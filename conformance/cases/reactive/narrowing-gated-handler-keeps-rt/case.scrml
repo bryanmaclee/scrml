@@ -1,0 +1,13 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function signOut() { @user = not }
+}
+<button id="clear" onclick=signOut()>sign out</button>
+<div if=@user>
+    <button id="go" onclick={ @out = @user.name }>show name</button>
+</div>
+<p id="o">${@out}</p>
+</program>

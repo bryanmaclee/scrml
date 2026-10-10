@@ -1,0 +1,7 @@
+${
+    <name> : string = "x"
+    <out> : string = "init"
+    given @name :> { return }
+}
+<button id="go" onclick=${@out = "clicked"}>go</>
+<p id="out">${@out}</>

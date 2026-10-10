@@ -3277,7 +3277,26 @@ export function esTreeToExprNode(
         }
         // If validation fails, rawSlice stays "" — same as pre-fix behavior.
       }
-      return makeEscapeHatch(node, span, rawSlice);
+      const hatch = makeEscapeHatch(node, span, rawSlice);
+      // S462 fix round 5 — keep what acorn already parsed: the STRUCTURED parameters and
+      // the body as acorn delimited it (`BlockStatement` start/end, the same coordinate
+      // space as `rawSource`, so it is a substring of `raw`). A check that looks inside the
+      // body reads these — never a re-scan of `raw` (§42.3.5 narrowing). Codegen emits
+      // `raw` only; these fields change no output.
+      const bodyStart = (bodyNode as { start?: number }).start;
+      const bodyEnd = (bodyNode as { end?: number }).end;
+      if (
+        rawSlice !== "" && rawSource != null &&
+        typeof nodeStart === "number" && typeof nodeEnd === "number" &&
+        typeof bodyStart === "number" && typeof bodyEnd === "number" &&
+        bodyStart >= nodeStart && bodyEnd <= nodeEnd && bodyEnd > bodyStart
+      ) {
+        hatch.params = params;
+        hatch.bodyRaw = restoreHandledOperands(rawSource.slice(bodyStart, bodyEnd));
+        const id = (node as { id?: { name?: unknown } | null }).id;
+        if (id && typeof id.name === "string") hatch.fnName = id.name;
+      }
+      return hatch;
     }
 
     // ---- Sequence Expression (a, b, c) — not common but valid ----

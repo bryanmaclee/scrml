@@ -136,8 +136,11 @@ describe("§1 inline ?{} in a match arm → server-call boundary + client contin
     const serverJs = serverJsFor(result, filePath);
     // The arm INSERT runs server-side as a real SQL call.
     expect(serverJs).toContain("INSERT INTO todos");
-    // The match IIFE is async-wrapped so the nested `await _scrml_sql` is valid.
-    expect(serverJs).toContain("await (async function() {");
+    // The arm's SQL is awaited. S462: a statement-position match lowers INLINE
+    // (no `await (async function() {…})()` wrapper — its arms run in the async
+    // server handler itself, so a `return` / `fail` in an arm leaves the handler).
+    expect(serverJs).toMatch(/await _scrml_sql[^\n]*INSERT INTO todos/);
+    expect(serverJs).not.toContain("await (async function() {");
     // `@draft` (a client reactive cell) read inside the server batch is the
     // marshalled request payload, NOT the client-only reactive store getter.
     expect(serverJs).toContain('_scrml_body["draft"]');
@@ -390,7 +393,8 @@ describe("§6 regression — named server fn with a match+?{} called from a hand
     expect(result.errors ?? []).toEqual([]);
     const serverJs = serverJsFor(result, filePath);
     expect(serverJs).toContain("INSERT INTO todos");
-    expect(serverJs).toContain("await (async function() {");
+    // S462 — the statement-position match is inline; its SQL is awaited in place.
+    expect(serverJs).toMatch(/await _scrml_sql[^\n]*INSERT INTO todos/);
     const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(() => new Script(clientJs)).not.toThrow();

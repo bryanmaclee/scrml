@@ -72,10 +72,12 @@
  * Performance budget: <= 20 ms per file.
  */
 
+import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
+import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
@@ -89,7 +91,8 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
-import { walkBodyNarrowed } from "./presence-narrowing.ts";
+import { walkBodyNarrowed, narrowingEndedAt, findEndCause } from "./presence-narrowing.ts";
+import { buildNarrowingEndsAt, arrayShape, recordShape, maybeAbsent, PRIM_SHAPE, UNKNOWN_SHAPE, type ValueShape } from "./narrowing-write-set.ts";
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
@@ -10860,6 +10863,26 @@ function annotateNodes(
     const key = nodeKey(n);
     let resolvedType: ResolvedType;
 
+    // S462 review M1 — a `match` in expression position whose FIRST arm is a
+    // `given` arm was re-read by the statement parser (ast-builder
+    // `attachStructuredExpressionMatches`); its `given` arms are checked here, in
+    // this statement's scope, exactly as an in-statement `given` arm is (head-name
+    // resolution, W-GIVEN-PRESENCE-DEPRECATED, the body). Only the `given` arms:
+    // every other arm was checked on the primary path.
+    const nestedMatches = (n as { __nestedMatches?: ASTNodeLike[] }).__nestedMatches;
+    if (Array.isArray(nestedMatches)) {
+      for (const m of nestedMatches) {
+        const mBody = (m as { body?: ASTNodeLike[] }).body;
+        if (!Array.isArray(mBody)) continue;
+        for (const arm of mBody) {
+          if (arm && typeof arm === "object" && arm.kind === "given-guard") {
+            (arm as { __inMatchBody?: boolean }).__inMatchBody = true;
+            visitNode(arm);
+          }
+        }
+      }
+    }
+
     switch (n.kind) {
       // ------------------------------------------------------------------
       // Markup element
@@ -14281,6 +14304,24 @@ function annotateNodes(
             ggSpan,
             "info",
           ));
+        }
+        // §42.2.3 — `given x` narrows an EXISTING variable in place; it binds no
+        // name ("No variable is rebound to a new name"). Each head name must
+        // therefore resolve like any other read: an undeclared one is
+        // E-SCOPE-001, not a guard that throws `ReferenceError` when it runs
+        // (S462 review F3 — `match name { given n -> … }` with no `n`).
+        // A REBIND head (`given c = @h :>`) introduces its name — its disposition is
+        // E-SYNTAX-045 / §66.7.5, not a read — and a malformed head already has
+        // its one diagnostic; neither is resolved here.
+        if (!isRebind && !malformedHead) {
+          const ggVars = Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : [];
+          const ggIsCell = Array.isArray((n as { variableIsCell?: unknown }).variableIsCell) ? (n as { variableIsCell: unknown[] }).variableIsCell : [];
+          const ggSpan2 = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          ggVars.forEach((v, i) => {
+            if (typeof v !== "string" || !v) return;
+            const identName = ggIsCell[i] === true ? `@${v}` : v;
+            checkLogicExprIdents({ kind: "ident", name: identName, span: ggSpan2 }, ggSpan2, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          });
         }
         // Walk the guard body so nested statements still get visited (the
         // default-case recursion would otherwise own this; we replicate it).
@@ -23448,6 +23489,11 @@ function checkLoopControl(
       return;
     }
 
+    // §18.2 `leave-stmt` (S462): a bare leave arm carries its statement as
+    // `leaveStmt`; it is checked exactly as the braced `{ break }` is.
+    const leaveStmt = (node as { leaveStmt?: ASTNodeLike }).leaveStmt;
+    if (leaveStmt && typeof leaveStmt === "object") walkNode(leaveStmt, loopDepth, insideFn);
+
     // For all other nodes, recurse into body/consequent/alternate/children
     const nodeBody = node.body as ASTNodeLike[] | undefined;
     if (Array.isArray(nodeBody)) walk(nodeBody, loopDepth, insideFn);
@@ -23471,6 +23517,86 @@ function checkLoopControl(
   }
 
   walk(nodes, 0, false);
+
+  checkTopLevelReturn(nodes, errors, filePath);
+}
+
+/**
+ * E-STMT-RETURN-OUTSIDE-FUNCTION (§34) — a `return` in a `${ … }` logic block
+ * OUTSIDE any function: a top-level statement, or one nested only in control
+ * flow that runs in place (`if` / loop bodies, `match` arms — braced or a bare
+ * §18.2 leave arm — and a decl-position `match`). There is no function for it
+ * to leave; emitted as-is it would leave the client's init function and skip
+ * everything after it, event wiring included (S462 review F4). Function,
+ * lambda and handler bodies, lifecycle bodies (`on mount`, `when …`) and every
+ * other construct that lowers to its own function are NOT entered: a `return`
+ * there is legal.
+ */
+function checkTopLevelReturn(nodes: ASTNodeLike[], errors: TSError[], filePath: string): void {
+  const STOP = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
+  const report = (n: ASTNodeLike): void => {
+    const s = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    errors.push(new TSError(
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      `E-STMT-RETURN-OUTSIDE-FUNCTION: \`return\` at line ${s.line} is not inside a function — it is at ` +
+      "the top level of a `${ … }` logic block (in an `if`, a loop or a `match` arm there), where there is " +
+      "no function for it to leave. Move the code into a function and `return` from that, or select with " +
+      "`if` / `match` without leaving.",
+      s,
+    ));
+  };
+  const seen = new Set<unknown>();
+  // `anchor`: for statements PARSED from an arm's text (their spans are the
+  // probe's, not the file's) the diagnostic points at the arm that holds them.
+  const inPlace = (n: unknown, anchor: ASTNodeLike | null = null): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) inPlace(c, anchor); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    switch (node.kind) {
+      case "return-stmt": report(anchor ?? node); return;
+      case "if-stmt": inPlace(node.consequent, anchor); inPlace(node.alternate, anchor); inPlace(node.body, anchor); return;
+      case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body, anchor); return;
+      // A standalone `given x :> { … }` guard runs its block in place (S462 review B2).
+      case "given-guard": inPlace(node.body, anchor); return;
+      case "match-stmt": case "match-expr":
+        // EVERY arm form — structured block, bare leave, inline text, a raw-text
+        // alternation / literal arm (`bare-expr`), a §18.19 product arm — through
+        // the one arm-body reader (S462 review N1).
+        if (Array.isArray(node.body)) {
+          for (const arm of node.body as ASTNodeLike[]) {
+            if (!arm || typeof arm !== "object") continue;
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? (arm.kind === "match-arm-block" || arm.kind === "given-guard" ? null : arm));
+          }
+        }
+        return;
+      case "guarded-expr":
+        // A `!{}` handler at the top level is in place too: `risky() !{ .X :> return }`.
+        if (Array.isArray(node.arms)) {
+          for (const arm of node.arms as ASTNodeLike[]) {
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? node);
+          }
+        }
+        return;
+      case "let-decl": case "const-decl": case "tilde-decl":
+        inPlace(node.matchExpr, anchor); inPlace(node.guardedNode, anchor); return;
+      default: return;
+    }
+  };
+  const findLogic = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) findLogic(c); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    if (typeof node.kind === "string" && STOP.has(node.kind)) return;
+    if (node.kind === "logic" && Array.isArray(node.body)) { inPlace(node.body); }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "span" || !v || typeof v !== "object") continue;
+      findLogic(v);
+    }
+  };
+  findLogic(nodes);
 }
 
 // ---------------------------------------------------------------------------
@@ -27856,7 +27982,7 @@ function processFile(
       typeRegistry,
       optionalEngineCellNames,
     );
-    checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan);
+    checkOptionalMemberAccess(optionalTopNodes, receivers, errors, fileSpan, typeRegistry);
   }
 
   // §52.4.4 / §52.11 — E-AUTH-001: a client-local `@var` used as a bound
@@ -32075,6 +32201,44 @@ function collectPlainOptionalReceivers(
   return { optionalCells, cellStructs, optionalMapCells };
 }
 
+/**
+ * S462 fix round 1 (F3 / F4) — what the §42.3.5 write-set reader may assume about a value
+ * of a written type: whether a built-in method called on it runs no scrml code (a
+ * primitive, an array), and whether it is function-free (no function anywhere in it — safe
+ * to hand to a built-in as data). Anything not proven is unknown (fail closed).
+ */
+function valueShapeOfType(t: ResolvedType | null | undefined, depth = 0): ValueShape {
+  if (!t || typeof t !== "object" || depth > 8) return UNKNOWN_SHAPE;
+  switch (t.kind) {
+    case "primitive":
+      return PRIM_SHAPE;
+    case "array":
+      return arrayShape(valueShapeOfType((t as ArrayType).element, depth + 1));
+    case "struct": {
+      const st = t as StructType;
+      return recordShape(!typeContainsFunctionField(st), (name) => {
+        const f = st.fields.get(name);
+        return f ? valueShapeOfType(f, depth + 1) : null;
+      });
+    }
+    case "union": {
+      const all = (t as UnionType).members;
+      const members = all.filter((m) => m && m.kind !== "not");
+      if (members.length === 1) {
+        const inner = valueShapeOfType(members[0], depth + 1);
+        // `T | not` — possibly absent (S462 Q10: a write of it does not re-narrow).
+        return members.length < all.length ? maybeAbsent(inner) : inner;
+      }
+      return UNKNOWN_SHAPE;
+    }
+    case "enum":
+    case "map":
+      return recordShape(!typeContainsFunctionField(t), () => null);
+    default:
+      return UNKNOWN_SHAPE;
+  }
+}
+
 /** Describes the VALUE an expression node produces, for per-hop resolution. */
 interface ReceiverValueInfo {
   /** True when the produced value's static type admits `not` (possibly-`not`). */
@@ -32094,6 +32258,7 @@ function checkOptionalMemberAccess(
   receivers: OptionalReceiverSet,
   errors: TSError[],
   fileSpan: Span,
+  typeRegistry?: Map<string, ResolvedType>,
 ): void {
   const { optionalCells, cellStructs, optionalMapCells } = receivers;
   if (optionalCells.size === 0 && optionalMapCells.size === 0) return;
@@ -32153,13 +32318,13 @@ function checkOptionalMemberAccess(
   }
 
   // Fire the diagnostic for one bare hop through a possibly-`not` receiver.
-  function fire(receiverText: string, span: Span): void {
+  function fire(receiverText: string, span: Span, endedNote = ""): void {
     errors.push(new TSError(
       "E-TYPE-046",
       `E-TYPE-046: member access through \`${receiverText}\`, whose type admits \`not\` ` +
       `(a plain-optional \`T | not\` receiver). An unguarded dereference would fault at runtime. ` +
       `Optional-chain the access (\`${receiverText}?.…\`) to propagate absence, or narrow the ` +
-      `receiver to prove presence (\`if=\` / \`given\` / \`is not\` / \`match\`). (§42.3.5)`,
+      `receiver to prove presence (\`if=\` / \`given\` / \`is not\` / \`match\`). (§42.3.5)` + endedNote,
       span,
     ));
   }
@@ -32188,8 +32353,57 @@ function checkOptionalMemberAccess(
     const cell = bareCellName(node);
     return cell && optionalCells.has(cell) ? cell : null;
   };
+  // S462 (§42.3.5) — the write-set reader: what a node writes (a write to a narrowed cell
+  // ends its narrowing — `@cell = …`, `reset(@cell)`, a call of a function of this file
+  // whose write set holds the cell, a call whose write set cannot be determined, a
+  // suspension point), which statements re-narrow (Q10), which lambdas a built-in calls
+  // synchronously (Q12).
+  // g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow / function
+  // expression the parser kept as an escape hatch is checked through its BODY. S462 fix
+  // round 5: the body is the text the PARSER delimited (`bodyRaw`, acorn's BlockStatement
+  // — a substring of the `raw` codegen emits) and the parameters are the parser's
+  // STRUCTURED `params` (declared by the write-set reader through `boundNamesOf`); no
+  // text scanner reads either. The body is parsed by the one handler statement parser,
+  // as a zero-parameter arrow (parameters are not statements). One expansion per node,
+  // shared by the write-set reader and the walk, so the names inside resolve and the
+  // walk reads the same objects. A hatch without both fields (the parser could not
+  // delimit its source) is not expanded: the write-set reader then treats it as "all".
+  const opaqueBodies = new WeakMap<object, unknown[] | null>();
+  const expandOpaque = (n: Record<string, unknown>): unknown[] | null => {
+    if (opaqueBodies.has(n)) return opaqueBodies.get(n) ?? null;
+    let out: unknown[] | null = null;
+    const kind = n.nativeKind;
+    if (kind === "ArrowFunctionExpression" || kind === "FunctionExpression") {
+      out = escapeHatchBodyStatements(n, fileSpan.file ?? "");
+      // The re-parse's spans are relative to the body's own text (line 1); drop them so a
+      // diagnostic inside lands on the enclosing statement / attribute instead.
+      const unspan = (x: unknown): void => {
+        if (!x || typeof x !== "object") return;
+        if (Array.isArray(x)) { for (const y of x) unspan(y); return; }
+        const r = x as Record<string, unknown>;
+        delete r.span;
+        for (const k of Object.keys(r)) unspan(r[k]);
+      };
+      if (out) unspan(out);
+    }
+    opaqueBodies.set(n, out);
+    return out;
+  };
+  const writeSet = buildNarrowingEndsAt(topNodes as unknown[], {
+    receiverKey,
+    typeShape: typeRegistry ? (ann: string) => valueShapeOfType(resolveTypeExpr(ann, typeRegistry)) : undefined,
+    expandOpaque,
+  });
+  const endsOpts = { endsAt: writeSet.endsAt };
   walkBodyNarrowed(topNodes as unknown[], new Set<string>(), fileSpan, {
     receiverKey,
+    endsAt: writeSet.endsAt,
+    narrowsAt: writeSet.narrowsAt,
+    syncCallbackArg: writeSet.syncCallbackArg,
+    expandOpaque,
+    // S462 Q12 — every key here is a reactive cell: a function body created in a narrowed
+    // scope does not inherit it.
+    closureDrops: () => true,
     // An `if=` guard names the cell bare or `@`-prefixed (§42.4).
     guardKey: (node: unknown): string | null => {
       const t = node as { kind?: string; name?: string } | undefined;
@@ -32206,7 +32420,24 @@ function checkOptionalMemberAccess(
       const recv = resolveValueInfo(n.object);
       if (!recv.optional) return;
       const cell = bareCellName(n.object);
-      if (!(cell && present.has(cell))) fire(receiverLabel(n.object), span as Span);
+      if (cell && present.has(cell)) return;
+      // S462 — a receiver that WAS narrowed and then lost it: name the cause (the call /
+      // write itself and why), not only "narrow the receiver".
+      const ended = cell ? narrowingEndedAt(present, cell) : undefined;
+      let note = "";
+      if (ended && cell) {
+        const line = ended.span.line ?? "?";
+        if (ended.why === "closure") {
+          note = ` The narrowing of \`@${cell}\` does not reach into the function created at line ${line}: it may run later, after \`@${cell}\` is written, so a reactive cell is re-tested inside it (§42.3.5, S462). Test \`@${cell}\` again inside the function.`;
+        } else if (ended.why === "deferred") {
+          note = ` This deferred body runs when its block exits — after the writes that follow it (line ${line} on), which may set \`@${cell}\` to \`not\` (§42.3.5). Test \`@${cell}\` again inside the deferred body.`;
+        } else {
+          const cause = findEndCause(ended.src, cell, endsOpts);
+          const why = cause ? writeSet.describeEnd(cause, cell) : `\`@${cell}\` may be written there`;
+          note = ` The narrowing of \`@${cell}\` ended at line ${line}: ${why}. A write ends the narrowing from that point (§42.3.5) — test \`@${cell}\` again after it, or read it before.`;
+        }
+      }
+      fire(receiverLabel(n.object), span as Span, note);
     },
   });
 }

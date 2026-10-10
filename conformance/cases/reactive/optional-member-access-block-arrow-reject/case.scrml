@@ -1,0 +1,13 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function show() {
+        const r = () => { @out = @user.name }
+        r()
+    }
+}
+<button id="b" onclick=show()>go</button>
+<p id="o">${@out}</p>
+</program>

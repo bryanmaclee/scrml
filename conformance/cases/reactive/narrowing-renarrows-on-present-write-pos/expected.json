@@ -1,0 +1,24 @@
+{
+  "id": "reactive-narrowing-renarrows-on-present-write-pos",
+  "description": "S462 Q10 — a write whose value is provably present (an object literal) narrows the place again from that point: after `clear()` ends the narrowing, `@user = { name: \"b\" }` re-narrows it. Compiles clean; clicking renders \"b\".",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"a\", Q10): \"a write whose value is provably present (a struct/object literal, a value of a non-optional type) narrows the place again from that point\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-TYPE-046"
+    ],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "b"
+      }
+    ]
+  }
+}

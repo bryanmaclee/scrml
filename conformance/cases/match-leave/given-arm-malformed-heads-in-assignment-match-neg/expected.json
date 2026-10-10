@@ -1,0 +1,20 @@
+{
+  "id": "match-leave-given-arm-malformed-heads-in-assignment-match-neg",
+  "description": "Malformed `given` heads in `@v = match …` arms — a property path, a call, a comparison, a parenthesized name, a rebind — are refused (E-SYNTAX-044 ×4, E-SYNTAX-045), as they are in a statement match (S462 review M1).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"A `given` head SHALL contain only an identifier-list\"; the same head check now reads expression-position match arms.",
+  "expect": {
+    "codes": [
+      "E-SYNTAX-044",
+      "E-SYNTAX-045"
+    ],
+    "codeCounts": {
+      "E-SYNTAX-044": 4,
+      "E-SYNTAX-045": 1
+    },
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

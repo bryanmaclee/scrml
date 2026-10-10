@@ -1,0 +1,49 @@
+${
+    type K:enum = { A, B }
+    type E:enum = { Boom(msg: string) }
+    <log> : string = ""
+    <out> : string = "none"
+    <seen> : string = "none"
+    function risky(n: number)! E {
+        if (n < 0) { fail E.Boom("neg") }
+        return n
+    }
+    // F2: a braced leaving block in a returned multi-scrutinee match
+    function early(a: K, b: K) -> string {
+        return match (a, b) {
+            (.A, .A) :> { @log = @log + "side;"; return "early" }
+            _ :> "other"
+        }
+    }
+    // F5 inverse: a `break` of an inner loop is not a leave of the match
+    function inner(k: K) -> number {
+        const v = match k {
+            .A :> { let n = 0; for (const x of [1, 2, 3]) { if (x == 2) { break } n = n + x } n }
+            .B :> 0
+        }
+        return v
+    }
+    // F7: `?` arms in multi-scrutinee statement and decl matches
+    function viaStmt(a: K, b: K, n: number)! E {
+        match (a, b) {
+            (.A, .A) :> risky(n)?
+            _ :> @log = @log + "x"
+        }
+        @log = @log + "after;"
+    }
+    function viaDecl(a: K, b: K, n: number)! E {
+        const r = match (a, b) {
+            (.A, .A) :> risky(n)?
+            _ :> 0
+        }
+        @log = @log + "r=" + r + ";"
+    }
+    function go() {
+        @out = early(K.A, K.A) + "/" + early(K.B, K.A) + "/" + inner(K.A)
+        viaStmt(K.A, K.A, -1) !{ .Boom(m) :> @seen = "s:" + m }
+        viaDecl(K.A, K.A, -1) !{ .Boom(m) :> @seen = @seen + ",d:" + m }
+        viaDecl(K.A, K.A, 4) !{ .Boom(m) :> @seen = @seen + ",bad" }
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@out}</p>

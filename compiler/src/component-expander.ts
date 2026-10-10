@@ -47,6 +47,7 @@ import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
@@ -1682,9 +1683,27 @@ function checkOptionalFnPropCalls(
           // A handler value is a statement list (§5.2.3) — the type system's own check view
           // (`parseHandlerStatementsForCheck`: an arrow value yields its BODY); any other
           // value is one expression.
-          const stmts = typeof a.name === "string" && isEventHandlerAttrName(a.name)
+          // S462 round 6 (F6-3): a handler value that IS a function is recognised by the
+          // expression parser (structurally) and kept as `exprNode` — the narrowing walk
+          // reads it as the handler itself (its parameters structured, its body the
+          // parser-delimited `bodyRaw`); only a statement-form value goes through the
+          // handler statement parser.
+          const isHandler = typeof a.name === "string" && isEventHandlerAttrName(a.name);
+          let fnValue: ExprNode | null = null;
+          if (isHandler) {
+            try {
+              let e = parseExprToNode(v.raw, defSpan.file ?? "", 0) as unknown as Record<string, unknown> | null;
+              while (e && e.kind === "paren" && e.expr) e = e.expr as Record<string, unknown>;
+              if (e && (e.kind === "lambda" || (e.kind === "escape-hatch" &&
+                (e.nativeKind === "ArrowFunctionExpression" || e.nativeKind === "FunctionExpression")))) {
+                fnValue = parseExprToNode(v.raw, defSpan.file ?? "", 0);
+              }
+            } catch { fnValue = null; }
+          }
+          const stmts = isHandler && !fnValue
             ? parseHandlerStatementsForCheck({ kind: "expr", raw: v.raw }, defSpan.file ?? "") : null;
-          if (stmts) (v as unknown as Record<string, unknown>).handlerBlock = { stmts };
+          if (fnValue) v.exprNode = fnValue;
+          else if (stmts) (v as unknown as Record<string, unknown>).handlerBlock = { stmts };
           else if (!v.exprNode) {
             try { const e = parseExprToNode(v.raw, defSpan.file ?? "", 0); if (e) v.exprNode = e; } catch { /* keep raw */ }
           }
@@ -1750,6 +1769,21 @@ function checkOptionalFnPropCalls(
     // A block-bodied arrow the parser kept as an escape hatch: its statements, parsed by the
     // one handler statement parser (tokenizeLogic + parseLogicBody).
     expandOpaque: (n) => blockArrowStatements(n),
+    // S462 (§42.3.5) — a write to the narrowed prop ends its narrowing; here only a direct
+    // assignment is read as one. A call is NOT read as ending it — not because a call
+    // cannot rebind the prop (a closure can: `const z = () => { onGo = not }; z()`), but
+    // because EVERY write of a prop in the body, wherever it stands, is already refused as
+    // E-COMPONENT-PROP-WRITE, so no compiling program reaches such a call.
+    endsAt: (n) => {
+      // The marker is `@`-spelled, so a substituted `onGo = …` statement parses as the
+      // reactive-assignment form (`state-decl` / `reactive-assign`); in an expression it
+      // is an `assign`.
+      const k = n.kind === "assign" ? keyOf(n.target)
+        : n.kind === "state-decl" && typeof n.name === "string" ? keyOf({ kind: "ident", name: "@" + n.name })
+        : n.kind === "reactive-assign" && typeof n.target === "string" ? keyOf({ kind: "ident", name: "@" + n.target })
+        : null;
+      return k ? [k] : null;
+    },
   });
   const seen = new Set<string>();
   for (const o of offending) {
@@ -1796,9 +1830,10 @@ function locatePropUse(defSpan: Span, normalizedBody: string, anchor: { start: n
  * the type system's own check view — an arrow yields its BODY (`parseHandlerStatementsForCheck`).
  */
 function blockArrowStatements(n: Record<string, unknown>): unknown[] | null {
-  const raw = typeof n.raw === "string" ? n.raw : "";
-  if (!raw.includes(OPT_FN_MARK) || !raw.includes("=>")) return null;
-  return parseHandlerStatementsForCheck({ kind: "expr", raw }, "");
+  // S462 round 6 (F6-3): the parser's structured params + delimited body (one expansion,
+  // shared with the E-TYPE-046 walk) — no raw-text arrow scan, so several / default / rest
+  // parameters are read like any other.
+  return escapeHatchBodyStatements(n, "");
 }
 
 

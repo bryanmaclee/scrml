@@ -1,0 +1,13 @@
+{
+  "id": "match-leave-given-arm-lambda-param-no-false-scope-error",
+  "description": "`(q) => match @k { given q :> … }` — a `given` arm naming an enclosing LAMBDA's parameter gets no false E-SCOPE-001 (S462 review X1). A match inside a lambda is not re-read by the statement parser; it keeps main's behaviour (filed: the single-reader redesign).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: a `given` head names variables in scope; a lambda parameter is in scope inside the lambda. The re-read checked the arm in the owning statement's scope, which excludes the lambda's parameters.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCOPE-001"
+    ]
+  }
+}

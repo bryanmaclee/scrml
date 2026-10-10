@@ -1,0 +1,24 @@
+{
+  "id": "match-leave-value-arm-leave-word-in-string-not-a-leave",
+  "description": "A leave WORD inside a string or template literal in a value-position arm (`\"press continue\"`, `\"please return\"`, `` `fail ${…}` ``) is not a leave: the match renders and assigns its value (S462 review F1).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2 `leave-stmt` is a statement; a string literal containing `continue` is an expression. The leaving-arm refusal decides from parsed statements, never from raw text (one text, one reader).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CG-003",
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "msg": "press continue",
+      "arg": "[please return]",
+      "tpl": "fail x"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "match-leave-bare-break-continue-arm-no-loop-neg",
+  "description": "Bare `.A :> break` / `.B :> continue` arms with no enclosing loop are E-LOOP-001 / E-LOOP-002, as the braced forms are (S462 review F6).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2 \"Leaving arms\": a bare leave arm is legal exactly where the braced one is; §49.9 E-LOOP-001/002.",
+  "expect": {
+    "codes": [
+      "E-LOOP-001",
+      "E-LOOP-002"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

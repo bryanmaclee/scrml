@@ -1,0 +1,9 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<div show=@user>
+    <button id="go" onclick={ @out = @user.name }>show name</button>
+</div>
+<p id="o">${@out}</p>
+</program>

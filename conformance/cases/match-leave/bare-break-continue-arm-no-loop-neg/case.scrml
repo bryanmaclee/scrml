@@ -1,0 +1,13 @@
+${
+    type K:enum = { A, B }
+    <out> : string = "none"
+    function pick(k: K) {
+        match k {
+            .A :> break
+            .B :> continue
+        }
+        @out = "ran"
+    }
+    function go() { pick(K.A) }
+}
+<button id="go" onclick=go()>go</>

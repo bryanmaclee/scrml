@@ -1,0 +1,21 @@
+{
+  "id": "match-leave-stmt-arm-braced-break-continue-loop",
+  "description": "`{ continue }` / `{ break }` arms of a statement-position `match` inside a `for` loop target that loop: over [C, A, C, B, C] the count is 2 (C counts, A skips, C counts, B stops).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "§19.3.3: \"`fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.\" §19.4.3 (S451 ruling 1a) counts an arm that ends in `return` / `fail` — or a `break` / `continue` to a loop enclosing the statement — as LEAVING. impl#1 lowered a statement-position `match` to an IIFE, so these exits left only the arm: the statements after the `match` ran, a `fail` was dropped, and a `continue` was a JS syntax error (g-stmt-match-block-return-falls-through; dpa-068 D2/D3). The statement-position match now lowers inline.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "out": "n=2"
+    }
+  }
+}

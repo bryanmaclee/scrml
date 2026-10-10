@@ -1,0 +1,15 @@
+{
+  "id": "reactive-optional-member-access-block-arrow-reject",
+  "description": "§42.3.5 in every body (S462, g-etype046-blind-in-block-bodied-arrows-s462) — an unguarded member access through a plain-optional cell inside a BLOCK-bodied arrow is E-TYPE-046, as in any other body.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5: a member access through a receiver whose static type admits `not` SHALL be E-TYPE-046 unless optional-chained or narrowed — there is no arrow-body exemption",
+  "expect": {
+    "codes": [
+      "E-TYPE-046"
+    ],
+    "severity": {
+      "E-TYPE-046": "error"
+    }
+  }
+}

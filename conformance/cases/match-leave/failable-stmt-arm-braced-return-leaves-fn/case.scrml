@@ -1,0 +1,21 @@
+${
+    type E:enum = { Boom(msg: string), Other }
+    type E2:enum = { Wrapped(msg: string) }
+    <out> : string = "none"
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    function risky(n: number)! E {
+        if (n < 0) { fail E.Boom("neg") }
+        return n
+    }
+    function go() {
+        match risky(-1) {
+            .Ok(v) :> @seen = "ok"
+            .Boom(m) :> { return }
+            .Other :> @seen = "other"
+        }
+        @after = "ran"
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="after">${@after}</>

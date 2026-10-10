@@ -104,8 +104,8 @@ describe("each-block §1 — canonical <each in=@cell>", () => {
     expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     // Client JS emits the render function.
     expect(clientJs).toMatch(/function _scrml_each_render_[0-9a-z]{8}_\d+\(\)/);
-    // Reactive subscription via _scrml_effect_static.
-    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_[0-9a-z]{8}_\d+\)/);
+    // Reactive subscription via _scrml_effect_static. (a render-gate effect, S462 r7)
+    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_[0-9a-z]{8}_\d+, true\)/);
     // The source @cell is read through _scrml_reactive_get (V5-strict).
     expect(clientJs).toContain('_scrml_reactive_get("items")');
     // Reconcile_list call shape.
@@ -760,7 +760,7 @@ function clk(i) {
     // null-guard) before reading the iter var, so a same-key reconcile fires the
     // handler with live data, not the create-time snapshot. The iter-var read in
     // the handler arg is preserved (it now resolves to the re-bound `let`).
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
     expect(clientJs).toContain('.setAttribute("data-i", _scrml_g.String(_scrml_each_item));');
   });
 });

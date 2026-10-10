@@ -1,0 +1,10 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<div if=@user>
+    <button id="go" onclick={ @user = not
+        @out = @user.name }>clear and show</button>
+</div>
+<p id="o">${@out}</p>
+</program>

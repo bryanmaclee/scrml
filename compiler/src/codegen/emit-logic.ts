@@ -5,7 +5,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -1067,6 +1067,22 @@ export function rewriteReflectForRuntime(code: string): string {
  * E-REACTIVE-003 refusal a body read of the same cell gets. Making the head
  * visible to that refusal is a front-end widening, out of scope here (reported).
  */
+/**
+ * §42.2.3 — the presence test of a `given x, y` head: every named variable is
+ * present (`!== null && !== undefined`). Shared by the standalone guard
+ * (`case "given-guard"`) and a `given` arm of a `match` (emit-control-flow.ts
+ * `collectMatchArms` / emitMatchExprDecl).
+ */
+export function givenGuardCondition(node: { variables?: unknown; variableIsCell?: unknown; span?: unknown }, opts: EmitLogicOpts): string {
+  const vars: string[] = Array.isArray(node.variables) ? node.variables as string[] : [];
+  return vars
+    .map((v: string, i: number) => {
+      const ref = givenHeadRef(node, v, i, opts);
+      return `${ref} !== null && ${ref} !== undefined`;
+    })
+    .join(" && ");
+}
+
 function givenHeadRef(node: { variableIsCell?: unknown; span?: unknown }, name: string, i: number, opts: EmitLogicOpts): string {
   const isCell = Array.isArray(node.variableIsCell) && node.variableIsCell[i] === true;
   if (!isCell || opts.boundary === "server") return name;
@@ -3312,7 +3328,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // this fix — clean `if (cond) return X` per arm), wrapped with the
       // return-type boundary check for refinement-typed returns.
       if (node.matchExpr) {
-        return _wrapReturnWithCheck(emitMatchExpr(node.matchExpr, opts));
+        return _wrapReturnWithCheck(emitMatchExpr(node.matchExpr, { ...opts, matchValueIsReturned: true }));
       }
       // markup-value-in-expression-2026-06-17 (c) — `return <markup>` value.
       // The AST builder attaches a structured markup node as `markupNode` when
@@ -4019,12 +4035,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const body: object[] = node.body ?? [];
       if (vars.length === 0) return "";
 
-      const conditions = vars
-        .map((v: string, i: number) => {
-          const ref = givenHeadRef(node, v, i, opts);
-          return `${ref} !== null && ${ref} !== undefined`;
-        })
-        .join(" && ");
+      const conditions = givenGuardCondition(node, opts);
 
       const lines: string[] = [`if (${conditions}) {`];
       for (const stmt of body) {
@@ -4900,7 +4911,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // guard + timer/history bookkeeping. The runtime symptom is that the
       // engine cell DOES update but cell-aware downstream wiring (timer arm,
       // history capture, etc.) is silently skipped.
-      return emitMatchExpr(node, opts);
+      //
+      // A `match` reached here is a STATEMENT: it lowers INLINE so an arm's
+      // `return` / `fail` / `break` / `continue` leaves the enclosing function or
+      // loop (§19.3.3, §19.4.3; g-stmt-match-block-return-falls-through). A match
+      // whose value is used goes through `emitMatchExpr` (emitFnShortcutBody's
+      // tail, `return match`, expression positions) or `emitMatchExprDecl`.
+      return emitMatchStmt(node, opts);
 
     case "switch-stmt":
       return emitSwitchStmt(node);
@@ -5207,7 +5224,11 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
         code = exprCode ? `return ${refinedTailValue(stmt, exprCode, bodyOpts)};` : "";
       } else {
         // match/switch emit as IIFE expression strings — wrap in `return ...;`.
-        const rawCode = emitLogicNode(stmt, bodyOpts);
+        // A tail `match` is in VALUE position (it is the function's result), so it
+        // takes the value lowering, not the statement one emitLogicNode now gives.
+        const rawCode = (stmt.kind === "match-stmt" || stmt.kind === "match-expr")
+          ? emitMatchExpr(stmt, { ...bodyOpts, matchValueIsReturned: true })
+          : emitLogicNode(stmt, bodyOpts);
         if (rawCode) {
           const stripped = rawCode.replace(/;\s*$/, "");
           code = `return ${refinedTailValue(stmt, stripped, bodyOpts)};`;
@@ -6121,6 +6142,29 @@ export function planBlockArmLift(inner: string): { leading: string[]; tail: stri
 }
 
 /**
+ * §19.5 — a match arm whose body is a propagation `expr?` (dpa-068 D4). Same
+ * shape as `case "propagate-expr"`: evaluate once; an error result returns from
+ * the enclosing `!` function (§19.5.2 — the INLINE arm lowerings only: the
+ * decl-position `emitMatchExprDecl` and the statement-position `emitMatchStmt`,
+ * where `return` leaves that function); `value` is the success value.
+ */
+export function emitPropagateArm(operand: string, opts: EmitLogicOpts): { lines: string[]; value: string } {
+  const tmp = genVar("_scrml_tmp");
+  // Lower through the expression TREE (not the raw-string path) so a call to a
+  // server peer is awaited (emit-expr `peerAwaitable`) exactly as the statement
+  // form `const x = f()?` is — the string path left `check(n + 1)` a bare
+  // Promise, whose `.__scrml_error` is undefined, so the error never propagated.
+  let operandNode: any = null;
+  try { operandNode = parseExprToNode(operand, "<match-arm-propagate>", 0); } catch { operandNode = null; }
+  if (operandNode && operandNode.kind === "escape-hatch") operandNode = null;
+  const expr = _awaitMatchArmServerCalls(emitExprField(operandNode, operand, _makeExprCtx(opts)), opts);
+  return {
+    lines: [`const ${tmp} = ${expr};`, `if (${tmp} && ${tmp}.__scrml_error) return ${tmp};`],
+    value: tmp,
+  };
+}
+
+/**
  * §18.5 block-arm value lowering (raw-string arm path). Given a block-body arm
  * result STRING already confirmed a block via `_matchArmResultIsBlockBody`,
  * emit its leading statements followed by an assignment of its tail expression
@@ -6161,8 +6205,28 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // §18.19 — multi-scrutinee match in decl position: delegate to the shared
   // value-return emitter (emit-control-flow.ts:emitMatchExpr), which lowers the
   // product dispatch to an IIFE that evaluates to the arm value, then bind it.
+  // S462 — INLINE, like the single-scrutinee path below (it was the value IIFE,
+  // which swallowed an arm's `return` / `fail` and broke `break` / `continue`).
   if (Array.isArray(matchExpr.scrutineeExprs) && matchExpr.scrutineeExprs.length >= 2) {
-    return `${keyword} ${name} = ${emitMatchExpr(matchExpr, opts)};`;
+    const resultVar = genVar("tilde");
+    const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string): string[] => {
+      const t = resultStr.trim();
+      if (!t) return [];
+      // §18.2 `leave-stmt` (S462 W1): the arm leaves; it assigns nothing.
+      const leave = leaveStmtFromArmText(t);
+      if (leave) return [emitLogicNode(leave, opts)];
+      // §19.5 — a raw propagation arm (S462 review F7).
+      const operand = propagateOperandOfArmText(t);
+      if (operand !== null) {
+        const p = emitPropagateArm(operand, opts);
+        return [...p.lines, `${resultVar} = ${p.value};`];
+      }
+      if (_matchArmResultIsBlockBody(t)) {
+        return _emitBlockArmValueFromString(t, resultVar, opts).split("\n").map((l) => l.trim()).filter(Boolean);
+      }
+      return [`${resultVar} = ${_awaitMatchArmServerCalls(emitExprField(null, t, _makeExprCtx(opts)), opts)};`];
+    });
+    return [`let ${resultVar} = null;`, dispatch, `${keyword} ${name} = ${resultVar};`].join("\n");
   }
 
   const tildeVar = genVar("tilde");
@@ -6194,6 +6258,9 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   const body: any[] = matchExpr.body ?? [];
   for (const child of body) {
     if (!child) continue;
+    // §42.2.3 — a `given x :> body` arm (g-impl1-given-match-arm-body-dropped-s462).
+    const givenArm = givenGuardToMatchArm(child, opts);
+    if (givenArm) { arms.push(givenArm); continue; }
     // Structured match-arm-block nodes (from `. Variant => { ... }` arms)
     if (child.kind === "match-arm-block") {
       // Carry the payload binding (raw `field: local` text, else the positional
@@ -6229,10 +6296,25 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     if (typeof armExpr !== "string") continue;
     const trimmed = armExpr.trim();
     if (!trimmed) continue;
+    const _armsBefore = arms.length;
     const armStrings = splitMultiArmString(trimmed);
     for (const armStr of armStrings) {
       const arm = parseMatchArm(armStr);
-      if (arm) arms.push(arm);
+      if (arm) {
+        // §18.2 `leave-stmt` (S462 W1) in a raw-text arm — the arm's one statement.
+        const leave = arm.failExpr ? null : leaveStmtFromArmText(arm.result ?? "");
+        arms.push(leave ? { ...arm, result: "", structuredBody: [leave] } : stampPropagateOperand(arm));
+      }
+    }
+    // A raw arm whose line ends in `?` (`1 :> check(n + 1)?`) reaches here as a
+    // statement-level `propagate-expr` node: the statement parser took the `?`
+    // as the statement's propagation and left the arm text WITHOUT it. The `?`
+    // belongs to the LAST arm on the line — restore it there (dpa-068 D4).
+    if (child.kind === "propagate-expr" && arms.length > _armsBefore) {
+      const last = arms[arms.length - 1];
+      if (!last.failExpr && !last.propagateOperand && (last.result ?? "").trim() && !(last.result ?? "").trim().startsWith("{")) {
+        last.propagateOperand = last.result.trim();
+      }
     }
   }
 
@@ -6342,6 +6424,20 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-LOGIC.
     const armResultLine = (a: MatchArm): string => {
       if (a.failExpr) return `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}`;
+      // §19.5 — `.A :> risky(n)?`: an error result returns from the enclosing `!`
+      // function (§19.5.2), a success value is the arm's value.
+      if (a.propagateOperand) {
+        const p = emitPropagateArm(a.propagateOperand, opts);
+        return [...p.lines, `${tildeVar} = ${p.value};`].map((l) => `  ${l}`).join("\n");
+      }
+      // An arm whose value is a nested `match` (dpa-068 c10): lower it inline too,
+      // into its own result var, so a leave in ITS arms leaves this function.
+      const nested = nestedMatchFromArmText(a.result);
+      if (nested) {
+        const innerName = genVar("nested");
+        const inner = emitMatchExprDecl(innerName, nested, "const", { ...opts, tildeContext: undefined } as EmitLogicOpts, null);
+        return [...inner.split("\n"), `${tildeVar} = ${innerName};`].map((l) => `  ${l}`).join("\n");
+      }
       // §18.5 block-arm value: a `{ statement* expression? }` body in value
       // position must execute its leading statements and lift its TAIL
       // EXPRESSION to the result var — NOT be emitted verbatim (which produced

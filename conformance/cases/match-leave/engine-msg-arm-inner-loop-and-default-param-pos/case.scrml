@@ -1,0 +1,16 @@
+${
+    type Phase:enum = { Closed, Open }
+    type Msg:enum = { Toggle, Peek }
+    <hits> : number = 0
+}
+<engine for=Phase initial=.Closed accepts=Msg>
+  <Closed rule=.Open>
+    .Toggle :> { for (const o of [{ a: 1 }, { a: 2 }]) { if (o.a == 1) { break } }; .Open }
+    .Peek :> { const f = function (o = { a: 1 }) { return o.a }; @hits = f(); .Closed }
+  </>
+  <Open rule=.Closed>
+    .Toggle :> .Closed
+    _ :> @phase
+  </>
+</>
+<button id="go" onclick=@phase.advance(.Toggle)>go</>

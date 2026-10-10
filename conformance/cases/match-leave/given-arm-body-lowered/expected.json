@@ -1,0 +1,25 @@
+{
+  "id": "match-leave-given-arm-body-lowered",
+  "description": "A `given x :> body` arm of a `match` fires when `x` is present — as a decl-position value (`let out = match …`), a `return match` value, and a statement-position match whose braced arms `return`.",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3 \"In match arms, the presence pattern in a `match` block uses `given`\" (`not :> handleAbsence()` / `given x :> handlePresence(x)`). impl#1 parsed a brace-less `given` arm body as a sibling statement and every match lowering skipped the `given-guard` node, so the present case fell through: the value was `not` and the statement arm never ran (g-impl1-given-match-arm-body-dropped-s462).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-PARSE-001"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "a": "hi al",
+      "b": "ret bo",
+      "c": "21",
+      "d": "absent"
+    }
+  }
+}

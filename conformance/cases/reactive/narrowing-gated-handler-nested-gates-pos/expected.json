@@ -1,0 +1,19 @@
+{
+  "id": "reactive-narrowing-gated-handler-nested-gates-pos",
+  "description": "S462 Q18 — nested gates: the chain of `if=` gates enclosing a handler (innermost to outermost) contributes its narrowings, so a handler inside `if=@user` › `if=@other` reads both bare. Compiles clean; clicking renders both names.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"a\", Q18): nested gates — the innermost-to-outermost chain of gates that encloses the handler contributes its narrowings.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-TYPE-046"
+    ],
+    "input": [
+      { "click": "#go" }
+    ],
+    "domAnchored": [
+      { "selector": "#o", "text": "ab" }
+    ]
+  }
+}

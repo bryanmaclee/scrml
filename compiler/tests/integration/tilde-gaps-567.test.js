@@ -205,13 +205,16 @@ describe("tilde (~) Gap 5 — `~` after `!{}` handler lowers correctly", () => {
 
   test("guarded-expr inside ${} top-level — `~` after consumes correctly", () => {
     // Same shape but the guarded-expr + `~`-consume both at top-level of a ${} body.
+    // S462 (review N1): the arm yields its value as a block tail. A `return` here
+    // would be at the top level, with no function to leave —
+    // E-STMT-RETURN-OUTSIDE-FUNCTION (§18.2 "Leaving arms").
     const src = [
       "function loadItem(id: number) -> string { return `item-${id}` }",
       "function format(s: string) -> string { return `[${s}]` }",
       "",
       "${",
       "  loadItem(1) !{",
-      "    | .NotFound -> { return \"missing\" }",
+      "    | .NotFound -> { \"missing\" }",
       "  }",
       "  const result = format(~)",
       "}",
