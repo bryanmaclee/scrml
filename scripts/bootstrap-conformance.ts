@@ -113,9 +113,11 @@ import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lo
  * `client-server-call` (§19.9.10, S454 F8) is excluded too: it changes what a case MEANS to the
  * bootstrap (it adds a handler), so it is applied to the corpus source (reviewed, committed), never
  * silently at grading time. `sql-failable` (§19.8.3, S451 R11) likewise: it adds a handler to an
- * unhandled `?{}`.
+ * unhandled `?{}`. `is-some` (§42.2.2a / §55.1, S462) is excluded for `arm-pipe`'s reason: `is some`
+ * is a §63 spelling deprecation in the contract during the window (W-IS-SOME-DEPRECATED is
+ * conformance-required), so a case written in it is graded AS WRITTEN.
  */
-const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "client-server-call" && r !== "sql-failable");
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" && r !== "client-server-call" && r !== "sql-failable");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");

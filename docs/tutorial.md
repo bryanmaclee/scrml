@@ -6,7 +6,7 @@ This tutorial walks you from an empty directory to a small but complete scrml ap
 
 **What scrml is, in one paragraph.** scrml is a single-file language for full-stack web apps. One `.scrml` file compiles to the HTML, JavaScript, CSS, and server routes the app needs. Markup, reactive state, server functions, SQL, real-time channels, and tests all live in the same file; the compiler decides which half runs in the browser and which half runs on the server. The unit of organization is the program, not the tier.
 
-**What this tutorial covers.** The language as the compiler ships it at v0.8.0. If you find older material online that disagrees with this document (especially anything from before April 2026 — `< machine>` instead of `<engine>`, `@var = 0` for declaration instead of `<var> = 0`, `null`/`undefined`/`===`/`!==` JavaScript literals instead of `is some` / `is not` / `==` / `!=`, `<channel>` as a sibling of `<program>` rather than a child), trust this document. scrml is newer than the training data of every current LLM, and the language has shifted since.
+**What this tutorial covers.** The language as the compiler ships it at v0.8.0. If you find older material online that disagrees with this document (especially anything from before April 2026 — `< machine>` instead of `<engine>`, `@var = 0` for declaration instead of `<var> = 0`, `null`/`undefined`/`===`/`!==` JavaScript literals instead of `is given` / `is not` / `==` / `!=`, `<channel>` as a sibling of `<program>` rather than a child), trust this document. scrml is newer than the training data of every current LLM, and the language has shifted since.
 
 **Prerequisites.** Working knowledge of JavaScript syntax (`const`/`let`, arrow functions, template strings) and the DOM event model. A passing acquaintance with SQL helps for §2 onward but is not required — every SQL example uses only `SELECT` and `INSERT`.
 
@@ -179,7 +179,7 @@ A counter in memory is gone the moment you refresh the page. Let's persist it. s
       // their bodies touch a `?{}` SQL block.
       function loadCount() {
         const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
-        return row is some ? row.value : 0
+        return row is given ? row.value : 0
       }
 
       function persistCount(n) {
@@ -223,7 +223,7 @@ Compare to §2's in-memory counter. The markup is identical. The function shape 
 
 The `?{`SELECT ...`}` form holds parameterized SQL. The backtick string is the query; `${var}` interpolations become bound parameters automatically — even if `var` contains quotes or semicolons, it is treated as data, not SQL. The methods are `.run()` (INSERT/UPDATE/DELETE), `.get()` (single row, or `not` if no rows match), and `.all()` (array of rows).
 
-> **Note on `is some`.** scrml has no `null` or `undefined` keyword in source. The presence check is `value is some` (true when the value is present) and the absence check is `value is not` (true when the value is absent — i.e. the value is `not`). This is the canonical scrml shape for what JavaScript spells as `value !== null && value !== undefined`. You write `==` and `!=` for equality; `===` does not exist (§7).
+> **Note on `is given`.** scrml has no `null` or `undefined` keyword in source. The presence check is `value is given` (true when the value is present; `value is some` is an older, soft-deprecated spelling of the same test, and `scrml fix` rewrites it) and the absence check is `value is not` (true when the value is absent — i.e. the value is `not`). This is the canonical scrml shape for what JavaScript spells as `value !== null && value !== undefined`. You write `==` and `!=` for equality; `===` does not exist (§7).
 
 The one rule that distinguishes server functions from client functions is that **server-escalated functions must not assign to reactive state** (`E-RI-002`). State transitions belong on the client; the server's job is to fetch and persist. A client function calls a server-escalated function for data, then updates state with the result. The compiler propagates server-side classification through the call graph: if `addContact()` calls server-escalated `persistContact()`, the assignment to `@name = ""` inside `addContact` is checked in client context. The canonical idiom is to call `reset(@name)` instead of `@name = ""` after the server call — `reset()` is a language keyword that goes through the client-side reset path unambiguously.
 
@@ -738,7 +738,7 @@ This is the canonical scrml shape for "the form field is a value and its renderi
 
 ### 5.3 The validator vocabulary
 
-The 14 universal-core validators are: `req`, `is some`, `length(rel)`, `pattern(regex)`, `min(n)`, `max(n)`, `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)`, `eq(expr)`, `neq(expr)`, `oneOf([...])`, `notIn([...])`.
+The 14 universal-core validators are: `req`, `is given`, `length(rel)`, `pattern(regex)`, `min(n)`, `max(n)`, `gt(expr)`, `lt(expr)`, `gte(expr)`, `lte(expr)`, `eq(expr)`, `neq(expr)`, `oneOf([...])`, `notIn([...])`.
 
 Cross-field validation falls out automatically. `<confirm req eq(@signup.password)>` reads as "confirm must equal password" — the compiler tracks the dependency and re-evaluates the validator whenever either cell changes. There is no special "cross-field" vocabulary.
 
@@ -834,7 +834,7 @@ Some operations can fail: a network call, a database query, a parsing pass. scrm
         if (name == "")                          fail SaveError.EmptyName
         if (!email.includes("@"))                fail SaveError.InvalidEmail(email)
         const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-        if (existing is some)                    fail SaveError.DuplicateEmail(email)
+        if (existing is given)                    fail SaveError.DuplicateEmail(email)
         ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run()
       }
 
@@ -900,7 +900,7 @@ A small but load-bearing detail. scrml uses three operators where JavaScript use
 | scrml | JavaScript | Reading |
 |---|---|---|
 | `!x` | `!x` | Boolean negation — `!` is the negation operator. |
-| `x is some` | `x !== null && x !== undefined` | Presence check — value exists. |
+| `x is given` | `x !== null && x !== undefined` | Presence check — value exists. |
 | `x is not` | `x === null \|\| x === undefined` | Absence check — value missing. |
 
 `!` is the boolean negation operator (`!x`, `!(a == b)`) — same spelling and meaning as JavaScript. The keyword `not` is **not** a negation operator: it is the absence value (§42, Absence Semantics). `not` appears only as the absent value itself (`<user>: User? = not`, `@user = not`) or as the right-hand side of `is` (`x is not`); `not x` in prefix position before a boolean is a compile error (`E-TYPE-045`).
@@ -916,7 +916,7 @@ A small but load-bearing detail. scrml uses three operators where JavaScript use
   <user>: User? = not              // optional — starts absent
   <loggedIn> = false
 
-  const <message> = @user is some ? "Hello, " + @user.name : "Sign in to continue"
+  const <message> = @user is given ? "Hello, " + @user.name : "Sign in to continue"
 
   <div>
     <p>${@message}</p>
@@ -928,7 +928,7 @@ A small but load-bearing detail. scrml uses three operators where JavaScript use
 </program>
 ```
 
-`not` is the absence sentinel — `<user>: User? = not` reads "user is an optional User, initialized to absent." Writing `null` or `undefined` here is `E-SYNTAX-042` (scrml has no `null`/`undefined` keywords). `@user is some` guards the read of `@user.name`; `!@loggedIn` negates a boolean; and the sign-in button's inline block handler, `onclick={ @user = { name: "Ada" }; @loggedIn = true }`, runs two writes in order.
+`not` is the absence sentinel — `<user>: User? = not` reads "user is an optional User, initialized to absent." Writing `null` or `undefined` here is `E-SYNTAX-042` (scrml has no `null`/`undefined` keywords). `@user is given` guards the read of `@user.name`; `!@loggedIn` negates a boolean; and the sign-in button's inline block handler, `onclick={ @user = { name: "Ada" }; @loggedIn = true }`, runs two writes in order.
 
 Equality uses `==` and `!=`, and there is no `===` or `!==` (`E-EQ-004`). `==` compares **values, structurally** (§45): two structs are equal when their fields are equal, two enum values when they have the same variant and equal payloads, primitives by value. There is no identity comparison and no type coercion — comparing values of different types, such as `0 == false`, is a compile error (`E-EQ-001`).
 
@@ -1004,7 +1004,7 @@ The compiler emits the WebSocket endpoint (`/_scrml_ws/chat` for this channel), 
   // Reading `session` makes this a server function. The role check runs on
   // the server, so a non-admin's response never contains the admin text.
   function loadAdminReport() {
-    if (session.role is some && session.role == "Admin") {
+    if (session.role is given && session.role == "Admin") {
       return "3 signups are waiting for review."
     }
     return ""
@@ -1087,7 +1087,7 @@ By now you have seen every primitive you need to build a working scrml app. Here
       function saveNote(body)! -> SaveError {
         if (body.length < 3) fail SaveError.TooShort
         const existing = ?{`SELECT id FROM notes WHERE body = ${body}`}.get()
-        if (existing is some) fail SaveError.Duplicate(body)
+        if (existing is given) fail SaveError.Duplicate(body)
         ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
       }
 
@@ -1210,7 +1210,7 @@ A fast reference for the keywords and sigils in this tutorial. Each line links b
 - **Server-escalated function** — a function that touches `?{}` SQL, `session`, or another server-only resource runs on the server. The legacy `server function` keyword still compiles but is deprecated. §2.2.
 - **`function f()! -> Err { fail Err.Variant ... }`** — failable function. §6.
 - **`caller() !{ | .Variant :> {...} }`** — error destructuring at call sites. §6.
-- **`is some` / `is not`** — presence / absence predicates. **`!`** — boolean negation. **`not`** — the absence value (`= not`, `x is not`), NOT a negation operator. §7.
+- **`is given` / `is not`** — presence / absence predicates. **`!`** — boolean negation. **`not`** — the absence value (`= not`, `x is not`), NOT a negation operator. §7.
 - **`==` / `!=`** — structural value equality (no `===`/`!==`). §7.
 - **`reset(@cell)`** — language keyword for resetting state to its initial value. §5.7.
 - **`<channel name="..." topic="...">`** — real-time shared state; lives inside `<program>` (or at file top in a pure-channel module file). §8.
@@ -1237,7 +1237,7 @@ The convergent failures every developer makes coming from another framework. If 
 | `throw new Error(...)` | `fail Err.Variant` (typed error enum) | §6 |
 | `if (@phase === 'loading') ...` chains | `<engine for=Phase initial=.Idle>` | §4.3 |
 | Many booleans gating UI | One enum + engine | §4 |
-| `null` / `undefined` literals | `is some` / `is not` | §7 |
+| `null` / `undefined` literals | `is given` / `is not` | §7 |
 | `===` / `!==` | `==` / `!=` | §7 |
 | `not x` (intending negation) | `!x` (`not` is the absence value, not negation) | §7 |
 | `< machine name=...>` (legacy v0.1) | `<engine for=Type initial=...>` | §4.3 |

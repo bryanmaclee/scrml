@@ -149,7 +149,7 @@
                 <a href="/dispatch/drivers" class="hover:text-blue-300">Drivers</a>
                 <a href="/dispatch/customers" class="hover:text-blue-300">Customers</a>
                 <a href="/dispatch/billing" class="hover:text-blue-300">Billing</a>
-                <span class="text-slate-400 text-xs" if=(@currentUser is some)>
+                <span class="text-slate-400 text-xs" if=(@currentUser is given)>
                     ${@currentUser.email}
                 </span>
                 <button onclick=logout() class="hover:text-blue-300">Logout</button>

@@ -257,20 +257,20 @@ ${
     export function debounce(fn, delay) {
         let timer = not
         function debounced(...args) {
-            if (timer is some) clearTimeout(timer)
+            if (timer is given) clearTimeout(timer)
             timer = setTimeout(() => {
                 timer = not
                 fn.apply(this, args)
             }, delay)
         }
         debounced.cancel = function() {
-            if (timer is some) {
+            if (timer is given) {
                 clearTimeout(timer)
                 timer = not
             }
         }
         debounced.flush = function(...args) {
-            if (timer is some) {
+            if (timer is given) {
                 clearTimeout(timer)
                 timer = not
                 fn.apply(this, args)
@@ -302,7 +302,7 @@ ${
                 timer = setTimeout(() => {
                     inThrottle = false
                     timer = not
-                    if (lastArgs is some) {
+                    if (lastArgs is given) {
                         fn.apply(this, lastArgs)
                         lastArgs = not
                     }
@@ -312,7 +312,7 @@ ${
             }
         }
         throttled.cancel = function() {
-            if (timer is some) {
+            if (timer is given) {
                 clearTimeout(timer)
                 timer = not
             }
@@ -320,11 +320,11 @@ ${
             lastArgs = not
         }
         throttled.flush = function() {
-            if (timer is some) {
+            if (timer is given) {
                 clearTimeout(timer)
                 timer = not
                 inThrottle = false
-                if (lastArgs is some) {
+                if (lastArgs is given) {
                     fn.apply(this, lastArgs)
                     lastArgs = not
                 }
@@ -366,7 +366,7 @@ ${
         const date = typeof timestamp == "number" ? new Date(timestamp) : timestamp
         // Intl rejects mixing dateStyle/timeStyle with explicit field-level
         // options. Skip the field-level defaults if the caller passed either.
-        const usingStyles = options && (options.dateStyle is some || options.timeStyle is some)
+        const usingStyles = options && (options.dateStyle is given || options.timeStyle is given)
         const defaults = usingStyles
             ? {}
             : { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }

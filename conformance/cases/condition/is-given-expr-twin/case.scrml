@@ -1,0 +1,25 @@
+// §42.2.2a / §42.2.4 (S462) — the canonical twin of condition/is-some-deprecated-expr: the same
+// program written with `x is given`. Same runtime; no W-IS-SOME-DEPRECATED.
+<program>
+type U:struct = { name: string }
+<user>: U | not = not
+<n>: int = 0
+<label> = "init"
+${
+    function check() {
+        const present: bool = @user is given
+        if (@user is given && @n > 0) {
+            @label = "both"
+        } else {
+            @label = present ? "present" : "absent"
+        }
+    }
+    function login() {
+        @user = { name: "Ada" }
+        check()
+    }
+}
+<button id="go" onclick=login()>go</button>
+<p id="out">${@label}</p>
+<p id="who" if=(@user is given)>signed in</p>
+</program>

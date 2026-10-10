@@ -1,0 +1,21 @@
+{
+  "id": "forms-is-given-validator-inline-message",
+  "description": "§55.1 / §55.10 — the presence validator `is given` takes the Level-1 inline message in the paren form, exactly as `req(\"…\")` does: `<nick is given(\"…\") length(>=3, \"…\")>` declares the cell (no E-VALIDATOR-INLINE-*, no lost declaration). Typing \"ab\" leaves a present value, so `is given` passes and `length(>=3)` fails; its inline override renders at `<errors of=>`.",
+  "language-version": "1.0",
+  "spec": "§55.10",
+  "rationale": "§55.1 lists `is given` with catalog arity bareword-or-inline-override; §55.10 Level 1 is per-(cell, validator), static-string, paren form. Provenance: ruling:user-voice-scrml.md S462 \"a, validator too, go\" (the validator spelled `is given`).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "input": "#nick", "value": "ab" }],
+    "state": {
+      "signup.nick": "ab",
+      "signup.nick.isValid": false
+    },
+    "domAnchored": [
+      { "selector": "#err .scrml-error", "count": 1 },
+      { "selector": "#err .scrml-error", "text": "Nickname must be at least 3 chars" }
+    ]
+  }
+}

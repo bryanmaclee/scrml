@@ -1,0 +1,12 @@
+// §55.1 (S462) — the SOFT-DEPRECATED validator spelling `<x is some>`, kept ON PURPOSE: it is the
+// same predicate as `<x is given>` and surfaces one W-IS-SOME-DEPRECATED. Do NOT run `scrml fix`
+// over this case. Its canonical twin is forms/is-given-validator.
+<program>
+${
+    <signup>
+        <nick is some length(>=3)> = <input id="nick" type="text"/>
+    </>
+}
+<signup><nick/></>
+<div id="all"><errors of=@signup.nick all/></div>
+</program>

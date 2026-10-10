@@ -15,8 +15,8 @@ ${
     //   .Overdue     — paid_at absent AND due_at < today
     //   .Outstanding — paid_at absent AND due_at >= today
     export fn invoiceStatus(inv: asIs, todayIso: string) -> InvoiceStatus {
-        if (inv.paid_at is some && inv.paid_at != "") return .Paid
-        if (inv.due_at is some && inv.due_at != "" && inv.due_at < todayIso) return .Overdue
+        if (inv.paid_at is given && inv.paid_at != "") return .Paid
+        if (inv.due_at is given && inv.due_at != "" && inv.due_at < todayIso) return .Overdue
         return .Outstanding
     }
 
@@ -56,7 +56,7 @@ ${
             </a>
             <div class="text-xs text-slate-500">
                 ${loadOriginCity is not ? "" : loadOriginCity}
-                <span if=(loadOriginCity is some && loadDestinationCity is some) class="text-slate-400 mx-1">→</span>
+                <span if=(loadOriginCity is given && loadDestinationCity is given) class="text-slate-400 mx-1">→</span>
                 ${loadDestinationCity is not ? "" : loadDestinationCity}
             </div>
         </td>
@@ -74,7 +74,7 @@ ${
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${invoiceStatusClasses(invoiceStatus(invoice, todayIso))}">
                 ${invoiceStatusLabel(invoiceStatus(invoice, todayIso))}
             </span>
-            <div if=(invoice.payment_reference is some && invoice.payment_reference != "") class="text-xs text-slate-500 mt-1">
+            <div if=(invoice.payment_reference is given && invoice.payment_reference != "") class="text-xs text-slate-500 mt-1">
                 ${invoice.payment_reference}
             </div>
         </td>
@@ -86,7 +86,7 @@ ${
             >
                 Mark paid
             </button>
-            <span if=(invoice.paid_at is some && invoice.paid_at != "") class="text-xs text-slate-400">
+            <span if=(invoice.paid_at is given && invoice.paid_at != "") class="text-xs text-slate-400">
                 ${formatIsoDate(invoice.paid_at)}
             </>
         </td>

@@ -1,0 +1,13 @@
+<program db="sqlite:./app.db">
+
+  <channel name="lobby" onclient:open=onOpen(e)>
+    <count> = 0
+    function onOpen(e) {
+      const rows = ?{`SELECT id FROM users`}.all()
+      @count = rows.length
+    }
+  </channel>
+
+  <p>${@count}</p>
+
+</program>

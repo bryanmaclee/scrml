@@ -702,8 +702,8 @@ describe("C10 §C10.11 — _SCRML_TAG_TO_VALIDATOR covers the 14 universal-core 
     expect(api.tagToValidator.Required).toBe("req");
   });
 
-  test("NotSome maps to 'is some'", () => {
+  test("NotSome maps to 'is given' (S462 — `is some` is its soft-deprecated spelling)", () => {
     const api = buildMessagesSandbox();
-    expect(api.tagToValidator.NotSome).toBe("is some");
+    expect(api.tagToValidator.NotSome).toBe("is given");
   });
 });

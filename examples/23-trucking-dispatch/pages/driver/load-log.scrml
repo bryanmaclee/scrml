@@ -151,7 +151,7 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentLoad is some) class="space-y-4">
+          <div if=(@loaded && @currentLoad is given) class="space-y-4">
 
               <header class="bg-white rounded-lg border border-slate-200 p-6">
                   <div class="flex items-start justify-between">
