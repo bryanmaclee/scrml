@@ -93,29 +93,29 @@ describe("g-prune-server-only-stdlib-chunks — a stdlib name in a display strin
 
   test("§3  a GENUINE client use of a stdlib chunk is NOT over-stripped", () => {
     const GENUINE = `<program>
-\${ import { randomUUID } from 'scrml:random' }
-<id> = ""
-<button id="go" onclick={ @id = randomUUID() }>Gen</button>
+\${ import { randomInt } from 'scrml:random' }
+<id> = 0
+<button id="go" onclick={ @id = randomInt(1, 9) }>Gen</button>
 <div id="out">\${@id}</div>
 </program>
 `;
     const { clientJs } = compile("s3", GENUINE);
     // the read-decl and the real call both survive → chunk kept
     expect(clientJs).toContain("_scrml_stdlib.random");
-    expect(clientJs).toMatch(/randomUUID\s*\(/);
+    expect(clientJs).toMatch(/randomInt\s*\(/);
   });
 
   test("§4  selective prune in one file: string-only auth drops, genuinely-used random keeps", () => {
     const MIX = `<program>
 \${ import { hashPassword } from 'scrml:auth' }
-\${ import { randomUUID } from 'scrml:random' }
+\${ import { randomInt } from 'scrml:random' }
 <pw> = "x"
 <hashed> = ""
-<uid> = ""
+<uid> = 0
 <note> = "a note about the hashPassword feature"
 \${ function computeHash(pw) { return hashPassword(pw) } }
 <button id="b1" onclick={ @hashed = computeHash(@pw) }>hash</button>
-<button id="b2" onclick={ @uid = randomUUID() }>uid</button>
+<button id="b2" onclick={ @uid = randomInt(1, 9) }>uid</button>
 <div id="n">\${@note}</div>
 <div>\${@hashed}</div><div>\${@uid}</div>
 </program>

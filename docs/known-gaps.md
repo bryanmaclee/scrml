@@ -31,10 +31,52 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 568 | 6 |
-| LOW | 339 | 0 |
+| MED | 573 | 6 |
+| LOW | 341 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-stdlib-type-erase-reads-emitted-text-s462 — `eraseStdlibTypeOnlyImports` re-reads the EMITTED text, so a multi-line template literal in a server function that contains the line `import { TableSort } from "scrml:data"` is rewritten inside the string — `NEW S462; LOW; open`
+
+<!-- @gap id=g-stdlib-type-erase-reads-emitted-text-s462 sev=LOW status=open locus=compiler/src/module-resolver.js(eraseStdlibTypeOnlyImports)+compiler/src/api.js(rewriteStdlibImports) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Found by the delta re-review of s462-stdlib-import-004 (8f334bcdf). The erasure pass is a line regex over the module text, so a string literal whose own line has the shape of a `scrml:` import is edited. BASE's `rewriteStdlibImports` (the `scrml:NAME` → `./_scrml/NAME.js` specifier rewrite) corrupts the same line today, so this is a second reader of the same text, not a new class. Fix direction: erase (and rewrite) at emission, from the import-decl's specifier list, not from the emitted text.
+
+### g-library-import-text-shape-erase-and-rewrite-gaps-s462 — in library mode a multi-line import collapses (the eraser's line-preserving claim is false there), and a library import with a trailing `// c` comment is neither erased nor specifier-rewritten → load fails `Cannot find package 'scrml:data'` (same on BASE); the parity test ("non-struct ⇒ enum") and the eraser ("non-enum ⇒ erase") classify by opposite rules — `NEW S462; LOW; open`
+
+<!-- @gap id=g-library-import-text-shape-erase-and-rewrite-gaps-s462 sev=LOW status=open locus=compiler/src/codegen/emit-library.ts(verbatim import text)+compiler/src/module-resolver.js(eraseStdlibTypeOnlyImports)+compiler/tests/unit/stdlib-shim-export-parity.test.js(exportKinds) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Found by the delta re-review of s462-stdlib-import-004 (8f334bcdf). Library mode emits the logic block's import text verbatim; both the erasure regex and `rewriteStdlibImports` require a single-line `import { … } from "scrml:…";` with nothing after it, so a trailing comment defeats both (BASE fails the same way on the specifier rewrite). The two classifiers agree on every stdlib type today (enum / struct only) but would diverge on a third type kind. Fix direction: one classifier for "has a run-time value", shared by the eraser and the parity test; erase and rewrite from the import AST (see g-stdlib-type-erase-reads-emitted-text-s462).
+
+### g-stdlib-reexport-runtime-unresolved-s462 — a named re-export from a `scrml:` module compiles clean but its emitted `.js` keeps the raw `scrml:crypto` specifier and fails to load; Q19's E-IMPORT-004 check guards a path that does not run yet (struct re-exports would also need erasure) — `NEW S462; MED; open`
+
+<!-- @gap id=g-stdlib-reexport-runtime-unresolved-s462 sev=MED status=open locus=compiler/src/codegen(re-export emission)+compiler/src/api.js(rewriteStdlibImports, bundleStdlibForRun — re-exports not collected) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Reviewer-reproduced on 8f334bcdf: an exports-only file `export { CryptoError, generateUUID as uuid } from "scrml:crypto"` compiles with no diagnostic; its `.js` carries `export { … } from "scrml:crypto"` unrewritten, so loading it fails. The S462 Q19 ruling (§21.4: a named re-export from `scrml:` SHALL be checked, E-IMPORT-004) is implemented at compile time (`validateStdlibImports`), but the run-time half — bundling the shim, rewriting the re-export specifier, erasing `:struct` names as `eraseStdlibTypeOnlyImports` does for imports — is missing. Fix direction: collect `scrml:` re-export specifiers into the stdlib bundle set and route re-export lines through the same rewrite + erasure as imports.
+
+### g-bare-variant-fn-argument-ambiguous-s462 — a bare variant passed as a function argument in logic (`f(.Small)` with `f(s: Size)`) is E-VARIANT-AMBIGUOUS, for LOCAL enums too, although §14.10 lists "a function parameter type" as a resolving position — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-bare-variant-fn-argument-ambiguous-s462 sev=MED status=open locus=compiler/src/type-system.ts(bare-variant inference — call-argument position) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004 while exercising stdlib enums; reproduces with a same-file enum on BASE, so not caused by the branch. SPEC §14.10: a bare variant "SHALL be resolved … when the type at the position can be inferred from … a function parameter type (`fn(.V)` where the parameter is typed `T`)".
+
+### g-tool-main-failable-await-outside-async-s462 — a `kind="tool"` `main` that calls a failable function emits `await` inside a non-async function (invalid module) — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-tool-main-failable-await-outside-async-s462 sev=MED status=open locus=compiler/src/codegen/emit-tool.ts(main emission — async colouring) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004 (tool-mode stdlib probes); present on BASE. The failable call is lowered with `await` but the enclosing `main` is not coloured `async`, so the emitted tool module does not parse.
+
+### g-client-fn-parseerror-escalates-to-server-s462 — a client function that uses `ParseError` imported from `scrml:data` is escalated to the server (and then refused E-CPS-NONIDEM-NO-STORAGE when it also writes state) — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-client-fn-parseerror-escalates-to-server-s462 sev=MED status=open locus=compiler/src/route-inference.ts(server-only stdlib module tagging — type-only use of scrml:data) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004; present on BASE. Referencing a stdlib enum (a value-free use: variant construction / matching) should not make a function server-only; route inference treats the `scrml:data` reference as a server-escalating stdlib call.
+
+### g-bootstrap-stdlib-import-004-missing-s462 — the bootstrap (impl#2) does not check `scrml:` imports or named `scrml:` re-exports against the stdlib module's export list (E-IMPORT-004, §41.3.1 / §21.4) — `NEW S462; MED; open`
+
+<!-- @gap id=g-bootstrap-stdlib-import-004-missing-s462 sev=MED status=open locus=compiler/self-host-v2(module resolution — no stdlib export table) prov=empirical:s462-stdlib-import-004-bootstrap-conformance -->
+
+impl#1 implements the check as of S462 (`module-resolver.js` `validateStdlibImports`, fed by the STDLIB-EXPORT-SEED stage). `bun scripts/bootstrap-conformance.ts` reports three of the new cases as bootstrap FAILs: `module/e-import-004-stdlib-name-not-exported-reject` and `module/e-import-004-stdlib-submodule-only-name-reject` (missing E-IMPORT-004 — not in the bootstrap's sources), and `module/e-import-004-stdlib-name-exported-clean` (the twin emits an unasserted E-SCOPE-001 for the imported stdlib name — the bootstrap does not bind stdlib imports at all). The re-export case `module/e-import-004-stdlib-reexport-missing-name-reject` is UNSUPPORTED there (the bootstrap's slice M2 does not parse an `export { … } from` statement in a logic block). Fix direction: give the bootstrap the stdlib module's `.scrml` export list (the same one reader impl#1 uses), then judge imports and named re-exports against it.
 
 ### g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 — a declaration field named `as` can never be constructed: `<card as=c/>` binds a handle instead, silently; `<card as="x"/>` is E-DECL-AS — `NEW S462; LOW; open (pre-existing)`
 
@@ -24088,6 +24130,8 @@ Found S462 while building the `scrml fix` `given-presence` rule (`s462-given-pre
 <!-- @gap id=g-impl1-markup-if-branch-memo-stale-render-s462 sev=HIGH status=resolved resolved-by=s462-markup-if-stale-render locus=compiler/src/codegen/emit-reactive-wiring.ts(emitLiftGroup ~:672 — "Guard 1 (branch)": isSingleIf → genVar("lift_branch") ~:710, `if (_branch === <branchVar>) return;` ~:744) prov=empirical:s462-given-presence-deprecate-landing-prep(happy-dom,conformance-runner);review:S462-delta-review-of-2e1de037a(reproduced-on-origin/main-126329fa5-and-HEAD) -->
 
 **RESOLVED S462** (s462-markup-if-stale-render; SPEC §7.4.2 "the interpolation site SHALL re-render whenever any referenced cell changes", §17.1 "`if=` is sugar over `${ if(expr) { lift <element>...</element> } }`"). The branch memo is gone. A lift group that is exactly one `if` chain and re-renders through an effect now takes an arm-selector shape (`emitLiftIfChainGroup`, emit-reactive-wiring.ts): a selector effect evaluates the chain's conditions to an arm index (all arms — the old memo saw only the first condition, so an `else if` arm was never replaced by the `else` arm) and swaps the arm run only when the index changes; the arm run (`_scrml_lift_branch_run`, file-local) renders the arm in its own effect, owns and disposes every effect the arm creates, and gates them on the selector so an outgoing arm never renders a value its condition no longer admits. While such an arm is emitted, emit-lift's LIVE mode wires each markup binding (text interpolation, attribute value, `bind:` initial value + reverse sync, `if=` toggle, a keyed list's first render) as its own effect, so a read in the arm's markup updates in place — input value, focus and listeners survive; a read outside the markup re-renders the arm. Every other group is emitted byte-identically to before. Executed: `compiler/tests/browser/browser-markup-if-arm-rerender-s462.browser.test.js` (18 cases); conformance `control-flow/markup-if-arm-reads-rerender-pos`, `control-flow/markup-if-presence-arm-reads-rerender-pos`. Emit-differential over the corpus: 7 client.js artifacts change, 0 compile / diagnostic / syntax deltas. **Not done here (follow-up):** the `scrml fix` `given-presence` rule still REFUSES a markup guard over a cell (`compiler/src/commands/fix-given-presence.js` ~:54, ~:451 — its reason text names this gap); the rewrite target now renders correctly, so the refusal can be lifted, and `conformance/cases/condition/given-presence-deprecated-markup`'s description note ("keeps the stale \"ada\" on impl#1 today") is now false. Bootstrap: no counterpart — self-host-v2 has no Tier-0 markup `${ if … lift }` (parse-reject; owed in `compiler/self-host-v2/progress.md`).
+
+**S462 fix round 1** (S239 review of `db40d22a8`): a LIVE binding no longer reads a mutable arm local (`let` running totals, `while` counters, a `let` written after the lift, a local mutated through a member write or method call) — those bindings stay with the arm's effect (`liftArmMutableLocals`, emit-lift.js); the chain's conditions run only in the selector (`_scrml_lift_if_group`), which owns the selected arm — no per-binding re-evaluation (was quadratic with an expensive condition, and POSTed per binding for a server-fn condition); an arm that writes its own condition mid-render no longer leaves both arms in the DOM (fragment render + re-entrant stop); effects a render creates later (keyed rows added after the first render) are disposed with the arm. Pinned in the same browser test (7 more cases).
 
 Found during the S462 landing prep (`s462-given-presence-deprecate`) while re-verifying the `scrml fix` `given-presence` rule on markup sites; **widened by the S462 delta review** (reproduced on origin/main `126329fa5` and on the branch): it is NOT about presence. Executed in happy-dom through `conformance/run.ts`:
 - presence: `<user>: { name: string } | not = { name: "a" }`, a button setting `@user = { name: "b" }`, `${ if (@user is given) { <p id="name">${@user.name}</p> } }` → `#name` stays **"a"**. The same program with `${ given @user :> { … } }` → **"b"** (pinned: `conformance/cases/condition/given-presence-deprecated-markup`).

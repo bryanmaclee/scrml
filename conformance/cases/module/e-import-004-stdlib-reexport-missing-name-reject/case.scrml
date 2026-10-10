@@ -1,0 +1,4 @@
+${
+    import { hash } from './m.scrml'
+}
+<p>${hash}</>

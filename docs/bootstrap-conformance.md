@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1636 of 1636 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1641 of 1641 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 164 | 10.0% |
+| PASS | 165 | 10.1% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 56 | 3.4% |
+| FAIL | 59 | 3.6% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 623 | 38.1% |
-| UNSUPPORTED | 793 | 48.5% |
+| NOT-TWINNED | 623 | 38.0% |
+| UNSUPPORTED | 794 | 48.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 220; of those, 164 hold (74.5%). Runtime half executed on the bootstrap for 52 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 224; of those, 165 hold (73.7%). Runtime half executed on the bootstrap for 52 case(s).
 
-- **Vacuous** passes: 11 of 164 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **153**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 165 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **154**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 59; the other 30 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 554 · parse-reject 239.
+UNSUPPORTED by reason: bootstrap-unsupported 554 · parse-reject 240.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **723** — PASS 89 · FAIL 52 · UNSUPPORTED 582. Twin holds 89 (non-vacuous 81). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **728** — PASS 90 · FAIL 55 · UNSUPPORTED 583. Twin holds 90 (non-vacuous 82). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -133,7 +133,7 @@ NOT-TWINNED by reason (623 cases; a case counts once per distinct reason):
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
-| module | 40 | · | · | 10 | · | 8 | 22 | · | · |
+| module | 45 | 1 | · | 13 | · | 8 | 23 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | own-value-type | 12 | 12 | · | · | · | · | · | · | · |
@@ -157,7 +157,7 @@ NOT-TWINNED by reason (623 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (56)
+### FAIL (59)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -236,6 +236,12 @@ NOT-TWINNED by reason (623 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-004-name-not-exported-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
   - missing E-IMPORT-004
+- `module/e-import-004-stdlib-name-exported-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-SCOPE-001
+- `module/e-import-004-stdlib-name-not-exported-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
+  - missing E-IMPORT-004
+- `module/e-import-004-stdlib-submodule-only-name-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
+  - missing E-IMPORT-004
 - `module/e-import-005-bare-specifier-reject` (twin · codes; not in the bootstrap: E-IMPORT-005)
   - missing E-IMPORT-005
 - `module/e-import-005-relative-specifier-clean` (twin · twin-extra-error)
@@ -297,7 +303,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (164)
+### PASS / CODES-ONLY (165)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -418,6 +424,7 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
+- `module/e-import-004-stdlib-subpath-name-clean` — PASS · TWIN
 - `own-value-type/base-type-neg` — PASS
 - `own-value-type/base-type-pos` — PASS
 - `own-value-type/boundary-export-neg` — PASS
@@ -464,7 +471,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (793)
+### UNSUPPORTED (794)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -995,6 +1002,7 @@ none
 - `module/e-import-004-reexport-ambiguous-star-reject` — twin · bootstrap-unsupported: function `w` is also declared in `c.scrml` — the bootstrap links one namespace, so every use of `w` would resolve to the first one (a silent mis-link); it is refused instead (a bootstrap slice limit, 
 - `module/e-import-004-reexport-chain-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-004-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-004-stdlib-reexport-missing-name-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-006-reexport-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-006-reexport-star-missing-file-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `*` (statements at logic-block level are not in bootstrap slice M2)
 - `module/e-import-008-plain-import-clean` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
