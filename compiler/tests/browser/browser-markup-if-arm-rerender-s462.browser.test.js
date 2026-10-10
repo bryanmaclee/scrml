@@ -451,6 +451,51 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
     expect(document.querySelectorAll("#p").length).toBe(1);
   });
 
+  test("if / else whose else arm is a keyed list, under an if= template (gauntlet-r10-odin-filebrowser shape)", async () => {
+    compileAndMount(`<program>
+<isSearching> = false
+<searchResults> = []
+<picked> = 0
+\${
+  function pick(id) { @picked = id }
+}
+<div class="results" if=@isSearching>
+  <ul>\${
+    if (@searchResults.length == 0) {
+      lift <li class="none">No files found</li>
+    } else {
+      for (let result of @searchResults) {
+        lift <li class="item"><button onclick=pick(result.id)><span class="name">\${result.name}</span></button></li>
+      }
+    }
+  }</ul>
+</div>
+<p id="picked">\${@picked}</p>
+</program>
+`, "odin-shape");
+    set("isSearching", true);
+    await flush();
+    const box = () => document.querySelector(".results");
+    expect(box().querySelectorAll(".none").length).toBe(1);
+    set("searchResults", [{ id: 1, name: "a" }]);
+    await flush();
+    expect(box().querySelectorAll(".none").length).toBe(0);
+    expect([...box().querySelectorAll(".item .name")].map((e) => e.textContent)).toEqual(["a"]);
+    const first = box().querySelector(".item");
+    set("searchResults", [{ id: 1, name: "a" }, { id: 2, name: "b" }]);
+    await flush();
+    expect([...box().querySelectorAll(".item .name")].map((e) => e.textContent)).toEqual(["a", "b"]);
+    // Same arm: the list reconciled in place, its first row kept.
+    expect(box().querySelector(".item")).toBe(first);
+    box().querySelectorAll(".item button")[1].click();
+    await flush();
+    expect(text("#picked")).toBe("2");
+    set("searchResults", []);
+    await flush();
+    expect(box().querySelectorAll(".item").length).toBe(0);
+    expect(box().querySelectorAll(".none").length).toBe(1);
+  });
+
   test("a group inside an <each> row (nested group): the row's arm reads update", async () => {
     compileAndMount(`<program>
 <rows> = [{ id: 1, t: "x" }, { id: 2, t: "y" }]
