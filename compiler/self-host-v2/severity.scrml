@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 116 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
+// 117 codes with a §34 severity; 67 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -30,7 +30,6 @@
 //   E-DECL-STAR-PREDEFINED — no §34 row
 //   E-DECL-STAR-REF-ATTR-WRITE — no §34 row
 //   E-DECL-STATE-CHILD — no §34 row
-//   E-DECL-USE-ATTR — no §34 row
 //   E-ENGINE-INVALID-TRANSITION — §34 Severity "Runtime" is not a compile severity
 //   E-ERROR-016 — no §34 row
 //   E-FIELD-PRIVATE-WRITE — no §34 row
@@ -120,6 +119,7 @@ ${
             "E-DECL-TYPE-NOT-INFERABLE" :> Severity.Error
             "E-DECL-TYPE-REQUIRED-AT-BOUNDARY" :> Severity.Error
             "E-DECL-TYPE-UNPROVEN" :> Severity.Error
+            "E-DECL-USE-ATTR" :> Severity.Error
             "E-DEFER-AMBIGUOUS-LEAD" :> Severity.Error
             "E-DEFER-CONTROL-FLOW" :> Severity.Error
             "E-DEFER-LATER-SHADOW" :> Severity.Error
