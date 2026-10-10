@@ -75,3 +75,4 @@ HOLD (do not change): the event-handler-as-closure reading (`<div if=@user><butt
 
 Re-measure corpus (0 new expected) + gates incl. CI-only ones: `bun scripts/s34-census.ts --check-new --base 42d1a7459` (or the base you're on), the tracking tiers (integration + lsp + commands) as ci.yml, browser tier, types:check, bootstrap slices. Report new SHA + per-item disposition.
 2026-10-09T20:39:57-06:00 FIX ROUND 3: NEW-1 sync-callback body = loop body (may-write subtracted on entry); NEW-2 index/.at not present (Q10); note names the call inside a callback (acc.concat) — unit 77 green
+2026-10-09T20:55:12-06:00 FIX ROUND 3 docs: NEW-3 appended to implicit-coercion gap; NEW-4 verified (await missing inside nested block only) + filed g-helper-call-in-nested-block-not-awaited-s462; resolved-text test count 77
