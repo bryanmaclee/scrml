@@ -28,3 +28,4 @@ INFO: a declaration field named `as` makes `<card as=c/>` take the handle branch
 
 Regenerate SPEC-INDEX etc. Report new FINAL_SHA + per-item disposition + gates.
 2026-10-09T19:42:35-06:00 FR1 M1: Q14 folded — §66.15.2 O46 RULED (superseded block kept), §66.15.3 rewritten (…attrs:button, bare apply, collision exclusion, one rest, wiring, preconditions; L3 condition-4 reworded), §66.15.1 spread row, §66.22 O46/O18 rows + closed list
+2026-10-09T19:43:08-06:00 FR1 M2 (rule 7 = requirement + gap id), L2 (O18-r carve-out in §66.20 + §34 rows), L4 (§34 row moved into the E-DECL-* cluster after E-DECL-NEEDS-INITIALIZER; §34 is topic-grouped, not globally alphabetical)
