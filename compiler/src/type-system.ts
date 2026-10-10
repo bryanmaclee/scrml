@@ -1529,13 +1529,14 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
   ["AuthError",       tError("AuthError",       new Map())],
   ["TimeoutError",    tError("TimeoutError",    new Map())],
   // §41.13 — ParseError is the canonical failure-type for parseVariant
-  // (Path A, L22). It is also exported from `stdlib/data/parse.scrml` for
-  // explicit `import { ParseError } from 'scrml:data'` use, but registering
-  // it here as a built-in :enum (with the four canonical variants) ensures
-  // that `!{}` exhaustiveness checks against parseVariant calls resolve the
-  // type even when the importing file doesn't repeat the import — and dodges
-  // the stdlib re-export-chase gap (api.js importedTypes seeder reads the
-  // dep file's own typeDecls, not those re-exported via index.scrml).
+  // (Path A, L22). It is declared in `stdlib/data/parse.scrml`; an explicit
+  // `import { ParseError } from 'scrml:data'` seeds that declaration through
+  // the general stdlib-type path (§53.14.6, api.js importedTypes — re-exports
+  // chased since S462), which shadows this entry. The built-in remains for the
+  // case the import path cannot cover: a `!{}` handler on a parseVariant call
+  // in a file that never imports ParseError still resolves the type for its
+  // exhaustiveness check. The four variants must stay identical to the stdlib
+  // declaration — pinned by compiler/tests/unit/stdlib-shim-export-parity.test.js §5.
   ["ParseError",      tEnum("ParseError", [
     { name: "MissingDiscriminator", payload: null, renders: null },
     { name: "UnknownVariant",       payload: new Map([["tag",    tPrimitive("string")]]), renders: null },

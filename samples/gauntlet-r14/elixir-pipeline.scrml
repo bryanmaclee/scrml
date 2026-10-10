@@ -2,7 +2,7 @@
 // Tests R13 fixes: E-RI-002 false positive, SQL @var rewriting, import emission
 // New: ~ tilde-decl, multiple server functions setting @vars after SQL
 
-${ import { uuid } from 'scrml:crypto' }
+${ import { generateUUID } from 'scrml:crypto' }
 
 < db src="./pipeline.db" tables="jobs,logs">
     ${
@@ -14,7 +14,7 @@ ${ import { uuid } from 'scrml:crypto' }
         pipelineVersion = "Pipeline v2"
 
         server function createJob() {
-            const jobId = uuid()
+            const jobId = generateUUID()
             ?{`INSERT INTO jobs (id, name, status) VALUES (${jobId}, ${@newJobName}, 'Pending')`}.run()
             @jobs = ?{`SELECT id, name, status FROM jobs`}
             @newJobName = ""
