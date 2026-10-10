@@ -69,7 +69,9 @@
  *                 _scrml_effect, _scrml_effect_static, _scrml_computed
  *   messages      _scrml_messages_inline/_registered, _scrml_messages_register,
  *                 _scrml_messages_register_inline, _scrml_message_for,
- *                 _SCRML_DEFAULT_MESSAGES, _SCRML_TAG_TO_VALIDATOR (§55.10, C10)
+ *                 _SCRML_DEFAULT_MESSAGES, _SCRML_TAG_TO_VALIDATOR (§55.10, C10);
+ *                 the §41.12.1 template reader inlined from runtime-message-templates.js
+ *                 (_SCRML_MESSAGE_SLOTS, _scrml_message_template_parse/_render, S462)
  *   engine        _scrml_engine_check_transition, _scrml_engine_advance,
  *                 _scrml_engine_direct_set (§51.0.F + §51.0.G, C13).
  *                 Tree-shaken when usage.engines is false.

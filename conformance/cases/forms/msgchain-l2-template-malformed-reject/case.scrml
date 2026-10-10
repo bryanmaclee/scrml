@@ -2,13 +2,12 @@
 ${
     import { registerMessages } from 'scrml:data'
     registerMessages({
-        .LengthFailed: "{field} is too short (length {predicate})",
-        .Required:     "{field} is absolutely required",
+        .Required:     "{ field } is required",
+        .LengthFailed: "{field} needs a length {predicate",
     })
     <signup>
         <name req length(>=2)> = <input id="name" type="text"/>
     </>
 }
 <signup><name/></>
-<div id="err"><errors of=@signup.name/></div>
 </program>

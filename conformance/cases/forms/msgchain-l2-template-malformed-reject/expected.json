@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-l2-template-malformed-reject",
+  "description": "§41.12.1 rules 2 + 5 — a literal registerMessages template with a `{` that opens no slot is refused with E-MESSAGE-TEMPLATE-MALFORMED, once per bad template: `{ field }` (a slot has no whitespace) and an unclosed `{predicate`.",
+  "language-version": "1.0",
+  "spec": "§41.12.1",
+  "rationale": "§41.12.1 grammar: a slot is exactly `{`, a name, `}`; `{{` is the only escape. Rule 2: any other text after a single `{` makes the template malformed. Rule 5: checked at compile time when the template is a literal. Two bad templates → two diagnostics.",
+  "expect": {
+    "codes": ["E-MESSAGE-TEMPLATE-MALFORMED"],
+    "notCodes": ["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-SLOT-UNKNOWN", "E-MESSAGE-VARIANT-UNKNOWN"],
+    "codeCounts": { "E-MESSAGE-TEMPLATE-MALFORMED": 2 }
+  }
+}
