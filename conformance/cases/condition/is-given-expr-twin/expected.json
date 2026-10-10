@@ -1,0 +1,18 @@
+{
+  "id": "condition-is-given-expr-twin",
+  "description": "§42.2.4 — the canonical twin of condition/is-some-deprecated-expr: `x is given` in a value position, a compound condition and a parenthesized `if=` test. No W-IS-SOME-DEPRECATED; clicking #go sets @user, so @label = \"present\" (@n is 0) and #who renders — the same runtime as the deprecated spelling.",
+  "language-version": "1.0",
+  "spec": "§42.2.4",
+  "rationale": "§42.2.4 — `expr is given` is THE explicit presence test, valid in a condition, a compound condition and every value position. §63.5 — the deprecated `is some` form's runtime is identical to this one. Provenance: ruling:user-voice-scrml.md S460 \"a′, go\"; ruling:user-voice-scrml.md S462 \"a, validator too, go\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-IS-SOME-DEPRECATED"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "label": "present" },
+    "domAnchored": [
+      { "selector": "#out", "text": "present" },
+      { "selector": "#who", "text": "signed in" }
+    ]
+  }
+}

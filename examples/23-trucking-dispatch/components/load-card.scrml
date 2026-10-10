@@ -80,7 +80,7 @@ ${
 
         <div class="text-xs text-slate-600 mb-2">
             ${load.commodity}
-            <span if=(load.weight_lbs is some) class="text-slate-400">
+            <span if=(load.weight_lbs is given) class="text-slate-400">
                 · ${load.weight_lbs} lbs
             </>
         </div>
@@ -94,7 +94,7 @@ ${
             </span>
         </div>
 
-        <div if=(customerName is some) class="text-xs text-slate-500 mt-1 truncate">
+        <div if=(customerName is given) class="text-xs text-slate-500 mt-1 truncate">
             ${customerName}
         </div>
     </>

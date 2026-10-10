@@ -12,7 +12,7 @@
         let out = []
         for (const it of [{ id: 7 }, { id: { a: 1 } }, { id: 9 }, { id: 8 }]) {
             const row = ?{`SELECT body FROM notes WHERE id = ${it.id}`}.get() !{ .QueryFailed(m) :> "QF"  _ :> "other" }
-            out.push(row is not ? "none" : (row.body is some ? row.body : row))
+            out.push(row is not ? "none" : (row.body is given ? row.body : row))
         }
         return out.join(",")
     }
