@@ -1,0 +1,29 @@
+${
+    type K:enum = { A, B }
+    <v> : number = 0
+    <s> : string = "none"
+    <w> : number = 0
+    function show(x: number) -> string { return "s=" + x }
+    function go() {
+        let n: number | not = 5
+        @s = show(match K.A {
+            given n :> 1
+            .A :> 2
+            .B :> 3
+        })
+        @v = match K.A {
+            given n :> 1
+            .A :> 2
+            .B :> 3
+        }
+        let ww = 0
+        ww = match K.A {
+            given n :> 1
+            .A :> 2
+            .B :> 3
+        }
+        @w = ww
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="s">${@s}</p>

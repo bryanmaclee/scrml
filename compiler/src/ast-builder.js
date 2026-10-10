@@ -54,7 +54,7 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
+import { parseExprToNode, emitStringFromTree as _emitStringFromTreeForMatch, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
 import { declExtent, liveStmtNothingReason, liveLabelIsTargeted } from "../native-parser/body-top-coverage.js";
 import * as acornForEffects from "acorn";
@@ -588,6 +588,79 @@ export function parseLeaveArmBody(text, filePath, startOffset) {
     return { error: "`" + kw + "` in an arm takes at most a loop label: `:> " + kw + "` or `:> " + kw + " Label` (§18.2 \"Leaving arms\")." };
   }
   return { node: { kind: kw === "break" ? "break-stmt" : "continue-stmt", label: rest || null, span } };
+}
+
+/**
+ * S462 review M1 — §42.2.3 "In match arms": a `given x :> body` arm. The
+ * expression parser carries a `match` written in an expression position (a call
+ * argument, `@v = match …`, `x = match …`, a derived cell) as a `match-expr`
+ * ExprNode whose arms are raw TEXT (`rawArms`), and no reader of that text knows
+ * a `given` arm: the arm was silently dropped, and a malformed `given` head got
+ * no E-SYNTAX-044. For a match whose arms include a `given` arm, this pass
+ * re-reads the match with the STATEMENT parser — the one that reads `given`
+ * heads (head check, separators, arm body) for `const d = match` / `return
+ * match` — and attaches the resulting `match-stmt` as `structured` on the
+ * ExprNode. Codegen lowers the structured arms; the type system visits its
+ * `given` arms through `__nestedMatches` on the owning statement (deprecation
+ * lint, head-name scope). Both side-fields are NON-enumerable so the generic AST
+ * walkers do not see the arms a second time. Only the `given`-head diagnostics of
+ * the re-read are reported: every other arm was already read, and checked, on
+ * the primary path.
+ */
+// (HANDLER_STMT_ID_BASE + 900_000_000 — the constant is declared later in this module.)
+const _exprMatchStmtIds = { next: 1_000_000_000 + 900_000_000 };
+const _EXPR_KEY_RE = /(?:Expr|ExprNode|exprNode)$/;
+const _GIVEN_HEAD_CODES = new Set(["E-SYNTAX-044", "E-SYNTAX-045"]);
+function attachStructuredExpressionMatches(nodes, errors, filePath) {
+  const seen = new WeakSet();
+  const reread = (m, owner) => {
+    if (m.structured !== undefined || !Array.isArray(m.rawArms) || !m.subject) return;
+    if (Array.isArray(m.subjects) && m.subjects.length >= 2) return;
+    // Sound pre-filter: only an arm that BEGINS with the word `given` can be a
+    // `given` arm; whether it is one is decided by the parse below.
+    if (!m.rawArms.some((a) => typeof a === "string" && /^\s*given(?![A-Za-z0-9_$])/.test(a))) return;
+    // The statement already carries this very match as a structured `matchExpr`
+    // (a derived `const <x> = match …`, read and type-checked there): lower that
+    // one; do not read it a second time.
+    if (owner && owner.matchExpr && Array.isArray(owner.matchExpr.body) && (owner.initExpr === m || owner.exprNode === m)) {
+      Object.defineProperty(m, "structured", { value: owner.matchExpr, enumerable: false, configurable: true, writable: true });
+      return;
+    }
+    let subjectText = "";
+    try { subjectText = _emitStringFromTreeForMatch(m.subject); } catch { return; }
+    const sp = owner && owner.span ? owner.span : { start: 0, line: 1, col: 1 };
+    const text = "match " + subjectText + " {\n" + m.rawArms.join("\n") + "\n}";
+    let res = null;
+    try {
+      res = parseHandlerStatementListCore({ kind: "expr", raw: text, span: sp }, filePath, _exprMatchStmtIds, null,
+        typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1);
+    } catch { res = null; }
+    const stmt = res && Array.isArray(res.stmts) && res.stmts.length === 1 ? res.stmts[0] : null;
+    if (!stmt || (stmt.kind !== "match-stmt" && stmt.kind !== "match-expr") || !Array.isArray(stmt.body)) return;
+    for (const e of res.parseErrors ?? []) {
+      if (e && _GIVEN_HEAD_CODES.has(e.code)) errors.push(e);
+    }
+    Object.defineProperty(m, "structured", { value: stmt, enumerable: false, configurable: true, writable: true });
+    if (owner) {
+      const list = Array.isArray(owner.__nestedMatches) ? owner.__nestedMatches : [];
+      list.push(stmt);
+      Object.defineProperty(owner, "__nestedMatches", { value: list, enumerable: false, configurable: true, writable: true });
+    }
+  };
+  const walk = (n, owner, inExpr) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr); return; }
+    if (inExpr && n.kind === "match-expr") reread(n, owner);
+    const nextOwner = !inExpr && typeof n.kind === "string" && n.span ? n : owner;
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (!v || typeof v !== "object") continue;
+      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k));
+    }
+  };
+  walk(nodes, null, false);
 }
 
 /**
@@ -23845,6 +23918,11 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
   // fire-site error and this walker emission never both appear for the same
   // switch keyword.
   collectForbiddenSwitches(nodes, errors, filePath);
+
+  // S462 review M1 — a `match` in EXPRESSION position (`@v = match …`, a call
+  // argument, `x = match …`) is carried by the expression parser as raw arm text,
+  // which reads no `given` arm. Those matches get the statement parser's arms.
+  attachStructuredExpressionMatches(nodes, errors, filePath);
 
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.

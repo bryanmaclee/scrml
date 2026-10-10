@@ -1,0 +1,14 @@
+${
+    type K:enum = { A, B }
+    <k> : K = .A
+    <x> : number | not = 5
+    const <dv> = match @k {
+        given @x :> 1
+        .A :> 2
+        .B :> 3
+    }
+    <seen> : number = 0
+    function go() { @seen = @dv }
+}
+<button id="go" onclick=go()>go</>
+<p id="dv">${@dv}</p>

@@ -1,0 +1,21 @@
+{
+  "id": "match-leave-given-arm-in-derived-match",
+  "description": "A `given @x :>` arm fires in a derived `const <dv> = match …` (S462 review M1).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "The derived cell recomputes from its expression form; it now lowers the structured arms the parser built for it.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "seen": 1
+    }
+  }
+}

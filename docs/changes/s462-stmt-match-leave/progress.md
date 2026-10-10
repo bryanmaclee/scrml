@@ -17,3 +17,4 @@
 2026-10-10T12:47:28-06:00 merged origin/main bbe74c1df (#1392): given-parse conflict resolved (skipGivenComments + arm-level -> accepted by malformed-head check); gates green; 2 esm throws pinned.
 2026-10-10T13:05:58-06:00 post-merge: given-head scope check skips rebind/malformed heads (given-rebind-no-presence-lint gained a stray E-SCOPE-001).
 2026-10-10T13:50:49-06:00 fix round 3: B2 given-guard case restored in checkTopLevelReturn.
+2026-10-10T14:10:23-06:00 fix round 3: M1 expression-position given arms (statement-parser re-read, non-enumerable structured/__nestedMatches); corpus 0 change.
