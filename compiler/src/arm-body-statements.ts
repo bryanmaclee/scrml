@@ -117,3 +117,39 @@ export function armStatements(arm: any): any[] | null {
   if (typeof arm.handler === "string") return armBodyStatementsFromText(arm.handler);
   return null;
 }
+
+/**
+ * The exits of a statement list that leave it entirely, each once, in order:
+ * a `return` / `fail` (a function exit — nested function, lambda and `fn` bodies
+ * are their own scope and are not entered) and a `break` / `continue` whose
+ * target is not a loop inside the list (labels tracked). The same boundary rules
+ * as the loop-control check (`checkLoopControl`) and `leaveInStatements`.
+ */
+export function exitsOfStatements(stmts: unknown): Array<{ kind: "return" | "fail" | "break" | "continue"; node: any }> {
+  const out: Array<{ kind: "return" | "fail" | "break" | "continue"; node: any }> = [];
+  const seen = new Set<unknown>();
+  const walk = (n: any, loopDepth: number, labels: Set<string>): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, loopDepth, labels); return; }
+    const k = n.kind;
+    if (typeof k === "string" && FN_KINDS.has(k)) return;
+    if (k === "return-stmt") { out.push({ kind: "return", node: n }); return; }
+    if (k === "fail-expr") { out.push({ kind: "fail", node: n }); return; }
+    if (k === "break-stmt" || k === "continue-stmt") {
+      const label = typeof n.label === "string" && n.label.length > 0 ? n.label : null;
+      const targetInside = label ? labels.has(label) : loopDepth > 0;
+      if (!targetInside) out.push({ kind: k === "break-stmt" ? "break" : "continue", node: n });
+      return;
+    }
+    let depth = loopDepth;
+    let inner = labels;
+    if (typeof k === "string" && LOOP_KINDS.has(k)) {
+      depth = loopDepth + 1;
+      if (typeof n.label === "string" && n.label.length > 0) { inner = new Set(labels); inner.add(n.label); }
+    }
+    for (const [key, v] of Object.entries(n)) if (key !== "span" && v && typeof v === "object") walk(v, depth, inner);
+  };
+  walk(stmts, 0, new Set());
+  return out;
+}

@@ -197,74 +197,31 @@ import {
   isWatchesChannel,
   ROWCHANGE_VARIANT_NAMES,
 } from "./channel-watches.ts";
-import { tokenizeLogic } from "./tokenizer.ts";
+import { armBodyStatementsFromText, exitsOfStatements } from "./arm-body-statements.ts";
 
 /**
- * dpa-068 D10 — does a §51.0.S.2.3 message-arm body hold a `return` of its OWN
- * (a bare `return` body, or a `return` statement at the block's own level)?
- * Tokenized, so a `return` inside a string, a comment, a nested `function`
- * body or an arrow body (`=> { … }`) does not count.
+ * dpa-068 D10 / S462 review F6, N2, N3 — the exits of a §51.0.S.2.3 message-arm
+ * body that leave the ARM: a `return` (there is no function to return from) and
+ * a `break` / `continue` with no loop to target. The body is carried only as raw
+ * text at this stage, so it is PARSED by the one arm-body reader
+ * (`arm-body-statements.ts`: a bare leave statement, or a `{ … }` block through
+ * the statement parser) and the nodes are walked with the loop-control check's
+ * function- and loop-boundary rules — never scanned for keywords or guessed at
+ * by brace position (an object literal's `{` in a `for` head or a default
+ * parameter is not a body).
  */
-export function messageArmBodyLoopExits(bodyRaw: string, isBlockBody: boolean): Array<"break" | "continue"> {
-  if (typeof bodyRaw !== "string" || !/\b(break|continue)\b/.test(bodyRaw)) return [];
-  let toks: Array<{ kind: string; text: string }>;
-  try { toks = tokenizeLogic(bodyRaw, 0, 1, 1, []) as Array<{ kind: string; text: string }>; } catch { return []; }
-  const ownDepth = isBlockBody ? 1 : 0;
-  let depth = 0;
-  const scopeDepths: number[] = [];   // braces opened by a nested function OR a loop body
-  let pendingScope = false;
-  const out: Array<"break" | "continue"> = [];
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i];
-    if (t.kind === "COMMENT") continue;
-    if (t.kind === "KEYWORD" && (t.text === "function" || t.text === "fn" || t.text === "for" || t.text === "while" || t.text === "do")) pendingScope = true;
-    if ((t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text === "=>" && toks[i + 1]?.text === "{") pendingScope = true;
-    if (t.kind === "PUNCT" && t.text === "{") {
-      depth++;
-      if (pendingScope) { scopeDepths.push(depth); pendingScope = false; }
-      continue;
-    }
-    if (t.kind === "PUNCT" && t.text === "}") {
-      if (scopeDepths.length && scopeDepths[scopeDepths.length - 1] === depth) scopeDepths.pop();
-      depth--;
-      continue;
-    }
-    if (t.kind === "KEYWORD" && (t.text === "break" || t.text === "continue") && scopeDepths.length === 0 && depth >= ownDepth) {
-      out.push(t.text);
-    }
-  }
-  return out;
+function messageArmExits(bodyRaw: string): Array<"return" | "fail" | "break" | "continue"> {
+  if (typeof bodyRaw !== "string") return [];
+  const stmts = armBodyStatementsFromText(bodyRaw);
+  return stmts ? exitsOfStatements(stmts).map((e) => e.kind) : [];
 }
 
-export function messageArmBodyHasOwnReturn(bodyRaw: string, isBlockBody: boolean): boolean {
-  if (typeof bodyRaw !== "string" || !/\breturn\b/.test(bodyRaw)) return false;
-  let toks: Array<{ kind: string; text: string }>;
-  try { toks = tokenizeLogic(bodyRaw, 0, 1, 1, []) as Array<{ kind: string; text: string }>; } catch { return false; }
-  const ownDepth = isBlockBody ? 1 : 0;
-  // Brace depth, plus a stack of depths at which a nested function body opened.
-  let depth = 0;
-  const fnBodyDepths: number[] = [];
-  let pendingFnBody = false;
-  for (let i = 0; i < toks.length; i++) {
-    const t = toks[i];
-    if (t.kind === "COMMENT") continue;
-    if (t.kind === "KEYWORD" && (t.text === "function" || t.text === "fn")) pendingFnBody = true;
-    if ((t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text === "=>" && toks[i + 1]?.text === "{") pendingFnBody = true;
-    if (t.kind === "PUNCT" && t.text === "{") {
-      depth++;
-      if (pendingFnBody) { fnBodyDepths.push(depth); pendingFnBody = false; }
-      continue;
-    }
-    if (t.kind === "PUNCT" && t.text === "}") {
-      if (fnBodyDepths.length && fnBodyDepths[fnBodyDepths.length - 1] === depth) fnBodyDepths.pop();
-      depth--;
-      continue;
-    }
-    if (t.kind === "KEYWORD" && t.text === "return" && fnBodyDepths.length === 0 && depth >= ownDepth) {
-      return true;
-    }
-  }
-  return false;
+export function messageArmBodyLoopExits(bodyRaw: string, _isBlockBody?: boolean): Array<"break" | "continue"> {
+  return messageArmExits(bodyRaw).filter((k): k is "break" | "continue" => k === "break" || k === "continue");
+}
+
+export function messageArmBodyHasOwnReturn(bodyRaw: string, _isBlockBody?: boolean): boolean {
+  return messageArmExits(bodyRaw).includes("return");
 }
 
 // ⛑ S441 — E-WRITE-NOT-IN-LOGIC-CONTEXT (S123 "Unit CC") is RETIRED: a
