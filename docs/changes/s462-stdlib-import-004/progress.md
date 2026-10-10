@@ -2,3 +2,4 @@
 - 2026-10-09T22:04:31-06:00 REPRODUCED: scrml:data {required,totallyBogus} compiles clean; protect-001 verifyHash from scrml:auth compiles clean
 - 2026-10-09T22:08:10-06:00 impl: validateStdlibImports (module-resolver.js) wired in STDLIB-EXPORT-SEED (api.js); repro now E-IMPORT-004 w/ hints. Next: corpus measurement
 - 2026-10-09T22:31:14-06:00 gate (no-bail) 31842 pass/8 fail — all 8 load flakes, re-run clean in isolation. Fixed test fixtures randomUUID(scrml:random)->randomInt, formatDate scrml:format->scrml:time; samples protect-001 (verifyHash -> scrml:crypto 3-arg), gauntlet-r14 elixir uuid->generateUUID
+- 2026-10-09T22:47:48-06:00 addendum (stdlib exported TYPES) appended to BRIEF.md
