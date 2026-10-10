@@ -1,0 +1,11 @@
+${
+    type K:enum = { A, B }
+    <k> : K = .A
+    <w> : string = ""
+    function go() {
+        let n: string | not = "z"
+        @w = ["p"].map((q) => match @k { given n :> q + n  .A :> q + "a"  else :> "e" }).join("")
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="w">${@w}</p>

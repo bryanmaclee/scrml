@@ -1,0 +1,25 @@
+${
+    type E:enum = { Boom(msg: string), Other }
+    type E2:enum = { Wrapped(msg: string) }
+    type K:enum = { A, B, C }
+    <out> : string = "none"
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    function risky(n: number)! E {
+        if (n < 0) { fail E.Boom("neg") }
+        return n
+    }
+    function pick(k: K) {
+        match k {
+            .A :> return
+            .B :> @seen = "b"
+            .C :> @seen = "c"
+        }
+        @after = "ran"
+    }
+    function go() {
+        pick(K.A)
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="after">${@after}</>

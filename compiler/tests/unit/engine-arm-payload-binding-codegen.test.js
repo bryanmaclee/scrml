@@ -93,7 +93,7 @@ describe("match-arm-block payload binding (Bug 1 fix-A)", () => {
     expect(errors).toEqual([]);
     // The arm body MUST bind `n` from tagged-object payload before the assignment.
     // Pattern: `if (<tag> === "Mushroom") { const n = <tmp>.data.coins; ...`
-    expect(clientJs).toMatch(/=== "Mushroom"\) \{ const n = [\w]+\.data\.coins;/);
+    expect(clientJs).toMatch(/=== "Mushroom"\) \{\s*const n = [\w]+\.data\.coins;/);
     // And the body must use `n` (not a leaked identifier).
     expect(clientJs).toMatch(/_scrml_reactive_get\("coins"\) \+ n/);
   });
@@ -230,7 +230,7 @@ describe("14-mario fixture (integration smoke)", () => {
     const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Fix-A surface: payload binding declared.
-    expect(clientJs).toMatch(/=== "Mushroom"\) \{ const n = [\w]+\.data\.coins;/);
+    expect(clientJs).toMatch(/=== "Mushroom"\) \{\s*const n = [\w]+\.data\.coins;/);
     // Fix-B surface 1: comparison uses MarioState.Small, not bare MarioState.
     expect(clientJs).toContain("MarioState.Small");
     expect(clientJs).not.toMatch(/_scrml_structural_eq\(_scrml_reactive_get\("marioState"\), MarioState\)/);

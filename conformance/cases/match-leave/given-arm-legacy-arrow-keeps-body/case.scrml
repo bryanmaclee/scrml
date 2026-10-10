@@ -1,0 +1,18 @@
+${
+    <a> : string = "unset"
+    <b> : string = "unset"
+    function decl(name: string | not) -> string {
+        let out = match name {
+            not -> "absent"
+            given name -> "hi " + name
+        }
+        return out
+    }
+    function go() {
+        @a = decl("al")
+        @b = decl(not)
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="a">${@a}</>
+<p id="b">${@b}</>

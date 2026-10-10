@@ -236,8 +236,10 @@ const out = match (m, e) {
     expect(r.clientJs).toMatch(/=== "InCode" && \S+ === "Quote"/);
     // Payload binding from position 2 destructured into the arm body.
     expect(r.clientJs).toMatch(/const q = _scrml_scrut_\d+\.data\.q;/);
-    // Per-position `_` arm tests only the non-wildcard position.
-    expect(r.clientJs).toMatch(/=== "Eof"\) \{ return "eof"; \}/);
+    // Per-position `_` arm tests only the non-wildcard position. (S462: a
+    // decl-position multi-scrutinee match lowers INLINE — each arm assigns the
+    // result var — so an arm's `return` / `fail` leaves the enclosing function.)
+    expect(r.clientJs).toMatch(/=== "Eof"\) \{\s*_scrml_tilde_\d+ = "eof";\s*\}/);
     // No tuple accessor leaks.
     expect(r.clientJs).not.toMatch(/\.0\b/);
     expect(r.clientJs).not.toMatch(/\bundefined\b/);
@@ -258,11 +260,11 @@ const out = match (m, e) {
 }
 <p>{ out }</p>
 </program>`, "runtime");
-    // Extract the desugared IIFE and run it with concrete tagged inputs.
-    const mm = r.clientJs.match(/= (\(function\(\) \{[\s\S]*?\}\)\(\));/);
+    // Extract the desugared dispatch (S462: inline — from the result var's
+    // declaration to the binding of `out`) and run it with concrete tagged inputs.
+    const mm = r.clientJs.match(/(let (_scrml_tilde_\d+) = null;[\s\S]*?)const out = \2;/);
     expect(mm).toBeTruthy();
-    const iife = mm[1];
-    const run = new Function("m", "e", `return ${iife}`);
+    const run = new Function("m", "e", `${mm[1]}\nreturn ${mm[2]};`);
     const Q = (q) => ({ variant: "Quote", data: { q } });
     expect(run("InCode", Q("hi"))).toBe("hi");          // payload bound
     expect(run("InCode", "Tick")).toBe("tmpl");

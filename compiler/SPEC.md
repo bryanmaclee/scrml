@@ -17361,12 +17361,40 @@ binding-list    ::= binding (',' binding)*
 binding         ::= Identifier
                   | FieldName ':' Identifier
 wildcard-arm    ::= 'else' | '_'
-arm-body        ::= expression | block-body
+arm-body        ::= expression | block-body | leave-stmt
 block-body      ::= '{' statement* expression? '}'
+leave-stmt      ::= 'return' expression?
+                  | 'fail' variant-expr          // operand REQUIRED, starting on the same line
+                  | 'break' Label?
+                  | 'continue' Label?
 ```
 
-> ⚑ **A bare control-flow statement (`return`, `fail`) is NOT an arm body today** — `arm-body ::= expression | block-body`, so write `:> { return }` / `:> { fail E.V(…) }`. A widening is banked (dpa-068).
-> **Provenance:** ruling:user-voice-scrml.md S454 "grant the exception. Your rec, but we will likely widen this later. significantly more ergonomic" · supersedes: the bare `:> return` / `:> fail …` spellings in the §13.2, §19.5 and §19.9.10 examples (corrected to the braced form, S454).
+**Leaving arms (S462).** An arm body MAY be a single **leave statement** — `.NotFound(_) :> return`,
+`.Bad(m) :> fail .Wrapped(m)`, `.Skip :> continue`. It means exactly what the same statement means as
+the only statement of a `{ }` block arm (`:> { return }`), and leaves the same way: `return` and `fail`
+leave the enclosing function, `break` / `continue` leave or continue the enclosing loop (§19.3.3,
+§19.4.3).
+
+- **Arms only.** `leave-stmt` is an alternative of THIS production (§18.2 `arm-body` — not §17.6.1's
+  if-as-expression `arm-body`), so it applies wherever a `match-arm` does: a `match` arm in statement,
+  declaration and value position, a `!{}` handler arm (§19.4.5) and an engine message arm
+  (§51.0.S.2.3). It is NOT an expression anywhere else: `x ?? return`, `c ? v : fail .E` and
+  `f(return)` stay outside the language.
+- **Extent.** `fail`'s operand is required and SHALL begin on the `fail` line. Any operand ends where a
+  single-expression arm body ends: at the line break unless the line ends in a §7.2.2 rule-2
+  continuation token, at the `}` closing the arm list, or at a same-line arm head. So
+  `.A :> return⏎    "orphan"` is `return` followed by a line at arm level that forms no arm — a parse
+  error (§7.2.2 "Arm heads"), never `return "orphan"`.
+- **Legality by context, through the existing rules.** `return` needs an enclosing function — in an
+  engine message arm, which is not a function body, it is **E-STMT-RETURN-OUTSIDE-FUNCTION**; `fail`
+  needs a `!` function (**E-ERROR-001**, §19.3.3); `break` / `continue` need an enclosing loop
+  (**E-LOOP-001** / **E-LOOP-002**, §49.9). A bare leave arm is legal exactly where the braced one is.
+- **`lift` is not a leave statement.** It yields or accumulates a value and does not leave; an unbraced
+  `:> lift <…>` arm is outside this production and owes its own ruling (see the note at §19.11).
+- **Canonical spelling.** A single leave is written bare (`:> return`); anything longer is braced
+  (`:> { @phase = .Failed; return }`). The braced single-statement form stays legal.
+
+> **Provenance:** ruling:user-voice-scrml.md S462 "2 W1" · dd:scrml-support/docs/deep-dives/arm-body-leave-stmt-widening-dpa-068-2026-10-08.md · supersedes: the S454 flag *"A bare control-flow statement (`return`, `fail`) is NOT an arm body today — `arm-body ::= expression | block-body`, so write `:> { return }` / `:> { fail E.V(…) }`. A widening is banked (dpa-068)."* (ruling:user-voice-scrml.md S454 "grant the exception. Your rec, but we will likely widen this later. significantly more ergonomic") · **direction of change: newly-accepting** (a bare leave arm; impl#1 previously accepted a bare `return` / `fail` only in a `!{}` arm, and the bootstrap a bare `fail` arm). The ruling was sequenced: the pole-independent miscompiles (the statement-`match` IIFE that swallowed a braced arm's `return` / `fail`, dpa-068 D2/D3; the arm-body extent, D8) were fixed BEFORE either compiler accepts the bare form.
 
 Note: `variant-pattern` accepts both `.` (canonical) and `::` (alias) notation (S37-AM-001).
 `wildcard-arm` accepts both `else` (canonical) and `_` (alias) (S37-AM-003). The match arm
@@ -17581,6 +17609,9 @@ unify to a common supertype. The result type of the `match` expression is that u
 - If two or more arm bodies produce types that cannot be unified, the compiler SHALL emit
   E-TYPE-001 identifying each conflicting arm.
 - The result type of a `match` expression is the unified type of all arm body types.
+- A leaving arm (a leave-stmt, or a block that leaves on every path) contributes no type to the arm unification.
+
+  > **Provenance:** ruling:user-voice-scrml.md S462 "2 W1" · dd:scrml-support/docs/deep-dives/arm-body-leave-stmt-widening-dpa-068-2026-10-08.md · direction of change: inert for every program the SPEC already admitted (it names how a braced leaving arm, `.B :> { return "x" }`, already unified — the SPEC was silent) and covers the §18.2 `leave-stmt` arm.
 
 **Worked example — valid (all arms same type):**
 ```scrml
@@ -17606,7 +17637,7 @@ Arms must produce the same type or types that unify to a common supertype.
 
 ### 18.5 Arm Body Forms
 
-An arm body is either a single expression or a block body.
+An arm body is a single expression, a block body, or a single leave statement (§18.2 "Leaving arms", S462).
 
 **Single-expression arm:**
 ```scrml
@@ -17627,7 +17658,9 @@ produces `void`.
 
 **Normative statements:**
 
-- An arm body SHALL be either a single expression or a `{ }` block.
+- An arm body SHALL be a single expression, a `{ }` block, or a single leave statement (`return [expr]`,
+  `fail <variant>`, `break [Label]`, `continue [Label]` — §18.2). A leaving arm produces no value; it
+  contributes no type to the arm unification (§18.4).
 - A block arm body's result type SHALL be the type of its last expression. If the block
   ends with a statement and has no trailing expression, the arm result type is `void`.
 - The result type rule from §18.4 applies to block arm bodies the same as to
@@ -19205,6 +19238,9 @@ handled-expr  ::= expression '!{' handler-arm+ '}'
 handler-arm   ::= match-arm                  // §18.2 — arm-pattern, ':>' (or a deprecated alias), arm-body
 ```
 
+A handler arm's body is a §18.2 `arm-body`, so it MAY be a bare leave statement (`.NotFound(_) :> return`,
+`.Bad(m) :> fail .Wrapped(m)`, §18.2 "Leaving arms", S462).
+
 So, in a `!{}` exactly as in a `match`: a variant arm is `.V`, or `.V(binding-list)` to bind its
 payload (§18.7; `::V` is the §18.2 alias); `_` / `else` is the catch-all; `_ <name>` binds the whole
 error (§18.6.1); alternates are separated by `|` within one arm (`.A | .B :> …`, §18.2); arms are
@@ -20612,6 +20648,13 @@ ${
     }}
 </>
 ```
+
+> ⚑ **`lift` is outside the §18.2 leave set (S462).** The unbraced `:> lift <…>` arms in §19.11's
+> examples are not `leave-stmt` arms — `lift` yields or accumulates, it does not leave — and they are
+> not an `expression` either. Their spelling (the plain markup value `:> <div…/>`, or braces
+> `:> { lift <div…/> }`) owes its own ruling; neither compiler compiles the unbraced shape today
+> (dpa-068 D7, c15).
+> **Provenance:** ruling:user-voice-scrml.md S462 "2 W1" · dd:scrml-support/docs/deep-dives/arm-body-leave-stmt-widening-dpa-068-2026-10-08.md
 
 #### 19.11.2 Reactive Propagation Shorthand
 
@@ -26278,7 +26321,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-MARKUP-003~~ | §24.1 | **Retired 2026-07-16 (S263).** Unknown-attribute-on-known-HTML-element is owned by **E-HTML-001** (§24.2, aspirational — VP-1 deliberately passes plain-HTML attributes through). The dead impl squatter (`validateMarkupAttributes`, `type-system.ts`) that carried this code would false-fire on scrml's own `if`/`else`/`each` directives (176 corpus files). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-MU-001 | §35 | Must-use: return value of `!` function not captured | Error |
 | E-PA-002 | §11.3 | Protect analyzer: invalid `protect=` syntax | Error |
-| E-PARSE-001 | §4 | Parse error: unexpected token in block structure | Error |
+| E-PARSE-001 | §4, §7.2.2 | Parse error: unexpected token in block structure. Includes a line at the arm level of a `match { … }` body that forms no arm (§7.2.2 "Arm heads") — e.g. the line after `.A :> return` (dpa-068 D8; impl#1, S462; that limb emitted at `compiler/src/ast-builder.js` `reportOrphanArmLines` and `markLeaveArms`.) | Error |
 | E-PARSE-002 | §4 | Parse error: unterminated block | Error |
 | E-SCRIPT-001 | §4.17 | `<script>` element in scrml source. scrml does not admit `<script>` at all (§4.17 companion considerations) — scrml logic lives in logic-context `${...}` (§7) and genuine foreign JS has the `_{...}` foreign-code block (§23). The symmetric twin of `<style>` → `E-STYLE-001` (§9): both are element-level rejections at the block-splitter level, both recover by scanning past the matching close tag (case-insensitive) or to EOF so the rejected body does not cascade. Tag-name match is EXACT, not a prefix — `<noscript>` is unaffected. **Source-side only:** the emitter's own `<script src="scrml-runtime.<hash>.js">` / `<script src="<page>.client.js">` tags are produced downstream of the block splitter and are never subject to this check. (Added S277 — closes the gap where a `<script>` element compiled clean and its body reached the emitted document verbatim; the pre-S277 §4.17 claim that `<script>` was a `W-LINT-018` Ghost-Pattern surface was false. Emitted at `compiler/src/block-splitter.js`.) | Error |
 | ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
@@ -26611,7 +26654,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-003 | §8.10.7 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that also appears in the handler's client-visible return type. Protected fields must not leak to client-visible cache rows. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error |
 | E-SYNTAX-042 | §17.6, §45 | `null` or `undefined` appears in a scrml value position. scrml's absence sentinel is `not`; `null`/`undefined` are not valid scrml literals. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
 | E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x :>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
-| E-SYNTAX-044 | §17.6, §42.2.3 | A `given` head that is not an identifier-list followed by `:>` (or the legacy `=>`): a property path (`given obj.field :>`), a comparison, call or other expression (`given id < 0 :> fail …`, `given f(x) :>`), no name (`given (c) :>`), or no separator (`given n { … }`, `given n -> …`) — and a STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :> return 1`: a `given` guard must be `given <names> :> { … }`; a `given x :> expr` match ARM is a different production and is not refused) — in logic and markup-`${}` contexts alike. §42.2.3: "A `given` head SHALL contain only an identifier-list"; `given-guard ::= 'given' identifier-list (':>' | '=>') block`. The message names the fix: a condition is `if (<cond>) { … }`; presence is `if (x is given) { … }`. One error per head; the refused head surfaces neither W-GIVEN-PRESENCE-DEPRECATED nor E-SYNTAX-045 (the rebind head `given c = <expr> :>` keeps E-SYNTAX-045). **S462 widening — direction of change: newly-rejecting** (conformance restoration: before it, impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and ran the `fail` unconditionally, `g-given-bool-expr-fail-runs-unconditionally-s460`). **Provenance:** ruling:user-voice-scrml.md S462 "a" · supersedes (text): *"Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers."* (Catalog addition S78 audit.) The brace-less body (S462 fix round 1, pa-ruled under §42.2.3's grammar; corpus measured — see `docs/changes/s462-given-presence-deprecate/progress.md`) is emitted at `compiler/src/type-system.ts:14251` (the `given-guard` case, where the match-arm context is known). Emitted at `compiler/src/ast-builder.js:11604` and `compiler/src/ast-builder.js:16815` (the head check after the name list in both `given` parsers; message via `givenHeadError`), and at `compiler/src/ast-builder.js:11548` / `:16758` (the property path); also by the bootstrap's in-place guard parser in `compiler/self-host-v2/parse.scrml` (logic context). | Error |
+| E-SYNTAX-044 | §17.6, §42.2.3 | A `given` head that is not an identifier-list followed by `:>` (or the legacy `=>`): a property path (`given obj.field :>`), a comparison, call or other expression (`given id < 0 :> fail …`, `given f(x) :>`), no name (`given (c) :>`), or no separator (`given n { … }`, `given n -> …` in a STANDALONE guard — on a `given` ARM of a `match`, `->` is the §18.2 deprecated arm-separator alias and is accepted, S462) — and a STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :> return 1`: a `given` guard must be `given <names> :> { … }`; a `given x :> expr` match ARM is a different production and is not refused) — in logic and markup-`${}` contexts alike. §42.2.3: "A `given` head SHALL contain only an identifier-list"; `given-guard ::= 'given' identifier-list (':>' | '=>') block`. The message names the fix: a condition is `if (<cond>) { … }`; presence is `if (x is given) { … }`. One error per head; the refused head surfaces neither W-GIVEN-PRESENCE-DEPRECATED nor E-SYNTAX-045 (the rebind head `given c = <expr> :>` keeps E-SYNTAX-045). **S462 widening — direction of change: newly-rejecting** (conformance restoration: before it, impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and ran the `fail` unconditionally, `g-given-bool-expr-fail-runs-unconditionally-s460`). **Provenance:** ruling:user-voice-scrml.md S462 "a" · supersedes (text): *"Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers."* (Catalog addition S78 audit.) The brace-less body (S462 fix round 1, pa-ruled under §42.2.3's grammar; corpus measured — see `docs/changes/s462-given-presence-deprecate/progress.md`) is emitted at `compiler/src/type-system.ts:14251` (the `given-guard` case, where the match-arm context is known). Emitted at `compiler/src/ast-builder.js:11604` and `compiler/src/ast-builder.js:16815` (the head check after the name list in both `given` parsers; message via `givenHeadError`), and at `compiler/src/ast-builder.js:11548` / `:16758` (the property path); also by the bootstrap's in-place guard parser in `compiler/self-host-v2/parse.scrml` (logic context). | Error |
 | E-SYNTAX-045 | §17.6, §42.2.3 | Rebind form `given <name> = <expr> :>` used in a `given` presence guard. `given` narrows in place — no variable is rebound to a new name (§42.2.3: “No variable is rebound to a new name; each identifier is narrowed in place”). The sibling shape of the property-path reject (E-SYNTAX-044): both reject a non-bare-identifier in `given` head position. Bare `=` is the trigger; `==` / `=>` / `:>` (equality, deprecated separator, canonical separator) do NOT fire. Resolution: declare the value first (`let n = <expr>` then `given n :> { ... }`), or narrow an existing variable in place (`given <existingVar> :> { ... }`). Fires for BOTH logic-context and markup-${}-context given-guards (previously logic emitted E-CODEGEN-INVALID-LOGIC and markup silently compiled). (Catalog addition S189 g-given-rebind dog-food; emitted at `compiler/src/ast-builder.js` both given-guard parse sites.) | Error |
 | E-SYNTAX-064 | §17.7.3, §3.4 | The `@.` contextual iteration sigil ("the current iteration value" / `@.field` for a field of the current item) appears OUTSIDE any `<each>` body scope, where it has no referent. Fires at every reachable `@.`-bearing position outside an each-body: an attribute value (`<li title=@.name>` / `class:done=@.done`), a Tier-0 `${for (it of @items) { lift ... }}` handler-call arg (`onclick=ping(@.id)`), and a Tier-0 lifted interpolation (`lift <li>${@.name}</li>`). A Tier-0 `${for...lift}` is NOT an `<each>` body scope — use the bare loop variable (`it.field`) there; in a `<each>` element use `@.` inside the body or bind an alias with `as name` (`<each in=@items as item>` → `item.field`). Replaces the prior confusing leak (raw `@.` reaching codegen → `E-CODEGEN-INVALID-LOGIC`) and the misleading `E-SCOPE-001` on the base `@` token. (Catalog addition S157 Bug 70 — wired the previously-queued code; emitted at `compiler/src/type-system.ts` visitAttr + lift-expr scan.) | Error |
 | E-BATCH-001 | §8.9.3, §19.10.5 | Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error |
@@ -26851,7 +26894,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-STMT-FOR-BINDING-INIT | §49 | A for-in / for-of binding may not have an initializer. | Error |
 | E-STMT-FOR-DECL-COUNT | §49 | A for-in / for-of declaration must declare exactly one binding. | Error |
 | E-STMT-FOR-SEMICOLON | §49 | Expected `;` after the `for` init or test clause. | Error |
-| E-STMT-RETURN-OUTSIDE-FUNCTION | §4 | `return` outside of a function. | Error |
+| E-STMT-RETURN-OUTSIDE-FUNCTION | §4, §51.0.S.2.3 | `return` outside of a function. Includes a `return` in an engine message arm, bare (`.Go :> return`) or braced — a message arm is not a function body (§18.2 "Leaving arms", S462; impl#1 emits it at `compiler/src/symbol-table.ts`, was E-CODEGEN-INVALID-LOGIC — dpa-068 D10). Also a `return` at the top of a `${ … }` logic block, or nested there only in control flow that runs in place (`if` / loop bodies, `match` arms — bare or braced — and a decl-position `match`): impl#1 emits it at `compiler/src/type-system.ts` `checkTopLevelReturn` (S462 review F4; before, such a `return` compiled clean and left the client's init function). | Error |
 | E-STMT-FUNCTION-NAME | §4 | Expected a name after `function`. | Error |
 | E-STMT-FUNCTION-BODY | §4 | Expected `{` to open a function body. | Error |
 | E-STMT-UNCLOSED-FUNCTION-BODY | §4 | Expected `}` to close a function body. | Error |
@@ -31479,6 +31522,9 @@ Multi-narrowing is all-or-nothing. If any listed variable is `not`, the body is 
 
 **No rebind.** Because `given` narrows in place, the rebind form `given <name> = <expr> :>` is NOT valid scrml — there is no `=` in the `given` head grammar (`given-guard ::= ‘given’ identifier-list (‘:>’ | ‘=>’) block`). A `given` head SHALL contain only an identifier-list. A bare `=` after a `given`-bound identifier SHALL be compile error E-SYNTAX-045 (the sibling of the property-path reject E-SYNTAX-044), in BOTH logic and markup-`${}` contexts. To bind a fresh value, declare it first (`let n = <expr>` then `given n :> { ... }`); to narrow an existing variable, name it directly (`given <existingVar> :> { ... }`). (`==`, `=>`, `:>` after the identifier are NOT rebinds and do not fire: equality, the deprecated separator, the canonical separator respectively.)
 
+Because a `given` head NAMES variables rather than binding them, each head name SHALL resolve as an ordinary read at that point: an undeclared name — including one declared only later in the block, exactly as for any other read — is **E-SCOPE-001**. This holds for a `given` arm of a `match` too (`match name { given n :> … }` with no `n` in scope is E-SCOPE-001, not a guard that tests an unbound name at run time).
+> **Provenance:** spec:§42.2.3 "No rebind" (above) — a consequence, not a new rule · S462 review F3/N5 (s462-stmt-match-leave) · **direction of change: newly-rejecting** in impl#1, which never resolved a `given` head (an undeclared head compiled and threw `ReferenceError` when the guard ran). Corpus measured: 2 sites, both in the s19 gauntlet samples that name an undeclared `n` (`phase3-match-given-arm-075`, `phase3-match-optional-no-arms-076`); 0 sites declare the name only after the guard. Emitted at `compiler/src/type-system.ts` (`case "given-guard"`).
+
 **In match arms**, the presence pattern in a `match` block uses `given` in the payload position:
 
 ```scrml
@@ -31496,7 +31542,7 @@ ${
 
 **The head is an identifier-list — E-SYNTAX-044:**
 
-A `given` head SHALL be `given` followed by an identifier-list and then the separator `:>` (or the deprecated `=>`). Any other head SHALL be compile error **E-SYNTAX-044**, in logic and markup-`${}` contexts alike: a property path (`given obj.field :>` — bind it to a local first), a comparison, call or other expression (`given id < 0 :> fail …` — that is a condition: `if (id < 0) { fail … }`), a head with no name (`given (cond) :>`), and a head with no separator (`given n { … }`, `given n -> …`). So SHALL a standalone guard whose body is not a `{ … }` block (`given id :> fail X`) — the grammar's `block`; without braces the body would run whether or not the names are present. A `given x :> expr` match arm is a different production (an arm body may be an expression) and is not refused. The rebind head `given <name> = <expr> :>` is E-SYNTAX-045 instead (above). A refused head is the site's one diagnostic (no W-GIVEN-PRESENCE-DEPRECATED).
+A `given` head SHALL be `given` followed by an identifier-list and then the separator `:>` (or the deprecated `=>`). Any other head SHALL be compile error **E-SYNTAX-044**, in logic and markup-`${}` contexts alike: a property path (`given obj.field :>` — bind it to a local first), a comparison, call or other expression (`given id < 0 :> fail …` — that is a condition: `if (id < 0) { fail … }`), a head with no name (`given (cond) :>`), and a head with no separator (`given n { … }`, `given n -> …` in a STANDALONE guard — on a `given` ARM of a `match`, `->` is the §18.2 deprecated arm-separator alias and is accepted, S462). So SHALL a standalone guard whose body is not a `{ … }` block (`given id :> fail X`) — the grammar's `block`; without braces the body would run whether or not the names are present. A `given x :> expr` match arm is a different production (an arm body may be an expression) and is not refused. The rebind head `given <name> = <expr> :>` is E-SYNTAX-045 instead (above). A refused head is the site's one diagnostic (no W-GIVEN-PRESENCE-DEPRECATED).
 
 > **Provenance:** ruling:user-voice-scrml.md S462 "a" (the non-identifier `given` head; gap `g-given-bool-expr-fail-runs-unconditionally-s460`) · supersedes (text): *"**Property path note (pending):** Whether `given` accepts property paths (e.g., `given obj.field =>`) is under consideration. For v1, `given` SHALL accept only simple identifiers. A property path in `given` position SHALL be a compile error (E-SYNTAX-044, reserved)."* **Direction of change: newly-rejecting** — conformance restoration: the grammar above never admitted such a head, but impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and then ran the `fail` unconditionally, at exit 0. Measured S462 by compiling the corpus: see `docs/changes/s462-given-presence-deprecate/progress.md`.
 
@@ -37078,6 +37124,11 @@ Inside a state-child body, a message-arm reacts to a message variant. A message 
 ```
 message-arm ::= match-arm                    // §18.2 — the arm's pattern matches the accepts= MsgType
 ```
+
+A message arm's body is a §18.2 `arm-body`, so the grammar admits a bare leave statement there too
+(§18.2 "Leaving arms", S462) — but a message arm is not a function body and its value is the target
+state, so `return` in it, bare or braced, is **E-STMT-RETURN-OUTSIDE-FUNCTION**, `fail` is **E-ERROR-001**
+and `break` / `continue` are **E-LOOP-001** / **E-LOOP-002**: legality is by context (§18.2).
 
 Payload binding follows §18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }`
 matches §18.2. The message arms are the leading items of the state-child body (before any render

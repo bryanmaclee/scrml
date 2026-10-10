@@ -1,0 +1,21 @@
+{
+  "id": "match-leave-decl-multi-scrutinee-arm-braced-return-leaves-fn",
+  "description": "A `{ return 1 }` arm of a DECL-position multi-scrutinee `match` (`const v = match (a, b) { … }`) returns 1 from the function — it does not become `v`. `pick(.A, .A)` is 1 (not 10); `pick(.B, .A)` is 30.",
+  "language-version": "1.0",
+  "spec": "§18.19",
+  "rationale": "§19.3.3: \"`fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.\" §19.4.3 (S451 ruling 1a) counts an arm that ends in `return` / `fail` — or a `break` / `continue` to a loop enclosing the statement — as LEAVING. impl#1 lowered a statement-position `match` to an IIFE, so these exits left only the arm: the statements after the `match` ran, a `fail` was dropped, and a `continue` was a JS syntax error (g-stmt-match-block-return-falls-through; dpa-068 D2/D3). The statement-position match now lowers inline. The decl-position multi-scrutinee match was still the value IIFE, where `return 1` made `v = 1` and the function went on to return 10.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "out": "1,30"
+    }
+  }
+}

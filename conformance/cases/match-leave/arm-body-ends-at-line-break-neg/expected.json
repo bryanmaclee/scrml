@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-arm-body-ends-at-line-break-neg",
+  "description": "A single-expression arm body ends at its line break: the `\"orphan\"` line after `.A :> return` is not part of the arm, and a line at arm level that is no arm is a parse error (E-PARSE-001), not a silently dropped statement and not `return \"orphan\"`.",
+  "language-version": "1.0",
+  "spec": "§7.2.2",
+  "rationale": "§7.2.2 rule 8: \"`return` ends at the line break\"; \"Arm heads\": inside a `match { … }` body \"a line at that level begins an arm\" and a line that does not form an arm \"is a parse error\". impl#1 joined the lines into `return return \"orphan\"` (dpa-068 D8); with the extent fixed and no arm-level check, the line would have been dropped silently.",
+  "expect": {
+    "codes": [
+      "E-PARSE-001"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

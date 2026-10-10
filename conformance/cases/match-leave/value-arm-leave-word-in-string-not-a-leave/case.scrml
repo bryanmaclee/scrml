@@ -1,0 +1,18 @@
+${
+    type K:enum = { A, B }
+    <k> : K = .A
+    <msg> : string = "none"
+    <arg> : string = "none"
+    <tpl> : string = "none"
+    function show(s: string) -> string { return "[" + s + "]" }
+    function go() {
+        @msg = match @k { .A :> "press continue" .B :> "no" }
+        @arg = show(match @k { .A :> "please return" .B :> "no" })
+        @tpl = match @k { .A :> `fail ${"x"}` .B :> "no" }
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="label">${match @k { .A :> "break it" .B :> "no" }}</p>
+<p id="msg">${@msg}</p>
+<p id="arg">${@arg}</p>
+<p id="tpl">${@tpl}</p>

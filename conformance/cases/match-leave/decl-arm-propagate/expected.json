@@ -1,0 +1,22 @@
+{
+  "id": "match-leave-decl-arm-propagate",
+  "description": "A `risky(n)?` arm body of a decl-position `match` propagates: on an error the enclosing `!` function returns it (the caller's `!{}` sees `Boom`), and the write after the `match` does not run.",
+  "language-version": "1.0",
+  "spec": "§19.5",
+  "rationale": "§19.5.1 `propagation-expr ::= expression '?'` is an expression, and §18.2 `arm-body ::= expression | block-body`, so `.A :> risky(n)?` is a legal arm. §19.5.2: \"If the result is an error variant, `?` causes the enclosing function to return that error variant immediately.\" impl#1 emitted the `?` literally (`= f(n) ?;`, E-CODEGEN-INVALID-LOGIC — dpa-068 D4).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "seen": "boom:neg",
+      "out": "none"
+    }
+  }
+}

@@ -54,6 +54,15 @@
 [esm] conformance/cases/markup-handler/s437-r5-template-cell-read-second/case.scrml  # emit-client-esm: Unexpected character '@'
 [esm] conformance/cases/match-codes/e-match-arm-markup-in-value-pos/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/match-codes/e-syntax-010-else-not-last-pos/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-leave/argument-match-arm-labelled-break-outer-neg/case.scrml  # emit-client-esm: Unsyntactic break
+[esm] conformance/cases/match-leave/bare-break-continue-arm-no-loop-neg/case.scrml  # emit-client-esm: Unsyntactic break
+[esm] conformance/cases/match-leave/dpa068-engine-msg-arm-bare-return-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-leave/engine-msg-arm-break-continue-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-leave/engine-msg-arm-return-neg/case.scrml  # emit-client-esm: Unexpected token
+[esm] conformance/cases/match-leave/top-level-given-guard-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
+[esm] conformance/cases/match-leave/top-level-if-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
+[esm] conformance/cases/match-leave/top-level-match-arm-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
+[esm] conformance/cases/match-leave/top-level-raw-and-handler-arm-return-neg/case.scrml  # emit-client-esm: 'return' outside of function
 [esm] conformance/cases/module/e-import-003-import-inside-fn-reject/case.scrml  # emit-client-esm: 'import' and 'export' may only appear at the top level
 [esm] conformance/cases/module/e-scope-010-filescope-duplicate-reject/case.scrml  # emit-client-esm: Identifier 'dup' has already been declared
 [esm] conformance/cases/own-value-type/base-type-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)

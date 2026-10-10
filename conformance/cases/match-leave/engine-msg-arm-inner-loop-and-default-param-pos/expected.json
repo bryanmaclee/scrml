@@ -1,0 +1,16 @@
+{
+  "id": "match-leave-engine-msg-arm-inner-loop-and-default-param-pos",
+  "description": "Legal message-arm blocks are not refused: a `break` of a `for` whose head holds object literals, and a `return` inside a `function` expression whose parameter has an object-literal default (S462 review N2/N3).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.2.3",
+  "rationale": "The arm's exits are decided by parsing its body and walking it with the loop-control check's function and loop boundaries; an object literal's `{` is not a body.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-LOOP-001",
+      "E-LOOP-002",
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

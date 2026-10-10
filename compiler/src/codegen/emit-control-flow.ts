@@ -2,10 +2,11 @@ import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
-import { emitStringFromTree } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
@@ -1552,7 +1553,7 @@ export function emitTryStmt(node: any): string {
 // ---------------------------------------------------------------------------
 
 export interface MatchArm {
-  kind: "variant" | "string" | "literal" | "wildcard" | "not";
+  kind: "variant" | "string" | "literal" | "wildcard" | "not" | "given";
   /**
    * The arm's primary test value. For single-variant arms this is the variant
    * name (e.g. `"Big"`); for pipe-alternation arms (§18 follow-on, S84 fix)
@@ -1586,6 +1587,18 @@ export interface MatchArm {
    * function, instead of emitting `fail …` literally (E-CODEGEN-INVALID-LOGIC).
    */
   failExpr?: any | null;
+  /**
+   * §19.5 — the operand of a single-expression arm body that is a propagation
+   * `expr?` (`.A :> risky(n)?`), stamped by ast-builder.js
+   * (`markPropagateArms`). The arm evaluates `expr`; an error result returns
+   * from the enclosing `!` function, a success value is the arm's value.
+   */
+  propagateOperand?: string | null;
+  /**
+   * §42.2.3 — a `given x :> body` arm: its condition, the presence test of the
+   * named variables (`givenGuardCondition`), computed when the arm is collected.
+   */
+  givenCondition?: string;
 }
 
 /**
@@ -1887,6 +1900,95 @@ export function parseMatchArm(rawTrimmed: string): MatchArm | null {
  *   - `not`                 → kind "not"
  */
 export function matchArmInlineToMatchArm(node: any): MatchArm | null {
+  const arm = _matchArmInlineToMatchArm(node);
+  if (arm && node?.leaveStmt) {
+    // §18.2 `leave-stmt` (S462 W1) — the arm's one statement.
+    return { ...arm, result: "", failExpr: null, structuredBody: [node.leaveStmt] };
+  }
+  if (arm && typeof node?.propagateOperand === "string" && node.propagateOperand.trim()) {
+    arm.propagateOperand = node.propagateOperand;
+  }
+  return arm;
+}
+
+/**
+ * §18.2 `leave-stmt` (S462 W1) for a RAW-TEXT arm (one the AST builder kept as
+ * text: a number- or boolean-literal arm, a `|` alternation, a §18.19 product
+ * arm). Parsed with the parser's own `parseLeaveArmBody`, so the node is the
+ * one a structured arm carries. Returns null when `text` is no leave statement.
+ */
+export function leaveStmtFromArmText(text: string): any | null {
+  if (!_LEAVE_HEAD_RE.test((text ?? "").trim())) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseLeaveArmBody } = require("../ast-builder.js") as { parseLeaveArmBody: (t: string, f: string, o: number) => { node?: any; error?: string } | null };
+  const r = parseLeaveArmBody(text, "<match-arm>", 0);
+  return r && r.node ? r.node : null;
+}
+
+/**
+ * An arm body that is itself a single-scrutinee `match` expression
+ * (`.A :> match j { .A :> return "early" … }`). In an INLINE arm lowering the
+ * nested match is lowered inline too, so a leave in ITS arms leaves the
+ * enclosing function or loop (dpa-068 c10); through the value IIFE it would
+ * leave only the inner arm. Returns the structured node the match emitters
+ * consume (the same bridge emit-expr.ts uses), or null.
+ */
+export function nestedMatchFromArmText(text: string): any | null {
+  const t = (text ?? "").trim();
+  if (!/^match(?![A-Za-z0-9_$])/.test(t)) return null;
+  let node: any = null;
+  try { node = parseExprToNode(t, "<match-arm>", 0); } catch { node = null; }
+  if (!node || node.kind !== "match-expr" || !Array.isArray(node.rawArms) || !node.subject) return null;
+  if (Array.isArray(node.subjects) && node.subjects.length >= 2) return null;
+  return {
+    kind: "match-expr",
+    header: "",
+    headerExpr: node.subject,
+    body: node.rawArms.map((arm: string) => ({ kind: "bare-expr", expr: arm })),
+  };
+}
+
+function stampLeave(arm: MatchArm): MatchArm {
+  if (arm.structuredBody || arm.failExpr) return arm;
+  const node = leaveStmtFromArmText(arm.result ?? "");
+  return node ? { ...arm, result: "", structuredBody: [node] } : arm;
+}
+
+/**
+ * Does this arm LEAVE — a `return` / `fail` / `?` / `break` / `continue` at the
+ * arm's own level (a nested function's are its own)? Read by the value IIFE,
+ * where such an exit cannot leave the enclosing function or loop.
+ */
+function armLeaves(arm: MatchArm): string | null {
+  if (arm.failExpr) return "fail";
+  if (arm.propagateOperand) return "?";
+  if (arm.structuredBody) return leaveInStatements(arm.structuredBody);
+  return leaveInArmText(arm.result ?? "");
+}
+
+/**
+ * The leave a raw-text arm body performs (S462 review F1/F5/N4): a propagation
+ * `expr?`, or — through the ONE arm-body reader (`arm-body-statements.ts`) — a
+ * leave statement or a `{ … }` block parsed to statements. Never a text scan.
+ */
+function leaveInArmText(text: string): string | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  if (propagateOperandOfArmText(t) !== null) return "?";
+  if (t.startsWith("{") && !_matchArmResultIsBlockBody(t)) return null; // an object literal
+  const stmts = armBodyStatementsFromText(t);
+  return stmts ? leaveInStatements(stmts) : null;
+}
+
+/** §19.5 — the operand of a raw arm body that is a propagation `expr?`, else null. */
+export function propagateOperandOfArmText(text: string): string | null {
+  const r = (text ?? "").trim();
+  if (!r.endsWith("?") || r.endsWith("??") || r.startsWith("{")) return null;
+  const operand = r.slice(0, -1).trim();
+  return operand || null;
+}
+
+function _matchArmInlineToMatchArm(node: any): MatchArm | null {
   const test: string = node.test ?? "";
   // S144 Cluster D (Bug Y) — strip a stray trailing comma arm-separator.
   // §18.2 has NO comma separator between arms; when source writes `.A => x,`
@@ -2731,6 +2833,25 @@ function emitIifeBlockArmBody(
 /** §18.19 — emit one multi-scrutinee arm body (`{ <prelude> return <expr>; }`). */
 function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprContext, opts?: any): string {
   const trimmed = resultStr.trim();
+  // A leaving arm in this value IIFE (S462) — see `emitMatchExpr`.
+  const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: trimmed });
+  if (leaves) {
+    // Correct only where the match's value is what the function returns, and
+    // never for `break` / `continue` (see `emitMatchExpr`).
+    if (!(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+      refuseLeavingValueArm(null, leaves, opts);
+      return `{ ${prelude}return undefined; }`;
+    }
+    const leave = leaveStmtFromArmText(trimmed);
+    if (leave) return `{ ${prelude}${emitLogicNode(leave, opts)} }`;
+    const operand = propagateOperandOfArmText(trimmed);
+    if (operand !== null) {
+      const p = emitPropagateArm(operand, opts ?? {});
+      return `{ ${prelude}${p.lines[0]} return ${p.value}; }`;
+    }
+    // A braced block that leaves: its `return` / `fail` lower in place below,
+    // and inside this returned IIFE they return from the function.
+  }
   const isBlockBody = trimmed.startsWith("{") && trimmed.endsWith("}");
   if (isBlockBody) {
     // §18.5 — lift the block's tail expression (was silently dropped pre-fix).
@@ -2793,100 +2914,13 @@ export function emitMatchExpr(node: any, opts?: any): string {
   }
 
   const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
-  const body: any[] = node.body ?? [];
 
   const tmpVar = genVar("match");
 
-  const arms: MatchArm[] = [];
-  for (const child of body) {
-    if (!child) continue;
-    // Handle structured match-arm-block nodes (from AST builder block body parsing).
-    // These come from `. VariantName => { ... }` arms where the body was parsed as AST.
-    //
-    // Bug 1 fix (S88 dispatch — 14-mario): block-form payload-binding arms
-    // (`. Variant(n) => { ... }`) carry `payloadBindings: string[]` from
-    // ast-builder.js (Form 1b). Project them into MatchArm.binding so
-    // emitVariantBindingPrelude can produce the `const n = tmp.data.field;`
-    // statements before the arm body. Without this, references like `n` inside
-    // the body emit as unbound JS identifiers → ReferenceError at runtime.
-    // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
-    if (child.kind === "match-arm-block") {
-      const arm: MatchArm = {
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: child.variant ?? null,
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : null,
-      };
-      arms.push(arm);
-      continue;
-    }
-    // Handle structured match-arm-inline nodes (from AST builder inline arm parsing).
-    // These come from `. VariantName => result` arms where the result is a single expression.
-    // The structured node carries pre-parsed test/binding/result fields, so no regex needed.
-    if (child.kind === "match-arm-inline") {
-      const arm = matchArmInlineToMatchArm(child);
-      if (arm) arms.push(arm);
-      continue;
-    }
-    // Prefer string `expr`: match arm text (e.g. `.Variant :> result`) is inherently
-    // a multi-part pattern the expression parser can only partially represent.
-    // exprNode captures only the first parseable chunk, losing the arrow + result.
-    let armExpr: string = child.expr ?? child.header ?? "";
-    if (!armExpr && child.exprNode) {
-      try { armExpr = emitStringFromTree(child.exprNode); } catch { armExpr = ""; }
-    }
-    if (typeof armExpr !== "string") continue;
-    const trimmed = armExpr.trim();
-    if (!trimmed) continue;
-
-    // A single body child may contain all arms concatenated on one line.
-    // Split into individual arm strings before parsing (BUG-R13-001).
-    // C2 (R27): repair rejoin-spaced `- >` → `->` across the whole arm text
-    // BEFORE the splitter scans for arm-boundary arrows (the splitter's arrow
-    // lookahead matches a literal 2-char `->`; the spaced form would otherwise
-    // be invisible to it). `->` is never a value-expression operator in scrml,
-    // so a global collapse of `- >` is safe.
-    const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
-    for (const armStr of armStrings) {
-      const arm = parseMatchArm(armStr);
-      if (arm) arms.push(arm);
-    }
-  }
+  const arms = collectMatchArms(node.body ?? [], opts);
 
   if (arms.length === 0) {
-    // D (gate-emitted-js-parse-invariant-2026-05-29; ratified S141, A+D):
-    // codegen could not lower ANY arm of this match. Historically this site
-    // emitted `/* match expression could not be compiled */ <header>;` — a
-    // SILENT STUB that produced INVALID JS in expression position (e.g.
-    // `() => /* ... */ _scrml_reactive_get("phase"))` → "missing ) after
-    // argument list", the R27 C2 class). Instead, emit a HARD E-CG-003
-    // ("unsupported AST node kind in emission") naming the SOURCE construct so
-    // the compile FAILS with a source-anchored diagnostic, AND fall back to a
-    // SYNTACTICALLY-VALID placeholder so the never-meant-to-run emitted JS
-    // still parses (the A backstop must not double-report a known-unlowerable
-    // site as a generic invalid-JS defect). When no error channel is threaded
-    // (the emit-expr.ts expression-position bridge passes no `opts`), the hard
-    // error used to be dropped: the placeholder PARSES, so the A parse gate was
-    // never a backstop for it. With no channel the refusal goes to the run-wide
-    // refused-lowering sink (refused-lowering-errors.ts, drained by runCG) — s456.
-    const matchSrc = (node?.header ?? "").trim() || "<match>";
-    const errChannel: CGError[] | null | undefined = opts?.errors;
-    {
-      const refusal = new CGError(
-        "E-CG-003",
-        `E-CG-003: match expression \`match ${matchSrc} { ... }\` has no arm the ` +
-        `code generator can lower — every arm failed to parse (unsupported arm ` +
-        `shape). Rewrite the arms using a documented form (\`.Variant => result\`, ` +
-        `\`.Variant(binding) => result\`, \`"string" => result\`, \`else => result\`; ` +
-        `the \`->\` / \`:>\` separators are accepted aliases per SPEC §18.2).`,
-        (node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2],
-      );
-      if (errChannel) errChannel.push(refusal);
-      else recordRefusedLowering(refusal, node);
-    }
-    // Valid-JS placeholder (parses in statement AND expression position).
-    return `(undefined) /* E-CG-003: match expression had no lowerable arms */`;
+    return emitNoLowerableArms(node, opts);
   }
 
   // S22 §1a slice 2: decide whether this match needs the tagged-object normalization.
@@ -2927,6 +2961,21 @@ export function emitMatchExpr(node: any, opts?: any): string {
     const bindingPrelude = arm.kind === "variant"
       ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch)
       : "";
+
+    // A LEAVING arm in this value IIFE (S462). An exit here leaves only the arm's
+    // function, never the enclosing one or its loop. It is correct only when the
+    // match's value is itself what the enclosing function returns (`return
+    // match …`, a `fn` tail — `opts.matchValueIsReturned`) and the exit is a
+    // `return` / `fail` / `?`: then the arm's returned value IS the function's.
+    // Anywhere else the exit would be swallowed — the arm's `return x` would
+    // become the match's VALUE (g-stmt-match-block-return-falls-through, value
+    // position) — so it is refused loudly rather than miscompiled.
+    {
+      const leaves = armLeaves(arm);
+      if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+        refuseLeavingValueArm(node, leaves, opts);
+      }
+    }
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
     // This path is taken for match-arm-block nodes parsed by the AST builder.
@@ -3032,9 +3081,21 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // envelope as its value; since `fail` is valid only inside a `!` function
     // (NS-1) and the canonical adopter shape is `const v = match …; return v`,
     // the enclosing function returns the error envelope — the §19.5.2 semantics.
-    const failArmEmit = arm.failExpr
+    let failArmEmit = arm.failExpr
       ? `{ ${bindingPrelude}${emitLogicNode(arm.failExpr, _matchMode === "server" ? { boundary: "server" } : { boundary: "client" })} }`
       : null;
+    // §19.5 — a propagation `expr?` arm body (dpa-068 D4). In this IIFE an early
+    // `return` leaves only the arm, so the error can propagate only when the
+    // match's VALUE is itself what the function returns (`return match …`, a
+    // `fn` tail — `opts.matchValueIsReturned`): there, returning the call's
+    // result — success value or error — from the IIFE is exactly §19.5.2. In any
+    // other value position (an argument, an operand, an interpolation) the error
+    // would silently become the match's value, so the arm is refused loudly.
+    if (!failArmEmit && arm.propagateOperand) {
+      const p = emitPropagateArm(arm.propagateOperand, opts ?? (_matchMode === "server" ? { boundary: "server" } : {}));
+      // (Outside a returned position the arm was refused above.)
+      failArmEmit = `{ ${bindingPrelude}${p.lines[0]} return ${p.value}; }`;
+    }
     const emitResult = failArmEmit
       ? failArmEmit
       : isBlockBody
@@ -3108,6 +3169,472 @@ export function emitMatchExpr(node: any, opts?: any): string {
     : `(function() {`;
   if (_handlesSql) exitSqlErrorSchema();
   return iifeLines.join("\n");
+}
+
+/**
+ * Emit a STATEMENT-position `match` (its value, if any, is discarded) INLINE —
+ * as the arm dispatch itself (`const tmp = subject; if (…) { … } else if …`),
+ * with no function boundary around the arms.
+ *
+ * Why not the IIFE `emitMatchExpr` uses: an arm body is a block of statements
+ * that run in the ENCLOSING function, so a `return` / `fail` in an arm leaves
+ * that function and a `break` / `continue` targets the enclosing loop.
+ * §19.3.3: "`fail` SHALL be valid inside any control flow construct (if/else,
+ * for, match) within a `!` function body. The `fail` returns from the function,
+ * not from the control flow construct." §19.4.3 counts an arm that ends in
+ * `return` / `fail` (or a `break` / `continue` to an enclosing loop) as LEAVING.
+ * Inside an IIFE those exits left only the arm: a `{ return }` arm let the
+ * statements after the `match` run, a `{ fail … }` arm's error was dropped,
+ * and a `{ continue }` arm was a JS syntax error
+ * (g-stmt-match-block-return-falls-through, dpa-068 D2/D3).
+ *
+ * The VALUE-position lowerings are unchanged: `emitMatchExpr` (an argument, a
+ * `return match`, a `fn` tail, an interpolation) and `emitMatchExprDecl`
+ * (`let v = match …`, already inline). Arm dispatch — conditions, tag
+ * normalization, payload preludes, the §19.8.3 `?{}` fail-closed tail — is the
+ * same code `emitMatchExpr` uses; only the arm BODY differs (a statement list,
+ * not a `return <value>`).
+ */
+export function emitMatchStmt(node: any, opts?: any): string {
+  return emitMatchInline(node, opts);
+}
+
+/**
+ * §18.19 — a DECL-position multi-scrutinee match (`let v = match (a, b) { … }`),
+ * inline like its single-scrutinee sibling `emitMatchExprDecl`: each arm assigns
+ * the result var given by `armBody`, and a `return` / `fail` / `break` /
+ * `continue` in an arm leaves the enclosing function or loop. It went through
+ * the value IIFE, where `(.A, .A) :> { return 1 }` returned 1 AS THE VALUE and
+ * the function kept going (the decl-position sibling of
+ * g-stmt-match-block-return-falls-through, measured S462 against bun:sqlite).
+ */
+export function emitMultiScrutineeMatchInline(node: any, opts: any, armBody: (resultStr: string) => string[]): string {
+  return emitMatchInline(node, opts, armBody);
+}
+
+function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: string) => string[]): string {
+  const engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null =
+    opts?.engineBindings ?? null;
+  const engineCtx: EngineRewriteCtx | null = (engineBindings || opts?.engineVarNames) ? {
+    engineBindings,
+    exprCtxExtras: {
+      engineVarNames: opts?.engineVarNames ?? null,
+      enginesWithHooks: opts?.enginesWithHooks ?? null,
+      enginesWithOnTimeout: opts?.enginesWithOnTimeout ?? null,
+      enginesWithIdleWatchdog: opts?.enginesWithIdleWatchdog ?? null,
+      enginesWithInternalRules: opts?.enginesWithInternalRules ?? null,
+      enginesWithHistory: opts?.enginesWithHistory ?? null,
+      enginesWithMessageArms: opts?.enginesWithMessageArms ?? null,
+      engineMessageVariants: opts?.engineMessageVariants ?? null,
+      engineBindings,
+    },
+  } : null;
+  const _matchMode: "client" | "server" = opts?.boundary === "server" ? "server" : "client";
+  const _matchCtx: EmitExprContext = {
+    mode: _matchMode,
+    ...(engineCtx?.exprCtxExtras ?? {}),
+    ...(opts ? { logicOpts: opts } : {}),
+  };
+
+  const _scrutineeExprs: any[] | null =
+    Array.isArray(node.scrutineeExprs) && node.scrutineeExprs.length >= 2 ? node.scrutineeExprs
+    : (Array.isArray(node.subjects) && node.subjects.length >= 2 ? node.subjects : null);
+  if (_scrutineeExprs) {
+    return emitMultiScrutineeMatchStmt(node, _scrutineeExprs, _matchCtx, engineCtx, _matchMode, opts, multiArmBody);
+  }
+
+  const headerRaw = emitExprField(node.headerExpr, (node.header ?? "").trim(), _matchCtx);
+  const tmpVar = genVar("match");
+  const arms = collectMatchArms(node.body ?? [], opts);
+  if (arms.length === 0) {
+    return `${emitNoLowerableArms(node, opts)};`;
+  }
+
+  const subjectVariants = getMatchSubjectVariantFields(node);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node))
+    || isSqlFailableMatch(node.headerExpr, arms);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
+  const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
+  const _handlesSql = matchScrutineeHandlesSql(node.headerExpr, failableMatch, _matchMode);
+  const header = _handlesSql ? emitSqlQueryShape(sqlQueryExprShape(node.headerExpr)!, _matchCtx, true) : headerRaw;
+  if (_handlesSql) enterSqlErrorSchema();
+
+  const lines: string[] = [];
+  lines.push(`const ${tmpVar} = ${header};`);
+  if (needsTagNormalization) lines.push(emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch));
+
+  let conditionIndex = 0;
+  for (const arm of arms) {
+    const bindingPrelude = arm.kind === "variant"
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch)
+      : "";
+    const bodyLines: string[] = [];
+    if (bindingPrelude) bodyLines.push(bindingPrelude.trim());
+    if (arm.kind === "wildcard" && arm.binding) bodyLines.push(`const ${arm.binding} = ${tmpVar};`);
+    bodyLines.push(...stmtArmBodyLines(arm, node, engineCtx, engineBindings, _matchMode, _matchCtx, opts));
+    let head: string;
+    if (arm.kind === "wildcard") {
+      head = conditionIndex === 0 ? "{" : "else {";
+    } else {
+      head = `${conditionIndex === 0 ? "if" : "else if"} (${armCondition(arm, tmpVar, tagVar)}) {`;
+      conditionIndex++;
+    }
+    lines.push(head);
+    for (const l of bodyLines) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+    lines.push(`}`);
+  }
+  // S454 fix round (F1) — FAIL CLOSED: a match on a `?{}` with no catch-all re-raises
+  // a failure none of its arms names.
+  if (_handlesSql && conditionIndex > 0 && !arms.some((a) => a.kind === "wildcard")) {
+    lines.push(`else if (${tagVar} !== "Ok") { ${unhandledFailureThrow(tmpVar)} }`);
+  }
+  if (_handlesSql) exitSqlErrorSchema();
+  return lines.join("\n");
+}
+
+/**
+ * A leave keyword heading a single-expression arm body (`.A :> return`,
+ * `.A :> fail .E(…)`, `.A :> break`). Held, see `stmtArmBodyLines`.
+ */
+const _LEAVE_HEAD_RE = /^(?:return|fail|break|continue)(?![A-Za-z0-9_$])/;
+
+/** An expression in statement position: parenthesize the heads JS would read as a statement. */
+function asExpressionStatement(expr: string): string {
+  const t = expr.trim().replace(/;+\s*$/, "");
+  if (!t) return "";
+  if (/^(?:\{|function\b|class\b|let\s*\[|async\s+function\b)/.test(t)) return `(${t});`;
+  return `${t};`;
+}
+
+/**
+ * The statements of ONE arm of a statement-position `match` (no prelude, no
+ * braces). The arm's value — if it has one — is evaluated for its effects and
+ * discarded, exactly as the IIFE's `return <value>` was discarded by the
+ * statement around it.
+ */
+function stmtArmBodyLines(
+  arm: MatchArm,
+  matchNode: any,
+  engineCtx: EngineRewriteCtx | null,
+  engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null,
+  matchMode: "client" | "server",
+  matchCtx: EmitExprContext,
+  opts: any,
+): string[] {
+  if (arm.structuredBody) {
+    // An object-literal block-form arm (`else :> { x: 0 }`) is a VALUE: evaluate it.
+    const objArm = _objectLiteralArmFromStructuredBody(arm.structuredBody);
+    if (objArm !== null) {
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitExprField(null, objArm, matchCtx), opts ?? {}));
+      return s ? [s] : [];
+    }
+    // The arm is a JS block: a name it declares is scoped to it, so it gets its own
+    // declared-name set, seeded from the enclosing scope (an outer `let n` stays
+    // visible, so `n = n + 1` assigns it) — the same per-arm scoping
+    // emitMatchExprDecl uses.
+    const armOpts = { ...(opts ?? {}), declaredNames: new Set<string>(opts?.declaredNames ?? []) };
+    return emitLogicBody(arm.structuredBody, armOpts).filter((s: string) => s.trim() !== "");
+  }
+  if (arm.failExpr) {
+    return [emitLogicNode(arm.failExpr, opts ?? (matchMode === "server" ? { boundary: "server" } : { boundary: "client" }))];
+  }
+  if (arm.propagateOperand) {
+    // §19.5 `.A :> risky(n)?` — an error returns from the enclosing `!` function.
+    return emitPropagateArm(arm.propagateOperand, opts ?? {}).lines;
+  }
+  const result = arm.result ?? "";
+  const trimmed = result.trim();
+  if (!trimmed) return [];
+  const isBlockBody = trimmed.startsWith("{") && trimmed.endsWith("}");
+  if (isBlockBody) {
+    if (!_matchArmResultIsBlockBody(result)) {
+      // `1 :> { x: 1 }` — an object literal, a value.
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitExprField(null, result, matchCtx), opts ?? {}));
+      return s ? [s] : [];
+    }
+    const inner = trimmed.slice(1, -1).trim();
+    if (!inner) return [];
+    const code = rewriteBlockBody(inner, null, engineCtx, matchMode).trim().replace(/;+\s*$/, "");
+    return code ? [`${code};`] : [];
+  }
+  // §19.5 — a raw propagation arm (`(.A, .B) :> risky(n)?`, S462 review F7).
+  const operand = propagateOperandOfArmText(trimmed);
+  if (operand !== null) return emitPropagateArm(operand, opts ?? {}).lines;
+  // A nested `match` as the arm's (discarded) value is itself a statement here.
+  const nested = nestedMatchFromArmText(trimmed);
+  if (nested) return [emitMatchStmt(nested, opts)];
+  // §18.2 `leave-stmt` (S462 W1) in a raw-text arm (a §18.19 product arm, a
+  // literal arm): the arm's one statement, lowered from its node.
+  const leave = leaveStmtFromArmText(trimmed);
+  if (leave) return [emitLogicNode(leave, opts ?? (matchMode === "server" ? { boundary: "server" } : { boundary: "client" }))];
+  const inlineEngineWrite = engineBindings ? detectInlineEngineWrite(result, engineBindings) : null;
+  if (inlineEngineWrite) return inlineEngineWrite.guardLines;
+  const valueExpr = emitTypedArmResultCtor(result, matchNode, matchCtx) ?? emitExprField(null, result, matchCtx);
+  const s = asExpressionStatement(valueExpr);
+  return s ? [s] : [];
+}
+
+/**
+ * §18.19 — the statement-position multi-scrutinee match, inline (see
+ * `emitMatchStmt`). Same dispatch as `emitMultiScrutineeMatch`; each arm body is
+ * a statement list rather than a `return <value>`.
+ */
+function emitMultiScrutineeMatchStmt(
+  node: any,
+  scrutineeExprs: any[],
+  matchCtx: EmitExprContext,
+  engineCtx: EngineRewriteCtx | null,
+  matchMode: "client" | "server",
+  opts?: any,
+  armBodyOverride?: (resultStr: string) => string[],
+): string {
+  const N = scrutineeExprs.length;
+  const rawScrutinees: string[] = Array.isArray(node.scrutinees) ? node.scrutinees : [];
+  const valVars: string[] = [];
+  const tagVars: string[] = [];
+  const lines: string[] = [];
+  for (let i = 0; i < N; i++) {
+    const valVar = genVar("scrut");
+    const tagVar = genVar("tag");
+    const exprText = emitExprField(scrutineeExprs[i], rawScrutinees[i] ?? "", matchCtx);
+    lines.push(`const ${valVar} = ${exprText};`);
+    lines.push(`const ${tagVar} = (${valVar} != null && typeof ${valVar} === "object") ? ${valVar}.variant : ${valVar};`);
+    valVars.push(valVar);
+    tagVars.push(tagVar);
+  }
+  const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
+    ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
+    : [];
+  const armBody = armBodyOverride ?? ((resultStr: string): string[] =>
+    stmtArmBodyLines({ kind: "wildcard", test: null, binding: null, result: resultStr }, node, engineCtx, null, matchMode, matchCtx, opts));
+
+  let conditionIndex = 0;
+  for (const child of (node.body ?? []) as any[]) {
+    if (!child || typeof child !== "object") continue;
+    const productPatterns: string[] | null = Array.isArray(child.productPatterns) ? child.productPatterns : null;
+    const test: string = child.test ?? "";
+    const isWholeWildcard = !productPatterns &&
+      (test === "else" || child.isWildcard === true || test === "_");
+    const resultStr: string = typeof child.result === "string" ? child.result : "";
+    if (productPatterns) {
+      if (productPatterns.length !== N) continue;
+      const conds: string[] = [];
+      const preludes: string[] = [];
+      for (let i = 0; i < N; i++) {
+        const posArm = parseMatchArm(`${productPatterns[i]} :> 0`);
+        if (!posArm || posArm.kind === "wildcard") continue;
+        conds.push(armCondition(posArm, valVars[i], tagVars[i]));
+        if (posArm.kind === "variant") {
+          const prelude = emitVariantBindingPrelude(posArm, valVars[i], false, perPositionSubject[i] ?? null);
+          if (prelude) preludes.push(prelude.trim());
+        }
+      }
+      const condition = conds.length > 0 ? conds.join(" && ") : "true";
+      lines.push(`${conditionIndex === 0 ? "if" : "else if"} (${condition}) {`);
+      for (const l of [...preludes, ...armBody(resultStr)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      lines.push(`}`);
+      conditionIndex++;
+    } else if (isWholeWildcard) {
+      lines.push(conditionIndex === 0 ? `{` : `else {`);
+      for (const l of armBody(resultStr)) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      lines.push(`}`);
+    } else {
+      // Fail closed exactly as emitMultiScrutineeMatch does (g-match-lowering-arm-drop F3).
+      const rawArm: string = typeof child.expr === "string" ? child.expr
+        : typeof child.result === "string" ? child.result : "";
+      if (rawArm.trim().length > 0 && opts?.errors) {
+        opts.errors.push(new CGError(
+          "E-CG-003",
+          `E-CG-003: multi-scrutinee match arm \`${rawArm.trim().slice(0, 80)}\` could not ` +
+          `be lowered — the code generator does not recognize this product-pattern arm ` +
+          `shape. Each arm MUST be a parenthesized product pattern (\`(p1, …, pN) :> body\`) ` +
+          `or a whole-product wildcard (\`_\` / \`else\`).`,
+          (child.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2],
+        ));
+      }
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * §19.5 — a raw-text arm (one the AST builder kept as text — a number- or
+ * boolean-literal arm, a `|` alternation) whose single-expression body is a
+ * propagation `expr?`. The parser stamps `propagateOperand` on the structured
+ * `match-arm-inline` nodes (ast-builder.js `markPropagateArms`); a text arm has
+ * no node to stamp, so its parsed `result` is read here, by the same rule: a
+ * body whose last character is a lone `?` (a conditional `?` is never the last
+ * token of a complete arm body). Without this the `?` was dropped in server
+ * mode (`check(n + 1);` — the error was discarded) and emitted literally in
+ * client mode (E-CODEGEN-INVALID-LOGIC).
+ */
+export function stampPropagateOperand(arm: MatchArm): MatchArm {
+  if (arm.propagateOperand || arm.failExpr) return arm;
+  const r = (arm.result ?? "").trim();
+  if (!r.endsWith("?") || r.endsWith("??") || r.startsWith("{")) return arm;
+  const operand = r.slice(0, -1).trim();
+  if (operand) arm.propagateOperand = operand;
+  return arm;
+}
+
+/**
+ * §42.2.3 "In match arms" — a `given x :> body` child of a `match` body is an
+ * arm whose condition is the presence of `x` (it narrows in place; nothing is
+ * bound). Its body is the braced block, or — for `given x :> expr` — the one
+ * `bare-expr` statement the parser made of the expression (`armExprBody`), whose
+ * value is the arm's value (§18.5's tail rule). Returns null for any other
+ * child. Before this, every match lowering skipped the node, so the arm never
+ * fired (g-impl1-given-match-arm-body-dropped-s462).
+ */
+export function givenGuardToMatchArm(child: any, opts?: any): MatchArm | null {
+  if (!child || child.kind !== "given-guard") return null;
+  if (!Array.isArray(child.variables) || child.variables.length === 0) return null;
+  return {
+    kind: "given",
+    test: null,
+    binding: null,
+    result: "",
+    structuredBody: Array.isArray(child.body) ? child.body : [],
+    givenCondition: givenGuardCondition(child, opts ?? {}),
+  };
+}
+
+/**
+ * S462 — refuse a leaving arm in a value-position `match` that lowers to the value
+ * IIFE (see the call site in `emitMatchExpr`). E-CG-003 names the fix.
+ */
+function refuseLeavingValueArm(node: any, leaves: string, opts: any): void {
+  const how = leaves === "break" || leaves === "continue"
+    ? `a \`${leaves}\` cannot reach a loop from inside an expression`
+    : `the \`${leaves}\` would leave only the arm, so its value would silently become the match's value`;
+  const refusal = new CGError(
+    "E-CG-003",
+    `E-CG-003: an arm of this \`match\` leaves with \`${leaves}\`, but the match is used as a value ` +
+    `inside an expression, where ${how}. Bind the match first (\`const v = match … { … }\`), write it ` +
+    `as a statement, or \`return match …\` (a \`return\` / \`fail\` / \`?\` arm is supported there).`,
+    (node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2],
+  );
+  if (opts?.errors) opts.errors.push(refusal); else recordRefusedLowering(refusal, node);
+}
+
+/**
+ * Collect the arms of a single-scrutinee `match` body into `MatchArm`s — the
+ * structured `match-arm-block` / `match-arm-inline` nodes the AST builder
+ * produced, plus any arm carried as raw text (split + parsed). Shared by the
+ * value-position IIFE lowering (`emitMatchExpr`) and the statement-position
+ * inline lowering (`emitMatchStmt`) so the two read the same arm set.
+ */
+function collectMatchArms(body: any[], opts?: any): MatchArm[] {
+  const arms: MatchArm[] = [];
+  for (const child of body) {
+    if (!child) continue;
+    const givenArm = givenGuardToMatchArm(child, opts);
+    if (givenArm) { arms.push(givenArm); continue; }
+    // Handle structured match-arm-block nodes (from AST builder block body parsing).
+    // These come from `. VariantName => { ... }` arms where the body was parsed as AST.
+    //
+    // Bug 1 fix (S88 dispatch — 14-mario): block-form payload-binding arms
+    // (`. Variant(n) => { ... }`) carry `payloadBindings: string[]` from
+    // ast-builder.js (Form 1b). Project them into MatchArm.binding so
+    // emitVariantBindingPrelude can produce the `const n = tmp.data.field;`
+    // statements before the arm body. Without this, references like `n` inside
+    // the body emit as unbound JS identifiers → ReferenceError at runtime.
+    // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
+    if (child.kind === "match-arm-block") {
+      const arm: MatchArm = {
+        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
+        test: child.variant ?? null,
+        binding: matchArmBlockBinding(child),
+        result: "",
+        structuredBody: Array.isArray(child.body) ? child.body : null,
+      };
+      arms.push(arm);
+      continue;
+    }
+    // Handle structured match-arm-inline nodes (from AST builder inline arm parsing).
+    // These come from `. VariantName => result` arms where the result is a single expression.
+    // The structured node carries pre-parsed test/binding/result fields, so no regex needed.
+    if (child.kind === "match-arm-inline") {
+      const arm = matchArmInlineToMatchArm(child);
+      if (arm) arms.push(arm);
+      continue;
+    }
+    // Prefer string `expr`: match arm text (e.g. `.Variant :> result`) is inherently
+    // a multi-part pattern the expression parser can only partially represent.
+    // exprNode captures only the first parseable chunk, losing the arrow + result.
+    let armExpr: string = child.expr ?? child.header ?? "";
+    if (!armExpr && child.exprNode) {
+      try { armExpr = emitStringFromTree(child.exprNode); } catch { armExpr = ""; }
+    }
+    if (typeof armExpr !== "string") continue;
+    const trimmed = armExpr.trim();
+    if (!trimmed) continue;
+
+    // A single body child may contain all arms concatenated on one line.
+    // Split into individual arm strings before parsing (BUG-R13-001).
+    // C2 (R27): repair rejoin-spaced `- >` → `->` across the whole arm text
+    // BEFORE the splitter scans for arm-boundary arrows (the splitter's arrow
+    // lookahead matches a literal 2-char `->`; the spaced form would otherwise
+    // be invisible to it). `->` is never a value-expression operator in scrml,
+    // so a global collapse of `- >` is safe.
+    const _armsBefore = arms.length;
+    const armStrings = splitMultiArmString(trimmed.replace(/-\s*>/g, "->"));
+    for (const armStr of armStrings) {
+      const arm = parseMatchArm(armStr);
+      if (arm) arms.push(stampLeave(stampPropagateOperand(arm)));
+    }
+    // A raw arm whose line ends in `?` (`1 :> check(n + 1)?`) reaches here as a
+    // statement-level `propagate-expr` node: the statement parser took the `?`
+    // as the statement's propagation and left the arm text WITHOUT it. The `?`
+    // belongs to the LAST arm on the line — restore it there (dpa-068 D4).
+    if (child.kind === "propagate-expr" && arms.length > _armsBefore) {
+      const last = arms[arms.length - 1];
+      if (!last.failExpr && !last.propagateOperand && (last.result ?? "").trim() && !(last.result ?? "").trim().startsWith("{")) {
+        last.propagateOperand = last.result.trim();
+      }
+    }
+  }
+  return arms;
+}
+
+/**
+ * D (gate-emitted-js-parse-invariant-2026-05-29; ratified S141, A+D): no arm of
+ * this match could be lowered. Reports E-CG-003 and returns a placeholder that
+ * parses in statement AND expression position.
+ */
+function emitNoLowerableArms(node: any, opts: any): string {
+  // D (gate-emitted-js-parse-invariant-2026-05-29; ratified S141, A+D):
+  // codegen could not lower ANY arm of this match. Historically this site
+  // emitted `/* match expression could not be compiled */ <header>;` — a
+  // SILENT STUB that produced INVALID JS in expression position (e.g.
+  // `() => /* ... */ _scrml_reactive_get("phase"))` → "missing ) after
+  // argument list", the R27 C2 class). Instead, emit a HARD E-CG-003
+  // ("unsupported AST node kind in emission") naming the SOURCE construct so
+  // the compile FAILS with a source-anchored diagnostic, AND fall back to a
+  // SYNTACTICALLY-VALID placeholder so the never-meant-to-run emitted JS
+  // still parses (the A backstop must not double-report a known-unlowerable
+  // site as a generic invalid-JS defect). When no error channel is threaded
+  // (the emit-expr.ts expression-position bridge passes no `opts`), the hard
+  // error used to be dropped: the placeholder PARSES, so the A parse gate was
+  // never a backstop for it. With no channel the refusal goes to the run-wide
+  // refused-lowering sink (refused-lowering-errors.ts, drained by runCG) — s456.
+  const matchSrc = (node?.header ?? "").trim() || "<match>";
+  const errChannel: CGError[] | null | undefined = opts?.errors;
+  {
+    const refusal = new CGError(
+      "E-CG-003",
+      `E-CG-003: match expression \`match ${matchSrc} { ... }\` has no arm the ` +
+      `code generator can lower — every arm failed to parse (unsupported arm ` +
+      `shape). Rewrite the arms using a documented form (\`.Variant => result\`, ` +
+      `\`.Variant(binding) => result\`, \`"string" => result\`, \`else => result\`; ` +
+      `the \`->\` / \`:>\` separators are accepted aliases per SPEC §18.2).`,
+      (node?.span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as Parameters<typeof CGError>[2],
+    );
+    if (errChannel) errChannel.push(refusal);
+    else recordRefusedLowering(refusal, node);
+  }
+  // Valid-JS placeholder (parses in statement AND expression position).
+  return `(undefined) /* E-CG-003: match expression had no lowerable arms */`;
 }
 
 /**
@@ -3235,6 +3762,7 @@ function _soleBareExprValue(stmts: any[] | null, ctx: EmitExprContext): string |
  * is still comparing the raw subject (tmpVar).
  */
 export function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): string {
+  if (arm.kind === "given") return arm.givenCondition ?? "false";
   if (arm.kind === "not") {
     return `${tmpVar} === null || ${tmpVar} === undefined`;
   }

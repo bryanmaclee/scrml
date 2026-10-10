@@ -1,0 +1,20 @@
+${
+    type K:enum = { A, B }
+    <out> : string = "none"
+    <after> : string = "not-run"
+    function pick(a: K, b: K) -> number {
+        const v = match (a, b) {
+            (.A, .A) :> { return 1 }
+            (.A, .B) :> 2
+            (.B, .A) :> 3
+            (.B, .B) :> 4
+        }
+        @after = "ran"
+        return v * 10
+    }
+    function go() {
+        @out = "" + pick(K.A, K.A) + "," + pick(K.B, K.A)
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@out}</>

@@ -1,0 +1,18 @@
+${
+    type K:enum = { A, B }
+    <out> : string = "none"
+    function show(n: number) -> string { return "n=" + n }
+    function scan(k: K) -> string {
+        let s = ""
+        outer: for (const i of [1, 2]) {
+            s = show(match k {
+                .A :> { for (const j of [1, 2]) { if (j == 2) { break outer } } 1 }
+                .B :> 2
+            })
+        }
+        return s
+    }
+    function go() { @out = scan(K.A) }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@out}</p>
