@@ -1,0 +1,30 @@
+${
+    type E:enum = { Boom(msg: string), Other }
+    type K:enum = { A, B }
+    <seen> : string = "none"
+    <out> : string = "none"
+    function risky(n: number)! E {
+        if (n < 0) { fail E.Boom("neg") }
+        return n
+    }
+    function viaReturn(k: K, n: number)! E {
+        return match k {
+            .A :> risky(n)?
+            .B :> 0
+        }
+    }
+    function go() {
+        viaReturn(K.A, -1) !{
+            .Boom(m) :> @seen = "boom:" + m
+            .Other :> @seen = "other"
+        }
+        const ok = viaReturn(K.A, 4) !{
+            .Boom(m) :> 0
+            .Other :> 0
+        }
+        @out = "ok=" + ok
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="seen">${@seen}</>
+<p id="out">${@out}</>

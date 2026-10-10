@@ -1,0 +1,23 @@
+{
+  "id": "match-leave-return-match-arm-propagate",
+  "description": "A `risky(n)?` arm of a `return match …` propagates: the error reaches the caller's `!{}` (`boom:neg`), and the success value is the return value (`ok=4`).",
+  "language-version": "1.0",
+  "spec": "§19.5",
+  "rationale": "§19.5.1 makes `expr?` an expression and so an `arm-body` (§18.2); §19.5.2: on an error \"`?` causes the enclosing function to return that error variant immediately\", on success it \"unwraps it and produces the success value\". In `return match …` the match's value IS the function's return, so both halves hold. impl#1 emitted the `?` literally (E-CODEGEN-INVALID-LOGIC — dpa-068 D4).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-CG-003"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "seen": "boom:neg",
+      "out": "ok=4"
+    }
+  }
+}

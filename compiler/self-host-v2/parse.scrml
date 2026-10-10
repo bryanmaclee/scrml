@@ -685,9 +685,11 @@ ${
     }
 
     // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
-    // a `|` (the next arm), the first token on a later line, or the start of
-    // the next arm on the same line (`.A :> 1  .B :> 2` — a pattern followed
-    // by its separator, which no expression contains).
+    // a `|` (the next arm), the first token on a later line unless the line
+    // above ends in a §7.2.2 rule-2 continuation token (`.Boom(m) :> "a:" +⏎ m`
+    // is one arm — dpa-068 D12), or the start of the next arm on the same line
+    // (`.A :> 1  .B :> 2` — a pattern followed by its separator, which no
+    // expression contains).
     fn armEnd(tp: TP) -> int {
         let i: int = tp.i
         let depth: int = 0
@@ -695,7 +697,7 @@ ${
             const x: PTok = tp.toks[i]
             if (x.cls == TC.End) return i
             if (depth == 0 && i > tp.i) {
-                if (x.line != tp.toks[i - 1].line) return i
+                if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
                 if (x.cls == TC.Punct && x.text == "|") return i
                 if (armStartsAt(tp.toks, i)) return i
             }
@@ -707,6 +709,24 @@ ${
             i = i + 1
         }
         return tp.toks.length - 1
+    }
+
+    // §7.2.2 rule 2 — does token `k`, the last of its line, continue the
+    // expression onto the next line? The closed list: a binary operator, `=` and
+    // the compound assignments, `.` / `?.`, a conditional `?` / `:`, `,`, `=>`,
+    // `:>`, and a prefix `!` / `typeof` / `new`. A `?` written against its
+    // operand (`load(id)?`) is §19.5 propagation and ends the expression.
+    fn continuesLine(ts: PTok[], k: int) -> boolean {
+        const t: PTok = ts[k]
+        if (t.cls == TC.Keyword || t.cls == TC.Ident) {
+            return ["in", "instanceof", "is", "typeof", "new", "and", "or"].indexOf(t.text) >= 0
+        }
+        if (t.cls != TC.Punct) return false
+        if (t.text == "?") return !(k > 0 && touching(ts[k - 1], t))
+        return ["+", "-", "*", "/", "%", "**", "==", "!=", "===", "!==", "<", ">", "<=", ">=",
+                "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>",
+                "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
+                ".", "?.", ":", ",", "=>", ":>", "!"].indexOf(t.text) >= 0
     }
 
     // Does an arm's pattern start at token `i` — `.V`, `::V`, `_`, `else`,

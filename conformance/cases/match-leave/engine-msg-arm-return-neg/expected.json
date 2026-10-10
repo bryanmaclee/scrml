@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-engine-msg-arm-return-neg",
+  "description": "A `return` in an engine message arm (here `{ return }`) has no enclosing function: E-STMT-RETURN-OUTSIDE-FUNCTION, not a codegen crash.",
+  "language-version": "1.0",
+  "spec": "§51.0.S.2.3",
+  "rationale": "§51.0.S.2.3: a message arm's value is the target state — a message arm is not a function body. §34: E-STMT-RETURN-OUTSIDE-FUNCTION, \"`return` outside of a function\". impl#1 emitted `return return;` and failed as E-CODEGEN-INVALID-LOGIC, a compiler-defect code that names nothing the author wrote (dpa-068 D10).",
+  "expect": {
+    "codes": [
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

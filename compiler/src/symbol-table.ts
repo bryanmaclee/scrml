@@ -197,6 +197,44 @@ import {
   isWatchesChannel,
   ROWCHANGE_VARIANT_NAMES,
 } from "./channel-watches.ts";
+import { tokenizeLogic } from "./tokenizer.ts";
+
+/**
+ * dpa-068 D10 — does a §51.0.S.2.3 message-arm body hold a `return` of its OWN
+ * (a bare `return` body, or a `return` statement at the block's own level)?
+ * Tokenized, so a `return` inside a string, a comment, a nested `function`
+ * body or an arrow body (`=> { … }`) does not count.
+ */
+export function messageArmBodyHasOwnReturn(bodyRaw: string, isBlockBody: boolean): boolean {
+  if (typeof bodyRaw !== "string" || !/\breturn\b/.test(bodyRaw)) return false;
+  let toks: Array<{ kind: string; text: string }>;
+  try { toks = tokenizeLogic(bodyRaw, 0, 1, 1, []) as Array<{ kind: string; text: string }>; } catch { return false; }
+  const ownDepth = isBlockBody ? 1 : 0;
+  // Brace depth, plus a stack of depths at which a nested function body opened.
+  let depth = 0;
+  const fnBodyDepths: number[] = [];
+  let pendingFnBody = false;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.kind === "COMMENT") continue;
+    if (t.kind === "KEYWORD" && (t.text === "function" || t.text === "fn")) pendingFnBody = true;
+    if ((t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text === "=>" && toks[i + 1]?.text === "{") pendingFnBody = true;
+    if (t.kind === "PUNCT" && t.text === "{") {
+      depth++;
+      if (pendingFnBody) { fnBodyDepths.push(depth); pendingFnBody = false; }
+      continue;
+    }
+    if (t.kind === "PUNCT" && t.text === "}") {
+      if (fnBodyDepths.length && fnBodyDepths[fnBodyDepths.length - 1] === depth) fnBodyDepths.pop();
+      depth--;
+      continue;
+    }
+    if (t.kind === "KEYWORD" && t.text === "return" && fnBodyDepths.length === 0 && depth >= ownDepth) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ⛑ S441 — E-WRITE-NOT-IN-LOGIC-CONTEXT (S123 "Unit CC") is RETIRED: a
 // `<program>` / `<page>` / `<channel>` body is code (SPEC §40.8 S441 bullet), so
@@ -7641,11 +7679,10 @@ export function validateEngineStateChildrenAndRules(
     // arm led by `|` is soft-deprecated; it parses to the same entry as the
     // pipe-less §18.2 arm. One per `|`-led arm. `legacyPipe` is set only by
     // parseMessageArms' `|` path (engine-statechild-parser.ts).
-    for (const arm of arms) {
-      if (!arm.legacyPipe) continue;
-      // The arm's own span (S452 review r1): `rulesRawPos` (ast-builder.js)
-      // places `rulesRaw` in the file; the arm sits `bodyRawOffset +
-      // spanStart` into it. Falls back to the engine's span when unplaced.
+    // The arm's own span (S452 review r1): `rulesRawPos` (ast-builder.js)
+    // places `rulesRaw` in the file; the arm sits `bodyRawOffset +
+    // spanStart` into it. Falls back to the engine's span when unplaced.
+    const messageArmSpan = (arm: MessageArmEntry): SYMDiagnostic["span"] => {
       const rp = (engineDecl as { rulesRawPos?: { start: number; line: number; col: number } } | undefined)?.rulesRawPos;
       const rulesRawText = typeof (engineDecl as { rulesRaw?: unknown } | undefined)?.rulesRaw === "string"
         ? (engineDecl as { rulesRaw: string }).rulesRaw : null;
@@ -7664,6 +7701,11 @@ export function validateEngineStateChildrenAndRules(
           col: nl < 0 ? rp.col + before.length : before.length - nl,
         };
       }
+      return span;
+    };
+    for (const arm of arms) {
+      if (!arm.legacyPipe) continue;
+      const span = messageArmSpan(arm);
       errors.push({
         code: "W-ARM-PIPE-LEGACY",
         message: armPipeLegacyMessage(
@@ -7672,6 +7714,32 @@ export function validateEngineStateChildrenAndRules(
         ),
         span,
         severity: "info",
+      });
+    }
+
+    // -- E-STMT-RETURN-OUTSIDE-FUNCTION -- §51.0.S.2.3: a message arm is not a
+    // function body (its value is the target state), so a `return` in it —
+    // bare (`.Go :> return`) or as a statement of its `{ … }` block — has no
+    // function to leave (§34 "`return` outside of a function"). Before this it
+    // reached codegen and failed there as E-CODEGEN-INVALID-LOGIC
+    // (`return return;`), a compiler-defect code naming nothing the author
+    // wrote (dpa-068 D10). The arm body is carried only as raw text here (no
+    // tree exists for it at this stage), so it is TOKENIZED — not regexed — and
+    // only a `return` at the arm's own statement level counts; one inside a
+    // nested function or arrow body is that function's.
+    for (const arm of arms) {
+      if (!messageArmBodyHasOwnReturn(arm.bodyRaw, arm.isBlockBody)) continue;
+      const armLabel = arm.isWildcard ? "_" : `.${arm.variantName}`;
+      errors.push({
+        code: "E-STMT-RETURN-OUTSIDE-FUNCTION",
+        message:
+          `E-STMT-RETURN-OUTSIDE-FUNCTION: the message arm \`${armLabel} :>\` in state-child ` +
+          `\`<${sc.tag}>\` contains a \`return\`, but a message arm is not a function body — ` +
+          `there is no function for it to leave. A message arm's value is the state the engine ` +
+          `moves to (§51.0.S.2.3): end the arm with its target state (e.g. \`.Idle\`), or the ` +
+          `current state to stay put.`,
+        span: messageArmSpan(arm),
+        severity: "error",
       });
     }
 
