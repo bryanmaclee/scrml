@@ -719,12 +719,14 @@ describe("S462 Q12 — a function body created in a narrowed scope re-tests reac
             function inner() -> string { return @user.name }
             @out = inner() } }`)).toBe(1);
   });
-  test("an event-handler body under `if=@user`", () => {
+  test("an event-handler body OUTSIDE an `if=@user` gate", () => {
+    // (S462 Q18 superseded the earlier reading in which a handler INSIDE the gate also
+    // re-tested; see the Q18 block below.)
     expect(e046(`<program>
 type User:struct = { name: string }
 <user>: User | not = { name: "a" }
 <out> = ""
-<div if=@user><button onclick={ @out = @user.name }>go</button></div>
+<div if=@user></div><button onclick={ @out = @user.name }>go</button>
 <p>\${@out}</p>
 </program>
 `).length).toBe(1);
@@ -1027,5 +1029,69 @@ describe("S462 fix round 5 — no text scan decides what an escape hatch writes"
         return "" }
     function show() { if (@user is given) { const t = tag\`x\`
             @out = @user.name } }`)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S462 Q18 ("a") — a handler inside an `if=` gate keeps the gate's narrowing.
+// ---------------------------------------------------------------------------
+function progM(markup) {
+  return `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<other>: User | not = { name: "b" }
+<out> = ""
+\${
+    function clear() { @user = not }
+}
+${markup}
+<p>\${@out}</p>
+</program>
+`;
+}
+const nM = (markup) => e046(progM(markup)).length;
+
+describe("S462 Q18 — an event handler inside an `if=` gate keeps that cell's narrowing", () => {
+  test("a handler on a child of `if=@user` reads @user bare", () => {
+    expect(nM(`<div if=@user><button onclick={ @out = @user.name }>go</button></div>`)).toBe(0);
+  });
+  test("a handler on the gated element itself", () => {
+    expect(nM(`<button if=@user onclick={ @out = @user.name }>go</button>`)).toBe(0);
+  });
+  test("an `else-if=` gate", () => {
+    expect(nM(`<p if=@other>o</p><div else-if=@user><button onclick={ @out = @user.name }>go</button></div>`)).toBe(0);
+  });
+  test("a deeper descendant", () => {
+    expect(nM(`<div if=@user><section><ul><li><button onclick={ @out = @user.name }>go</button></li></ul></section></div>`)).toBe(0);
+  });
+  test("nested gates contribute their narrowings", () => {
+    expect(nM(`<div if=@user><section if=@other><button onclick={ @out = @user.name + @other.name }>go</button></section></div>`)).toBe(0);
+  });
+  test("`show=` does not gate (hides, does not remove)", () => {
+    expect(nM(`<div show=@user><button onclick={ @out = @user.name }>go</button></div>`)).toBe(1);
+  });
+  test("another cell stays un-narrowed", () => {
+    expect(nM(`<div if=@user><button onclick={ @out = @other.name }>go</button></div>`)).toBe(1);
+  });
+  test("a handler outside the gate", () => {
+    expect(nM(`<div if=@user></div><button onclick={ @out = @user.name }>go</button>`)).toBe(1);
+  });
+  test("a write inside the handler still ends the narrowing", () => {
+    expect(nM(`<div if=@user><button onclick={ @user = not
+        @out = @user.name }>go</button></div>`)).toBe(1);
+  });
+  test("a call inside the handler that writes the cell ends it", () => {
+    expect(nM(`<div if=@user><button onclick={ clear()
+        @out = @user.name }>go</button></div>`)).toBe(1);
+  });
+  test("a timer callback inside the handler re-tests", () => {
+    expect(nM(`<div if=@user><button onclick={ setTimeout(() => { @out = @user.name }, 10) }>go</button></div>`)).toBe(1);
+  });
+  test("a closure created inside the handler re-tests", () => {
+    expect(nM(`<div if=@user><button onclick={ const f = () => @user.name
+        @out = f() }>go</button></div>`)).toBe(1);
+  });
+  test("a gate ended by an earlier write does not keep anything", () => {
+    expect(nM(`<div if=@user>\${ clear() }<button onclick={ @out = @user.name }>go</button></div>`)).toBe(1);
   });
 });

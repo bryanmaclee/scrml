@@ -1,0 +1,23 @@
+{
+  "id": "reactive-narrowing-gated-handler-keeps-rt",
+  "description": "S462 Q18 — an event handler inside an `if=@user` gate keeps `@user`'s narrowing: the bare `@user.name` in it compiles. RUNTIME half: the click while present renders the name; signing out (another control) removes the gated subtree and its listener synchronously, so the handler can no longer run — `#go` is gone and `@out` keeps its value. (Dispatching a click on the DETACHED `#go` — the driver's selector verbs cannot address a removed element — is asserted by compiler/tests/browser/browser-gated-handler-narrowing-s462.browser.test.js.)",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"a\", Q18): an event handler on an element — or inside a subtree — gated by `if=` / `else-if=` on a presence test of a cell KEEPS that cell's narrowing inside the handler: render-gating removes the subtree and its listener synchronously on the write that ends the condition.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-TYPE-046"
+    ],
+    "input": [
+      { "click": "#go" },
+      { "click": "#clear" },
+      { "wait": "settle" }
+    ],
+    "state": { "out": "a" },
+    "domAnchored": [
+      { "selector": "#go", "count": 0 },
+      { "selector": "#o", "text": "a" }
+    ]
+  }
+}

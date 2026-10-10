@@ -504,6 +504,29 @@ function walkParamDefaults(fn: Rec, present: ReadonlySet<string>, span: NarrowSp
   return p;
 }
 
+/**
+ * S462 Q18 ("a") — the mark an `if=` / `else-if=` gate leaves beside each receiver it
+ * narrows. Presence keys are receiver names chosen by the consumer; a NUL-prefixed key
+ * cannot be one, and no consumer looks it up. A mark lives exactly as long as the set it
+ * is in: a function body that drops reactive narrowings (`closureDrop`) drops the marks
+ * too, so a closure created inside the gated subtree does not inherit the exemption.
+ */
+const GATE_MARK = "\u0000gate:";
+
+/**
+ * S462 Q18 ("a") — the presence set an event handler starts with. As any function body
+ * (Q12) it re-tests reactive cells, EXCEPT a receiver narrowed by the chain of `if=` /
+ * `else-if=` gates enclosing the handler (the element's own or an ancestor's, still
+ * narrowed here): render-gating removes the subtree and its listener synchronously on the
+ * write that ends the gate's condition, so the handler cannot run while it is `not`.
+ * `show=` never gates (it hides, it does not remove). A write inside the handler still
+ * ends the narrowing from that point (S462 "b") — the body walk does that.
+ */
+function handlerEntry(present: ReadonlySet<string>, handler: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
+  const gated = [...present].filter((k) => !k.startsWith(GATE_MARK) && present.has(GATE_MARK + k));
+  return withKeys(closureEntry(present, handler, span, opts), gated);
+}
+
 /** Lambdas a known built-in calls synchronously (S462 Q12) — set by the call above them. */
 const SYNC_CALLBACKS = new WeakSet<object>();
 
@@ -647,7 +670,9 @@ export function walkNodeNarrowed(
   present = p;
   if (n.kind === "markup") {
     let inner = present;
-    for (const k of guardKeys(n, opts)) inner = withKey(inner, k);
+    // S462 Q18 — an `if=` / `else-if=` gate also MARKS what it narrows, so an event handler
+    // inside the gated subtree (this element's or a descendant's) can keep it.
+    for (const k of guardKeys(n, opts)) inner = withKey(withKey(inner, k), GATE_MARK + k);
     const attrs = n.attrs as Rec[] | undefined;
     if (Array.isArray(attrs)) {
       for (const attr of attrs) {
@@ -656,9 +681,10 @@ export function walkNodeNarrowed(
         const isGuard = attr.name === "if" || attr.name === "else-if";
         const hb = (val.handlerBlock as Rec | undefined)?.stmts;
         // S462 Q12 — an event handler (any form: a statement list, an expression, a
-        // lambda) is a function body: it runs later, so it re-tests reactive cells.
+        // lambda) is a function body: it runs later, so it re-tests reactive cells —
+        // except what an enclosing `if=` gate narrows (Q18, `handlerEntry`).
         const isHandler = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
-        const at = isGuard ? present : isHandler ? closureEntry(inner, val, here, opts) : inner;
+        const at = isGuard ? present : isHandler ? handlerEntry(inner, val, here, opts) : inner;
         if (Array.isArray(hb)) walkBodyNarrowed(hb, at, here, opts);
         else walkExprNarrowed(val, at, here, opts);
       }
