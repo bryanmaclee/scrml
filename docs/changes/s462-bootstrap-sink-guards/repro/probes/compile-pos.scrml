@@ -1,0 +1,5 @@
+<program>
+    let <doc:string="x"/>
+    <div id="o" online=@doc one="1" onboarding="yes"></div>
+    <iframe id="ok" srcdoc="<p>static</p>"></iframe>
+</program>

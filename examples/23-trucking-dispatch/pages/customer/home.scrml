@@ -96,7 +96,7 @@
         // GLOBAL broadcast (one `<customerEvents>` cell, all events); each payload
         // carries `targetCustomerId` so the customer UI filters to its own account
         // (per channels/customer-events.scrml). Empty until the account loads.
-        const <currentCustomerEvents> = @customerEvents.filter(ev => @currentCustomer is some && ev.targetCustomerId == @currentCustomer.id)
+        const <currentCustomerEvents> = @customerEvents.filter(ev => @currentCustomer is given && ev.targetCustomerId == @currentCustomer.id)
         <activeLoadRows> = []
         <recentInvoiceRows> = []
         <loaded> = false
@@ -160,12 +160,12 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">
                   Invoices
-                  <span if=(@currentCustomerEvents is some && (@currentCustomerEvents.length > 0)) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
+                  <span if=(@currentCustomerEvents is given && (@currentCustomerEvents.length > 0)) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
                       ${@currentCustomerEvents.length}
                   </span>
               </a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -177,7 +177,7 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentCustomer is some) class="space-y-6">
+          <div if=(@loaded && @currentCustomer is given) class="space-y-6">
 
               <!-- Greeting + account status -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -186,17 +186,17 @@
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Account</div>
                           <h1 class="text-2xl font-bold">${@currentCustomer.name}</h1>
                           <div class="text-sm text-slate-600 mt-1">
-                              <span if=(@currentCustomer.contact_name is some && @currentCustomer.contact_name != "")>
+                              <span if=(@currentCustomer.contact_name is given && @currentCustomer.contact_name != "")>
                                   ${@currentCustomer.contact_name}
                               </>
-                              <span if=(@currentCustomer.contact_email is some && @currentCustomer.contact_email != "") class="text-slate-400">
+                              <span if=(@currentCustomer.contact_email is given && @currentCustomer.contact_email != "") class="text-slate-400">
                                   &middot; ${@currentCustomer.contact_email}
                               </>
                           </div>
                       </div>
                       <div class="text-right">
                           <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClassesOf(@currentCustomer)}">
-                              ${@currentCustomer is some ? accountStatusLabel(@currentCustomer.account_status) : ""}
+                              ${@currentCustomer is given ? accountStatusLabel(@currentCustomer.account_status) : ""}
                           </span>
                       </div>
                   </div>
@@ -251,7 +251,7 @@
                                   </div>
                                   <div class="text-xs text-slate-600 mb-1">
                                       ${l.commodity}
-                                      <span if=(l.weight_lbs) class="text-slate-400">
+                                      <span if=(l.weight_lbs is given && l.weight_lbs > 0) class="text-slate-400">
                                           · ${l.weight_lbs} lbs
                                       </>
                                   </div>
@@ -309,7 +309,7 @@
                                   <div class="text-sm font-semibold text-slate-900">
                                       ${formatRate(inv.amount_dollars)}
                                   </div>
-                                  <div if=(inv.paid_at is some && inv.paid_at != "") class="text-xs text-emerald-700">
+                                  <div if=(inv.paid_at is given && inv.paid_at != "") class="text-xs text-emerald-700">
                                       Paid ${formatIsoDate(inv.paid_at)}
                                   </div>
                                   <div if=(inv.paid_at is not || inv.paid_at == "") class="text-xs text-amber-700">

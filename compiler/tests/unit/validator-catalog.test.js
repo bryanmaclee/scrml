@@ -25,7 +25,7 @@ describe("validator-catalog: 14 universal-core predicates per SPEC §55.1", () =
     const names = UNIVERSAL_CORE_PREDICATES.map((p) => p.name);
     expect(names).toEqual([
       "req",
-      "is some",
+      "is given",
       "length",
       "pattern",
       "min",
@@ -68,10 +68,15 @@ describe("validator-catalog: lookup API", () => {
     expect(lookupPredicate("nonexistent")).toBeUndefined();
   });
 
-  test("lookupPredicate matches multi-word name 'is some' verbatim", () => {
-    const sig = lookupPredicate("is some");
+  test("lookupPredicate matches multi-word name 'is given' verbatim", () => {
+    const sig = lookupPredicate("is given");
     expect(sig).toBeDefined();
     expect(sig?.errorTag).toBe("NotSome");
+  });
+
+  test("S462 — the soft-deprecated spelling 'is some' resolves to the same predicate", () => {
+    expect(lookupPredicate("is some")).toBe(lookupPredicate("is given"));
+    expect(isUniversalCorePredicate("is some")).toBe(true);
   });
 
   test("isUniversalCorePredicate is consistent with lookupPredicate", () => {
@@ -190,7 +195,7 @@ describe("validator-catalog: ValidationError enum tag mapping per SPEC §55.9", 
     // From SPEC §55.9 line 24523-24535 (ValidationError enum).
     const expected = {
       req: "Required",
-      "is some": "NotSome",
+      "is given": "NotSome",
       length: "LengthFailed",
       pattern: "PatternMismatch",
       min: "MinFailed",

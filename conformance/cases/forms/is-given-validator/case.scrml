@@ -1,0 +1,11 @@
+// §55.1 (S462) — the canonical twin of forms/is-some-deprecated-validator: the presence validator
+// spelled `is given`. Same runtime; no W-IS-SOME-DEPRECATED.
+<program>
+${
+    <signup>
+        <nick is given length(>=3)> = <input id="nick" type="text"/>
+    </>
+}
+<signup><nick/></>
+<div id="all"><errors of=@signup.nick all/></div>
+</program>

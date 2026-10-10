@@ -70,7 +70,7 @@
         @submitting = true
 
         const result = loginServer(@email, @password) !{ .Transport(_) :> { return } }
-        if (result.error is some) {
+        if (result.error is given) {
           @errorMessage = result.error
           @submitting = false
           return

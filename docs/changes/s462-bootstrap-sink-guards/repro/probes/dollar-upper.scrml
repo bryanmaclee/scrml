@@ -1,0 +1,4 @@
+<program>
+    let <code:string="alert(1)"/>
+    <button id="b" ONCLICK=${@code}>x</button>
+</program>

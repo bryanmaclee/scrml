@@ -464,7 +464,7 @@ function walkRawText(raw: string, mode: "expr" | "stmts", scope: Scope, ctx: Met
 const JS_RESERVED_WORDS = new Set([
   "let", "const", "var", "function", "return", "if", "else", "for", "while", "do", "switch",
   "case", "break", "continue", "new", "delete", "typeof", "instanceof", "void", "in", "of",
-  "true", "false", "null", "fn", "is", "some", "default",
+  "true", "false", "null", "fn", "is", "some", "given", "default",
 ]);
 
 function walkStmt(n: AnyNode, scope: Scope, ctx: MetaAllowListContext, report: Report, span?: Span): void {

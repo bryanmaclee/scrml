@@ -388,7 +388,7 @@
 
           <p if=(@loaded && @currentLoad is not) class="text-slate-500">${@errorMessage}</p>
 
-          <div if=(@loaded && @currentLoad is some) class="space-y-6">
+          <div if=(@loaded && @currentLoad is given) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -402,12 +402,12 @@
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
                               ${@currentLoad.commodity}
-                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
+                              <span if=(@currentLoad.weight_lbs is given)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
                           ${ lift <div><LoadStatusBadge status=@currentLoad.status/></div> }
-                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is given ? formatRate(@currentLoad.rate_dollars) : ""}</div>
                       </div>
                   </div>
 
@@ -415,18 +415,18 @@
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer</div>
                           <div class="font-semibold text-slate-900">${@currentLoad.customer_name}</div>
-                          <div class="text-slate-600">${@currentLoad is some ? @currentLoad.customer_contact ? @currentLoad.customer_contact : "" : ""}</div>
-                          <div class="text-slate-500 text-xs">${@currentLoad is some ? @currentLoad.customer_phone ? @currentLoad.customer_phone : "" : ""}</div>
+                          <div class="text-slate-600">${@currentLoad is given ? @currentLoad.customer_contact ? @currentLoad.customer_contact : "" : ""}</div>
+                          <div class="text-slate-500 text-xs">${@currentLoad is given ? @currentLoad.customer_phone ? @currentLoad.customer_phone : "" : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.origin_address ? @currentLoad.origin_address : "" : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is given ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is given ? @currentLoad.origin_address ? @currentLoad.origin_address : "" : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Deliver</div>
-                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.destination_address ? @currentLoad.destination_address : "" : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is given ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is given ? @currentLoad.destination_address ? @currentLoad.destination_address : "" : ""}</div>
                       </div>
                   </div>
               </section>
@@ -456,7 +456,7 @@
                    provides the durable lin enforcement,
                    and at the call site each fn declares its lin parameter
                    exactly once per §35.2.1. -->
-              <section if=(@currentLoad is some && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <section if=(@currentLoad is given && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-amber-900">
                           <strong>Rate confirmation pending.</strong>
@@ -476,7 +476,7 @@
                       Assignment
                   </h2>
 
-                  <div if=(@assignment is some) class="bg-emerald-50 border border-emerald-200 rounded-md p-4 mb-4 text-sm">
+                  <div if=(@assignment is given) class="bg-emerald-50 border border-emerald-200 rounded-md p-4 mb-4 text-sm">
                       <div class="font-semibold text-emerald-900 mb-1">Currently assigned</div>
                       <div class="text-emerald-800">
                           Driver: <strong>${@assignment.driver_name}</strong>

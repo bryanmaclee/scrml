@@ -40,7 +40,7 @@
 /**
  * What a predicate's argument is shaped like in source.
  *
- * `null` (for arity-0 bareword predicates `req`, `is some`) — no args at all.
+ * `null` (for arity-0 bareword predicates `req`, `is given`) — no args at all.
  * Otherwise an array describing each positional argument.
  */
 export type PredicateArgKind =
@@ -105,7 +105,7 @@ export interface PredicateSignature {
    *    per §55.10, so this slot exists only for future predicates that should
    *    forbid inline overrides.
    *  - `"0+inline"` — bareword OR one optional trailing inline-message-override
-   *    (string literal). Used by `req` and `is some`. The §55.10 worked
+   *    (string literal). Used by `req` and `is given`. The §55.10 worked
    *    example `<name req("Please enter your name")>` is the canonical form
    *    for this arity.
    *  - `1` — strictly one required arg, no inline override. Currently unused.
@@ -146,12 +146,12 @@ export const UNIVERSAL_CORE_PREDICATES: readonly PredicateSignature[] = [
     specRef: "§55.1 — non-empty value (`\"\"` fails; null/undefined fail). Inline override per §55.10.",
   },
   {
-    name: "is some",
+    name: "is given",
     arity: "0+inline",
     args: [{ kind: "inline-message-override" }],
     cellTypeRequirement: "any",
     errorTag: "NotSome",
-    specRef: "§55.1, §42.2.5 — value EXISTS (null/undefined fail). `\"\"` IS some. Inline override per §55.10.",
+    specRef: "§55.1, §42.2.5 — value EXISTS (`not` fails). `\"\"` IS given. Inline override per §55.10. `is some` is its soft-deprecated spelling (S462, W-IS-SOME-DEPRECATED).",
   },
   {
     name: "length",
@@ -257,6 +257,20 @@ const PREDICATE_BY_NAME: ReadonlyMap<string, PredicateSignature> = new Map(
 );
 
 /**
+ * Soft-deprecated spellings (SPEC §63 Stage 1) → the canonical predicate name.
+ * `is some` retired to `is given` (ruling:user-voice-scrml.md S462 "a, validator
+ * too, go"); it still resolves to the same predicate during the window.
+ */
+const DEPRECATED_PREDICATE_SPELLINGS: ReadonlyMap<string, string> = new Map([
+  ["is some", "is given"],
+]);
+
+/** The canonical predicate name for a source spelling (identity for a canonical one). */
+export function canonicalPredicateName(name: string): string {
+  return DEPRECATED_PREDICATE_SPELLINGS.get(name) ?? name;
+}
+
+/**
  * Look up a universal-core predicate signature by its source-level name.
  *
  * Returns `undefined` if the name does NOT match a universal-core predicate.
@@ -264,10 +278,11 @@ const PREDICATE_BY_NAME: ReadonlyMap<string, PredicateSignature> = new Map(
  * `scrml:data`) are NOT in this catalog; their signatures are registered
  * elsewhere (stdlib registration path, future).
  *
- * Multi-word names (like `"is some"`) match verbatim.
+ * Multi-word names (like `"is given"`) match verbatim; a soft-deprecated
+ * spelling (`"is some"`) resolves to its canonical predicate.
  */
 export function lookupPredicate(name: string): PredicateSignature | undefined {
-  return PREDICATE_BY_NAME.get(name);
+  return PREDICATE_BY_NAME.get(canonicalPredicateName(name));
 }
 
 /**
@@ -275,7 +290,7 @@ export function lookupPredicate(name: string): PredicateSignature | undefined {
  * Convenience wrapper around `lookupPredicate`.
  */
 export function isUniversalCorePredicate(name: string): boolean {
-  return PREDICATE_BY_NAME.has(name);
+  return PREDICATE_BY_NAME.has(canonicalPredicateName(name));
 }
 
 /**

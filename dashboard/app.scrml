@@ -108,7 +108,7 @@ function statusesFrom(state, currentSha) {
     const out = []
     for (let ex of EXAMPLES) {
         const entry = state[ex.name]
-        const hasEntry = entry is some && typeof entry.sha == "string"
+        const hasEntry = entry is given && typeof entry.sha == "string"
         const sha = hasEntry ? entry.sha : ""
         const verifiedAt = hasEntry && typeof entry.verified_at == "string" ? entry.verified_at : ""
         const neverVerified = sha == ""

@@ -10,7 +10,8 @@
  * TWO TIERS (S239 review of 1f9de1f08, HIGH 1). impl#1 is the only compiler adopters run, and it
  * does NOT implement the §66 opener dialect. So:
  *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
- *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), client-server-call (§19.9.10, an
+ *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), is-some (§42.2.2a / §55.1, S462:
+ *     `x is some` and the validator `<x is some>` → `is given` — commands/fix-is-some.js), client-server-call (§19.9.10, an
  *     unhandled client call of a server function → `!{ .Transport(_) :> { return } }` —
  *     commands/fix-client-server-call.js), sql-failable (§19.8.3, an unhandled `?{}` READ outside a
  *     `!` function → `!{ _ :> not }` / `!{ _ :> [] }`; every write is listed, never rewritten — S455
@@ -54,7 +55,8 @@ import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from
 const HELP = `scrml fix <file|dir> [options]
 
 Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
-\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; client-server-call: an
+\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; is-some: \`x is some\`
+and the validator \`<x is some>\` → \`is given\`, §42.2.2a / §55.1; client-server-call: an
 unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10;
 sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` →
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare

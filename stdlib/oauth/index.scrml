@@ -92,7 +92,7 @@ ${
     export function memoryAdapter() {
         const store = new Map()
         function expired(entry) {
-            return entry.expiresAt is some && entry.expiresAt <= Date.now()
+            return entry.expiresAt is given && entry.expiresAt <= Date.now()
         }
         return {
             put(key, value, ttlSeconds) {
@@ -204,7 +204,7 @@ ${
         // Provider-specific extras (e.g. Google's access_type/prompt for refresh).
         if (config.extraAuthParams) {
             for (const [k, v] of Object.entries(config.extraAuthParams)) {
-                if (v is some) params[k] = String(v)
+                if (v is given) params[k] = String(v)
             }
         }
 

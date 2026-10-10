@@ -660,7 +660,7 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentLoad is some) class="space-y-6">
+          <div if=(@loaded && @currentLoad is given) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -674,14 +674,14 @@
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
                               ${@currentLoad.commodity}
-                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
+                              <span if=(@currentLoad.weight_lbs is given)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
                           <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClassesOf(@currentLoad)}">
-                              ${@currentLoad is some ? statusLabel(@currentLoad.status) : ""}
+                              ${@currentLoad is given ? statusLabel(@currentLoad.status) : ""}
                           </span>
-                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is given ? formatRate(@currentLoad.rate_dollars) : ""}</div>
                       </div>
                   </div>
 
@@ -689,18 +689,18 @@
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer</div>
                           <div class="font-semibold text-slate-900">${@currentLoad.customer_name}</div>
-                          <div class="text-slate-600">${@currentLoad is some ? @currentLoad.customer_contact is not ? "" : @currentLoad.customer_contact : ""}</div>
-                          <div class="text-slate-500 text-xs">${@currentLoad is some ? @currentLoad.customer_phone is not ? "" : @currentLoad.customer_phone : ""}</div>
+                          <div class="text-slate-600">${@currentLoad is given ? @currentLoad.customer_contact is not ? "" : @currentLoad.customer_contact : ""}</div>
+                          <div class="text-slate-500 text-xs">${@currentLoad is given ? @currentLoad.customer_phone is not ? "" : @currentLoad.customer_phone : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.origin_address is not ? "" : @currentLoad.origin_address : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is given ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is given ? @currentLoad.origin_address is not ? "" : @currentLoad.origin_address : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Deliver</div>
-                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.destination_address is not ? "" : @currentLoad.destination_address : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is given ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is given ? @currentLoad.destination_address is not ? "" : @currentLoad.destination_address : ""}</div>
                       </div>
                   </div>
               </section>
@@ -712,15 +712,15 @@
                   </h2>
 
                   <!-- Status advance button when there's a valid next status. -->
-                  <div if=(@currentLoad is some && (nextDriverStatus(@currentLoad.status) != "")) class="mb-4">
+                  <div if=(@currentLoad is given && (nextDriverStatus(@currentLoad.status) != "")) class="mb-4">
                       <button
                           onclick=transition(nextDriverStatus(@currentLoad.status))
                           class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md"
-                      >${@currentLoad is some ? nextDriverButtonLabel(@currentLoad.status) : ""}</button>
+                      >${@currentLoad is given ? nextDriverButtonLabel(@currentLoad.status) : ""}</button>
                   </div>
 
-                  <p if=(@currentLoad is some && (nextDriverStatus(@currentLoad.status) == "")) class="text-sm text-slate-500 mb-4">
-                      No driver-driven transition available from <strong>${@currentLoad is some ? statusLabel(@currentLoad.status) : ""}</strong>.
+                  <p if=(@currentLoad is given && (nextDriverStatus(@currentLoad.status) == "")) class="text-sm text-slate-500 mb-4">
+                      No driver-driven transition available from <strong>${@currentLoad is given ? statusLabel(@currentLoad.status) : ""}</strong>.
                   </p>
 
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -731,12 +731,12 @@
                            to the driver as a UI affordance. -->
                       <button
                           onclick=openForm("bol")
-                          disabled=(@currentLoad is some && (!isBolEligible(@currentLoad.status) || @bolToken == ""))
+                          disabled=(@currentLoad is given && (!isBolEligible(@currentLoad.status) || @bolToken == ""))
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
                       >Upload BOL</button>
                       <button
                           onclick=openForm("pod")
-                          disabled=(@currentLoad is some && (!isPodEligible(@currentLoad.status)))
+                          disabled=(@currentLoad is given && (!isPodEligible(@currentLoad.status)))
                           class="px-3 py-2 text-sm font-medium rounded-md border border-slate-300 hover:bg-slate-100 disabled:opacity-50"
                       >Upload POD</button>
                       <button

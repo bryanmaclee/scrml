@@ -42,7 +42,7 @@
 
         function registerServer(emailArg, passwordArg, nameArg, contactPhoneArg, billingAddressArg) {
             const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get()
-            if (existing is some) return { error: "Email already registered" }
+            if (existing is given) return { error: "Email already registered" }
 
             const hash = hashPassword(passwordArg)
             ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run()

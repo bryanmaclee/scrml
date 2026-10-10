@@ -86,6 +86,27 @@ describe("§66.6.9 rule 2 — an undeclared attribute on a plain use is E-DECL-U
   });
 });
 
+// s462 merge re-check (the sink-guards branch's NIT): `attrCaseDiags` refuses a case-variant
+// `ON…=(…)` (handler text from data, §5.2 rule 2) but returns early for a component USE. A use
+// must not carry one past BOTH checks: E-DECL-USE-ATTR refuses it there, and no artifact is built.
+describe("a case-variant `ON…=(…)` on a use or a reference cannot slip past both checks", () => {
+  for (const [label, markup] of [
+    ["plain use", `<card title="a" ONCLICK=(@s)/>`],
+    ["plain use, mixed case", `<card title="a" OnClick=(@s)/>`],
+    ["plain use, bare reference", `<card title="a" ONCLICK=@s/>`],
+    ["`<*x>` reference", `<*card ONCLICK=(@s)/>`],
+  ]) {
+    test(`${label}: ${markup} → E-DECL-USE-ATTR, no Core`, () => {
+      const r = run(prog(markup));
+      expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-USE-ATTR"]);
+      expect(r.core == null).toBe(true);
+    });
+  }
+  test("the same attribute on a plain element is the sink refusal (control)", () => {
+    expect(codes(prog(`<button ONCLICK=(@s)>b</button>`))).toEqual(["E-ATTR-INTERP-EXECUTABLE"]);
+  });
+});
+
 describe("§66.6.9 rule 1 — what a plain use may carry", () => {
   test("declared attributes, `as=` and `if=` / `else` → clean", () => {
     expect(codes(prog(`<card title="a" as=c if=@b/><card else title="z"/>`))).toEqual([]);
