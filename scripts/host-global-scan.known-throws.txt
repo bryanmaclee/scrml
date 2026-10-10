@@ -118,7 +118,6 @@
 [esm] stdlib/crypto/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
 [esm] stdlib/data/index.scrml  # emit-client-esm: Unexpected token
 [esm] stdlib/data/transform.scrml  # emit-client-esm: Unexpected token
-[esm] stdlib/data/validate.scrml  # emit-client-esm: Unexpected token
 [esm] stdlib/host/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
 [esm] stdlib/http/index.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
 [esm] stdlib/oauth/index.scrml  # emit-client-esm: Unexpected token
