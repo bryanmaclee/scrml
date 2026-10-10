@@ -31,10 +31,46 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 570 | 6 |
-| LOW | 339 | 0 |
+| MED | 574 | 6 |
+| LOW | 341 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-stdlib-type-erase-reads-emitted-text-s462 — `eraseStdlibTypeOnlyImports` re-reads the EMITTED text, so a multi-line template literal in a server function that contains the line `import { TableSort } from "scrml:data"` is rewritten inside the string — `NEW S462; LOW; open`
+
+<!-- @gap id=g-stdlib-type-erase-reads-emitted-text-s462 sev=LOW status=open locus=compiler/src/module-resolver.js(eraseStdlibTypeOnlyImports)+compiler/src/api.js(rewriteStdlibImports) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Found by the delta re-review of s462-stdlib-import-004 (8f334bcdf). The erasure pass is a line regex over the module text, so a string literal whose own line has the shape of a `scrml:` import is edited. BASE's `rewriteStdlibImports` (the `scrml:NAME` → `./_scrml/NAME.js` specifier rewrite) corrupts the same line today, so this is a second reader of the same text, not a new class. Fix direction: erase (and rewrite) at emission, from the import-decl's specifier list, not from the emitted text.
+
+### g-library-import-text-shape-erase-and-rewrite-gaps-s462 — in library mode a multi-line import collapses (the eraser's line-preserving claim is false there), and a library import with a trailing `// c` comment is neither erased nor specifier-rewritten → load fails `Cannot find package 'scrml:data'` (same on BASE); the parity test ("non-struct ⇒ enum") and the eraser ("non-enum ⇒ erase") classify by opposite rules — `NEW S462; LOW; open`
+
+<!-- @gap id=g-library-import-text-shape-erase-and-rewrite-gaps-s462 sev=LOW status=open locus=compiler/src/codegen/emit-library.ts(verbatim import text)+compiler/src/module-resolver.js(eraseStdlibTypeOnlyImports)+compiler/tests/unit/stdlib-shim-export-parity.test.js(exportKinds) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Found by the delta re-review of s462-stdlib-import-004 (8f334bcdf). Library mode emits the logic block's import text verbatim; both the erasure regex and `rewriteStdlibImports` require a single-line `import { … } from "scrml:…";` with nothing after it, so a trailing comment defeats both (BASE fails the same way on the specifier rewrite). The two classifiers agree on every stdlib type today (enum / struct only) but would diverge on a third type kind. Fix direction: one classifier for "has a run-time value", shared by the eraser and the parity test; erase and rewrite from the import AST (see g-stdlib-type-erase-reads-emitted-text-s462).
+
+### g-stdlib-reexport-runtime-unresolved-s462 — a named re-export from a `scrml:` module compiles clean but its emitted `.js` keeps the raw `scrml:crypto` specifier and fails to load; Q19's E-IMPORT-004 check guards a path that does not run yet (struct re-exports would also need erasure) — `NEW S462; MED; open`
+
+<!-- @gap id=g-stdlib-reexport-runtime-unresolved-s462 sev=MED status=open locus=compiler/src/codegen(re-export emission)+compiler/src/api.js(rewriteStdlibImports, bundleStdlibForRun — re-exports not collected) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Reviewer-reproduced on 8f334bcdf: an exports-only file `export { CryptoError, generateUUID as uuid } from "scrml:crypto"` compiles with no diagnostic; its `.js` carries `export { … } from "scrml:crypto"` unrewritten, so loading it fails. The S462 Q19 ruling (§21.4: a named re-export from `scrml:` SHALL be checked, E-IMPORT-004) is implemented at compile time (`validateStdlibImports`), but the run-time half — bundling the shim, rewriting the re-export specifier, erasing `:struct` names as `eraseStdlibTypeOnlyImports` does for imports — is missing. Fix direction: collect `scrml:` re-export specifiers into the stdlib bundle set and route re-export lines through the same rewrite + erasure as imports.
+
+### g-bare-variant-fn-argument-ambiguous-s462 — a bare variant passed as a function argument in logic (`f(.Small)` with `f(s: Size)`) is E-VARIANT-AMBIGUOUS, for LOCAL enums too, although §14.10 lists "a function parameter type" as a resolving position — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-bare-variant-fn-argument-ambiguous-s462 sev=MED status=open locus=compiler/src/type-system.ts(bare-variant inference — call-argument position) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004 while exercising stdlib enums; reproduces with a same-file enum on BASE, so not caused by the branch. SPEC §14.10: a bare variant "SHALL be resolved … when the type at the position can be inferred from … a function parameter type (`fn(.V)` where the parameter is typed `T`)".
+
+### g-tool-main-failable-await-outside-async-s462 — a `kind="tool"` `main` that calls a failable function emits `await` inside a non-async function (invalid module) — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-tool-main-failable-await-outside-async-s462 sev=MED status=open locus=compiler/src/codegen/emit-tool.ts(main emission — async colouring) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004 (tool-mode stdlib probes); present on BASE. The failable call is lowered with `await` but the enclosing `main` is not coloured `async`, so the emitted tool module does not parse.
+
+### g-client-fn-parseerror-escalates-to-server-s462 — a client function that uses `ParseError` imported from `scrml:data` is escalated to the server (and then refused E-CPS-NONIDEM-NO-STORAGE when it also writes state) — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-client-fn-parseerror-escalates-to-server-s462 sev=MED status=open locus=compiler/src/route-inference.ts(server-only stdlib module tagging — type-only use of scrml:data) prov=review:s462-stdlib-import-004-delta-rereview -->
+
+Surfaced by the delta re-review of s462-stdlib-import-004; present on BASE. Referencing a stdlib enum (a value-free use: variant construction / matching) should not make a function server-only; route inference treats the `scrml:data` reference as a server-escalating stdlib call.
 
 ### g-bootstrap-stdlib-import-004-missing-s462 — the bootstrap (impl#2) does not check `scrml:` imports or named `scrml:` re-exports against the stdlib module's export list (E-IMPORT-004, §41.3.1 / §21.4) — `NEW S462; MED; open`
 
