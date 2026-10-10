@@ -9564,11 +9564,14 @@ ${
     // `typeIfAttr`): render-gating removes the subtree and its listener
     // synchronously on the write that ends the gate's condition. The marks
     // themselves do not enter the handler.
-    fn tDropCellNarrowing(env: TEnv) -> TEnv {
+    // s462 round 6 — `gates` false: a focus-family handler (`focusEvent`) keeps
+    // no gate narrowing — a browser fires `blur` / `focusout` DURING the removal,
+    // while the node is still connected.
+    fn tDropCellNarrowing(env: TEnv, gates: boolean) -> TEnv {
         let keep: string[] = []
         for (const k of env.narrowed) {
             if (k.indexOf("@") == 0) {
-                if (env.narrowed.indexOf(gateMark(k)) >= 0) keep = keep.concat([k])
+                if (gates && env.narrowed.indexOf(gateMark(k)) >= 0) keep = keep.concat([k])
             } else if (k.indexOf(gateMark("")) != 0) {
                 keep = keep.concat([k])
             }
@@ -9582,6 +9585,11 @@ ${
     // s462 Q18 — the mark an `if=` / `else-if=` gate leaves in `narrowed` beside
     // each cell place it narrows (no place key starts with `gate:`; every reader
     // of `narrowed` compares whole keys or `@` / `#` prefixes).
+    fn focusEvent(ev: string) -> boolean {
+        const e: string = ev.toLowerCase()
+        return e == "blur" || e == "focusout" || e == "focus" || e == "focusin"
+    }
+
     fn gateMark(k: string) -> string {
         return "gate:" + k
     }
@@ -11948,8 +11956,8 @@ ${
     // body — it runs LATER, after writes the walk does not see — so it does not inherit
     // the narrowing of reactive cells (`@…`): it re-tests. A captured local (`#id`, an
     // `<each>` row) keeps its narrowing.
-    fn typeHandlerValue(env0: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
-        const env: TEnv = tDropCellNarrowing(env0)
+    fn typeHandlerValue(env0: TEnv, v: AAttrValue, ts: TypeState, ev: string) -> TypeState {
+        const env: TEnv = tDropCellNarrowing(env0, !focusEvent(ev))
         return match v {
             .Bare(e: x) :> typeStmtExpr(env, x, ts)
             .Paren(e: x) :> typeStmtExpr(env, x, ts)
@@ -11994,7 +12002,7 @@ ${
                 // `if=` narrowing; it narrows nothing itself
                 ts = typeShowAttr(renv, a, ts)
             } else if (eventName(a.name) != "") {
-                ts = typeHandlerValue(renv, a.value, ts)
+                ts = typeHandlerValue(renv, a.value, ts, eventName(a.name))
             } else {
                 ts = typeAttrValue(renv, a.value, ts).ts
             }

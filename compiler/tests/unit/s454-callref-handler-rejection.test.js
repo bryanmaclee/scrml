@@ -162,13 +162,13 @@ describe("S454 — every call-ref registration path colours an async callee", ()
     expect(r.errs).toEqual([]);
     // `(event)` here is a carried divergence from §5.2.2 ("with no arguments"), pre-existing:
     // g-inarm-callref-handler-passes-event-s454. Pinned as current behaviour, not as the rule.
-    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ try \{ await _scrml_go_\d+\(_scrml_event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("oninput _scrml_attr_oninput_\d+"/);
+    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; try \{ await _scrml_go_\d+\(_scrml_event\); \} catch \(_scrml_async_err\) \{ _scrml_error_boundary_log\("oninput _scrml_attr_oninput_\d+"/);
   });
 
   test("in-arm NON-delegable listener with a SYNC callee is unchanged", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=syncFn() /></></match>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ _scrml_syncFn_\d+\(_scrml_event\); \};/);
+    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; _scrml_syncFn_\d+\(_scrml_event\); \};/);
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 
@@ -183,7 +183,7 @@ describe("S454 — every call-ref registration path colours an async callee", ()
       pre,
     );
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
+    expect(r.js).toMatch(/const _scrml_arm_h = async function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
     // the page-level twin is the oracle
     expect(r.js).toMatch(/"_scrml_attr_oninput_\d+": async function\(_scrml_event\) \{ try \{ if \(await _scrml_fetch_isOk_\d+\(1\)\)/);
     expect(catchArms(r.js).length).toBe(2);
@@ -192,7 +192,7 @@ describe("S454 — every call-ref registration path colours an async callee", ()
   test("in-arm NON-delegable `${…}` handler with no async call is unchanged", () => {
     const r = emit(`<match for=Doc on=@cur><Empty><p>n</p></><Note(note)><input id="m" oninput=\${@y = 1} /></></match>`);
     expect(r.errs).toEqual([]);
-    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ _scrml_cs_reactive_set\("y", 1\); \};/);
+    expect(r.js).toMatch(/const _scrml_arm_h = function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; _scrml_cs_reactive_set\("y", 1\); \};/);
     expect(r.js).not.toContain("_scrml_error_boundary_log");
   });
 

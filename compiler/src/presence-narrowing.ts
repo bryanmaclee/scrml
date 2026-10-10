@@ -521,10 +521,27 @@ const GATE_MARK = "\u0000gate:";
  * write that ends the gate's condition, so the handler cannot run while it is `not`.
  * `show=` never gates (it hides, it does not remove). A write inside the handler still
  * ends the narrowing from that point (S462 "b") — the body walk does that.
+ *
+ * S462 round 6 (F6-2) — the removal guarantee holds for every event dispatched AFTER the
+ * write (delegated events never reach a detached node; a direct listener checks that its
+ * element is connected, codegen/detached-listener.ts). It does NOT hold for an event the
+ * browser fires DURING the removal, while the node is still connected: Chromium fires
+ * `blur` / `focusout` on a focused element inside `remove()` (verified, Playwright
+ * Chromium). So a handler for the focus family (`FOCUS_EVENTS`) keeps no gate narrowing.
  */
-function handlerEntry(present: ReadonlySet<string>, handler: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
+function handlerEntry(present: ReadonlySet<string>, handler: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions, eventName = ""): ReadonlySet<string> {
+  const entry = closureEntry(present, handler, span, opts);
+  if (FOCUS_EVENTS.has(eventName)) return entry;
   const gated = [...present].filter((k) => !k.startsWith(GATE_MARK) && present.has(GATE_MARK + k));
-  return withKeys(closureEntry(present, handler, span, opts), gated);
+  return withKeys(entry, gated);
+}
+
+/** S462 round 6 — events a browser may fire while a gated subtree is being removed. */
+const FOCUS_EVENTS = new Set(["blur", "focusout", "focus", "focusin"]);
+
+/** The DOM event an event-handler attribute names (`onclick` / `on:click` / `onclient:click` → `click`). */
+function handlerEventName(attrName: string): string {
+  return attrName.replace(/^on(?:client:|server:|:)?/i, "").toLowerCase();
 }
 
 /** Lambdas a known built-in calls synchronously (S462 Q12) — set by the call above them. */
@@ -684,7 +701,8 @@ export function walkNodeNarrowed(
         // lambda) is a function body: it runs later, so it re-tests reactive cells —
         // except what an enclosing `if=` gate narrows (Q18, `handlerEntry`).
         const isHandler = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
-        const at = isGuard ? present : isHandler ? handlerEntry(inner, val, here, opts) : inner;
+        const at = isGuard ? present
+          : isHandler ? handlerEntry(inner, val, here, opts, handlerEventName(attr.name as string)) : inner;
         if (Array.isArray(hb)) walkBodyNarrowed(hb, at, here, opts);
         else walkExprNarrowed(val, at, here, opts);
       }

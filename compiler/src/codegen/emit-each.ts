@@ -38,6 +38,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
+import { guardDetachedListener } from "./detached-listener.ts";
 import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -2571,7 +2572,7 @@ function renderTemplateAttrToJs(
         boundaryId: `on${ev} <each> row`,
       },
     );
-    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${handlerFn});`);
+    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${guardDetachedListener(handlerFn)});`);
     return;
   }
 

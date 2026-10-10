@@ -100,3 +100,17 @@ describe("S462 Q18 — a handler inside an `if=` gate keeps that gate's narrowin
     expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ @o = { v: not, n: not, f: not }\n @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
 });
+
+// S462 round 6 (F6-2): a focus-family handler (`blur` / `focusout` / `focus` / `focusin`) keeps no gate
+// narrowing — the browser fires `blur` / `focusout` while the gated subtree is being removed.
+describe("S462 round 6 — focus-family handlers are not exempt", () => {
+  test("onblur under `if=` re-tests", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><input onblur={ @m = @o.n + 1 }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("onfocusout under `if=` re-tests", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><input onfocusout={ @m = @o.n + 1 }/></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("oninput under `if=` keeps it", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><input oninput={ @m = @o.n + 1 }/></p>")).toEqual([]);
+  });
+});

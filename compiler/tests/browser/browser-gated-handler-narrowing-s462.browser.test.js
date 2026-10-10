@@ -69,6 +69,63 @@ type User:struct = { name: string }
 </program>
 `;
 
+// S462 round 6 (F6-2) — a NON-delegated event (`input`, `keydown`) is wired with a direct
+// listener. An event dispatched inside the removed subtree keeps its propagation path, so
+// an ancestor's listener in that subtree would still run — unless the listener checks that
+// its element is still connected (codegen/detached-listener.ts).
+const SRC_INPUT = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+\${
+    function clear() { @user = not }
+}
+<div if=@user>
+    <section id="sec" oninput={ @out = @user.name } onkeydown={ @out = @user.name + "!" }>
+        <input class="i" oninput={ clear() }/>
+    </section>
+</div>
+<p id="o">\${@out}</p>
+</program>
+`;
+
+describe("S462 round 6 — a direct listener on a removed element does not run", () => {
+  test("a bubbling `input` whose own handler unmounts the gate: the ancestor's handler does not run", async () => {
+    const { errors } = compileAndMount(SRC_INPUT, "gatedinput");
+    expect(errors).toEqual([]);
+    await flush();
+    const sec = document.querySelector("#sec");
+    const inp = document.querySelector(".i");
+    expect(sec).not.toBeNull();
+    // While present: a keydown on the section runs its handler.
+    sec.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    await flush();
+    expect(globalThis.__s462q18_get("out")).toBe("a!");
+
+    const seen = [];
+    const onError = (e) => { seen.push(e?.error ?? e?.message ?? e); };
+    window.addEventListener("error", onError);
+    const origConsoleError = console.error;
+    console.error = (...a) => { seen.push(a); };
+    try {
+      // The input's own handler clears @user (the gate unmounts synchronously); the event
+      // then bubbles to the section, now detached — its handler must not run.
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+      expect(document.querySelector("#sec")).toBeNull();
+      // And events dispatched later on the held, detached nodes run nothing.
+      sec.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true }));
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    } finally {
+      window.removeEventListener("error", onError);
+      console.error = origConsoleError;
+    }
+    expect(seen).toEqual([]);
+    expect(globalThis.__s462q18_get("out")).toBe("a!");
+  });
+});
+
 describe("S462 Q18 — a gated handler cannot run once its gate removed it", () => {
   test("compiles clean; the detached button's click runs nothing", async () => {
     const { errors } = compileAndMount(SRC, "gated");

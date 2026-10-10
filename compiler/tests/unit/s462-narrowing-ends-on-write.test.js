@@ -1114,3 +1114,18 @@ type Load:struct = { ref: string }
     expect(e046(site("if=(@loaded && @currentLoad is some)")).length).toBe(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 6 (F6-2) — focus-family handlers keep no gate narrowing: Chromium fires
+// `blur` / `focusout` on a focused element DURING its removal, while still connected.
+// ---------------------------------------------------------------------------
+describe("S462 round 6 — F6-2: a focus-family handler is not exempt", () => {
+  for (const ev of ["onblur", "onfocusout", "onfocus", "onfocusin"]) {
+    test(`${ev} under \`if=@user\` re-tests`, () => {
+      expect(nM(`<div if=@user><input ${ev}={ @out = @user.name }/></div>`)).toBe(1);
+    });
+  }
+  test("oninput / onkeydown under `if=@user` keep it (direct listeners check the element is connected)", () => {
+    expect(nM(`<div if=@user><input oninput={ @out = @user.name } onkeydown={ @out = @user.name }/></div>`)).toBe(0);
+  });
+});

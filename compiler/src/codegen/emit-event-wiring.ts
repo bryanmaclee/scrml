@@ -1,3 +1,4 @@
+import { guardDetachedListener } from "./detached-listener.ts";
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
@@ -1664,7 +1665,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // click/submit live on `document` and survive on their own).
       nonDelegatedRewire.push(`    (_scrml_root || _scrml_g.document).querySelectorAll('[data-scrml-bind-${eventName}]').forEach(function(_scrml_el) {`);
       nonDelegatedRewire.push(`      const _scrml_id = _scrml_el.getAttribute('data-scrml-bind-${eventName}');`);
-      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) _scrml_el.addEventListener(${JSON.stringify(domEvent)}, ${mapVarName}[_scrml_id]);`);
+      // S462 round 6 (F6-2): a direct listener runs only while its element is connected.
+      nonDelegatedRewire.push(`      if (${mapVarName}[_scrml_id]) _scrml_el.addEventListener(${JSON.stringify(domEvent)}, ${guardDetachedListener(`${mapVarName}[_scrml_id]`)});`);
       nonDelegatedRewire.push(`    });`);
     }
   }

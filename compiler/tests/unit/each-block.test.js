@@ -760,7 +760,7 @@ function clk(i) {
     // null-guard) before reading the iter var, so a same-key reconcile fires the
     // handler with live data, not the create-time snapshot. The iter-var read in
     // the handler arg is preserved (it now resolves to the re-bound `let`).
-    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
+    expect(clientJs).toMatch(/\.addEventListener\("click", function\(_scrml_event\) \{ if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; let _scrml_each_item = _scrml_resolve_item\(_scrml_mount, _scrml_each_key_\d+\); if \(_scrml_each_item === null\) return; _scrml_clk_\d+\(_scrml_each_item\); \}\)/);
     expect(clientJs).toContain('.setAttribute("data-i", _scrml_g.String(_scrml_each_item));');
   });
 });
