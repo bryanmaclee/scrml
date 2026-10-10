@@ -13,3 +13,4 @@
 2026-10-10T11:32:58-06:00 final: tiers 5630/0; emit-differential vs origin/main 2897ba133: 22 diag-changed (19 new match-leave cases + samples 080/075/076), 44 artifact-changed (inline lowering), nothing else.
 2026-10-10T12:16:38-06:00 fix round 2: N1+N4 (arm-body-statements.ts one reader; top-level return all arm forms incl !{}; labels). corpus 0 change.
 2026-10-10T12:29:16-06:00 fix round 2: N2/N3 message-arm exits via parsed body.
+2026-10-10T12:40:58-06:00 N5: SPEC §42.2.3 note (given heads resolve as reads; newly-rejecting; corpus 2 samples).

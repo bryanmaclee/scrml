@@ -31444,6 +31444,9 @@ Multi-narrowing is all-or-nothing. If any listed variable is `not`, the body is 
 
 **No rebind.** Because `given` narrows in place, the rebind form `given <name> = <expr> :>` is NOT valid scrml — there is no `=` in the `given` head grammar (`given-guard ::= ‘given’ identifier-list (‘:>’ | ‘=>’) block`). A `given` head SHALL contain only an identifier-list. A bare `=` after a `given`-bound identifier SHALL be compile error E-SYNTAX-045 (the sibling of the property-path reject E-SYNTAX-044), in BOTH logic and markup-`${}` contexts. To bind a fresh value, declare it first (`let n = <expr>` then `given n :> { ... }`); to narrow an existing variable, name it directly (`given <existingVar> :> { ... }`). (`==`, `=>`, `:>` after the identifier are NOT rebinds and do not fire: equality, the deprecated separator, the canonical separator respectively.)
 
+Because a `given` head NAMES variables rather than binding them, each head name SHALL resolve as an ordinary read at that point: an undeclared name — including one declared only later in the block, exactly as for any other read — is **E-SCOPE-001**. This holds for a `given` arm of a `match` too (`match name { given n :> … }` with no `n` in scope is E-SCOPE-001, not a guard that tests an unbound name at run time).
+> **Provenance:** spec:§42.2.3 "No rebind" (above) — a consequence, not a new rule · S462 review F3/N5 (s462-stmt-match-leave) · **direction of change: newly-rejecting** in impl#1, which never resolved a `given` head (an undeclared head compiled and threw `ReferenceError` when the guard ran). Corpus measured: 2 sites, both in the s19 gauntlet samples that name an undeclared `n` (`phase3-match-given-arm-075`, `phase3-match-optional-no-arms-076`); 0 sites declare the name only after the guard. Emitted at `compiler/src/type-system.ts` (`case "given-guard"`).
+
 **In match arms**, the presence pattern in a `match` block uses `given` in the payload position:
 
 ```scrml
