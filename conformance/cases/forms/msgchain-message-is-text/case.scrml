@@ -1,0 +1,16 @@
+<program>
+${
+    import { messageFor, registerMessages } from 'scrml:data'
+    registerMessages({ .EqFailed: "<b>{field}</b> must be {expected}" })
+    <signup>
+        <password req> = <input id="password" type="text"/>
+        <confirm req eq(@signup.password)> = <input id="confirm" type="text"/>
+        <hint neq(@signup.password)> = <input id="hint" type="text"/>
+    </>
+}
+<signup><password/><confirm/><hint/></>
+<div id="e-confirm"><errors of=@signup.confirm/></div>
+<div id="e-hint"><errors of=@signup.hint/></div>
+<div id="e-all"><errors of=@signup all/></div>
+<p id="e-text">${ messageFor(@signup.confirm.errors[0], "confirm") }</p>
+</program>

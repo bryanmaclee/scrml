@@ -1,0 +1,13 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .Required:  "{field} is required",
+        .MinFailed: "{field} must be at least {expected}",
+    })
+    <signup>
+        <age req min(18)> = <input id="age" type="number"/>
+    </>
+}
+<signup><age/></>
+</program>
