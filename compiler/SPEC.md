@@ -26351,6 +26351,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
+| E-MESSAGE-NOT-TEMPLATE | §41.12, §55.10 | A value in the `registerMessages` map is a function (an arrow, `fn` or `function` expression) or another non-string literal. Level-2 messages are message TEMPLATES with named slots (`.Required: "Please fill in {field}."`) — a function is not value data and is never stored (§14.3). The message shows the template form and the variant's slots. A non-string value the compiler cannot see is refused by the runtime when `registerMessages` runs (§41.12.1 rule 6). **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-SLOT-UNKNOWN | §41.12.1 | A literal `registerMessages` template names a slot (`{name}`) that its variant does not have. The slots are `{field}` plus the variant's §55.9 payload fields (`{predicate}`, `{re}`, `{threshold}`, `{expected}`, `{forbidden}`, `{set}`, `{tag}`). The message names the slot, the variant and the variant's slots. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-TEMPLATE-MALFORMED | §41.12.1 | A literal `registerMessages` template has a `{` that neither opens a slot (`{` name `}`, no whitespace) nor is escaped as `{{` — an unclosed `{name`, `{}`, `{ field }`, `{1}`. The message names the position. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-VARIANT-UNKNOWN | §41.12, §55.9 | A `registerMessages` map key is not a `ValidationError` variant (§55.9), so no error can ever carry it and the entry is never read. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
 | E-VALIDATOR-DEAD | §55.5.2, §66.5.5 | **Amended S447 (call 4).** A value's validators are dead because **nothing can ever change the value** — all three hold: (1) no `bind:` anywhere targets it; (2) it has no write grant (it is locked — written without `let`, §66.9; a locked value with a reactive initializer is derived and is E-DERIVED-WITH-VALIDATORS instead); (3) it is not server-loaded (no `server` authority, §52) — **and** it is neither (4) seeded at a use site (§66.9 rule 8) nor (5) restored by `persist=` (§6.14.2); both of those count as LIVE (S447 gate-calls item 4: *"each can start invalid, so the validator has something to report"*). Its validity is then a compile-time constant. A value set only from logic and read through `isValid` is **legal**, for child fields and top-level values alike; a validated top-level value is no longer dead for being top-level (§55.5.1). Resolution: bind it, make it writable (`let`), or drop the validators. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 4 — *"E-VALIDATOR-DEAD only when nothing can ever change the value: no bind, no write grant, not server-loaded"* · ruling:user-voice-scrml.md S447 "RULED — \"your recs on the gate calls\": the four §55.17 OPEN items" item 4 (use-site seed and `persist=` restore are LIVE) · origin: S442 "RULED — dpa-058 (O25) = all PA recs" item (5) · **supersedes:** this row's S444 wording, both clauses — (a) "a single-value top-level cell … (§55.5 Edge A) — bound or not" and (b) "a child field that no `bind:` targets". (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`fieldVals`, `validatorPass`) under the **superseded** S444 trigger; the S447 trigger is **Nominal / lands with the impl** in the bootstrap. impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
 | E-VALIDITY-NO-SURFACE | §55.5.1 | **Amended S447 (call 3).** A read of a synthesized validity property — `isValid`, `errors`, `touched`, `submitted` (including `<errors of=@x/>`, which reads `.errors`) — on a value that has no validity surface: a **top-level value that carries no validators** (`let <count:int=0/>` then `@count.isValid`). A validated top-level value has the surface (§55.5.1); a declaration and its child fields always have it (§55.5 Edge B, §55.6). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — "`@x.isValid` on a no-surface cell → an error" · ruling:user-voice-scrml.md S447 "validity calls 2-6" call 3 — *"Only values carrying validators get the surface"* · **supersedes:** the trigger "a single-value top-level cell (§55.5 Edge A)" for VALIDATED top-level cells (S447 item 1). (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`resolveMember`) for EVERY program cell — the narrowing to unvalidated cells is **Nominal / lands with the impl**. impl#1: **Nominal / not yet emitted** — impl#1 reads the property off the raw value and yields `undefined` silently (known gap); impl#1 carries it, §34.0.) | Error |
 | E-VALIDITY-RESERVED-NAME | §55.5.3, §66.2.3 | `isValid`, `errors`, `touched` or `submitted` used as (1) the name of a child field or an attribute of a declaration, or (2) the name of a field of a struct type used as the type of a validated value (a value carrying validators). The name would shadow the synthesized validity surface (§55.5–§55.7); the message names the field and the surface property it hides. Not affected: a top-level declaration so named (it is not a field), a struct-literal key, a struct type never used as a validated value's type. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 5 — *"`isValid` / `errors` / `touched` / `submitted` are illegal field / attribute names (and as fields of a struct type used as a validated value's type). Newly rejecting; corpus impact measured zero by the DD."* (Named S447. **Nominal / spec-ahead — lands with the impl**; not yet emitted by either implementation (the bootstrap today resolves a field so named before the surface — silent shadowing, dpa-058c F12). impl#1 carries it, §34.0.) | Error |
@@ -30394,6 +30398,14 @@ This section (§41) extends §21 without removing it. Specifically:
 
 **Added:** 2026-05-04 — formalises Lock 12's project-registered messages — the second tier of the 4-level error message resolution chain (§55.10).
 
+> ⚑ **Amended 2026-10-09 (S462).** The values of the `registerMessages` map are **message templates with named
+> slots**, not functions. A function value is refused (`E-MESSAGE-NOT-TEMPLATE`).
+> **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration"
+> item (2) — *"`registerMessages` (§41.12/§55.10) values become message TEMPLATES with named slots (`.Required:
+> "Please fill in {field}."`), not functions."* — a consequence of ruling:user-voice-scrml.md S462 "RULED — \"a\" —
+> no value holds a function" (§14.3 extended). · **supersedes:** the 2026-05-04 form whose values were functions
+> `(fieldName, ...payload) => string`.
+
 **The API:**
 
 ```scrml
@@ -30401,21 +30413,74 @@ ${
   import { registerMessages } from 'scrml:data'
 
   registerMessages({
-    .Required:        (field) => `${field} is required.`,
-    .TooShort:        (field, n) => `${field} must be at least ${n} characters.`,
-    .EmailInvalid:    (field) => `Please enter a valid email for ${field}.`,
-    .Custom:          (field, tag) => /* fall through to inline / defaults */,
+    .Required:        "Please fill in {field}.",
+    .LengthFailed:    "{field} must have a length {predicate}.",
+    .MinFailed:       "{field} must be at least {threshold}.",
+    .OneOfFailed:     "{field} must be one of: {set}.",
   })
 }
 ```
 
 **Normative statements:**
 
-- `registerMessages(map)` is exported by `scrml:data`. The argument is an enum-keyed object whose keys are `ValidationError` variants (cross-ref §55.9) and whose values are functions returning the user-facing string for that error tag.
-- Each function receives `(fieldName, ...args)` — the first positional argument is the field display name (cross-ref §55.10's field-name resolution), and the remaining positional arguments are the variant's payload values (e.g., `.TooShort(2)` passes `2` as the second argument).
+- `registerMessages(map)` is exported by `scrml:data`. The argument is an enum-keyed object whose keys are `ValidationError` variants (cross-ref §55.9) and whose values are **message templates** — strings in the grammar below. A template is data: it names the slots it fills, and the runtime fills them; no author code runs to produce a message.
+- A value that is a function (an arrow, `fn`, or `function` expression) SHALL be refused with `E-MESSAGE-NOT-TEMPLATE`, whose message shows the template form. Any other value that is not a string — written as a literal, so the compiler can see it — is refused with the same code.
+- A key that is not a `ValidationError` variant (§55.9) SHALL be refused with `E-MESSAGE-VARIANT-UNKNOWN`: no error carries that tag, so the entry could never be read.
 - `registerMessages` is project-wide. It SHOULD be called exactly once at app boot, typically inside the root `<program>` body or a top-level `${}` block. Multiple calls compose by last-write-wins per variant key.
 - Calling `registerMessages` from a non-top-level context (inside a function body, inside a worker `<program>`) is `E-USE-INVALID-CTX` — registration must happen at app initialisation, not per-call.
 - A variant key not registered in any `registerMessages` call falls through to the next layer of the resolution chain (`scrml:data` shipped English defaults, then the `<match for=ValidationError>` escape hatch). See §55.10 for the full 4-level chain.
+
+#### 41.12.1 Message template grammar
+
+```
+template := ( text | "{{" | slot )*
+slot     := "{" name "}"
+name     := [A-Za-z_] [A-Za-z0-9_]*
+text     := any character other than "{"
+```
+
+1. **Only `{` is special.** `{name}` is a slot: the runtime replaces it with the rendered value of that slot
+   (table below). `{{` is a literal `{`. A `}` outside a slot is ordinary text and needs no escape.
+2. **A slot is exactly `{`, a name, `}`** — no whitespace, no expression, no format specifier, no nesting.
+   Any other text after a single `{` (end of string, a space, a digit, `}`, another character) makes the
+   template **malformed**: `E-MESSAGE-TEMPLATE-MALFORMED`.
+3. **The slots are the field name and the variant's payload fields** (§55.9), by their §55.9 names:
+
+   | Variant | Slots |
+   |---|---|
+   | `Required`, `NotSome` | `{field}` |
+   | `LengthFailed` | `{field}`, `{predicate}` |
+   | `PatternMismatch` | `{field}`, `{re}` |
+   | `MinFailed`, `MaxFailed` | `{field}`, `{threshold}` |
+   | `GtFailed`, `LtFailed`, `GteFailed`, `LteFailed`, `EqFailed` | `{field}`, `{expected}` |
+   | `NeqFailed` | `{field}`, `{forbidden}` |
+   | `OneOfFailed`, `NotInFailed` | `{field}`, `{set}` |
+   | `Custom` | `{field}`, `{tag}` |
+
+   A template need not use every slot its variant has, and may use one slot more than once.
+4. **Rendering.** `{field}` is the field display name (§55.10). `{predicate}` renders the relational predicate
+   as `<op> <value>` (`>= 2`). `{set}` renders the elements as text joined by `, ` (`a, b, c`). `{re}` renders the
+   pattern as written (`/^[a-z]+$/`). `{threshold}`, `{expected}`, `{forbidden}` and `{tag}` render the value as
+   text. A slot whose payload value is absent renders as the empty string.
+5. **A literal template is checked at compile time.** When the `registerMessages` argument is an object
+   literal and a value is a string literal (a double-quoted string, or a back-tick string with no `${}`), the
+   compiler parses the template against the slot table of its key: a slot name the variant does not have is
+   `E-MESSAGE-SLOT-UNKNOWN` (the message names the slot, the variant and the variant's slots); a malformed
+   template is `E-MESSAGE-TEMPLATE-MALFORMED` (the message names the offending position).
+6. **A non-literal template is checked when it is registered, and fails closed.** A template the compiler
+   cannot see (a variable, a back-tick string with `${}`, a value read from data) is parsed by the runtime, with
+   the same grammar and the same slot table, when `registerMessages` runs. A template that is malformed, names a
+   slot its variant lacks, or is not a string is **refused**: it is not registered (an earlier registration
+   for that variant, if any, stays), the runtime reports the refusal on the console, and the chain falls
+   through to Level 3 for that variant. A refused template is never rendered partially, and an unknown
+   `{name}` is never shown to the user as text.
+7. **Statically extractable.** A program whose `registerMessages` values are all string literals has its whole
+   message catalog in source text: i18n tooling extracts it without running the program (the same property
+   Level 1 has by L12 Edge F, §55.10).
+
+The compile-time check and the runtime check are one reader: the compiler and the runtime parse templates with
+the same source (`compiler/src/runtime-message-templates.js`, inlined into the `messages` runtime chunk). The
+Level-3 shipped defaults (§55.10) are templates in the same grammar.
 
 **The 4-level resolution chain (cross-ref §55.10):**
 
@@ -30429,9 +30494,10 @@ ${
 The `scrml:data` module exports a sibling helper `messageFor` that performs the full 4-level resolution and returns the user-facing string. The `<errors of=expr/>` element (§55.8) calls `messageFor` internally for default rendering.
 
 **Cross-references:**
-- §55.9 — `ValidationError` enum (the variant catalog).
+- §55.9 — `ValidationError` enum (the variant catalog and the payload field names the slots use).
 - §55.10 — full 4-level message resolution chain.
 - §55.8 — `<errors of=expr/>` element (default rendering uses `messageFor`).
+- §14.3 — a function is not value data; it is never stored (the reason the values are templates).
 
 ### 41.13 `scrml:data` `parseVariant` — boundary-parsing primitive for tagged-variant JSON
 
@@ -30578,7 +30644,7 @@ The element form is canonical. A bare-call form (`const handle = formFor(Signup,
 - The slot scope of a per-field slot SHALL expose the auto-synthesized reactive cell for that field. Inside the slot body, `bind:value=@<varName>.<fieldName>` binds to the canonical cell; alternative slot-scope binding via `:let={(cell) => ...}` per §16.6 parametric-snippet form is also legal.
 - A slot whose `name=` does not match any struct field SHALL emit `E-FORMFOR-SLOT-UNKNOWN` at the parser stage.
 - `<errors of=@<varName>.<fieldName>/>` SHALL be emitted by `formFor` adjacent to each field's input position regardless of slot override. The validity surface is formFor-owned, not slot-owned — slot overrides change the INPUT rendering, not the error rendering.
-- Project-scoped per-type renderer registration (`data.registerRenderer(TypeKey, renderFn)`) is reserved for v1.next as a sibling to `data.registerMessages` (§41.12). This revision does NOT include the registry; per-call slot overrides are the only customization surface in v1.0.
+- Project-scoped per-type renderer registration (`data.registerRenderer(TypeKey, renderFn)`) is reserved for v1.next as a sibling to `data.registerMessages` (§41.12). This revision does NOT include the registry; per-call slot overrides are the only customization surface in v1.0. When it is specified, its renderer argument SHALL take a non-function form (data the runtime interprets, as `registerMessages` takes templates, §41.12) — a function is not value data and is never stored (§14.3, S462).
 
 #### 41.14.5 Normative statements — field-set transforms (OQ-FF-3)
 
@@ -42270,7 +42336,9 @@ type ValidationError = enum {
 payload structure), and inert at the type system (no exhaustiveness). The enum gives
 exhaustiveness for `match` over errors, payload data for parameterization (e.g., the
 threshold in `MinFailed(18)`), and a single canonical reference for project-registered
-messages and i18n (§55.10).
+messages and i18n (§55.10). The payload field names are the slot names of a message
+template (§41.12.1): `MinFailed`'s template may use `{threshold}`, `OneOfFailed`'s `{set}`,
+`Custom`'s `{tag}`.
 
 **`@signup.errors` arrays contain these enum values.** Render via `messageFor` (§55.10)
 or via `match` over `ValidationError` (the JS-style match form, §18.1+, or block-form,
@@ -42296,9 +42364,9 @@ extractable for i18n tooling; expressions defeat that.
 ${
   import { registerMessages } from 'scrml:data'
   registerMessages({
-    .Required:        (field) => `Please fill in ${field}.`,
-    .LengthFailed:    (field, pred) => `${field} must satisfy ${pred}.`,
-    .PatternMismatch: (field, re) => `${field} doesn't match the expected pattern.`,
+    .Required:        "Please fill in {field}.",
+    .LengthFailed:    "{field} must have a length {predicate}.",
+    .PatternMismatch: "{field} doesn't match the expected pattern.",
     ...
   })
 }
@@ -42307,12 +42375,17 @@ ${
 The `registerMessages` API is part of `scrml:data` (cross-ref §41), imported via a named
 import (`import { registerMessages } from 'scrml:data'`) — the `use scrml:data` +
 `data.registerMessages` member-access form does NOT resolve (fires `E-USE-001`/`E-SCOPE-001`;
-S236 ruling `g-spec-msgchain-l2-example-uncompilable`). Each entry is a function from
-`(fieldName, ...errorTagPayload)` to a string. Functions can return
-template-interpolated strings, including reactive references.
+S236 ruling `g-spec-msgchain-l2-example-uncompilable`). Each entry is a **message template**
+(§41.12.1, S462): a string whose `{field}` slot is the field display name and whose other slots are
+the variant's §55.9 payload fields (`{threshold}`, `{expected}`, `{set}`, …). A template is data —
+no author function runs to produce a message (§14.3: a function is never stored). A template written
+as a literal is checked at compile time (`E-MESSAGE-SLOT-UNKNOWN`, `E-MESSAGE-TEMPLATE-MALFORMED`);
+a function value is `E-MESSAGE-NOT-TEMPLATE`. Literal templates keep the whole Level-2 catalog
+statically extractable for i18n, as Level 1 is.
 
 **Level 3 — `scrml:data` shipped English defaults** (zero-config; works for prototype-phase
-apps without any registration). Always available; the floor of the resolution chain.
+apps without any registration). Always available; the floor of the resolution chain. The defaults
+are templates in the §41.12.1 grammar (e.g. `MinFailed` → `"{field} must be at least {threshold}."`).
 
 **Level 4 — `match` escape hatch** (full developer control at the call site):
 

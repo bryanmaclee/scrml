@@ -1,1 +1,2 @@
 - 2026-10-09T18:57:36-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a81dcc7de466cf877
+- 2026-10-09T19:02:43-06:00 SPEC §41.12 template grammar + §55.9/§55.10 + §41.14.4 registerRenderer note + 4 §34 rows
