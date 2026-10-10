@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 248 | 5 |
-| MED | 567 | 6 |
-| LOW | 336 | 0 |
+| HIGH | 249 | 5 |
+| MED | 569 | 6 |
+| LOW | 338 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24401,6 +24401,36 @@ SPEC §6.6.10: "The compiler SHALL detect all cycles in the derived reactive dep
 ### g-bootstrap-eq-mixed-types-silent-s462 — the bootstrap's typer accepts `==` / `!=` between provably different primitive types (`let <s:string="a"/>` + `<c=(@s == 1)/>` compiles; the inferred type is `bool`) — `NEW S462; LOW; open (pre-existing)`
 <!-- @gap id=g-bootstrap-eq-mixed-types-silent-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(checkOperands — `.EqPrim :> ts` / `.NeqPrim :> ts`: `==` / `!=` are not judged; the comment defers them to §45.3 E-EQ-001) prov=review:S462-s239-fix-round-1-F8 -->
 Pre-existing leniency surfaced by the S462 review (the own-value inference reads a comparison as `bool`, §66.3 rule 5 (d), and so does the typer). Governing: §45.3 (E-EQ-001). Not caused by S462; filed so the inference's `bool` is not read as a judgment that the comparison is well-typed.
+
+### G-ERRORS-DEFAULT-RENDER-MESSAGE-AS-HTML-S462 — the `<errors of=>` default render inserted the resolved message into `innerHTML` as HTML, so a payload slot carrying user data became markup: `<confirm req eq(@signup.password)>` + typing `<img id=pwn src=x>` into the password field created an `#pwn` element (per-field render and the compound `all` rollup alike) — `NEW S462; HIGH; RESOLVED S462 (s462-register-messages-templates FIX1 P1)`
+<!-- @gap id=g-errors-default-render-message-as-html-s462 sev=HIGH status=resolved locus=compiler/src/codegen/emit-event-wiring.ts(<errors> default renderOne),compiler/src/runtime-template.js(_scrml_message_html, 'messages' chunk) prov=review:S462-register-messages-templates -->
+
+Pre-existing since C11 (on 980cb3001 too). Reviewer-reproduced in happy-dom, PA-confirmed by reading `emit-event-wiring.ts` (`'<p class="scrml-error">' + messageForFn(...) + '</p>'` → `_scrml_el.innerHTML`). §55.8's normative default render is `<p class="scrml-error">${ messageFor(errors[0]) }</p>` — a markup `${}` text interpolation — so the message is TEXT; SPEC §55.8 now says so explicitly ("The message is text"). **Fix:** the default render escapes the whole message through `_scrml_message_html` (`& < > " '`) before it reaches `innerHTML`; `messageFor` itself still returns plain text (escaping belongs to the HTML sink — a `${ messageFor(e) }` interpolation already escapes, and escaping inside `messageFor` would double-escape there). **Evidence:** happy-dom probe `#pwn` count 3 → 0 (per-field, rollup, and the body-override position, which renders the default — see G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462); conformance `forms/msgchain-message-is-text` (runtime: registered L2 template with `<b>`, shipped L3 default with `{forbidden}`, per-field + `all` rollup, and a `${ messageFor(...) }` control paragraph — all render the same text, no `img`/`b` element); unit `c10 §C10.10d`. Every `_scrml_message_for` → `innerHTML` path goes through this one `renderOne` (grep: the only emitter of `scrml-error` markup; formFor emits `<errors>` elements, so it inherits the fix). The body-override path (author markup) is unchanged and currently unreachable.
+
+### G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462 — the §55.8 `<errors of=…>` body override is dead: its SPEC form `${(err) => <span>…</span>}` is refused with E-SYNTAX-043 (the retired `(x) =>` presence-guard syntax), and any other spelling (`${ function (err) { return <span>…</span> } }`) is silently ignored — the default render shows instead — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-errors-body-override-arrow-form-unreachable-s462 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(<errors> body-override extraction: arrow-only regex on the bare-expr text) + the E-SYNTAX-043 `(x) =>` refusal (§42.2.3) prov=agent:s462-register-messages-templates-fix1 -->
+
+Found while checking the P1 sinks. `emit-html.ts` accepts a body override only when the body's bare-expr text matches `^(x) =>`; that text is now E-SYNTAX-043, so the override can never be written. Needs a SPEC call on the body-override spelling (and, when it is revived, the `${ messageFor(err) }` inside the author's markup must stay a text interpolation — the P1 class).
+
+### G-LOGIC-BACKTICK-LONE-CLOSE-BRACE-CLOSES-CONTEXT-S462 — a `}` inside a back-tick string in a `${}` logic block (`` const s = `a }` ``) is counted by the block splitter as the close of the logic context → E-CTX-001 / E-PARSE-001 — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-logic-backtick-lone-close-brace-closes-context-s462 sev=MED status=open locus=compiler/src/block-splitter.js(back-tick template tracking at ~:2937 runs for frame.type === "meta" only; logic frames count a template's `}` as a context brace) prov=review:S462-register-messages-templates -->
+
+Reviewer-reproduced on both trees; agent re-confirmed (`` const s = `a }` `` alone). Balanced braces inside a back-tick string (`` `{field} x` ``) are unaffected, so it bites exactly the §41.12.1 "a lone `}` is text" case. SPEC §41.12.1 rule 5 now carries a note: write a template containing a lone `}` as a double-quoted string until this closes.
+
+### G-BARE-CALL-STRING-TAG-BEFORE-STATE-BLOCK-DROPPED-S462 — a multi-line bare call statement whose argument holds a string starting a tag (`foo({\n a: "<b>x",\n})`), followed by a state block (`<vf>…</>`) in the same `${}`, vanishes from the client JS with no diagnostic — `NEW S462; HIGH; open (pre-existing; root cause not traced)`
+<!-- @gap id=g-bare-call-string-tag-before-state-block-dropped-s462 sev=HIGH status=open locus=searched:compiler/src/block-splitter.js(logic-context `<` markup detection vs string state across lines),compiler/src/ast-builder.js(bare-expr statement collection) — not traced prov=review:S462-register-messages-templates -->
+
+Reviewer-found as `registerMessages({ .PatternMismatch: "<b>{field}</b>", })`; agent-minimized (S462 FIX1): the trigger is (a) a BARE call statement (a `const o = foo({…})` declaration survives), (b) spanning lines, (c) a double-quoted string in it containing `<` + a tag name (`"<b>x"` suffices; `"a </b> b"` does not), and (d) a state block after it in the same `${}`. Without (d) the same file reports E-MARKUP-001 (the `<b` is read as markup); with it, nothing is reported and the statement is gone (the control without `<b`, `foo({ a: "x" })`, reaches scope checking and fires E-SCOPE-001). Single-line `registerMessages({ .PatternMismatch: "<b>{field}</b>" })` is unaffected. Silent drop of a program statement = HIGH.
+
+### G-BROWSER-BASELINE-FAIL-MARKER-PARSER-FLAKY-UNDER-LOAD-S462 — `scripts/browser-baseline.ts --check` intermittently refuses with "PARSER DISAGREES … 50 vs 49" (the `(fail)` marker count it parses does not match bun's summary) when the machine is loaded; a clean re-run passes — `NEW S462; LOW; open`
+<!-- @gap id=g-browser-baseline-fail-marker-parser-flaky-under-load-s462 sev=LOW status=open locus=scripts/browser-baseline.ts(FAIL_MARKER parse of bun's interleaved test output vs the summary count) prov=agent:s462-register-messages-templates-fix1 -->
+
+Observed in s462-register-messages-templates FIX ROUND 1 with several sibling agents' full suites running: the first `--check` refused ("a `(fail)` marker emitted somewhere this regex does not reach"), the immediate re-run PASSED (48 asserted). bun interleaves markers into output under load; the parser is the fragile half. A gate that refuses intermittently for reasons no change caused gets re-run until green, which is how it stops being read.
+
+### G-REWRITE-FN-KEYWORD-REWRITES-STRING-CONTENTS-S462 — on the escape-hatch codegen path `rewriteFnKeyword`'s `\bfn\b` replace runs over string-literal contents: `"fn(a) {field} fn (b)"` is emitted as `"function(a) { field } function (b)"` — `NEW S462; LOW; open (pre-existing; same class as G-ESCAPE-HATCH-ARG-TEXT-REWRITE-CORRUPTS-STRINGS-S461)`
+<!-- @gap id=g-rewrite-fn-keyword-rewrites-string-contents-s462 sev=LOW status=open locus=compiler/src/codegen/rewrite.ts(rewriteFnKeyword, `expr.replace(/\bfn\b/g, "function")`, pass 16) prov=review:S462-register-messages-templates-rereview -->
+
+Reviewer-found on the s462 re-review. `rewriteFnKeyword` is token-blind; any string in an expression that falls to the escape-hatch text path loses its literal `fn` words (and other text passes reformat braces). The S462 F1 compile-time check re-reads escape-hatch `registerMessages` calls through this same lowering, so a template containing the word `fn` is CHECKED as the corrupted text — the check and the emitted code agree, but both differ from the source.
 
 ### G-BOOTSTRAP-NO-CHANNEL-HANDLER-CHECKS-S462 — the bootstrap (`compiler/self-host-v2/`) has none of the channel handler checks: no E-CHANNEL-005, E-CHANNEL-HANDLER-SHADOW or E-CHANNEL-006 (declared or §12.2-placed), and no handler-name resolution to build them on — `NEW S462; LOW; open (bootstrap twin)`
 <!-- @gap id=g-bootstrap-no-channel-handler-checks-s462 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `E-CHANNEL-00[56]`, `E-CHANNEL-HANDLER-SHADOW`, `onclient` — zero hits; the only channel diagnostic is E-CHANNEL-OUTSIDE-PROGRAM at analyze.scrml:1425) prov=empirical:s462-channel-006-inferred -->

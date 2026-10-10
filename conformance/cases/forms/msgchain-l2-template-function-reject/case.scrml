@@ -1,0 +1,12 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .Required: (field) => `${field} is required`,
+    })
+    <signup>
+        <name req> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+</program>
