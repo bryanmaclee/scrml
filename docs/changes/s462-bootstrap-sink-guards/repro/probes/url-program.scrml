@@ -1,0 +1,48 @@
+type Row:struct = { id: int, url: string }
+
+<lnk u:string>
+</>
+renders <a class="lnk" href=u>l</a>
+
+<program>
+    let <bad:string="javascript:alert(1)"/>
+    let <good:string="/ok?a=1"/>
+    let <pic:string="data:image/png;base64,AAAA"/>
+    let <u:string="/start"/>
+    let <spaced:string="  JaVaScRiPt:alert(4)"/>
+    let <set:string="/a.png 1x, javascript:alert(5) 2x"/>
+    let <list:string="/a;javascript:alert(2)"/>
+    let <animated:string="fill"/>
+    <rows:Row[]=([{ id: 1, url: "JaVaScRiPt:alert(3)" }, { id: 2, url: "https://example.com/" }])/>
+    function flip() { @u = "vbscript:x" }
+
+    <main>
+        <a id="e" href=@bad>bound</a>
+        <a id="g" href=@good>safe</a>
+        <a id="p" href=(@good + "#top")>expression</a>
+        <img id="i" src=@pic/>
+        <a id="h" href=@pic>raster data on href</a>
+        <a id="d" href=@u>reactive</a>
+        <a id="sp" href=@spaced>leading space, mixed case</a>
+        <a id="up" HREF=@bad>upper-case name</a>
+        <img id="ss" srcset=@set/>
+        <form id="f" action=@bad></form>
+        <object id="ob" data=@bad></object>
+        <div id="dv" data=@bad></div>
+        <button id="flip" onclick=flip()>flip</button>
+        <ul>
+            <each in=@rows key=@.id as row>
+                <li><a class="row" href=row.url>row</a></li>
+            </each>
+        </ul>
+        <lnk u="javascript:alert(6)"/>
+        <lnk u="/fine"/>
+        <svg>
+            <a href="/x"><set id="s1" attributeName="href" to=@bad/><text>s1</text></a>
+            <rect width="1" height="1"><set id="s2" attributeName="fill" to=@bad/></rect>
+            <a href="/x"><animate id="s3" attributeName="xlink:href" values=@list/><text>s3</text></a>
+            <rect width="1" height="1"><set id="s4" attributeName=@animated to=@bad/></rect>
+            <rect width="1" height="1"><set id="s5" attributeName=@animated to=@good/></rect>
+        </svg>
+    </main>
+</program>

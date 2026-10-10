@@ -7425,7 +7425,19 @@ ${
         if (e.star) tag = "*" + e.tag
         for (const a of e.attrs) {
             const lower: string = a.name.toLowerCase()
-            if (lower != a.name && isControlAttrName(lower)) {
+            if (lower != a.name && eventName(lower) != "" && (parenValue(a.value) || quotedHasInterp(a.value))) {
+                // s462 — §5.2 rule 2 "Event-handler text from data": a case
+                // variant of an `on…` name with an EXPRESSION value
+                // (`ONCLICK=(@code)`) is a value written as handler text, not a
+                // handler — refused, as impl#1 refuses it. (A bare reference or
+                // call, `onClick=go(2)`, is a handler form impl#1 wires; the
+                // bootstrap does not wire a case variant, so that one stays the
+                // case-variant refusal below.) A quoted `${…}` value is the
+                // parser's refusal (reported once).
+                if (parenValue(a.value)) {
+                    st = addDiag(st, env.file, a.span, "E-ATTR-INTERP-EXECUTABLE", "the `" + a.name + "=` attribute on `<" + tag + ">` takes its value from data (an expression), and it would be written as event-handler TEXT, which the browser compiles as JavaScript. JavaScript is never built from data. Write the event attribute in lowercase (`" + lower + "=f(x)`) so it is wired as a listener (§5.2).")
+                }
+            } else if (lower != a.name && isControlAttrName(lower)) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + tag + ">` is a case variant of the scrml attribute `" + lower + "` — the bootstrap reads scrml attribute names exactly, so it would be a plain HTML attribute that does nothing; write `" + lower + "`")
             } else if (html && a.name == "ref") {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`ref=` on `<" + tag + ">` (§6.7.1a, an element-reference binding) is not in the bootstrap — it would be emitted as a plain `ref` attribute and bind nothing")
@@ -7443,7 +7455,7 @@ ${
     // `x:y` name (`bind:`, `class:`, `style:`, …).
     fn isControlAttrName(n: string) -> boolean {
         if (n.indexOf(":") >= 0) return true
-        if (n.length > 2 && n.substring(0, 2) == "on") return true
+        if (n.length > 2 && n.substring(0, 2) == "on" && !isNonEventOnWord(n)) return true
         return n == "if" || n == "else-if" || n == "else" || n == "show" || n == "ref" || n == "as" ||
                n == "in" || n == "key" || n == "of" || n == "all" || n == "deps" || n == "rule"
     }
@@ -7971,8 +7983,17 @@ ${
     }
 
     fn eventName(attr: string) -> string {
+        if (isNonEventOnWord(attr)) return ""
         if (attr.length > 2 && attr.substring(0, 2) == "on") return attr.substring(2)
         return ""
+    }
+
+    // s462 — §5.2 rule 1: an `on…` name is an event handler "EXCEPT the named
+    // non-event words `one`, `online` and `onboarding`, matched by exact whole
+    // name … The three exempt words are ordinary attributes". The exemption
+    // names the SAFE words; every other `on…` name is a handler (fail closed).
+    fn isNonEventOnWord(n: string) -> boolean {
+        return n == "one" || n == "online" || n == "onboarding"
     }
 
     // A handler value is a statement (or a block of them).
@@ -7993,6 +8014,28 @@ ${
             .Quoted(v: s) :> not
             .NoValue :> not
             .Braced(b: b) :> not
+        }
+    }
+
+    // s462 — an attribute's parenthesized expression value `name=(…)`.
+    fn parenValue(v: AAttrValue) -> boolean {
+        return match v {
+            .Paren(e: e) :> true
+            .Bare(e: e) :> false
+            .Quoted(v: s) :> false
+            .NoValue :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    // s462 — a quoted value holding `${…}` (the parser refuses it).
+    fn quotedHasInterp(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: s) :> s.indexOf("$" + "{") >= 0
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
+            .NoValue :> false
+            .Braced(b: b) :> false
         }
     }
 
@@ -8060,6 +8103,14 @@ ${
                 }
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
+            } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "srcdoc") {
+                // s462 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose
+                // value is not a static string "SHALL be a compile error
+                // (E-ATTR-INTERP-EXECUTABLE)" — data is never written into an
+                // HTML document. In a declaration's body it is reported once,
+                // at the definition (a field supplies the value).
+                st = resolveValue(penv, a.value, not, st)
+                st = addDiag(st, env.file, a.span, "E-ATTR-INTERP-EXECUTABLE", "the `" + a.name + "=` attribute on `<" + e.tag + ">` takes its value from data (an expression, a variable, a call or a field), and `srcdoc` is an HTML document — data written there can carry script. A `srcdoc` value is a static string only (no `$" + "{…}`). Build the frame from a URL (`src=`) or render the content as markup in the page (§5.2).")
             } else if (valueExpr(a.value) is given) {
                 st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)

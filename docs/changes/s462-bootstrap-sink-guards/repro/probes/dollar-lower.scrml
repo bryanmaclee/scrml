@@ -1,0 +1,5 @@
+<program>
+    let <code:string="alert(1)"/>
+    <button id="b" onclick=${@code}>x</button>
+    <iframe id="f" title=${@code}></iframe>
+</program>

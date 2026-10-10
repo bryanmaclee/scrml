@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1599 of 1599 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1603 of 1603 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 139 | 8.7% |
+| PASS | 144 | 9.0% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 611 | 38.2% |
-| UNSUPPORTED | 793 | 49.6% |
+| NOT-TWINNED | 611 | 38.1% |
+| UNSUPPORTED | 792 | 49.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 195; of those, 139 hold (71.3%). Runtime half executed on the bootstrap for 44 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 200; of those, 144 hold (72.0%). Runtime half executed on the bootstrap for 46 case(s).
 
-- **Vacuous** passes: 11 of 139 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **128**.
+- **Vacuous** passes: 11 of 144 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **133**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 557 · parse-reject 236.
+UNSUPPORTED by reason: bootstrap-unsupported 556 · parse-reject 236.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **711** — PASS 76 · FAIL 52 · UNSUPPORTED 583. Twin holds 76 (non-vacuous 68). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **715** — PASS 81 · FAIL 52 · UNSUPPORTED 582. Twin holds 81 (non-vacuous 73). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -97,7 +97,7 @@ NOT-TWINNED by reason (611 cases; a case counts once per distinct reason):
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
-| attr-executable-sink | 15 | · | · | · | · | 7 | 8 | · | · |
+| attr-executable-sink | 19 | 5 | · | · | · | 7 | 7 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
 | block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
@@ -296,8 +296,13 @@ none
 
 none
 
-### PASS / CODES-ONLY (139)
+### PASS / CODES-ONLY (144)
 
+- `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
+- `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
+- `attr-executable-sink/event-attr-paren-data-text-neg` — PASS · TWIN
+- `attr-executable-sink/srcdoc-bound-cell-neg` — PASS · TWIN
+- `attr-executable-sink/srcdoc-interp-neg` — PASS · TWIN
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
 - `auth/auth-attr-unrecognized-literal-no-login-lint-pos` — PASS
@@ -438,7 +443,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (793)
+### UNSUPPORTED (792)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -462,7 +467,6 @@ none
 - `attr-executable-sink/non-handler-and-raster-data-pos` — twin · bootstrap-unsupported: `online="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/safe-interp-pos` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `attr-executable-sink/srcdoc-data-forms-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `attr-executable-sink/srcdoc-interp-neg` — twin · bootstrap-unsupported: `srcdoc="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/svg-animation-literal-scheme-neg` — twin · bootstrap-unsupported: `to="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression
 - `attr-executable-sink/url-scheme-interp-neg` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
