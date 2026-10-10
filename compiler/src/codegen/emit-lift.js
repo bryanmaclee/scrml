@@ -101,6 +101,38 @@ export function pushLiftNonKeyed() { _scrml_lift_non_keyed_depth++; }
 export function popLiftNonKeyed() { _scrml_lift_non_keyed_depth--; }
 export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 
+// g-impl1-markup-if-branch-memo-stale-render-s462 — LIVE mode. Active while the
+// arm bodies of a `${ if … }` lift group are emitted (emit-reactive-wiring.ts
+// emitStmtCollectingIfChain). Such an arm renders inside its own effect
+// (`_scrml_lift_branch_run`), which re-renders the arm when a value the arm
+// reads directly changes. A markup binding must not make it re-render: that
+// would replace every element of the arm — an input loses its typed text and
+// focus — whenever any interpolation in the arm changes. So in LIVE mode each
+// markup binding that reads reactive state (a text interpolation, an attribute
+// value, a `bind:` initial value, an `if=` display toggle) is wired the way
+// top-level markup is: a stable node, updated in place by its own
+// `_scrml_effect`, whose reads the arm's effect does not see. The arm run owns
+// those effects and disposes them with the arm. Inside a reconciled per-item
+// factory the reconcile ctx's live-keyed effects take precedence, unchanged.
+// A counter, not a flag, so nested pushes compose.
+let _scrml_lift_live_depth = 0;
+export function pushLiftLive() { _scrml_lift_live_depth++; }
+export function popLiftLive() { _scrml_lift_live_depth--; }
+const _LIFT_LIVE_READ_RE = /_scrml_(?:reactive|derived)_get\(/;
+/**
+ * The first render call of a keyed list (`_scrml_render_list_N`). Its static
+ * effect keeps the list reconciled; in LIVE mode the first call must not ALSO
+ * subscribe the enclosing arm to the collection, or every change to the list
+ * would re-render the whole arm instead of reconciling it in place.
+ */
+export function liftInitialRenderCall(renderFn) {
+  return _scrml_lift_live_depth > 0 && !currentLiftReconcileCtx() ? `_scrml_untracked(${renderFn});` : `${renderFn}();`;
+}
+/** True when LIVE mode is active (outside a reconcile ctx) and `js` reads a cell. */
+function liftLiveWraps(js) {
+  return _scrml_lift_live_depth > 0 && !currentLiftReconcileCtx() && _LIFT_LIVE_READ_RE.test(js);
+}
+
 /**
  * s430-emit-state-leak — restore every emit-lift module stack / counter to its
  * initial value. Called once at the head of every `runCG`: each is balanced by
@@ -111,6 +143,7 @@ export function resetLiftModuleState() {
   _scrml_lift_reconcile_ctx_stack.length = 0;
   _scrml_lift_scope_names_stack.length = 0;
   _scrml_lift_non_keyed_depth = 0;
+  _scrml_lift_live_depth = 0;
   _scrml_lift_request_ids_stack.length = 0;
 }
 
@@ -514,9 +547,28 @@ function maybeWrapLiftPerItemEffect(bodyLines) {
 function pushLiftAttrSet(lines, setStmt) {
   if (currentLiftReconcileCtx()) {
     for (const l of maybeWrapLiftPerItemEffect([setStmt])) lines.push(l);
+  } else if (liftLiveWraps(setStmt)) {
+    lines.push(`_scrml_effect(function() { ${setStmt} });`);
   } else {
     lines.push(setStmt);
   }
+}
+
+// LIFT-2 (S88) two-way `bind:*` wiring inside a lift template: the initial DOM
+// value from the cell, the input event writing the cell, and the reverse sync.
+// In LIVE mode the initial value and the reverse sync are one `_scrml_effect`, so
+// the read is the binding's own (the arm effect does not re-render the arm while
+// the user types) and the arm run disposes the sync with the arm.
+function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
+  const initStmt = `${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`;
+  if (liftLiveWraps(initStmt)) {
+    lines.push(`_scrml_effect(function() { ${initStmt} });`);
+    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+    return;
+  }
+  lines.push(initStmt);
+  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+  lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
 }
 
 // S293 — a per-item `if=` conditional-display toggle whose predicate reads the
@@ -1246,9 +1298,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       // form may include leading whitespace). Strip the @-prefix.
       const varRef = attr.value.trim().replace(/^@/, "");
       const varJSON = JSON.stringify(varRef);
-      lines.push(`${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`);
-      lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
-      lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
+      pushLiftBind(lines, elVar, flavor, eventName, varJSON);
     } else if (attr.name === "if") {
       // LIFT-3 fix (S88) — conditional display toggle inside lift template,
       // parity with top-level if= attribute conditional rendering.
@@ -1270,6 +1320,11 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       if (tryEmitLiftIfReactive(lines, elVar, exprJS, attr.value)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
+      if (liftLiveWraps(exprJS)) {
+        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
+        lines.push(`_scrml_effect(${updaterVar});`);
+        continue;
+      }
       lines.push(`${updaterVar}();`);
       // Extract @-prefixed reactive var names from the raw expression. Strip
       // any dotted-path tail so `@form.field` subscribes to the compound root
@@ -1470,7 +1525,7 @@ function emitSetContent(elVar, parts) {
   // S213 ss15 items 3+4 (Seam 3) — when the template reads a `<request>`
   // deep-reactive object, wrap the textContent write in `_scrml_effect` so it
   // re-renders on fetch-resolve (mirrors the bare-expr interpolation path).
-  if (liftExprReadsRequestState(tpl)) {
+  if (liftExprReadsRequestState(tpl) || liftLiveWraps(tpl)) {
     const tnVar = genVar('lift_tn');
     return [
       `const ${tnVar} = _scrml_g.document.createTextNode("");`,
@@ -1535,9 +1590,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           // Dotted compound — defer to existing setAttribute path (no fix in v1).
           lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, _scrml_reactive_get(${varJSON}));`);
         } else {
-          lines.push(`${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`);
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
-          lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
+          pushLiftBind(lines, elVar, flavor, eventName, varJSON);
         }
         continue;
       }
@@ -1593,6 +1646,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       if (tryEmitLiftIfReactive(lines, elVar, exprJS, rawText)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
+      if (liftLiveWraps(exprJS)) {
+        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
+        lines.push(`_scrml_effect(${updaterVar});`);
+        continue;
+      }
       lines.push(`${updaterVar}();`);
       // Subscribe to each @-prefixed reactive var in the raw expression. The
       // for-loop iterable identifier is captured by the per-item factory
@@ -1684,12 +1742,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // §5.2 rule 3 (S457) — guard a URL attribute whose literal prefix commits to no scheme.
         // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
         if (quotedUrlAttrNeedsGuard(tag, name, sv, attrs)) tpl = wrapUrlGuard(elVar, name, tpl, urlGuardTarget(tag, name, attrs));
-        const _setStmt = `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`;
-        if (currentLiftReconcileCtx()) {
-          for (const _l of maybeWrapLiftPerItemEffect([_setStmt])) lines.push(_l);
-        } else {
-          lines.push(_setStmt);
-        }
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val.value)});`);
       }
@@ -1959,7 +2012,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
                 for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = _scrml_g.String((${_rw}) ?? "");`])) lines.push(l);
-              } else if (liftExprReadsRequestState(_rw)) {
+              } else if (liftExprReadsRequestState(_rw) || liftLiveWraps(_rw)) {
                 const _tn = genVar('lift_tn');
                 lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
@@ -2033,7 +2086,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
                 for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? "");`])) lines.push(l);
-              } else if (liftExprReadsRequestState(rewritten)) {
+              } else if (liftExprReadsRequestState(rewritten) || liftLiveWraps(rewritten)) {
                 // S213 ss15 items 3+4 (Seam 3) — the interpolation reads a
                 // `<request>` deep-reactive object; wrap the text-node write in
                 // `_scrml_effect` so it re-renders when the fetch resolves
@@ -2945,7 +2998,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
       lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     }
     lines.push(`}`);
-    lines.push(`${renderFn}();`);
+    lines.push(liftInitialRenderCall(renderFn));
     // Item-dependent inner lists use a DYNAMIC effect: their deps (the current
     // outer item's collection) CHANGE across runs, so first-run-only tracking
     // (_scrml_effect_static) would keep subscribing to the create-time item and

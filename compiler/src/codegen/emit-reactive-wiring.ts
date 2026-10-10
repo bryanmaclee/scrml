@@ -3,7 +3,8 @@ import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
-import { pushLiftNonKeyed, popLiftNonKeyed, checkLoopBinderWrites } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, checkLoopBinderWrites } from "./emit-lift.js";
+import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
 import {
@@ -641,6 +642,7 @@ function emitMountDeferredLiftGroup(
   codeStmts: any[],
   combinedCode: string,
   groupHasReactiveDeps: boolean,
+  ifChain: LiftIfChain | null = null,
 ): void {
   if (!liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps)) {
     const liftCodes: string[] = [];
@@ -657,8 +659,148 @@ function emitMountDeferredLiftGroup(
     emitLiftGroup(mountOut, LIFT_MOUNT_HOST_PARAM, liftStmts, liftCodes.join("\n"), groupHasReactiveDeps);
     return;
   }
-  emitLiftGroup(mountOut, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps);
+  emitLiftGroup(mountOut, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps, ifChain);
 }
+
+/**
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — the arm split of a
+ * lift-bearing `if` chain, recorded while the chain was emitted (see
+ * `IfChainCollector` in emit-control-flow.ts).
+ *
+ *   - `code`    — the chain as emitted (what `codes` holds for it);
+ *   - `conds`   — each conditional arm's lowered condition, in chain order;
+ *   - `hasElse` — the chain ends in a plain `else`, which is arm `conds.length`;
+ *   - `armCode` — `code` with arm i's condition replaced by `_scrml_arm === i`.
+ */
+export interface LiftIfChain {
+  code: string;
+  conds: string[];
+  hasElse: boolean;
+  armCode: string;
+}
+
+let _ifChainSeq = 0;
+
+/**
+ * Emit one statement of a logic group. A lift-bearing `if-stmt` is emitted with
+ * an `IfChainCollector` active, and its arm split is recorded in `chains`
+ * (keyed by the statement node). The returned text is always the ordinary
+ * emission: the collector's markers are stripped before it is returned.
+ *
+ * The chain is emitted in emit-lift's LIVE mode (see `pushLiftLive`): its arms
+ * render inside the arm run, whose markup bindings must be their own effects.
+ *
+ * The split is recorded only when every marker survived the emission intact —
+ * a pass that reprinted the code would have dropped them. Then the statement is
+ * emitted again, plainly (LIVE mode off), with the side-channel entries of the
+ * first attempt withdrawn, and the group keeps the plain re-render shape.
+ */
+function emitStmtCollectingIfChain(
+  stmt: any,
+  opts: any,
+  chains: Map<any, LiftIfChain>,
+  sideLists: { nested: any[] | null; errors: any[] },
+): string {
+  if (!stmt || stmt.kind !== "if-stmt" || !stmtContainsLift(stmt)) {
+    return emitLogicNode(stmt, opts);
+  }
+  const nestedBefore = sideLists.nested ? sideLists.nested.length : 0;
+  const errsBefore = sideLists.errors.length;
+  const collector: IfChainCollector = { id: String(++_ifChainSeq), target: stmt, conds: [], hasElse: false };
+  pushIfChainCollector(collector);
+  pushLiftLive();
+  let marked: string;
+  try {
+    marked = emitLogicNode(stmt, opts);
+  } finally {
+    popLiftLive();
+    popIfChainCollector();
+  }
+  const replain = (): string => {
+    chains.delete(stmt);
+    if (sideLists.nested) sideLists.nested.length = nestedBefore;
+    sideLists.errors.length = errsBefore;
+    return emitLogicNode(stmt, opts);
+  };
+  if (!marked) return replain();
+  let code = marked;
+  let armCode = marked;
+  let intact = collector.conds.length > 0;
+  for (let i = 0; i < collector.conds.length; i++) {
+    const open = ifChainArmOpen(collector, i);
+    const close = ifChainArmClose(collector, i);
+    const bracketed = `${open}${collector.conds[i]}${close}`;
+    if (marked.split(bracketed).length !== 2) intact = false;
+    code = code.split(open).join("").split(close).join("");
+    armCode = armCode.split(bracketed).join(`_scrml_arm === ${i}`);
+  }
+  if (!intact || armCode.includes(`/*scrml-arm-${collector.id}-`) || armCode.includes(`/*scrml-arm-end-${collector.id}-`)) {
+    return replain();
+  }
+  chains.set(stmt, { code, conds: collector.conds.slice(), hasElse: collector.hasElse, armCode });
+  return code;
+}
+
+/**
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — file-local driver for the
+ * arm-selector shape of a `${ if … }` lift group (see emitLiftGroup), emitted
+ * once per file that uses it.
+ *
+ * `_scrml_lift_branch_run(host, armOf, arm, body, mkEffect, mkStatic)` renders
+ * arm `arm` into `host` inside its own effect, so the arm RE-RENDERS when a
+ * value its body reads directly changes, and only then. The selector effect
+ * that called it re-runs on the chain's conditions alone, and replaces the run
+ * only when the selected arm changes. Reads that the body's markup wires
+ * itself (a text interpolation, an attribute binding) each have their own
+ * effect and update in place — they change no element, so listeners and input
+ * state survive.
+ *
+ *   - `armOf()` re-evaluates the chain's selector. Every effect of the run is
+ *     gated on it (untracked): a cell write that is about to switch arms can
+ *     reach an effect of the outgoing arm before the selector effect, and that
+ *     effect must not render a value its arm's condition no longer admits
+ *     (`@user.name` once `@user` is `not`). The selector effect then disposes
+ *     the run.
+ *   - Effect ownership is `_scrml_lift_scoped_run`'s: the body receives
+ *     tracking wrappers as `_scrml_effect` / `_scrml_effect_static` (lexically
+ *     shadowed), every effect the body creates is alive-gated to this run, the
+ *     run-pass effects and every static effect are disposed when the run is
+ *     replaced, and the lift target is saved and restored.
+ *   - `mkEffect` / `mkStatic` are the constructors in scope where the group is
+ *     emitted — inside a mount-deferred or nested group they are that group's
+ *     own tracking wrappers, so the run is torn down with its host's mount.
+ */
+const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
+  "function _scrml_lift_branch_run(host, armOf, arm, body, mkEffect, mkStatic) {",
+  "  const current = () => _scrml_untracked(armOf) === arm;",
+  "  let stop = null;",
+  "  const d = mkEffect(function() {",
+  "    if (stop) { stop(); stop = null; }",
+  "    if (!current()) return;",
+  "    host.replaceChildren();",
+  "    const disposers = [];",
+  "    let collecting = true;",
+  "    let alive = true;",
+  "    const own = (make, keepAlways) => function(fn) {",
+  "      const dd = make(function() { if (alive && current()) fn(); });",
+  "      if ((collecting || keepAlways) && typeof dd === \"function\") disposers.push(dd);",
+  "      return dd;",
+  "    };",
+  "    const prevTarget = _scrml_lift_target;",
+  "    try {",
+  "      body(host, own(mkEffect, false), own(mkStatic, true), arm);",
+  "    } finally {",
+  "      collecting = false;",
+  "      _scrml_lift_target = prevTarget;",
+  "    }",
+  "    stop = function() { alive = false; for (let i = disposers.length - 1; i >= 0; i--) disposers[i](); disposers.length = 0; };",
+  "  });",
+  "  return function() { if (typeof d === \"function\") d(); if (stop) { stop(); stop = null; } };",
+  "}",
+];
+
+/** Set by emitLiftGroup when it emits the arm-selector shape; reset per file. */
+let _liftBranchRunUsed = false;
 
 /**
  * Emit one lift group — the statements of a single `${ … lift … }` block whose
@@ -668,6 +810,10 @@ function emitMountDeferredLiftGroup(
  * body, or `LIFT_MOUNT_HOST_PARAM` for a host inside a mount-deferred
  * `<template>` (the caller then wraps `out` in the group's mount function).
  * Everything else about the group's shape is identical between the two.
+ *
+ * `ifChain` is the arm split of the group's code when the group is exactly one
+ * lift-bearing `if` chain (see emitStmtCollectingIfChain); it selects the
+ * arm-selector shape below.
  */
 function emitLiftGroup(
   out: string[],
@@ -675,16 +821,14 @@ function emitLiftGroup(
   stmts: any[],
   combinedCode: string,
   groupHasReactiveDeps: boolean,
+  ifChain: LiftIfChain | null = null,
 ): void {
   if (groupHasReactiveDeps) {
     // Wrap in _scrml_effect: clear the placeholder, re-run the block.
-    // Guard 1 (branch): if the group is a single if-stmt whose condition
-    //   evaluates to the same truthy/falsy value as last time, skip the
-    //   innerHTML clear to preserve event listeners and input state.
-    // Guard 2 (keyed reconcile): if the emitted code uses
-    //   `_scrml_reconcile_list`, the list wrapper is mounted once and
-    //   reconciled in place. An innerHTML clear would destroy the wrapper
-    //   every time the effect re-runs, breaking keyed diffing.
+    // Keyed reconcile: if the emitted code uses `_scrml_reconcile_list`,
+    //   the list wrapper is mounted once and reconciled in place. An
+    //   innerHTML clear would destroy the wrapper every time the effect
+    //   re-runs, breaking keyed diffing.
     // Bug 5: if the ONLY reactive reads in the block are inside keyed
     //   reconcile calls, the `_scrml_effect_static(renderFn)` inside the
     //   for-lift emit already handles re-reconciliation. An outer
@@ -694,7 +838,6 @@ function emitLiftGroup(
     //   reconcile + other reactive reads) falls through to the general
     //   wrap — preserves existing behavior (known issues there are
     //   separate from Bug 5 and addressed in a follow-on).
-    const isSingleIf = stmts.length === 1 && stmts[0].kind === "if-stmt";
     const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
     const hasOtherReactiveReads = hasKeyedReconcile
       ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
@@ -705,13 +848,11 @@ function emitLiftGroup(
       out.push(`_scrml_lift_target = ${hostExpr};`);
       out.push(combinedCode);
       out.push(`_scrml_lift_target = null;`);
+    } else if (ifChain) {
+      emitLiftIfChainGroup(out, hostExpr, ifChain);
     } else {
       const targetVar = genVar("lift_tgt");
-      const branchVar = isSingleIf ? genVar("lift_branch") : null;
       out.push(`const ${targetVar} = ${hostExpr};`);
-      if (branchVar) {
-        out.push(`let ${branchVar} = -1;`);
-      }
 
       // Mixed-case follow-on to Bug 5: if the block combines a keyed-
       // reconcile for-lift with OTHER reactive content (e.g. a sibling
@@ -735,16 +876,6 @@ function emitLiftGroup(
       }
 
       out.push(`_scrml_effect(function() {`);
-      if (branchVar) {
-        // Extract the condition from the emitted if-statement to check branch identity.
-        // The emitted code starts with `if (condition) {` — extract and test condition.
-        const condMatch = effectBodyCode.match(/^if\s*\((.+)\)\s*\{/);
-        if (condMatch) {
-          out.push(`  const _branch = (${condMatch[1]}) ? 1 : 0;`);
-          out.push(`  if (_branch === ${branchVar}) return;`);
-          out.push(`  ${branchVar} = _branch;`);
-        }
-      }
       // With the mixed-case hoist in place, innerHTML clear is now safe
       // even when hasKeyedReconcile (the wrapper is outer-scope; it
       // re-mounts via the retained _scrml_lift(wrapper) in the body).
@@ -762,6 +893,59 @@ function emitLiftGroup(
     out.push(combinedCode);
     out.push(`_scrml_lift_target = null;`);
   }
+}
+
+/**
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — the arm-selector shape of a
+ * `${ if (c0) { … } else if (c1) { … } else { … } }` lift group.
+ *
+ * SPEC §7.4.2: "When `expr` references one or more reactive cells (`@x`
+ * access), the interpolation site SHALL re-render whenever any referenced cell
+ * changes". The earlier shape re-ran the whole block in one effect behind a
+ * guard that returned early while the first condition's truthiness was
+ * unchanged (to keep listeners and input state); the early return also skipped
+ * every read in the arm, so `${ if (@on) { lift <p>${@n}</p> } }` never showed
+ * a new `@n`, and an `else if` arm never replaced the `else` arm.
+ *
+ * Two effects now split the two jobs:
+ *
+ *   1. The selector effect evaluates the chain's conditions (exactly as the if
+ *      emitter lowered them) to an arm index, and does nothing else. It re-runs
+ *      on the conditions' reads only; when the index is unchanged it returns,
+ *      and when it changes it disposes the current arm run, clears the host and
+ *      starts the new arm's run (`-1`: no arm taken, the host stays empty).
+ *   2. The arm run (`_scrml_lift_branch_run`) renders the arm's body — the
+ *      chain's own code, with each condition replaced by an arm-index test — in
+ *      its own effect. Markup reads update in place through the per-binding
+ *      effects the lift emitter creates for them (emit-lift.js "live" mode,
+ *      active while the arm code was emitted); any other read the body makes
+ *      re-renders the arm.
+ */
+function emitLiftIfChainGroup(out: string[], hostExpr: string, chain: LiftIfChain): void {
+  _liftBranchRunUsed = true;
+  const targetVar = genVar("lift_tgt");
+  const armOfVar = genVar("lift_arm_of");
+  const branchVar = genVar("lift_branch");
+  const stopVar = genVar("lift_stop");
+  const noArm = chain.hasElse ? String(chain.conds.length) : "-1";
+  const selector = chain.conds.map((c, i) => `(${c}) ? ${i} : `).join("") + noArm;
+  out.push(`const ${targetVar} = ${hostExpr};`);
+  out.push(`function ${armOfVar}() { return ${selector}; }`);
+  out.push(`let ${branchVar} = null;`);
+  out.push(`let ${stopVar} = null;`);
+  out.push(`_scrml_effect(function() {`);
+  out.push(`  const _branch = ${armOfVar}();`);
+  out.push(`  if (_branch === ${branchVar}) return;`);
+  out.push(`  ${branchVar} = _branch;`);
+  out.push(`  if (${stopVar}) { ${stopVar}(); ${stopVar} = null; }`);
+  out.push(`  ${targetVar}.innerHTML = "";`);
+  out.push(`  if (_branch === -1) return;`);
+  out.push(`  ${stopVar} = _scrml_lift_branch_run(${targetVar}, ${armOfVar}, _branch, function(${LIFT_MOUNT_HOST_PARAM}, _scrml_effect, _scrml_effect_static, _scrml_arm) {`);
+  out.push(`  _scrml_lift_target = ${LIFT_MOUNT_HOST_PARAM};`);
+  out.push(`  ${chain.armCode}`);
+  out.push(`  _scrml_lift_target = null;`);
+  out.push(`  }, _scrml_effect, _scrml_effect_static);`);
+  out.push(`});`);
 }
 
 /** Check if an AST statement contains a lift-expr anywhere in its tree. */
@@ -850,6 +1034,7 @@ export function buildMachineBindingsMap(fileAST: any): Map<string, { engineName:
 export function emitReactiveWiring(ctx: CompileContext): string[] {
   const { fileAST, errors, encodingCtx } = ctx;
   const lines: string[] = [];
+  _liftBranchRunUsed = false;
 
   // s427 round 4 — a write to a rendering loop's non-`let` binder fails the compile
   // (checkLoopBinderWrites, emit-lift.js). One whole-file walk covers every host.
@@ -1142,6 +1327,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // duplicate behind.
     const stmtSideRanges: Array<{ nested: [number, number]; errs: [number, number] }> = [];
     const nestedListRef: any[] | null = (ctx.registry?.nestedLiftGroups ?? null) as any[] | null;
+    // g-impl1-markup-if-branch-memo-stale-render-s462 — the arm split of each
+    // lift-bearing `if-stmt` this group emitted (see emitStmtCollectingIfChain).
+    const liftIfChains = new Map<any, LiftIfChain>();
 
     for (const stmt of stmts) {
       // S108 Bug 5 Phase 3 — Skip statements from constant-folded logic wrappers.
@@ -1178,7 +1366,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
       const _errsBefore = errors.length;
       const _seededBefore = seededConstFallbackCount();
-      const code = emitLogicNode(stmt, groupEmitOpts);
+      const code = emitStmtCollectingIfChain(stmt, groupEmitOpts, liftIfChains, { nested: nestedListRef, errors });
       // s441 (S440 F4) — a top-level logic statement is module-init code, outside
       // every function body the lexical escape check walks: `${ const checks =
       // [isOk] }` then `checks[0](x)` in a fn handed out a Promise-returning server
@@ -1390,7 +1578,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         if (r.errs[1] > r.errs[0]) errors.splice(r.errs[0], r.errs[1] - r.errs[0]);
         pushLiftNonKeyed();
         try {
-          codes[i] = emitLogicNode(codeStmts[i], groupEmitOpts);
+          codes[i] = emitStmtCollectingIfChain(codeStmts[i], groupEmitOpts, liftIfChains, { nested: nestedListRef, errors });
         } finally {
           popLiftNonKeyed();
         }
@@ -1426,10 +1614,17 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         const r = stmtSideRanges[i] as any;
         if (!r || !r.seededConst || r.onMount) continue;
         const st = codeStmts[i];
-        codes[i] = withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts));
+        codes[i] = withSeededConstsOff(groupNames, () => emitStmtCollectingIfChain(st, groupEmitOpts, liftIfChains, { nested: nestedListRef, errors }));
       }
       combinedCode = codes.join("\n");
     }
+
+    // g-impl1-markup-if-branch-memo-stale-render-s462 — a group that is exactly
+    // one lift-bearing `if` chain renders through the arm-selector shape
+    // (emitLiftGroup). The split must describe the code actually emitted: a
+    // statement re-emitted above recorded its new split, so compare the text.
+    const _chain0 = codes.length === 1 ? liftIfChains.get(codeStmts[0]) : undefined;
+    const groupIfChain: LiftIfChain | null = _chain0 && _chain0.code === codes[0] ? _chain0 : null;
 
     // A nested group NEVER reaches file scope: its statements read the row's
     // iteration names / the arm's payload bindings, which exist only as the
@@ -1437,7 +1632,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // per instance — each row and each arm entry is its own `${}` evaluation.
     if (group.nested) {
       const fnLines = nestedLiftFnLines.get(group.nested.fnName)!;
-      if (groupHasLift) emitLiftGroup(fnLines, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps);
+      if (groupHasLift) emitLiftGroup(fnLines, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps, groupIfChain);
       else fnLines.push(combinedCode);
       continue;
     }
@@ -1466,10 +1661,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         // Only the RENDER work moves into the mount function; the block's
         // declarations keep file scope (SPEC §7.6) — see emitMountDeferredLiftGroup.
         const chunkLines: string[] = [];
-        emitMountDeferredLiftGroup(chunkLines, fnLines, stmts, codes, codeStmts, combinedCode, groupHasReactiveDeps);
+        emitMountDeferredLiftGroup(chunkLines, fnLines, stmts, codes, codeStmts, combinedCode, groupHasReactiveDeps, groupIfChain);
         lines.push(...chunkLines);
       } else {
-        emitLiftGroup(lines, `_scrml_g.document.querySelector('[data-scrml-logic="${pid}"]')`, stmts, combinedCode, groupHasReactiveDeps);
+        emitLiftGroup(lines, `_scrml_g.document.querySelector('[data-scrml-logic="${pid}"]')`, stmts, combinedCode, groupHasReactiveDeps, groupIfChain);
       }
     } else {
       lines.push(combinedCode);
@@ -1511,6 +1706,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       lines.push(...(nestedLiftFnLines.get(ng.fnName) ?? []));
       lines.push("}");
     }
+  }
+
+  // g-impl1-markup-if-branch-memo-stale-render-s462 — the arm-run driver of a
+  // `${ if … }` lift group's arm-selector shape (emitLiftIfChainGroup). A
+  // function declaration, so it hoists to every group that calls it.
+  if (_liftBranchRunUsed) {
+    lines.push("");
+    lines.push("// --- arm runs of `${ if … }` lift groups (re-render an arm only when its own reads change) ---");
+    lines.push(...LIFT_BRANCH_RUN_HELPER);
   }
 
   // Step 4c: Generate <var server> READ-authority sync infrastructure (§52.6).

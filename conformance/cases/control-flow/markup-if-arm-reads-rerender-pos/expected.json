@@ -1,0 +1,28 @@
+{
+  "id": "control-flow-markup-if-arm-reads-rerender-pos",
+  "description": "A markup `${ if … }` lift group re-renders the reactive reads inside its taken arm while that arm stays taken, and an if / else if / else chain selects every arm. Three groups: `${ if (@on) { lift <p id=n>${@n}</p> } }` (a read the condition does not mention), `${ if (@user is given) { lift <p id=name>${@user.name}</p> } }` (a read of the tested cell — the canonical spelling of the soft-deprecated `${ given @user :> { … } }`), and a three-arm chain over `@mode` whose every arm reads `@n`. Clicks: #inc, #rename, #toB, #inc, #toC. Pre-fix (impl#1): the group's effect returned early while its FIRST condition's truthiness was unchanged, so #n stayed \"0\", #name stayed \"ada\", and the chain never left its `else if` arm for the `else` arm (`@mode == \"a\"` was false both times).",
+  "language-version": "1.0",
+  "spec": "§7.4.2",
+  "rationale": "§7.4.2: \"When `expr` references one or more reactive cells (`@x` access), the interpolation site SHALL re-render whenever any referenced cell changes — the standard reactive subscription contract\". §17.1: \"`if=` is sugar over `${ if(expr) { lift <element>...</element> } }`.\" §10.8.2: \"When `lift` appears in an `if`/`else` body, only the taken branch's `lift` calls SHALL be added to the accumulator.\" Gap: g-impl1-markup-if-branch-memo-stale-render-s462.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [
+      { "click": "#inc" },
+      { "click": "#rename" },
+      { "click": "#toB" },
+      { "click": "#inc" },
+      { "click": "#toC" }
+    ],
+    "state": { "n": 2, "mode": "c", "user": { "name": "bob" } },
+    "domAnchored": [
+      { "selector": "#n", "text": "2" },
+      { "selector": "#n", "count": 1 },
+      { "selector": "#name", "text": "bob" },
+      { "selector": "#pa", "count": 0 },
+      { "selector": "#pb", "count": 0 },
+      { "selector": "#pc", "count": 1 },
+      { "selector": "#pc", "text": "c-2" }
+    ]
+  }
+}

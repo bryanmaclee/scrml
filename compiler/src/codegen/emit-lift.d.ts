@@ -38,6 +38,9 @@ export declare function liftScopeNamesCopy(): Set<string>;
 
 export declare function pushLiftNonKeyed(): void;
 export declare function popLiftNonKeyed(): void;
+export declare function pushLiftLive(): void;
+export declare function liftInitialRenderCall(renderFn: string): string;
+export declare function popLiftLive(): void;
 export declare function liftNonKeyedActive(): boolean;
 
 /** Restore every emit-lift module stack / counter to its initial value (head of every runCG). */
