@@ -228,8 +228,8 @@ export function _inlineSiblingShimImports(source, shimDir, emitted) {
       // helper-drop). The recursion above only follows the sibling's cross-file
       // `import` statements; it never scans the extracted def's BODY for the
       // sibling's OWN top-level helpers. But `get`/`post`/… call an unexported
-      // `_request`; `uploadFile` calls `multipart`; `withDefaults`/`withAuth`
-      // reference the sibling exports `get`/`post`/… — none via an `import`. So
+      // `_request`; `uploadFile` calls `multipart`; `get` reaches `_clientOptions`
+      // which calls `_mergeOptions` (S462 HttpClient) — none via an `import`. So
       // inline the transitive closure of same-file top-level names this def
       // references, in dependency order, BEFORE the importing def itself.
       for (const helperDef of _collectSameFilePrivateHelpers(
@@ -292,8 +292,8 @@ function _collectTopLevelDefinedNames(source) {
  * inlines (they arrive via a same-file reference, not an `import` statement).
  *
  * `get`/`post`/… call an unexported `_request`; `uploadFile` calls the exported
- * `multipart`; `withDefaults`/`withAuth` reference the sibling exports
- * `get`/`post`/… . Without this pass a client-inlined `get` emits a call to an
+ * `multipart`; `get` reaches `_clientOptions`, which calls `_mergeOptions`
+ * (S462 HttpClient). Without this pass a client-inlined `get` emits a call to an
  * undefined `_request` — `ReferenceError: _request is not defined` (S245 bug
  * g-http-client-inline-private-helper-drop).
  *

@@ -22,7 +22,7 @@
  *
  * §1  real http.js: `import { get }` inlines `_request` (defined, before `get`, once).
  * §2  every http private-referencing export inlines its needed helpers, parseable.
- * §3  dependency-order + dedup: withDefaults -> get/post/... -> _request (each once).
+ * §3  dependency-order + dedup: get -> _clientOptions -> _mergeOptions (2-level), each once (S462).
  * §4  2-level transitive (synthetic): export A -> private B -> private C, ordered + callable.
  * §5  original-named under `as`-alias: `get as fetchIt` -> `function fetchIt` calls bare `_request`.
  * §6  collision guard: importing shim's OWN `_request` wins; the sibling's is skipped.
@@ -122,17 +122,24 @@ describe("client-inliner inlines same-file private-helper closure (S245)", () =>
     }
   });
 
-  test("§3  dependency-order + dedup: withDefaults -> get/post/... -> _request (each once)", () => {
-    const out = assemble('import { withDefaults } from "./http.js";\n', STDLIB_DIR);
-    // withDefaults references the sibling exports get/post/put/del/patch...
-    for (const method of ["get", "post", "put", "del", "patch"]) {
-      expect(defines(out, method)).toBe(true);
-      expect(defCount(out, method)).toBe(1);
-      // ...which transitively drag in the single shared _request.
-      expect(defIndex(out, "_request")).toBeLessThan(defIndex(out, method));
+  test("§3  dependency-order + dedup: get -> _clientOptions -> _mergeOptions (2-level), each once", () => {
+    // S462: the HttpClient is a config struct; `get(client, path)` resolves it
+    // through same-file private helpers, one of which (_clientOptions) calls
+    // another (_mergeOptions) — a 2-level same-file closure on the REAL shim.
+    const out = assemble('import { get, withDefaults } from "./http.js";\n', STDLIB_DIR);
+    for (const helper of ["_request", "_isClient", "_clientUrl", "_clientOptions", "_mergeOptions", "_NO_CLIENT"]) {
+      expect({ helper, count: defCount(out, helper) }).toEqual({ helper, count: 1 });
     }
-    expect(defCount(out, "_request")).toBe(1); // shared, deduped across all 5
+    expect(defIndex(out, "_mergeOptions")).toBeLessThan(defIndex(out, "_clientOptions"));
+    expect(defIndex(out, "_clientOptions")).toBeLessThan(defIndex(out, "get"));
+    expect(defIndex(out, "_request")).toBeLessThan(defIndex(out, "get"));
     expect(() => new Function(out)).not.toThrow();
+    // Callable end-to-end: the client struct composes without touching fetch.
+    const mod = new Function(out + "\nreturn { withDefaults, _clientOptions };")();
+    const api = mod.withDefaults({ timeout: 5, headers: { "X-A": "1" } });
+    expect(typeof api.get).toBe("undefined"); // a struct — no stored functions
+    const opts = mod._clientOptions(api, { headers: { "X-B": "2" } });
+    expect(opts).toEqual({ timeout: 5, headers: { "X-A": "1", "X-B": "2" } });
   });
 
   test("§4  2-level transitive (synthetic): export A -> private B -> private C, ordered + callable", () => {

@@ -13,16 +13,16 @@
 // timeouts throw.
 //
 // Surface (must match stdlib/http/index.scrml exports):
-//   - get(url, options?)
-//   - post(url, body, options?)
-//   - put(url, body, options?)
-//   - del(url, options?)
-//   - patch(url, body, options?)
-//   - withBaseUrl(baseUrl)         — factory client
+//   - get(url, options?)            | get(client, path, options?)
+//   - post(url, body, options?)      | post(client, path, body, options?)
+//   - put(url, body, options?)       | put(client, path, body, options?)
+//   - del(url, options?)             | del(client, path, options?)
+//   - patch(url, body, options?)     | patch(client, path, body, options?)
+//   - withBaseUrl(baseUrl, wrapped?)        → HttpClient (config struct)
 //   - isOk(response)
 //   - isError(response)
-//   - withAuth(token, scheme?, wrapped?)
-//   - withDefaults(defaults, wrapped?)
+//   - withAuth(token, scheme?, wrapped?)    → HttpClient
+//   - withDefaults(defaults, wrapped?)      → HttpClient
 //   - retry(fn, opts?)
 //   - multipart(fields)            → FormData
 //   - uploadFile(url, file, opts?)
@@ -93,40 +93,95 @@ async function _request(url, options) {
   throw lastError;
 }
 
-export async function get(url, options) {
-  return _request(url, { ...options, method: "GET" });
+// ---------------------------------------------------------------------------
+// Clients (S462) — an HttpClient is a plain config STRUCT, never an object of
+// functions (a function is not stored in a value, SPEC §14.3):
+//   { baseUrl: string, defaults: options, authorization: string | null }
+// The request functions take either a URL or a client as their first argument.
+// ---------------------------------------------------------------------------
+
+const _NO_CLIENT = Object.freeze({ baseUrl: "", defaults: {}, authorization: null });
+
+// A client is the non-string target that carries `defaults`. A URL string (or
+// a URL object, which has no `defaults`) is a URL.
+function _isClient(target) {
+  return target !== null && target !== undefined && typeof target !== "string"
+    && target.defaults !== null && target.defaults !== undefined;
 }
 
-export async function post(url, body, options) {
-  return _request(url, { ...options, method: "POST", body });
+// Resolve a path against the client's base URL. Absolute URLs pass through.
+function _clientUrl(client, path) {
+  if (!client.baseUrl) return path;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  const base = client.baseUrl.replace(/\/$/, "");
+  const p = path.startsWith("/") ? path : "/" + path;
+  return base + p;
 }
 
-export async function put(url, body, options) {
-  return _request(url, { ...options, method: "PUT", body });
-}
-
-export async function del(url, options) {
-  return _request(url, { ...options, method: "DELETE" });
-}
-
-export async function patch(url, body, options) {
-  return _request(url, { ...options, method: "PATCH", body });
-}
-
-export function withBaseUrl(baseUrl) {
-  function resolveUrl(path) {
-    if (path.startsWith("http://") || path.startsWith("https://")) return path;
-    const base = baseUrl.replace(/\/$/, "");
-    const p = path.startsWith("/") ? path : "/" + path;
-    return base + p;
+// Merge two option objects: `over` wins key by key; headers merge by key.
+function _mergeOptions(under, over) {
+  const u = under || {};
+  const o = over || {};
+  const merged = Object.assign({}, u, o);
+  if (u.headers || o.headers) {
+    merged.headers = Object.assign({}, u.headers || {}, o.headers || {});
   }
-  return {
-    get: (path, opts) => get(resolveUrl(path), opts),
-    post: (path, body, opts) => post(resolveUrl(path), body, opts),
-    put: (path, body, opts) => put(resolveUrl(path), body, opts),
-    del: (path, opts) => del(resolveUrl(path), opts),
-    patch: (path, body, opts) => patch(resolveUrl(path), body, opts),
-  };
+  return merged;
+}
+
+// The options a client contributes to one call: its defaults under the call's
+// own options, then its Authorization header over both.
+function _clientOptions(client, options) {
+  const merged = _mergeOptions(client.defaults, options);
+  if (client.authorization !== null && client.authorization !== undefined) {
+    merged.headers = Object.assign({}, merged.headers || {}, { Authorization: client.authorization });
+  }
+  return merged;
+}
+
+// get(url, options?) | get(client, path, options?)
+export async function get(target, pathOrOptions, options) {
+  if (_isClient(target)) {
+    return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "GET" });
+  }
+  return _request(target, { ...pathOrOptions, method: "GET" });
+}
+
+// post(url, body, options?) | post(client, path, body, options?)
+export async function post(target, a, b, c) {
+  if (_isClient(target)) {
+    return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "POST", body: b });
+  }
+  return _request(target, { ...b, method: "POST", body: a });
+}
+
+// put(url, body, options?) | put(client, path, body, options?)
+export async function put(target, a, b, c) {
+  if (_isClient(target)) {
+    return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PUT", body: b });
+  }
+  return _request(target, { ...b, method: "PUT", body: a });
+}
+
+// del(url, options?) | del(client, path, options?)
+export async function del(target, pathOrOptions, options) {
+  if (_isClient(target)) {
+    return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "DELETE" });
+  }
+  return _request(target, { ...pathOrOptions, method: "DELETE" });
+}
+
+// patch(url, body, options?) | patch(client, path, body, options?)
+export async function patch(target, a, b, c) {
+  if (_isClient(target)) {
+    return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PATCH", body: b });
+  }
+  return _request(target, { ...b, method: "PATCH", body: a });
+}
+
+export function withBaseUrl(baseUrl, wrapped) {
+  const base = wrapped || _NO_CLIENT;
+  return { baseUrl, defaults: base.defaults, authorization: base.authorization };
 }
 
 export function isOk(response) {
@@ -137,40 +192,21 @@ export function isError(response) {
   return response && response.status >= 400;
 }
 
+// The outermost withAuth wins: wrapping a client that already carries an
+// Authorization value replaces it.
 export function withAuth(token, scheme, wrapped) {
   const sch = scheme || "Bearer";
-  const inner = wrapped || { get, post, put, del, patch };
-  function mergeOpts(opts) {
-    const o = opts || {};
-    const headers = Object.assign({}, o.headers || {}, { Authorization: `${sch} ${token}` });
-    return Object.assign({}, o, { headers });
-  }
-  return {
-    get: (url, opts) => inner.get(url, mergeOpts(opts)),
-    post: (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-    put: (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-    del: (url, opts) => inner.del(url, mergeOpts(opts)),
-    patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
-  };
+  const base = wrapped || _NO_CLIENT;
+  return { baseUrl: base.baseUrl, defaults: base.defaults, authorization: `${sch} ${token}` };
 }
 
+// Defaults merge OVER the wrapped client's defaults (headers by key).
 export function withDefaults(defaults, wrapped) {
-  const d = defaults || {};
-  const inner = wrapped || { get, post, put, del, patch };
-  function mergeOpts(opts) {
-    const o = opts || {};
-    const merged = Object.assign({}, d, o);
-    if (d.headers || o.headers) {
-      merged.headers = Object.assign({}, d.headers || {}, o.headers || {});
-    }
-    return merged;
-  }
+  const base = wrapped || _NO_CLIENT;
   return {
-    get: (url, opts) => inner.get(url, mergeOpts(opts)),
-    post: (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-    put: (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-    del: (url, opts) => inner.del(url, mergeOpts(opts)),
-    patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
+    baseUrl: base.baseUrl,
+    defaults: _mergeOptions(base.defaults, defaults),
+    authorization: base.authorization,
   };
 }
 
