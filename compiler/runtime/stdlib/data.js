@@ -576,13 +576,23 @@ export function parseVariant(_json, _T) {
   );
 }
 
-// ParseError shape used by the monomorphized call sites. Exposed for
-// type imports + handler matching.
+// ParseError — mirrors `export type ParseError:enum` in stdlib/data/parse.scrml,
+// in the compiler's enum shape (unit variant → its name; payload variant →
+// constructor returning { variant, data }), the same shape as HostError /
+// CryptoError. Exposed for type imports + handler matching; the shape is pinned
+// against the .scrml declaration by stdlib-shim-export-parity.test.js.
 export const ParseError = Object.freeze({
   MissingDiscriminator: "MissingDiscriminator",
-  UnknownVariant: "UnknownVariant",
-  InvalidPayload: "InvalidPayload",
-  Malformed: "Malformed",
+  UnknownVariant: function(tag) {
+    return { variant: "UnknownVariant", data: { tag } };
+  },
+  InvalidPayload: function(field, reason) {
+    return { variant: "InvalidPayload", data: { field, reason } };
+  },
+  Malformed: function(reason) {
+    return { variant: "Malformed", data: { reason } };
+  },
+  variants: ["MissingDiscriminator", "UnknownVariant", "InvalidPayload", "Malformed"],
 });
 
 // ---------------------------------------------------------------------------
@@ -668,5 +678,24 @@ export function schemaFor(_StructType, _options) {
     "The canonical usage is `<schema>${ schemaFor(StructType) }</>`; the call " +
     "site must appear inside a <schema> block via ${...} interpolation per " +
     "SPEC §41.15."
+  );
+}
+
+// ---------------------------------------------------------------------------
+// table-for.scrml — tableFor defensive fallback
+//
+// Canonical usage is the markup element form `<tableFor for=Struct rows=…>`,
+// which the compiler's type-system stage rewrites into a `<table>` tree before
+// any code emission. If a call reaches this body the rewrite failed — surface
+// a clear error rather than `tableFor is not a function`. (`TableSort`, the
+// module's :struct type, has no run-time value.)
+// ---------------------------------------------------------------------------
+
+export function tableFor(_StructType, _options) {
+  // Defensive fallback only — see header comment.
+  throw new Error(
+    "scrml:data tableFor: internal — call site was not rewritten at compile time. " +
+    "The canonical usage is the markup element form <tableFor for=Struct rows=@rows/> " +
+    "per SPEC §41.16."
   );
 }
