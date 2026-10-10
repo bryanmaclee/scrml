@@ -423,6 +423,29 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
     expect(document.querySelectorAll("#host p").length).toBe(1);
   });
 
+  test("a multi-statement group keeps the plain re-render shape, and its reads update", async () => {
+    const { clientJs } = compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="host">\${
+  const label = "n="
+  if (@on) {
+    lift <p id="p">\${label}\${@n}</p>
+  }
+}</div>
+</program>
+`, "multi-stmt");
+    // Only a group that is exactly one `if` chain takes the arm-selector shape;
+    // this one is emitted plainly (no arm run, no per-binding effect).
+    expect(clientJs).not.toContain("_scrml_lift_branch_run(");
+    expect(clientJs).not.toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent/);
+    expect(text("#p")).toBe("n=0");
+    set("n", 6);
+    await flush();
+    expect(text("#p")).toBe("n=6");
+    expect(document.querySelectorAll("#host p").length).toBe(1);
+  });
+
   test("a group whose host is inside an if= template (mount-deferred): reads update, a remount starts clean", async () => {
     compileAndMount(`<program>
 <show> = true

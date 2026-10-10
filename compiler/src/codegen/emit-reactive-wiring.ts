@@ -682,63 +682,99 @@ export interface LiftIfChain {
 let _ifChainSeq = 0;
 
 /**
- * Emit one statement of a logic group. A lift-bearing `if-stmt` is emitted with
- * an `IfChainCollector` active, and its arm split is recorded in `chains`
- * (keyed by the statement node). The returned text is always the ordinary
- * emission: the collector's markers are stripped before it is returned.
- *
- * The chain is emitted in emit-lift's LIVE mode (see `pushLiftLive`): its arms
- * render inside the arm run, whose markup bindings must be their own effects.
- *
- * The split is recorded only when every marker survived the emission intact —
- * a pass that reprinted the code would have dropped them. Then the statement is
- * emitted again, plainly (LIVE mode off), with the side-channel entries of the
- * first attempt withdrawn, and the group keeps the plain re-render shape.
+ * The side-channel lists a statement's emission appends to (the nested lift
+ * groups it registers, the diagnostics it reports), and — per statement node —
+ * the entries its CURRENT emission appended. A statement emitted again must
+ * withdraw exactly its own earlier entries: a nested group's function name is
+ * referenced by the code that registered it, so keeping the first emission's
+ * entry beside the second's would leave a function nothing calls (or, the other
+ * way round, a call to a function nothing defines).
  */
-function emitStmtCollectingIfChain(
+interface StmtSideLists {
+  nested: any[] | null;
+  errors: any[];
+  owned: Map<any, { nested: any[]; errs: any[] }>;
+}
+
+/**
+ * Run `emit` for `stmt`, first withdrawing (by identity) the side-channel
+ * entries a previous emission of the same statement appended, then recording
+ * the entries this one appends.
+ */
+function emitStmtRecorded(stmt: any, side: StmtSideLists, emit: () => string): string {
+  const prev = side.owned.get(stmt);
+  if (prev) {
+    if (side.nested) {
+      for (const e of prev.nested) {
+        const i = side.nested.indexOf(e);
+        if (i !== -1) side.nested.splice(i, 1);
+      }
+    }
+    for (const e of prev.errs) {
+      const i = side.errors.indexOf(e);
+      if (i !== -1) side.errors.splice(i, 1);
+    }
+  }
+  const nestedBefore = side.nested ? side.nested.length : 0;
+  const errsBefore = side.errors.length;
+  const code = emit();
+  side.owned.set(stmt, {
+    nested: side.nested ? side.nested.slice(nestedBefore) : [],
+    errs: side.errors.slice(errsBefore),
+  });
+  return code;
+}
+
+/**
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — emit a group's one
+ * lift-bearing `if-stmt` for the arm-selector shape (emitLiftIfChainGroup), in
+ * place of its plain emission.
+ *
+ * The statement is emitted with an `IfChainCollector` active, so each chain
+ * condition is recorded and bracketed by markers, and in emit-lift's LIVE mode
+ * (`pushLiftLive`), because its arms render inside an arm run whose markup
+ * bindings must be their own effects. From the one emission come `code` (markers
+ * stripped) and `armCode` (each bracketed condition replaced by its arm test).
+ *
+ * The split is trusted only when every marker survived intact — a pass that
+ * reprinted the code would have dropped them. Otherwise the statement is emitted
+ * plainly again and `chain` is null: the group keeps the plain re-render shape.
+ * Either way the earlier emission's side-channel entries are withdrawn
+ * (emitStmtRecorded).
+ */
+function emitIfChainForArms(
   stmt: any,
-  opts: any,
-  chains: Map<any, LiftIfChain>,
-  sideLists: { nested: any[] | null; errors: any[] },
-): string {
-  if (!stmt || stmt.kind !== "if-stmt" || !stmtContainsLift(stmt)) {
-    return emitLogicNode(stmt, opts);
-  }
-  const nestedBefore = sideLists.nested ? sideLists.nested.length : 0;
-  const errsBefore = sideLists.errors.length;
+  side: StmtSideLists,
+  emitPlain: () => string,
+): { code: string; chain: LiftIfChain | null } {
   const collector: IfChainCollector = { id: String(++_ifChainSeq), target: stmt, conds: [], hasElse: false };
-  pushIfChainCollector(collector);
-  pushLiftLive();
-  let marked: string;
-  try {
-    marked = emitLogicNode(stmt, opts);
-  } finally {
-    popLiftLive();
-    popIfChainCollector();
-  }
-  const replain = (): string => {
-    chains.delete(stmt);
-    if (sideLists.nested) sideLists.nested.length = nestedBefore;
-    sideLists.errors.length = errsBefore;
-    return emitLogicNode(stmt, opts);
-  };
-  if (!marked) return replain();
-  let code = marked;
-  let armCode = marked;
-  let intact = collector.conds.length > 0;
+  const marked = emitStmtRecorded(stmt, side, () => {
+    pushIfChainCollector(collector);
+    pushLiftLive();
+    try {
+      return emitPlain();
+    } finally {
+      popLiftLive();
+      popIfChainCollector();
+    }
+  });
+  let code = marked ?? "";
+  let armCode = code;
+  let intact = !!marked && collector.conds.length > 0;
   for (let i = 0; i < collector.conds.length; i++) {
     const open = ifChainArmOpen(collector, i);
     const close = ifChainArmClose(collector, i);
     const bracketed = `${open}${collector.conds[i]}${close}`;
-    if (marked.split(bracketed).length !== 2) intact = false;
-    code = code.split(open).join("").split(close).join("");
+    if (code.split(bracketed).length !== 2) intact = false;
     armCode = armCode.split(bracketed).join(`_scrml_arm === ${i}`);
   }
-  if (!intact || armCode.includes(`/*scrml-arm-${collector.id}-`) || armCode.includes(`/*scrml-arm-end-${collector.id}-`)) {
-    return replain();
+  for (let i = 0; i < collector.conds.length; i++) {
+    code = code.split(ifChainArmOpen(collector, i)).join("").split(ifChainArmClose(collector, i)).join("");
   }
-  chains.set(stmt, { code, conds: collector.conds.slice(), hasElse: collector.hasElse, armCode });
-  return code;
+  if (!intact || armCode.includes(`/*scrml-arm-${collector.id}-`) || armCode.includes(`/*scrml-arm-end-${collector.id}-`)) {
+    return { code: emitStmtRecorded(stmt, side, emitPlain), chain: null };
+  }
+  return { code, chain: { code, conds: collector.conds.slice(), hasElse: collector.hasElse, armCode } };
 }
 
 /**
@@ -812,7 +848,7 @@ let _liftBranchRunUsed = false;
  * Everything else about the group's shape is identical between the two.
  *
  * `ifChain` is the arm split of the group's code when the group is exactly one
- * lift-bearing `if` chain (see emitStmtCollectingIfChain); it selects the
+ * lift-bearing `if` chain (see emitIfChainForArms); it selects the
  * arm-selector shape below.
  */
 function emitLiftGroup(
@@ -844,12 +880,14 @@ function emitLiftGroup(
       : true;
     const canSkipOuterEffect = hasKeyedReconcile && !hasOtherReactiveReads;
 
-    if (canSkipOuterEffect) {
+    if (ifChain) {
+      // The caller passes a chain only for a group that re-renders through an
+      // effect (liftGroupWrapsOuterEffect), and emitted its code for the arms.
+      emitLiftIfChainGroup(out, hostExpr, ifChain);
+    } else if (canSkipOuterEffect) {
       out.push(`_scrml_lift_target = ${hostExpr};`);
       out.push(combinedCode);
       out.push(`_scrml_lift_target = null;`);
-    } else if (ifChain) {
-      emitLiftIfChainGroup(out, hostExpr, ifChain);
     } else {
       const targetVar = genVar("lift_tgt");
       out.push(`const ${targetVar} = ${hostExpr};`);
@@ -1327,9 +1365,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // duplicate behind.
     const stmtSideRanges: Array<{ nested: [number, number]; errs: [number, number] }> = [];
     const nestedListRef: any[] | null = (ctx.registry?.nestedLiftGroups ?? null) as any[] | null;
-    // g-impl1-markup-if-branch-memo-stale-render-s462 — the arm split of each
-    // lift-bearing `if-stmt` this group emitted (see emitStmtCollectingIfChain).
-    const liftIfChains = new Map<any, LiftIfChain>();
+    // g-impl1-markup-if-branch-memo-stale-render-s462 — the entries each
+    // statement's current emission appended to the side channels, so a
+    // statement re-emitted for the arm-selector shape withdraws exactly its own.
+    const sideLists: StmtSideLists = { nested: nestedListRef, errors, owned: new Map() };
 
     for (const stmt of stmts) {
       // S108 Bug 5 Phase 3 — Skip statements from constant-folded logic wrappers.
@@ -1366,7 +1405,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
       const _errsBefore = errors.length;
       const _seededBefore = seededConstFallbackCount();
-      const code = emitStmtCollectingIfChain(stmt, groupEmitOpts, liftIfChains, { nested: nestedListRef, errors });
+      const code = emitStmtRecorded(stmt, sideLists, () => emitLogicNode(stmt, groupEmitOpts));
       // s441 (S440 F4) — a top-level logic statement is module-init code, outside
       // every function body the lexical escape check walks: `${ const checks =
       // [isOk] }` then `checks[0](x)` in a fn handed out a Promise-returning server
@@ -1578,7 +1617,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         if (r.errs[1] > r.errs[0]) errors.splice(r.errs[0], r.errs[1] - r.errs[0]);
         pushLiftNonKeyed();
         try {
-          codes[i] = emitStmtCollectingIfChain(codeStmts[i], groupEmitOpts, liftIfChains, { nested: nestedListRef, errors });
+          const st = codeStmts[i];
+          codes[i] = emitStmtRecorded(st, sideLists, () => emitLogicNode(st, groupEmitOpts));
         } finally {
           popLiftNonKeyed();
         }
@@ -1614,17 +1654,36 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         const r = stmtSideRanges[i] as any;
         if (!r || !r.seededConst || r.onMount) continue;
         const st = codeStmts[i];
-        codes[i] = withSeededConstsOff(groupNames, () => emitStmtCollectingIfChain(st, groupEmitOpts, liftIfChains, { nested: nestedListRef, errors }));
+        codes[i] = withSeededConstsOff(groupNames, () => emitStmtRecorded(st, sideLists, () => emitLogicNode(st, groupEmitOpts)));
       }
       combinedCode = codes.join("\n");
     }
 
-    // g-impl1-markup-if-branch-memo-stale-render-s462 — a group that is exactly
-    // one lift-bearing `if` chain renders through the arm-selector shape
-    // (emitLiftGroup). The split must describe the code actually emitted: a
-    // statement re-emitted above recorded its new split, so compare the text.
-    const _chain0 = codes.length === 1 ? liftIfChains.get(codeStmts[0]) : undefined;
-    const groupIfChain: LiftIfChain | null = _chain0 && _chain0.code === codes[0] ? _chain0 : null;
+    // g-impl1-markup-if-branch-memo-stale-render-s462 — a lift group that is
+    // exactly one lift-bearing `if` chain and re-renders through an effect takes
+    // the arm-selector shape (emitLiftIfChainGroup): its one statement is emitted
+    // again, for the arms, in place of the plain emission above. Every other
+    // group keeps its plain emission, byte for byte.
+    let groupIfChain: LiftIfChain | null = null;
+    if (
+      codes.length === 1 &&
+      groupHasLift &&
+      (pid || group.nested) &&
+      liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps) &&
+      codeStmts[0]?.kind === "if-stmt" &&
+      stmtContainsLift(codeStmts[0]) &&
+      !(stmtSideRanges[0] as any)?.onMount
+    ) {
+      const st = codeStmts[0];
+      const seededOff = !!(stmtSideRanges[0] as any)?.seededConst && !groupAtChunkScope;
+      const emitPlain = (): string => (seededOff
+        ? withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts))
+        : emitLogicNode(st, groupEmitOpts));
+      const r = emitIfChainForArms(st, sideLists, emitPlain);
+      codes[0] = r.code;
+      combinedCode = r.code;
+      groupIfChain = r.chain;
+    }
 
     // A nested group NEVER reaches file scope: its statements read the row's
     // iteration names / the arm's payload bindings, which exist only as the
