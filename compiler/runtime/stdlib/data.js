@@ -582,13 +582,23 @@ export function parseVariant(_json, _T) {
   );
 }
 
-// ParseError shape used by the monomorphized call sites. Exposed for
-// type imports + handler matching.
+// ParseError — mirrors `export type ParseError:enum` in stdlib/data/parse.scrml,
+// in the compiler's enum shape (unit variant → its name; payload variant →
+// constructor returning { variant, data }), the same shape as HostError /
+// CryptoError. Exposed for type imports + handler matching; the shape is pinned
+// against the .scrml declaration by stdlib-shim-export-parity.test.js.
 export const ParseError = Object.freeze({
   MissingDiscriminator: "MissingDiscriminator",
-  UnknownVariant: "UnknownVariant",
-  InvalidPayload: "InvalidPayload",
-  Malformed: "Malformed",
+  UnknownVariant: function(tag) {
+    return { variant: "UnknownVariant", data: { tag } };
+  },
+  InvalidPayload: function(field, reason) {
+    return { variant: "InvalidPayload", data: { field, reason } };
+  },
+  Malformed: function(reason) {
+    return { variant: "Malformed", data: { reason } };
+  },
+  variants: ["MissingDiscriminator", "UnknownVariant", "InvalidPayload", "Malformed"],
 });
 
 // ---------------------------------------------------------------------------

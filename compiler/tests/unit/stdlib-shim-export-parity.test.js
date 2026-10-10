@@ -17,7 +17,14 @@
  *       A `:struct` type has no run-time value and is not required; a server
  *       import of one is pruned by usage at emit time;
  *   §3  every shim export is a `.scrml` export (no run-time-only surface the
- *       compiler would refuse to import), except the named allow-list below.
+ *       compiler would refuse to import), except the named allow-list below;
+ *   §4  every ENUM the module exports has the same SHAPE in the shim as in the
+ *       `.scrml` declaration (read by the compiler's own buildTypeRegistry):
+ *       the same variant names, a unit variant is its name string, a payload
+ *       variant is a constructor whose parameters are the payload field names in
+ *       order, and `variants` lists the variant names in declaration order;
+ *   §5  the type checker's built-in ParseError (type-system.ts BUILTIN_TYPES) is
+ *       the same enum stdlib/data/parse.scrml declares (drift guard).
  */
 
 import { describe, test, expect } from "bun:test";
@@ -27,6 +34,7 @@ import { fileURLToPath } from "url";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { listStdlibModules } from "../../src/module-resolver.js";
+import { buildTypeRegistry, BUILTIN_TYPES } from "../../src/type-system.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SHIM_ROOT = resolve(here, "../../runtime/stdlib");
@@ -49,6 +57,34 @@ const SHIM_ONLY_EXPORTS = {
 
 function parse(absPath) {
   return buildAST(splitBlocks(absPath, readFileSync(absPath, "utf8"))).ast;
+}
+
+/** The declared shape of every enum `absPath` declares: name → [[variant, fields|null]]. */
+function declaredEnums(absPath) {
+  const ast = parse(absPath);
+  const reg = buildTypeRegistry(ast.typeDecls || [], [], { file: absPath, start: 0, end: 0, line: 1, col: 1 });
+  const out = new Map();
+  for (const td of ast.typeDecls || []) {
+    const t = reg.get(td.name);
+    if (t?.kind !== "enum") continue;
+    out.set(td.name, (t.variants || []).map((v) => [v.name, v.payload ? [...v.payload.keys()] : null]));
+  }
+  return out;
+}
+
+/** The parameter names of a shim constructor (`function(a, b) { … }`). */
+function paramNames(fn) {
+  const m = /^[^(]*\(([^)]*)\)/.exec(Function.prototype.toString.call(fn));
+  return m ? m[1].split(",").map((p) => p.trim()).filter(Boolean) : [];
+}
+
+/** The shape a shim enum object presents, in the form `declaredEnums` returns. */
+function shimEnumShape(obj, declared) {
+  return declared.map(([name]) => {
+    const v = obj?.[name];
+    if (typeof v === "function") return [name, paramNames(v)];
+    return [name, v === name ? null : `<not the variant name: ${JSON.stringify(v)}>`];
+  });
 }
 
 /** Terminal kind of every exported name ("struct" | "enum" | "value"), re-exports chased. */
@@ -102,5 +138,25 @@ describe("stdlib shim export parity (.scrml export list vs runtime shim)", () =>
       const shimOnly = [...shimNames].filter((n) => !kinds.has(n) && !allowed.has(n));
       expect(shimOnly).toEqual([]);
     });
+
+    const enums = declaredEnums(absPath);
+    if (enums.size > 0) {
+      test(`${specifier}: §4 every declared enum has the same variants / payload fields in the shim`, async () => {
+        const mod = await import(shimPath);
+        for (const [name, declared] of enums) {
+          if (!kinds.has(name)) continue; // a module-private enum is not part of the surface
+          expect({ name, shape: shimEnumShape(mod[name], declared) }).toEqual({ name, shape: declared });
+          expect({ name, variants: mod[name]?.variants }).toEqual({ name, variants: declared.map(([v]) => v) });
+        }
+      });
+    }
   }
+
+  test("§5 the built-in ParseError is the enum stdlib/data/parse.scrml declares", () => {
+    const parsePath = modules.find((m) => m.specifier === "scrml:data/parse").absPath;
+    const declared = declaredEnums(parsePath).get("ParseError");
+    const builtin = BUILTIN_TYPES.get("ParseError");
+    expect(builtin?.kind).toBe("enum");
+    expect(builtin.variants.map((v) => [v.name, v.payload ? [...v.payload.keys()] : null])).toEqual(declared);
+  });
 });
