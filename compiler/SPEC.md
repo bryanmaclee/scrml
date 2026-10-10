@@ -26305,7 +26305,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | The presence spelling `is some` — the expression form `x is some` (§42.2.2a) or the §55.1 validator `<x is some>` — is SOFT-DEPRECATED (§63.1 Stage 1): it is the same-meaning spelling of `is given`, and it parses identically (same AST, emitted code, run-time behaviour, narrowing; the validator is the same predicate with the same `.NotSome` tag). One lint per site; the message names `is given`, `scrml fix`, and §42.2.2a (expression) or §55.1 (validator). Resolution: write `is given`, or run `scrml fix` (its default `is-some` rule, `compiler/src/commands/fix-is-some.js`: the word `some` after `is` becomes `given`; each rewritten file verified by an impl#1 compile before and after — identical artifacts). ONE code for both surfaces: one word, one replacement. A `some` in a comment, a string or markup prose is not a site. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Emitted by impl#1** (S462, `s462-is-some-deprecate`) at stage TAB, `compiler/src/api.js` via `compiler/src/is-some-deprecation.ts` `isSomeDeprecationDiagnostics` — one per site of `ast-builder.js` `legacyIsSomeSites` (an `is` KEYWORD followed by the IDENT `some` in impl#1's own token streams) confirmed against the source by `confirmIsSomeSites`. Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (the postfix presence test, s462). (S462; emitted at `compiler/src/api.js:1855` `isSomeDeprecationDiagnostics`.) | Info |
 | E-IS-SOME-DEPRECATED | §42.2.2a, §55.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `is some` spelling (expression and validator). Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. The `scrml fix` rule landed S462 in impl#1 (`is-some`, `compiler/src/commands/fix-is-some.js` `fixIsSome`); whether that satisfies §63.4's verified-landed gate is a scheduling-time decision. **Provenance:** ruling:user-voice-scrml.md S462 "a, validator too, go". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context. (Corrected S462: the earlier text said an in-`match` `given` arm "already fires `W-MATCH-ARROW-LEGACY`" — it does not; `match x { not :> 0  given x => 1 }` fired neither code at base `afe2e9212`. Since S462 that arm surfaces W-GIVEN-PRESENCE-DEPRECATED.) Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) **S462:** the in-place guard is itself soft-deprecated (W-GIVEN-PRESENCE-DEPRECATED, §42.2.3), so on an in-place guard written with `=>` that code is the site's ONE diagnostic and this one does not fire (its rewrite retires the separator with the guard); this code remains for the rebind head `given c = @h => { … }` only (emitted at `compiler/src/type-system.ts` `case "given-guard"`, gated on the node's `rebind` flag). | Info |
-| W-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | The in-place presence guard — `given x :> { … }`, the multi-name `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1). It parses, lowers and runs as before; one diagnostic per site (a guard written with the legacy `=>` separator fires this code alone, not W-GIVEN-ARROW-LEGACY as well). The message names the canonical form — `if (x is given) { … }` / `if (x is given && y is given) { … }`; for the arm, `else :>` after the `not :>` arm — plus `scrml fix` and §42.2.3. NOT fired at the §66.7.5 rebind head `given c = @h :>`, at an engine transition guard `given (cond)` (§4.11.4), or at `given` used as an identifier. Resolution: `scrml fix` (its default `given-presence` rule, `compiler/src/commands/fix-given-presence.js`), which verifies each site by compiling and refuses a site impl#1 compiles differently today. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" — *"the in-place presence guard `given x :> { … }` (incl. multi-variable `given x, y :>`, the markup-context form, and the `given x :>` match arm) is SOFT-DEPRECATED through the §63 lifecycle"* (code name: PA reading recorded with the ruling, bryan's veto window). Emitted at `compiler/src/type-system.ts:14249` (the `given-guard` case; message via `givenPresenceDeprecatedMessage`); not at a malformed head (E-SYNTAX-044 alone) nor at the empty node impl#1 leaves after a declaration ending in `is given`. Also emitted by the bootstrap for the logic-context guard (its in-place guard parser in `compiler/self-host-v2/parse.scrml`, which reads the guard as `if (x is given && …)`); the bootstrap parses neither the `given` arm nor a markup-`${}` guard, so it has no emit site for those. **Severity Info** (S462 fix round, PA call in bryan's veto window: matches the sibling W-IS-SOME-DEPRECATED and the §63 precedents W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY; first landed as Warning). | Info |
+| W-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | The in-place presence guard — `given x :> { … }`, the multi-name `given x, y :> { … }`, the same guard inside a markup `${ … }`, and the `given x :>` match arm — is SOFT-DEPRECATED (§63.1 Stage 1). It parses, lowers and runs as before; one diagnostic per site (a guard written with the legacy `=>` separator fires this code alone, not W-GIVEN-ARROW-LEGACY as well). The message names the canonical form — `if (x is given) { … }` / `if (x is given && y is given) { … }`; for the arm, `else :>` after the `not :>` arm — plus `scrml fix` and §42.2.3. NOT fired at the §66.7.5 rebind head `given c = @h :>`, at an engine transition guard `given (cond)` (§4.11.4), or at `given` used as an identifier. Resolution: `scrml fix` (its default `given-presence` rule, `compiler/src/commands/fix-given-presence.js`), which verifies each site by compiling and refuses a site impl#1 compiles differently today. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" — *"the in-place presence guard `given x :> { … }` (incl. multi-variable `given x, y :>`, the markup-context form, and the `given x :>` match arm) is SOFT-DEPRECATED through the §63 lifecycle"* (code name: PA reading recorded with the ruling, bryan's veto window). Emitted at `compiler/src/type-system.ts:14266` (the `given-guard` case; message via `givenPresenceDeprecatedMessage`); not at a malformed head (E-SYNTAX-044 alone) nor at the empty node impl#1 leaves after a declaration ending in `is given`. Also emitted by the bootstrap for the logic-context guard (its in-place guard parser in `compiler/self-host-v2/parse.scrml`, which reads the guard as `if (x is given && …)`); the bootstrap parses neither the `given` arm nor a markup-`${}` guard, so it has no emit site for those. **Severity Info** (S462 fix round, PA call in bryan's veto window: matches the sibling W-IS-SOME-DEPRECATED and the §63 precedents W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY; first landed as Warning). | Info |
 | E-GIVEN-PRESENCE-DEPRECATED | §42.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the in-place presence guard and the `given x :>` match arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S462 "a, go" (*"a reserved E-code in §34"*; the name is the PA reading recorded with the ruling). **Nominal / not yet emitted.** | Error |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
 | W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
@@ -26368,6 +26368,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
+| E-MESSAGE-NOT-TEMPLATE | §41.12, §55.10 | A value in the `registerMessages` map is a function (an arrow, `fn` or `function` expression) or another non-string literal. Level-2 messages are message TEMPLATES with named slots (`.Required: "Please fill in {field}."`) — a function is not value data and is never stored (§14.3). The message shows the template form and the variant's slots. A non-string value the compiler cannot see is refused by the runtime when `registerMessages` runs (§41.12.1 rule 6). **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-SLOT-UNKNOWN | §41.12.1 | A literal `registerMessages` template names a slot (`{name}`) that its variant does not have. The slots are `{field}` plus the variant's §55.9 payload fields (`{predicate}`, `{re}`, `{threshold}`, `{expected}`, `{forbidden}`, `{set}`, `{tag}`). The message names the slot, the variant and the variant's slots. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-TEMPLATE-MALFORMED | §41.12.1 | A literal `registerMessages` template has a `{` that neither opens a slot (`{` name `}`, no whitespace) nor is escaped as `{{` — an unclosed `{name`, `{}`, `{ field }`, `{1}`. The message names the position. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
+| E-MESSAGE-VARIANT-UNKNOWN | §41.12, §55.9 | A `registerMessages` map key is not a `ValidationError` variant (§55.9), so no error can ever carry it and the entry is never read. **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration" item (2) (supersedes: §41.12's 2026-05-04 function-valued map). (Catalog addition S462; emitted at `compiler/src/type-system.ts` `checkRegisterMessagesCalls`; the template parser is `compiler/src/runtime-message-templates.js`, shared with the runtime.) | Error |
 | E-VALIDATOR-DEAD | §55.5.2, §66.5.5 | **Amended S447 (call 4).** A value's validators are dead because **nothing can ever change the value** — all three hold: (1) no `bind:` anywhere targets it; (2) it has no write grant (it is locked — written without `let`, §66.9; a locked value with a reactive initializer is derived and is E-DERIVED-WITH-VALIDATORS instead); (3) it is not server-loaded (no `server` authority, §52) — **and** it is neither (4) seeded at a use site (§66.9 rule 8) nor (5) restored by `persist=` (§6.14.2); both of those count as LIVE (S447 gate-calls item 4: *"each can start invalid, so the validator has something to report"*). Its validity is then a compile-time constant. A value set only from logic and read through `isValid` is **legal**, for child fields and top-level values alike; a validated top-level value is no longer dead for being top-level (§55.5.1). Resolution: bind it, make it writable (`let`), or drop the validators. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 4 — *"E-VALIDATOR-DEAD only when nothing can ever change the value: no bind, no write grant, not server-loaded"* · ruling:user-voice-scrml.md S447 "RULED — \"your recs on the gate calls\": the four §55.17 OPEN items" item 4 (use-site seed and `persist=` restore are LIVE) · origin: S442 "RULED — dpa-058 (O25) = all PA recs" item (5) · **supersedes:** this row's S444 wording, both clauses — (a) "a single-value top-level cell … (§55.5 Edge A) — bound or not" and (b) "a child field that no `bind:` targets". (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`fieldVals`, `validatorPass`) under the **superseded** S444 trigger; the S447 trigger is **Nominal / lands with the impl** in the bootstrap. impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
 | E-VALIDITY-NO-SURFACE | §55.5.1 | **Amended S447 (call 3).** A read of a synthesized validity property — `isValid`, `errors`, `touched`, `submitted` (including `<errors of=@x/>`, which reads `.errors`) — on a value that has no validity surface: a **top-level value that carries no validators** (`let <count:int=0/>` then `@count.isValid`). A validated top-level value has the surface (§55.5.1); a declaration and its child fields always have it (§55.5 Edge B, §55.6). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — "`@x.isValid` on a no-surface cell → an error" · ruling:user-voice-scrml.md S447 "validity calls 2-6" call 3 — *"Only values carrying validators get the surface"* · **supersedes:** the trigger "a single-value top-level cell (§55.5 Edge A)" for VALIDATED top-level cells (S447 item 1). (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`resolveMember`) for EVERY program cell — the narrowing to unvalidated cells is **Nominal / lands with the impl**. impl#1: **Nominal / not yet emitted** — impl#1 reads the property off the raw value and yields `undefined` silently (known gap); impl#1 carries it, §34.0.) | Error |
 | E-VALIDITY-RESERVED-NAME | §55.5.3, §66.2.3 | `isValid`, `errors`, `touched` or `submitted` used as (1) the name of a child field or an attribute of a declaration, or (2) the name of a field of a struct type used as the type of a validated value (a value carrying validators). The name would shadow the synthesized validity surface (§55.5–§55.7); the message names the field and the surface property it hides. Not affected: a top-level declaration so named (it is not a field), a struct-literal key, a struct type never used as a validated value's type. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 5 — *"`isValid` / `errors` / `touched` / `submitted` are illegal field / attribute names (and as fields of a struct type used as a validated value's type). Newly rejecting; corpus impact measured zero by the DD."* (Named S447. **Nominal / spec-ahead — lands with the impl**; not yet emitted by either implementation (the bootstrap today resolves a field so named before the surface — silent shadowing, dpa-058c F12). impl#1 carries it, §34.0.) | Error |
@@ -26564,7 +26568,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-003 | §8.10.7 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that also appears in the handler's client-visible return type. Protected fields must not leak to client-visible cache rows. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error |
 | E-SYNTAX-042 | §17.6, §45 | `null` or `undefined` appears in a scrml value position. scrml's absence sentinel is `not`; `null`/`undefined` are not valid scrml literals. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase3-eq-checks.js`.) | Error |
 | E-SYNTAX-043 | §17.6 | `(x) =>` presence-guard syntax used — replaced by `given x :>`. The old form is removed from the language. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js`.) | Error |
-| E-SYNTAX-044 | §17.6, §42.2.3 | A `given` head that is not an identifier-list followed by `:>` (or the legacy `=>`): a property path (`given obj.field :>`), a comparison, call or other expression (`given id < 0 :> fail …`, `given f(x) :>`), no name (`given (c) :>`), or no separator (`given n { … }`, `given n -> …`) — and a STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :> return 1`: a `given` guard must be `given <names> :> { … }`; a `given x :> expr` match ARM is a different production and is not refused) — in logic and markup-`${}` contexts alike. §42.2.3: "A `given` head SHALL contain only an identifier-list"; `given-guard ::= 'given' identifier-list (':>' | '=>') block`. The message names the fix: a condition is `if (<cond>) { … }`; presence is `if (x is given) { … }`. One error per head; the refused head surfaces neither W-GIVEN-PRESENCE-DEPRECATED nor E-SYNTAX-045 (the rebind head `given c = <expr> :>` keeps E-SYNTAX-045). **S462 widening — direction of change: newly-rejecting** (conformance restoration: before it, impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and ran the `fail` unconditionally, `g-given-bool-expr-fail-runs-unconditionally-s460`). **Provenance:** ruling:user-voice-scrml.md S462 "a" · supersedes (text): *"Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers."* (Catalog addition S78 audit.) The brace-less body (S462 fix round 1, pa-ruled under §42.2.3's grammar; corpus measured — see `docs/changes/s462-given-presence-deprecate/progress.md`) is emitted at `compiler/src/type-system.ts:14234` (the `given-guard` case, where the match-arm context is known). Emitted at `compiler/src/ast-builder.js:11604` and `compiler/src/ast-builder.js:16815` (the head check after the name list in both `given` parsers; message via `givenHeadError`), and at `compiler/src/ast-builder.js:11548` / `:16758` (the property path); also by the bootstrap's in-place guard parser in `compiler/self-host-v2/parse.scrml` (logic context). | Error |
+| E-SYNTAX-044 | §17.6, §42.2.3 | A `given` head that is not an identifier-list followed by `:>` (or the legacy `=>`): a property path (`given obj.field :>`), a comparison, call or other expression (`given id < 0 :> fail …`, `given f(x) :>`), no name (`given (c) :>`), or no separator (`given n { … }`, `given n -> …`) — and a STANDALONE guard whose body is not a `{ … }` block (`given id :> fail X`, `given x :> return 1`: a `given` guard must be `given <names> :> { … }`; a `given x :> expr` match ARM is a different production and is not refused) — in logic and markup-`${}` contexts alike. §42.2.3: "A `given` head SHALL contain only an identifier-list"; `given-guard ::= 'given' identifier-list (':>' | '=>') block`. The message names the fix: a condition is `if (<cond>) { … }`; presence is `if (x is given) { … }`. One error per head; the refused head surfaces neither W-GIVEN-PRESENCE-DEPRECATED nor E-SYNTAX-045 (the rebind head `given c = <expr> :>` keeps E-SYNTAX-045). **S462 widening — direction of change: newly-rejecting** (conformance restoration: before it, impl#1 read `given id < 0 :> fail X` as a presence guard on `id` with an EMPTY body and ran the `fail` unconditionally, `g-given-bool-expr-fail-runs-unconditionally-s460`). **Provenance:** ruling:user-voice-scrml.md S462 "a" · supersedes (text): *"Property path in `given` position (e.g., `given obj.field =>`) — reserved; not yet supported in v1. `given` accepts only simple identifiers."* (Catalog addition S78 audit.) The brace-less body (S462 fix round 1, pa-ruled under §42.2.3's grammar; corpus measured — see `docs/changes/s462-given-presence-deprecate/progress.md`) is emitted at `compiler/src/type-system.ts:14251` (the `given-guard` case, where the match-arm context is known). Emitted at `compiler/src/ast-builder.js:11604` and `compiler/src/ast-builder.js:16815` (the head check after the name list in both `given` parsers; message via `givenHeadError`), and at `compiler/src/ast-builder.js:11548` / `:16758` (the property path); also by the bootstrap's in-place guard parser in `compiler/self-host-v2/parse.scrml` (logic context). | Error |
 | E-SYNTAX-045 | §17.6, §42.2.3 | Rebind form `given <name> = <expr> :>` used in a `given` presence guard. `given` narrows in place — no variable is rebound to a new name (§42.2.3: “No variable is rebound to a new name; each identifier is narrowed in place”). The sibling shape of the property-path reject (E-SYNTAX-044): both reject a non-bare-identifier in `given` head position. Bare `=` is the trigger; `==` / `=>` / `:>` (equality, deprecated separator, canonical separator) do NOT fire. Resolution: declare the value first (`let n = <expr>` then `given n :> { ... }`), or narrow an existing variable in place (`given <existingVar> :> { ... }`). Fires for BOTH logic-context and markup-${}-context given-guards (previously logic emitted E-CODEGEN-INVALID-LOGIC and markup silently compiled). (Catalog addition S189 g-given-rebind dog-food; emitted at `compiler/src/ast-builder.js` both given-guard parse sites.) | Error |
 | E-SYNTAX-064 | §17.7.3, §3.4 | The `@.` contextual iteration sigil ("the current iteration value" / `@.field` for a field of the current item) appears OUTSIDE any `<each>` body scope, where it has no referent. Fires at every reachable `@.`-bearing position outside an each-body: an attribute value (`<li title=@.name>` / `class:done=@.done`), a Tier-0 `${for (it of @items) { lift ... }}` handler-call arg (`onclick=ping(@.id)`), and a Tier-0 lifted interpolation (`lift <li>${@.name}</li>`). A Tier-0 `${for...lift}` is NOT an `<each>` body scope — use the bare loop variable (`it.field`) there; in a `<each>` element use `@.` inside the body or bind an alias with `as name` (`<each in=@items as item>` → `item.field`). Replaces the prior confusing leak (raw `@.` reaching codegen → `E-CODEGEN-INVALID-LOGIC`) and the misleading `E-SCOPE-001` on the base `@` token. (Catalog addition S157 Bug 70 — wired the previously-queued code; emitted at `compiler/src/type-system.ts` visitAttr + lift-expr scan.) | Error |
 | E-BATCH-001 | §8.9.3, §19.10.5 | Explicit `transaction { }` block composed with an implicit per-handler transaction. The two cannot compose. Resolution: `.nobatch()` the outer calls, or wrap the whole handler in the explicit `transaction { }`. (Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts`.) | Error |
@@ -30427,6 +30431,14 @@ This section (§41) extends §21 without removing it. Specifically:
 
 **Added:** 2026-05-04 — formalises Lock 12's project-registered messages — the second tier of the 4-level error message resolution chain (§55.10).
 
+> ⚑ **Amended 2026-10-09 (S462).** The values of the `registerMessages` map are **message templates with named
+> slots**, not functions. A function value is refused (`E-MESSAGE-NOT-TEMPLATE`).
+> **Provenance:** ruling:user-voice-scrml.md S462 "RULED — \"go on the package\" — no-function-in-value migration"
+> item (2) — *"`registerMessages` (§41.12/§55.10) values become message TEMPLATES with named slots (`.Required:
+> "Please fill in {field}."`), not functions."* — a consequence of ruling:user-voice-scrml.md S462 "RULED — \"a\" —
+> no value holds a function" (§14.3 extended). · **supersedes:** the 2026-05-04 form whose values were functions
+> `(fieldName, ...payload) => string`.
+
 **The API:**
 
 ```scrml
@@ -30434,21 +30446,79 @@ ${
   import { registerMessages } from 'scrml:data'
 
   registerMessages({
-    .Required:        (field) => `${field} is required.`,
-    .TooShort:        (field, n) => `${field} must be at least ${n} characters.`,
-    .EmailInvalid:    (field) => `Please enter a valid email for ${field}.`,
-    .Custom:          (field, tag) => /* fall through to inline / defaults */,
+    .Required:        "Please fill in {field}.",
+    .LengthFailed:    "{field} must have a length {predicate}.",
+    .MinFailed:       "{field} must be at least {threshold}.",
+    .OneOfFailed:     "{field} must be one of: {set}.",
   })
 }
 ```
 
 **Normative statements:**
 
-- `registerMessages(map)` is exported by `scrml:data`. The argument is an enum-keyed object whose keys are `ValidationError` variants (cross-ref §55.9) and whose values are functions returning the user-facing string for that error tag.
-- Each function receives `(fieldName, ...args)` — the first positional argument is the field display name (cross-ref §55.10's field-name resolution), and the remaining positional arguments are the variant's payload values (e.g., `.TooShort(2)` passes `2` as the second argument).
+- `registerMessages(map)` is exported by `scrml:data`. The argument is an enum-keyed object whose keys are `ValidationError` variants (cross-ref §55.9) and whose values are **message templates** — strings in the grammar below. A template is data: it names the slots it fills, and the runtime fills them; no author code runs to produce a message.
+- A value that is a function (an arrow, `fn`, or `function` expression) SHALL be refused with `E-MESSAGE-NOT-TEMPLATE`, whose message shows the template form. Any other value that is not a string — written as a literal, so the compiler can see it — is refused with the same code.
+- A key that is not a `ValidationError` variant (§55.9) SHALL be refused with `E-MESSAGE-VARIANT-UNKNOWN`: no error carries that tag, so the entry could never be read.
 - `registerMessages` is project-wide. It SHOULD be called exactly once at app boot, typically inside the root `<program>` body or a top-level `${}` block. Multiple calls compose by last-write-wins per variant key.
 - Calling `registerMessages` from a non-top-level context (inside a function body, inside a worker `<program>`) is `E-USE-INVALID-CTX` — registration must happen at app initialisation, not per-call.
 - A variant key not registered in any `registerMessages` call falls through to the next layer of the resolution chain (`scrml:data` shipped English defaults, then the `<match for=ValidationError>` escape hatch). See §55.10 for the full 4-level chain.
+
+#### 41.12.1 Message template grammar
+
+```
+template := ( text | "{{" | slot )*
+slot     := "{" name "}"
+name     := [A-Za-z_] [A-Za-z0-9_]*
+text     := any character other than "{"
+```
+
+1. **Only `{` is special.** `{name}` is a slot: the runtime replaces it with the rendered value of that slot
+   (table below). `{{` is a literal `{`. A `}` outside a slot is ordinary text and needs no escape.
+2. **A slot is exactly `{`, a name, `}`** — no whitespace, no expression, no format specifier, no nesting.
+   Any other text after a single `{` (end of string, a space, a digit, `}`, another character) makes the
+   template **malformed**: `E-MESSAGE-TEMPLATE-MALFORMED`.
+3. **The slots are the field name and the variant's payload fields** (§55.9), by their §55.9 names:
+
+   | Variant | Slots |
+   |---|---|
+   | `Required`, `NotSome` | `{field}` |
+   | `LengthFailed` | `{field}`, `{predicate}` |
+   | `PatternMismatch` | `{field}`, `{re}` |
+   | `MinFailed`, `MaxFailed` | `{field}`, `{threshold}` |
+   | `GtFailed`, `LtFailed`, `GteFailed`, `LteFailed`, `EqFailed` | `{field}`, `{expected}` |
+   | `NeqFailed` | `{field}`, `{forbidden}` |
+   | `OneOfFailed`, `NotInFailed` | `{field}`, `{set}` |
+   | `Custom` | `{field}`, `{tag}` |
+
+   A template need not use every slot its variant has, and may use one slot more than once.
+4. **Rendering.** The rendered message is text (§55.8 "The message is text"); `<`, `&` and every other
+   character of the rendered template and of a slot value reach the page literally. `{field}` is the field display name (§55.10). `{predicate}` renders the relational predicate
+   as `<op> <value>` (`>= 2`). `{set}` renders the elements as text joined by `, ` (`a, b, c`). `{re}` renders the
+   pattern as written (`/^[a-z]+$/`). `{threshold}`, `{expected}`, `{forbidden}` and `{tag}` render the value as
+   text. A slot whose payload value is absent renders as the empty string.
+5. **A literal template is checked at compile time.** When the `registerMessages` argument is an object
+   literal and a value is a string literal (a double-quoted string, or a back-tick string with no `${}`), the
+   compiler parses the template against the slot table of its key: a slot name the variant does not have is
+   `E-MESSAGE-SLOT-UNKNOWN` (the message names the slot, the variant and the variant's slots); a malformed
+   template is `E-MESSAGE-TEMPLATE-MALFORMED` (the message names the offending position).
+   *Implementation note (S462):* write a template that contains a lone `}` as a **double-quoted** string.
+   In impl#1 a lone `}` inside a back-tick string in a `${}` block is still read as the end of the block
+   (E-CTX-001 — gap `g-logic-backtick-lone-close-brace-closes-context-s462`); balanced `{name}` slots
+   in a back-tick string are unaffected.
+6. **A non-literal template is checked when it is registered, and fails closed.** A template the compiler
+   cannot see (a variable, a back-tick string with `${}`, a value read from data) is parsed by the runtime, with
+   the same grammar and the same slot table, when `registerMessages` runs. A template that is malformed, names a
+   slot its variant lacks, or is not a string is **refused**: it is not registered (an earlier registration
+   for that variant, if any, stays), the runtime reports the refusal on the console, and the chain falls
+   through to Level 3 for that variant. A refused template is never rendered partially, and an unknown
+   `{name}` is never shown to the user as text.
+7. **Statically extractable.** A program whose `registerMessages` values are all string literals has its whole
+   message catalog in source text: i18n tooling extracts it without running the program (the same property
+   Level 1 has by L12 Edge F, §55.10).
+
+The compile-time check and the runtime check are one reader: the compiler and the runtime parse templates with
+the same source (`compiler/src/runtime-message-templates.js`, inlined into the `messages` runtime chunk). The
+Level-3 shipped defaults (§55.10) are templates in the same grammar.
 
 **The 4-level resolution chain (cross-ref §55.10):**
 
@@ -30462,9 +30532,10 @@ ${
 The `scrml:data` module exports a sibling helper `messageFor` that performs the full 4-level resolution and returns the user-facing string. The `<errors of=expr/>` element (§55.8) calls `messageFor` internally for default rendering.
 
 **Cross-references:**
-- §55.9 — `ValidationError` enum (the variant catalog).
+- §55.9 — `ValidationError` enum (the variant catalog and the payload field names the slots use).
 - §55.10 — full 4-level message resolution chain.
 - §55.8 — `<errors of=expr/>` element (default rendering uses `messageFor`).
+- §14.3 — a function is not value data; it is never stored (the reason the values are templates).
 
 ### 41.13 `scrml:data` `parseVariant` — boundary-parsing primitive for tagged-variant JSON
 
@@ -30611,7 +30682,7 @@ The element form is canonical. A bare-call form (`const handle = formFor(Signup,
 - The slot scope of a per-field slot SHALL expose the auto-synthesized reactive cell for that field. Inside the slot body, `bind:value=@<varName>.<fieldName>` binds to the canonical cell; alternative slot-scope binding via `:let={(cell) => ...}` per §16.6 parametric-snippet form is also legal.
 - A slot whose `name=` does not match any struct field SHALL emit `E-FORMFOR-SLOT-UNKNOWN` at the parser stage.
 - `<errors of=@<varName>.<fieldName>/>` SHALL be emitted by `formFor` adjacent to each field's input position regardless of slot override. The validity surface is formFor-owned, not slot-owned — slot overrides change the INPUT rendering, not the error rendering.
-- Project-scoped per-type renderer registration (`data.registerRenderer(TypeKey, renderFn)`) is reserved for v1.next as a sibling to `data.registerMessages` (§41.12). This revision does NOT include the registry; per-call slot overrides are the only customization surface in v1.0.
+- Project-scoped per-type renderer registration (`data.registerRenderer(TypeKey, renderFn)`) is reserved for v1.next as a sibling to `data.registerMessages` (§41.12). This revision does NOT include the registry; per-call slot overrides are the only customization surface in v1.0. When it is specified, its renderer argument SHALL take a non-function form (data the runtime interprets, as `registerMessages` takes templates, §41.12) — a function is not value data and is never stored (§14.3, S462).
 
 #### 41.14.5 Normative statements — field-set transforms (OQ-FF-3)
 
@@ -31597,7 +31668,7 @@ ${
 | E-SYNTAX-043 | `(x) =>` presence guard syntax used — replaced by `given x :>` | Error |
 | E-SYNTAX-044 | A `given` head that is not an identifier-list followed by `:>` — a property path, a comparison or other expression (`given id < 0 :>`), no name, or no separator — or a standalone guard whose body is not a `{ … }` block (§42.2.3; widened S462 "a"; emitted at `compiler/src/ast-builder.js:11604`) | Error |
 | E-SYNTAX-045 | Rebind form `given <name> = <expr> :>` — `given` narrows in place, it does not rebind to a new name (§42.2.3) | Error |
-| W-GIVEN-PRESENCE-DEPRECATED | The soft-deprecated in-place presence guard — `given x :> { … }`, `given x, y :> { … }`, the markup-context form, or the `given x :>` match arm (§42.2.3, S462). Not the rebind head. (Emitted at `compiler/src/type-system.ts:14249`.) | Info |
+| W-GIVEN-PRESENCE-DEPRECATED | The soft-deprecated in-place presence guard — `given x :> { … }`, `given x, y :> { … }`, the markup-context form, or the `given x :>` match arm (§42.2.3, S462). Not the rebind head. (Emitted at `compiler/src/type-system.ts:14266`.) | Info |
 | E-GIVEN-PRESENCE-DEPRECATED | Reserved (§63.2) end-of-window code for the in-place presence guard; named, not scheduled, never fired before a §62 MAJOR event schedules it (§42.2.3, S462) | Error |
 | E-TYPE-041 | `not` assigned to a variable of non-optional type `T` | Error |
 | E-TYPE-042 | Absence checked with `== not`, `=== not`, `== null`, etc. | Error |
@@ -42330,6 +42401,14 @@ or compound:
 produces NO DOM at all (not a hidden element with `display:none`; literally nothing
 rendered).
 
+**The message is text.** The default render is a `${}` text interpolation, so the resolved
+message SHALL be inserted as text — at every level of the chain, in the per-field render and in
+the compound `all` rollup alike. Markup characters in it (from an inline override, a registered
+template, or a payload slot) render literally and never become elements. A payload slot can
+carry user data — `eq(@signup.password)`'s `{expected}` is whatever the user typed — so this is a
+security property, not a styling one. *(S462 FIX ROUND 1 P1: the default render had concatenated
+the message into HTML; a typed `<img …>` became an element.)*
+
 **Body override** for full custom rendering:
 ```scrml
 <errors of=@signup.name>
@@ -42370,7 +42449,9 @@ type ValidationError = enum {
 payload structure), and inert at the type system (no exhaustiveness). The enum gives
 exhaustiveness for `match` over errors, payload data for parameterization (e.g., the
 threshold in `MinFailed(18)`), and a single canonical reference for project-registered
-messages and i18n (§55.10).
+messages and i18n (§55.10). The payload field names are the slot names of a message
+template (§41.12.1): `MinFailed`'s template may use `{threshold}`, `OneOfFailed`'s `{set}`,
+`Custom`'s `{tag}`.
 
 **`@signup.errors` arrays contain these enum values.** Render via `messageFor` (§55.10)
 or via `match` over `ValidationError` (the JS-style match form, §18.1+, or block-form,
@@ -42396,9 +42477,9 @@ extractable for i18n tooling; expressions defeat that.
 ${
   import { registerMessages } from 'scrml:data'
   registerMessages({
-    .Required:        (field) => `Please fill in ${field}.`,
-    .LengthFailed:    (field, pred) => `${field} must satisfy ${pred}.`,
-    .PatternMismatch: (field, re) => `${field} doesn't match the expected pattern.`,
+    .Required:        "Please fill in {field}.",
+    .LengthFailed:    "{field} must have a length {predicate}.",
+    .PatternMismatch: "{field} doesn't match the expected pattern.",
     ...
   })
 }
@@ -42407,12 +42488,17 @@ ${
 The `registerMessages` API is part of `scrml:data` (cross-ref §41), imported via a named
 import (`import { registerMessages } from 'scrml:data'`) — the `use scrml:data` +
 `data.registerMessages` member-access form does NOT resolve (fires `E-USE-001`/`E-SCOPE-001`;
-S236 ruling `g-spec-msgchain-l2-example-uncompilable`). Each entry is a function from
-`(fieldName, ...errorTagPayload)` to a string. Functions can return
-template-interpolated strings, including reactive references.
+S236 ruling `g-spec-msgchain-l2-example-uncompilable`). Each entry is a **message template**
+(§41.12.1, S462): a string whose `{field}` slot is the field display name and whose other slots are
+the variant's §55.9 payload fields (`{threshold}`, `{expected}`, `{set}`, …). A template is data —
+no author function runs to produce a message (§14.3: a function is never stored). A template written
+as a literal is checked at compile time (`E-MESSAGE-SLOT-UNKNOWN`, `E-MESSAGE-TEMPLATE-MALFORMED`);
+a function value is `E-MESSAGE-NOT-TEMPLATE`. Literal templates keep the whole Level-2 catalog
+statically extractable for i18n, as Level 1 is.
 
 **Level 3 — `scrml:data` shipped English defaults** (zero-config; works for prototype-phase
-apps without any registration). Always available; the floor of the resolution chain.
+apps without any registration). Always available; the floor of the resolution chain. The defaults
+are templates in the §41.12.1 grammar (e.g. `MinFailed` → `"{field} must be at least {threshold}."`).
 
 **Level 4 — `match` escape hatch** (full developer control at the call site):
 

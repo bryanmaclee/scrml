@@ -113,6 +113,8 @@ import {
 // §53.6.1 `url` named shape (S457 "6a") — the ONE judge of `string(url)`, shared with the runtime
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
+import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
+import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 
@@ -10397,7 +10399,9 @@ function annotateNodes(
     ?? []);
 
   // Step 1: collect parseVariant local names from imports of 'scrml:data'.
+  // (The same walk collects `registerMessages` locals for the §41.12.1 template check below.)
   const parseVariantLocals = new Set<string>();
+  const registerMessagesLocals = new Set<string>();
   function collectParseVariantImports(nodes: ASTNodeLike[]): void {
     for (const n of nodes) {
       if (!n || typeof n !== "object") continue;
@@ -10408,12 +10412,18 @@ function annotateNodes(
             if (spec && spec.imported === "parseVariant" && typeof spec.local === "string") {
               parseVariantLocals.add(spec.local);
             }
+            if (spec && spec.imported === "registerMessages" && typeof spec.local === "string") {
+              registerMessagesLocals.add(spec.local);
+            }
           }
         } else if (Array.isArray(n.names)) {
           // Defensive fallback when specifiers wasn't populated.
           for (const name of n.names as unknown[]) {
             if (typeof name === "string" && name === "parseVariant") {
               parseVariantLocals.add("parseVariant");
+            }
+            if (typeof name === "string" && name === "registerMessages") {
+              registerMessagesLocals.add("registerMessages");
             }
           }
         }
@@ -10504,6 +10514,13 @@ function annotateNodes(
   if (parseVariantLocals.size > 0) {
     const _pvDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     walkAndValidateParseVariantCalls(_allTopNodes, parseVariantLocals, typeRegistry, errors, _pvDefaultSpan);
+  }
+
+  // §41.12.1 (S462) — every literal `registerMessages` template is checked against its variant's slots;
+  // a function value is refused (a registered message is a template, not a function).
+  if (registerMessagesLocals.size > 0) {
+    const _rmDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    checkRegisterMessagesCalls(_allTopNodes, registerMessagesLocals, errors, _rmDefaultSpan);
   }
 
   // ---------------------------------------------------------------------------
@@ -23495,6 +23512,184 @@ function _resolveAndCheckL22TypeName(
   }
   return resolved;
 }
+
+// ---------------------------------------------------------------------------
+// §41.12 / §41.12.1 (S462) — `registerMessages` values are MESSAGE TEMPLATES.
+//
+// Finds every call of a local bound to `registerMessages` from `'scrml:data'` and checks the map
+// argument it can see (an object literal):
+//   - a key that is not a ValidationError variant (§55.9)            → E-MESSAGE-VARIANT-UNKNOWN
+//   - a value that is a function, or another non-string literal      → E-MESSAGE-NOT-TEMPLATE
+//   - a string-literal template naming a slot its variant lacks      → E-MESSAGE-SLOT-UNKNOWN
+//   - a string-literal template with a `{` that opens no slot        → E-MESSAGE-TEMPLATE-MALFORMED
+// A value the compiler cannot see (a variable, a back-tick string with `${}`, a call) is left to the
+// runtime, which parses it with the SAME reader (`runtime-message-templates.js`) at registration and
+// refuses it there (§41.12.1 rule 6).
+//
+// The walk is structural over the whole file AST (every object reachable from the top nodes), so a
+// call in any position is found; a visited-set and a span key keep aliased nodes from double-firing.
+// An ExprNode's span is measured from the start of its own expression text (line 1), so diagnostics
+// are reported at the nearest enclosing AST node outside the expression tree — the statement that
+// makes the call — whose span is in file coordinates.
+// ---------------------------------------------------------------------------
+const _EXPR_NODE_KINDS = new Set<string>([
+  "ident", "lit", "array", "object", "spread", "unary", "binary", "assign", "ternary", "member",
+  "index", "call", "new", "lambda", "cast", "match-expr", "map-lit", "sql-ref", "input-state-ref",
+  "escape-hatch", "markup-value", "reset-expr", "prop", "shorthand",
+]);
+
+function checkRegisterMessagesCalls(
+  nodes: ASTNodeLike[],
+  locals: Set<string>,
+  errors: TSError[],
+  defaultSpan: Span,
+): void {
+  const seen = new WeakSet<object>();
+  const checkedCalls = new Set<string>();
+
+  const slotList = (tag: string): string =>
+    (_SCRML_MESSAGE_SLOTS[tag] ?? []).map((s: string) => `{${s}}`).join(", ");
+
+  function checkValue(tag: string, value: ExprNode, span: Span): void {
+    const kind = (value as { kind?: string }).kind;
+    const isFunction =
+      kind === "lambda" ||
+      (kind === "escape-hatch" &&
+        /^(ArrowFunctionExpression|FunctionExpression)$/.test(String((value as EscapeHatchExpr).nativeKind ?? "")));
+    if (isFunction) {
+      errors.push(new TSError(
+        "E-MESSAGE-NOT-TEMPLATE",
+        `E-MESSAGE-NOT-TEMPLATE: the \`registerMessages\` value for \`.${tag}\` is a function. ` +
+        `A registered message is a message TEMPLATE — a string with named slots — not a function (§41.12; ` +
+        `a function is not value data and is never stored, §14.3). Write it as \`.${tag}: "…"\`, using the ` +
+        `slots ${slotList(tag)} — e.g. \`.${tag}: "Please check {field}."\`.`,
+        span,
+      ));
+      return;
+    }
+    if (kind === "object" || kind === "array" || kind === "map-lit") {
+      errors.push(new TSError(
+        "E-MESSAGE-NOT-TEMPLATE",
+        `E-MESSAGE-NOT-TEMPLATE: the \`registerMessages\` value for \`.${tag}\` is not a string. ` +
+        `A registered message is a message template — a string with the slots ${slotList(tag)} (§41.12.1).`,
+        span,
+      ));
+      return;
+    }
+    if (kind !== "lit") return; // not visible at compile time — the runtime judges it (§41.12.1 rule 6)
+    const lit = value as LitExpr;
+    // A back-tick string with `${}` is not a literal template: the runtime parses what it evaluates
+    // to. (`hasInterpolation` is carried by the parser; a hand-made node without it falls back to `raw`.)
+    if (lit.litType === "template" &&
+        (lit.hasInterpolation === true || (lit.hasInterpolation === undefined && /\$\{/.test(String(lit.raw ?? ""))))) {
+      return;
+    }
+    if (lit.litType !== "string" && lit.litType !== "template") {
+      errors.push(new TSError(
+        "E-MESSAGE-NOT-TEMPLATE",
+        `E-MESSAGE-NOT-TEMPLATE: the \`registerMessages\` value for \`.${tag}\` is \`${lit.raw}\`, not a string. ` +
+        `A registered message is a message template — a string with the slots ${slotList(tag)} (§41.12.1).`,
+        span,
+      ));
+      return;
+    }
+    const text = typeof lit.value === "string" ? lit.value : "";
+    const parsed = _scrml_message_template_parse(text, _SCRML_MESSAGE_SLOTS[tag]);
+    if (parsed.ok) return;
+    if (parsed.reason === "unknown-slot") {
+      errors.push(new TSError(
+        "E-MESSAGE-SLOT-UNKNOWN",
+        `E-MESSAGE-SLOT-UNKNOWN: the \`registerMessages\` template for \`.${tag}\` names the slot ` +
+        `\`{${parsed.slot}}\`, which \`${tag}\` does not have. Its slots are ${slotList(tag)} — the field ` +
+        `name and the variant's §55.9 payload fields (§41.12.1). Write \`{{\` for a literal \`{\`.`,
+        span,
+      ));
+    } else {
+      errors.push(new TSError(
+        "E-MESSAGE-TEMPLATE-MALFORMED",
+        `E-MESSAGE-TEMPLATE-MALFORMED: the \`registerMessages\` template for \`.${tag}\` has a \`{\` at ` +
+        `offset ${parsed.at} that opens no slot. A slot is \`{name}\` — a name, no spaces — and \`{{\` is a ` +
+        `literal \`{\` (§41.12.1). The slots of \`${tag}\` are ${slotList(tag)}.`,
+        span,
+      ));
+    }
+  }
+
+  function checkCall(call: { callee?: unknown; args?: unknown[]; span?: Span }, anchor: Span): void {
+    const callee = call.callee as { kind?: string; name?: string } | undefined;
+    if (!callee || callee.kind !== "ident" || typeof callee.name !== "string" || !locals.has(callee.name)) return;
+    const callSpan = anchor;
+    const rel = call.span;
+    const key = `${anchor.file ?? ""}:${anchor.start}:${rel?.start ?? 0}:${rel?.end ?? 0}`;
+    if (checkedCalls.has(key)) return;
+    checkedCalls.add(key);
+    const arg = (call.args ?? [])[0] as { kind?: string; props?: ObjectPropLike[] } | undefined;
+    if (!arg || arg.kind !== "object" || !Array.isArray(arg.props)) return; // not visible — runtime judges it
+    for (const prop of arg.props) {
+      if (!prop || (prop.kind !== "prop" && prop.kind !== "shorthand")) continue;
+      if (prop.kind === "prop" && (prop.computed || typeof prop.key !== "string")) continue;
+      const tag = prop.kind === "prop" ? (prop.key as string) : (prop.name as string);
+      const span = callSpan;
+      if (!_SCRML_MESSAGE_SLOTS[tag]) {
+        errors.push(new TSError(
+          "E-MESSAGE-VARIANT-UNKNOWN",
+          `E-MESSAGE-VARIANT-UNKNOWN: \`registerMessages\` key \`.${tag}\` is not a ValidationError variant ` +
+          `(§55.9), so no error carries it and the message is never read. The variants are ` +
+          `${Object.keys(_SCRML_MESSAGE_SLOTS).map((t) => `.${t}`).join(", ")}.`,
+          span,
+        ));
+        continue;
+      }
+      if (prop.kind === "prop" && prop.value) checkValue(tag, prop.value as ExprNode, span);
+    }
+  }
+
+  function visit(v: unknown, anchor: Span): void {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { for (const item of v) visit(item, anchor); return; }
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    const obj = v as Record<string, unknown>;
+    let here = anchor;
+    const kind = typeof obj.kind === "string" ? obj.kind : "";
+    const sp = obj.span as Span | undefined;
+    if (kind && !_EXPR_NODE_KINDS.has(kind) && sp && typeof sp.start === "number" && typeof sp.line === "number") {
+      here = sp;
+    }
+    if (kind === "call") checkCall(obj as { callee?: unknown; args?: unknown[]; span?: Span }, here);
+    // S462 FIX1 F1 — an expression acorn cannot read is kept as an `escape-hatch` ParseError and
+    // reaches codegen as TEXT, which lowers it with `rewriteFnKeyword` (`fn` → `function`) before
+    // emitting it. `registerMessages({ .Required: fn(field) { … } })` is such an expression: its
+    // `fn(…) { … }` value makes the whole call unreadable, so without this no call node exists and
+    // nothing in the map — the function value, nor any other template beside it — is checked. Read
+    // what codegen will emit (the same lowering, then the same parser) and check that tree.
+    if (kind === "escape-hatch" && obj.nativeKind === "ParseError" && typeof obj.raw === "string") {
+      const raw = obj.raw as string;
+      let mentionsLocal = false;
+      for (const name of locals) { if (raw.includes(name)) { mentionsLocal = true; break; } }
+      if (mentionsLocal) {
+        const lowered = rewriteFnKeyword(raw);
+        if (lowered !== raw) {
+          let reparsed: ExprNode | null = null;
+          try { reparsed = parseExprToNode(lowered, here.file ?? defaultSpan.file, 0); } catch { reparsed = null; }
+          if (reparsed && (reparsed as { kind?: string }).kind !== "escape-hatch") visit(reparsed, here);
+        }
+      }
+    }
+    for (const k in obj) visit(obj[k], here);
+  }
+
+  for (const n of nodes) visit(n, defaultSpan);
+}
+
+type ObjectPropLike = {
+  kind?: string;
+  key?: unknown;
+  name?: unknown;
+  value?: unknown;
+  computed?: boolean;
+  span?: Span;
+};
 
 // ---------------------------------------------------------------------------
 // §41.13 / §53.10 — parseVariant validation helper.

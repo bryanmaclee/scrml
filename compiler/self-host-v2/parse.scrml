@@ -2473,9 +2473,47 @@ ${
     // every attribute and a declaration's own value.
     fn quotedInterpDiags(mp: MP, o: Opener) -> MP {
         let m: MP = mp
-        for (const a of o.attrs) { m = quotedInterpDiag(m, a.name, a.value, a.span) }
+        for (const a of o.attrs) {
+            if (quotedHasInterp(a.value) && executableByName(a.name)) {
+                m = executableInterpDiag(m, a.name, o.name, a.span)
+            } else {
+                m = quotedInterpDiag(m, a.name, a.value, a.span)
+            }
+        }
         m = quotedInterpDiag(m, o.name, o.own, mkSpan(o.start, o.start + o.name.length + 1))
         return m
+    }
+
+    fn quotedHasInterp(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: x) :> x.indexOf("$" + "{") >= 0
+            .NoValue :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    // s462 — §5.2 rule 1 / rule 2: a quoted value with `${…}` in an attribute
+    // the browser EXECUTES by its NAME alone — an event-handler attribute (its
+    // name, lowercased, begins with `on`, except the exact words `one`,
+    // `online`, `onboarding`) or `srcdoc` (any case) — "SHALL be a compile
+    // error (E-ATTR-INTERP-EXECUTABLE)". The bootstrap refuses every other
+    // quoted `${…}` too (no reactive templates, above); a scheme-led URL
+    // attribute stays that refusal (its judgment reads the literal scheme).
+    fn executableByName(name: string) -> boolean {
+        const lower: string = name.toLowerCase()
+        if (lower == "srcdoc") return true
+        if (lower.length <= 2 || lower.substring(0, 2) != "on") return false
+        return lower != "one" && lower != "online" && lower != "onboarding"
+    }
+
+    fn executableInterpDiag(mp: MP, name: string, tag: string, sp: ASpan) -> MP {
+        const head: string = "the quoted `" + name + "=\"…\"` attribute on `<" + tag + ">` interpolates `$" + "{…}`"
+        if (name.toLowerCase() == "srcdoc") {
+            return mDiag(mp, "E-ATTR-INTERP-EXECUTABLE", head + " into an iframe `srcdoc`, which is an HTML document — interpolated text there can carry script. Build the frame from a URL (`src=`) or render the content as markup in the page (§5.2).", sp.start, sp.end)
+        }
+        return mDiag(mp, "E-ATTR-INTERP-EXECUTABLE", head + " into event-handler text. JavaScript is never built from interpolated text — a value can close a string and run code on the event. Pass the value as data: the unquoted call form `" + name + "=f(x)` (§5.2).", sp.start, sp.end)
     }
 
     fn quotedInterpDiag(mp: MP, name: string, v: AAttrValue, sp: ASpan) -> MP {

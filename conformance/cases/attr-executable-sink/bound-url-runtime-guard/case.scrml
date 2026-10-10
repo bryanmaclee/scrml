@@ -1,0 +1,18 @@
+<program>
+<bad> = "javascript:alert(1)"
+<good> = "/ok?a=1"
+<pic> = "data:image/png;base64,AAAA"
+<u> = "/start"
+<spaced> = "  JaVaScRiPt:alert(2)"
+function flip() { @u = "vbscript:x" }
+<a id="e" href=(@bad)>bound</a>
+<a id="g" href=(@good)>safe</a>
+<img id="i" src=(@pic)/>
+<a id="h" href=(@pic)>raster on href</a>
+<a id="d" href=(@u)>reactive</a>
+<a id="s" href=(@spaced)>spaced</a>
+<form id="f" action=(@bad)></form>
+<object id="o" data=(@bad)></object>
+<div id="v" data=(@bad)></div>
+<button id="flip" onclick=flip()>flip</button>
+</program>
