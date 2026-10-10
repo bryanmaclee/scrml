@@ -22,7 +22,7 @@
  *                   own lines). Chained second; its own module (fix-arm-pipe.js) locates the arms
  *                   from impl#1's arm records and verifies each file (identical artifacts).
  *   is-some         §42.2.2a / §55.1 (S462): the soft-deprecated presence spelling `x is some` (and the
- *                   validator `<x is some>`) → `is given`. Chained after arm-pipe; its own module
+ *                   validator `<x is some>`) → `is given`. Chained after sql-failable; its own module
  *                   (fix-is-some.js) locates the sites from impl#1's token streams (the sites
  *                   W-IS-SOME-DEPRECATED fires on) and verifies each file (identical artifacts).
  *   client-server-call  §19.9.10 (S451; S454 F8): an UNHANDLED client call of a server function
@@ -113,16 +113,16 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "is-some", "client-server-call", "sql-failable", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
 export const S66_RULES = Object.freeze([
   "pre-migrate",
   "arm-pipe",
-  "is-some",
   "client-server-call",
   "sql-failable",
+  "is-some",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1306,15 +1306,6 @@ export function fixS66(source, opts = {}) {
     blockers.push(...ap.blockers);
   }
 
-  if (enabled.has("is-some")) {
-    // §42.2.2a / §55.1 (S462) — `is some` → `is given`. Chained like arm-pipe: its own structural
-    // location + verification (commands/fix-is-some.js); a file it cannot verify is left untouched
-    // and reported.
-    const is = fixIsSome(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
-    if (is.changed) src = is.output;
-    applied.push(...is.applied);
-    blockers.push(...is.blockers);
-  }
 
   /** INFO lines (not blockers): client-server-call's "callers no longer abort", sql-failable's "a failure used to throw". */
   const infos = [];
@@ -1335,6 +1326,16 @@ export function fixS66(source, opts = {}) {
     applied.push(...sf.applied);
     blockers.push(...sf.blockers);
     infos.push(...sf.infos);
+  }
+
+  if (enabled.has("is-some")) {
+    // §42.2.2a / §55.1 (S462) — `is some` → `is given`. Chained after sql-failable (the handler rules keep their place right after arm-pipe); like arm-pipe: its own structural
+    // location + verification (commands/fix-is-some.js); a file it cannot verify is left untouched
+    // and reported.
+    const is = fixIsSome(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (is.changed) src = is.output;
+    applied.push(...is.applied);
+    blockers.push(...is.blockers);
   }
 
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).
