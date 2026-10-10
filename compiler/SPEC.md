@@ -30468,6 +30468,10 @@ text     := any character other than "{"
    compiler parses the template against the slot table of its key: a slot name the variant does not have is
    `E-MESSAGE-SLOT-UNKNOWN` (the message names the slot, the variant and the variant's slots); a malformed
    template is `E-MESSAGE-TEMPLATE-MALFORMED` (the message names the offending position).
+   *Implementation note (S462):* write a template that contains a lone `}` as a **double-quoted** string.
+   In impl#1 a lone `}` inside a back-tick string in a `${}` block is still read as the end of the block
+   (E-CTX-001 — gap `g-logic-backtick-lone-close-brace-closes-context-s462`); balanced `{name}` slots
+   in a back-tick string are unaffected.
 6. **A non-literal template is checked when it is registered, and fails closed.** A template the compiler
    cannot see (a variable, a back-tick string with `${}`, a value read from data) is parsed by the runtime, with
    the same grammar and the same slot table, when `registerMessages` runs. A template that is malformed, names a

@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 247 | 5 |
-| MED | 566 | 5 |
+| HIGH | 248 | 5 |
+| MED | 568 | 5 |
 | LOW | 327 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -24337,3 +24337,23 @@ Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pr
 <!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
 
 Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
+
+### G-ERRORS-DEFAULT-RENDER-MESSAGE-AS-HTML-S462 — the `<errors of=>` default render inserted the resolved message into `innerHTML` as HTML, so a payload slot carrying user data became markup: `<confirm req eq(@signup.password)>` + typing `<img id=pwn src=x>` into the password field created an `#pwn` element (per-field render and the compound `all` rollup alike) — `NEW S462; HIGH; RESOLVED S462 (s462-register-messages-templates FIX1 P1)`
+<!-- @gap id=g-errors-default-render-message-as-html-s462 sev=HIGH status=resolved locus=compiler/src/codegen/emit-event-wiring.ts(<errors> default renderOne),compiler/src/runtime-template.js(_scrml_message_html, 'messages' chunk) prov=review:S462-register-messages-templates -->
+
+Pre-existing since C11 (on 980cb3001 too). Reviewer-reproduced in happy-dom, PA-confirmed by reading `emit-event-wiring.ts` (`'<p class="scrml-error">' + messageForFn(...) + '</p>'` → `_scrml_el.innerHTML`). §55.8's normative default render is `<p class="scrml-error">${ messageFor(errors[0]) }</p>` — a markup `${}` text interpolation — so the message is TEXT; SPEC §55.8 now says so explicitly ("The message is text"). **Fix:** the default render escapes the whole message through `_scrml_message_html` (`& < > " '`) before it reaches `innerHTML`; `messageFor` itself still returns plain text (escaping belongs to the HTML sink — a `${ messageFor(e) }` interpolation already escapes, and escaping inside `messageFor` would double-escape there). **Evidence:** happy-dom probe `#pwn` count 3 → 0 (per-field, rollup, and the body-override position, which renders the default — see G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462); conformance `forms/msgchain-message-is-text` (runtime: registered L2 template with `<b>`, shipped L3 default with `{forbidden}`, per-field + `all` rollup, and a `${ messageFor(...) }` control paragraph — all render the same text, no `img`/`b` element); unit `c10 §C10.10d`. Every `_scrml_message_for` → `innerHTML` path goes through this one `renderOne` (grep: the only emitter of `scrml-error` markup; formFor emits `<errors>` elements, so it inherits the fix). The body-override path (author markup) is unchanged and currently unreachable.
+
+### G-ERRORS-BODY-OVERRIDE-ARROW-FORM-UNREACHABLE-S462 — the §55.8 `<errors of=…>` body override is dead: its SPEC form `${(err) => <span>…</span>}` is refused with E-SYNTAX-043 (the retired `(x) =>` presence-guard syntax), and any other spelling (`${ function (err) { return <span>…</span> } }`) is silently ignored — the default render shows instead — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-errors-body-override-arrow-form-unreachable-s462 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(<errors> body-override extraction: arrow-only regex on the bare-expr text) + the E-SYNTAX-043 `(x) =>` refusal (§42.2.3) prov=agent:s462-register-messages-templates-fix1 -->
+
+Found while checking the P1 sinks. `emit-html.ts` accepts a body override only when the body's bare-expr text matches `^(x) =>`; that text is now E-SYNTAX-043, so the override can never be written. Needs a SPEC call on the body-override spelling (and, when it is revived, the `${ messageFor(err) }` inside the author's markup must stay a text interpolation — the P1 class).
+
+### G-LOGIC-BACKTICK-LONE-CLOSE-BRACE-CLOSES-CONTEXT-S462 — a `}` inside a back-tick string in a `${}` logic block (`` const s = `a }` ``) is counted by the block splitter as the close of the logic context → E-CTX-001 / E-PARSE-001 — `NEW S462; MED; open (pre-existing)`
+<!-- @gap id=g-logic-backtick-lone-close-brace-closes-context-s462 sev=MED status=open locus=compiler/src/block-splitter.js(back-tick template tracking at ~:2937 runs for frame.type === "meta" only; logic frames count a template's `}` as a context brace) prov=review:S462-register-messages-templates -->
+
+Reviewer-reproduced on both trees; agent re-confirmed (`` const s = `a }` `` alone). Balanced braces inside a back-tick string (`` `{field} x` ``) are unaffected, so it bites exactly the §41.12.1 "a lone `}` is text" case. SPEC §41.12.1 rule 5 now carries a note: write a template containing a lone `}` as a double-quoted string until this closes.
+
+### G-BARE-CALL-STRING-TAG-BEFORE-STATE-BLOCK-DROPPED-S462 — a multi-line bare call statement whose argument holds a string starting a tag (`foo({\n a: "<b>x",\n})`), followed by a state block (`<vf>…</>`) in the same `${}`, vanishes from the client JS with no diagnostic — `NEW S462; HIGH; open (pre-existing; root cause not traced)`
+<!-- @gap id=g-bare-call-string-tag-before-state-block-dropped-s462 sev=HIGH status=open locus=searched:compiler/src/block-splitter.js(logic-context `<` markup detection vs string state across lines),compiler/src/ast-builder.js(bare-expr statement collection) — not traced prov=review:S462-register-messages-templates -->
+
+Reviewer-found as `registerMessages({ .PatternMismatch: "<b>{field}</b>", })`; agent-minimized (S462 FIX1): the trigger is (a) a BARE call statement (a `const o = foo({…})` declaration survives), (b) spanning lines, (c) a double-quoted string in it containing `<` + a tag name (`"<b>x"` suffices; `"a </b> b"` does not), and (d) a state block after it in the same `${}`. Without (d) the same file reports E-MARKUP-001 (the `<b` is read as markup); with it, nothing is reported and the statement is gone (the control without `<b`, `foo({ a: "x" })`, reaches scope checking and fires E-SCOPE-001). Single-line `registerMessages({ .PatternMismatch: "<b>{field}</b>" })` is unaffected. Silent drop of a program statement = HIGH.
