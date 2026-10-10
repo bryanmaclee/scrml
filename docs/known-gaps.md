@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 248 | 5 |
 | MED | 568 | 5 |
-| LOW | 327 | 0 |
+| LOW | 329 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24357,3 +24357,13 @@ Reviewer-reproduced on both trees; agent re-confirmed (`` const s = `a }` `` alo
 <!-- @gap id=g-bare-call-string-tag-before-state-block-dropped-s462 sev=HIGH status=open locus=searched:compiler/src/block-splitter.js(logic-context `<` markup detection vs string state across lines),compiler/src/ast-builder.js(bare-expr statement collection) — not traced prov=review:S462-register-messages-templates -->
 
 Reviewer-found as `registerMessages({ .PatternMismatch: "<b>{field}</b>", })`; agent-minimized (S462 FIX1): the trigger is (a) a BARE call statement (a `const o = foo({…})` declaration survives), (b) spanning lines, (c) a double-quoted string in it containing `<` + a tag name (`"<b>x"` suffices; `"a </b> b"` does not), and (d) a state block after it in the same `${}`. Without (d) the same file reports E-MARKUP-001 (the `<b` is read as markup); with it, nothing is reported and the statement is gone (the control without `<b`, `foo({ a: "x" })`, reaches scope checking and fires E-SCOPE-001). Single-line `registerMessages({ .PatternMismatch: "<b>{field}</b>" })` is unaffected. Silent drop of a program statement = HIGH.
+
+### G-BROWSER-BASELINE-FAIL-MARKER-PARSER-FLAKY-UNDER-LOAD-S462 — `scripts/browser-baseline.ts --check` intermittently refuses with "PARSER DISAGREES … 50 vs 49" (the `(fail)` marker count it parses does not match bun's summary) when the machine is loaded; a clean re-run passes — `NEW S462; LOW; open`
+<!-- @gap id=g-browser-baseline-fail-marker-parser-flaky-under-load-s462 sev=LOW status=open locus=scripts/browser-baseline.ts(FAIL_MARKER parse of bun's interleaved test output vs the summary count) prov=agent:s462-register-messages-templates-fix1 -->
+
+Observed in s462-register-messages-templates FIX ROUND 1 with several sibling agents' full suites running: the first `--check` refused ("a `(fail)` marker emitted somewhere this regex does not reach"), the immediate re-run PASSED (48 asserted). bun interleaves markers into output under load; the parser is the fragile half. A gate that refuses intermittently for reasons no change caused gets re-run until green, which is how it stops being read.
+
+### G-REWRITE-FN-KEYWORD-REWRITES-STRING-CONTENTS-S462 — on the escape-hatch codegen path `rewriteFnKeyword`'s `\bfn\b` replace runs over string-literal contents: `"fn(a) {field} fn (b)"` is emitted as `"function(a) { field } function (b)"` — `NEW S462; LOW; open (pre-existing; same class as G-ESCAPE-HATCH-ARG-TEXT-REWRITE-CORRUPTS-STRINGS-S461)`
+<!-- @gap id=g-rewrite-fn-keyword-rewrites-string-contents-s462 sev=LOW status=open locus=compiler/src/codegen/rewrite.ts(rewriteFnKeyword, `expr.replace(/\bfn\b/g, "function")`, pass 16) prov=review:S462-register-messages-templates-rereview -->
+
+Reviewer-found on the s462 re-review. `rewriteFnKeyword` is token-blind; any string in an expression that falls to the escape-hatch text path loses its literal `fn` words (and other text passes reformat braces). The S462 F1 compile-time check re-reads escape-hatch `registerMessages` calls through this same lowering, so a template containing the word `fn` is CHECKED as the corrupted text — the check and the emitted code agree, but both differ from the source.
