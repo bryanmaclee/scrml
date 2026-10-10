@@ -119,7 +119,7 @@ ${
     // place is the spread target or under it (RULED S440).
     fn cellRead(c: LC, d: Sym, i: InstRef, path: FieldRef[]) -> Expr {
         const s: SnapB | not = c.snap
-        if (s is some) {
+        if (s is given) {
             if (s.decl.id == d.id && instKey(s.inst) == instKey(i) && hasPrefix(path, s.path)) {
                 let rest: FieldRef[] = []
                 let k: int = s.path.length
@@ -309,9 +309,9 @@ ${
         const plan: SuspendPlan = c.t.server.plan
         if (plan.at.length > 0) {
             const tmp: Sym | not = tempOf(plan, e.nid)
-            if (tmp is some) return Expr.Local(tmp)
+            if (tmp is given) return Expr.Local(tmp)
             const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
-            if (sa is some && handledOfK(e.k) is not) return Expr.Local(sa.bind)
+            if (sa is given && handledOfK(e.k) is not) return Expr.Local(sa.bind)
         }
         return lowerExprAt(c, e)
     }
@@ -326,7 +326,7 @@ ${
     fn presenceOperand(c: LC, e: AExpr) -> Expr {
         const f: NameFact | not = nameFact(c.t.names, e.nid)
         const i: InstRef | not = aliasInst(f)
-        if (i is some) return Expr.Handle(instOf(c, i))
+        if (i is given) return Expr.Handle(instOf(c, i))
         return lowerExprK(c, e)
     }
 
@@ -797,7 +797,7 @@ ${
         for (const sw of ws) {
             const w: WriteFact = sw.w
             const t: Sym | not = sw.tmp
-            if (t is some) {
+            if (t is given) {
                 lets = lets.concat([Stmt.Let(t, values[k])])
                 writes = writes.concat([Stmt.Write(w.cap, one, w.edit, Expr.Local(t), w.check)])
             }
@@ -932,7 +932,7 @@ ${
         const init: Expr | not = lowerValue(ic, f.init)
         if (init is not) return []
         let edit: EditKind = EditKind.Replace
-        if (f.graph is some) edit = EditKind.Transition
+        if (f.graph is given) edit = EditKind.Transition
         return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx))
     }
 
@@ -1013,7 +1013,7 @@ ${
         let open = true
         while (open && k < ns.length) {
             const e: AElem | not = elemOf(ns[k])
-            if (e is some) {
+            if (e is given) {
                 if (hasAttrNamed(e, "if")) {
                     open = false
                 } else if (hasAttrNamed(e, "else-if")) {
@@ -1037,7 +1037,7 @@ ${
         let k: int = i
         while (k < j) {
             const e: AElem | not = elemOf(ns[k])
-            if (e is some) arms = arms.concat([{ test: chainTest(c, e), body: bareElem(c, e) }])
+            if (e is given) arms = arms.concat([{ test: chainTest(c, e), body: bareElem(c, e) }])
             k = k + 1
         }
         return View.Cond(arms)
@@ -1051,7 +1051,7 @@ ${
         for (const a of e.attrs) {
             if (a.name == "if" || a.name == "else-if") {
                 const t: Expr | not = lowerValue(c, a.value)
-                if (t is some) return t
+                if (t is given) return t
                 return Expr.Lit(Literal.Bool(false))
             }
         }
@@ -1215,10 +1215,10 @@ ${
     fn condWrap(c: LC, e: AElem, vs: View[]) -> View[] {
         for (const a of e.attrs) {
             const k: AttrKind | not = attrKind(c, a)
-            if (k is some) {
+            if (k is given) {
                 if (isIf(k)) {
                     const test: Expr | not = lowerValue(c, a.value)
-                    if (test is some) return [View.Cond([{ test: test, body: vs }])]
+                    if (test is given) return [View.Cond([{ test: test, body: vs }])]
                 }
             }
         }
@@ -1229,7 +1229,7 @@ ${
         let out: Attr[] = []
         for (const a of attrs) {
             const k: AttrKind | not = attrKind(c, a)
-            if (k is some) out = out.concat(htmlAttr(c, a, k))
+            if (k is given) out = out.concat(htmlAttr(c, a, k))
         }
         return out
     }
@@ -1257,7 +1257,7 @@ ${
     // it) hides the element (fail closed).
     fn showAttr(c: LC, a: AAttr) -> Attr[] {
         const t: Expr | not = lowerValue(c, a.value)
-        if (t is some) return [Attr.Show(t)]
+        if (t is given) return [Attr.Show(t)]
         return [Attr.Show(Expr.Lit(Literal.Bool(false)))]
     }
 
@@ -1330,7 +1330,7 @@ ${
     fn handlerStmt(c: LC, e: AExpr) -> Stmt[] {
         // s454 (U1b): a reference / call that suspends was hoisted (handlerBlock)
         const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
-        if (sa is some) return hoistExpr(c, e)
+        if (sa is given) return hoistExpr(c, e)
         const f: NameFact | not = nameFact(c.t.names, e.nid)
         const s: Sym | not = match f {
             .NFn(sym: x) :> x
@@ -1342,13 +1342,13 @@ ${
             .NSurface(of: x) :> not
             not :> not
         }
-        if (s is some) return [Stmt.Eval(Expr.Call(s, []))]
+        if (s is given) return [Stmt.Eval(Expr.Call(s, []))]
         return hoistStmtExpr(c, e).concat(evalStmt(c, e))
     }
 
     fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
         const r: AExpr | not = blockReference(b)
-        if (r is some) return block(handlerStmt(c, r))
+        if (r is given) return block(handlerStmt(c, r))
         return lowerBlock(c, b)
     }
 
@@ -1376,11 +1376,11 @@ ${
         let out: ConstructAttr[] = []
         for (const a of attrs) {
             const k: AttrKind | not = attrKind(c, a)
-            if (k is some) {
+            if (k is given) {
                 const idx: int = constructField(k)
                 if (idx >= 0) {
                     const v: Expr | not = lowerValue(c, a.value)
-                    if (v is some) out = out.concat([{ field: idx, value: v }])
+                    if (v is given) out = out.concat([{ field: idx, value: v }])
                 }
             }
         }
@@ -1410,11 +1410,11 @@ ${
         let key: Expr | not = not
         for (const a of e.attrs) {
             const k: AttrKind | not = attrKind(c, a)
-            if (k is some) {
+            if (k is given) {
                 const role: int = eachRole(k)
                 if (role == 1) {
                     const s: Expr | not = lowerValue(c, a.value)
-                    if (s is some) src = s
+                    if (s is given) src = s
                 }
                 if (role == 2) key = lowerValue(c, a.value)
             }
@@ -1568,12 +1568,12 @@ ${
         for (const f of d.fields) { fields = fields.concat([lowerField(c, f)]) }
         let renders: View[] | not = not
         const s: DeclSyntax | not = syntaxOf(ss, d.nid)
-        if (s is some) renders = lowerRenders(c, s)
+        if (s is given) renders = lowerRenders(c, s)
         // s449: the program cells' `reset-on=` rules are registered with the
         // program's scope, ahead of its markup (§6.8.4)
         if (isProgramKind(d.kind)) {
             const rv: View[] | not = renders
-            if (rv is some) renders = resetOnViews(c, d).concat(rv)
+            if (rv is given) renders = resetOnViews(c, d).concat(rv)
         }
         const wiring: WiringAttr[] = []
         return { sym: d.sym, kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
@@ -1679,7 +1679,7 @@ ${
         if (e is not) return []
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
         if (h is not) return []
-        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: hoisted with its Suspend (hoistExpr)
+        if (suspendAtOf(c.t.server.plan, e.nid) is given) return []    // s454: hoisted with its Suspend (hoistExpr)
         return [attemptOf(c, e, h)]
     }
 
@@ -1697,7 +1697,7 @@ ${
         const err: Sym = effErr(c, h)
         let call: Failable = failableOf(c, hd.subject)
         const sa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
-        if (sa is some) call = Failable.FSettled(sa.bind)
+        if (sa is given) call = Failable.FSettled(sa.bind)
         const how: AHow = hd.how
         return match how {
             .Propagate :> Stmt.Attempt(result, call, err, plainOk(h), retagArms(c, h))
@@ -1715,7 +1715,7 @@ ${
         if (rf is not) return h.err
         if (remoteCaller(c.t, rf.caller)) return h.err
         const l: Sym | not = rf.local
-        if (l is some) return l
+        if (l is given) return l
         return h.err
     }
 
@@ -1736,7 +1736,7 @@ ${
     // The call: a `!` function's (FCall) or a query (FSql).
     fn failableOf(c: LC, e: AExpr) -> Failable {
         const q: ASql | not = sqlOfExpr(e.k)
-        if (q is some) return Failable.FSql(sqlQueryOf(c, e, q))
+        if (q is given) return Failable.FSql(sqlQueryOf(c, e, q))
         const k: AExprK = e.k
         return match k {
             .Call(callee: cal, args: args) :> failableCall(c, nameFact(c.t.names, cal.nid), args)
@@ -1791,7 +1791,7 @@ ${
         // s454 (U1b): a client call also re-fails its trailing `Transport` (§19.9.10)
         let rs: Retag[] = h.retag
         const rf: RemoteFact | not = h.remote
-        if (rf is some && clientCall(c, h)) rs = rs.concat(rf.retagT)
+        if (rf is given && clientCall(c, h)) rs = rs.concat(rf.retagT)
         let out: ErrArm[] = []
         for (const r of rs) {
             let vals: Expr[] = []
@@ -1866,7 +1866,7 @@ ${
         let out: Sym[] = []
         for (const b of bs) {
             const s: Sym | not = letSym(bindFact(c.t.binds, b.nid))
-            if (s is some) out = out.concat([s])
+            if (s is given) out = out.concat([s])
         }
         return out
     }
@@ -1946,11 +1946,11 @@ ${
     // An expression statement, with the Attempt its whole value — or its
     // assigned value — needs before it.
     fn evalStmt(c: LC, e: AExpr) -> Stmt[] {
-        if (suspendAtOf(c.t.server.plan, e.nid) is some) return []    // s454: the whole statement was its hoisted Suspend
+        if (suspendAtOf(c.t.server.plan, e.nid) is given) return []    // s454: the whole statement was its hoisted Suspend
         const pre: Stmt[] = attemptsFor(c, e)
         if (pre.length > 0) {
             const h: HandledFact | not = handledFactOf(c.t, e.nid)
-            if (h is some) {
+            if (h is given) {
                 if (h.stmt) return pre
             }
         }
@@ -2047,7 +2047,7 @@ ${
         let out: int[] = []
         for (const f of t.fns) {
             const e: Sym | not = f.err
-            if (e is some) out = out.concat([e.id])
+            if (e is given) out = out.concat([e.id])
         }
         for (const ff of t.fails.facts) { out = out.concat(failFactErrs(ff)) }
         return out
@@ -2081,7 +2081,7 @@ ${
         let reads: SqlTables = SqlTables.TablesUnknown
         let writes: SqlTables = SqlTables.TablesUnknown
         let columns: SqlColumns = SqlColumns.ColsUnknown
-        if (info is some) {
+        if (info is given) {
             db = info.db
             kind = info.kind
             reads = info.reads
@@ -2180,7 +2180,7 @@ ${
     fn hoistStmtExpr(c: LC, e: AExpr) -> Stmt[] {
         if (c.t.server.plan.at.length == 0) return []
         const v: AExpr | not = assignedValueOf(e.k)
-        if (v is some) return hoistExpr(c, v)
+        if (v is given) return hoistExpr(c, v)
         return hoistExpr(c, e)
     }
 
@@ -2188,7 +2188,7 @@ ${
         const plan: SuspendPlan = c.t.server.plan
         if (plan.at.length == 0) return []
         const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
-        if (sa is some) return hoistKids(c, suspendArgsOf(e)).concat(suspendStmts(c, e, sa))
+        if (sa is given) return hoistKids(c, suspendArgsOf(e)).concat(suspendStmts(c, e, sa))
         return hoistKids(c, hoistOrder(e))
     }
 
@@ -2197,7 +2197,7 @@ ${
         for (const k of ks) {
             out = out.concat(hoistExpr(c, k))
             const t: Sym | not = tempOf(c.t.server.plan, k.nid)
-            if (t is some) out = out.concat([Stmt.Let(t, lowerExprAt(c, k))])
+            if (t is given) out = out.concat([Stmt.Let(t, lowerExprAt(c, k))])
         }
         return out
     }
@@ -2242,7 +2242,7 @@ ${
     // A suspension point's own arguments (evaluated before it suspends).
     fn suspendArgsOf(e: AExpr) -> AExpr[] {
         const h: AHandled | not = handledOfK(e.k)
-        if (h is some) return callArgsOf(h.subject)
+        if (h is given) return callArgsOf(h.subject)
         return callArgsOf(e)
     }
 
@@ -2285,7 +2285,7 @@ ${
         }
         const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
-        if (h is some && handledOfK(e.k) is some) return [sus, attemptOf(c, e, h)]
+        if (h is given && handledOfK(e.k) is given) return [sus, attemptOf(c, e, h)]
         return [sus]
     }
 
@@ -2318,24 +2318,24 @@ ${
         while (i < ss.length) {
             const s: Stmt = ss[i]
             const sus: SuspendParts | not = suspendParts(s)
-            if (sus is some) {
+            if (sus is given) {
                 const rest: Stmt[] = ss.slice(i + 1)
                 return ss.slice(0, i).concat([Stmt.Suspend(sus.bind, sus.on, block(cpsStmts(sus.then.stmts.concat(rest), tail)))])
             }
             const jk: Sym | not = joinMarkOf(s)
-            if (jk is some && i + 1 < ss.length) {
+            if (jk is given && i + 1 < ss.length) {
                 const ip: IfParts | not = ifParts(ss[i + 1])
-                if (ip is some) {
+                if (ip is given) {
                     const body: Stmt[] = cpsStmts(ss.slice(i + 2), tail)
                     const jump: Stmt[] = [Stmt.Jump(jk)]
                     return ss.slice(0, i).concat([Stmt.Join(jk, block(body)), Stmt.If(ip.cond, block(cpsStmts(ip.thenB.stmts, jump)), block(cpsStmts(elseStmts(ip.elseB), jump)))])
                 }
             }
             const ip2: IfParts | not = ifParts(s)
-            if (ip2 is some && i == ss.length - 1 && holdsSuspension([s])) {
+            if (ip2 is given && i == ss.length - 1 && holdsSuspension([s])) {
                 // the last statement: its branches end the block — each gets the tail
                 let eb: Block | not = not
-                if (ip2.elseB is some || tail.length > 0) eb = block(cpsStmts(elseStmts(ip2.elseB), tail))
+                if (ip2.elseB is given || tail.length > 0) eb = block(cpsStmts(elseStmts(ip2.elseB), tail))
                 return ss.slice(0, i).concat([Stmt.If(ip2.cond, block(cpsStmts(ip2.thenB.stmts, tail)), eb)])
             }
             i = i + 1
@@ -2445,7 +2445,7 @@ ${
 
     fn nodeSuspends(n: Node) -> boolean {
         return match n {
-            .NStmt(s: s) :> suspendParts(s) is some || joinMarkOf(s) is some
+            .NStmt(s: s) :> suspendParts(s) is given || joinMarkOf(s) is given
             .NExpr(e: x) :> false
             .NProgram(p: x) :> false
             .NDecl(d: x) :> false
@@ -2479,7 +2479,7 @@ ${
                     .FnItem(f: fx) :> not
                     .MarkupItem(n: n) :> not
                 }
-                if (p is some && p.nid == nid) {
+                if (p is given && p.nid == nid) {
                     for (const a of p.attrs) { if (a.name == "reset") return false }
                 }
             }
@@ -2511,10 +2511,10 @@ ${
         for (const info of t.fns) {
             if (isServerPlaced(t, info.sym)) {
                 const sf: ServerFn | not = lowerServerFn(t, fsx, info)
-                if (sf is some) server = server.concat([sf])
+                if (sf is given) server = server.concat([sf])
             } else {
                 const f: Fn | not = lowerFn(t, fsx, info)
-                if (f is some) fns = fns.concat([f])
+                if (f is given) fns = fns.concat([f])
             }
         }
         const dbs: Db[] = t.server.dbs
@@ -2542,7 +2542,7 @@ ${
         let out: Decl[] = []
         for (const d of p.decls) {
             const rs: View[] | not = d.renders
-            if (rs is some) {
+            if (rs is given) {
                 out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gateViews(p, rs),
                                     wiring: d.wiring, handles: d.handles }])
             } else {
@@ -2655,7 +2655,7 @@ ${
         for (const x of p.decls) {
             if (x.sym.id == d.id) {
                 const rs: View[] | not = x.renders
-                if (rs is some) return namedFields(p, rs, inner, seen.concat([d.id]))
+                if (rs is given) return namedFields(p, rs, inner, seen.concat([d.id]))
             }
         }
         return []

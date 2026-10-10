@@ -69,7 +69,7 @@ ${
      */
     export async function signJwt(payload, secret, expiresIn) {
         const now = Math.floor(Date.now() / 1000)
-        const exp = now + (expiresIn is some ? expiresIn : 3600)
+        const exp = now + (expiresIn is given ? expiresIn : 3600)
 
         const header = { alg: "HS256", typ: "JWT" }
         const claims = { ...payload, iat: now, exp }
@@ -232,9 +232,9 @@ ${
      *   if (res.valid) { @currentUser = res.payload }
      */
     export function verifyJwtJwks(token, jwksUrl, opts) {
-        const options = opts is some ? opts : {}
-        const clockTolerance = options.clockToleranceSec is some ? options.clockToleranceSec : 60
-        const ttl = options.ttl is some ? options.ttl : 3600
+        const options = opts is given ? opts : {}
+        const clockTolerance = options.clockToleranceSec is given ? options.clockToleranceSec : 60
+        const ttl = options.ttl is given ? options.ttl : 3600
         const cache = options.cache
 
         // 1. Structural decode of the header + payload. Malformed -> reject.
@@ -252,24 +252,24 @@ ${
 
         // 3. Resolve the signing JWK by kid; refetch once on a kid-miss so a
         //    rotated signing key is picked up.
-        let jwks = cache is some ? cache.get(jwksUrl) : not
+        let jwks = cache is given ? cache.get(jwksUrl) : not
         let freshlyFetched = false
         if (jwks is not) {
             jwks = fetchJwks(jwksUrl)
-            if (cache is some && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
+            if (cache is given && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
             freshlyFetched = true
         }
         let jwk = selectJwk(jwks, decoded.header.kid)
-        if (jwk is not && decoded.header.kid is some && !freshlyFetched) {
+        if (jwk is not && decoded.header.kid is given && !freshlyFetched) {
             jwks = fetchJwks(jwksUrl)
-            if (cache is some && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
+            if (cache is given && hasKeys(jwks)) cache.set(jwksUrl, jwks, ttl)
             jwk = selectJwk(jwks, decoded.header.kid)
         }
         if (jwk is not) {
             // no-kid + multiple keys is ambiguous; name it distinctly (aligns
             // with the runtime shim).
-            const many = jwks is some && Array.isArray(jwks.keys) && jwks.keys.length > 1
-            const reason = (decoded.header.kid is some || !many) ? "key-not-found" : "kid-ambiguous"
+            const many = jwks is given && Array.isArray(jwks.keys) && jwks.keys.length > 1
+            const reason = (decoded.header.kid is given || !many) ? "key-not-found" : "kid-ambiguous"
             return { valid: false, reason: reason }
         }
 
@@ -303,20 +303,20 @@ ${
         //    rejected fail-closed rather than trusted.
         const now = Math.floor(Date.now() / 1000)
         const payload = decoded.payload
-        if (payload.exp is some) {
+        if (payload.exp is given) {
             const expN = numericClaim(payload.exp)
             if (!Number.isFinite(expN)) return { valid: false, reason: "invalid" }
             if (now > expN + clockTolerance) return { valid: false, reason: "expired" }
         }
-        if (payload.nbf is some) {
+        if (payload.nbf is given) {
             const nbfN = numericClaim(payload.nbf)
             if (!Number.isFinite(nbfN)) return { valid: false, reason: "invalid" }
             if (now < nbfN - clockTolerance) return { valid: false, reason: "not-yet-valid" }
         }
-        if (options.issuer is some && payload.iss != options.issuer) {
+        if (options.issuer is given && payload.iss != options.issuer) {
             return { valid: false, reason: "issuer-mismatch" }
         }
-        if (options.audience is some && !audienceMatches(payload.aud, options.audience)) {
+        if (options.audience is given && !audienceMatches(payload.aud, options.audience)) {
             return { valid: false, reason: "audience-mismatch" }
         }
 
@@ -378,7 +378,7 @@ ${
      * True when v is a plain object (not `not`, not an array, not a primitive).
      */
     fn isPlainObject(v) {
-        return v is some && typeof v == "object" && !Array.isArray(v)
+        return v is given && typeof v == "object" && !Array.isArray(v)
     }
 
     /**
@@ -387,7 +387,7 @@ ${
      * full TTL.
      */
     fn hasKeys(jwks) {
-        return jwks is some && Array.isArray(jwks.keys) && jwks.keys.length > 0
+        return jwks is given && Array.isArray(jwks.keys) && jwks.keys.length > 0
     }
 
     /**
@@ -395,10 +395,10 @@ ${
      * when the token carries no kid, else `not` (kid-miss or ambiguous).
      */
     fn selectJwk(jwks, kid) {
-        const keys = jwks is some && Array.isArray(jwks.keys) ? jwks.keys : []
-        if (kid is some && kid != "") {
+        const keys = jwks is given && Array.isArray(jwks.keys) ? jwks.keys : []
+        if (kid is given && kid != "") {
             const match = keys.find(k => k.kid == kid)
-            return match is some ? match : not
+            return match is given ? match : not
         }
         if (keys.length == 1) return keys[0]
         return not
@@ -442,17 +442,17 @@ ${
         const decoded = decodeJwt(fakeToken) !{
             ::DecodeFailed(m) -> not
         }
-        assertTruthy(decoded is some)
+        assertTruthy(decoded is given)
         assertEqual(decoded.sub, "1234")
         assertEqual(decoded.name, "Alice")
 
         // decodeJwt absent cases — invalid structure returns `not` (not failable)
         const r1 = decodeJwt(not) !{ ::DecodeFailed(m) -> not }
-        assertFalsy(r1 is some)
+        assertFalsy(r1 is given)
         const r2 = decodeJwt("not.a.token.at.all.extra") !{ ::DecodeFailed(m) -> not }
-        assertFalsy(r2 is some)
+        assertFalsy(r2 is given)
         const r3 = decodeJwt("") !{ ::DecodeFailed(m) -> not }
-        assertFalsy(r3 is some)
+        assertFalsy(r3 is given)
 
         // verifyJwtJwks — alg-pinning is enforced BEFORE any JWKS fetch or
         // crypto, so an alg:none (or alg:HS256-with-pubkey) token is rejected

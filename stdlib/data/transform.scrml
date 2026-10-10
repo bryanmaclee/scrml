@@ -159,7 +159,7 @@ ${
             for (let i = 0; i < v.length; i++) out += _data_value_canonical(v[i])
             return out + "]"
         }
-        if (v is some && v.__scrml_map == true) {
+        if (v is given && v.__scrml_map == true) {
             const mkeys = Object.keys(v.entries).sort()
             let mout = "M{"
             for (let mi = 0; mi < mkeys.length; mi++) {
@@ -168,7 +168,7 @@ ${
             }
             return mout + "}"
         }
-        if (v is some && v._tag is some) {
+        if (v is given && v._tag is given) {
             const tag = String(v._tag)
             let eout = "E" + tag.length + ":" + tag + "("
             const eKeys = Object.keys(v).filter((k) => k != "_tag").sort()
@@ -380,7 +380,7 @@ ${
         if (Array.isArray(obj)) {
             return obj.map(camelizeKeys)
         }
-        if (obj is some && typeof obj == "object") {
+        if (obj is given && typeof obj == "object") {
             const result = {}
             for (const [key, value] of Object.entries(obj)) {
                 result[toCamelCase(key)] = camelizeKeys(value)
@@ -400,7 +400,7 @@ ${
         if (Array.isArray(obj)) {
             return obj.map(snakifyKeys)
         }
-        if (obj is some && typeof obj == "object") {
+        if (obj is given && typeof obj == "object") {
             const result = {}
             for (const [key, value] of Object.entries(obj)) {
                 result[toSnakeCase(key)] = snakifyKeys(value)
@@ -421,8 +421,8 @@ ${
         if (Array.isArray(source)) return source
         const result = { ...target }
         for (const [key, value] of Object.entries(source)) {
-            if (typeof value == "object" && value is some && !Array.isArray(value) &&
-                typeof result[key] == "object" && result[key] is some) {
+            if (typeof value == "object" && value is given && !Array.isArray(value) &&
+                typeof result[key] == "object" && result[key] is given) {
                 result[key] = deepMerge(result[key], value)
             } else {
                 result[key] = value

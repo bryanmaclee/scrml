@@ -290,7 +290,7 @@ describe("§6 canonical §66 input is left alone", () => {
     expect(r.blockers).toEqual([]);
   });
   test("S66_RULES is the stable rule-id list", () => {
-    expect([...S66_RULES]).toEqual(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "rhs-decl", "const-cell", "engine-simple", "program-wrap", "program-move", "unwrap-logic"]);
+    expect([...S66_RULES]).toEqual(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "rhs-decl", "const-cell", "engine-simple", "program-wrap", "program-move", "unwrap-logic"]);
   });
   test("a rules subset applies only those rules", () => {
     const r = fix("${\n    <count> = 0\n}\n<p>${@count}</p>\n", { rules: ["program-wrap"] });

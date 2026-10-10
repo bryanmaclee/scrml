@@ -108,7 +108,7 @@ ${
         </td>
 
         <td class="px-3 py-3 text-sm text-slate-700">
-            <span if=(driver.current_location is some && driver.current_location != "")>
+            <span if=(driver.current_location is given && driver.current_location != "")>
                 ${driver.current_location}
             </>
             <span if=(driver.current_location is not || driver.current_location == "") class="text-slate-400">
@@ -117,7 +117,7 @@ ${
         </td>
 
         <td class="px-3 py-3 text-sm">
-            <span if=(currentLoadId is some)>
+            <span if=(currentLoadId is given)>
                 <a class="text-blue-600 hover:underline" href="/dispatch/loads/${currentLoadId}">
                     Load #${currentLoadId}
                 </a>

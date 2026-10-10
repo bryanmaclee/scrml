@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 5 |
 | MED | 567 | 5 |
-| LOW | 332 | 0 |
+| LOW | 333 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -21135,9 +21135,23 @@ Reproducer `repro/site-helper-in-sql-interpolation-missing-server-side.scrml`. s
 <!-- @gap id=g-server-param-length-predicate-unenforced sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(E-CONTRACT-001-RT boundary-guard emitter — `.member` predicates skipped)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9c -->
 Reproducer `repro/site-server-param-length-predicate-unenforced.scrml`: server.js carries the `E-CONTRACT-001-RT` guard for the `qty` parameter only. Governing: §53.9.4 *"Inline predicate constraints on server function parameters SHALL be enforced at the server boundary … cannot be bypassed by raw HTTP requests."* A raw request with a 1-character value reaches the body. (The broad site claim "parameter predicates are not enforced" did not reproduce; the `.length` form did.)
 
-### g-is-some-cell-validator-drops-the-declaration — `<mid is some> = ""` (a §55.1 validator) never registers the cell; the reads then fail E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S441; MED; open`
-<!-- @gap id=g-is-some-cell-validator-drops-the-declaration sev=MED status=open locus=searched:compiler/src/ast-builder.js(structural-decl lookahead — the two-token `is some` validator)—agent-located-verify prov=empirical:S441-site-fix-p-issome -->
+### g-is-some-cell-validator-drops-the-declaration — `<mid is some> = ""` (a §55.1 validator) never registers the cell; the reads then fail E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S441; MED; RESOLVED S462 (s462-is-some-deprecate)`
+<!-- @gap id=g-is-some-cell-validator-drops-the-declaration sev=MED status=resolved resolved-by=s462-is-some-deprecate locus=compiler/src/ast-builder.js(scanStructuralDeclLookahead — the two-token `is some` validator) prov=empirical:S441-site-fix-p-issome -->
 Reproducer `repro/site-is-some-cell-validator-drops-decl.scrml`. No diagnostic at the declaration; every read blames the read site. Same with `<mid: string is some>`. Governing: §55.1's validator table lists `is some` (example `<x is some>`, error `.NotSome`).
+
+**RESOLVED S462** (s462-is-some-deprecate): `scanStructuralDeclLookahead` reads `is given` and its soft-deprecated spelling `is some` as the one presence validator (named `is given`; the `is some` spelling surfaces W-IS-SOME-DEPRECATED). Pinned by `compiler/tests/unit/is-some-deprecated-lint-s462.test.js` and `conformance/cases/forms/is-given-validator` / `is-some-deprecated-validator`. The inline-message form `is given("…")` too (S462 fix round F2). **Scope of the resolution: the UNTYPED opener only.** The typed opener `<mid: string is some>` named above still drops the declaration — and so does `<mid: string req>`: it is not an `is some` defect but a typed-opener + validator one, filed as [[g-typed-opener-validators-drop-the-declaration-s462]].
+
+### g-is-presence-literal-operand-drops-the-test-s462 — a LITERAL operand of the presence test lowers to just the literal: `const a = "s" is some` → `const a = "s"`; `` `t` is given `` → `` `t` ``; the test is dropped (a silent wrong value: a string, not `true`) — `NEW S462; LOW; open`
+<!-- @gap id=g-is-presence-literal-operand-drops-the-test-s462 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(rewriteIsPredicates / scanLhsLeft — the leftward operand scan accepts an identifier / `)` / `]` tail, never a closing quote or backtick)—agent-located-verify prov=empirical:s462-is-some-deprecate-fix-round-2 -->
+Pre-existing, both spellings, identical on main `42d1a7459` (executed S462 fix round 2). A number operand lowers correctly (`5 is some` → `(5 !== null && 5 !== undefined)`). A literal is never absent, so the right answer is the constant `true` (or E-… refusing a test with a known answer — not ruled); what is wrong today is that the expression's VALUE changes type. Corpus: 0 sites found by the S462 census.
+
+### g-is-presence-in-mixed-text-attr-template-codegen-invalid-s462 — `title="v: ${@user is some}"` (a plain cell, no `<#request>`) fails E-CODEGEN-INVALID-LOGIC, both spellings — `NEW S462; LOW; open`
+<!-- @gap id=g-is-presence-in-mixed-text-attr-template-codegen-invalid-s462 sev=LOW status=open locus=searched:compiler/src/codegen/emit-bindings.ts(lowerAttrTemplateValue → raw-string rewriteTemplateAttrValue; the `${…}` interior is not lowered through the expression parser)—agent-located-verify prov=empirical:s462-is-some-deprecate-parity-probe -->
+Found by the S462 both-spellings differential (probe `mixedAttr`), identical before any S462 edit. Fails CLOSED (the build refuses). The `<#request>`-ref twin is [[g-request-is-some-in-mixed-text-attr-template-misroute]]; this is the same raw-string path with an ordinary cell.
+
+### g-typed-opener-validators-drop-the-declaration-s462 — a TYPED legacy declaration opener that carries validators (`<mid: string req> = <input …/>`, `<mid: string is given>`) is not read as a declaration; the cell vanishes (E-MARKUP-001 on the opener, E-STATE-UNDECLARED at reads) — `NEW S462; MED; open`
+<!-- @gap id=g-typed-opener-validators-drop-the-declaration-s462 sev=MED status=open locus=searched:compiler/src/ast-builder.js(scanStructuralDeclLookahead — the `:` type annotation is handled only AFTER the `>`; a validator after an in-opener type is not scanned)—agent-located-verify prov=empirical:s462-is-some-deprecate-fix-round-F5 -->
+Found in the S462 fix round (F5). Reproducer (compound field): `<signup>` / `<mid: string req> = <input id="mid" type="text"/>` / `</>` inside `${…}` → E-MARKUP-001 (`<signup>`, `<mid>`) and E-STATE-UNDECLARED. Identical for `is given` / `is some`; the untyped `<mid req>` declares. Governing: §55.2 (validators as bare attributes on a state-cell declaration) and §6.2 Shape 2. W-IS-SOME-DEPRECATED still fires on the `is some` spelling there, with the validator message.
 
 ### g-reflect-in-for-of-header-not-rewritten — `for (const f of reflect(Signup).fields)` in `^{}` fails `E-META-EVAL-001: Signup is not defined`; `const info = reflect(Signup)` works — `NEW S441; MED; open`
 <!-- @gap id=g-reflect-in-for-of-header-not-rewritten sev=MED status=open locus=searched:compiler/src/meta-eval.ts(rewriteReflectCalls not applied to a for-of iterable)—agent-located-verify prov=empirical:S441-site-fix-p-mt2-mt3 -->
@@ -24240,8 +24254,10 @@ Source: `docs/changes/s460-presence-a-prime/progress.md`, Phase 4 self-count. Of
 
 **Severity MED:** this blocks the bootstrap from compiling ordinary adopter code (string handling in any form), and a′ widened the blast radius from "unsupported" to "an extra error at every condition that reads such a value". It is not a wrong-output bug: everything fails closed.
 
-### G-IMPL1-IS-GIVEN-AND-VALUE-POSITION-CODEGEN-S460 — impl#1: `const ok = @n is given && @b` → E-CODEGEN-INVALID-LOGIC (the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`); the `is some` spelling of the same line compiles — `NEW S460; LOW; open`
-<!-- @gap id=g-impl1-is-given-and-value-position-codegen-s460 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(rewriteIsPredicates — the `is given` rewrite on a declaration initializer; not traced) prov=review:S460-aprime;empirical:s460-aprime-land-impl1-compile -->
+### G-IMPL1-IS-GIVEN-AND-VALUE-POSITION-CODEGEN-S460 — impl#1: `const ok = @n is given && @b` → E-CODEGEN-INVALID-LOGIC (the emitted JS reads `… = _scrml_reactive_get("n"); && _scrml_reactive_get("b");`); the `is some` spelling of the same line compiles — `NEW S460; LOW; RESOLVED S462 (s462-is-some-deprecate)`
+<!-- @gap id=g-impl1-is-given-and-value-position-codegen-s460 sev=LOW status=resolved resolved-by=s462-is-some-deprecate locus=compiler/src/ast-builder.js(collectExpr — the `given` statement-keyword boundary fired right after `is`) prov=review:S460-aprime;empirical:s460-aprime-land-impl1-compile -->
+
+**RESOLVED S462** (s462-is-some-deprecate): the root cause was NOT `rewriteIsPredicates` — `ast-builder.js` `collectExpr` (and its sibling collector) broke the expression at `given`, a statement-starting keyword, even right after `is`; the line was cut after `@n is` and `&& @b` became a separate statement. The same break also silently DROPPED the test in other positions (`@b && @n is given` → `@b && @n`; `return (g(1)) is given` → `return g(1)`), and the codegen string-rewrite fallback (`codegen/rewrite.ts`) and the unquoted-attribute operator scan (`unquoted-attr-value.ts`) knew only `is some`. All closed; `compiler/tests/unit/is-given-parity-s462.test.js` compiles both spellings in each position and asserts identical artifacts.
 
 First recorded inside [[g-impl1-condition-rule-s460]] ("Codegen defect found while probing"). Filed on its own so it can be fixed and closed separately from that carried divergence. Re-verified on main `3d0e54e21`.
 
