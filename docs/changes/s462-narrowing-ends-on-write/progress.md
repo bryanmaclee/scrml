@@ -88,3 +88,4 @@ R4-2 (HIGH, loosens base): `clear(); @user = @box?.owner; @out = @user.name` (`B
 Re-run: unit file, pre-commit, `bun scripts/s34-census.ts --check-new --base 42d1a7459`, tracking tiers as ci.yml, browser tier, corpus measure. Report SHA + before/after.
 2026-10-09T21:33:23-06:00 FIX ROUND 4: R4-1 multi/default/rest-param block arrows expanded for checking (arrowBodyText, codegen untouched); R4-2 optional-chained / not-present member not present-shaped; unit 83; corpus 2719: 0 new on pre-existing
 2026-10-09T21:48:21-06:00 FIX ROUND 4 docs: arrows gap RESOLVED text corrected (overclaim) + round-4 measurement on the pa-ruled marker; test count 83
+2026-10-09T22:01:27-06:00 FIX ROUND 4 verify: pre-commit 34024/0; s34-census PASS (emitter line refreshed 31829->31856); tracking tiers 5607/0; browser PASS x2; conformance 1540/1605 + 65 xfail; types OK; corpus 0 new
