@@ -42,3 +42,4 @@ Re-run: bootstrap slices, bootstrap-conformance buckets (expect PASS 151, no oth
 2026-10-09T21:38:36-06:00 s34-census: reworded E-DERIVED-CIRCULAR-DEP row provenance (census symbol index does not read .scrml); census PASS; tracking tiers 5625 pass 0 fail
 2026-10-09T21:47:49-06:00 re-review #3 nit: redeclared handle read -> blamed (E-HANDLE-REDECLARE owns); test added (65 pass)
 2026-10-09T22:09:20-06:00 MERGE origin/main e18d3a91a: conflicts analyze.scrml (3 hunks: ours + `is given`; my code's `x is some` migrated to `is given` per #1385), known-gaps (counts regen; both sides' entries kept), generated docs regenerated. bc PASS 151 / NOT-TWINNED 611 (main 139+12). Slices green (m4 hook timeout once, 1229/1229 on rerun).
+2026-10-09T22:56:36-06:00 MERGE origin/main 834debc25 (#1386): analyze/SPEC clean; severity/FACTS/bootstrap-conformance regenerated, known-gaps counts regenerated (hunk), master-list restored. bc PASS 156 (main 144 + 12), slices green.

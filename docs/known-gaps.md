@@ -30,11 +30,43 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 247 | 5 |
+| HIGH | 248 | 5 |
 | MED | 567 | 6 |
-| LOW | 335 | 0 |
+| LOW | 336 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-no-s5-2-sink-floor-s462 — the BOOTSTRAP (`compiler/self-host-v2/`) wrote data-bound executable sinks unguarded: `srcdoc=@cell` compiled clean and the frame ran the cell's script; `href=@cell` wrote `javascript:` (`rt.attr` was a bare `setAttribute`) and a click ran it — `NEW S462; HIGH; RESOLVED S462 (s462-bootstrap-sink-guards)`
+
+<!-- @gap id=g-bootstrap-no-s5-2-sink-floor-s462 sev=HIGH status=resolved resolved-by=s462-bootstrap-sink-guards locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(attr)+compiler/self-host-v2/analyze.scrml(resolveHtml, attrCaseDiags, eventName)+compiler/self-host-v2/parse.scrml(quotedInterpDiags) prov=empirical:s462-chromium-repro(docs/changes/s462-bootstrap-sink-guards/repro) -->
+
+Filed from the O46 deep-dive (`scrml-support/docs/deep-dives/attribute-spread-o46-x-forwarding-2026-10-09.md` §6.1, relayed) and REPRODUCED before the fix on `origin/main` `980cb3001`: the bootstrap's own artifact (front end + `print.scrml` + `slice-m1/runtime/runtime.js`), served to headless Chromium — `srcdoc=@doc` with `<script>parent.pwned = 1</script>` → `window.pwned = 1`; `href=@bad` `javascript:alert(1)` → clicking opens `alert("1")`; a reactive re-write to `vbscript:x` was written verbatim. No diagnostic for either. Same in happy-dom (`<form action>`, `<object data>`, `<img srcset>`, SVG `<set to>` likewise).
+
+**RESOLVED S462** (s462-bootstrap-sink-guards): the bootstrap now meets SPEC §5.2 on every bound write. **Scope: the §5.2 ATTRIBUTE sinks only** (URL-valued attributes, `srcdoc`, `on…` text). Element-level executable sinks are NOT covered here — the bootstrap still admits `<script>` / `<style>`: see [[g-bootstrap-admits-script-style-elements-s462]] (HIGH, open).
+- Rule 3 (runtime): `rt.attr` judges every URL-valued bound write — element-scoped (`_scrml_is_url_attr`), SVG animation values against the animated attribute (a computed or absent `attributeName` → `""`, fail closed), first write and every reactive re-write — with `_scrml_safe_url`. The guard is impl#1's `compiler/src/runtime-url-guard.js` copied VERBATIM into `runtime.js` between marker lines (one definition, not a second list): `bun scripts/sync-bootstrap-url-guard.ts --write|--check`; `compiler/tests/unit/bootstrap-url-guard-verbatim.test.js` fails on drift. A refusal reports through the guard's own `console.error` fallback (the bootstrap has no `_scrml_error_boundary_log`), never the value.
+- Rule 2 (compile): `srcdoc` (any case) with a non-static value and a quoted `on…`/`srcdoc` value with `${…}` are E-ATTR-INTERP-EXECUTABLE; a case-variant `on…` with an expression value (`ONCLICK=(@x)`) — written, not wired — is E-ATTR-INTERP-EXECUTABLE. `one` / `online` / `onboarding` are ordinary attributes (exact names), as rule 1 says (they were wired as `e`/`line`/`boarding` listeners).
+- After the fix, the same Chromium runs: `srcdoc` refused at compile time; `href` written `about:blank`, no dialog.
+- Conformance (both implementations PASS; the bootstrap grades the twin): `attr-executable-sink/{bound-url-runtime-guard, bound-svg-animation-runtime-guard, srcdoc-bound-cell-neg, event-attr-paren-data-text-neg}` (new) + `srcdoc-interp-neg` (was UNSUPPORTED). Bootstrap tests: `slice-m4/sink-guards.test.js` (runtime halves executed).
+- Nit for the X / O46 forwarding build: the case-variant `ON…=(…)` refusal lives in `analyze.scrml` `attrCaseDiags`, which returns early for a component USE — when forwarded attributes land on a use, re-check this path (a forwarded `ONCLICK=(…)` must not bypass it).
+- Still open on the bootstrap, all FAIL-CLOSED (refused, never written): the attribute expression form `attr=${…}` does not parse (E-PARSE-TRAILING); a quoted `${…}` in any other attribute is the reactive-template refusal (E-BOOTSTRAP-UNSUPPORTED) — so a scheme-led quoted URL is refused under that code, not E-ATTR-INTERP-EXECUTABLE (the literal-prefix scheme judgment lands with §5.5.3 reactive templates, and must read impl#1's `_scrml_read_url_scheme`, not a scrml re-implementation).
+
+### g-bootstrap-admits-script-style-elements-s462 — the BOOTSTRAP accepts `<script>` and `<style>` elements: `<script>${@code}</script>` runs data as JavaScript, `<script src=@u>` / SVG `<script href=@u>` load a data-chosen script, `<style>${@css}</style>` injects CSS — impl#1 refuses both (E-SCRIPT-001 / E-STYLE-001) — `NEW S462; HIGH; open`
+
+<!-- @gap id=g-bootstrap-admits-script-style-elements-s462 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml)+compiler/self-host-v2/parse.scrml(element opener) prov=review:s462-bootstrap-sink-guards-S239(Chromium, reproduced on base 980cb3001 AND head d76bcbf4f) -->
+
+Reviewer-reproduced in Chromium on the bootstrap's own artifact, base and head (the s462 sink-guards change does not touch it — it covers §5.2 ATTRIBUTE sinks only, [[g-bootstrap-no-s5-2-sink-floor-s462]]):
+- `<program> let <code:string="window.pwned='SCRIPT'"/> <script id="sc">${@code}</script> </program>` — `window.pwned` is set;
+- `<svg><script>${@code}</script></svg>` — same (the SVG-namespace script);
+- `let <u:string="/evil.js"/> <script src=@u></script>`, and SVG `<script href=@u>` — the page loads the data-chosen script;
+- `<style>${@css}</style>` — CSS injection; Chromium fetched an attacker `url()`.
+
+SPEC §4.17: "`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the **block-splitter level**: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` (scrml logic lives in logic-context `${...}`; genuine foreign JS has the `_{...}` foreign-code block, §23). … The match on the tag name is **exact**, not a prefix — `<noscript>` is an ordinary element and is unaffected." §34 rows E-SCRIPT-001 (§4.17) / E-STYLE-001 (§9), both Error. impl#1 emits both at `compiler/src/block-splitter.js`. The bootstrap has neither code. Fix (separate change): refuse both elements by exact local name, in every namespace (`<svg><script>` is a script — the §5.2.x emit allow-list's own reading), with the recovery the SPEC names.
+
+### g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 — in the BOOTSTRAP, a braced value on a non-handler attribute (`srcdoc={@doc}`, `href={@bad}`) silently lowers to `""`, and a lowercase quoted handler `onclick="alert(1)"` lowers to an empty listener — fail-safe but silent — `NEW S462; LOW; open`
+
+<!-- @gap id=g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml — a Braced value on a non-handler attribute is filed AStatic)+compiler/self-host-v2/lower.scrml(quotedText(.Braced) -> "", handlerBlock(.Quoted) -> block([])) prov=review:s462-bootstrap-sink-guards-S239 -->
+
+Nothing executable is written (the braced value becomes `attr=""`; the quoted handler becomes a listener that does nothing), so no sink is open — but the author's text is dropped with no diagnostic. impl#1 writes a quoted static `onclick="…"` as the author's static string (§5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string"). Either reading should be a diagnostic in the bootstrap rather than a silent drop (`feedback_dont_soft_classify_bugs`).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
