@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1613 of 1613 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1615 of 1615 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1613 of 1613 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 620 | 38.4% |
-| UNSUPPORTED | 793 | 49.2% |
+| NOT-TWINNED | 621 | 38.5% |
+| UNSUPPORTED | 794 | 49.2% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,15 +26,15 @@ Scope: **1613 of 1613 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556 · parse-reject 237.
+UNSUPPORTED by reason: bootstrap-unsupported 556 · parse-reject 238.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **715** — PASS 81 · FAIL 52 · UNSUPPORTED 582. Twin holds 81 (non-vacuous 73). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **716** — PASS 81 · FAIL 52 · UNSUPPORTED 583. Twin holds 81 (non-vacuous 73). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (621 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 70 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -47,8 +47,8 @@ NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
 - 35 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
+- 32 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
-- 31 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
@@ -106,7 +106,7 @@ NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
 | condition | 26 | 18 | · | · | · | 5 | 3 | · | · |
-| control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
+| control-flow | 70 | 12 | · | 2 | · | 19 | 37 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -443,7 +443,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (793)
+### UNSUPPORTED (794)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -599,6 +599,7 @@ none
 - `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `control-flow/markup-if-arm-reads-rerender-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
@@ -1239,7 +1240,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (620)
+### NOT-TWINNED (621)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1392,6 +1393,7 @@ none
 - `control-flow/loop-007-while-as-expr-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `while-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/loop-007-while-as-expr-no-lift-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/loop-007-while-as-expr-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `control-flow/markup-if-presence-arm-reads-rerender-pos` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `defer/later-shadow-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `defer/outside-function-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `defer-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
