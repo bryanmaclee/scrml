@@ -596,7 +596,10 @@ export function parseLeaveArmBody(text, filePath, startOffset) {
  * argument, `@v = match …`, `x = match …`, a derived cell) as a `match-expr`
  * ExprNode whose arms are raw TEXT (`rawArms`), and no reader of that text knows
  * a `given` arm: the arm was silently dropped, and a malformed `given` head got
- * no E-SYNTAX-044. For a match whose arms include a `given` arm, this pass
+ * no E-SYNTAX-044. For a match whose FIRST arm is a `given` arm, this pass
+ * (a later `given` arm is glued into the arm before it by the expression
+ * parser's arm splitter and is NOT reached — S462 review X2, filed with the
+ * single-reader redesign; neither is a match inside a lambda, X1)
  * re-reads the match with the STATEMENT parser — the one that reads `given`
  * heads (head check, separators, arm body) for `const d = match` / `return
  * match` — and attaches the resulting `match-stmt` as `structured` on the
@@ -617,6 +620,8 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
     if (m.structured !== undefined || !Array.isArray(m.rawArms) || !m.subject) return;
     if (Array.isArray(m.subjects) && m.subjects.length >= 2) return;
     // Sound pre-filter: only an arm that BEGINS with the word `given` can be a
+    // (in practice: only the FIRST arm — a later `given` arm arrives glued to the
+    // previous raw arm, X2)
     // `given` arm; whether it is one is decided by the parse below.
     if (!m.rawArms.some((a) => typeof a === "string" && /^\s*given(?![A-Za-z0-9_$])/.test(a))) return;
     // The statement already carries this very match as a structured `matchExpr`
@@ -647,20 +652,26 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
       Object.defineProperty(owner, "__nestedMatches", { value: list, enumerable: false, configurable: true, writable: true });
     }
   };
-  const walk = (n, owner, inExpr) => {
+  // `inFn`: inside a lambda / function expression. A match there is NOT re-read:
+  // its `given` arms would be checked in the OWNING STATEMENT's scope, which does
+  // not hold the lambda's parameters (S462 review X1 — a false E-SCOPE-001 for
+  // `(q) => match … { given q :> … }`). Such a match keeps main's behaviour; the
+  // single-reader redesign that closes it is filed in known-gaps.
+  const walk = (n, owner, inExpr, inFn) => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
-    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr); return; }
-    if (inExpr && n.kind === "match-expr") reread(n, owner);
+    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr, inFn); return; }
+    if (inExpr && !inFn && n.kind === "match-expr") reread(n, owner);
     const nextOwner = !inExpr && typeof n.kind === "string" && n.span ? n : owner;
+    const childInFn = inFn || (inExpr && n.kind === "lambda");
     for (const k of Object.keys(n)) {
       if (k === "span") continue;
       const v = n[k];
       if (!v || typeof v !== "object") continue;
-      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k));
+      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k), childInFn);
     }
   };
-  walk(nodes, null, false);
+  walk(nodes, null, false, false);
 }
 
 /**

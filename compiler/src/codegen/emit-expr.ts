@@ -4594,7 +4594,7 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     return emitStructuredMatchExpr(bridgedMulti, { errors: ctx.errors });
   }
 
-  // S462 review M1 — a match with a `given` arm was re-read by the statement
+  // S462 review M1 — a match whose FIRST arm is a `given` arm was re-read by the statement
   // parser at AST time (ast-builder `attachStructuredExpressionMatches`); lower
   // those structured arms, so the `given` arm is not dropped.
   const structured = (node as { structured?: { body?: unknown[] } }).structured;

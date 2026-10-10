@@ -1,6 +1,6 @@
 {
   "id": "match-leave-given-arm-in-expression-position-match",
-  "description": "A `given n :>` arm fires in an EXPRESSION-position match — a call argument, `@v = match …` and `x = match …` — exactly as in `const d = match` (S462 review M1).",
+  "description": "A FIRST-position `given n :>` arm fires in an EXPRESSION-position match — a call argument, `@v = match …` and `x = match …` — exactly as in `const d = match` (S462 review M1). A later `given` arm, and a match inside a lambda, are not reached (filed: the single-reader redesign).",
   "language-version": "1.0",
   "spec": "§42.2.3",
   "rationale": "§42.2.3 \"In match arms\": a `given` arm is a match arm in every position. The expression parser carried these matches as raw arm text that nothing read as a `given` arm, so the arm was dropped and the next arm won.",

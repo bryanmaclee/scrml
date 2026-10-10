@@ -10861,7 +10861,7 @@ function annotateNodes(
     const key = nodeKey(n);
     let resolvedType: ResolvedType;
 
-    // S462 review M1 — a `match` in expression position whose arms include a
+    // S462 review M1 — a `match` in expression position whose FIRST arm is a
     // `given` arm was re-read by the statement parser (ast-builder
     // `attachStructuredExpressionMatches`); its `given` arms are checked here, in
     // this statement's scope, exactly as an in-statement `given` arm is (head-name

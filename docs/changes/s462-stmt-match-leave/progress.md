@@ -19,3 +19,4 @@
 2026-10-10T13:50:49-06:00 fix round 3: B2 given-guard case restored in checkTopLevelReturn.
 2026-10-10T14:10:23-06:00 fix round 3: M1 expression-position given arms (statement-parser re-read, non-enumerable structured/__nestedMatches); corpus 0 change.
 2026-10-10T14:38:25-06:00 fix round 3: B2, M1, DOC, gaps committed; merged origin/main 801419299; facts + state regenerated; 1 esm throw pinned.
+2026-10-10T15:34:55-06:00 re-review 4: X1 (no re-read inside lambdas) + 2 cases; wording first-position-only; 5 known-gaps entries; state+facts regenerated.

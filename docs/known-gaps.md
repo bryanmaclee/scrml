@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 578 | 6 |
+| MED | 583 | 6 |
 | LOW | 343 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -24114,7 +24114,7 @@ Same family as [[g-given-outside-machine-rule-body-mislowers-silently]], where `
 
 ### G-IMPL1-GIVEN-MATCH-ARM-BODY-DROPPED-S462 — impl#1 drops the body of a `given x :>` match arm: `match name { not :> "absent"  given name :> "hi " + name }` emits only the `not` branch, so the present case yields `null` / falls through, at exit 0 — `NEW S462; HIGH; open (pre-existing, silent miscompile)`
 <!-- @gap id=g-impl1-given-match-arm-body-dropped-s462 sev=HIGH status=resolved resolved-by=s462-stmt-match-leave locus=searched:compiler/src/codegen(match lowering — a `given-guard` node in a match body is not lowered as an arm; emit-control-flow / emit-logic match emitters, not traced) prov=empirical:s462-given-presence-deprecate-probes -->
-⛑ **RESOLVED S462 (`s462-stmt-match-leave`).** A `given x :> body` arm is lowered in every match position: statement, decl and `return match` (`givenGuardToMatchArm`), and expression positions — a call argument, `@v = match`, `x = match`, a derived cell — through the statement-parser re-read (`attachStructuredExpressionMatches`). A brace-less arm body is the arm's one statement; the arm-level `->` separator is accepted; an undeclared head name is E-SCOPE-001 (§42.2.3 "No rebind"). Cases: `match-leave/given-arm-*`, `condition/given-presence-deprecated-arm` (runtime half). 
+⛑ **RESOLVED S462 (`s462-stmt-match-leave`).** A `given x :> body` arm is lowered in every match position: statement, decl and `return match` (`givenGuardToMatchArm`), and — for a FIRST-position `given` arm, outside a lambda — expression positions (a call argument, `@v = match`, `x = match`, a derived cell) through the statement-parser re-read (`attachStructuredExpressionMatches`). A later `given` arm, and a match inside a lambda, still drop the arm as on main: see `g-impl1-expression-match-arms-single-reader-s462`. A brace-less arm body is the arm's one statement; the arm-level `->` separator is accepted; an undeclared head name is E-SCOPE-001 (§42.2.3 "No rebind"). Cases: `match-leave/given-arm-*`, `condition/given-presence-deprecated-arm` (runtime half). 
 
 Found S462 while building the `scrml fix` `given-presence` rule (`s462-given-presence-deprecate`). Compiled on the branch (base `afe2e9212`, the S462 lint changes no emitted code):
 - value match — `let out = match name { not :> "absent"  given name :> "hi " + name }` → `if (_scrml_match_N === null || … === undefined) { _scrml_tilde = "absent"; }` and nothing else: `out` is `null` when `name` is present. The canonical `else :> "hi " + name` emits the `else` branch.
@@ -24663,3 +24663,23 @@ dpa-068 D7 / probe c15. `lift` is outside the §18.2 leave set (S462 ruling); th
 ### g-impl1-dead-rewrite-top-level-return-s462 — codegen's S142 `rewriteTopLevelReturn` (turns a top-level `!{}` arm's `return X` into a value) is unreachable — `NEW S462; LOW; open`
 <!-- @gap id=g-impl1-dead-rewrite-top-level-return-s462 sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(rewriteTopLevelReturn in the guarded-expr arm emission) prov=review:s462-stmt-match-leave-fix-rounds -->
 Since S462 (review N1) a top-level `return` in a `!{}` handler arm is E-STMT-RETURN-OUTSIDE-FUNCTION (§18.2 "Leaving arms"; type-system `checkTopLevelReturn`), so the rewrite never sees one. Remove it, or keep it only if a non-top-level caller is found.
+
+### g-impl1-expression-match-arms-single-reader-s462 — expression-position `match` arms are read twice (raw text, plus a statement-parser re-read only for a first-position `given` arm); they should be parsed ONCE by the statement parser's arm parser — `NEW S462; MED; open`
+<!-- @gap id=g-impl1-expression-match-arms-single-reader-s462 sev=MED status=open locus=compiler/src/ast-builder.js(attachStructuredExpressionMatches) + compiler/src/expression-parser.ts(match-expr rawArms) + compiler/src/codegen/emit-expr.ts(emitMatchExpr bridge) prov=review:s462-stmt-match-leave-re-review-4 -->
+The S462 M1 fix re-reads an expression-position match with the statement parser when its FIRST raw arm begins with `given`. The right design is one reader: parse expression-position `match` arms with `parseMatchBodyWithArity` so the `match-expr` node carries structured, ENUMERABLE arms and nothing is re-read. This also closes: **X2** a non-first `given` arm stays glued into the previous raw arm and fails as E-CODEGEN-INVALID-LOGIC (same as main); **X3** the re-read discards every parse error except E-SYNTAX-044/045; a `given` arm inside a LAMBDA is still silently dropped as on main (the re-read is skipped there because it would check the arm in the owning statement's scope, which excludes the lambda's parameters — X1); and a `.map((q) => …)` arm compiles differently depending on whether a sibling arm is `given`.
+
+### g-impl1-derived-show-match-not-reactive-to-arm-cells-s462 — a derived `const <lbl> = show(match …)` does not recompute when a cell read inside an arm changes — `NEW S462; MED; open`
+<!-- @gap id=g-impl1-derived-show-match-not-reactive-to-arm-cells-s462 sev=MED status=open locus=searched:compiler/src/codegen/reactive-deps.ts(derived dep collection does not walk the match ExprNode's raw arm text) — not traced prov=review:s462-stmt-match-leave-re-review-4 -->
+Found by S462 review #4. Pre-existing; the arm text is not an expression tree the dependency walker reads.
+
+### g-impl1-server-call-in-expression-match-arm-object-promise-s462 — a server call in an expression-position match arm yields `[object Promise]` — `NEW S462; MED; open`
+<!-- @gap id=g-impl1-server-call-in-expression-match-arm-object-promise-s462 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(emitMatchExpr bridge → emit-control-flow value IIFE; the arm call is not awaited in a client expression position) — not traced prov=review:s462-stmt-match-leave-re-review-4 -->
+Found by S462 review #4. Pre-existing on main.
+
+### g-impl1-undeclared-name-in-expression-match-arm-unchecked-s462 — an undeclared name in a (non-`given`) expression-position match arm gets no E-SCOPE-001 — `NEW S462; MED; open`
+<!-- @gap id=g-impl1-undeclared-name-in-expression-match-arm-unchecked-s462 sev=MED status=open locus=searched:compiler/src/type-system.ts(checkLogicExprIdents does not walk match-expr rawArms text) — not traced prov=review:s462-stmt-match-leave-re-review-4 -->
+Found by S462 review #4. Pre-existing; the arm is text to the type system. The single-reader redesign above closes it.
+
+### g-s462-m1-wording-first-position-only — the S462 M1 commit message says the re-read covers a match whose "arms include a `given` arm"; it covers a FIRST-position `given` arm only (and none inside a lambda) — `NEW S462; MED; open`
+<!-- @gap id=g-s462-m1-wording-first-position-only sev=MED status=open locus=git:commit `fix(s462-stmt-match-leave): review M1 — given arms in expression-position matches` (message only) prov=review:s462-stmt-match-leave-re-review-4 -->
+Corrected in code comments, the conformance case description and the resolution note of `g-impl1-given-match-arm-body-dropped-s462` (S462 review #4). The commit message itself is history and is left as is; this entry is the correction of record.
