@@ -113,6 +113,7 @@ function buildMessagesSandbox() {
       register: _scrml_messages_register,
       defaults: _SCRML_DEFAULT_MESSAGES,
       tagToValidator: _SCRML_TAG_TO_VALIDATOR,
+      messageHtml: _scrml_message_html,
     };
   `;
   // eslint-disable-next-line no-new-func
@@ -633,6 +634,31 @@ describe("C10 §C10.10b — runtime refusal of bad templates (fail closed)", () 
     const seen = quiet(() => api.register({ constructor: "{field}" }));
     expect(seen.join("\n")).toContain("not a ValidationError variant");
     expect(api.messageFor({ tag: "constructor" }, "x")).toBe("x is invalid.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C10.10d — the message is TEXT (§55.8): the default <errors> render escapes it
+// ---------------------------------------------------------------------------
+
+describe("C10 §C10.10d — _scrml_message_html escapes a message for the default render", () => {
+  test("markup characters in a payload are escaped, so a typed tag never becomes an element", () => {
+    const api = buildMessagesSandbox();
+    const msg = api.messageFor({ tag: "EqFailed", expected: "<img id=pwn src=x onerror=\"a('1')\">" }, "confirm");
+    expect(api.messageHtml(msg)).toBe(
+      "confirm must equal &lt;img id=pwn src=x onerror=&quot;a(&#39;1&#39;)&quot;&gt;.",
+    );
+  });
+
+  test("& is escaped first-class (no double-escape surprises)", () => {
+    const api = buildMessagesSandbox();
+    expect(api.messageHtml("a & b &amp; c")).toBe("a &amp; b &amp;amp; c");
+  });
+
+  test("messageFor itself returns plain text — escaping belongs to the HTML sink", () => {
+    const api = buildMessagesSandbox();
+    api.register({ Required: "<b>{field}</b>" });
+    expect(api.messageFor({ tag: "Required" }, "x")).toBe("<b>x</b>");
   });
 });
 

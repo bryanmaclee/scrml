@@ -30458,7 +30458,8 @@ text     := any character other than "{"
    | `Custom` | `{field}`, `{tag}` |
 
    A template need not use every slot its variant has, and may use one slot more than once.
-4. **Rendering.** `{field}` is the field display name (§55.10). `{predicate}` renders the relational predicate
+4. **Rendering.** The rendered message is text (§55.8 "The message is text"); `<`, `&` and every other
+   character of the rendered template and of a slot value reach the page literally. `{field}` is the field display name (§55.10). `{predicate}` renders the relational predicate
    as `<op> <value>` (`>= 2`). `{set}` renders the elements as text joined by `, ` (`a, b, c`). `{re}` renders the
    pattern as written (`/^[a-z]+$/`). `{threshold}`, `{expected}`, `{forbidden}` and `{tag}` render the value as
    text. A slot whose payload value is absent renders as the empty string.
@@ -42295,6 +42296,14 @@ or compound:
 `messageFor` (§55.10) walks the resolution chain. When `errors.length == 0`, the element
 produces NO DOM at all (not a hidden element with `display:none`; literally nothing
 rendered).
+
+**The message is text.** The default render is a `${}` text interpolation, so the resolved
+message SHALL be inserted as text — at every level of the chain, in the per-field render and in
+the compound `all` rollup alike. Markup characters in it (from an inline override, a registered
+template, or a payload slot) render literally and never become elements. A payload slot can
+carry user data — `eq(@signup.password)`'s `{expected}` is whatever the user typed — so this is a
+security property, not a styling one. *(S462 FIX ROUND 1 P1: the default render had concatenated
+the message into HTML; a typed `<img …>` became an element.)*
 
 **Body override** for full custom rendering:
 ```scrml

@@ -5059,6 +5059,15 @@ function _scrml_messages_fallback(fieldName) {
   return fieldName + " is invalid.";
 }
 
+// A resolved message is TEXT (§55.8 default render: <p class="scrml-error">\${ messageFor(e) }</p>),
+// and its slots carry user data (an eq(@other) payload is whatever the user typed). The default
+// <errors> render builds HTML, so it escapes the whole message through this before innerHTML.
+function _scrml_message_html(text) {
+  return String(text).replace(/[&<>"']/g, function (ch) {
+    return ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;";
+  });
+}
+
 /**
  * Level-1 storage emission — called by C10-emitted code at module init.
  * Key shape: cellName + "::" + validatorName.

@@ -19,3 +19,4 @@ P2 (pre-existing, file a gap with locus): a `}` inside a back-tick string (`` `{
 P3 (pre-existing, UNVERIFIED root cause): a multi-line `registerMessages({ .PatternMismatch: "<b>{field}</b>", })` followed by a `<vf>…</>` state block in the same `${}` → the import + call vanish from client JS with no diagnostic, both trees. Try to minimize; file a gap with what you find.
 
 Gates (ALL, CI-only ones included): pre-commit · conformance · browser tier as ci.yml · `bun run types:check` · the `tracking` tiers (integration + lsp + commands) as ci.yml · `bun scripts/s34-census.ts --check-new --base 980cb3001cfd99711457890c6a88b2b2e546991b`. Report new SHA + per-item disposition.
+- 2026-10-09T20:41:22-06:00 FIX1 P1: default <errors> render escapes the message (_scrml_message_html); SPEC §55.8 'message is text'; conformance msgchain-message-is-text; happy-dom probe pwn 3 -> 0
