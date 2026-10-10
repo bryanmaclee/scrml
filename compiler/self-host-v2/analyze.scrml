@@ -11564,12 +11564,15 @@ ${
         return env.blame.fns.indexOf(s.id) >= 0
     }
 
-    // A declaration field whose WRITTEN type was refused (FieldInfo.trusted, r8).
+    // A declaration field whose WRITTEN type was refused (FieldInfo.trusted, r8)
+    // — or, s462, whose type could not be INFERRED (§66.3 rule 7: the field is
+    // untrusted and its own diagnostic, E-DECL-TYPE-NOT-INFERABLE or the cycle
+    // code, owns every reader's unresolved type: no cascade).
     fn refusedDeclField(t: Tables, d: Sym, idx: int) -> boolean {
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not) return false
         if (idx < 0 || idx >= di.fields.length) return false
-        return di.fields[idx].annotated && !di.fields[idx].trusted
+        return !di.fields[idx].trusted
     }
 
     // A struct field whose type did not resolve (Unresolved.fields, r8).

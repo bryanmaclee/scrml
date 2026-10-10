@@ -123,6 +123,9 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
     // a reader of the failed cell reports nothing of its own (rule 7's no-cascade clause)
     expect(codes(S + "    <r=(@u.name)/>\n    <r2=(@r * 2)/>").filter((c) => c === "E-DECL-TYPE-NOT-INFERABLE")).toHaveLength(1);
   });
+  test("a CONDITION reading the failed cell is not a second report (E-COND-NOT-BOOLEAN stays silent — the field's own code owns it)", () => {
+    expect(codes("    let <f:bool=true/>\n    <r=(!@f)/>", "<p if=@r>x</p>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
+  });
   test("no report when an Error already lies inside the initializer (E-SCOPE-001 owns `@nope`)", () => {
     expect(codes("    <r=(@nope + 1)/>")).toEqual(["E-SCOPE-001"]);
   });
