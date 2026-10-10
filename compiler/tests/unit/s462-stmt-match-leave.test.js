@@ -98,10 +98,33 @@ describe("given arm in a match (g-impl1-given-match-arm-body-dropped-s462)", () 
     const { ast, errors } = parse(`\${\n    function f(v: number | not) -> string {\n        match v {\n            not :> log(1)\n            given v :> log(v)\n        }\n        return "x"\n    }\n}\n`);
     const m = findMatch(ast);
     const g = m.body.find((c) => c.kind === "given-guard");
-    expect(g.armResult.replace(/\s+/g, "")).toBe("log(v)");
+    expect(g.armExprBody).toBe(true);
+    expect(g.body.length).toBe(1);
+    expect(g.body[0].kind).toBe("bare-expr");
+    expect(g.body[0].expr.replace(/\s+/g, "")).toBe("log(v)");
     expect(m.body.some((c) => c.kind === "bare-expr")).toBe(false);
     expect(errors.map((e) => e.code)).not.toContain("E-PARSE-001");
     const js = emitMatchStmt(m, {});
     expect(js).toContain("else if (v !== null && v !== undefined) {");
+  });
+});
+
+describe("S462 W1 — §18.2 leave-stmt arm bodies", () => {
+  test("bare `continue` / `return` / `fail` arms carry their statement node and lower as statements", () => {
+    const { ast, errors } = parse(wrap(`        for (const x of [k]) {\n            match x {\n                .A :> continue\n                .B :> return\n                .C :> fail .Oops\n            }\n        }`));
+    const m = findMatch(ast);
+    const kinds = m.body.map((c) => c.leaveStmt && c.leaveStmt.kind);
+    expect(kinds).toEqual(["continue-stmt", "return-stmt", "fail-expr"]);
+    expect(errors.map((e) => e.code)).not.toContain("E-PARSE-001");
+    const js = emitMatchStmt(m, {});
+    expect(js).toContain("continue;");
+    expect(js).toMatch(/\{\n\s+return;\n\}/);
+    expect(js).not.toContain("return return");
+    expect(js).not.toMatch(/return fail/);
+  });
+
+  test("`fail` with its operand on the next line is a parse error (the operand starts on the same line)", () => {
+    const { errors } = parse(wrap(`        match k {\n            .A :> fail\n                .Oops\n            .B :> log(1)\n            .C :> log(2)\n        }`));
+    expect(errors.map((e) => e.code)).toContain("E-PARSE-001");
   });
 });

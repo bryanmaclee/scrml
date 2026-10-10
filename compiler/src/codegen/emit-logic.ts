@@ -5,7 +5,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -6212,6 +6212,9 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string): string[] => {
       const t = resultStr.trim();
       if (!t) return [];
+      // §18.2 `leave-stmt` (S462 W1): the arm leaves; it assigns nothing.
+      const leave = leaveStmtFromArmText(t);
+      if (leave) return [emitLogicNode(leave, opts)];
       if (_matchArmResultIsBlockBody(t)) {
         return _emitBlockArmValueFromString(t, resultVar, opts).split("\n").map((l) => l.trim()).filter(Boolean);
       }
@@ -6291,7 +6294,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     const armStrings = splitMultiArmString(trimmed);
     for (const armStr of armStrings) {
       const arm = parseMatchArm(armStr);
-      if (arm) arms.push(stampPropagateOperand(arm));
+      if (arm) {
+        // §18.2 `leave-stmt` (S462 W1) in a raw-text arm — the arm's one statement.
+        const leave = arm.failExpr ? null : leaveStmtFromArmText(arm.result ?? "");
+        arms.push(leave ? { ...arm, result: "", structuredBody: [leave] } : stampPropagateOperand(arm));
+      }
     }
     // A raw arm whose line ends in `?` (`1 :> check(n + 1)?`) reaches here as a
     // statement-level `propagate-expr` node: the statement parser took the `?`
@@ -6416,6 +6423,14 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       if (a.propagateOperand) {
         const p = emitPropagateArm(a.propagateOperand, opts);
         return [...p.lines, `${tildeVar} = ${p.value};`].map((l) => `  ${l}`).join("\n");
+      }
+      // An arm whose value is a nested `match` (dpa-068 c10): lower it inline too,
+      // into its own result var, so a leave in ITS arms leaves this function.
+      const nested = nestedMatchFromArmText(a.result);
+      if (nested) {
+        const innerName = genVar("nested");
+        const inner = emitMatchExprDecl(innerName, nested, "const", { ...opts, tildeContext: undefined } as EmitLogicOpts, null);
+        return [...inner.split("\n"), `${tildeVar} = ${innerName};`].map((l) => `  ${l}`).join("\n");
       }
       // §18.5 block-arm value: a `{ statement* expression? }` body in value
       // position must execute its leading statements and lift its TAIL

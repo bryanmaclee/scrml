@@ -123,7 +123,10 @@ export function textBodiesOf(n: Node): TextBody[] {
       if (arm.kind === "bare-expr" && typeof arm.expr === "string") {
         const parsed = parseMatchArm((arm.expr as string).trim()) as { result: string } | null;
         out.push({ text: parsed ? parsed.result : null, label: "a `match` arm" });
-      } else if (arm.kind === "match-arm-inline" && typeof arm.result === "string") {
+      } else if (arm.kind === "match-arm-inline" && typeof arm.result === "string" && !arm.leaveStmt) {
+        // (An arm whose body is a §18.2 leave statement carries it as the node
+        // `leaveStmt`, which the structural walk reaches; reading its text too
+        // would report the same exit twice.)
         out.push({ text: arm.result as string, label: "a `match` arm" });
       }
     }

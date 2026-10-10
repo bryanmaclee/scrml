@@ -7,34 +7,34 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1601 of 1601 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1615 of 1615 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 142 | 8.9% |
+| PASS | 150 | 9.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 601 | 37.5% |
-| UNSUPPORTED | 802 | 50.1% |
+| NOT-TWINNED | 602 | 37.3% |
+| UNSUPPORTED | 807 | 50.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 198; of those, 142 hold (71.7%). Runtime half executed on the bootstrap for 47 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 206; of those, 150 hold (72.8%). Runtime half executed on the bootstrap for 55 case(s).
 
-- **Vacuous** passes: 11 of 142 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **131**.
+- **Vacuous** passes: 11 of 150 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **139**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 566 · parse-reject 236.
+UNSUPPORTED by reason: bootstrap-unsupported 571 · parse-reject 236.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **723** — PASS 79 · FAIL 52 · UNSUPPORTED 592. Twin holds 79 (non-vacuous 71). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **736** — PASS 87 · FAIL 52 · UNSUPPORTED 597. Twin holds 87 (non-vacuous 79). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (601 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (602 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 68 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -52,9 +52,9 @@ NOT-TWINNED by reason (601 cases; a case counts once per distinct reason):
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
+- 10 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
-- 9 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
@@ -131,7 +131,7 @@ NOT-TWINNED by reason (601 cases; a case counts once per distinct reason):
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 13 | 3 | · | · | · | 1 | 9 | · | · |
+| match-leave | 27 | 11 | · | · | · | 2 | 14 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 40 | · | · | 10 | · | 8 | 22 | · | · |
@@ -297,7 +297,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (142)
+### PASS / CODES-ONLY (150)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -404,6 +404,14 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
+- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN
+- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN
+- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-fail` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-return-valuepos` — PASS · TWIN
+- `match-leave/dpa068-guard-stmt-bare-fail-then-after` — PASS · TWIN
+- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN
 - `match-leave/expr-arm-continuation-joins` — PASS · TWIN
 - `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN
 - `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN
@@ -442,7 +450,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (802)
+### UNSUPPORTED (807)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -893,6 +901,11 @@ none
 - `match-leave/arm-body-ends-at-line-break-neg` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/decl-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/decl-multi-scrutinee-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-leave/dpa068-decl-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-nested-match-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
+- `match-leave/dpa068-stmt-bare-fail` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-stmt-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/given-arm-body-lowered` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
@@ -1247,7 +1260,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (601)
+### NOT-TWINNED (602)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1635,6 +1648,7 @@ none
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `module/e-import-001-export-outside-logic-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)

@@ -552,6 +552,45 @@ function armLineStartsNewItem(tok) {
 }
 
 /**
+ * §18.2 `leave-stmt` (S462, ruling dpa-068 W1) — a single-expression arm body
+ * that is a leave statement: `return [expr]`, `fail <variant>`, `break [Label]`,
+ * `continue [Label]`. `text` is the arm body as the arm parser collected it,
+ * which already ends where an arm body ends (§7.2.2 "Arm heads", the
+ * `armBody` extent of collectExpr). Returns `{ node }` — the same statement
+ * node the statement parser builds for that statement, so every lowering emits
+ * it as a statement of the arm (never by splicing the text, which dpa-068 D8
+ * showed changes meaning) — or `{ error }` for a malformed leave, or `null`
+ * when `text` is not a leave statement at all.
+ */
+export function parseLeaveArmBody(text, filePath, startOffset) {
+  if (typeof text !== "string") return null;
+  const t = text.trim();
+  const m = /^(return|fail|break|continue)(?![A-Za-z0-9_$])\s*([\s\S]*)$/.exec(t);
+  if (!m) return null;
+  const kw = m[1];
+  const rest = m[2].trim();
+  const span = { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + t.length, line: 1, col: 1 };
+  if (kw === "return") {
+    if (!rest) return { node: { kind: "return-stmt", expr: "", span } };
+    return { node: { kind: "return-stmt", expr: rest, exprNode: safeParseExprToNodeGlobal(rest, filePath, startOffset ?? 0), span } };
+  }
+  if (kw === "fail") {
+    const f = rest ? _parseFailExprString(t, filePath, startOffset ?? 0) : null;
+    if (!f) {
+      return { error: rest
+        ? "`" + t.slice(0, 60) + "` is not a `fail` of an error variant. A leaving arm `:> fail …` names the variant: `fail .Variant(args)` or `fail ErrorType.Variant(args)` (§19.3.1, §18.2)."
+        : "`fail` in an arm needs the error variant it fails with, starting on the same line: `:> fail .Variant(args)` (§18.2 \"Leaving arms\")." };
+    }
+    return { node: f };
+  }
+  // break / continue, with an optional label.
+  if (rest && !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rest)) {
+    return { error: "`" + kw + "` in an arm takes at most a loop label: `:> " + kw + "` or `:> " + kw + " Label` (§18.2 \"Leaving arms\")." };
+  }
+  return { node: { kind: kw === "break" ? "break-stmt" : "continue-stmt", label: rest || null, span } };
+}
+
+/**
  * Module-level safe expression parser — wraps parseExprToNode in try/catch.
  * Returns undefined on failure. Used by parseAttributes (module-level scope)
  * and other module-level helpers that need ExprNode but lack access to the
@@ -6535,7 +6574,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           typeof tok.span.line === "number" && typeof lastTok.span.line === "number" &&
           tok.span.line > lastTok.span.line &&
           !armLineEndsInContinuation(lastTok, prevLastTok) &&
-          armLineStartsNewItem(tok)
+          (armLineStartsNewItem(tok) ||
+            // §7.2.2 rule 8 / §18.2: a leave keyword with nothing after it on its
+            // line is complete — `fail`'s operand must start on the same line.
+            (lastTok.kind === "KEYWORD" && parts.length === 1 &&
+              (lastTok.text === "return" || lastTok.text === "fail" ||
+               lastTok.text === "break" || lastTok.text === "continue")))
         ) {
           break;
         }
@@ -11330,9 +11374,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // W-GIVEN-ARROW-LEGACY lint + `migrate --fix` can see the deprecated form
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
+      let separatorConsumed = false;
       if (isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
+        separatorConsumed = true;
       }
       // parse body
       let body = [];
@@ -11340,21 +11386,28 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // a `match` takes an `arm-body` (§18.2), so a single expression is its body.
       // Before this the expression was left behind as a sibling statement of the
       // match body that no lowering reads, so the arm was silently dropped
-      // (g-impl1-given-match-arm-body-dropped-s462). Only at ARM level: a
-      // standalone `given` guard still requires a block.
-      let armResult = null;
+      // (g-impl1-given-match-arm-body-dropped-s462). The expression becomes the
+      // body's one statement, so it is type- and scope-checked like any other.
+      // Only at ARM level and after a separator: a standalone `given` guard still
+      // requires a block.
+      let armExprBody = false;
       if (peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
-      } else if (_matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
+      } else if (separatorConsumed && _matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
                  peek().kind !== "EOF" && !(peek().kind === "PUNCT" && peek().text === "}")) {
+        const exprStartTok = peek();
         const { expr: armExpr } = collectExpr(null, { armBody: true });
-        armResult = armExpr.trim() || null;
+        const armText = armExpr.trim();
+        if (armText) {
+          body = [{ id: ++counter.next, kind: "bare-expr", expr: armText, exprNode: safeParseExprToNode(armText, exprStartTok.span?.start ?? 0), span: spanOf(exprStartTok, peek()) }];
+          armExprBody = true;
+        }
       }
       return {
         id: ++counter.next,
         kind: "given-guard",
-        ...(armResult !== null ? { armResult } : {}),
+        ...(armExprBody ? { armExprBody: true } : {}),
         variables,
         variableIsCell,
         separatorGlyph,
@@ -13209,8 +13262,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (isMatch) {
       reportOrphanArmLines(body);
       markPropagateArms(body);
+      markLeaveArms(body);
     }
     return body;
+  }
+
+  // §18.2 `leave-stmt` (S462 W1): a single-expression arm body that is
+  // `return [expr]` / `fail <variant>` / `break [Label]` / `continue [Label]`
+  // carries its statement node as `leaveStmt`; every match lowering emits it as
+  // the arm's one statement. A `fail` arm the decl parser already resolved
+  // (`failExpr`, errarm-refail) reuses that node.
+  function markLeaveArms(body) {
+    if (!Array.isArray(body)) return;
+    for (const child of body) {
+      if (!child || child.kind !== "match-arm-inline" || typeof child.result !== "string") continue;
+      if (child.failExpr) { child.leaveStmt = child.failExpr; continue; }
+      const r = parseLeaveArmBody(child.result, filePath, child.span?.start ?? 0);
+      if (!r) continue;
+      if (r.error) {
+        errors.push(new TABError("E-PARSE-001", r.error, child.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+        continue;
+      }
+      child.leaveStmt = r.node;
+    }
   }
 
   // §19.5.1 `propagation-expr ::= expression '?'` is an expression, so it is an
