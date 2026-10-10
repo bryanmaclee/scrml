@@ -1281,6 +1281,56 @@ export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
   return errors;
 }
 
+/**
+ * S462 — erase stdlib TYPES with no run-time value from an emitted ES module's
+ * `scrml:` imports.
+ *
+ * A `:struct` (or any non-enum) type a stdlib module exports is a compile-time
+ * name: the JS shim exports nothing for it, so `import { TableSort } from
+ * "scrml:data"` reaching a server / tool / library module fails when the module
+ * LINKS ("Export named 'TableSort' not found"). The name is dropped from the
+ * import clause by its declared kind (the STDLIB-EXPORT-SEED registry entry's
+ * `typeKind`), never by scanning the emitted text for uses. An ENUM is kept: it
+ * has a run-time value (the variant constructors) and every shim exports it
+ * (pinned by stdlib-shim-export-parity.test.js). A type whose kind the seed
+ * could not read is kept too — dropping a real value would be the worse failure.
+ *
+ * Line-preserving (source maps stay valid): a clause left empty becomes a
+ * comment on the same line.
+ *
+ * @param {string} jsText — an emitted ES module (before the `scrml:` specifier rewrite)
+ * @param {string} importerPath — the `.scrml` file it was emitted from
+ * @param {Map<string, Map<string, { kind?: string, typeKind?: string }>>|null} exportRegistry
+ * @returns {string}
+ */
+export function eraseStdlibTypeOnlyImports(jsText, importerPath, exportRegistry) {
+  if (typeof jsText !== "string" || !jsText.includes("scrml:") || !exportRegistry || !importerPath) return jsText;
+  return jsText.replace(
+    /^([ \t]*)import\s*\{([^}]*)\}\s*from\s*(["'])(scrml:[A-Za-z0-9_\/-]+)\3([ \t]*;?)[ \t]*$/gm,
+    (match, indent, clause, quote, spec, semi) => {
+      const entry = exportRegistry.get(resolveModulePath(spec, importerPath));
+      if (!entry) return match;
+      const parts = clause.split(",").map((p) => p.trim()).filter(Boolean);
+      const erased = [];
+      const kept = [];
+      for (const part of parts) {
+        const imported = part.split(/\s+as\s+/)[0].trim();
+        const info = entry.get(imported);
+        if (info && info.kind === "type" && typeof info.typeKind === "string" && info.typeKind !== "enum") {
+          erased.push(imported);
+        } else {
+          kept.push(part);
+        }
+      }
+      if (erased.length === 0) return match;
+      if (kept.length === 0) {
+        return `${indent}// type-only stdlib import erased (no run-time value): ${erased.join(", ")} from ${spec}`;
+      }
+      return `${indent}import { ${kept.join(", ")} } from ${quote}${spec}${quote}${semi || ";"}`;
+    },
+  );
+}
+
 /** Is `source` the `scrml:compiler` umbrella or one of its per-stage siblings? */
 function isStdlibCompilerFamily(source) {
   const name = source.slice("scrml:".length);

@@ -50,7 +50,7 @@ import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRela
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { isPromiseReturningStdlibFn, resolveModulePath } from "../module-resolver.js";
+import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
@@ -81,25 +81,6 @@ import { SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE } from "../
 // comment-prefixed so it never collides with emitted JS and is a no-op if the
 // prune pass is somehow skipped (it is a bare comment line).
 const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
-
-/**
- * S462 — the names a `scrml:` module exports as TYPES, read from the export
- * registry the STDLIB-EXPORT-SEED stage filled from the module's `.scrml`
- * source (re-exports chased to their declaring kind). Null when the registry
- * has no entry for the module.
- */
-function stdlibTypeExportNames(
-  exportRegistry: Map<string, Map<string, { category?: string }>> | null,
-  specifier: string,
-  importerPath: string,
-): Set<string> | null {
-  if (!exportRegistry || !importerPath) return null;
-  const entry = exportRegistry.get(resolveModulePath(specifier, importerPath));
-  if (!entry) return null;
-  const out = new Set<string>();
-  for (const [name, info] of entry) if (info?.category === "type") out.add(name);
-  return out.size > 0 ? out : null;
-}
 
 // GITI-012 / fix-server-eq-helper-import: structural-equality helper source.
 // SPEC §45 emits `_scrml_structural_eq(a, b)` for any `==`/`!=` whose operands
@@ -2938,31 +2919,7 @@ export function generateServerJs(
         });
         continue;
       }
-      // S462 — a `scrml:` import of a stdlib TYPE (an enum or struct the module
-      // declares) is pruned by usage exactly like a local `.scrml` type import
-      // above: a struct type has no runtime value, so its shim exports nothing
-      // for it, and an unconditional `import { TableSort } from …data.js` fails
-      // to LINK when the server bundle loads. An enum referenced at run time
-      // (`JwtError.DecodeFailed(…)`) is kept — every stdlib shim exports its
-      // enums (pinned by stdlib-shim-export-parity.test.js). Value imports are
-      // emitted inline, unchanged.
-      const stdlibTypeNames = jsSource.startsWith("scrml:")
-        ? stdlibTypeExportNames(_asyncExportRegistry as any, jsSource, filePath)
-        : null;
-      const typeSpecs = stdlibTypeNames ? kept.filter((s) => stdlibTypeNames.has(s.imported)) : [];
-      const valueSpecs = typeSpecs.length > 0 ? kept.filter((s) => !stdlibTypeNames!.has(s.imported)) : kept;
-      if (typeSpecs.length > 0) {
-        if (_localImportSentinelIdx === -1) {
-          _localImportSentinelIdx = lines.length;
-          lines.push(LOCAL_SERVER_IMPORT_SENTINEL);
-        }
-        deferredLocalImports.push({
-          jsSource,
-          specs: typeSpecs.map((s) => ({ imported: s.imported, local: s.local })),
-        });
-      }
-      if (valueSpecs.length === 0) continue;
-      const names = valueSpecs.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
+      const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
       lines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
     }
   }

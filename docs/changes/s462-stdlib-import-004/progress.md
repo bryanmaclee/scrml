@@ -7,3 +7,4 @@
 - 2026-10-09T23:17:08-06:00 addendum-2 work: sub-shims, type-import prune, parity test, unit+conformance tests; committing
 - 2026-10-09T23:27:32-06:00 addendum-1: stdlib types seeded via shared stdlibModuleAst reader; corpus type-import sites (10 files) show no diagnostic change vs main except stdlib-path-exemption noise
 - 2026-10-10T09:56:53-06:00 gates: pre-commit green (31903/0), lsp+commands+top-level+render-map 3221/0, browser-baseline PASS, types-gate OK, s34-census PASS, corpus-floor PASS, snippet-gate PASS, facts regen, bootstrap-conformance regen (+3 bootstrap FAILs on new cases: impl#2 lacks stdlib E-IMPORT-004)
+- 2026-10-10T10:26:46-06:00 fix round: F1+F2 erase seam after CG; committing

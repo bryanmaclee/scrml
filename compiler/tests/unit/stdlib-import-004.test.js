@@ -16,10 +16,12 @@
  *   §7  the deferred `scrml:compiler*` family is not judged here
  *   §8  a missing MODULE stays E-IMPORT-006 only (no second report)
  *   §9  validateStdlibImports — unit: skips in-graph, unreadable and non-stdlib targets
+ *   §10 a :struct stdlib type is erased from server / tool / library ES imports (loaded under bun)
+ *   §11-12 §53.14.6 — stdlib types reach the importer's type registry
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
@@ -99,32 +101,78 @@ describe("E-IMPORT-004 for scrml: stdlib imports", () => {
   });
 });
 
-describe("server emit: stdlib TYPE imports are pruned by usage", () => {
-  test("§10 an erased struct-type import does not reach the server bundle; values and used enums do", () => {
-    const dir = join(root, "emit");
+describe("ES-module emit: a stdlib :struct type is erased from its import (server, tool, library)", () => {
+  // Each output is WRITTEN and then LOADED under bun: a `:struct` name left in an
+  // ES import fails at link time ("Export named 'TableSort' not found"). The
+  // program also mentions "TableSort" in a string, which must not keep the import
+  // (erasure is by declared kind, not a text scan). Enums stay — every shim
+  // exports its enums.
+  async function writeAndLoad(name, src, mode, artifact) {
+    const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
     const file = join(dir, "app.scrml");
-    writeFileSync(file, [
+    writeFileSync(file, src);
+    const outDir = join(dir, "dist");
+    const res = compileScrml({ inputFiles: [file], outputDir: outDir, write: true, log: () => {}, ...(mode ? { mode } : {}) });
+    expect((res.errors ?? []).filter((e) => !String(e.code).startsWith("W-"))).toEqual([]);
+    const js = readFileSync(join(outDir, artifact), "utf8");
+    let loadError = null;
+    try { await import(join(outDir, artifact)); } catch (e) { loadError = String(e?.message ?? e); }
+    return { js, loadError };
+  }
+
+  test("§10a server bundle: TableSort erased, ParseError / CryptoError / generateUUID kept, module links", async () => {
+    const { js, loadError } = await writeAndLoad("emit-server", [
       "<program>",
       "${ import { TableSort, ParseError } from 'scrml:data' }",
       "${ import { generateUUID, CryptoError } from 'scrml:crypto' }",
       "<s> = \"\"",
-      "${ server function mk() { const e = CryptoError.VerifyFailed(\"x\")",
-      "  return generateUUID() } }",
+      "${ server function mk() { const t: TableSort = { field: \"TableSort\", direction: \"asc\" }",
+      "  return generateUUID() + t.field } }",
       "<button onclick={ @s = mk() }>go</button>",
       "<div>${@s}</div>",
       "</program>",
       "",
-    ].join("\n"));
-    const res = compileScrml({ inputFiles: [file], outputDir: join(dir, "dist"), write: false, log: () => {} });
-    expect((res.errors ?? []).filter((e) => !String(e.code).startsWith("W-"))).toEqual([]);
-    const out = [...res.outputs.values()].find((o) => o.serverJs);
-    const importLines = out.serverJs.split("\n").filter((l) => /^import .*(data|crypto)/.test(l));
-    // TableSort / ParseError are unused at run time → pruned (data import gone).
-    expect(importLines.some((l) => /TableSort|ParseError/.test(l))).toBe(false);
-    // the value import and the run-time-referenced enum survive.
-    expect(importLines.some((l) => /\bgenerateUUID\b/.test(l))).toBe(true);
-    expect(importLines.some((l) => /\bCryptoError\b/.test(l))).toBe(true);
+    ].join("\n"), null, "app.server.js");
+    const imports = js.split("\n").filter((l) => /^\s*import\b/.test(l));
+    expect(imports.some((l) => /\bTableSort\b/.test(l))).toBe(false);
+    expect(imports.some((l) => /\bParseError\b/.test(l))).toBe(true);
+    expect(imports.some((l) => /\bgenerateUUID\b/.test(l) && /\bCryptoError\b/.test(l))).toBe(true);
+    expect(loadError).toBe(null);
+  });
+
+  test("§10b kind=\"tool\" module: TableSort erased, module links", async () => {
+    const { js, loadError } = await writeAndLoad("emit-tool", [
+      "<program kind=\"tool\">",
+      "${ import { TableSort } from \"scrml:data\" }",
+      "${ import { generateUUID } from \"scrml:crypto\" }",
+      "${",
+      "    function main() {",
+      "        const t: TableSort = { field: \"name\", direction: \"asc\" }",
+      "        return generateUUID() + t.field + \"TableSort\"",
+      "    }",
+      "}",
+      "</program>",
+      "",
+    ].join("\n"), null, "app.js");
+    expect(js.split("\n").filter((l) => /^\s*import\b/.test(l)).some((l) => /\bTableSort\b/.test(l))).toBe(false);
+    expect(loadError).toBe(null);
+  });
+
+  test("§10c library mode: TableSort erased, module links", async () => {
+    const { js, loadError } = await writeAndLoad("emit-library", [
+      "${",
+      "    import { TableSort } from \"scrml:data\"",
+      "    import { generateUUID } from \"scrml:crypto\"",
+      "    export function mk() {",
+      "        const t: TableSort = { field: \"name\", direction: \"asc\" }",
+      "        return generateUUID() + t.field + \"TableSort\"",
+      "    }",
+      "}",
+      "",
+    ].join("\n"), "library", "app.js");
+    expect(js.split("\n").filter((l) => /^\s*import\b/.test(l)).some((l) => /\bTableSort\b/.test(l))).toBe(false);
+    expect(loadError).toBe(null);
   });
 });
 

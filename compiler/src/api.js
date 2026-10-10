@@ -61,7 +61,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -2269,10 +2269,22 @@ function _compileScrmlImpl(options = {}) {
         }
         const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
         if (namesList.includes(localName)) {
-          return { kind: exp.exportKind || "unknown", isAsync: !!exp.isAsync };
+          return {
+            kind: exp.exportKind || "unknown",
+            isAsync: !!exp.isAsync,
+            typeKind: exp.exportKind === "type" ? _stdlibTypeKind(absPath, localName) : null,
+          };
         }
       }
       return null;
+    }
+
+    // S462 — the declared kind (`enum` / `struct` / …) of a type a stdlib module
+    // declares itself, or null. Codegen erases a non-enum stdlib type from an
+    // emitted ES import: it has no run-time value, so the shim exports nothing.
+    function _stdlibTypeKind(absPath, typeName) {
+      const decl = (stdlibModuleAst(absPath)?.typeDecls ?? []).find(t => t && t.name === typeName);
+      return decl && typeof decl.typeKind === "string" ? decl.typeKind : null;
     }
 
     // S462 — the exported-name set of each stdlib module read here, for the
@@ -2301,6 +2313,7 @@ function _compileScrmlImpl(options = {}) {
         for (const name of namesList) {
           let kind = exp.exportKind || "unknown";
           let isAsync = !!exp.isAsync;
+          let typeKind = kind === "type" ? _stdlibTypeKind(absPath, name) : null;
           // Re-export: chase the source module for the terminal kind + async
           // modifier so the auto-await classifier sees through it (Issue #26).
           if (exp.exportKind === "re-export" && exp.reExportSource) {
@@ -2314,6 +2327,7 @@ function _compileScrmlImpl(options = {}) {
             if (resolved) {
               kind = resolved.kind;
               isAsync = resolved.isAsync;
+              typeKind = resolved.typeKind ?? null;
             } else if (serverOnlyStdlibPaths.has(absPath)) {
               // jwt-auth-bypass (2026-07-11, HIGH) — FAIL CLOSED. The re-export
               // could NOT be resolved to a terminal {kind, isAsync} (missing /
@@ -2357,6 +2371,7 @@ function _compileScrmlImpl(options = {}) {
             category,
             isComponent,
             ...(isAsync ? { isAsync: true } : {}),
+            ...(typeKind ? { typeKind } : {}),
           });
         }
       }
@@ -3456,6 +3471,19 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
+  // S462 — one seam for every ES-module emitter (server, `kind="tool"`, library):
+  // a stdlib type with no run-time value (`:struct`) is erased from its `scrml:`
+  // import by declared kind, so the module links (see eraseStdlibTypeOnlyImports).
+  // The client bundle reads `_scrml_stdlib.NAME` by destructuring, where an absent
+  // name is `undefined`, not a link error — it is not an ES import and is left alone.
+  for (const [_eraseFile, _eraseOut] of cgResult?.outputs ?? []) {
+    if (!_eraseOut) continue;
+    for (const field of ["serverJs", "toolJs", "libraryJs"]) {
+      if (typeof _eraseOut[field] === "string") {
+        _eraseOut[field] = eraseStdlibTypeOnlyImports(_eraseOut[field], _eraseFile, moduleResult.exportRegistry);
+      }
+    }
+  }
   // S457 — every placeholder is lowered by now; any that survived (a refused
   // construct) loses its compilation token here, before the emit gate reads,
   // reports or any write lands, and before the in-memory outputs a failed compile
