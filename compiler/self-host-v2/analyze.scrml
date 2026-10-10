@@ -2375,7 +2375,8 @@ ${
                         count = count + 1
                     }
                 }
-                if (count > 1) return rinf(infOut("`@" + n + "`, an `as=` handle bound more than once in its scope"), done)
+                // bound twice in one scope: E-HANDLE-REDECLARE (the scope pass) owns it
+                if (count > 1) return rinf(infBlamed(), done)
                 if (hit is some) {
                     if (hit.conditional) return rinf(infOk(Type.Maybe(Type.Named(hit.target))), done)
                     return rinf(infOk(Type.Named(hit.target)), done)

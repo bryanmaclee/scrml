@@ -264,6 +264,11 @@ describe("rule 10 — an unproven annotation is an error", () => {
     const p = r.typed.tables.decls.find((d) => d.sym.id === r.typed.tables.program.id);
     expect(tag(p.fields.find((f) => f.sym.hint === "r").ty)).toBe("Str");
   });
+  test("re-review #3 nit — a REDECLARED handle is E-HANDLE-REDECLARE's alone (no own-value cascade)", () => {
+    const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n";
+    const src = pre + "<program>\n    function g() { return @w.label }\n    <r:int=(g())/>\n    <main><chip as=w/><chip as=w/></main>\n</program>\n";
+    expect(frontEnd(mods, [{ path: "app.scrml", src }]).diags.map((d) => d.code)).toEqual(["E-HANDLE-REDECLARE"]);
+  });
   test("the message names the cause and the two fixes", () => {
     const d = run(MK + "    <v:int=(mk(true))/>").diags[0];
     expect(d.message).toContain("`mk(…)`");
