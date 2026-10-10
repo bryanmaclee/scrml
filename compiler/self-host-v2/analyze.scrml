@@ -110,14 +110,18 @@ ${
     //                        cell that itself failed, a mis-linked callee)
     export type TypeOrigin:enum = {
         Written,
-        WrittenUnproven(why: string),
+        WrittenUnproven(why: string, at: CalleeAt),
         Literal,
         Inferred,
-        Failed(why: string),
+        Failed(why: string, at: CalleeAt),
         Cyclic(names: string[]),
         Boundary(where: string),
         Blamed,
     }
+    // s462 fix round 1 (F5): the function a failed proof stands in ("" file —
+    // none). An Error already inside that function (a refused construct)
+    // owns the failure: the own-value code is not a second report.
+    export type CalleeAt:struct = { file: string, start: int, end: int }
 
     // s444 Phase B (dpa-058, RULED S442 (2)) — one validator of a field and its
     // HTML-native lowering (`required`, `minlength` / `maxlength`, `min` /
@@ -2092,24 +2096,45 @@ ${
     // 10's "cannot resolve") · 3 blamed (another diagnostic owns it) · 4 on a
     // cycle (`cyc`: the cells on it, rule 8).
     // =========================================================================
-    type Inf:struct = { ty: Type | not, kind: int, why: string, cyc: string[] }
+    type Inf:struct = { ty: Type | not, kind: int, why: string, cyc: string[], at: CalleeAt }
     // A program cell the table is built over (rule 5 (b)'s "cell").
     type OwnSrc:struct = { name: string, aty: AType | not, init: AAttrValue }
     type OwnT:struct = { name: string, ty: Type | not, origin: TypeOrigin }
-    // A parameter inside a proven-return body (`ty`: `not` = unannotated).
-    type ParamT:struct = { name: string, ty: Type | not }
+    // One name in scope inside a function body, innermost LAST (fix round 1,
+    // F1): a parameter (`param`), a local, a `given` binding, an arm's binder.
+    // `ty` `not` = its type is not written and not determined.
+    type ParamT:struct = { name: string, ty: Type | not, param: boolean }
     // `st` is only read (resolveType's diagnostics are DISCARDED here — the
-    // binder reports each written type once, where it stands).
-    type InferCx:struct = { te: TypeEnv, fns: FnSrc[], st: AS, srcs: OwnSrc[] }
+    // binder reports each written type once, where it stands). `res` (fix
+    // round 1, F2): RESOLVE mode — is the value's type DETERMINED (rule 5 (g)'s
+    // proven return, rule 10)? — rather than MEMBERSHIP mode (is the
+    // initializer in rule 5's set?). Resolve mode also reads a comparison or a
+    // logical operator as `bool` whatever its operands, and a member path / an
+    // `as=` handle through declared types. `types` / `decls` / `handles`: the
+    // declared struct and declaration fields a member path reads.
+    type InferCx:struct = { te: TypeEnv, fns: FnSrc[], st: AS, srcs: OwnSrc[], res: boolean,
+                            types: TypeInfo[], decls: DeclStub[], handles: HandleInfo[] }
     type RInf:struct = { r: Inf, done: OwnT[] }
     type ROwn:struct = { t: OwnT, done: OwnT[] }
+    // A `return` and the names in scope where it stands.
+    type RetAt:struct = { e: AExpr | not, sc: ParamT[] }
+    type RRets:struct = { rs: RetAt[], done: OwnT[] }
 
-    fn infOk(t: Type) -> Inf { return { ty: t, kind: 0, why: "", cyc: [] } }
-    fn infOut(why: string) -> Inf { return { ty: not, kind: 1, why: why, cyc: [] } }
-    fn infUnres(why: string) -> Inf { return { ty: not, kind: 2, why: why, cyc: [] } }
-    fn infBlamed() -> Inf { return { ty: not, kind: 3, why: "", cyc: [] } }
-    fn infCycle(names: string[]) -> Inf { return { ty: not, kind: 4, why: "", cyc: names } }
+    fn noCallee() -> CalleeAt { return { file: "", start: -1, end: -1 } }
+    fn infOk(t: Type) -> Inf { return { ty: t, kind: 0, why: "", cyc: [], at: noCallee() } }
+    fn infOut(why: string) -> Inf { return { ty: not, kind: 1, why: why, cyc: [], at: noCallee() } }
+    fn infUnres(why: string) -> Inf { return { ty: not, kind: 2, why: why, cyc: [], at: noCallee() } }
+    fn infBlamed() -> Inf { return { ty: not, kind: 3, why: "", cyc: [], at: noCallee() } }
+    fn infCycle(names: string[]) -> Inf { return { ty: not, kind: 4, why: "", cyc: names, at: noCallee() } }
     fn rinf(r: Inf, done: OwnT[]) -> RInf { return { r: r, done: done } }
+    // the same failure, standing in function `af` (when it names none yet)
+    fn infIn(r: Inf, file: string, af: AFn) -> Inf {
+        if (r.at.file != "") return r
+        return { ty: r.ty, kind: r.kind, why: r.why, cyc: r.cyc, at: { file: file, start: af.span.start, end: af.span.end } }
+    }
+    fn withRes(cx: InferCx, res: boolean) -> InferCx {
+        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: res, types: cx.types, decls: cx.decls, handles: cx.handles }
+    }
 
     // Of two results, the one that decides the report: blamed > cycle >
     // unresolved > outside > a member.
@@ -2142,6 +2167,18 @@ ${
         return out
     }
 
+    // Every `as=` handle of every declaration's markup (fix round 1, F2: a
+    // member path through a handle, `@country.value`, is a declared type).
+    // The handle pass's own diagnostics are phase A's (the declaration loop);
+    // this read discards them.
+    fn allHandles(ds: DeclStub[], st: AS) -> HandleInfo[] {
+        let out: HandleInfo[] = []
+        for (const d of ds) {
+            out = out.concat(handlesIn(ds, rendersNodes(d), { owner: d.nid, conditional: false, file: d.file }, st).hs)
+        }
+        return out
+    }
+
     // The table of every program cell's type and origin (phase A, before any
     // field is built — a field's `@ref` resolves against it).
     fn ownTable(cx: InferCx) -> OwnT[] {
@@ -2167,10 +2204,12 @@ ${
     }
 
     // One program cell, resolved (memoized in `done`). `stack`: the cells
-    // ("@x") and functions ("f()") whose inference is in progress.
-    fn ownResolve(cx: InferCx, name: string, stack: string[], done: OwnT[]) -> ROwn {
+    // ("@x") and functions ("f()") whose inference is in progress. A cell's
+    // own type is always rule 5's (MEMBERSHIP mode), whoever asks.
+    fn ownResolve(cx0: InferCx, name: string, stack: string[], done: OwnT[]) -> ROwn {
         const found: OwnT | not = ownFound(done, name)
         if (found is some) return { t: found, done: done }
+        const cx: InferCx = withRes(cx0, false)
         const s: OwnSrc = cx.srcs[srcIndex(cx.srcs, name)]
         const aty: AType | not = s.aty
         if (aty is some) {
@@ -2196,7 +2235,7 @@ ${
             return TypeOrigin.Blamed
         }
         if (r.kind == 3) return TypeOrigin.Blamed
-        return TypeOrigin.Failed(r.why)
+        return TypeOrigin.Failed(r.why, r.at)
     }
 
     fn inferValue(cx: InferCx, v: AAttrValue, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
@@ -2215,7 +2254,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .At(name: n) :> inferAt(cx, n, stack, done)
-            .Name(name: n) :> rinf(paramInf(ps, n), done)
+            .Name(name: n) :> rinf(scopeInf(ps, n), done)
             .Member(obj: o, name: n) :> inferMember(cx, o, n, stack, ps, done)
             .Call(callee: c) :> inferCall(cx, c, stack, done)
             .Unary(op: o, e: x) :> inferUnary(cx, o, x, stack, ps, done)
@@ -2239,16 +2278,25 @@ ${
         }
     }
 
-    // Rule 5 (g): a parameter is a typed `@ref` by its written type.
-    fn paramInf(ps: ParamT[], n: string) -> Inf {
-        for (const p of ps) {
+    // A bare name inside a function body, through the function's REAL scopes
+    // (innermost last — a shadowing local, `given` binding or arm binder hides
+    // an outer name or a parameter; fix round 1, F1). A parameter is typed by
+    // its written type; an UNANNOTATED parameter is refused by the bootstrap
+    // whole (E-BOOTSTRAP-UNSUPPORTED), so it is blamed, not reported again
+    // (F5). Any other binding whose type is not determined is unresolved.
+    fn scopeInf(ps: ParamT[], n: string) -> Inf {
+        let i = ps.length - 1
+        while (i >= 0) {
+            const p: ParamT = ps[i]
             if (p.name == n) {
                 const t: Type | not = p.ty
                 if (t is some) return infOk(baseOf(t))
-                return infUnres("the unannotated parameter `" + n + "`")
+                if (p.param) return infBlamed()
+                return infUnres("`" + n + "`, a binding whose type is neither written nor determined")
             }
+            i = i - 1
         }
-        return infOut("the name `" + n + "` (a local or a bare name — not a typed `@` reference)")
+        return infOut("the name `" + n + "` (not a typed `@` reference)")
     }
 
     fn inferAt(cx: InferCx, n: string, stack: string[], done: OwnT[]) -> RInf {
@@ -2274,6 +2322,14 @@ ${
         if (srcIndex(cx.srcs, n) >= 0) {
             const ro: ROwn = ownResolve(cx, n, stack, done)
             return rinf(refInf(ro.t, stack), ro.done)
+        }
+        if (cx.res) {
+            for (const h of cx.handles) {
+                if (h.name == n) {
+                    if (h.conditional) return rinf(infOk(Type.Maybe(Type.Named(h.target))), done)
+                    return rinf(infOk(Type.Named(h.target)), done)
+                }
+            }
         }
         let i2 = 0
         while (i2 < cx.te.declNames.length) {
@@ -2334,13 +2390,72 @@ ${
         return not
     }
 
+    // RESOLVE mode (F2): the declared type of field `n` of a value typed `t` —
+    // a struct's field (its written type), or a declaration's attribute / child
+    // field (its written type, or its literal's); `not` when undetermined.
+    fn declaredFieldType(cx: InferCx, t: Type, n: string) -> Type | not {
+        const s: Sym | not = namedSym(t)
+        if (s is not) return not
+        const ti: TypeInfo | not = typeInfoOf(cx.types, s)
+        if (ti is some) {
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is not) return not
+            for (const f of fs) {
+                if (f.sym.hint == n) return f.ty
+            }
+            return not
+        }
+        for (const ds of cx.decls) {
+            const d: ADecl | not = ds.d
+            if (ds.sym.id == s.id && d is some) {
+                for (const a of d.attrs) {
+                    if (a.name == n) return writtenOrLiteral(cx, a.ty, a.dflt)
+                }
+                for (const c of childFields(d.body)) {
+                    if (c.name == n) return writtenOrLiteral(cx, c.ty, c.own)
+                }
+            }
+        }
+        return not
+    }
+
+    fn namedSym(t: Type) -> Sym | not {
+        return match t {
+            .Named(sym: s) :> s
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Seq(elem: e) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    fn writtenOrLiteral(cx: InferCx, aty: AType | not, v: AAttrValue) -> Type | not {
+        if (aty is some) {
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            if (rt.unresolved) return not
+            return rt.t
+        }
+        return literalOf(v)
+    }
+
     fn inferMember(cx: InferCx, o: AExpr, n: string, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
         const qv: Type | not = qualifiedVariant(cx, o, n)
         if (qv is some) return rinf(infOk(qv), done)
         const r: RInf = inferE(cx, o, stack, ps, done)
         if (r.r.kind >= 3) return r
-        if (n != "length") return rinf(infOut("the member path `." + n + "`"), r.done)
         const t: Type | not = r.r.ty
+        if (n != "length") {
+            if (cx.res) {
+                if (r.r.kind != 0) return r
+                if (t is some) {
+                    const ft: Type | not = declaredFieldType(cx, t, n)
+                    if (ft is some) return rinf(infOk(baseOf(ft)), r.done)
+                }
+            }
+            return rinf(infOut("the member path `." + n + "`"), r.done)
+        }
         if (t is not) return r
         const kd: int = kindOf(t)
         if (kd == 2 || kd == 5) return rinf(infOk(Type.Int), r.done)
@@ -2350,6 +2465,7 @@ ${
     fn inferUnary(cx: InferCx, o: UnOp, x: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
         const r: RInf = inferE(cx, x, stack, ps, done)
         if (o != UnOp.Neg) {
+            if (cx.res) return rinf(infOk(Type.Bool), r.done)      // `!`, `is given`, `is not` are `bool`
             if (r.r.kind >= 3) return r
             return rinf(infOut(unaryWord(o) + " (a logical operator is not in the inferable set)"), r.done)
         }
@@ -2373,6 +2489,11 @@ ${
         const rr: RInf = inferE(cx, r, stack, ps, rl.done)
         const d: OwnT[] = rr.done
         const isLogic: boolean = o == BinOp.And || o == BinOp.Or || o == BinOp.Pipe
+        const cmp: boolean = o == BinOp.Eq || o == BinOp.Ne || o == BinOp.Lt || o == BinOp.Le || o == BinOp.Gt || o == BinOp.Ge
+        // RESOLVE mode: a comparison or `&&` / `||` is a `bool` whatever its
+        // operands (the typer's answer, F2) — an operand's own fault is the
+        // typer's to report
+        if (cx.res && (cmp || (isLogic && o != BinOp.Pipe))) return rinf(infOk(Type.Bool), d)
         if (isLogic) {
             const bad: Inf = worse(rl.r, rr.r)
             if (bad.kind >= 3) return rinf(bad, d)
@@ -2382,7 +2503,6 @@ ${
         const a: Type | not = rl.r.ty
         const b: Type | not = rr.r.ty
         if (a is not || b is not) return rinf(infBlamed(), d)
-        const cmp: boolean = o == BinOp.Eq || o == BinOp.Ne || o == BinOp.Lt || o == BinOp.Le || o == BinOp.Gt || o == BinOp.Ge
         if (cmp) return rinf(infOk(Type.Bool), d)
         const nums: boolean = isNumericKind(a) && isNumericKind(b)
         const isDiv: boolean = o == BinOp.Div
@@ -2421,8 +2541,11 @@ ${
         const ry: RInf = inferE(cx, y, stack, ps, rt.done)
         const rn: RInf = inferE(cx, n, stack, ps, ry.done)
         const d: OwnT[] = rn.done
-        if (rt.r.kind != 0 || ry.r.kind != 0 || rn.r.kind != 0) return rinf(worse(worse(rt.r, ry.r), rn.r), d)
-        const tt: Type | not = rt.r.ty
+        // RESOLVE mode: the test's own fault is the condition rule's (E-COND-NOT-BOOLEAN)
+        let testR: Inf = rt.r
+        if (cx.res) testR = infOk(Type.Bool)
+        if (testR.kind != 0 || ry.r.kind != 0 || rn.r.kind != 0) return rinf(worse(worse(testR, ry.r), rn.r), d)
+        const tt: Type | not = testR.ty
         const a: Type | not = ry.r.ty
         const b: Type | not = rn.r.ty
         if (tt is not || a is not || b is not) return rinf(infBlamed(), d)
@@ -2464,19 +2587,26 @@ ${
             if (isVoidType(at)) return rinf(infOut("`" + n + "(…)`, which returns no value"), done)
             return rinf(infBlamed(), done)            // a written return type that was refused (E-TYPE-UNKNOWN / a parse error)
         }
-        if (fi.failable) return rinf(infOut("`" + n + "(…)`, a failable call (§19.4)"), done)
+        if (fi.failable) return rinf(infUnres("`" + n + "(…)` is failable (§19.4), and a failable function has no success type to infer"), done)
         // a server call in a value position is §13.7's E-VALUE-SERVER-CALL
         // (placePass, after the typer — so condBlamed cannot see it): blamed
         if (fi.serverOwn) return rinf(infBlamed(), done)
         const key: string = n + "()"
         if (stack.indexOf(key) >= 0) return rinf(infUnres("`" + n + "(…)`, whose return is not declared and depends on itself"), done)
-        return ownProvenReturn(cx, found.f, stack.concat([key]), done)
+        const r: RInf = ownProvenReturn(cx, found.f, stack.concat([key]), done)
+        return rinf(infIn(r.r, fi.file, found.f), r.done)
     }
 
-    // Rule 5 (g)'s INFERRED-AND-PROVEN return — by the SPEC's set, not by the
-    // typer's proven types (that is the client-call plan's `provenReturn`:
-    // a server function's success type for the wire, §57.4 R10).
-    fn ownProvenReturn(cx: InferCx, af: AFn, stack: string[], done: OwnT[]) -> RInf {
+    // Rule 5 (g)'s INFERRED-AND-PROVEN return (fix round 1, F2: in RESOLVE
+    // mode — every returned value's type DETERMINED, as the typer determines
+    // it: a typed local, a member path through declared types, a comparison;
+    // the ruled fail-closed core stays — an unannotated parameter, recursion, a
+    // non-total body, a failable or server function). Names resolve through
+    // the body's real scopes (F1, retsIn). (The client-call plan's
+    // `provenReturn` is a different question: a server function's success type
+    // for the wire, §57.4 R10, read off the typer's proven types.)
+    fn ownProvenReturn(cx0: InferCx, af: AFn, stack: string[], done: OwnT[]) -> RInf {
+        const cx: InferCx = withRes(cx0, true)
         const who: string = "`" + af.name + "(…)` declares no return type, and its return is not proven: "
         if (!exits(af.body)) return rinf(infUnres(who + "it does not end in `return` on every path"), done)
         let ps: ParamT[] = []
@@ -2487,18 +2617,19 @@ ${
                 const rt: RType = resolveType(cx.te, at, cx.st)
                 if (!rt.unresolved) pt = rt.t
             }
-            ps = ps.concat([{ name: p.name, ty: pt }])
+            ps = ps.concat([{ name: p.name, ty: pt, param: true }])
         }
-        let d: OwnT[] = done
+        const rr: RRets = retsIn(cx, af.body, ps, stack, done)
+        let d: OwnT[] = rr.done
         let acc: Type | not = not
-        for (const site of returnSites(af.body)) {      // every `return`, at any depth (the client-call plan's walk)
+        for (const site of rr.rs) {
             const e: AExpr | not = site.e
             if (e is not) return rinf(infUnres(who + "a `return` carries no value"), d)
-            const r: RInf = inferE(cx, e, stack, ps, d)
+            const r: RInf = inferE(cx, e, stack, site.sc, d)
             d = r.done
             if (r.r.kind == 3) return rinf(r.r, d)
             const t: Type | not = r.r.ty
-            if (r.r.kind != 0 || t is not) return rinf(infUnres(who + r.r.why), d)
+            if (r.r.kind != 0 || t is not) return rinf({ ty: not, kind: 2, why: who + r.r.why, cyc: [], at: r.r.at }, d)
             if (acc is not) {
                 acc = t
             } else {
@@ -2511,9 +2642,201 @@ ${
         return rinf(infOk(acc), d)
     }
 
+    // ---- fix round 1, F1: the body's scopes ---------------------------------
+    // Every `return` of a block with the names in scope where it stands: a
+    // local (`let` / `const`) is in scope after it, in its block; a `given`
+    // binding in its body; an arm's binders in its arm block. A local's type
+    // is its written one, or — a `const` only — its initializer's DETERMINED
+    // type; a `let` without a type, a `given` binding over an undetermined
+    // subject and every arm binder are untyped (returning one is not proven).
+    // A lambda's body is not walked (its `return` is not the function's).
+    fn retsIn(cx: InferCx, b: ABlock, sc0: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
+        let sc: ParamT[] = sc0
+        let done: OwnT[] = done0
+        let out: RetAt[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const r: RRets = match k {
+                .Return(e: x) :> retsInMaybe(cx, x, sc, stack, done)
+                .If(cond: c, thenB: tb, elseB: eb) :> retsIf(cx, c, tb, eb, sc, stack, done)
+                .Given(name: n, subject: x, body: gb) :> retsGiven(cx, n, x, gb, sc, stack, done)
+                .Eval(e: x) :> retsInExpr(cx, x, sc, stack, done)
+                .Local(name: n, init: i) :> retsInExpr(cx, i, sc, stack, done)
+                .EffectStmt(w: w) :> noRets(done)
+                .Defer(body: db) :> noRets(done)
+                .Fail(f: x) :> noRets(done)
+            }
+            out = out.concat(r.rs)
+            done = r.done
+            const ret: AExpr | not = returnedExpr(k)
+            if (isReturn(k)) out = out.concat([{ e: ret, sc: sc }])
+            const lb: RBind = localBinding(cx, k, sc, stack, done)
+            done = lb.done
+            if (lb.b is some) sc = sc.concat([lb.b])
+        }
+        return { rs: out, done: done }
+    }
+
+    type RBind:struct = { b: ParamT | not, done: OwnT[] }
+
+    fn noRets(done: OwnT[]) -> RRets { return { rs: [], done: done } }
+    fn noBind(done: OwnT[]) -> RBind { return { b: not, done: done } }
+
+    fn localBinding(cx: InferCx, k: AStmtK, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
+        return match k {
+            .Local(name: n, mutable: m, ty: t, init: i) :> localOf(cx, n, m, t, i, sc, stack, done)
+            .Return(e: x) :> noBind(done)
+            .If(cond: c) :> noBind(done)
+            .Given(name: n) :> noBind(done)
+            .Eval(e: x) :> noBind(done)
+            .EffectStmt(w: w) :> noBind(done)
+            .Defer(body: db) :> noBind(done)
+            .Fail(f: x) :> noBind(done)
+        }
+    }
+
+    fn localOf(cx: InferCx, n: string, mutable: boolean, aty: AType | not, init: AExpr, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
+        if (aty is some) {
+            const rt: RType = resolveType(cx.te, aty, cx.st)
+            if (rt.unresolved) return { b: { name: n, ty: not, param: false }, done: done }
+            return { b: { name: n, ty: rt.t, param: false }, done: done }
+        }
+        if (mutable) return { b: { name: n, ty: not, param: false }, done: done }
+        const r: RInf = inferE(cx, init, stack, sc, done)
+        return { b: { name: n, ty: r.r.ty, param: false }, done: r.done }
+    }
+
+    fn isReturn(k: AStmtK) -> boolean {
+        return match k {
+            .Return(e: x) :> true
+            .If(cond: c) :> false
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: db) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn returnedExpr(k: AStmtK) -> AExpr | not {
+        return match k {
+            .Return(e: x) :> x
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: db) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    fn retsInMaybe(cx: InferCx, e: AExpr | not, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        if (e is not) return { rs: [], done: done }
+        return retsInExpr(cx, e, sc, stack, done)
+    }
+
+    fn retsIf(cx: InferCx, c: AExpr, tb: ABlock, eb: ABlock | not, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        const rc: RRets = retsInExpr(cx, c, sc, stack, done)
+        const rt: RRets = retsIn(cx, tb, sc, stack, rc.done)
+        if (eb is not) return { rs: rc.rs.concat(rt.rs), done: rt.done }
+        const re: RRets = retsIn(cx, eb, sc, stack, rt.done)
+        return { rs: rc.rs.concat(rt.rs).concat(re.rs), done: re.done }
+    }
+
+    // `given n = subject :> { … }`: `n` is the subject narrowed (its `T`).
+    fn retsGiven(cx: InferCx, n: string, x: AExpr, gb: ABlock, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        const rx: RRets = retsInExpr(cx, x, sc, stack, done)
+        const r: RInf = inferE(cx, x, stack, sc, rx.done)
+        let ty: Type | not = r.r.ty
+        if (ty is some) ty = unMaybe(ty)
+        const rb: RRets = retsIn(cx, gb, sc.concat([{ name: n, ty: ty, param: false }]), stack, r.done)
+        return { rs: rx.rs.concat(rb.rs), done: rb.done }
+    }
+
+    // The `return`s inside an expression's handling-form arm blocks (they
+    // leave the function); an arm's binders are in scope in its block, untyped.
+    fn retsInExpr(cx: InferCx, e: AExpr, sc: ParamT[], stack: string[], done0: OwnT[]) -> RRets {
+        const k: AExprK = e.k
+        if (isLambda(k)) return { rs: [], done: done0 }
+        let done: OwnT[] = done0
+        let out: RetAt[] = []
+        const h: AHandled | not = handledOf(k)
+        if (h is some) {
+            const rs: RRets = retsInExpr(cx, h.subject, sc, stack, done)
+            out = out.concat(rs.rs)
+            done = rs.done
+            for (const arm of handledArms(h)) {
+                const sc2: ParamT[] = sc.concat(armBinders(arm.pat))
+                const ab: AArmBody = arm.body
+                const ra: RRets = match ab {
+                    .ArmBlock(b: b) :> retsIn(cx, b, sc2, stack, done)
+                    .ArmExpr(e: x) :> retsInExpr(cx, x, sc2, stack, done)
+                }
+                out = out.concat(ra.rs)
+                done = ra.done
+            }
+            return { rs: out, done: done }
+        }
+        for (const x of exprKids(e)) {
+            const r: RRets = retsInExpr(cx, x, sc, stack, done)
+            out = out.concat(r.rs)
+            done = r.done
+        }
+        return { rs: out, done: done }
+    }
+
+    fn isLambda(k: AExprK) -> boolean {
+        return match k {
+            .Lambda(params: lp) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    fn armBinders(p: APat) -> ParamT[] {
+        return match p {
+            .PName(name: n, binds: bs) :> bindersOf(bs)
+            .PWild :> []
+            .PWhole(bind: b) :> bindersOf([b])
+            .PBare(bind: b) :> bindersOf([b])
+        }
+    }
+
+    fn bindersOf(bs: ABind[]) -> ParamT[] {
+        let out: ParamT[] = []
+        for (const b of bs) {
+            if (b.name != "_") out = out.concat([{ name: b.name, ty: not, param: false }])
+        }
+        return out
+    }
+
     // A field's type origin when no type is written (§66.3 rules 3, 5, 7, 8).
-    // A program cell (`where` 2) reads the table; a child field infers over it;
-    // an ATTRIBUTE infers from a literal only (O35(a) is open — §66.3).
+    // A program cell (`where` 2) reads the table; a child field infers over it.
+    // An ATTRIBUTE default is left as it was before S462 — O35(a) is OPEN
+    // (fix round 1, F7 (c)): a literal infers (rule 3), anything else has no
+    // type and reports nothing new (the bootstrap's parser refuses an untyped
+    // attribute whole).
     fn ownOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, role: FieldRole, where: int) -> OwnT {
         if (where == 2) {
             const t: OwnT | not = ownFound(tab, name)
@@ -2524,19 +2847,18 @@ ${
         const r: RInf = inferValue(cx, init, [], [], tab)
         const isLit: boolean = literalInit(cx, init)
         const isAttr: boolean = role == FieldRole.Attribute
-        if (isAttr && !isLit) {
-            if (r.r.kind >= 3) return { name: name, ty: not, origin: TypeOrigin.Blamed }
-            return { name: name, ty: not, origin: TypeOrigin.Failed("an attribute's default is inferred from a literal only (§66.3 rule 3 — O35(a) is open), and this one is not a literal") }
-        }
+        if (isAttr && !isLit) return { name: name, ty: not, origin: TypeOrigin.Blamed }
         return { name: name, ty: r.r.ty, origin: originOf(r.r, name, isLit) }
     }
 
-    // Rule 10: a WRITTEN type over an initializer whose value is unresolvable.
+    // Rule 10: a WRITTEN type over an initializer whose value's type cannot be
+    // resolved — judged in RESOLVE mode (F2: a comparison is a `bool`, a
+    // member path through declared types is resolved, whatever a sub-call is).
     fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
         let stack: string[] = []
         if (where == 2) stack = ["@" + name]
-        const r: RInf = inferValue(cx, init, stack, [], tab)
-        if (r.r.kind == 2) return TypeOrigin.WrittenUnproven(r.r.why)
+        const r: RInf = inferValue(withRes(cx, true), init, stack, [], tab)
+        if (r.r.kind == 2) return TypeOrigin.WrittenUnproven(r.r.why, r.r.at)
         return TypeOrigin.Written
     }
 
@@ -3815,7 +4137,8 @@ ${
         // s462 (§66.3 rules 5–8): every program cell's type, inferred where none
         // is written — before any field is built, since a field's `@ref` (in
         // any declaration) resolves against the program's cells
-        const icx: InferCx = { te: te0, fns: rf.fs, st: st, srcs: programSrcs(rd.ds) }
+        const icx: InferCx = { te: te0, fns: rf.fs, st: st, srcs: programSrcs(rd.ds), res: false,
+                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, st) }
         const ownTab: OwnT[] = ownTable(icx)
         // fields + handles per declaration
         let decls: DeclSrc[] = []
@@ -3850,7 +4173,9 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        st = derivedCycles(decls, files, st)
+        const rc: RCycles = derivedCycles(decls, files, st)
+        st = rc.st
+        decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
                              sceSym: builtinSym(rs.stubs, serverCallErrorName()) }
@@ -3863,12 +4188,20 @@ ${
     // derived cell that reads it back — annotated or not. One report per
     // cycle, at its first member in source order. (A read through a function
     // is not followed: the bootstrap's effect summary does not trace reads
-    // yet — a cycle only through a function's body is not reported here.)
+    // yet — a cycle only through a function's body is not reported here: a
+    // stated divergence from §6.6.10, g-bootstrap-derived-cycle-through-function-s462.)
+    // Fix round 1 (F3): the cycle code OUTRANKS — every member of a reported
+    // cycle has its own-value report withdrawn (its origin becomes Blamed:
+    // the cycle owns it), whether that report would have been
+    // E-DECL-TYPE-NOT-INFERABLE, -REQUIRED-AT-BOUNDARY or -UNPROVEN.
     type DEdge:struct = { from: int, to: int }
+    type RCycles:struct = { st: AS, decls: DeclSrc[] }
 
-    fn derivedCycles(decls: DeclSrc[], files: FileAst[], st0: AS) -> AS {
+    fn derivedCycles(decls: DeclSrc[], files: FileAst[], st0: AS) -> RCycles {
         let st: AS = st0
+        let out: DeclSrc[] = []
         for (const ds of decls) {
+            let members: int[] = []
             if (ds.isProgram) {
                 const fs: FieldInfo[] = ds.info.fields
                 const errs: ASpan[] = fileErrs(files, ds.file)
@@ -3897,12 +4230,50 @@ ${
                         for (const p of path) { names = names.concat(["@" + fs[p].sym.hint]) }
                         names = names.concat(["@" + fs[k].sym.hint])
                         st = addDiag(st, ds.file, fs[k].span, "E-DERIVED-CIRCULAR-DEP", "`@" + fs[k].sym.hint + "` is derived from itself: " + names.join(" → ") + " — a derived value (a locked declaration whose initializer reads cells) cannot depend on itself, it would recompute forever (§6.6.10); break the cycle")
+                        members = members.concat(path).concat([k])
                     }
                     k = k + 1
                 }
             }
+            if (members.length == 0) {
+                out = out.concat([ds])
+            } else {
+                let nf: FieldInfo[] = []
+                let j2 = 0
+                for (const f of ds.info.fields) {
+                    if (members.indexOf(j2) >= 0) {
+                        nf = nf.concat([withOrigin(f, TypeOrigin.Blamed)])
+                    } else {
+                        nf = nf.concat([f])
+                    }
+                    j2 = j2 + 1
+                }
+                const di: DeclInfo = ds.info
+                const ni: DeclInfo = { nid: di.nid, span: di.span, sym: di.sym, kind: di.kind, single: di.single, file: di.file, fields: nf, handles: di.handles }
+                out = out.concat([{ info: ni, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
+            }
         }
-        return st
+        return { st: st, decls: out }
+    }
+
+    // A written / literal / inferred origin is kept (there is nothing to withdraw).
+    fn withOrigin(f: FieldInfo, o0: TypeOrigin) -> FieldInfo {
+        const cur: TypeOrigin = f.origin
+        const keep: boolean = match cur {
+            .Written :> true
+            .Literal :> true
+            .Inferred :> true
+            .Blamed :> true
+            .WrittenUnproven(why: w) :> false
+            .Failed(why: w) :> false
+            .Cyclic(names: ns) :> false
+            .Boundary(where: b) :> false
+        }
+        let o: TypeOrigin = o0
+        if (keep) o = cur
+        return { nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted, typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode,
+                 role: f.role, grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads,
+                 shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten, origin: o }
     }
 
     // A path from `at` back to `start` through cells numbered above `start`
@@ -12878,8 +13249,8 @@ ${
             .Literal :> ts
             .Inferred :> ts
             .Blamed :> ts
-            .WrittenUnproven(why: w) :> unprovenReport(env, f, w, ts)
-            .Failed(why: w) :> notInferableReport(env, f, w, ts)
+            .WrittenUnproven(why: w, at: a) :> unprovenReport(env, f, w, a, ts)
+            .Failed(why: w, at: a) :> notInferableReport(env, f, w, a, ts)
             .Cyclic(names: ns) :> cycleReport(env, di, f, ns, ts)
             .Boundary(where: b) :> boundaryReport(env, f, b, ts)
         }
@@ -12891,10 +13262,25 @@ ${
         return hasErrIn(env.errs, f.span) || hasErrIn(env.blame.spans, f.span)
     }
 
-    fn notInferableReport(env: TEnv, f: FieldInfo, why: string, ts: TypeState) -> TypeState {
-        if (initBlamed(env, f, ts)) return ts
+    // Fix round 1 (F5): a failure that stands in a FUNCTION (a proof of its
+    // return) is owned by an Error already inside that function — a refused
+    // construct there is not reported a second time at the own value. Prior
+    // passes' Errors are visible for the current file (Blame.spans); the
+    // typer's own, for every file (ts.diags).
+    fn calleeBlamed(env: TEnv, a: CalleeAt, ts: TypeState) -> boolean {
+        if (a.file == "") return false
+        const sp: ASpan = mkSpan(a.start, a.end)
+        if (a.file == env.file && hasErrIn(env.blame.spans, sp)) return true
+        for (const d of ts.diags) {
+            if (d.file == a.file && d.severity == Severity.Error && d.span.start >= a.start && d.span.end <= a.end) return true
+        }
+        return false
+    }
+
+    fn notInferableReport(env: TEnv, f: FieldInfo, why: string, a: CalleeAt, ts: TypeState) -> TypeState {
+        if (initBlamed(env, f, ts) || calleeBlamed(env, a, ts)) return ts
         const n: string = f.sym.hint
-        return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n + "` has no `:Type`, and its value is not one a type is inferred from — " + why + ". A type is inferred only from literals, typed `@` references, and arithmetic, comparisons, ternaries and `.length` over those, and calls of functions with a declared (or provable) return (§66.3 rules 5–7). Write the type: `" + n + ":T=…` (or `:asIs` to sign for an untyped value)")
+        return report(ts, env, f.span, "E-DECL-TYPE-NOT-INFERABLE", "`" + n + "` has no `:Type`, and its value is not one a type is inferred from — " + why + ". A type is inferred only from literals, typed `@` references, and arithmetic, comparisons, ternaries and `.length` over those, and calls of functions with a declared (or provable) return (§66.3 rules 5–7). Write the type: `" + n + ":T=…`")
     }
 
     // Rule 8: a derived cycle is E-DERIVED-CIRCULAR-DEP's (derivedCycles); a
@@ -12927,10 +13313,10 @@ ${
         return report(ts, env, f.span, "E-DECL-TYPE-REQUIRED-AT-BOUNDARY", "`" + n + "` is " + what + " — its value is not a literal, so its type must be written, not inferred: `" + n + ":T=…` (§66.3 rule 9)")
     }
 
-    fn unprovenReport(env: TEnv, f: FieldInfo, why: string, ts: TypeState) -> TypeState {
-        if (initBlamed(env, f, ts)) return ts
+    fn unprovenReport(env: TEnv, f: FieldInfo, why: string, a: CalleeAt, ts: TypeState) -> TypeState {
+        if (initBlamed(env, f, ts) || calleeBlamed(env, a, ts)) return ts
         const n: string = f.sym.hint
-        return report(ts, env, f.span, "E-DECL-TYPE-UNPROVEN", "`" + n + "` is written with a type, but its value's type cannot be resolved — " + why + " — so nothing checks that the value is one (§66.3 rule 10). Declare what is untyped (the function's `-> T`), or write `:asIs` to sign for it")
+        return report(ts, env, f.span, "E-DECL-TYPE-UNPROVEN", "`" + n + "` is written with a type, but its value's type cannot be resolved — " + why + " — so nothing checks that the value is one (§66.3 rule 10). Declare what is untyped (the function's `-> T`, a parameter's or a local's type)")
     }
 
     fn typeFn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {

@@ -27,3 +27,4 @@ F7 (SPEC beyond the ruling — PA dispositions, bryan veto window):
 F8 (pre-existing typer leniency `(@s == 1)` string-vs-int infers bool) — file a LOW gap with locus.
 
 Report: new FINAL_SHA, per-finding before/after, re-measured corpus + bootstrap-conformance buckets, gates (pre-commit, bootstrap slices, gen-bootstrap-severity/spec-index/facts --check).
+2026-10-09T20:25:35-06:00 FIX ROUND 1: F1 scope resolver (retsIn), F2 resolve mode (typer-determined proof; fixture -> string reverted; 2 cases rewritten to mixed-return / recursion), F3 cycle members withdrawn (derivedCycles -> Blamed), F4 §6.6.10 limit + gap, F5 callee-blame + unannotated param blamed, F6 no :asIs in bootstrap messages, F7 SPEC readings/strip attribute limb/PA-reading marks, F8 gap. Slices all green (m2 574).

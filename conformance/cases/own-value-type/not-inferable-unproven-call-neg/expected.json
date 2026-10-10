@@ -1,9 +1,9 @@
 {
   "id": "own-value-type-not-inferable-unproven-call-neg",
-  "description": "§66.3 rule 5 (g): `seven()` declares no return type and returns a local, which never counts toward an inferred-and-proven return — so `<v=(seven())/>` is E-DECL-TYPE-NOT-INFERABLE.",
+  "description": "§66.3 rule 5 (g): `count()` declares no return type and is recursive — a function whose proof needs its own return is not proven — so `<v=(count(3))/>` is E-DECL-TYPE-NOT-INFERABLE.",
   "language-version": "1.0",
   "spec": "§66.3",
-  "rationale": "§66.3 rule 5: \"A function's return is inferred-and-proven when … every `return` carries an expression that is a member of this set … reading the function's PARAMETERS as typed `@ref`s … and never a local binding\"; rule 7: a call whose return is neither declared nor proven is outside the set. ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §7 item 1: \"calls to functions with a declared or inferred-and-proven return\").",
+  "rationale": "§66.3 rule 5: \"A function whose proof needs its own return (recursion, direct or through another function or cell) is not proven\"; rule 7: a call whose return is neither declared nor proven is outside the set. ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §7 item 1: \"calls to functions with a declared or inferred-and-proven return\").",
   "expect": {
     "codes": [
       "E-DECL-TYPE-NOT-INFERABLE"

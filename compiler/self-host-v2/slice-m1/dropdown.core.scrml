@@ -91,7 +91,7 @@ ${
 
     // A TEST FIXTURE for L12 (b) (ruled S437): the same program plus user code
     // that reads the unconditional handle `@country` BEFORE the first render —
-    //   function countryValue() -> string { return @country.value }   (s462: the return is declared — §66.3 rule 10)
+    //   function countryValue() { return @country.value }
     //   let <firstCountry:string=(countryValue())/>     // seeded at construction
     //   <p class="early">Early ${countryValue()} / ${@firstCountry}</p>   // placed BEFORE the instances
     // The instance record must exist when the program is CONSTRUCTED, not when
@@ -375,7 +375,7 @@ ${
             ])
         }
         if (earlyRead) {
-            // function countryValue() -> string { return @country.value }
+            // function countryValue() { return @country.value }
             const fCountryValue: Fn = {
                 sym: sCountryValue, params: [], pure: false, err: not, waits: false,
                 body: block([Stmt.Return(countryValue)]),
