@@ -54,3 +54,28 @@ describe("S462 — the known-write limbs are unchanged", () => {
     expect(inApp(O + "    function f() { if (@o.n != not) { const t = Date.now()\n @m = @o.n + 1 } }")).toEqual([]);
   });
 });
+
+// S462 Q11 / Q12 ("a", user-voice §S462). The fixture's `?{}` has no database scope (E-SQL-004,
+// beside the point here), so only the narrowing code is asserted.
+const SQ = "?" + "{";
+const WC = "    function wc(id: string) -> int {\n        const row = " + SQ + "`SELECT body FROM notes WHERE id = ${id}`}.get() !{ _ :> not }\n        return 0\n    }\n";
+const narrowing = (decls, markup) => inApp(decls, markup).filter((c) => c === "E-OPERAND-NOT-NARROWED");
+
+describe("S462 Q11 — a server call (a suspension point) ends every cell narrowing", () => {
+  test("a call of a server function (its own `?{}` places it on the server)", () => {
+    expect(narrowing(O + WC + "    function f() { if (@o.n != not) { @m = wc(\"n1\") !{ .Transport(t) :> 0 }\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("a re-test after it narrows again", () => {
+    expect(narrowing(O + WC + "    function f() { if (@o.n != not) { @m = wc(\"n1\") !{ .Transport(t) :> 0 }\n if (@o.n != not) { @m = @o.n + 1 } } }")).toEqual([]);
+  });
+});
+
+describe("S462 Q12 — an event handler re-tests reactive cells", () => {
+  test("a handler under `if=` does not inherit the cell narrowing", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ @m = @o.n + 1 }>b</button></p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("a re-test inside the handler narrows; the element's children keep the narrowing", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)><button onclick={ if (@o.n != not) { @m = @o.n + 1 } }>b</button></p>")).toEqual([]);
+    expect(narrowing(O, "<p if=(@o.n != not)>${@o.n + 1}</p>")).toEqual([]);
+  });
+});

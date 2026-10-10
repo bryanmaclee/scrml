@@ -9557,6 +9557,16 @@ ${
         return fnKeysNamed(ws, name)
     }
 
+    // s462 Q12 — drop every CELL narrowing (`@…` and places under it); locals and
+    // `<each>` row bindings (captured locals) keep theirs.
+    fn tDropCellNarrowing(env: TEnv) -> TEnv {
+        let keep: string[] = []
+        for (const k of env.narrowed) {
+            if (k.indexOf("@") != 0) keep = keep.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
+    }
+
     // s462 — drop every CELL narrowing (`@…`), and every `<each>` row binding
     // whose source is a cell: an UNKNOWN write may write any of them. A local's
     // narrowing (`#id`) stays: a call cannot rebind a local.
@@ -9576,7 +9586,15 @@ ${
     fn fnWrites(files: FileAst[]) -> FnW[] {
         let ws: FnW[] = []
         for (const f of files) {
-            for (const af of fnItems(f.items)) { ws = ws.concat([{ name: af.name, keys: blockEffects(af.body, []), params: paramNids(af.params) }]) }
+            // s462 Q11 (ruling:user-voice-scrml.md S462 "a"): a SERVER function's call is a
+            // suspension point (the client awaits it; another handler may write any cell
+            // meanwhile) — its key set holds UNKNOWN ("*"), so a call of it, or of any
+            // function that calls it (the fixpoint below), ends every cell narrowing.
+            for (const af of fnItems(f.items)) {
+                let own: string[] = blockEffects(af.body, [])
+                if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
+                ws = ws.concat([{ name: af.name, keys: own, params: paramNids(af.params) }])
+            }
         }
         let changed = true
         let pass = 0
@@ -11902,7 +11920,12 @@ ${
         return typeExpr(env, x, ts)
     }
 
-    fn typeHandlerValue(env: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
+    // s462 Q12 (ruling:user-voice-scrml.md S462 "a"): an event handler is a function
+    // body — it runs LATER, after writes the walk does not see — so it does not inherit
+    // the narrowing of reactive cells (`@…`): it re-tests. A captured local (`#id`, an
+    // `<each>` row) keeps its narrowing.
+    fn typeHandlerValue(env0: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
+        const env: TEnv = tDropCellNarrowing(env0)
         return match v {
             .Bare(e: x) :> typeStmtExpr(env, x, ts)
             .Paren(e: x) :> typeStmtExpr(env, x, ts)
