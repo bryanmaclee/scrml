@@ -7,12 +7,11 @@ ${
     // Import from 'scrml:data' to get all utilities in one import.
     //
     // Usage:
-    //   ${ import { validate, required, email, pick, groupBy } from 'scrml:data' }
+    //   ${ import { validate, Rule, pick, groupBy } from 'scrml:data' }
     // ---------------------------------------------------------------------------
 
-    export { validate, isValid, firstError, required, email, minLength, maxLength,
-             exactLength, pattern, min, max, numeric, integer, matches, oneOf, url,
-             custom, emailField, passwordField, passwordConfirmField } from './validate.scrml'
+    export { Rule, validate, isValid, firstError,
+             emailField, passwordField, passwordConfirmField } from './validate.scrml'
 
     export { pick, omit, mapKeys, mapValues, groupBy, indexBy, sortBy, unique,
              union, intersection, difference, member,
