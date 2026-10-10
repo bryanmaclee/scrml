@@ -71,3 +71,4 @@ ALSO (LOW): (a) a comment between `is` and `some` (`is /* c */ some`, `is // c‚è
 Report: new FINAL_SHA, before/after for NEW-1 + each item, gates re-run (pre-commit, conformance, browser-tier, types:check, bootstrap slices).
 
 Address this before completing your current task.
+- 2026-10-09T18:43:38-06:00 ROUND 2: NEW-1 fixed (endsPresenceGiven in both collectors' ASI checks + same-line check; collectLiftExpr VALUE_KW gains not; same-line `is some g(1)` now E-STMT-MISSING-SEMICOLON for both spellings ‚Äî was a silent drop for is some = newly-rejecting, measured 0 corpus); (a) comment between is/some: locator skips COMMENT/comment BLOCK_REF, confirm via token isStart + trivia check, gate regex allows comments; (b) gaps filed g-is-presence-literal-operand-drops-the-test-s462, g-is-presence-in-mixed-text-attr-template-codegen-invalid-s462; (c) conformance forms/is-given-validator-absent-message

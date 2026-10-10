@@ -61,7 +61,7 @@ export declare function attachHandlerStatementListsInTree(
 ): void;
 
 /** One `is some` spelling the builder's token streams saw (S462) — a candidate, confirmed against source by is-some-deprecation.ts. */
-export interface LegacyIsSomeSite { start: number; end: number; kind: "expr" | "validator" }
+export interface LegacyIsSomeSite { start: number; end: number; isStart?: number; kind: "expr" | "validator" }
 
 /** Build a FileAST from Block Splitter output. */
 export declare function buildAST(

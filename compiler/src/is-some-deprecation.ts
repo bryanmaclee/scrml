@@ -28,6 +28,8 @@ export interface IsSomeSite {
   start: number;
   end: number;
   kind: "expr" | "validator";
+  /** Offset of the `is` token, when the token stream recorded it (S462 fix round 2). */
+  isStart?: number;
 }
 
 export interface ConfirmedIsSomeSite extends IsSomeSite {
@@ -50,18 +52,54 @@ export function confirmIsSomeSites(source: string, sites: ReadonlyArray<IsSomeSi
     const end = start + 4;
     if (source.slice(start, end) !== "some") continue;
     if (end < source.length && ID.test(source[end])) continue;
-    let k = start - 1;
-    let ws = 0;
-    while (k >= 0 && /\s/.test(source[k])) { k--; ws++; }
-    if (ws === 0 || k < 1 || source[k] !== "s" || source[k - 1] !== "i") continue;
-    const isStart = k - 1;
-    if (isStart > 0 && ID.test(source[isStart - 1])) continue;
+    let isStart: number;
+    if (typeof s.isStart === "number") {
+      // The token stream placed the `is`: it must be there, whole-word, and only
+      // whitespace and comments may separate it from `some` (`is /* c */ some`).
+      isStart = s.isStart;
+      if (source.slice(isStart, isStart + 2) !== "is") continue;
+      if (isStart > 0 && ID.test(source[isStart - 1])) continue;
+      if (!onlyTriviaBetween(source, isStart + 2, start)) continue;
+    } else {
+      let k = start - 1;
+      let ws = 0;
+      while (k >= 0 && /\s/.test(source[k])) { k--; ws++; }
+      if (ws === 0 || k < 1 || source[k] !== "s" || source[k - 1] !== "i") continue;
+      isStart = k - 1;
+      if (isStart > 0 && ID.test(source[isStart - 1])) continue;
+    }
     seen.add(start);
     const { line, col } = lineColOf(source, start);
     out.push({ start, end, kind: s.kind === "validator" ? "validator" : "expr", isStart, line, col });
   }
   out.sort((a, b) => a.start - b.start);
   return out;
+}
+
+/** True when `source[from, to)` is non-empty and only whitespace, `// …⏎` and `/* … *\/` comments. */
+function onlyTriviaBetween(source: string, from: number, to: number): boolean {
+  if (to <= from) return false;
+  let i = from;
+  let sawSpace = false;
+  while (i < to) {
+    const c = source[i];
+    if (/\s/.test(c)) { sawSpace = true; i++; continue; }
+    if (c === "/" && source[i + 1] === "/") {
+      const nl = source.indexOf("\n", i);
+      if (nl === -1 || nl >= to) return false;
+      i = nl;
+      continue;
+    }
+    if (c === "/" && source[i + 1] === "*") {
+      const close = source.indexOf("*/", i + 2);
+      if (close === -1 || close + 2 > to) return false;
+      i = close + 2;
+      sawSpace = true;
+      continue;
+    }
+    return false;
+  }
+  return sawSpace;
 }
 
 function lineColOf(source: string, offset: number): { line: number; col: number } {

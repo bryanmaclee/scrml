@@ -684,7 +684,8 @@ let tokenizePassthrough = _defaultTokenizePassthrough;
 // confirmed sites. An offset the source does not confirm is dropped by both.
 let _isSomeSink = null;
 // Relevance pre-check only (never a locator): can this text hold an `is some` at all?
-const IS_SOME_TEXT_RE = /(?<![A-Za-z0-9_$])is\s+some(?![A-Za-z0-9_$])/;
+// (Whitespace and comments may separate the two words — `is /* c */ some`.)
+const IS_SOME_TEXT_RE = /(?<![A-Za-z0-9_$])is(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)+some(?![A-Za-z0-9_$])/;
 // A SUB-PARSE (an `<each>` body, a `<match>` arm body re-split from its raw text)
 // tokenizes a substring at substring-relative offsets. `withIsSomeBase` adds the
 // substring's file offset to what it records; a sub-parse whose file offset is
@@ -717,18 +718,27 @@ function noteIsSomeTokens(tokens, kind = "expr") {
   if (!_isSomeSink || _isSomeMuted > 0 || !Array.isArray(tokens)) return;
   for (let k = 0; k + 1 < tokens.length; k++) {
     const a = tokens[k];
-    if (!a || a.kind !== "KEYWORD" || a.text !== "is") continue;
-    const b = tokens[k + 1];
+    if (!a || a.kind !== "KEYWORD" || a.text !== "is" || !a.span) continue;
+    // A comment between the two words (`is /* c */ some`, `is // c⏎ some`) is a
+    // COMMENT token; the expression reader drops it, so the pair is still the
+    // operator (S462 fix round 2).
+    let m = k + 1;
+    // (A comment the block splitter split out reaches the stream as a BLOCK_REF to a
+    // `comment` block.)
+    const isTrivia = (t) => !!t && (t.kind === "COMMENT" || (t.kind === "BLOCK_REF" && t.block && t.block.type === "comment"));
+    while (m < tokens.length && isTrivia(tokens[m])) m++;
+    const b = tokens[m];
     if (!b || b.kind !== "IDENT" || b.text !== "some" || !b.span) continue;
     const start = b.span.start + _isSomeBias;
     const end = b.span.end + _isSomeBias;
+    const isStart = a.span.start + _isSomeBias;
     if (typeof start !== "number" || typeof end !== "number" || end - start !== 4) continue;
     // `is some` that CLOSES a declaration opener (`<mid: string is some>`) is the §55.1
     // validator even where the opener scan does not read it (S462 F5) — in an
     // expression, `some` is never followed by the opener's `>`.
-    const after = tokens[k + 2];
+    const after = tokens[m + 1];
     const siteKind = after && after.text === ">" ? "validator" : kind;
-    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, kind: siteKind });
+    if (!_isSomeSink.has(start)) _isSomeSink.set(start, { start, end, isStart, kind: siteKind });
   }
   // A backtick template literal is ONE STRING token whose body keeps its `${…}`
   // interpolations verbatim (tokenizer.ts readBacktickString); read them at their own
@@ -5843,7 +5853,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * `is`, never `given`). Read from the token stream, never from the joined text:
    * `@n = o.is⏎given o :> {…}` is a member read followed by a guard statement.
    */
+  // The `given` tokens accepted as the second word of `x is given` (S462 fix round 2).
+  // Such a `given` ENDS A VALUE — exactly like the IDENT `some` of `x is some` — so
+  // every ASI / missing-semicolon boundary check treats it as a value terminal.
+  // Without this, `@o = a is given⏎g(1)` joined the next line into the expression
+  // and the expression parser dropped `g(1)` silently.
+  const _presenceGivenToks = new WeakSet();
+  const endsPresenceGiven = (t) => !!t && t.kind === "KEYWORD" && t.text === "given" && _presenceGivenToks.has(t);
+
   function givenContinuesIsOperator() {
+    const r = _givenContinuesIsOperator();
+    if (r) _presenceGivenToks.add(peek());
+    return r;
+  }
+
+  function _givenContinuesIsOperator() {
     const g = peek();
     if (!g || g.kind !== "KEYWORD" || g.text !== "given") return false;
     let k = -1;
@@ -6542,6 +6566,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             _lastIsPostfixUpdate ||
             _lk === "NUMBER" || _lk === "STRING" ||
             (_lk === "KEYWORD" && (_lt === "true" || _lt === "false" || _lt === "this" || _lt === "not")) ||
+            endsPresenceGiven(lastTok) ||
+            // …and the `some` of `x is some` (same terminal, either spelling): before
+            // S462 round 2, `@o = a is some g(1)` dropped `g(1)` silently.
+            (_lk === "IDENT" && _lt === "some" && !!_pl && _pl.kind === "KEYWORD" && _pl.text === "is") ||
             (_lk === "PUNCT" && (_lt === ")" || _lt === "]" || _lt === "}"))
           );
           if (_startsCallOrMember && _lastEndsValue) {
@@ -6622,6 +6650,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             lastKind === "BLOCK_REF" ||
             lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
+            endsPresenceGiven(lastTok) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
           // tok starts a new statement if it's an IDENT (function call) or unhandled KEYWORD.
@@ -7111,10 +7140,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // ASI-style newline boundary (same logic as collectExpr BUG-ASI-NEWLINE)
       if (parts.length > 0 && depth === 0 && angleDepth === 0 && tok.span.line > lastTok.span.line) {
         const lk = lastTok.kind, lt = lastTok.text;
-        const VALUE_KW = new Set(["true", "false", "null", "undefined", "this"]);
+        // S462 fix round 2: `not` (the absence value / the end of `x is not`) ends a
+        // value here as it does in collectExpr; so does the `given` of `x is given`.
+        const VALUE_KW = new Set(["true", "false", "null", "undefined", "this", "not"]);
         const endsValue = (
           lk === "IDENT" || lk === "NUMBER" || lk === "STRING" || lk === "AT_IDENT" ||
           (lk === "KEYWORD" && VALUE_KW.has(lt)) ||
+          endsPresenceGiven(lastTok) ||
           (lk === "PUNCT" && (lt === ")" || lt === "]" || lt === "}"))
         );
         const startsStmt = (
@@ -10143,7 +10175,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             entry.legacySpelling = { start: w.span.start, end: w.span.end, line: w.span.line, col: w.span.col };
             if (_isSomeSink && _isSomeMuted === 0 && typeof w.span.start === "number") {
               const vs = w.span.start + _isSomeBias;
-              _isSomeSink.set(vs, { start: vs, end: vs + 4, kind: "validator" });
+              _isSomeSink.set(vs, { start: vs, end: vs + 4, isStart: t.span.start + _isSomeBias, kind: "validator" });
             }
           }
           // `is given("msg")` — the §55.10 Level-1 inline message, read exactly as
