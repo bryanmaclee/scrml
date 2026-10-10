@@ -224,6 +224,10 @@ export function buildImportGraph(fileASTs) {
 
     // Collect imports from AST
     const astImports = file.ast?.imports || [];
+    // S462 F4 — an import written inside a `^{}` meta block is refused there
+    // (E-META-001, meta-checker); it is still collected here, so mark it and let
+    // the stdlib name check stay silent about it (one report per cause).
+    const metaImports = importsInsideMeta(file.ast);
     for (const imp of astImports) {
       if (!imp.source) continue;
 
@@ -293,6 +297,7 @@ export function buildImportGraph(fileASTs) {
         absSource,
         isDefault: imp.isDefault || false,
         span: imp.span || null,
+        ...(metaImports.has(imp) ? { inMeta: true } : {}),
       });
     }
 
@@ -1259,6 +1264,7 @@ export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
     for (const imp of entry?.imports ?? []) {
       if (typeof imp.source !== "string" || !imp.source.startsWith("scrml:")) continue;
       if (isStdlibCompilerFamily(imp.source)) continue;
+      if (imp.inMeta) continue; // E-META-001 is the report (S462 F4)
       if (graph.has(imp.absSource)) continue; // in the compile set — validateImports judged it
       const exported = namesOf(imp.absSource);
       if (!(exported instanceof Set)) continue;
@@ -1274,6 +1280,7 @@ export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
         err.missingName = name;
         err.importerFile = toPosix(filePath);
         err.targetFile = toPosix(imp.absSource);
+        err.stdlibModule = imp.source.slice("scrml:".length);
         errors.push(err);
       }
     }
@@ -1302,6 +1309,7 @@ export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
       err.reExportedMissingName = exp.name;
       err.importerFile = toPosix(filePath);
       err.targetFile = toPosix(exp.reExportSource);
+      err.stdlibModule = spec.slice("scrml:".length);
       errors.push(err);
     }
   }
@@ -1356,6 +1364,28 @@ export function eraseStdlibTypeOnlyImports(jsText, importerPath, exportRegistry)
       return `${indent}import { ${kept.join(", ")} } from ${quote}${spec}${quote}${semi || ";"}`;
     },
   );
+}
+
+/**
+ * The import-decl nodes a file writes inside a `^{}` meta block (identity set; the
+ * AST's `imports` list holds the same objects).
+ * @param {object|undefined} ast
+ * @returns {Set<object>}
+ */
+function importsInsideMeta(ast) {
+  const out = new Set();
+  if (!Array.isArray(ast?.imports) || ast.imports.length === 0) return out;
+  const seen = new WeakSet();
+  const walk = (n, inMeta) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, inMeta); return; }
+    const meta = inMeta || n.kind === "meta" || n.kind === "Meta";
+    if (meta && n.kind === "import-decl") out.add(n);
+    for (const k of Object.keys(n)) if (k !== "span" && k !== "parentContext") walk(n[k], meta);
+  };
+  for (const node of ast?.nodes ?? []) walk(node, false);
+  return out;
 }
 
 /** Is `source` the `scrml:compiler` umbrella or one of its per-stage siblings? */

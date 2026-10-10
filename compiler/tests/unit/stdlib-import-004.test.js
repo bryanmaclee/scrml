@@ -260,6 +260,29 @@ describe("§21.4 (S462 Q19) — a named re-export from scrml: is checked", () =>
   });
 });
 
+describe("F4 — one report per cause", () => {
+  function codesOf(name, src) {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "app.scrml");
+    writeFileSync(file, src);
+    const res = compileScrml({ inputFiles: [file], outputDir: join(dir, "dist"), write: true, log: () => {} });
+    return [...(res.errors ?? []), ...(res.warnings ?? [])].map((e) => e.code);
+  }
+
+  test("§15 an import inside ^{} is E-META-001 only (no second E-IMPORT-004)", () => {
+    const codes = codesOf("meta-import", "^{\n    import { nope } from 'scrml:data'\n}\n<p>hi</>\n");
+    expect(codes).toContain("E-META-001");
+    expect(codes).not.toContain("E-IMPORT-004");
+  });
+
+  test("§16 a refused import from a shim-less module is E-IMPORT-004 only (no W-STDLIB-SHIM-MISSING)", () => {
+    const codes = codesOf("shimless", "${\n    import { x } from 'scrml:auth/templates/login'\n}\n<p>hi</>\n");
+    expect(codes).toContain("E-IMPORT-004");
+    expect(codes).not.toContain("W-STDLIB-SHIM-MISSING");
+  });
+});
+
 describe("validateStdlibImports (unit)", () => {
   const imp = (source, names, extra = {}) => ({
     source, names, absSource: `/std/${source.slice(6)}.scrml`, isDefault: false, span: null, ...extra,

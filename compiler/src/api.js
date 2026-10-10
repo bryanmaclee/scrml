@@ -594,7 +594,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  * @param {object[]} [diagnostics]
  * @returns {Set<string>}
  */
-export function planStdlibBundle(names, diagnostics) {
+export function planStdlibBundle(names, diagnostics, refusedModules = null) {
   const planned = new Set();
   if (!names) return planned;
   for (const name of names) {
@@ -603,7 +603,7 @@ export function planStdlibBundle(names, diagnostics) {
     if (!Array.isArray(diagnostics)) continue;
     // The same warnings, in the same order, `bundleStdlibForRun` pushes.
     if (isCompilerFamily(name)) diagnostics.push(stdlibCompilerDeferredWarning(name));
-    else if (!shimExists) diagnostics.push(stdlibShimMissingWarning(name));
+    else if (!shimExists && !(refusedModules && refusedModules.has(name))) diagnostics.push(stdlibShimMissingWarning(name));
   }
   return planned;
 }
@@ -3986,8 +3986,13 @@ function _compileScrmlImpl(options = {}) {
   // gate below checks the exact bytes the write phase would produce and the
   // shims are copied only once the gate has passed (a gate failure used to leave
   // `_scrml/*.js` behind in an otherwise-unwritten output directory).
+  // S462 F4 — a module whose import is already refused (E-IMPORT-004 against its
+  // export list) gets no second "has no runtime shim" warning: one report per cause.
+  const _refusedStdlibModules = new Set(
+    allErrors.filter(e => e && e.code === "E-IMPORT-004" && typeof e.stdlibModule === "string").map(e => e.stdlibModule),
+  );
   const bundledStdlib = (writeEligible && outputDir)
-    ? planStdlibBundle(stdlibSpecifiers, allErrors)
+    ? planStdlibBundle(stdlibSpecifiers, allErrors, _refusedStdlibModules)
     : new Set();
   // Set true once the first byte of this compile reaches `outputDir`.
   let artifactsWritten = false;
