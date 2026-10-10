@@ -114,3 +114,30 @@ describe("S462 round 6 — focus-family handlers are not exempt", () => {
     expect(narrowing(O, "<p if=(@o.n != not)><input oninput={ @m = @o.n + 1 }/></p>")).toEqual([]);
   });
 });
+
+// S462 round 6 (review #6 ruling): the gate exemption is an ALLOW-list of user-input events.
+describe("S462 round 6 — only user-input events keep the gate narrowing", () => {
+  for (const ev of ["onclick", "onkeydown", "onpointerup", "ondrop", "onClick"]) {
+    test(`${ev} under \`if=\` keeps it`, () => {
+      expect(narrowing(O, `<p if=(@o.n != not)><input ${ev}={ @m = @o.n + 1 }/></p>`)).toEqual([]);
+    });
+  }
+  for (const ev of ["onchange", "onmouseleave", "onanimationend", "onpointercancel", "onscroll"]) {
+    test(`${ev} under \`if=\` re-tests`, () => {
+      expect(narrowing(O, `<p if=(@o.n != not)><input ${ev}={ @m = @o.n + 1 }/></p>`)).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    });
+  }
+});
+
+// S462 round 6 (F6-5 bootstrap check): an `else` sibling of an `if=` is not narrowed by it.
+describe("S462 round 6 — markup else branches are checked", () => {
+  test("a read in `else` of the narrowing gate re-tests", () => {
+    expect(narrowing(O, "<p if=(@o.n != not)>x</p><p else>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("a read in an `else-if=` on another condition re-tests", () => {
+    expect(narrowing(O, "<p if=(@o.f != not)>x</p><p else-if=(@m == 0)>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("an `else-if=` on the place narrows it", () => {
+    expect(narrowing(O, "<p if=(@o.f != not)>x</p><p else-if=(@o.n != not)>${@o.n + 1}</p>")).toEqual([]);
+  });
+});

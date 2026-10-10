@@ -1236,3 +1236,25 @@ ${line}
     expect(errs[0].span.col).toBe(line.lastIndexOf("onGo()") + 1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 6 (review #6 ruling) — the gate exemption is an ALLOW-list of user-input events,
+// matched by exact (ASCII-lowercased) name; everything else re-tests.
+// ---------------------------------------------------------------------------
+describe("S462 round 6 — only user-input events keep a gate's narrowing", () => {
+  for (const ev of ["onclick", "ondblclick", "oncontextmenu", "oninput", "onbeforeinput", "onsubmit", "onreset",
+    "onkeydown", "onkeyup", "onkeypress", "onmousedown", "onmouseup", "onmousemove", "onpointerdown",
+    "onpointerup", "onpointermove", "onwheel", "ontouchstart", "ontouchmove", "ontouchend", "ondragstart",
+    "ondrag", "ondragend", "ondragenter", "ondragover", "ondrop", "onauxclick", "onClick", "on:click"]) {
+    test(`${ev} keeps it`, () => {
+      expect(nM(`<div if=@user><input ${ev}={ @out = @user.name }/></div>`)).toBe(0);
+    });
+  }
+  for (const ev of ["onchange", "onmouseleave", "onmouseout", "onpointerleave", "onpointercancel",
+    "ontouchcancel", "onanimationend", "ontransitionend", "onscroll", "onselect", "ondragleave",
+    "onfocus", "onblur", "on:custom", "onfoo"]) {
+    test(`${ev} re-tests`, () => {
+      expect(nM(`<div if=@user><input ${ev}={ @out = @user.name }/></div>`)).toBe(1);
+    });
+  }
+});

@@ -531,24 +531,44 @@ const GATE_MARK = "\u0000gate:";
  * `show=` never gates (it hides, it does not remove). A write inside the handler still
  * ends the narrowing from that point (S462 "b") — the body walk does that.
  *
- * S462 round 6 (F6-2) — the removal guarantee holds for every event dispatched AFTER the
- * write (delegated events never reach a detached node; a direct listener checks that its
- * element is connected, codegen/detached-listener.ts). It does NOT hold for an event the
- * browser fires DURING the removal, while the node is still connected: Chromium fires
- * `blur` / `focusout` on a focused element inside `remove()` (verified, Playwright
- * Chromium). So a handler for the focus family (`FOCUS_EVENTS`) keeps no gate narrowing.
+ * S462 round 6 (F6-2, review #6) — the removal guarantee holds for every event dispatched
+ * AFTER the write (delegated events never reach a detached node; a direct listener checks
+ * that its element is connected, codegen/detached-listener.ts). It does NOT hold for an
+ * event a browser fires DURING the removal, while the node is still connected — Chromium
+ * fires `blur` / `focusout` on a focused element inside `remove()` (measured, Playwright
+ * Chromium), and other engines cannot be checked here. So the exemption is FAIL-CLOSED: it
+ * applies only to the events in `USER_INPUT_EVENTS` (exact names), which a user agent fires
+ * as their own task from direct user input, never synchronously from a DOM mutation. Every
+ * other event — the focus family, every leave / out / cancel event, animation and
+ * transition events, custom events, unknown names — keeps no gate narrowing.
  */
 function handlerEntry(present: ReadonlySet<string>, handler: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions, eventName = ""): ReadonlySet<string> {
   const entry = closureEntry(present, handler, span, opts);
-  if (FOCUS_EVENTS.has(eventName)) return entry;
+  if (!USER_INPUT_EVENTS.has(eventName)) return entry;
   const gated = [...present].filter((k) => !k.startsWith(GATE_MARK) && present.has(GATE_MARK + k));
   return withKeys(entry, gated);
 }
 
-/** S462 round 6 — events a browser may fire while a gated subtree is being removed. */
-const FOCUS_EVENTS = new Set(["blur", "focusout", "focus", "focusin"]);
+/**
+ * S462 round 6 (review #6 ruling) — the events a gated handler keeps the gate's narrowing
+ * for: fired by the user agent as their own task from direct user input. An ALLOW-list by
+ * exact name; when in doubt a name is left out. Pruned from the reviewer's list: `change`
+ * (a browser may commit a pending value change as part of the blur it fires when a focused
+ * control is removed).
+ */
+const USER_INPUT_EVENTS = new Set([
+  "click", "dblclick", "auxclick", "contextmenu",
+  "input", "beforeinput", "submit", "reset",
+  "keydown", "keyup", "keypress",
+  "mousedown", "mouseup", "mousemove", "pointerdown", "pointerup", "pointermove",
+  "wheel", "touchstart", "touchmove", "touchend",
+  "dragstart", "drag", "dragend", "dragenter", "dragover", "drop",
+]);
 
-/** The DOM event an event-handler attribute names (`onclick` / `on:click` / `onclient:click` → `click`). */
+/**
+ * The DOM event an event-handler attribute names (`onclick` / `on:click` / `onclient:click`
+ * → `click`), ASCII-lowercased: HTML attribute names are ASCII case-insensitive.
+ */
 function handlerEventName(attrName: string): string {
   return attrName.replace(/^on(?:client:|server:|:)?/i, "").toLowerCase();
 }
