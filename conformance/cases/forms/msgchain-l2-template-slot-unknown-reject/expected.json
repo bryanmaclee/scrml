@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-l2-template-slot-unknown-reject",
+  "description": "§41.12.1 rule 5 — a literal registerMessages template that names a slot its variant does not have is refused with E-MESSAGE-SLOT-UNKNOWN. `MinFailed`'s slots are `{field}` and `{threshold}`; `{expected}` belongs to the comparison variants (GtFailed …). The well-formed `.Required` entry beside it fires nothing.",
+  "language-version": "1.0",
+  "spec": "§41.12.1, §55.9",
+  "rationale": "§41.12.1 rule 3: the slots are `{field}` plus the variant's §55.9 payload field names (MinFailed(threshold: number)). Rule 5: a literal template is parsed against its variant's slot table at compile time; an unknown slot name is E-MESSAGE-SLOT-UNKNOWN. Exactly one diagnostic — one per bad template.",
+  "expect": {
+    "codes": ["E-MESSAGE-SLOT-UNKNOWN"],
+    "notCodes": ["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-TEMPLATE-MALFORMED", "E-MESSAGE-VARIANT-UNKNOWN"],
+    "codeCounts": { "E-MESSAGE-SLOT-UNKNOWN": 1 }
+  }
+}
