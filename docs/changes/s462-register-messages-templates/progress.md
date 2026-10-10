@@ -2,3 +2,4 @@
 - 2026-10-09T19:02:43-06:00 SPEC §41.12 template grammar + §55.9/§55.10 + §41.14.4 registerRenderer note + 4 §34 rows
 - 2026-10-09T19:05:10-06:00 runtime: templates replace the function path (shared reader runtime-message-templates.js); c10 tests migrated
 - 2026-10-09T19:23:21-06:00 type-system check (4 E-MESSAGE-* codes) + conformance case migrated + 6 new cases + unit tests
+- 2026-10-09T19:58:19-06:00 code commit 40235db0c (gate 34056 pass/0 fail); docs migrated (kickstarter v2 §6.4, primer, stdlib/data/messages.scrml comments); types:check OK; browser messages tests 41/0; adopters: zero call sites

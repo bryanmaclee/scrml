@@ -7,9 +7,12 @@ ${
     //
     //   registerMessages(map)
     //     Project-wide Level-2 registration. Last-write-wins per variant key
-    //     across multiple calls. Each map entry is `(fieldName, ...payload) =>
-    //     string`. Keys are ValidationError variant names ("Required",
-    //     "MinFailed", "Custom", etc.). Per SPEC §41.12 lines 17073-17115.
+    //     across multiple calls. Each map value is a MESSAGE TEMPLATE (S462,
+    //     SPEC §41.12.1) — a string whose `{field}` slot is the field name and
+    //     whose other slots are the variant's §55.9 payload fields
+    //     (`{threshold}`, `{expected}`, `{set}`, ...); `{{` is a literal `{`.
+    //     Not a function. Keys are ValidationError variant names ("Required",
+    //     "MinFailed", "Custom", etc.). Per SPEC §41.12.
     //
     //   messageFor(error, fieldName, cellName?)
     //     Resolve a ValidationError-shaped object to a user-facing string via
@@ -27,9 +30,9 @@ ${
     //     import { registerMessages, messageFor } from 'scrml:data'
     //
     //     registerMessages({
-    //       .Required:        (field) => `${field} is required.`,
-    //       .MinFailed:       (field, n) => `${field} must be at least ${n}.`,
-    //       .PatternMismatch: (field) => `${field} doesn't match the format.`,
+    //       .Required:        "{field} is required.",
+    //       .MinFailed:       "{field} must be at least {threshold}.",
+    //       .PatternMismatch: "{field} doesn't match the format.",
     //     })
     //   }
     //
@@ -48,9 +51,11 @@ ${
     /**
      * registerMessages — project-level Level-2 registration.
      *
-     * @param map — `{ Required: (field) => "...", MinFailed: (field, n) => "...", ... }`
-     *              Keys are ValidationError variant names; values are functions
-     *              taking `(fieldName, ...payload)` and returning a string.
+     * @param map — `{ Required: "Please fill in {field}.", MinFailed: "{field} must be at least {threshold}.", ... }`
+     *              Keys are ValidationError variant names; values are message
+     *              templates (SPEC §41.12.1). A bad literal template is a compile
+     *              error (E-MESSAGE-*); a bad non-literal one is refused here at
+     *              registration and the chain falls through.
      *
      * Composes across multiple calls (last-write-wins per variant). Should be
      * called at app boot (typically the root `<program>` body or a top-level
