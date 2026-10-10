@@ -14287,7 +14287,10 @@ function annotateNodes(
         // therefore resolve like any other read: an undeclared one is
         // E-SCOPE-001, not a guard that throws `ReferenceError` when it runs
         // (S462 review F3 — `match name { given n -> … }` with no `n`).
-        {
+        // A REBIND head (`given c = @h :>`) introduces its name — its disposition is
+        // E-SYNTAX-045 / §66.7.5, not a read — and a malformed head already has
+        // its one diagnostic; neither is resolved here.
+        if (!isRebind && !malformedHead) {
           const ggVars = Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : [];
           const ggIsCell = Array.isArray((n as { variableIsCell?: unknown }).variableIsCell) ? (n as { variableIsCell: unknown[] }).variableIsCell : [];
           const ggSpan2 = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
