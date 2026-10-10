@@ -37,6 +37,12 @@ const EXCLUDED = {
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",
+  // S462 round 5: a block-bodied arrow / function expression escape hatch carries its parser-
+  // structured parameter list and own name for the §42.3.5 narrowing check. Their scope is the
+  // body, which exists only as TEXT (`raw` / `bodyRaw`); the defer lint parses that whole text
+  // (`textLambdaContainsDefer`, parameters included), so there is no structured subtree to scope.
+  "escape-hatch.params": "check-only structured copy of a text-carried function's parameters; scope = its text body, linted by textLambdaContainsDefer",
+  "escape-hatch.fnName": "a text-carried named function expression's own name; scope = its text body, linted by textLambdaContainsDefer",
   // §42.2.3 / §66.7.5 (S462) — `given-guard.rebind` marks the rebind head `given c = @h :>` so the
   // W-GIVEN-PRESENCE-DEPRECATED lint skips it. A boolean flag; the binder is `variables` (in the table).
   "given-guard.rebind": "a boolean flag (rebind head vs in-place presence guard), not a name; the binder is `variables`",

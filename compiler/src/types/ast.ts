@@ -2102,6 +2102,22 @@ export interface EscapeHatchExpr {
   nativeKind: string;
   /** Raw source text of the unsupported expression. */
   raw: string;
+  /**
+   * S462 fix round 5 — a block-bodied `ArrowFunctionExpression` / `FunctionExpression`
+   * (the only escape hatch that carries these): its parameters, STRUCTURED by the parser
+   * that parsed `raw` (the same `LambdaParam[]` a `lambda` carries). Read by checks that
+   * look inside the body (§42.3.5 narrowing); codegen emits `raw` and never reads this.
+   * Absent when the parser could not delimit the function's own source.
+   */
+  params?: LambdaParam[];
+  /**
+   * S462 fix round 5 — the BODY (`{ … }`, braces included) of the same function, the
+   * substring of `raw` the parser delimited (acorn's `BlockStatement` start/end; the
+   * native parser's `BlockStub` span). Checks parse this text — never a re-scan of `raw`.
+   */
+  bodyRaw?: string;
+  /** S462 fix round 5 — a NAMED function expression's own name (bound inside its body). */
+  fnName?: string;
 }
 
 // ---- Reset Expression (§6.8.2) ----

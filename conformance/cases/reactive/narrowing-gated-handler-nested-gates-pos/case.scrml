@@ -1,0 +1,12 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<other>: User | not = { name: "b" }
+<out> = ""
+<div if=@user>
+    <section if=@other>
+        <button id="go" onclick={ @out = @user.name + @other.name }>both</button>
+    </section>
+</div>
+<p id="o">${@out}</p>
+</program>

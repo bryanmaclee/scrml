@@ -1,0 +1,18 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function clear() { @user = not }
+    function noop() { @out = "z" }
+    function show() {
+        if (@user is given) {
+            const { noop } = { noop: clear }
+            noop()
+            @out = @user.name
+        }
+    }
+}
+<button id="b" onclick=show()>go</button>
+<p id="o">${@out}</p>
+</program>

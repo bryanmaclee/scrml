@@ -1,0 +1,17 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function show(xs: int[]) {
+        if (@user is given) {
+            for (const x of xs) {
+                @out = @user.name
+                @user = not
+            }
+        }
+    }
+}
+<button id="b" onclick=show([1, 2])>go</button>
+<p id="o">${@out}</p>
+</program>

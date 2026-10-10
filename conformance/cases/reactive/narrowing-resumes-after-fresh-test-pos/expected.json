@@ -1,0 +1,24 @@
+{
+  "id": "reactive-narrowing-resumes-after-fresh-test-pos",
+  "description": "S462 twin — after a write ends the narrowing, a fresh presence test narrows again. Compiles clean; clicking clears `@user`, so the fresh test is false and `@out` stays empty.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"b\"): \"A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point; a later member access through it is E-TYPE-046.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-TYPE-046"
+    ],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": ""
+      }
+    ]
+  }
+}

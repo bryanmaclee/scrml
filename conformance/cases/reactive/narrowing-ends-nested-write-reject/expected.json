@@ -1,0 +1,15 @@
+{
+  "id": "reactive-narrowing-ends-nested-write-reject",
+  "description": "S462 — a write in a NESTED block (an `if` branch that may run) ends the narrowing after that block; the later bare `@user.name` is E-TYPE-046.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"b\"): \"A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point; a later member access through it is E-TYPE-046.\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-046"
+    ],
+    "severity": {
+      "E-TYPE-046": "error"
+    }
+  }
+}

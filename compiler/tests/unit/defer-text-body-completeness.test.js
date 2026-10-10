@@ -73,6 +73,7 @@ const CLASSIFIED = {
   "expr.raw": "notStatement", // an attribute / interpolation EXPRESSION (defer there is an identifier, §19.16.1); an on*=${} handler value is lowered via its markup owner (tested below)
   "expr.expr": "sibling:exprNode",
   "escape-hatch.raw": "notStatement", // an EXPRESSION the parser could not structure; lambdas in it: textLambdaContainsDefer
+  "escape-hatch.bodyRaw": "sibling:raw", // S462 round 5: a block-bodied arrow's body, a SUBSTRING of its own `raw` (textLambdaContainsDefer reads it there); a check-only view, never lowered
   "function-decl.raw": "sibling:body",
   "export-decl.raw": "reparsed", // `export const Name = <markup>`: lint-defer.ts recovers the markup the way the component expander does and walks it (S446); otherwise declaration header text — an exported function's body is a re-parsed function-decl
   "each-block.bodyRaw": "sibling:bodyChildren",

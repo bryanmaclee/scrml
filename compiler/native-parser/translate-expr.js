@@ -925,7 +925,30 @@ function blockBodyLambdaEscapeHatch(nativeExpr, nativeKind) {
     if (typeof nativeExpr.verbatim !== "string" || nativeExpr.verbatim.length === 0) {
         return null;
     }
-    return makeEscapeHatch(nativeKind, nativeExpr.verbatim, nativeExpr.span);
+    const hatch = makeEscapeHatch(nativeKind, nativeExpr.verbatim, nativeExpr.span);
+    // S462 fix round 5 — the live front-end's escape hatch carries the STRUCTURED
+    // parameters and the parser-delimited body (expression-parser.ts); mirror it. The
+    // body is the BlockStub's own span, in the same coordinate space as the lambda's
+    // span (both from the parse that stamped `verbatim`), so it is a substring of
+    // `verbatim`. A destructured parameter translates to a placeholder name — a
+    // consumer that needs its bindings reads it as unknown (fail closed).
+    const sp = nativeExpr.span;
+    const bs = body.span;
+    if (sp && bs && typeof sp.start === "number" && typeof bs.start === "number" && typeof bs.end === "number") {
+        const from = bs.start - sp.start;
+        const to = bs.end - sp.start;
+        const text = from >= 0 && to <= nativeExpr.verbatim.length && to > from
+            ? nativeExpr.verbatim.slice(from, to) : "";
+        if (text.startsWith("{") && text.endsWith("}")) {
+            hatch.params = translateParamList(nativeExpr.params);
+            hatch.bodyRaw = text;
+            if (nativeExpr.name !== undefined && nativeExpr.name !== null) {
+                const nm = identText(nativeExpr.name);
+                if (nm !== "") hatch.fnName = nm;
+            }
+        }
+    }
+    return hatch;
 }
 
 // translateFunctionExpr — native `Function{name,params,body,isAsync,

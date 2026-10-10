@@ -10729,12 +10729,109 @@ ${
         return out
     }
 
+    // s462 — §42.3.5 (ruling:user-voice-scrml.md S462 "b"): "A write to the
+    // narrowed place — direct, in a nested block, or by a call that writes it
+    // or whose write set cannot be determined — ends the narrowing from that
+    // point". A call `()name` whose `name` is no function of the linked
+    // program has a write set that cannot be determined: its key is UNKNOWN
+    // ("*"), which ends every cell narrowing (fail closed). Unreachable in the
+    // current slice — function values, function-typed parameters and braced
+    // arrows are all refused (E-BOOTSTRAP-UNSUPPORTED / parse) — and kept so
+    // the "function values" slice inherits the rule instead of re-deriving it.
+    fn hasFnNamed(ws: FnW[], name: string) -> boolean {
+        for (const w of ws) {
+            if (w.name == name) return true
+        }
+        return false
+    }
+
+    // The write keys of a call of `name`: its function's write set, or UNKNOWN.
+    export fn callKeys(ws: FnW[], name: string) -> string[] {
+        if (!hasFnNamed(ws, name)) return ["*"]
+        return fnKeysNamed(ws, name)
+    }
+
+    // s462 Q12 — drop every CELL narrowing (`@…` and places under it); locals and
+    // `<each>` row bindings (captured locals) keep theirs. s462 Q18
+    // (ruling:user-voice-scrml.md S462 "a") — EXCEPT a cell narrowed by the chain
+    // of `if=` / `else-if=` gates enclosing the handler (`gateMark`, set by
+    // `typeIfAttr`): render-gating removes the subtree and its listener
+    // synchronously on the write that ends the gate's condition. The marks
+    // themselves do not enter the handler.
+    // s462 round 6 — `gates` false: a handler for an event outside the user-input
+    // allow-list (`userInputEvent`) keeps no gate narrowing — a browser may fire it
+    // DURING the removal, while the node is still connected.
+    fn tDropCellNarrowing(env: TEnv, gates: boolean) -> TEnv {
+        let keep: string[] = []
+        for (const k of env.narrowed) {
+            if (k.indexOf("@") == 0) {
+                if (gates && env.narrowed.indexOf(gateMark(k)) >= 0) keep = keep.concat([k])
+            } else if (k.indexOf(gateMark("")) != 0) {
+                keep = keep.concat([k])
+            }
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret, blame: env.blame }
+    }
+
+    // s462 — drop every CELL narrowing (`@…`), and every `<each>` row binding
+    // whose source is a cell: an UNKNOWN write may write any of them. A local's
+    // narrowing (`#id`) stays: a call cannot rebind a local.
+    // s462 Q18 — the mark an `if=` / `else-if=` gate leaves in `narrowed` beside
+    // each cell place it narrows (no place key starts with `gate:`; every reader
+    // of `narrowed` compares whole keys or `@` / `#` prefixes).
+    // s462 round 6 (review #6 ruling) — the ALLOW-list of events a gated handler keeps
+    // the gate's narrowing for: fired by the user agent as their own task from direct
+    // user input, never synchronously from a DOM mutation or removal (Chromium fires
+    // `blur` / `focusout` inside `remove()`). Exact names, ASCII-lowercased (HTML
+    // attribute names are case-insensitive); anything else keeps no gate narrowing.
+    fn userInputEvent(ev: string) -> boolean {
+        let e: string = ev.toLowerCase()
+        if (e.indexOf(":") == 0) e = e.substring(1)              // `on:click`
+        if (e.indexOf("client:") == 0) e = e.substring(7)        // `onclient:click`
+        if (e.indexOf("server:") == 0) e = e.substring(7)        // `onserver:click`
+        return ["click", "dblclick", "auxclick", "contextmenu", "input", "beforeinput", "submit", "reset",
+                "keydown", "keyup", "keypress", "mousedown", "mouseup", "mousemove", "pointerdown", "pointerup",
+                "pointermove", "wheel", "touchstart", "touchmove", "touchend", "dragstart", "drag", "dragend",
+                "dragenter", "dragover", "drop"].indexOf(e) >= 0
+    }
+
+    fn gateMark(k: string) -> string {
+        return "gate:" + k
+    }
+
+    fn gateMarks(keys: string[]) -> string[] {
+        let out: string[] = []
+        for (const k of keys) {
+            if (k.indexOf("@") == 0) out = out.concat([gateMark(k)])
+        }
+        return out
+    }
+
+    fn tUnnarrowCells(env: TEnv) -> TEnv {
+        let out: TEnv = env
+        for (const k of env.narrowed) {
+            if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
+        }
+        for (const r of env.rows) {
+            if (r.key.indexOf("@") == 0) out = tUnnarrow(out, r.name)
+        }
+        return out
+    }
+
     // Every function's write set, closed over its calls (a fixpoint: each pass
     // adds keys, a key set is finite; bounded by the function count + 2).
     fn fnWrites(files: FileAst[]) -> FnW[] {
         let ws: FnW[] = []
         for (const f of files) {
-            for (const af of fnItems(f.items)) { ws = ws.concat([{ name: af.name, keys: blockEffects(af.body, []), params: paramNids(af.params) }]) }
+            // s462 Q11 (ruling:user-voice-scrml.md S462 "a"): a SERVER function's call is a
+            // suspension point (the client awaits it; another handler may write any cell
+            // meanwhile) — its key set holds UNKNOWN ("*"), so a call of it, or of any
+            // function that calls it (the fixpoint below), ends every cell narrowing.
+            for (const af of fnItems(f.items)) {
+                let own: string[] = blockEffects(af.body, [])
+                if (af.server || sqlsInBlock(af.body).length > 0) own = own.concat(["*"])   // serverOwn (§12.2 T1), as the binder decides it
+                ws = ws.concat([{ name: af.name, keys: own, params: paramNids(af.params) }])
+            }
         }
         let changed = true
         let pass = 0
@@ -10745,7 +10842,7 @@ ${
                 let keys: string[] = w.keys
                 for (const k of w.keys) {
                     if (k.indexOf("()") == 0) {
-                        for (const c of fnKeysNamed(ws, k.substring(2))) {
+                        for (const c of callKeys(ws, k.substring(2))) {
                             if (keys.indexOf(c) < 0) {
                                 keys = keys.concat([c])
                                 changed = true
@@ -10771,7 +10868,8 @@ ${
         let out: TEnv = env
         for (const eff of exprEffects(e)) {
             if (eff.indexOf("()") == 0) {
-                for (const k of fnKeysNamed(env.fnw, eff.substring(2))) {
+                for (const k of callKeys(env.fnw, eff.substring(2))) {
+                    if (k == "*") out = tUnnarrowCells(out)
                     if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
                 }
             }
@@ -13062,7 +13160,12 @@ ${
         return typeExpr(env, x, ts)
     }
 
-    fn typeHandlerValue(env: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
+    // s462 Q12 (ruling:user-voice-scrml.md S462 "a"): an event handler is a function
+    // body — it runs LATER, after writes the walk does not see — so it does not inherit
+    // the narrowing of reactive cells (`@…`): it re-tests. A captured local (`#id`, an
+    // `<each>` row) keeps its narrowing.
+    fn typeHandlerValue(env0: TEnv, v: AAttrValue, ts: TypeState, ev: string) -> TypeState {
+        const env: TEnv = tDropCellNarrowing(env0, userInputEvent(ev))
         return match v {
             .Bare(e: x) :> typeStmtExpr(env, x, ts)
             .Paren(e: x) :> typeStmtExpr(env, x, ts)
@@ -13082,7 +13185,10 @@ ${
         if (x is not) return keepTEnv(env, ts)
         const r: RVT = typeExpr(env, x, ts)
         // s460 N3 — name the attribute the condition stands in (`if=` / `else-if=`)
-        return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`" + a.name + "=`", r.ts))
+        // s462 Q18 — the gate also marks the cells it narrows (`gateMark`), so an
+        // event handler in the gated subtree keeps them (`tDropCellNarrowing`).
+        const yes: string[] = condNarrowing(env, x).yes
+        return keepTEnv(tCallUnnarrow(tNarrow(env, yes.concat(gateMarks(yes))), x), checkCond(env, x, r.vt, "`" + a.name + "=`", r.ts))
     }
 
     fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {
@@ -13104,7 +13210,7 @@ ${
                 // `if=` narrowing; it narrows nothing itself
                 ts = typeShowAttr(renv, a, ts)
             } else if (eventName(a.name) != "") {
-                ts = typeHandlerValue(renv, a.value, ts)
+                ts = typeHandlerValue(renv, a.value, ts, eventName(a.name))
             } else {
                 ts = typeAttrValue(renv, a.value, ts).ts
             }
