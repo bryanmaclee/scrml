@@ -139,15 +139,15 @@ ${
         for (const n of allNodes(Node.NProgram(p))) {
             failCalls = failCalls + callFailable(p, n).length
             const sp: SuspendParts | not = nodeSuspendParts(n)
-            if (sp is some) {
+            if (sp is given) {
                 const oc: Sym | not = calledSym(sp.on)
-                if (oc is some) { if (fnErr(p, oc) is some) failOn = failOn + 1 }
+                if (oc is given) { if (fnErr(p, oc) is given) failOn = failOn + 1 }
             }
         }
         if (failCalls != failOn) out = out.concat(["C-E1: " + (failCalls - failOn) + " plain call(s) of a function declared `!` — a failable call stands only as an Attempt's call (§19.4.3), or as the `on` of a Suspend whose Attempt inspects it (C-S7)"])
         for (const d of p.decls) {
             for (const n of allNodes(Node.NDecl(d))) {
-                if (nodeFailErr(n) is some) out = out.concat(["C-E4: a Fail inside <" + d.sym.hint + "> — a Fail stands only in the body of a function declared `!`"])
+                if (nodeFailErr(n) is given) out = out.concat(["C-E4: a Fail inside <" + d.sym.hint + "> — a Fail stands only in the body of a function declared `!`"])
             }
         }
         for (const f of p.fns) {
@@ -163,7 +163,7 @@ ${
         let out: string[] = []
         for (const n of allNodes(root)) {
             const fe: FailAt | not = nodeFailErr(n)
-            if (fe is some) out = out.concat(checkFail(p, name, err, fe))
+            if (fe is given) out = out.concat(checkFail(p, name, err, fe))
         }
         return out
     }
@@ -173,7 +173,7 @@ ${
         const c: Sym | not = exprNodeCallee(n)
         if (c is not) return []
         const e: Sym | not = fnErr(p, c)
-        if (e is some) return ["C-E1: a plain call of " + c.hint + "(), which is declared `!` — a failable call stands only as an Attempt's call (§19.4.3)"]
+        if (e is given) return ["C-E1: a plain call of " + c.hint + "(), which is declared `!` — a failable call stands only as an Attempt's call (§19.4.3)"]
         return []
     }
 
@@ -199,9 +199,9 @@ ${
     // The error enum of function `s` (a Fn or a ServerFn) — not when it cannot fail.
     fn fnErr(p: CoreProgram, s: Sym) -> Sym | not {
         const f: Fn | not = findFn(p, s)
-        if (f is some) return f.err
+        if (f is given) return f.err
         const sf: ServerFn | not = findServerFn(p, s)
-        if (sf is some) return sf.err
+        if (sf is given) return sf.err
         return not
     }
 
@@ -284,18 +284,18 @@ ${
         let out: string[] = []
         const q: SqlQuery | not = failableSql(call)
         let want: Sym | not = p.sqlError
-        if (q is some) {
+        if (q is given) {
             out = out.concat(checkSqlQuery(p, q))
         } else {
             const f: Sym | not = failableFn(call)
             want = not
-            if (f is some) {
+            if (f is given) {
                 want = fnErr(p, f)
                 if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
-                if (want is not && (findFn(p, f) is some || findServerFn(p, f) is some)) out = out.concat(["C-E2: an Attempt calls " + f.hint + "(), which is not declared `!` (nothing to handle)"])
+                if (want is not && (findFn(p, f) is given || findServerFn(p, f) is given)) out = out.concat(["C-E2: an Attempt calls " + f.hint + "(), which is not declared `!` (nothing to handle)"])
             }
         }
-        if (want is some) {
+        if (want is given) {
             if (want.id != err.id) out = out.concat(["C-E2: an Attempt handles `" + err.hint + "` but its call fails with `" + want.hint + "`"])
         }
         const t: TypeDef | not = findTypeDef(p, err)
@@ -306,7 +306,7 @@ ${
         let wild = false
         for (const a of arms) {
             const pr: ArmPat = armPat(a.pat)
-            if (a.whole is some && !pr.wild) out = out.concat(["C-E2: an Attempt arm binds the whole error but is not the wildcard (§18.6.1: `_ err`)"])
+            if (a.whole is given && !pr.wild) out = out.concat(["C-E2: an Attempt arm binds the whole error but is not the wildcard (§18.6.1: `_ err`)"])
             if (pr.wild) {
                 wild = true
             } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
@@ -325,7 +325,7 @@ ${
             }
         }
         // C-E3
-        const needs: boolean = result is some
+        const needs: boolean = result is given
         if (!branchOk(needs, ok.body, ok.value)) out = out.concat([valueProblem(needs, "the success branch")])
         for (const a of arms) {
             if (!branchOk(needs, a.body, a.value)) out = out.concat([valueProblem(needs, "a failure arm")])
@@ -340,7 +340,7 @@ ${
 
     fn branchOk(needs: boolean, b: Block, v: Expr | not) -> boolean {
         if (!needs) return v is not
-        if (v is some) return true
+        if (v is given) return true
         return diverges(b)
     }
 
@@ -436,7 +436,7 @@ ${
                 const what: string = clientStateIn(n)
                 if (what != "") out = out.concat(["C-S1: server function " + s.sym.hint + "() " + what])
                 const callee: Sym | not = nodeCallee(n)
-                if (callee is some && touching.indexOf(callee.id) >= 0) {
+                if (callee is given && touching.indexOf(callee.id) >= 0) {
                     out = out.concat(["C-S1: server function " + s.sym.hint + "() calls " + callee.hint + "(), which touches client state"])
                 }
             }
@@ -444,7 +444,7 @@ ${
                 if (wireBuild(p, prm.ty).table is not) out = out.concat(["C-S4: server function " + s.sym.hint + "()'s parameter " + prm.sym.hint + " has no wire descriptor"])
             }
             const rt: Type | not = s.ret
-            if (rt is some) {
+            if (rt is given) {
                 if (wireBuild(p, rt).table is not) out = out.concat(["C-S4: server function " + s.sym.hint + "()'s return type has no wire descriptor"])
             }
         }
@@ -465,8 +465,8 @@ ${
             // (s454: C-S3's plain-call rule is checkClientCalls' — a Fn only client
             // code reaches; a declaration's own nodes are client code by construction)
             const callee: Sym | not = nodeCallee(n)
-            if (callee is some && !isFnRoot(root)) {
-                if (findServerFn(p, callee) is some) out = out.concat(["C-S3: client code (" + where + ") calls the server function " + callee.hint + "() as a plain call"])
+            if (callee is given && !isFnRoot(root)) {
+                if (findServerFn(p, callee) is given) out = out.concat(["C-S3: client code (" + where + ") calls the server function " + callee.hint + "() as a plain call"])
             }
         }
         return out
@@ -510,7 +510,7 @@ ${
                     let reaches = false
                     for (const n of allNodes(Node.NFn(f))) {
                         const c: Sym | not = nodeCallee(n)
-                        if (c is some && out.indexOf(c.id) >= 0) reaches = true
+                        if (c is given && out.indexOf(c.id) >= 0) reaches = true
                     }
                     if (reaches) {
                         out = out.concat([f.sym.id])
@@ -591,7 +591,7 @@ ${
 
     fn nodeIsSql(n: Node) -> boolean {
         return match n {
-            .NStmt(s: s) :> stmtSql(s) is some
+            .NStmt(s: s) :> stmtSql(s) is given
             .NExpr(e: x) :> false
             .NProgram(p: x) :> false
             .NDecl(d: x) :> false
@@ -707,8 +707,8 @@ ${
     }
 
     fn checkField(d: Decl, f: Field) -> string[] {
-        const has: boolean = f.wcap is some
-        const grants: boolean = grantsAnyWrite(f) || f.graph is some
+        const has: boolean = f.wcap is given
+        const grants: boolean = grantsAnyWrite(f) || f.graph is given
         if (has && !grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " has a write capability but grants no write"]
         if (!has && grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " grants a write but has no write capability"]
         return []
@@ -1102,7 +1102,7 @@ ${
         if (f.wcap is not) return [at + " but has no write capability (a locked or derived cell)"]
         let out: string[] = []
         const local: boolean = ps.store == PersistStore.Local
-        if (local && (f.graph is some || !f.grants.replace)) out = out.concat([at + " in localStorage, but its contract refuses a whole-value write — a cross-tab value is one (O-061-5)"])
+        if (local && (f.graph is given || !f.grants.replace)) out = out.concat([at + " in localStorage, but its contract refuses a whole-value write — a cross-tab value is one (O-061-5)"])
         const wb: WireBuild = wireBuild(p, f.ty)
         const wt: WireTable | not = wb.table
         if (wt is not) return out.concat([at + " but its type has no wire descriptor: " + wb.why.join("; ")])
@@ -1254,7 +1254,7 @@ ${
         for (const v of r) {
             for (const n of allNodes(Node.NView(v))) {
                 const used: Sym | not = instanceDeclOf(n)
-                if (used is some) {
+                if (used is given) {
                     const w2: string = constructWriteWitness(p, InstRef.Shared(used), seen)
                     if (w2 != "") return w2
                 }
@@ -1272,7 +1272,7 @@ ${
         const d: Decl | not = findDecl(p, ref.owner)
         if (d is not || ref.idx < 0 || ref.idx >= d.fields.length) return ""
         const f: Field = d.fields[ref.idx]
-        if (f.wcap is some) return ""
+        if (f.wcap is given) return ""
         if (seen.indexOf(f.sym.id) >= 0) return ""
         const init: Expr | not = f.init
         if (init is not) return ""
@@ -1538,10 +1538,10 @@ ${
         let js: int[] = joins
         if (i > 0) {
             const k: Sym | not = joinSym(b.stmts[i - 1])
-            if (k is some) js = joins.concat([k.id])
+            if (k is given) js = joins.concat([k.id])
         }
         let out: string[] = tailBlock(t, branchTail, js, where)
-        if (el is some) out = out.concat(tailBlock(el, branchTail, js, where))
+        if (el is given) out = out.concat(tailBlock(el, branchTail, js, where))
         return out
     }
 
@@ -1624,20 +1624,20 @@ ${
         let calls: int = 0
         let settled: int = 0
         for (const n of allNodes(Node.NProgram(p))) {
-            if (nodeServerCallSym(n) is some) calls = calls + 1
-            if (nodeSettled(n) is some) settled = settled + 1
+            if (nodeServerCallSym(n) is given) calls = calls + 1
+            if (nodeSettled(n) is given) settled = settled + 1
             const sp: SuspendParts | not = nodeSuspendParts(n)
-            if (sp is some) {
+            if (sp is given) {
                 const on: Sym | not = exprServerCallSym(sp.on)
-                if (on is some) {
+                if (on is given) {
                     legalOn = legalOn + 1
                     if (findServerFn(p, on) is not) out = out.concat(["C-S3: a ServerCall names `" + on.hint + "`, which is not a server function of the program"])
                 }
                 out = out.concat(checkSuspendCall(p, sp))
                 const first: Stmt | not = firstStmt(sp.then)
-                if (first is some) {
+                if (first is given) {
                     const fs: Sym | not = stmtSettled(first)
-                    if (fs is some) {
+                    if (fs is given) {
                         if (fs.id == sp.bind.id) legalSettled = legalSettled + 1
                     }
                 }
@@ -1647,7 +1647,7 @@ ${
         if (settled != legalSettled) out = out.concat(["C-S7: " + (settled - legalSettled) + " FSettled outcome(s) are not the call of the Attempt that begins their Suspend's `then`"])
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) {
-                if (nodeSuspendParts(n) is some) out = out.concat(["C-S3: server function " + s.sym.hint + "() suspends — a server body calls in place (§13.4)"])
+                if (nodeSuspendParts(n) is given) out = out.concat(["C-S3: server function " + s.sym.hint + "() suspends — a server body calls in place (§13.4)"])
             }
         }
         // C-S3: client code never plain-calls a ServerFn — a Fn a client root
@@ -1657,8 +1657,8 @@ ${
             if (reach.indexOf(f.sym.id) >= 0) {
                 for (const n of allNodes(Node.NFn(f))) {
                     const c: Sym | not = nodePlainCall(n)
-                    if (c is some) {
-                        if (findServerFn(p, c) is some) out = out.concat(["C-S3: client code (" + f.sym.hint + "()) calls the server function " + c.hint + "() as a plain call"])
+                    if (c is given) {
+                        if (findServerFn(p, c) is given) out = out.concat(["C-S3: client code (" + f.sym.hint + "()) calls the server function " + c.hint + "() as a plain call"])
                     }
                 }
             }
@@ -1672,16 +1672,16 @@ ${
         let waitOn: int = 0
         for (const n of allNodes(Node.NProgram(p))) {
             const c: Sym | not = nodePlainCall(n)
-            if (c is some) {
+            if (c is given) {
                 const fd: Fn | not = findFn(p, c)
-                if (fd is some) { if (fd.waits) waitCalls = waitCalls + 1 }
+                if (fd is given) { if (fd.waits) waitCalls = waitCalls + 1 }
             }
             const sp2: SuspendParts | not = nodeSuspendParts(n)
-            if (sp2 is some) {
+            if (sp2 is given) {
                 const oc: Sym | not = calledSym(sp2.on)
-                if (oc is some) {
+                if (oc is given) {
                     const fd2: Fn | not = findFn(p, oc)
-                    if (fd2 is some) { if (fd2.waits) waitOn = waitOn + 1 }
+                    if (fd2 is given) { if (fd2.waits) waitOn = waitOn + 1 }
                 }
             }
         }
@@ -1695,14 +1695,14 @@ ${
         let failErr: Sym | not = not
         let remote = false
         let callee: Sym | not = not
-        if (sc is some) {
+        if (sc is given) {
             remote = true
             callee = sc
         } else {
             const c: Sym | not = calledSym(sp.on)
-            if (c is some) {
+            if (c is given) {
                 const fd: Fn | not = findFn(p, c)
-                if (fd is some) {
+                if (fd is given) {
                     failErr = fd.err
                     callee = c
                 }
@@ -1712,7 +1712,7 @@ ${
         if (!remote && failErr is not) return []        // a non-failable waiting call: its value is the bind
         const first: Stmt | not = firstStmt(sp.then)
         let at: AttemptParts | not = not
-        if (first is some) at = attemptParts(first)
+        if (first is given) at = attemptParts(first)
         if (at is not) return ["C-S7: a Suspend on a failable call of " + callee.hint + "() does not begin its `then` with the Attempt that inspects the outcome"]
         let out: string[] = []
         const fs: Sym | not = failableSettled(at.call)
@@ -1725,8 +1725,8 @@ ${
         // C-E2 (extended): the failure set
         if (remote) {
             const sf: ServerFn | not = findServerFn(p, callee)
-            if (sf is some) out = out.concat(checkClientSet(p, sf, at.err))
-        } else if (failErr is some) {
+            if (sf is given) out = out.concat(checkClientSet(p, sf, at.err))
+        } else if (failErr is given) {
             if (failErr.id != at.err.id) out = out.concat(["C-E2: the Attempt over " + callee.hint + "()'s outcome handles `" + at.err.hint + "`, but it fails with `" + failErr.hint + "`"])
         }
         return out
@@ -1741,13 +1741,13 @@ ${
         const vs: VariantDef[] = enumVariantDefs(t)
         const e: Sym | not = sf.err
         let own: VariantDef[] = []
-        if (e is some) {
+        if (e is given) {
             if (e.id == set.id) {
                 if (hasTransport(vs, sce)) return []
                 return ["C-E2: " + sf.sym.hint + "()'s client failure set is its declared `" + e.hint + "`, which lacks `Transport(t: ServerCallError)`"]
             }
             const et: TypeDef | not = findTypeDef(p, e)
-            if (et is some) own = enumVariantDefs(et)
+            if (et is given) own = enumVariantDefs(et)
         }
         if (vs.length != own.length + 1) return ["C-E2: the client failure set of " + sf.sym.hint + "() has " + vs.length + " variant(s); the declared ones plus ONE Transport make " + (own.length + 1)]
         let i: int = 0
@@ -1991,7 +1991,7 @@ ${
 
     fn blockHoldsSuspend(b: Block) -> boolean {
         for (const n of allNodes(Node.NBlock(b))) {
-            if (nodeSuspendParts(n) is some) return true
+            if (nodeSuspendParts(n) is given) return true
         }
         return false
     }
@@ -2005,7 +2005,7 @@ ${
         for (const d of p.decls) {
             for (const n of allNodes(Node.NDecl(d))) {
                 const c: Sym | not = nodePlainCall(n)
-                if (c is some) { if (findFn(p, c) is some && out.indexOf(c.id) < 0) out = out.concat([c.id]) }
+                if (c is given) { if (findFn(p, c) is given && out.indexOf(c.id) < 0) out = out.concat([c.id]) }
             }
         }
         let changed = true
@@ -2015,8 +2015,8 @@ ${
                 if (out.indexOf(f.sym.id) >= 0) {
                     for (const n of allNodes(Node.NFn(f))) {
                         const c: Sym | not = nodePlainCall(n)
-                        if (c is some) {
-                            if (findFn(p, c) is some && out.indexOf(c.id) < 0) {
+                        if (c is given) {
+                            if (findFn(p, c) is given && out.indexOf(c.id) < 0) {
                                 out = out.concat([c.id])
                                 changed = true
                             }
@@ -2337,7 +2337,7 @@ ${
     }
 
     fn transitionGranted(f: Field) -> string {
-        if (f.graph is some) return ""
+        if (f.graph is given) return ""
         return "a transition needs a `rule=` graph; this field has none"
     }
 
@@ -2420,7 +2420,7 @@ ${
     fn aliasDecl(p: CoreProgram, h: Sym) -> Decl | not {
         for (const n of allNodes(Node.NProgram(p))) {
             const d: Sym | not = aliasOf(n, h)
-            if (d is some) return findDecl(p, d)
+            if (d is given) return findDecl(p, d)
         }
         return not
     }
@@ -2471,7 +2471,7 @@ ${
     fn narrowedDecl(p: CoreProgram, encl: Decl[], c: Sym) -> Decl | not {
         for (const n of allNodes(Node.NProgram(p))) {
             const i: InstRef | not = letHandle(n, c)
-            if (i is some) return resolveInst(p, encl, i)
+            if (i is given) return resolveInst(p, encl, i)
         }
         return not
     }
@@ -2697,7 +2697,7 @@ ${
     fn graphCheckProblem(p: CoreProgram, g: TransitionGraph, value: Expr, check: Check) -> string {
         const n: int = enumSize(p, g.enumSym)
         const lit: Literal | not = exprLiteral(value)
-        if (lit is some) {
+        if (lit is given) {
             const to: int = variantIdx(lit, g.enumSym)
             if (to < 0 || to >= n) return "the transition value is not a variant of `" + g.enumSym.hint + "`"
             if (!isStatic(check)) return ""

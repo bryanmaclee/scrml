@@ -3,7 +3,7 @@
 ${ function h() { @log = @log + "h" } }
 const C = <div class="c" props={ onGo?: () => void }>
     <button class="a" onclick=${() => onGo && onGo()}>a</button>
-    <button class="b" onclick=${() => { if (onGo is some) { onGo() } }}>b</button>
+    <button class="b" onclick=${() => { if (onGo is given) { onGo() } }}>b</button>
     <button class="c2" onclick=${() => onGo ? onGo() : 0}>c</button>
     <button class="s" onclick=${ if (onGo) { onGo() } }>s</button>
 </>

@@ -881,7 +881,7 @@ ${
         if (n == "string") return { t: Type.Str, st: st, unresolved: false }
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
-        if (s is some) return { t: Type.Named(s.sym), st: st, unresolved: false }
+        if (s is given) return { t: Type.Named(s.sym), st: st, unresolved: false }
         let i = 0
         while (i < te.declNames.length) {
             if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st, unresolved: false }
@@ -952,9 +952,9 @@ ${
             } else {
                 const gp: SeqAt | not = growAt(ax)
                 const sp: SeqAt | not = shrinkAt(ax)
-                if (gp is some) {
+                if (gp is given) {
                     where = where.concat([gp])
-                } else if (sp is some) {
+                } else if (sp is given) {
                     shrinks = shrinks.concat([sp])
                 } else {
                     st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
@@ -1019,7 +1019,7 @@ ${
         let out: SeqAt[] = []
         for (const g of gs) {
             const a: SeqAt | not = shrinkAt(grantAxis(g))
-            if (a is some) out = out.concat([a])
+            if (a is given) out = out.concat([a])
         }
         return out
     }
@@ -1214,7 +1214,7 @@ ${
         if (ti is not) return not
         if (enumVariants(ti.def).length == 0) {
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
-            if (fs is some) return not
+            if (fs is given) return not
         }
         return s
     }
@@ -1309,9 +1309,9 @@ ${
     // Where a declaration is written: its `<x …>` opener / its `<program>`.
     fn declSpan(ds: DeclStub) -> ASpan {
         const d: ADecl | not = ds.d
-        if (d is some) return d.span
+        if (d is given) return d.span
         const p: AProgram | not = ds.p
-        if (p is some) return p.span
+        if (p is given) return p.span
         return mkSpan(0, 0)
     }
 
@@ -1334,7 +1334,7 @@ ${
     // typed attributes (§66.2.2). `<x:struct>` is therefore a user declaration
     // too (it was the same kind before the respelling).
     fn isNestedUserDecl(d: ADecl) -> boolean {
-        return d.attrs.length > 0 || d.renders is some || ownTypeName(d) == "struct"
+        return d.attrs.length > 0 || d.renders is given || ownTypeName(d) == "struct"
     }
 
     fn withNestedStubs(r: RDeclStubs, p: AProgram, file: string) -> RDeclStubs {
@@ -1375,8 +1375,8 @@ ${
     fn isLaterProgram(items: AItem[], it: AItem) -> boolean {
         let seen = 0
         for (const x of items) {
-            if (x.nid == it.nid) return seen > 0 && programOfItem(x) is some
-            if (programOfItem(x) is some) seen = seen + 1
+            if (x.nid == it.nid) return seen > 0 && programOfItem(x) is given
+            if (programOfItem(x) is given) seen = seen + 1
         }
         return false
     }
@@ -1424,12 +1424,12 @@ ${
         for (const f of files) {
             let programs = 0
             for (const it of f.items) {
-                if (programOfItem(it) is some) programs = programs + 1
+                if (programOfItem(it) is given) programs = programs + 1
             }
             let seen = 0
             for (const it of f.items) {
                 const p: AProgram | not = programOfItem(it)
-                if (p is some) {
+                if (p is given) {
                     seen = seen + 1
                     if (seen > 1) {
                         st = addDiag(st, f.path, p.span, "E-PROGRAM-002", "a second top-level `<program>` in this file — a file declares its top-level `<program>` exactly once (§40.8), so which program's `auth=`, cookie and middleware settings govern it cannot be told; merge them into one `<program>`, or put a worker / sidecar / scoped-db program INSIDE the first (without `auth=` or cookie attributes)")
@@ -1439,7 +1439,7 @@ ${
                     }
                 }
                 const n: ANode | not = markupOfItem(it)
-                if (n is some) st = outsideProgramDiag(f.path, n, programs > 0, st)
+                if (n is given) st = outsideProgramDiag(f.path, n, programs > 0, st)
             }
         }
         return st
@@ -1456,7 +1456,7 @@ ${
         const t: string = e.tag.toLowerCase()
         if (t == "channel" && fileHasProgram) return addDiag(st, file, e.span, "E-CHANNEL-OUTSIDE-PROGRAM", "`<channel>` outside `<program>` in a file that has a `<program>` (§38.1) — move it inside the `<program>`")
         if (t == "outlet") return addDiag(st, file, e.span, "E-OUTLET-OUTSIDE-SHELL", "`<outlet>` outside a `<program>` shell (§20.8.1) — an outlet is the shell's route-content region; move it inside the `<program>`")
-        if (t == "foreign" && fileHasProgram && attrNamed(e.attrs, "lang") is some) return addDiag(st, file, e.span, "E-FOREIGN-LANG-IN-PROGRAM", "`<foreign lang>` in a file that also declares a top-level `<program>` (§23.6) — `<foreign lang>` is the library-file surface; remove it and set `lang=` on the `<program>`")
+        if (t == "foreign" && fileHasProgram && attrNamed(e.attrs, "lang") is given) return addDiag(st, file, e.span, "E-FOREIGN-LANG-IN-PROGRAM", "`<foreign lang>` in a file that also declares a top-level `<program>` (§23.6) — `<foreign lang>` is the library-file surface; remove it and set `lang=` on the `<program>`")
         return addDiag(st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`")
     }
 
@@ -1618,7 +1618,7 @@ ${
     // so any other value is refused rather than given a meaning.
     fn resetAttrDiag(file: string, a: AAttr, st: AS) -> AS {
         const v: string | not = quotedAttrText(a.value)
-        if (v is some) {
+        if (v is given) {
             if (v == "none") return st
         }
         return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset=` is " + attrValueText(a.value) + " — §65.3.4 names one value, \"none\" (drop the built-in reset layer); the bootstrap gives no other value a meaning")
@@ -1629,7 +1629,7 @@ ${
     // gate, so compiling it would serve the program ungated.
     fn topAuthDiag(file: string, a: AAttr, st: AS) -> AS {
         const v: string | not = quotedAttrText(a.value)
-        if (v is some) {
+        if (v is given) {
             if (v == "required" || v == "optional" || v == "none") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program auth=\"" + v + "\">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated")
         }
         return addDiag(st, file, a.span, "E-AUTH-ATTR-INVALID", "`auth=` on `<program>` is " + attrValueText(a.value) + " — it must be exactly one of the literals \"required\", \"optional\", \"none\" (§52.13.2)")
@@ -1639,7 +1639,7 @@ ${
     // value is refused: the bootstrap emits no request pipeline.
     fn ratelimitDiag(file: string, a: AAttr, st: AS) -> AS {
         const v: string | not = quotedAttrText(a.value)
-        if (v is some) {
+        if (v is given) {
             if (isRatelimitForm(v)) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program ratelimit=\"" + v + "\">` is not in the bootstrap — it emits no request pipeline (§40.2), so the limit would be dropped")
         }
         return addDiag(st, file, a.span, "E-MW-002", "`ratelimit=` is " + attrValueText(a.value) + " — it must be `N/unit` with unit one of sec, min, hour (e.g. ratelimit=\"100/min\", §39.2.4)")
@@ -1869,7 +1869,7 @@ ${
         let st: AS = st0
         for (const it of items) {
             const p: AProgram | not = programOfItem(it)
-            if (p is some) {
+            if (p is given) {
                 st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
                 st = nestedProgramAttrDiags(file, p, st)
                 st = nestedProgramDiags(file, p.items, st)
@@ -2171,7 +2171,7 @@ ${
         if (bad.kind == 1) return infUnres(binWord(o) + " over an operand whose type is not determined — its value is an operand, not a `bool`")
         const x: Type | not = a.ty
         const y: Type | not = b.ty
-        if (x is some && y is some && kindOf(x) == 3 && kindOf(y) == 3) return infOk(Type.Bool)
+        if (x is given && y is given && kindOf(x) == 3 && kindOf(y) == 3) return infOk(Type.Bool)
         return infUnres(binWord(o) + " over a non-`bool` operand — its value is that operand, not a `bool`")
     }
 
@@ -2195,7 +2195,7 @@ ${
         let out: OwnSrc[] = []
         for (const d of ds) {
             const p: AProgram | not = d.p
-            if (d.isProgram && p is some) {
+            if (d.isProgram && p is given) {
                 for (const it of p.items) {
                     for (const x of declsOfItem(it)) {
                         if (!isNestedUserDecl(x)) out = out.concat([{ name: x.name, aty: x.ty, init: x.own }])
@@ -2247,11 +2247,11 @@ ${
     // own type is always rule 5's (MEMBERSHIP mode), whoever asks.
     fn ownResolve(cx0: InferCx, name: string, stack: string[], done: OwnT[]) -> ROwn {
         const found: OwnT | not = ownFound(done, name)
-        if (found is some) return { t: found, done: done }
+        if (found is given) return { t: found, done: done }
         const cx: InferCx = withRes(cx0, false)
         const s: OwnSrc = cx.srcs[srcIndex(cx.srcs, name)]
         const aty: AType | not = s.aty
-        if (aty is some) {
+        if (aty is given) {
             // a WRITTEN type answers a reader at once — a reader never makes the
             // annotated cell's own initializer part of its inference
             const rt: RType = resolveType(cx.te, aty, cx.st)
@@ -2289,7 +2289,7 @@ ${
 
     fn inferE(cx: InferCx, e: AExpr, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
         const lt: Type | not = literalType(e)
-        if (lt is some) return rinf(infOk(lt), done)
+        if (lt is given) return rinf(infOk(lt), done)
         const k: AExprK = e.k
         return match k {
             .At(name: n) :> inferAt(cx, n, stack, done)
@@ -2329,7 +2329,7 @@ ${
             const p: ParamT = ps[i]
             if (p.name == n) {
                 const t: Type | not = p.ty
-                if (t is some) return infOk(baseOf(t))
+                if (t is given) return infOk(baseOf(t))
                 if (p.param) return infBlamed()
                 return infUnres("`" + n + "`, a binding whose type is neither written nor determined")
             }
@@ -2377,7 +2377,7 @@ ${
                 }
                 // bound twice in one scope: E-HANDLE-REDECLARE (the scope pass) owns it
                 if (count > 1) return rinf(infBlamed(), done)
-                if (hit is some) {
+                if (hit is given) {
                     if (hit.conditional) return rinf(infOk(Type.Maybe(Type.Named(hit.target))), done)
                     return rinf(infOk(Type.Named(hit.target)), done)
                 }
@@ -2396,7 +2396,7 @@ ${
     // diagnostic's (blamed) — unless it is on a cycle this read is part of.
     fn refInf(t: OwnT, stack: string[]) -> Inf {
         const ty: Type | not = t.ty
-        if (ty is some) return infOk(baseOf(ty))
+        if (ty is given) return infOk(baseOf(ty))
         const o: TypeOrigin = t.origin
         return match o {
             .Cyclic(names: ns) :> cycleRead(ns, stack)
@@ -2420,12 +2420,12 @@ ${
     // Rule 5 (a)'s literals, the qualified variant included — what rule 9's
     // boundary exemption ("a literal own value is unaffected") reads.
     fn literalInit(cx: InferCx, v: AAttrValue) -> boolean {
-        if (literalOf(v) is some) return true
+        if (literalOf(v) is given) return true
         const e: AExpr | not = valueExpr(v)
         if (e is not) return false
         const mo: AExpr | not = memberObj(e)
         if (mo is not) return false
-        return qualifiedVariant(cx, mo, memberName(e.k)) is some
+        return qualifiedVariant(cx, mo, memberName(e.k)) is given
     }
 
     // Rule 5 (a): a QUALIFIED variant `E.V` names its enum — a literal of `E`
@@ -2449,7 +2449,7 @@ ${
         const s: Sym | not = namedSym(t)
         if (s is not) return not
         const ti: TypeInfo | not = typeInfoOf(cx.types, s)
-        if (ti is some) {
+        if (ti is given) {
             const fs: FieldDef[] | not = structFieldDefs(ti.def)
             if (fs is not) return not
             for (const f of fs) {
@@ -2459,7 +2459,7 @@ ${
         }
         for (const ds of cx.decls) {
             const d: ADecl | not = ds.d
-            if (ds.sym.id == s.id && d is some) {
+            if (ds.sym.id == s.id && d is given) {
                 for (const a of d.attrs) {
                     if (a.name == n) return writtenOrLiteral(cx, a.ty, a.dflt)
                 }
@@ -2484,7 +2484,7 @@ ${
     }
 
     fn writtenOrLiteral(cx: InferCx, aty: AType | not, v: AAttrValue) -> Type | not {
-        if (aty is some) {
+        if (aty is given) {
             const rt: RType = resolveType(cx.te, aty, cx.st)
             if (rt.unresolved) return not
             return rt.t
@@ -2494,16 +2494,16 @@ ${
 
     fn inferMember(cx: InferCx, o: AExpr, n: string, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
         const qv: Type | not = qualifiedVariant(cx, o, n)
-        if (qv is some) return rinf(infOk(qv), done)
+        if (qv is given) return rinf(infOk(qv), done)
         const r: RInf = inferE(cx, o, stack, ps, done)
         if (r.r.kind >= 3) return r
         const t: Type | not = r.r.ty
         if (n != "length") {
             if (cx.res) {
                 if (r.r.kind != 0) return r
-                if (t is some) {
+                if (t is given) {
                     const ft: Type | not = declaredFieldType(cx, t, n)
-                    if (ft is some) return rinf(infOk(baseOf(ft)), r.done)
+                    if (ft is given) return rinf(infOk(baseOf(ft)), r.done)
                 }
             }
             return rinf(infOut("the member path `." + n + "`"), r.done)
@@ -2523,7 +2523,7 @@ ${
         }
         if (r.r.kind != 0) return r
         const t: Type | not = r.r.ty
-        if (t is some && isNumericKind(t)) return rinf(infOk(t), r.done)
+        if (t is given && isNumericKind(t)) return rinf(infOk(t), r.done)
         return rinf(infOut("unary `-` of a non-number"), r.done)
     }
 
@@ -2607,7 +2607,7 @@ ${
         if (tt is not || a is not || b is not) return rinf(infBlamed(), d)
         if (kindOf(tt) != 3) return rinf(infOut("a ternary whose test is a `" + typeName(tt) + "`"), d)
         const j: Type | not = joinBase(a, b)
-        if (j is some) return rinf(infOk(j), d)
+        if (j is given) return rinf(infOk(j), d)
         return rinf(infOut("a ternary whose arms are a `" + typeName(a) + "` and a `" + typeName(b) + "`"), d)
     }
 
@@ -2617,9 +2617,9 @@ ${
         if (n == "") {
             // rule 5 (g): a payload variant's construction `E.V(…)` — its type is `E`, declared
             const mc: MethodCall | not = memberCall(callee)
-            if (mc is some) {
+            if (mc is given) {
                 const qv: Type | not = qualifiedVariant(cx, mc.obj, mc.method)
-                if (qv is some) return rinf(infOk(qv), done)
+                if (qv is given) return rinf(infOk(qv), done)
                 return rinf(infOut("a method call"), done)
             }
             return rinf(infOut("a call of a computed function"), done)
@@ -2637,9 +2637,9 @@ ${
         if (found is not) return rinf(infOut("`" + n + "(…)`, which is not a function this program declares"), done)
         const fi: FnInfo = found.info
         const ret: Type | not = fi.ret
-        if (ret is some) return rinf(infOk(baseOf(ret)), done)
+        if (ret is given) return rinf(infOk(baseOf(ret)), done)
         const at: AType | not = found.f.ret
-        if (at is some) {
+        if (at is given) {
             if (isVoidType(at)) return rinf(infOut("`" + n + "(…)`, which returns no value"), done)
             return rinf(infBlamed(), done)            // a written return type that was refused (E-TYPE-UNKNOWN / a parse error)
         }
@@ -2673,7 +2673,7 @@ ${
         for (const p of af.params) {
             let pt: Type | not = not
             const at: AType | not = p.ty
-            if (at is some) {
+            if (at is given) {
                 const rt: RType = resolveType(cx.te, at, cx.st)
                 if (!rt.unresolved) pt = rt.t
             }
@@ -2732,7 +2732,7 @@ ${
             if (isReturn(k)) out = out.concat([{ e: ret, sc: sc }])
             const lb: RBind = localBinding(cx, k, sc, stack, done)
             done = lb.done
-            if (lb.b is some) sc = sc.concat([lb.b])
+            if (lb.b is given) sc = sc.concat([lb.b])
         }
         return { rs: out, done: done }
     }
@@ -2756,7 +2756,7 @@ ${
     }
 
     fn localOf(cx: InferCx, n: string, mutable: boolean, aty: AType | not, init: AExpr, sc: ParamT[], stack: string[], done: OwnT[]) -> RBind {
-        if (aty is some) {
+        if (aty is given) {
             const rt: RType = resolveType(cx.te, aty, cx.st)
             if (rt.unresolved) return { b: { name: n, ty: not, param: false }, done: done }
             return { b: { name: n, ty: rt.t, param: false }, done: done }
@@ -2810,7 +2810,7 @@ ${
         const rx: RRets = retsInExpr(cx, x, sc, stack, done)
         const r: RInf = inferE(cx, x, stack, sc, rx.done)
         let ty: Type | not = r.r.ty
-        if (ty is some) ty = unMaybe(ty)
+        if (ty is given) ty = unMaybe(ty)
         const rb: RRets = retsIn(cx, gb, sc.concat([{ name: n, ty: ty, param: false }]), stack, r.done)
         return { rs: rx.rs.concat(rb.rs), done: rb.done }
     }
@@ -2823,7 +2823,7 @@ ${
         let done: OwnT[] = done0
         let out: RetAt[] = []
         const h: AHandled | not = handledOf(k)
-        if (h is some) {
+        if (h is given) {
             const rs: RRets = retsInExpr(cx, h.subject, sc, stack, done)
             out = out.concat(rs.rs)
             done = rs.done
@@ -2900,10 +2900,10 @@ ${
     fn ownOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, role: FieldRole, where: int) -> OwnT {
         if (where == 2) {
             const t: OwnT | not = ownFound(tab, name)
-            if (t is some) return t
+            if (t is given) return t
         }
         const lit: Type | not = literalOf(init)
-        if (lit is some) return { name: name, ty: lit, origin: TypeOrigin.Literal }
+        if (lit is given) return { name: name, ty: lit, origin: TypeOrigin.Literal }
         const r: RInf = inferValue(cx, init, [], [], tab)
         const isLit: boolean = literalInit(cx, init)
         const isAttr: boolean = role == FieldRole.Attribute
@@ -2930,7 +2930,7 @@ ${
     // report on a refused construct would be a cascade. When `server` lands
     // in the bootstrap, it joins here (boundaryReport already words it).
     fn boundaryOf(exported: boolean, mods: AAttr[]) -> string {
-        if (attrNamed(mods, "persist") is some) return "persist"
+        if (attrNamed(mods, "persist") is given) return "persist"
         if (exported) return "export"
         return ""
     }
@@ -2963,7 +2963,7 @@ ${
         let seqRep = false
         let resolved = true
         let origin: TypeOrigin = TypeOrigin.Written
-        if (aty is some) {
+        if (aty is given) {
             const rt: RType = resolveType(te, aty, st)
             ty = rt.t
             resolved = !rt.unresolved     // r8: an unknown type name → untrusted
@@ -2979,7 +2979,7 @@ ${
             // type the program never had; the typer reports why, originReport)
             const ot: OwnT = ownOrigin(ix, tab, name, init, role, where)
             const inf: Type | not = ot.ty
-            if (inf is some) {
+            if (inf is given) {
                 ty = inf
             } else {
                 resolved = false
@@ -2987,19 +2987,19 @@ ${
             origin = ot.origin
             if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
-        if (isLet && seqElem(ty) is some) {
+        if (isLet && seqElem(ty) is given) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
         }
         const rg: RGraph = graphOf(te, g, ty, body, st)
         st = rg.st
         let edits: EditKind[] = typeEdits(ty)
-        if (rg.graph is some) edits = edits.concat([EditKind.Transition])
+        if (rg.graph is given) edits = edits.concat([EditKind.Transition])
         // s444: a sequence of structs whose element fields carry their own
         // `let` grants an ELEMENT-field write (`@xs[i].f = v`, dpa-052 Q3) —
         // listed as FieldAt(path) over the element struct (Core EditKind note)
         let elemEdits: EditKind[] = []
         const et: Type | not = seqElem(ty)
-        if (et is some) elemEdits = subFieldEdits(g, et)
+        if (et is given) elemEdits = subFieldEdits(g, et)
         const grants: GrantSet = { replace: isLet || seqRep, edits: edits.concat(subFieldEdits(g, ty)).concat(elemEdits) }
         const reads: string[] = valueReads(init)
         let mode: FieldMode = FieldMode.Locked
@@ -3031,7 +3031,7 @@ ${
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
         st = rv.st
         const f: FieldInfo = {
-            nid: nid, span: span, annotated: aty is some, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
+            nid: nid, span: span, annotated: aty is given, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs, valsWritten: vals.length,
             origin: origin,
         }
@@ -3064,7 +3064,7 @@ ${
             const r: RVal = valInfoOf(file, ty, v, st)
             st = r.st
             const vi: ValInfo | not = r.v
-            if (vi is some) out = out.concat([vi])
+            if (vi is given) out = out.concat([vi])
         }
         return { vs: out, st: st }
     }
@@ -3093,14 +3093,14 @@ ${
 
     fn isStrLike(t: Type) -> boolean {
         const mi: Type | not = maybeInner(t)
-        if (mi is some) return mi == Type.Str
+        if (mi is given) return mi == Type.Str
         return t == Type.Str
     }
 
     fn isNumLike(t: Type) -> boolean {
         let x: Type = t
         const mi: Type | not = maybeInner(t)
-        if (mi is some) x = mi
+        if (mi is given) x = mi
         return x == Type.Int || x == Type.Num
     }
 
@@ -3624,16 +3624,16 @@ ${
     fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
-        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some || attrNamed(e.attrs, "else") is some
+        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given || attrNamed(e.attrs, "else") is given
         if (e.tag == "each" && !e.star) {
             // a row scope: handles inside it live on the row, conditional relative to the row
             const r: RHandles = handlesIn(g0, e.kids, { owner: e.nid, conditional: false, file: w.file }, st)
             return { hs: r.hs, st: r.st }
         }
         const target: DeclStub | not = stubNamedDecl(g0, e.tag)
-        if (target is some && !e.star) {
+        if (target is given && !e.star) {
             const as: AAttr | not = attrNamed(e.attrs, "as")
-            if (as is some) {
+            if (as is given) {
                 const name: string = bareName(as.value)
                 if (name == "") {
                     st = addDiag(st, w.file, as.span, "E-DECL-AS", "`as=` takes a name")
@@ -3669,7 +3669,7 @@ ${
 
     fn rendersNodes(ds: DeclStub) -> ANode[] {
         const p: AProgram | not = ds.p
-        if (p is some) return markupNodes(p.items)
+        if (p is given) return markupNodes(p.items)
         const d: ADecl | not = ds.d
         if (d is not) return []
         const r: AElem | not = d.renders
@@ -3693,7 +3693,7 @@ ${
                 // whole (an untyped or mis-typed parameter voids the arity)
                 let ret: Type | not = not
                 const at: AType | not = af.ret
-                if (at is some) {
+                if (at is given) {
                     if (!isVoidType(at) && !hasErrIn(f.errs, at.span)) {
                         const rt: RType = resolveType(fte, at, st)
                         // guard (i), r7 A: a return type that did not resolve
@@ -3733,7 +3733,7 @@ ${
         const rt: RType = resolveType(te, at, st)
         if (rt.unresolved) return { err: not, st: rt.st }
         const es: Sym | not = enumStubSym(te, rt.t)
-        if (es is some) return { err: es, st: rt.st }
+        if (es is given) return { err: es, st: rt.st }
         return { err: not, st: addDiag(rt.st, f.path, at.span, "E-ERROR-011", "the error type of `" + af.name + "(…)!` is not an enum — §19.4.4.1: \"The error type after `!` SHALL be an enum type\" (a `:enum` declaration, or the built-in `Error` when it is omitted). Declare the failures as variants: `type " + af.name + "Error:enum = { … }`") }
     }
 
@@ -3778,7 +3778,7 @@ ${
                 let key: int = -1
                 let make = true
                 if (f.info.failable) {
-                    if (e is some) {
+                    if (e is given) {
                         key = e.id
                         const shape: int = transportShape(ts, e, sce)
                         if (shape == 0) {
@@ -3795,7 +3795,7 @@ ${
                     // (named `prior`, not `known`: impl#1 resolves a narrowed local that shares
                     // a top-level function's name to that FUNCTION — dogfood finding, progress.md)
                     const prior: Sym | not = remoteMemoOf(memo, key)
-                    if (prior is some) {
+                    if (prior is given) {
                         rerr = prior
                     } else {
                         const rm: RMintedEnum = mintRemoteEnum(ts, e, key, sce, st)
@@ -3846,10 +3846,10 @@ ${
         let st: AS = st0
         let name: string = "Transport"
         let vs: VariantDef[] = []
-        if (key >= 0 && e is some) {
+        if (key >= 0 && e is given) {
             name = e.hint + " + Transport"
             const t: TypeInfo | not = typeInfoOf(ts, e)
-            if (t is some) {
+            if (t is given) {
                 for (const v of enumVariants(t.def)) {
                     const rv: RSym = mint(st, v.sym.hint)
                     st = rv.st
@@ -3969,7 +3969,7 @@ ${
         let st: AS = st0
         for (const s of ds) {
             const d: ADecl | not = s.d
-            if (d is some) {
+            if (d is given) {
                 const n: string = ownTypeName(d)
                 if (n != "" && declNames.indexOf(n) >= 0) {
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
@@ -3982,7 +3982,7 @@ ${
                 }
             }
             const p: AProgram | not = s.p
-            if (p is some) {
+            if (p is given) {
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
@@ -4072,11 +4072,12 @@ ${
         return st
     }
 
-    // §55.1's presence predicates: `req` and `is some` (the latter reaches the
-    // bootstrap as the opener words `is` `some`, refused as unknown — and a
-    // second `is` is caught by the `mods` pass above).
+    // §55.1's presence predicates: `req` and `is given` — `is some` is its
+    // soft-deprecated spelling (S462). The two-word forms reach the bootstrap
+    // as the opener words `is` `given` / `is` `some`, refused as unknown — and a
+    // second `is` is caught by the `mods` pass above.
     fn isPresenceValidator(name: string) -> boolean {
-        return name == "req" || name == "is some"
+        return name == "req" || name == "is given" || name == "is some"
     }
 
     fn isBareValidator(v: AValidator) -> boolean {
@@ -4212,12 +4213,12 @@ ${
             let single = false
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
-            if (p is some) {
+            if (p is given) {
                 const r: RFields = programFields(te, rt.ts, p, icx, ownTab, st)
                 fields = r.fs
                 st = r.st
                 single = true
-            } else if (d is some) {
+            } else if (d is given) {
                 const r2: RFields = userFields(te, rt.ts, d, icx, ownTab, st)
                 fields = r2.fs
                 st = r2.st
@@ -4600,7 +4601,7 @@ ${
 
     fn condHandleNamed(env: Env, n: string) -> string {
         if (n == "") return ""
-        if (lookupNarrow(env, n) is some) return ""
+        if (lookupNarrow(env, n) is given) return ""
         const h: HandleInfo | not = lookupHandle(env, n)
         if (h is not) return ""
         if (!h.conditional) return ""
@@ -4742,22 +4743,22 @@ ${
 
     fn resolveName(env: Env, e: AExpr, name: string, st: AS) -> RX {
         const l: LocalB | not = lookupLocal(env, name)
-        if (l is some) {
+        if (l is given) {
             const st2: AS = addName(st, e.nid, NameFact.NLocal(l.s))
-            if (l.narrowed is some) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
+            if (l.narrowed is given) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
         // §66.5.2: inside a declaration's renders / initializers, its fields are
         // bare read-only projections of the current instance.
         const d: DeclSrc | not = ctxDecl(env)
-        if (d is some) {
+        if (d is given) {
             if (!d.isProgram) {
                 const i: int = fieldIndex(d.info, name)
                 if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
         }
         const f: FnInfo | not = fnNamed(env.g, name)
-        if (f is some) {
+        if (f is given) {
             const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
             if (env.fx.fnRef == e.nid) return plain(not, st2)
             // s451 (Ue, review HIGH-2): a function named without being called —
@@ -4770,7 +4771,7 @@ ${
             return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later \"function values\" slice; call it directly: `" + name + "(…)`"))
         }
         const pi: DeclInfo | not = programInfo(env)
-        if (pi is some) {
+        if (pi is given) {
             if (fieldIndex(pi, name) >= 0) {
                 return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a cell — read it as `@" + name + "` (V5-strict: bare names are locals)", st)
             }
@@ -4788,7 +4789,7 @@ ${
         if (!r.x.maybe) return r
         let tn: string = "T"
         const td: Sym | not = r.x.iDecl
-        if (td is some) tn = td.hint
+        if (td is given) tn = td.hint
         const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> { … c.field … }` (§66.7.5; reads ruled S437)"
         return { x: r.x, st: addDiag(r.st, env.file, e.span, "E-DECL-HANDLE-NOT-NARROWED", msg) }
     }
@@ -4832,7 +4833,7 @@ ${
     fn resolveAt(env: Env, e: AExpr, name: string, st: AS) -> RX {
         // §66.7.5: inside `given c = @name :> { … }`, `@name` is the narrowed `c`.
         const nb: NarrowB | not = lookupNarrow(env, name)
-        if (nb is some) {
+        if (nb is given) {
             return { x: { ty: nb.ty, inst: nb.inst, iDecl: nb.iDecl, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(nb.iDecl, nb.inst)) }
         }
@@ -4840,11 +4841,11 @@ ${
         const oi: int = ownFieldIndex(env, name)
         if (oi >= 0) {
             const od: DeclSrc | not = ctxDecl(env)
-            if (od is some) return plain(od.info.fields[oi].ty, addName(st, e.nid, NameFact.NField(od.info.sym, InstRef.Lexical(0), oi)))
+            if (od is given) return plain(od.info.fields[oi].ty, addName(st, e.nid, NameFact.NField(od.info.sym, InstRef.Lexical(0), oi)))
         }
         // O54 (a): inside x's own renders / initializers, `@x` is the current instance.
         const d: DeclSrc | not = ctxDecl(env)
-        if (d is some) {
+        if (d is given) {
             if (!d.isProgram && d.info.sym.hint == name) {
                 const inst: InstRef = InstRef.Lexical(0)
                 return { x: { ty: Type.Named(d.info.sym), inst: inst, iDecl: d.info.sym, maybe: false },
@@ -4855,7 +4856,7 @@ ${
         // handle shadows a program-scope name; a program-scope handle cannot
         // share a program cell's name (the scope pass refuses that).
         const h: HandleInfo | not = lookupHandle(env, name)
-        if (h is some) {
+        if (h is given) {
             const hi: InstRef = InstRef.Alias(h.sym)
             // a presence test in scope proves it mounted (ruled S442)
             const maybe: boolean = h.conditional && env.present.indexOf(name) < 0
@@ -4863,12 +4864,12 @@ ${
                      st: addName(st, e.nid, NameFact.NInst(h.target, hi)) }
         }
         const pi: DeclInfo | not = programInfo(env)
-        if (pi is some) {
+        if (pi is given) {
             const i: int = fieldIndex(pi, name)
             if (i >= 0) return plain(pi.fields[i].ty, addName(st, e.nid, NameFact.NField(pi.sym, programInst(env), i)))
         }
         const ud: DeclSrc | not = visibleDecl(env, name)
-        if (ud is some) {
+        if (ud is given) {
             const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
                      st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
@@ -4885,9 +4886,9 @@ ${
     // A bare variant resolves against the type its position expects; with no
     // expectation, against the one enum that has it.
     fn resolveVariant(env: Env, e: AExpr, name: string, expected: Type | not, st: AS) -> RX {
-        if (expected is some) {
+        if (expected is given) {
             const es: Sym | not = isEnumType(env.g.types, expected)
-            if (es is some) {
+            if (es is given) {
                 const i: int = variantIndex(env.g.types, es, name)
                 if (i >= 0) return plain(expected, addValue(st, e.nid, ValueFact.VVariant(es, i)))
                 return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of `" + es.hint + "`", st)
@@ -4911,7 +4912,7 @@ ${
 
     fn isLengthOf(t: Type | not) -> boolean {
         if (t is not) return false
-        if (seqElem(t) is some) return true
+        if (seqElem(t) is given) return true
         return t == Type.Str
     }
 
@@ -4924,7 +4925,7 @@ ${
         }
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
-        if (inst is some && iDecl is some) {
+        if (inst is given && iDecl is given) {
             const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
             if (d is not) return diagX(env, e, "E-SCOPE-001", "unknown declaration", st)
             const i: int = fieldIndex(d.info, name)
@@ -4944,13 +4945,13 @@ ${
             if (where == 2 || where == 1) return fieldSurface(env, e, obj, nf, name, where, st)
         }
         const t: Type | not = ro.x.ty
-        if (t is some) {
+        if (t is given) {
             const s: Sym | not = namedOf(t)
-            if (s is some) {
+            if (s is given) {
                 const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
-                if (ti is some) {
+                if (ti is given) {
                     const fs: FieldDef[] | not = structFieldDefs(ti.def)
-                    if (fs is some) {
+                    if (fs is given) {
                         let i = 0
                         for (const fd of fs) {
                             if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(s, i)))
@@ -5099,7 +5100,7 @@ ${
         if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
         if (n == "") {
             const m: MethodCall | not = memberCall(callee)
-            if (m is some) {
+            if (m is given) {
                 // s444: the host-call surface (one call — the clock read) and the
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
@@ -5110,7 +5111,7 @@ ${
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
         const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
-        if (cf is some) {
+        if (cf is given) {
             const sp: AS = callPurity(env, e, cf, st)
             // s451 (Ue): a `!` function's call is handled only as a handling form's subject (§19.4.3)
             if (cf.failable && env.fx.subject != e.nid) return plain(not, bySite(env, siteOf(env), conflictDiags(env, cf, e), [], unhandledCall(env, e, cf.name, sp)))
@@ -5213,7 +5214,7 @@ ${
         // a `.length` after a refused call is not a second report
         let guess: Type | not = not
         if (isFilter) guess = ot
-        if (ot is some) {
+        if (ot is given) {
             elem = seqElem(ot)
             if (elem is not) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)"))
         }
@@ -5271,7 +5272,7 @@ ${
             const rs: RSym = mint(st, pn)
             st = rs.st
             syms = syms.concat([rs.s])
-            if (ty is some) st = addAnnot(st, rs.s, ty)
+            if (ty is given) st = addAnnot(st, rs.s, ty)
             env2 = withLocal(env2, { name: pn, s: rs.s, ty: ty, mutable: false, narrowed: not, nDecl: not })
         }
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
@@ -5280,7 +5281,7 @@ ${
         return resolveExpr(env2, b, want, st)
     }
 
-    fn isLambda(e: AExpr) -> boolean { return lambdaBody(e) is some }
+    fn isLambda(e: AExpr) -> boolean { return lambdaBody(e) is given }
 
     fn lambdaParams(e: AExpr) -> string[] {
         const k: AExprK = e.k
@@ -5390,10 +5391,10 @@ ${
     // enums, the runtime's structural equality for structs and sequences.
     fn isStructural(env: Env, t: Type | not) -> boolean {
         if (t is not) return false
-        if (seqElem(t) is some) return true
+        if (seqElem(t) is given) return true
         const s: Sym | not = namedOf(t)
         if (s is not) return false
-        if (isEnumType(env.g.types, t) is some) return false
+        if (isEnumType(env.g.types, t) is given) return false
         return true
     }
 
@@ -5459,7 +5460,7 @@ ${
 
     fn resolveArray(env: Env, e: AExpr, es: AExpr[], expected: Type | not, st0: AS) -> RX {
         let elem: Type | not = not
-        if (expected is some) elem = seqElem(expected)
+        if (expected is given) elem = seqElem(expected)
         const st: AS = resolveExprs(env, es, elem, st0)
         return plain(expected, st)
     }
@@ -5534,7 +5535,7 @@ ${
     }
 
     fn expectedOr(t: Type | not) -> Type {
-        if (t is some) return t
+        if (t is given) return t
         return Type.Str
     }
 
@@ -5587,13 +5588,13 @@ ${
         const oi: int = ownFieldIndex(env, name)
         if (oi >= 0) {
             const od: DeclSrc | not = ctxDecl(env)
-            if (od is some) {
+            if (od is given) {
                 return { place: { decl: od.info, inst: InstRef.Lexical(0), idx: oi, path: [], ty: od.info.fields[oi].ty, maybe: false },
                          local: not, st: st }
             }
         }
         const pi: DeclInfo | not = programInfo(env)
-        if (pi is some && lookupHandle(env, name) is not) {
+        if (pi is given && lookupHandle(env, name) is not) {
             const i: int = fieldIndex(pi, name)
             if (i >= 0) {
                 return { place: { decl: pi, inst: programInst(env), idx: i, path: [], ty: pi.fields[i].ty, maybe: false },
@@ -5605,9 +5606,9 @@ ${
 
     fn placeName(env: Env, t: AExpr, name: string, st: AS) -> RPlace {
         const l: LocalB | not = lookupLocal(env, name)
-        if (l is some) return { place: not, local: l, st: st }
+        if (l is given) return { place: not, local: l, st: st }
         const d: DeclSrc | not = ctxDecl(env)
-        if (d is some && env.inRenders) {
+        if (d is given && env.inRenders) {
             if (!d.isProgram && fieldIndex(d.info, name) >= 0) {
                 return noPlace(addDiag(st, env.file, t.span, "E-DECL-RENDERS-BARE-WRITE", "`" + name + "` inside a `renders` is a read-only projection — write it as `@" + d.info.sym.hint + "." + name + "` (§66.5.2)"))
             }
@@ -5621,7 +5622,7 @@ ${
         const st: AS = ro.st
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
-        if (inst is some && iDecl is some) {
+        if (inst is given && iDecl is given) {
             const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
             if (d is not) return noPlace(st)
             const i: int = fieldIndex(d.info, name)
@@ -5642,13 +5643,13 @@ ${
             }
         }
         const bt: Type | not = base.ty
-        if (bt is some) {
+        if (bt is given) {
             const s: Sym | not = namedOf(bt)
-            if (s is some) {
+            if (s is given) {
                 const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
-                if (ti is some) {
+                if (ti is given) {
                     const fs: FieldDef[] | not = structFieldDefs(ti.def)
-                    if (fs is some) {
+                    if (fs is given) {
                         let i = 0
                         for (const fd of fs) {
                             if (fd.sym.hint == name) {
@@ -5775,7 +5776,7 @@ ${
         const shape: int = seqEditShape(target, value)
         if (shape > 0 && !rootIsLocal(env, target)) return resolveSeqShape(env, e, target, value, shape, st0)
         const ef: ElemFieldTarget | not = elemFieldTarget(target)
-        if (ef is some) {
+        if (ef is given) {
             if (!rootIsLocal(env, ef.seq)) return resolveElemFieldWrite(env, e, ef, value, st0)
         }
         // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
@@ -5784,12 +5785,12 @@ ${
             const ri: RX = resolveHandleSubject(env, target, st0)
             const inst: InstRef | not = ri.x.inst
             const iDecl: Sym | not = ri.x.iDecl
-            if (inst is some && iDecl is some) return resolveInstanceSpread(env, e, inst, iDecl, ri.x.maybe, value, ri.st)
+            if (inst is given && iDecl is given) return resolveInstanceSpread(env, e, inst, iDecl, ri.x.maybe, value, ri.st)
         }
         const rp: RPlace = resolvePlace(env, target, st0)
         let st: AS = rp.st
         const l: LocalB | not = rp.local
-        if (l is some) {
+        if (l is given) {
             if (!l.mutable) st = addDiag(st, env.file, target.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
             st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s))
             return resolveExpr(env, value, l.ty, st).st
@@ -5803,7 +5804,7 @@ ${
         const rv: RX = resolveExpr(env, value, f.ty, st)
         const rw: RWriteFact = wholeFieldWrite(env, p, f, value, rv.st, e.span)
         const w: WriteFact | not = rw.w
-        if (w is some) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
+        if (w is given) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
     }
 
@@ -5814,11 +5815,11 @@ ${
     fn wholeFieldWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, st: AS, span: ASpan) -> RWriteFact {
         const g: TransitionGraph | not = f.graph
         const cap: Sym | not = f.wcap
-        if (g is some && cap is some) {
+        if (g is given && cap is given) {
             const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
         }
-        if (f.grants.replace && cap is some) {
+        if (f.grants.replace && cap is given) {
             return { w: { cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, st: st }
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
@@ -5833,7 +5834,7 @@ ${
         const n: string = f.sym.hint
         let msg: string = "`@" + n + " = …` is a whole-value replace of `@" + n + "`, and its contract does not grant `replace` — it grants edits only (§66.11.2: a whole-value write is checked against the grants, whatever the spelling)"
         if (grantsEdit(f.grants.edits, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
-        if (seqElem(f.ty) is some) msg = msg + "; to write any value, add `replace` to the type's grants (§66.12.2)"
+        if (seqElem(f.ty) is given) msg = msg + "; to write any value, add `replace` to the type's grants (§66.12.2)"
         return msg
     }
 
@@ -5872,7 +5873,7 @@ ${
                 const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) {
+                if (w is given) {
                     const m: RSym = mint(st, pr.name)
                     st = m.st
                     ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
@@ -5944,7 +5945,7 @@ ${
         const r: RWriteFact = fieldAtWrite(env, p, f, value, st, e.span)
         st = r.st
         const w: WriteFact | not = r.w
-        if (w is some) st = addEffect(st, e.nid, EffectFact.EWrite(w))
+        if (w is given) st = addEffect(st, e.nid, EffectFact.EWrite(w))
         return st
     }
 
@@ -6046,11 +6047,11 @@ ${
         let st: AS = st0
         const s: Sym | not = namedOf(f.ty)
         let fs: FieldDef[] = []
-        if (s is some) {
+        if (s is given) {
             const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
-            if (ti is some) {
+            if (ti is given) {
                 const d: FieldDef[] | not = structFieldDefs(ti.def)
-                if (d is some) fs = d
+                if (d is given) fs = d
             }
         }
         if (s is not || fs.length == 0) return addDiag(st, env.file, e.span, "E-TYPE-STRUCT-CONTEXT", "a spread write needs a struct-typed target")
@@ -6077,7 +6078,7 @@ ${
                 const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, rv.st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) {
+                if (w is given) {
                     const m: RSym = mint(st, pr.name)
                     st = m.st
                     ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
@@ -6180,16 +6181,16 @@ ${
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
         const rmv: MethodCall | not = removeCall(callee)
-        if (rmv is some) {
+        if (rmv is given) {
             if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
             return localEditRefused(env, e, rmv.method, args, st)
         }
         const m: MethodCall | not = methodCall(callee)
-        if (m is some) {
+        if (m is given) {
             // r1 F1 (the same deletion, pre-existing M2 shape): an edit call on a LOCAL
             if (rootIsLocal(env, m.obj)) return localEditRefused(env, e, m.method, args, st)
         }
-        if (m is some) return resolveEditCall(env, e, m, args, st)
+        if (m is given) return resolveEditCall(env, e, m, args, st)
         return resolveExpr(env, e, not, st).st
     }
 
@@ -6239,7 +6240,7 @@ ${
         const f: FieldInfo = p.decl.fields[p.idx]
         let elem: Type | not = not
         const pt: Type | not = p.ty
-        if (pt is some) elem = seqElem(pt)
+        if (pt is given) elem = seqElem(pt)
         if (args.length != 1) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "` with other than one element is not in bootstrap slice M2")
         st = resolveExpr(env, args[0], elem, st).st
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
@@ -6253,7 +6254,7 @@ ${
         const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
-        if (granted && cap is some) {
+        if (granted && cap is given) {
             return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
@@ -6285,17 +6286,17 @@ ${
             const first: AExpr | not = spreadInner(es[0])
             const last: AExpr | not = spreadInner(es[es.length - 1])
             if (countSpreads(es) == 1) {
-                if (first is some) {
+                if (first is given) {
                     if (samePlaceSyntax(target, first)) return 1
                 }
-                if (last is some) {
+                if (last is given) {
                     if (samePlaceSyntax(target, last)) return 2
                 }
             }
             return 0
         }
         const m: MethodCall | not = callMethod(value)
-        if (m is some) {
+        if (m is given) {
             if (samePlaceSyntax(target, m.obj)) {
                 if (m.method == "filter") return 3
                 if (m.method == "map") return 4
@@ -6307,7 +6308,7 @@ ${
     fn countSpreads(es: AExpr[]) -> int {
         let n = 0
         for (const x of es) {
-            if (spreadInner(x) is some) n = n + 1
+            if (spreadInner(x) is given) n = n + 1
         }
         return n
     }
@@ -6451,7 +6452,7 @@ ${
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
         // r1 nit: the shape over a value that is not a sequence is a type error
         const pty: Type | not = p.ty
-        if (pty is some) {
+        if (pty is given) {
             if (seqElem(pty) is not) {
                 return addDiag(st, env.file, e.span, "E-TYPE-031", "`@" + f.sym.hint + "` is `" + typeName(pty) + "`, not a sequence — `[…]` is not a value of its type (§66.1 rule 5)")
             }
@@ -6483,12 +6484,12 @@ ${
         if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))
         let elemTy: Type | not = not
         const pt: Type | not = p.ty
-        if (pt is some) elemTy = seqElem(pt)
+        if (pt is given) elemTy = seqElem(pt)
         let elems: AExpr[] = []
         let tmps: Sym[] = []
         for (const x of arrayElems(value)) {
             const inner: AExpr | not = spreadInner(x)
-            if (inner is some) {
+            if (inner is given) {
                 // the operand `...@x` reads the target itself (a read, no check)
                 st = resolveExpr(env, inner, pt, st).st
             } else {
@@ -6513,7 +6514,7 @@ ${
     fn rootIsLocal(env: Env, e: AExpr) -> boolean {
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> lookupLocal(env, n) is some
+            .Name(name: n) :> lookupLocal(env, n) is given
             .Member(obj: o) :> rootIsLocal(env, o)
             .Index(obj: o) :> rootIsLocal(env, o)
             .At(name: n) :> false
@@ -6584,7 +6585,7 @@ ${
 
     fn callMethodName(v: AExpr) -> string {
         const m: MethodCall | not = callMethod(v)
-        if (m is some) return m.method
+        if (m is given) return m.method
         return "?"
     }
 
@@ -6714,18 +6715,18 @@ ${
         const f: FieldInfo = p.decl.fields[p.idx]
         let elem: Type | not = not
         const pt: Type | not = p.ty
-        if (pt is some) elem = seqElem(pt)
+        if (pt is given) elem = seqElem(pt)
         let target: FieldDef | not = not
         let owner: string = ""
         let elemSym: Sym | not = not
         let targetIdx: int = -1
-        if (elem is some) {
+        if (elem is given) {
             const s: Sym | not = namedOf(elem)
-            if (s is some) {
+            if (s is given) {
                 const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
-                if (ti is some) {
+                if (ti is given) {
                     const fs: FieldDef[] | not = structFieldDefs(ti.def)
-                    if (fs is some) {
+                    if (fs is given) {
                         owner = s.hint
                         elemSym = s
                         let k = 0
@@ -6846,9 +6847,9 @@ ${
     // Is a binding named `defer` VISIBLE here (§19.16.1: a parameter, an
     // earlier local, a `given` binding, a file-level function)?
     fn deferBound(env: Env) -> boolean {
-        if (lookupLocal(env, "defer") is some) return true
-        if (lookupHandle(env, "defer") is some) return true
-        return fnNamed(env.g, "defer") is some
+        if (lookupLocal(env, "defer") is given) return true
+        if (lookupHandle(env, "defer") is given) return true
+        return fnNamed(env.g, "defer") is given
     }
 
     // A `let` / `const` written AFTER a position in a block of the function.
@@ -6946,7 +6947,7 @@ ${
     fn deferExprRules(file: string, e: AExpr, st0: AS) -> AS {
         let st: AS = st0
         const h: AHandled | not = handledOf(e.k)
-        if (h is some) {
+        if (h is given) {
             const how: AHow = h.how
             if (how == AHow.Propagate) st = addDiag(st, file, e.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `?` propagation — it runs while its block is already exiting (§19.16.3 rule 1); handle the failure in place with `!{ … | _ :> … }`")
         }
@@ -7051,7 +7052,7 @@ ${
 
     fn exprNameRefs(e: AExpr, bound0: string[]) -> string[] {
         const h: AHandled | not = handledOf(e.k)
-        if (h is some) return handledNameRefs(h, bound0)
+        if (h is given) return handledNameRefs(h, bound0)
         const bound: string[] = bound0.concat(lambdaParams(e))
         let out: string[] = []
         const n: string = exprName(e)
@@ -7154,11 +7155,11 @@ ${
     // The name a handled subject is reported by.
     fn subjectName(e: AExpr) -> string {
         const c: AExpr | not = calleeOf(e.k)
-        if (c is some) {
+        if (c is given) {
             const n: string = exprName(c)
             if (n != "") return n + "(…)"
         }
-        if (sqlOfK(e.k) is some) return "the `" + sqlSigil() + "}` query"
+        if (sqlOfK(e.k) is given) return "the `" + sqlSigil() + "}` query"
         return "this expression"
     }
 
@@ -7174,7 +7175,7 @@ ${
         const site: SiteK = siteOf(env)
         // (fix round 1: an own-trigger server site too — its arms resolve against the client
         // set, and SiteLocal reports a `.Transport` arm as dead handling, §19.9.10, as a T5 site does)
-        if (sc is some) {
+        if (sc is given) {
             const rs0: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
             const hm: AHow = h.how
             const ty: Type | not = match hm {
@@ -7190,10 +7191,10 @@ ${
         const f: FnInfo | not = failableCallee(env, st, subj)
         let failable = false
         let err: Sym | not = not
-        if (f is some) {
+        if (f is given) {
             failable = true
             err = f.err
-        } else if (sqlOfK(subj.k) is some) {
+        } else if (sqlOfK(subj.k) is given) {
             failable = true
             err = env.g.sqlErrorSym
         }
@@ -7397,7 +7398,7 @@ ${
     // IS the set (it declares the wrapper) is named as written.
     fn setLabel(env: Env, f: FnInfo, rset: Sym) -> string {
         const e: Sym | not = f.err
-        if (e is some) {
+        if (e is given) {
             if (e.id == rset.id) return rset.hint
         }
         return rset.hint + "(t: ServerCallError)"
@@ -7405,7 +7406,7 @@ ${
 
     fn ownLabel(f: FnInfo) -> string {
         const e: Sym | not = f.err
-        if (e is some) return e.hint
+        if (e is given) return e.hint
         return f.name
     }
 
@@ -7448,7 +7449,7 @@ ${
         if (c is not) return not
         const n: string = exprName(c)
         if (n == "") return not
-        if (lookupLocal(env, n) is some) return not
+        if (lookupLocal(env, n) is given) return not
         const f: FnInfo | not = fnNamed(env.g, n)
         if (f is not) return not
         if (!f.serverOwn) return not
@@ -7623,7 +7624,7 @@ ${
         }
         const nf: NameFact | not = nameFactIn(st, c.nid)
         const f: FnInfo | not = calledFn(env, nf)
-        if (f is some) {
+        if (f is given) {
             // s454 (U1b): a server-triggered callee reaches here only from a
             // server→server site (a client site is remoteHandled's) — §19.9.10:
             // "When the callee is not declared `!`, the whole handler is attached
@@ -7692,7 +7693,7 @@ ${
         const p: APat = a.pat
         const pn: PatName | not = patName(p)
         const wb: WholePat | not = wholePatOf(p)
-        if (wb is some) {
+        if (wb is given) {
             // s452 — §18.6.1: `_ err` matches every error variant an earlier arm
             // did not (never `.Ok`) and binds the WHOLE error value, typed as the
             // failure's error type. A bare name (§18.2) and `else err` (§18.6.1)
@@ -7812,7 +7813,7 @@ ${
         let st: AS = st0
         for (const a of arms) {
             const wb: WholePat | not = wholePatOf(a.pat)
-            if (wb is some) {
+            if (wb is given) {
                 let m: string = wholeBinderPlainMsg(wb.b.name)
                 if (wb.bare) m = bareBinderPlainMsg(wb.b.name)
                 if (wb.viaElse) m = elseBinderMsg(wb.b.name)
@@ -7829,7 +7830,7 @@ ${
         let st: AS = st0
         for (const a of arms) {
             const wb: WholePat | not = wholePatOf(a.pat)
-            if (wb is some) {
+            if (wb is given) {
                 if (wb.bare) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", bareBinderFailableMsg(wb.b.name))
                 if (wb.viaElse) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", elseBinderMsg(wb.b.name))
             }
@@ -7920,7 +7921,7 @@ ${
         // an arm used for its value — refused too (fail closed, reversible). A
         // `defer` in a STATEMENT-position arm stays legal (above).
         const dsp: AStmt | not = directDefer(b)
-        if (dsp is some) return addDiag(resolveBlock(env, b, st0), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (" + whereLabel(cx.what) + ") — the deferred block would capture the arm's result (§19.16.2). Handle the call as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block")
+        if (dsp is given) return addDiag(resolveBlock(env, b, st0), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (" + whereLabel(cx.what) + ") — the deferred block would capture the arm's result (§19.16.2). Handle the call as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block")
         if (blockDiverges(b)) return resolveBlock(env, b, st0)
         const n: int = b.stmts.length
         if (n == 0) return fallsThrough(env, a, cx, st0)
@@ -7976,14 +7977,14 @@ ${
     // A write in expression form — an assignment, `reset(@x)`, or an edit call
     // on a reactive place (`@xs.push(v)`, `@xs.pop()`): it produces no value.
     fn isWriteExpr(x: AExpr) -> boolean {
-        if (assignValue(x) is some) return true
+        if (assignValue(x) is given) return true
         const c: AExpr | not = calleeOf(x.k)
         if (c is not) return false
         if (exprName(c) == "reset") return true
         const m: MethodCall | not = methodCall(c)
-        if (m is some) return isReactiveRoot(placeRoot(m.obj))
+        if (m is given) return isReactiveRoot(placeRoot(m.obj))
         const rm: MethodCall | not = removeCall(c)
-        if (rm is some) return isReactiveRoot(placeRoot(rm.obj))
+        if (rm is given) return isReactiveRoot(placeRoot(rm.obj))
         return false
     }
 
@@ -8010,7 +8011,7 @@ ${
     fn stmtYieldsOnAllPaths(s: AStmt) -> boolean {
         const k: AStmtK = s.k
         return match k {
-            .Return(e: x) :> x is some
+            .Return(e: x) :> x is given
             .If(cond: c, thenB: t, elseB: el) :> blockYieldsOnAllPaths(t) && maybeBlockYields(el)
             .Given(name: n) :> false
             .Eval(e: x) :> false
@@ -8172,7 +8173,7 @@ ${
     fn resolveFail(env: Env, s: AStmt, f: AFail, st0: AS) -> AS {
         let st: AS = resolveExprs(env, f.args, not, st0)
         const t: AExpr | not = f.target
-        if (t is some) st = resolveExpr(env, t, not, st).st
+        if (t is given) st = resolveExpr(env, t, not, st).st
         if (!env.fx.failable) {
             let where: string = "outside any function (a handler, an effect or markup)"
             if (env.fx.inFn) where = "in function '" + env.fx.fnName + "', which is not declared as failable"
@@ -8182,11 +8183,11 @@ ${
         if (err is not) return st                          // E-ERROR-011 reported
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
         const valid: string = variantNamesOf(vs).join(", ")
-        if (t is some) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
+        if (t is given) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
         if (f.enumName != "") {
             const named: Sym | not = typeNamedHere(env, f.enumName)
             let same = false
-            if (named is some) same = named.id == err.id
+            if (named is given) same = named.id == err.id
             if (!same) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.enumName + "." + f.variant + "', which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "' — '" + f.enumName + "' is a different type. Valid variants: " + valid + " (§19.3.3)")
         }
         const idx: int = variantIndex(env.g.types, err, f.variant)
@@ -8294,7 +8295,7 @@ ${
         if (di is not || idx < 0 || idx >= di.fields.length) return st
         const fi: FieldInfo = di.fields[idx]
         const w: Sym | not = fi.wcap
-        if (w is some) return st
+        if (w is given) return st
         const m: FieldMode = fi.mode
         const why: string = match m {
             .Derived :> "a DERIVED cell (its initializer reads cells) — it has no change event of its own; list the `@variables` it is computed from and read `@" + name + "` in the body (§6.7.4)"
@@ -8325,7 +8326,7 @@ ${
     fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
         let st: AS = st0
         let annot: Type | not = not
-        if (aty is some && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
+        if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
             const rt: RType = resolveType(te, aty, st)
             // r8: an annotation that did not resolve is not the local's type
@@ -8336,7 +8337,7 @@ ${
         const rs: RSym = mint(ri.st, name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
-        if (annot is some) {
+        if (annot is given) {
             lty = annot
             st = addAnnot(st, rs.s, annot)
         }
@@ -8347,7 +8348,7 @@ ${
     fn resolveIf(env: Env, c: AExpr, t: ABlock, el: ABlock | not, st0: AS) -> AS {
         let st: AS = resolveCond(env, c, st0)
         st = resolveBlock(withPresent(env, presenceHandle(env, c)), t, st)
-        if (el is some) st = resolveBlock(env, el, st)
+        if (el is given) st = resolveBlock(env, el, st)
         return st
     }
 
@@ -8413,7 +8414,7 @@ ${
                 .DeclNode(d: d) :> not
                 .Effect(w: w) :> not
             }
-            if (e is some) {
+            if (e is given) {
                 st = chainMember(env, e, prev, st)
                 st = showHostCheck(env, e, st)
                 st = attrCaseDiags(env, e, st)
@@ -8428,8 +8429,8 @@ ${
     // What an element is to the NEXT sibling: 1 it carries `if=` or `else-if=`,
     // 2 it carries `else` (only), 0 neither.
     fn chainRoleAfter(e: AElem) -> int {
-        if (attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some) return 1
-        if (attrNamed(e.attrs, "else") is some) return 2
+        if (attrNamed(e.attrs, "if") is given || attrNamed(e.attrs, "else-if") is given) return 1
+        if (attrNamed(e.attrs, "else") is given) return 2
         return 0
     }
 
@@ -8439,14 +8440,14 @@ ${
         const ea: AAttr | not = attrNamed(e.attrs, "else-if")
         const la: AAttr | not = attrNamed(e.attrs, "else")
         if (ia is not && ea is not && la is not) return st
-        if (ia is some && (ea is some || la is some)) {
+        if (ia is given && (ea is given || la is given)) {
             st = addDiag(st, env.file, e.span, "E-CTRL-005", "`else` (or `else-if=`) and `if=` cannot appear on the same element `<" + e.tag + ">`. An element either opens a new chain (`if=`) or continues one (`else-if=` / `else`), not both (§17.1.1)")
-        } else if (ea is some && la is some) {
+        } else if (ea is given && la is given) {
             st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` carries both `else-if=` and `else` — §17.1.1 gives an element one chain role; the bootstrap refuses the combination rather than pick one")
-        } else if (ea is some) {
+        } else if (ea is given) {
             if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else-if=…>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
             if (prev != 1) st = addDiag(st, env.file, ea.span, "E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else-if=` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
-        } else if (la is some) {
+        } else if (la is given) {
             if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
             if (prev != 1) st = addDiag(st, env.file, la.span, "E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
         }
@@ -8454,14 +8455,14 @@ ${
         // condition used to render the element unconditionally — fail-open)
         st = chainCondValue(env, e, ia, st)
         st = chainCondValue(env, e, ea, st)
-        if (la is some && !isNoValue(la.value)) {
+        if (la is given && !isNoValue(la.value)) {
             st = addDiag(st, env.file, la.span, "E-BOOTSTRAP-UNSUPPORTED", "`else` on `<" + e.tag + ">` takes no value — it is a bare attribute (§17.1.1)")
         }
         // the host: only an HTML element or a use is wrapped by the chain
         // lowering. `<each>` and `<errors>` refuse the attribute themselves; a
         // refused element has no fact. Anything else would IGNORE it.
         const f: ElemFact | not = elemFactNow(st, e.nid)
-        if (f is some && !chainHost(f)) {
+        if (f is given && !chainHost(f)) {
             st = chainHostRefused(env, e, ia, st)
             st = chainHostRefused(env, e, ea, st)
             st = chainHostRefused(env, e, la, st)
@@ -8580,7 +8581,7 @@ ${
 
     fn chainCondValue(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
         if (a is not) return st
-        if (valueExpr(a.value) is some) return st
+        if (valueExpr(a.value) is given) return st
         return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + e.tag + ">` needs a condition expression — `" + a.name + "=@x` or `" + a.name + "=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.1, §5.2) — it would render the element unconditionally")
     }
 
@@ -8621,7 +8622,7 @@ ${
     // condition its branch is shown under; an `else` branch has none).
     fn condAttrOf(attrs: AAttr[]) -> AAttr | not {
         const a: AAttr | not = attrNamed(attrs, "if")
-        if (a is some) return a
+        if (a is given) return a
         return attrNamed(attrs, "else-if")
     }
 
@@ -8654,7 +8655,7 @@ ${
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, e.tag)
-        if (d is some) {
+        if (d is given) {
             // O55 RULED (bryan S442): a plain use of a `single` declaration is an
             // error; `<*x/>` is the only way to render it (§66.13.3).
             if (d.info.single) return singleInstantiated(env, e, st)
@@ -8662,7 +8663,7 @@ ${
         }
         // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
         const sd: ADecl | not = singleProgramField(env, e.tag)
-        if (sd is some) return singleInstantiated(env, e, st)
+        if (sd is given) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
         // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
@@ -8746,7 +8747,7 @@ ${
         const nf: NameFact | not = nameFactIn(r.st, x.nid)
         const where: int = fieldReadKind(env, nf)
         const fv: ValidityOf | not = fieldValidity(nf)
-        if (fv is some) {
+        if (fv is given) {
             if (where == 2 && fieldValidatorsRefused(env, fv)) return r.st
             if (where == 2 && !fieldCarriesValidators(env, fv)) {
                 return addDiag(r.st, env.file, of.span, "E-VALIDITY-NO-SURFACE", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is a top-level value that carries no validators, so it has no validity surface and no `errors` (§55.5.1 rule 2, §55.8)")
@@ -8754,7 +8755,7 @@ ${
             return addElem(r.st, e.nid, ElemFact.MErrors(fv, all))
         }
         const dv: ValidityOf | not = declValidity(env, nf)
-        if (dv is some) return addElem(r.st, e.nid, ElemFact.MErrors(dv, all))
+        if (dv is given) return addElem(r.st, e.nid, ElemFact.MErrors(dv, all))
         return addDiag(r.st, env.file, of.span, "E-ERRORS-002", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is not a field, a declaration or a validated top-level value, so it has no `errors` (§55.8)")
     }
 
@@ -8869,7 +8870,7 @@ ${
         // s442: `<*f/>` naming a FIELD of the enclosing declaration (the
         // program's cells included, R4) — THIS instance's own field (§66.6.2).
         const sf: StarField | not = starField(env, e.tag)
-        if (sf is some) return resolveStarField(env, e, sf, st)
+        if (sf is given) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is not) {
             // r1 nit: a field of SOME user declaration, named out of its scope
@@ -8898,7 +8899,7 @@ ${
 
     fn starField(env: Env, name: string) -> StarField | not {
         const d: DeclSrc | not = ctxDecl(env)
-        if (d is some) {
+        if (d is given) {
             if (!d.isProgram) {
                 const i: int = fieldIndex(d.info, name)
                 if (i >= 0) return { decl: d.info, inst: InstRef.Lexical(0), idx: i, src: d }
@@ -8906,7 +8907,7 @@ ${
         }
         const pi: DeclInfo | not = programInfo(env)
         const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
-        if (pi is some && ps is some) {
+        if (pi is given && ps is given) {
             const j: int = fieldIndex(pi, name)
             if (j >= 0) return { decl: pi, inst: programInst(env), idx: j, src: ps }
         }
@@ -8931,7 +8932,7 @@ ${
         const g: TransitionGraph | not = f.graph
         const children: AStateChild[] = fieldStateChildren(sf.src, f.nid)
         let arms: StateArm[] = []
-        if (g is some) {
+        if (g is given) {
             for (const c of children) {
                 const v: int = variantIndex(env.g.types, g.enumSym, c.name)
                 if (v >= 0 && c.body.length > 0) arms = arms.concat([{ variant: v, body: c.body }])
@@ -9000,7 +9001,7 @@ ${
     // declaration's child fields.
     fn fieldDecls(ds: DeclSrc) -> ADecl[] {
         const p: AProgram | not = ds.p
-        if (p is some) {
+        if (p is given) {
             let out: ADecl[] = []
             for (const it of p.items) {
                 for (const d of declsOfItem(it)) {
@@ -9010,7 +9011,7 @@ ${
             return out
         }
         const ud: ADecl | not = ds.d
-        if (ud is some) return childFields(ud.body)
+        if (ud is given) return childFields(ud.body)
         return []
     }
 
@@ -9113,7 +9114,7 @@ ${
         // E-DECL-FIELD-TAG-NEEDS-STAR: a bare tag naming a CHILD field of the
         // enclosing declaration (§66.6.6).
         const cd: DeclSrc | not = ctxDecl(env)
-        if (cd is some) {
+        if (cd is given) {
             if (!cd.isProgram) {
                 const i: int = fieldIndex(cd.info, e.tag)
                 if (i >= 0 && isChildRole(cd.info.fields[i].role)) {
@@ -9137,7 +9138,7 @@ ${
                 // `bind:` on it (two cells fed from one input) is refused
                 // (⚑ PA: the SPEC (§5.4) does not say; no code names it).
                 const first: AAttr | not = firstBind(e.attrs)
-                if (first is some && first.nid != a.nid) {
+                if (first is given && first.nid != a.nid) {
                     // s451: the same `bind:` name twice is the parser's
                     // repeated-attribute refusal — one diagnostic per fault
                     if (first.name.toLowerCase() != a.name.toLowerCase()) {
@@ -9148,7 +9149,7 @@ ${
                 }
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
-            } else if (valueExpr(a.value) is some) {
+            } else if (valueExpr(a.value) is given) {
                 st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
             } else {
@@ -9182,7 +9183,7 @@ ${
             return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + e.tag + ">` needs a condition expression — `show=@x` or `show=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.2, §5.2) — it would never hide the element")
         }
         const sa: AAttr | not = attrNamed(e.attrs, "style")
-        if (sa is some && !isStaticAttr(sa.value)) {
+        if (sa is given && !isStaticAttr(sa.value)) {
             st = addDiag(st, env.file, sa.span, "E-ATTR-WRITER-CONFLICT", "`style=(…)` on `<" + e.tag + ">` writes the whole `style` attribute, and `show=` on the same element toggles its `display` — the wholesale write would erase the toggle on its next evaluation. Keep one: drop `show=` and compute `display` in `style=(…)`, or make `style=` static (§5.5.4)")
         }
         st = resolveIfValue(env, a.value, st)
@@ -9221,7 +9222,7 @@ ${
         st = writeGuards(env, p, x.span, st)
         const f: FieldInfo = p.decl.fields[p.idx]
         const pt: Type | not = p.ty
-        if (pt is some) {
+        if (pt is given) {
             const bad: string = bindTypeProblem(kind, pt)
             if (bad == "coerce") return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`bind:value` to a `" + typeName(pt) + "` place needs a number coercion of the element's text, which is not in the bootstrap (only string places)")
             if (bad != "") return addDiag(st, env.file, a.span, "E-TYPE-031", "`" + a.name + "` writes " + bad + ", and `" + placeKey(x) + "` is `" + typeName(pt) + "` (§5.4)")
@@ -9272,7 +9273,7 @@ ${
         for (const v of f.vals) {
             for (const h of v.attrs) {
                 if (htmlApplies(h.name, e.tag, itype, kind)) {
-                    if (attrNamed(e.attrs, h.name) is some) {
+                    if (attrNamed(e.attrs, h.name) is given) {
                         st = handAttrConflict(env, e, f, v.name, h, st)
                     } else if (!hasPairNamed(out, h.name)) {
                         out = out.concat([h])
@@ -9344,7 +9345,7 @@ ${
     fn bindTypeProblem(kind: BindKind, t: Type) -> string {
         let inner: Type = t
         const mi: Type | not = maybeInner(t)
-        if (mi is some) inner = mi
+        if (mi is given) inner = mi
         const isValue: boolean = kind == BindKind.Value
         if (isValue) {
             if (inner == Type.Str) return ""
@@ -9416,7 +9417,7 @@ ${
             if (a.name == "as") {
                 const n: string = bareName(a.value)
                 const h: HandleInfo | not = lookupHandle(env, n)
-                if (h is some) alias = h.sym
+                if (h is given) alias = h.sym
                 st = addAttr(st, a.nid, AttrKind.AAs)
             } else if (isChainAttr(a.name)) {
                 st = resolveIfValue(env, a.value, st)
@@ -9465,7 +9466,7 @@ ${
         for (const a of e.attrs) {
             if (a.name == "in") {
                 const ex: AExpr | not = valueExpr(a.value)
-                if (ex is some) {
+                if (ex is given) {
                     const r: RX = resolveExpr(env, ex, not, st)
                     st = r.st
                     srcTy = r.x.ty
@@ -9478,7 +9479,7 @@ ${
         }
         if (asName == "") asName = "item"
         let elemTy: Type | not = not
-        if (srcTy is some) elemTy = seqElem(unMaybe(srcTy))    // `S | not` iterates `S` (§17.7.2)
+        if (srcTy is given) elemTy = seqElem(unMaybe(srcTy))    // `S | not` iterates `S` (§17.7.2)
         const rs: RSym = mint(st, asName)
         st = rs.st
         let rowHandles: HandleInfo[] = []
@@ -9546,7 +9547,7 @@ ${
         }
         const prog: DeclSrc | not = findDeclSrc(g, g.program)
         let progHandles: HandleInfo[] = []
-        if (prog is some) progHandles = handlesOwnedBy(g, prog.info.nid)
+        if (prog is given) progHandles = handlesOwnedBy(g, prog.info.nid)
         for (const fs of g.fns) {
             let hs: HandleInfo[] = []
             if (fs.info.file == g.entry) hs = progHandles
@@ -9561,7 +9562,7 @@ ${
                 st = rs.st
                 let pty: Type = Type.Str
                 const at: AType | not = p.ty
-                if (at is some) {
+                if (at is given) {
                     // a type that failed to parse is not resolved (its parse
                     // error is the diagnostic; the typer treats it as unproven)
                     if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
@@ -9681,7 +9682,7 @@ ${
             if (f.path == file) {
                 for (const it of f.items) {
                     const imp: AImport | not = importOf(it)
-                    if (imp is some) {
+                    if (imp is given) {
                         for (const n of imp.names) {
                             if (n.name == name) return true
                         }
@@ -9842,7 +9843,7 @@ ${
         let cellSpans: ASpan[] = []
         let progNid: int = -1
         let progFile: string = ""
-        if (prog is some) {
+        if (prog is given) {
             progNid = prog.nid
             progFile = prog.file
             for (const f of prog.fields) {
@@ -9860,7 +9861,7 @@ ${
                 if (dup is not && o.owner == h.owner && o.name == h.name) dup = o
                 i = i + 1
             }
-            if (dup is some) {
+            if (dup is given) {
                 let why: string = ""
                 if (h.conditional || dup.conditional) why = " — even under mutually exclusive `if=` conditions (an error for now, ruled S440 #5 (iii))"
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "`as=" + h.name + "` — a handle `@" + h.name + "` is already bound in this scope (at " + offsetOf(dup.span) + "); a scope binds each handle name once" + why + " (§66.7.2)")])
@@ -9956,12 +9957,12 @@ ${
     // s451 (Ue) — a `fail`'s expressions: its payload values, or the non-variant target.
     fn failExprs(f: AFail) -> AExpr[] {
         const t: AExpr | not = f.target
-        if (t is some) return f.args.concat([t])
+        if (t is given) return f.args.concat([t])
         return f.args
     }
 
     fn thenElse(t: ABlock, el: ABlock | not) -> ABlock[] {
-        if (el is some) return [t, el]
+        if (el is given) return [t, el]
         return [t]
     }
 
@@ -10013,7 +10014,7 @@ ${
         let out: Diag[] = []
         for (const a of e.attrs) {
             const b: ABlock | not = bracedOf(a.value)
-            if (b is some && eventName(a.name) != "") out = out.concat(blockRedeclares(file, b, [], false))
+            if (b is given && eventName(a.name) != "") out = out.concat(blockRedeclares(file, b, [], false))
         }
         return out.concat(handlerRedeclares(file, e.kids))
     }
@@ -10567,7 +10568,7 @@ ${
         }
         if (n != "") return ["()" + n]
         const m: MethodCall | not = methodCall(c)
-        if (m is some) return [placeKey(m.obj)]
+        if (m is given) return [placeKey(m.obj)]
         return []
     }
 
@@ -10685,9 +10686,9 @@ ${
 
     fn tLocal(env: TEnv, s: Sym) -> VType {
         const settled: VType | not = findLocalT(env.settled, s.id)
-        if (settled is some) return settled
+        if (settled is given) return settled
         const own: VType | not = findLocalT(env.locals, s.id)
-        if (own is some) return own
+        if (own is given) return own
         return VType.Unknown
     }
 
@@ -10741,8 +10742,8 @@ ${
     fn sameVT(a: VType, b: VType) -> boolean {
         const x: Type | not = knownOf(a)
         const y: Type | not = knownOf(b)
-        if (x is some && y is some) return sameType(x, y)
-        if (x is some || y is some) return false
+        if (x is given && y is given) return sameType(x, y)
+        if (x is given || y is given) return false
         return isAbsentVT(a) == isAbsentVT(b)
     }
 
@@ -10787,7 +10788,7 @@ ${
     // `T` for a `T | not`; any other type as it is.
     fn unMaybe(ty: Type) -> Type {
         const i: Type | not = maybeInner(ty)
-        if (i is some) return i
+        if (i is given) return i
         return ty
     }
 
@@ -10806,7 +10807,7 @@ ${
     // A sequence's element type as written before `[]`: a `T | not` element is
     // parenthesized — `(int | not)[]`, not `int | not[]` (r7 N2).
     fn elemName(e: Type) -> string {
-        if (maybeInner(e) is some) return "(" + typeName(e) + ")"
+        if (maybeInner(e) is given) return "(" + typeName(e) + ")"
         return typeName(e)
     }
 
@@ -10830,11 +10831,11 @@ ${
     fn fitsType(v: Type, target: Type) -> Verdict {
         const ti: Type | not = maybeInner(target)
         const vi: Type | not = maybeInner(v)
-        if (ti is some) {
-            if (vi is some) return fitsType(vi, ti)
+        if (ti is given) {
+            if (vi is given) return fitsType(vi, ti)
             return fitsType(v, ti)
         }
-        if (vi is some) {
+        if (vi is given) {
             // a `T | not` value into a `T` position: wrong if `T` is; else it
             // may be `not` — not provable here (§42 narrowing is its own rule)
             const r: Verdict = fitsType(vi, target)
@@ -10859,7 +10860,7 @@ ${
         if (tk == 4) {
             const vs: Sym | not = namedOf(v)
             const tsym: Sym | not = namedOf(target)
-            if (vs is some && tsym is some) {
+            if (vs is given && tsym is given) {
                 if (vs.id == tsym.id) return Verdict.Fits
             }
             return Verdict.Fails
@@ -10867,7 +10868,7 @@ ${
         if (tk == 5) {
             const ve: Type | not = seqElem(v)
             const te: Type | not = seqElem(target)
-            if (ve is some && te is some) return fitsType(ve, te)
+            if (ve is given && te is given) return fitsType(ve, te)
             return Verdict.Fails
         }
         if (vk == tk) return Verdict.Fits
@@ -10909,7 +10910,7 @@ ${
     }
 
     fn optional(ty: Type) -> Type {
-        if (maybeInner(ty) is some) return ty
+        if (maybeInner(ty) is given) return ty
         return Type.Maybe(ty)
     }
 
@@ -11216,7 +11217,7 @@ ${
         for (const d of t.decls) {
             for (const f of d.fields) {
                 const c: Sym | not = f.wcap
-                if (c is some) {
+                if (c is given) {
                     if (c.id == cap.id) return f
                 }
             }
@@ -11280,17 +11281,17 @@ ${
     fn mayBeNot(x: Type, target: Type) -> boolean {
         const xi: Type | not = maybeInner(x)
         const ti: Type | not = maybeInner(target)
-        if (xi is some) {
+        if (xi is given) {
             // both optional: the outer `not` is admitted — look inside (r7 B)
-            if (ti is some) return mayBeNot(xi, ti)
+            if (ti is given) return mayBeNot(xi, ti)
             return fitsType(xi, target) != Verdict.Fails
         }
         // an optional TARGET admits the outer `not`, not a `not` element
         // inside (`[@o.n]` into `int[] | not`, r7 B)
-        if (ti is some) return mayBeNot(x, ti)
+        if (ti is given) return mayBeNot(x, ti)
         const xe: Type | not = seqElem(x)
         const te: Type | not = seqElem(target)
-        if (xe is some && te is some) return mayBeNot(xe, te)
+        if (xe is given && te is given) return mayBeNot(xe, te)
         return false
     }
 
@@ -11301,7 +11302,7 @@ ${
     }
 
     fn checkAbsent(env: TEnv, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
-        if (maybeInner(target) is some) return ts
+        if (maybeInner(target) is given) return ts
         return report(ts, env, span, "E-TYPE-041", "`not` is assigned to " + what + " of non-optional type `" + typeName(target) + "` — only a `" + typeName(target) + " | not` position holds `not` (§42.3.1)")
     }
 
@@ -11463,7 +11464,7 @@ ${
         for (const s of lambdaSyms(valueFact(env.t.values, e.nid))) {
             const a: Type | not = annotOf(env.t, s)
             let vt: VType = VType.Unknown
-            if (a is some) vt = known(a)
+            if (a is given) vt = known(a)
             env2 = tWithLocal(env2, s, vt)
         }
         return rvt(VType.Unknown, typeExpr(env2, body, ts).ts)
@@ -11532,7 +11533,7 @@ ${
         const ts2: TypeState = checkNumOperand(env, x, r.vt, "unary `-`", r.ts)
         if (ts2.diags.length > r.ts.diags.length) return rvt(VType.Unknown, ts2)
         const xt: Type | not = knownOf(r.vt)
-        if (xt is some && isNumericKind(xt)) return rvt(r.vt, ts2)
+        if (xt is given && isNumericKind(xt)) return rvt(r.vt, ts2)
         return rvt(VType.Unknown, ts2)
     }
 
@@ -11612,7 +11613,7 @@ ${
         if (ts.diags.length > ts0.diags.length) return ts
         const x: Type | not = knownOf(a)
         const y: Type | not = knownOf(b)
-        if (x is some && y is some) {
+        if (x is given && y is given) {
             if (kindOf(unMaybe(x)) == 0 && kindOf(unMaybe(y)) == 0) {
                 return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s — `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
             }
@@ -11632,7 +11633,7 @@ ${
     fn numKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
         if (isNumericKind(t)) return ts
         const inner: Type | not = maybeInner(t)
-        if (inner is some) {
+        if (inner is given) {
             if (isNumericKind(inner)) return notNarrowed(env, x, t, what, ts)
         }
         return operandType(env, x, typeName(t), what, "numbers", ts)
@@ -11650,7 +11651,7 @@ ${
     fn boolKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
         if (kindOf(t) == 3) return ts
         const inner: Type | not = maybeInner(t)
-        if (inner is some) {
+        if (inner is given) {
             if (kindOf(inner) == 3) return notNarrowed(env, x, t, what, ts)
         }
         return operandType(env, x, typeName(t), what, "booleans", ts)
@@ -11683,7 +11684,7 @@ ${
     fn plusKnown(env: TEnv, x: AExpr, t: Type, ts: TypeState) -> TypeState {
         if (isNumericKind(t) || kindOf(t) == 2) return ts
         const inner: Type | not = maybeInner(t)
-        if (inner is some) {
+        if (inner is given) {
             if (isNumericKind(inner) || kindOf(inner) == 2) return notNarrowed(env, x, t, "`+`", ts)
         }
         return operandType(env, x, typeName(t), "`+`", "two numbers or two strings", ts)
@@ -11976,7 +11977,7 @@ ${
     // it is no built-in (undeclared — the scope rules report it — or inside a
     // region the binder skipped).
     fn unboundCall(env: TEnv, c: AExpr, callee: AExpr) -> boolean {
-        if (nameFact(env.t.names, callee.nid) is some) return false
+        if (nameFact(env.t.names, callee.nid) is given) return false
         return valueFact(env.t.values, c.nid) is not
     }
 
@@ -12025,7 +12026,7 @@ ${
     fn condKnown(env: TEnv, c: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
         if (kindOf(t) == 3) return ts
         const inner: Type | not = maybeInner(t)
-        if (inner is some) {
+        if (inner is given) {
             // RULED S442 (six typer questions): "a bare `bool | not` in a
             // condition is an ERROR naming both fixes (`@f is some` / `@f ==
             // true`) — the same spelling otherwise flips meaning inside vs
@@ -12070,7 +12071,7 @@ ${
 
     fn divType(a: VType, b: VType) -> VType {
         const j: VType = numJoin(a, b)
-        if (knownOf(j) is some) return known(Type.Num)
+        if (knownOf(j) is given) return known(Type.Num)
         return VType.Unknown
     }
 
@@ -12098,7 +12099,7 @@ ${
             first = false
         }
         const et: Type | not = knownOf(elem)
-        if (et is some) return rvt(known(Type.Seq(et, anySeqGrants())), ts)
+        if (et is given) return rvt(known(Type.Seq(et, anySeqGrants())), ts)
         return rvt(VType.Unknown, ts)
     }
 
@@ -12133,7 +12134,7 @@ ${
         if (inManyFiles(env.t, fi.name)) return rvt(VType.Unknown, ts)
         if (n >= 0 && n == args.length) ts = checkArgs(env, fi.name, args, ts)
         const ret: Type | not = fi.ret
-        if (ret is some) return rvt(known(ret), ts)
+        if (ret is given) return rvt(known(ret), ts)
         return rvt(VType.Unknown, ts)
     }
 
@@ -12162,9 +12163,9 @@ ${
     fn hasInt(t: Type) -> boolean {
         if (kindOf(t) == 0) return true
         const i: Type | not = maybeInner(t)
-        if (i is some) return hasInt(i)
+        if (i is given) return hasInt(i)
         const el: Type | not = seqElem(t)
-        if (el is some) return hasInt(el)
+        if (el is given) return hasInt(el)
         return false
     }
 
@@ -12186,7 +12187,7 @@ ${
         while (i < args.length) {
             let pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
             if (env.t.unresolved.params.indexOf(pnids[i]) >= 0) pt = not      // r8: an unresolved parameter type
-            if (pt is some) {
+            if (pt is given) {
                 const what: string = "argument " + (i + 1) + " of `" + name + "`"
                 // r7 A: full assignability for EVERY parameter type (§7.5.1 position 3)
                 ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
@@ -12241,7 +12242,7 @@ ${
     fn checkNotElems(env: TEnv, e: AExpr, target: Type, ts: TypeState) -> TypeState {
         const es: AExpr[] = arrayElems(e)
         if (es.length == 0) return ts
-        if (knownOf(exprType0(ts, e.nid)) is some) return ts
+        if (knownOf(exprType0(ts, e.nid)) is given) return ts
         const te: Type | not = seqElem(unMaybe(target))
         if (te is not) return ts
         let out: TypeState = ts
@@ -12342,13 +12343,13 @@ ${
                 const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
                 let vt: VType = VType.Unknown
                 if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) vt = known(fs[i].ty)
-                if (whole && err is some) vt = known(Type.Named(err))
-                if (bs is some) aenv = tWithLocal(aenv, bs, vt)
+                if (whole && err is given) vt = known(Type.Named(err))
+                if (bs is given) aenv = tWithLocal(aenv, bs, vt)
                 i = i + 1
             }
             const body: AArmBody = a.body
             for (const x of armExprOf(body)) {
-                if (assignValue(x) is some) {
+                if (assignValue(x) is given) {
                     ts = typeStmtExpr(aenv, x, ts)
                 } else {
                     ts = typeExpr(aenv, x, ts).ts
@@ -12522,7 +12523,7 @@ ${
     fn assignKey(env: TEnv, e: AExpr, t: AExpr) -> string {
         if (exprName(t) != "") {
             const s: Sym | not = assignedLocal(effectFact(env.t.effects, e.nid))
-            if (s is some) return "#" + s.id
+            if (s is given) return "#" + s.id
             return ""
         }
         return nKey(env, t)
@@ -12569,7 +12570,7 @@ ${
         const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
         if (sym is not) return keepTEnv(env, r.ts)
         const annot: Type | not = annotOf(env.t, sym)
-        if (annot is some) {
+        if (annot is given) {
             let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, "`" + name + "`", r.ts)
             ts2 = checkIntInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", ts2)
             ts2 = checkNotElems(env, init, annot, checkLitFields(env, init, ts2))
@@ -12598,7 +12599,7 @@ ${
         const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
         const around: TEnv = tCallUnnarrow(env, subject)
         let inner: TEnv = around
-        if (sym is some) inner = tWithLocal(around, sym, r.vt)
+        if (sym is given) inner = tWithLocal(around, sym, r.vt)
         const rb: RTEnv = typeBlockEnv(inner, body, r.ts)
         return keepTEnv(joinPaths(env, rb.env, false, around, false), rb.ts)
     }
@@ -12637,19 +12638,19 @@ ${
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
         // s444: `@xs[i].f = v` — the value against the element field's type
         const ea: FieldRef[] | not = elemAtPath(f)
-        if (ea is some) {
+        if (ea is given) {
             const r0: RVT = typeExpr(env, value, ts0)
             let ts3: TypeState = typePlace(env, target, VType.Unknown, r0.ts)
             const tt: Type | not = pathType(env.t, ea)
-            if (tt is some) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
+            if (tt is given) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
             // r2 F3: the index names a POSITION — an `int`
             const ix: AExpr | not = elemAtIndex(f)
-            if (ix is some) ts3 = checkIndex(env, exprType0(ts3, ix.nid), ix.span, ts3)
+            if (ix is given) ts3 = checkIndex(env, exprType0(ts3, ix.nid), ix.span, ts3)
             return record(ts3, e.nid, VType.Unknown)
         }
         // s442: a recognized append / prepend shape — each ELEMENT is the written value
         const ed: EditsOf | not = editsOf(f)
-        if (ed is some) return typeEditsAssign(env, e, target, value, ed, ts0)
+        if (ed is given) return typeEditsAssign(env, e, target, value, ed, ts0)
         const ws: SpreadWrite[] = effectWrites(f)
         const ps: AProp[] = propsOf(value)
         if (ws.length > 0 && ws[0].prop >= 0) {
@@ -12668,7 +12669,7 @@ ${
         let placeType: VType = VType.Unknown
         if (ws.length == 1) {
             const wt: Type | not = writeValueType(env.t, ws[0].w)
-            if (wt is some) placeType = known(wt)
+            if (wt is given) placeType = known(wt)
         } else {
             // a local rebinding (§66.11.5): it widens the local's joined type.
             // Only a BARE local target (`a = v`) is the local itself; `a.n = v`
@@ -12676,10 +12677,10 @@ ${
             // not compute — unchecked (provable-or-silent), and not joined.
             const ls: Sym | not = assignedLocal(f)
             const bareLocal: boolean = exprName(target) != ""
-            if (ls is some) {
+            if (ls is given) {
                 if (bareLocal) placeType = tLocal(env, ls)
                 const la: Type | not = annotOf(env.t, ls)
-                if (la is some && bareLocal) {
+                if (la is given && bareLocal) {
                     // a write to an annotated local: checked like a cell write
                     ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
                 } else if (la is not && bareLocal) {
@@ -12769,7 +12770,7 @@ ${
     fn typePlace(env: TEnv, target: AExpr, placeType: VType, ts: TypeState) -> TypeState {
         let ts2: TypeState = ts
         const obj: AExpr | not = memberObj(target)
-        if (obj is some) ts2 = typeExpr(env, obj, ts2).ts
+        if (obj is given) ts2 = typeExpr(env, obj, ts2).ts
         return record(ts2, target.nid, placeType)
     }
 
@@ -12947,7 +12948,7 @@ ${
         if (e.star) return ts
         if (e.tag == "each") return typeEach(env, e, ts)
         const u: Sym | not = useDecl(elemFact(env.t.elems, e.nid))
-        if (u is some) return typeUse(env, e, u, ts)
+        if (u is given) return typeUse(env, e, u, ts)
         return typeHtml(env, e, ts)
     }
 
@@ -13022,7 +13023,7 @@ ${
                 av = ra.vt
             }
             const i: int = constructIndex(attrFact(env.t.attrs, a.nid))
-            if (di is some && i >= 0 && i < di.fields.length) {
+            if (di is given && i >= 0 && i < di.fields.length) {
                 const f: FieldInfo = di.fields[i]
                 if (f.annotated && f.trusted) {
                     const what: string = "`" + a.name + "` of `<" + e.tag + ">`"
@@ -13041,7 +13042,7 @@ ${
         let ts: TypeState = ts0
         let src: VType = VType.Unknown
         const inA: AAttr | not = attrNamed(e.attrs, "in")
-        if (inA is some) {
+        if (inA is given) {
             const r: RVT = typeInValue(env, inA.value, ts)
             ts = r.ts
             src = r.vt
@@ -13049,15 +13050,15 @@ ${
         }
         let elem: VType = VType.Unknown
         const st: Type | not = knownOf(src)
-        if (st is some) {
+        if (st is given) {
             const et: Type | not = seqElem(unMaybe(st))
-            if (et is some) elem = known(et)
+            if (et is given) elem = known(et)
         }
         let renv: TEnv = env
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
-        if (bind is some) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
+        if (bind is given) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
-        if (keyA is some) ts = typeAttrValue(renv, keyA.value, ts).ts
+        if (keyA is given) ts = typeAttrValue(renv, keyA.value, ts).ts
         return typeNodes(renv, e.kids, ts)
     }
 
@@ -13099,7 +13100,7 @@ ${
         if (x is not) return ts
         let s: Type = x
         const inner: Type | not = maybeInner(x)
-        if (inner is some) s = inner                     // `S | not` is admitted when `S` is a sequence (§17.7.4)
+        if (inner is given) s = inner                     // `S | not` is admitted when `S` is a sequence (§17.7.4)
         if (kindOf(s) == 5) return ts
         return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence (an array or a tuple), and this value is `" + typeName(x) + "` — for a count, `<each of=N>` (§17.7.2)")
     }
@@ -13139,7 +13140,7 @@ ${
         for (const l of cur) {
             const before: VType | not = findLocalT(prev, l.id)
             let keep = false
-            if (before is some) keep = sameVT(before, l.vt)
+            if (before is given) keep = sameVT(before, l.vt)
             if (keep) {
                 out = out.concat([l])
             } else {
@@ -13178,12 +13179,12 @@ ${
         for (const f of files) {
             for (const af of fnItems(f.items)) {
                 const s: Sym | not = bindSym(bindFact(t.binds, af.nid))
-                if (s is some) {
+                if (s is given) {
                     const fi: FnInfo | not = fnInfoOf(t, s)
-                    if (fi is some) {
+                    if (fi is given) {
                         const at: AType | not = af.ret
                         let refused: boolean = inManyFiles(t, fi.name)
-                        if (at is some && !isVoidType(at) && fi.ret is not) refused = true
+                        if (at is given && !isVoidType(at) && fi.ret is not) refused = true
                         if (refused) out = out.concat([s.id])
                     }
                 }
@@ -13233,7 +13234,7 @@ ${
                 for (const sc of stateChildOf(c)) { ts = typeNodes(env, sc.body, ts) }
             }
             const r: AElem | not = fd.renders
-            if (r is some) ts = typeElem(env, r, ts)
+            if (r is given) ts = typeElem(env, r, ts)
             ts = typeValidatorArgs(env, fd.validators, ts)
         }
         return ts
@@ -13275,7 +13276,7 @@ ${
     fn typeUserDecl(env: TEnv, d: ADecl, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0)
         // s442: its child fields' markup (only a user declaration has child fields)
-        if (declByNid(env.t, d.nid) is some) ts = typeFieldMarkup(env, childFields(d.body), ts)
+        if (declByNid(env.t, d.nid) is given) ts = typeFieldMarkup(env, childFields(d.body), ts)
         const r: AElem | not = d.renders
         if (r is not) return ts
         return typeElem(env, r, ts)
@@ -13320,7 +13321,7 @@ ${
 
     fn initBlamed(env: TEnv, f: FieldInfo, ts: TypeState) -> boolean {
         const e: AExpr | not = valueExpr(f.init)
-        if (e is some) return condBlamed(env, e, ts)
+        if (e is given) return condBlamed(env, e, ts)
         return hasErrIn(env.errs, f.span) || hasErrIn(env.blame.spans, f.span)
     }
 
@@ -13390,12 +13391,12 @@ ${
             let pvt: VType = VType.Unknown
             const trusted: boolean = paramsTrusted(env.errs, [p]) && env.t.unresolved.params.indexOf(p.nid) < 0
             if (trusted) pvt = paramType(pf)
-            if (s is some) {
+            if (s is given) {
                 fenv = tWithLocal(fenv, s, pvt)
                 // s460 (Blame.syms): a WRITTEN type that was refused (Rule C);
                 // an unannotated parameter is not blamed — its type is simply
                 // unresolved, which is what the condition rule reports (§42.4 5)
-                if (!trusted && p.ty is some) fenv = tWithRefused(fenv, s)
+                if (!trusted && p.ty is given) fenv = tWithRefused(fenv, s)
             }
         }
         return typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts)
@@ -13547,7 +13548,7 @@ ${
     fn scanExpr(cx: WCx, e: AExpr, acc0: BodyScan) -> BodyScan {
         const acc1: BodyScan = stmtWrite(cx, e, acc0)
         const c: AExpr | not = calleeOf(e.k)
-        if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc1))
+        if (c is given) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc1))
         let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc1)))
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
         for (const b of exprBlocks(e)) { acc = scanBlock(cx, b, acc) }      // s451 (Ue): an arm block
@@ -13589,7 +13590,7 @@ ${
         if (di is not || df.idx < 0 || df.idx >= di.fields.length) return not
         const fi: FieldInfo = di.fields[df.idx]
         const w: Sym | not = fi.wcap
-        if (w is some) return not                        // a cell: seeded once, at construction
+        if (w is given) return not                        // a cell: seeded once, at construction
         return fi
     }
 
@@ -13649,18 +13650,18 @@ ${
     fn scanCall(cx: WCx, e: AExpr, callee: AExpr, acc: BodyScan) -> BodyScan {
         // an edit / removal / `reset` call is a WRITE, recorded at its statement
         // (stmtWrite); its receiver is only read
-        if (effectFact(cx.t.effects, e.nid) is some || exprName(callee) == "reset" || isEditCallee(callee)) return scanExprs(cx, receiverOf(callee), acc)
+        if (effectFact(cx.t.effects, e.nid) is given || exprName(callee) == "reset" || isEditCallee(callee)) return scanExprs(cx, receiverOf(callee), acc)
         // a host call (`Date.now()`) or a sequence call (`xs.filter(λ)`): the
         // receiver is read; the arrow function is an argument (scanned by the caller)
         if (isHostOrSeq(valueFact(cx.t.values, e.nid))) return scanExprs(cx, receiverOf(callee), acc)
         const f: NameFact | not = nameFact(cx.t.names, callee.nid)
         const s: Sym | not = fnSymOf(f)
-        if (s is some) return addRef(acc, { sym: s.id, name: s.hint + "()", span: e.span, file: cx.file, asValue: false })
+        if (s is given) return addRef(acc, { sym: s.id, name: s.hint + "()", span: e.span, file: cx.file, asValue: false })
         // A callee name with no fact was already reported (E-SCOPE-001), and any
         // other callee shape is refused by the binder — only a NAME that resolves
         // to something other than a function reaches here: a local, a parameter,
         // a field. Rule 4: fail closed.
-        if (f is some && exprName(callee) != "") {
+        if (f is given && exprName(callee) != "") {
             return addUnproven(acc, { what: "`" + exprName(callee) + "(…)` calls through `" + exprName(callee) + "`, which is " + calleeKind(f) + ", not a declared scrml function", span: e.span, file: cx.file })
         }
         return scanExprs(cx, receiverOf(callee), acc)
@@ -13816,7 +13817,7 @@ ${
     fn stmtWrite(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
         const f: EffectFact | not = effectFact(cx.t.effects, e.nid)
         const cap: Sym | not = writtenCap(f)
-        if (cap is some) return addWrite(acc, { cell: cellLabel(cx.t, cap), span: e.span, file: cx.file, fix: factFix(cx.t, e, f, cap) })
+        if (cap is given) return addWrite(acc, { cell: cellLabel(cx.t, cap), span: e.span, file: cx.file, fix: factFix(cx.t, e, f, cap) })
         const syn: string = syntacticWrite(e)
         if (syn != "") return addWrite(acc, { cell: syn, span: e.span, file: cx.file, fix: shapeFix(e, "") })
         return acc
@@ -13860,7 +13861,7 @@ ${
         for (const d of t.decls) {
             for (const f of d.fields) {
                 const w: Sym | not = f.wcap
-                if (w is some && w.id == cap.id) {
+                if (w is given && w.id == cap.id) {
                     if (d.kind == DeclKind.Program) return "@" + f.sym.hint
                     return "@" + d.sym.hint + "." + f.sym.hint
                 }
@@ -13873,7 +13874,7 @@ ${
         for (const d of t.decls) {
             for (const f of d.fields) {
                 const w: Sym | not = f.wcap
-                if (w is some && w.id == cap.id) return f
+                if (w is given && w.id == cap.id) return f
             }
         }
         return not
@@ -13883,7 +13884,7 @@ ${
         if (isResetFact(f)) return FixShape.ResetFix
         let init: string = ""
         const fi: FieldInfo | not = fieldOfCap(t, cap)
-        if (fi is some) init = initKey(fi.init)
+        if (fi is given) init = initKey(fi.init)
         return shapeFix(e, init)
     }
 
@@ -13894,14 +13895,14 @@ ${
         if (exprName(callTarget(e)) == "reset") return FixShape.ResetFix
         const v: AExpr | not = assignedValue(e)
         if (v is not) return FixShape.OtherFix
-        if (calleeOf(v.k) is some) return FixShape.RequestFix
+        if (calleeOf(v.k) is given) return FixShape.RequestFix
         if (init != "" && litKey(v) == init) return FixShape.ResetFix
         return FixShape.OtherFix
     }
 
     fn callTarget(e: AExpr) -> AExpr {
         const c: AExpr | not = calleeOf(e.k)
-        if (c is some) return c
+        if (c is given) return c
         return e
     }
 
@@ -14017,7 +14018,7 @@ ${
     // `@x… = v`, `reset(@x…)`, `@x….push(v)` and the other edit / removal calls.
     fn syntacticWrite(e: AExpr) -> string {
         const t: AExpr | not = assignedTarget(e)
-        if (t is some) {
+        if (t is given) {
             const root: string = placeRoot(t)
             if (isReactiveRoot(root)) return root
             return ""
@@ -14047,9 +14048,9 @@ ${
         let acc: BodyScan = emptyScan()
         for (const f of ds.info.fields) { acc = scanValue(cx, f.init, acc) }
         const d: ADecl | not = ds.d
-        if (d is some) {
+        if (d is given) {
             const r: AElem | not = d.renders
-            if (r is some) acc = usedDecls(cx, r.kids, acc)
+            if (r is given) acc = usedDecls(cx, r.kids, acc)
         }
         return acc
     }
@@ -14068,9 +14069,9 @@ ${
         let acc: BodyScan = acc0
         for (const n of ns) {
             const e: AElem | not = elemOfNode(n.k)
-            if (e is some) {
+            if (e is given) {
                 const used: Sym | not = useOf(elemFact(cx.t.elems, e.nid))
-                if (used is some) acc = addRef(acc, { sym: used.id, name: constructionLabel(used.hint), span: e.span, file: cx.file, asValue: false })
+                if (used is given) acc = addRef(acc, { sym: used.id, name: constructionLabel(used.hint), span: e.span, file: cx.file, asValue: false })
                 acc = usedDecls(cx, e.kids, acc)
             }
         }
@@ -14158,12 +14159,12 @@ ${
         const i: int = nodeIdx(s.nodes, r.sym)
         if (i < 0) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
         const sw: Witness | not = writeWitness(s, i)
-        if (sw is some) {
+        if (sw is given) {
             if (quiet && throughValue(r, sw.chain)) return []
             return [writesThrough(w, r, sw)]
         }
         const su: UWitness | not = openWitness(s, i)
-        if (su is some) {
+        if (su is given) {
             if (quiet && throughValue(r, su.chain)) return []
             return [unprovenThrough(r, su)]
         }
@@ -14270,9 +14271,9 @@ ${
         for (const ds of g.decls) {
             const p: AProgram | not = ds.p
             const d: ADecl | not = ds.d
-            if (p is some) {
+            if (p is given) {
                 for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file)) }
-            } else if (d is some) {
+            } else if (d is given) {
                 out = out.concat(declInits(d, "@" + d.name, ds.file))
             }
             for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
@@ -14400,7 +14401,7 @@ ${
         const i: int = nodeIdx(s.nodes, r.sym)
         if (i < 0) return [valueUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
         const sw: Witness | not = writeWitness(s, i)
-        if (sw is some) {
+        if (sw is given) {
             if (rootsOnly && throughValue(r, sw.chain)) return []
             const chain: string = chainText(sw.chain) + " → " + sw.site.cell
             let how: string = "writes `" + sw.site.cell + "` through a call: `" + chain + "`"
@@ -14409,7 +14410,7 @@ ${
             return [valueWrites(p, how, r.span, r.file)]
         }
         const su: UWitness | not = openWitness(s, i)
-        if (su is some) {
+        if (su is given) {
             if (rootsOnly && throughValue(r, su.chain)) return []
             return [valueUnproven(p, "it reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what, r.span, r.file)]
         }
@@ -14471,7 +14472,7 @@ ${
                             const r: RResetEdge = resetEdgeOf(g, prog, d, a, st)
                             st = r.st
                             const e: ResetEdge | not = r.e
-                            if (e is some) edges = edges.concat([e])
+                            if (e is given) edges = edges.concat([e])
                         }
                     }
                 }
@@ -14517,7 +14518,7 @@ ${
         }
         const f: FieldInfo = prog.info.fields[target]
         const gr: TransitionGraph | not = f.graph
-        if (gr is some) {
+        if (gr is given) {
             const refused: string = engineRefusals(g, gr, f.init)
             if (refused != "") {
                 st = addDiag(st, prog.file, a.span, "E-RESET-ON-ENGINE-REFUSED", "`reset-on=` on `@" + d.name + "` resets it along its `rule=` graph, and every state other than the reset target must admit the target: " + refused + " (§6.8.4 rule 6) — add the target to those states' `rule=`")
@@ -14579,7 +14580,7 @@ ${
         if (i < 0) return "`@" + n + "` is not a declared cell in scope"
         const f: FieldInfo = pi.fields[i]
         const w: Sym | not = f.wcap
-        if (w is some) return ""
+        if (w is given) return ""
         const m: FieldMode = f.mode
         return match m {
             .Derived :> "`@" + n + "` is a DERIVED cell — it has no change event of its own; list the cells it is computed from"
@@ -14739,11 +14740,11 @@ ${
         for (const it of p.items) {
             for (const d of declsOfItem(it)) {
                 if (!isNestedUserDecl(d) && !hasErrIn(errs, d.span)) {
-                    if (attrNamed(d.mods, "persist") is some) declared = declared.concat([d.name])
+                    if (attrNamed(d.mods, "persist") is given) declared = declared.concat([d.name])
                     const r: RPersist = persistOf(g, prog, d, st)
                     st = r.st
                     const pi: PersistInfo | not = r.info
-                    if (pi is some) {
+                    if (pi is given) {
                         const other: string = keyHolder(infos, pi.persist)
                         if (other != "") {
                             st = addDiag(st, prog.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + d.name + "` and `@" + other + "` persist under the same key \"" + pi.persist.key + "\" in the same storage — each would restore and overwrite the other's value; the SPEC names no code for it (`key=` is \"an external storage contract\", §6.14.1 rule 2), so the bootstrap refuses it — give each cell its own key")
@@ -14803,8 +14804,8 @@ ${
         const km: AAttr | not = attrNamed(d.mods, "key")
         const pp: AAttr | not = attrNamed(d.mods, "prepaint")
         if (pm is not) {
-            if (pp is some) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
-            if (km is some) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"" + sessionWord() + "\"` (§6.14.1)")
+            if (pp is given) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            if (km is given) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"" + sessionWord() + "\"` (§6.14.1)")
             return { info: not, st: st }
         }
         let ok = true
@@ -14831,11 +14832,11 @@ ${
             }
         }
         const sv: AAttr | not = attrNamed(d.mods, "server")
-        if (sv is some) {
+        if (sv is given) {
             st = addDiag(st, prog.file, pm.span, "E-PERSIST-WITH-SERVER", "`persist=` on `@" + d.name + "`, a server-authority cell — it is already durable, and browser persistence is legal only where authority is local (§6.14.3 rule 3)")
             ok = false
         }
-        if (pp is some) {
+        if (pp is given) {
             st = addDiag(st, prog.file, pp.span, "E-BOOTSTRAP-UNSUPPORTED", "`prepaint` (REFLECT, §6.14.4.2) is not in the bootstrap — it emits no pre-paint script; drop `prepaint` (the cell restores when the client runs, §6.14.2 rule 7)")
             ok = false
         }
@@ -14848,7 +14849,7 @@ ${
             ok = false
         }
         if (!ok) return { info: not, st: st }
-        if (store is some) return { info: { sym: f.sym, persist: { store: store, key: key } }, st: st }
+        if (store is given) return { info: { sym: f.sym, persist: { store: store, key: key } }, st: st }
         return { info: not, st: st }
     }
 
@@ -14863,7 +14864,7 @@ ${
                 .Seeded :> "a cell whose contract grants no write"
             }
         }
-        if (store is some && store == PersistStore.Local && (f.graph is some || !f.grants.replace)) {
+        if (store is given && store == PersistStore.Local && (f.graph is given || !f.grants.replace)) {
             return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
         }
         // r8: an unresolved type is never checked against
@@ -14876,7 +14877,7 @@ ${
     }
 
     fn contractText(f: FieldInfo) -> string {
-        if (f.graph is some) return "a `rule=` graph"
+        if (f.graph is given) return "a `rule=` graph"
         return "no `replace` grant"
     }
 
@@ -14958,7 +14959,7 @@ ${
             for (const c of childFields(d.body)) { shadow = shadow.concat([c.name]) }
         }
         const r: AElem | not = d.renders
-        if (r is some) st = holdInElem(file, r, declared, shadow, st)
+        if (r is given) st = holdInElem(file, r, declared, shadow, st)
         for (const c of d.body) {
             const ch: ADeclChild = c
             const kids: ANode[] = match ch {
@@ -14994,7 +14995,7 @@ ${
     fn holdAttrDiag(file: string, a: AAttr, declared: string[], shadow: string[], st: AS) -> AS {
         const x: AExpr | not = valueExpr(a.value)
         let n: string = ""
-        if (x is some) n = atName(x)
+        if (x is given) n = atName(x)
         if (n == "") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`hold=` takes one persisted cell, `hold=@cell` — any other operand form is OPEN (O-062-10)")
         if (declared.indexOf(n) >= 0 && shadow.indexOf(n) < 0) {
             return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`hold=@" + n + "` (HOLD, §6.14.4.3) is not in the bootstrap — it emits no pre-paint script, so nothing would be held; drop `hold=` (the region shows the default until the client restores `@" + n + "`, §6.14.2 rule 7)")
@@ -15147,7 +15148,7 @@ ${
     fn sqlsInExpr(e: AExpr) -> SqlSite[] {
         let out: SqlSite[] = []
         const q: ASql | not = sqlOfK(e.k)
-        if (q is some) out = [{ nid: e.nid, span: e.span, q: q }]
+        if (q is given) out = [{ nid: e.nid, span: e.span, q: q }]
         for (const x of exprKids(e)) { out = out.concat(sqlsInExpr(x)) }
         for (const b of exprBlocks(e)) { out = out.concat(sqlsInBlock(b)) }   // s451 (Ue): an arm block
         return out
@@ -15260,11 +15261,11 @@ ${
     fn readsInExpr(t: Tables, e: AExpr) -> CellUse[] {
         // an assignment: only its value is read; an edit / reset call: its arguments
         const v: AExpr | not = assignedValue(e)
-        if (v is some) return readsInExpr(t, v)
-        if (effectFact(t.effects, e.nid) is some) {
+        if (v is given) return readsInExpr(t, v)
+        if (effectFact(t.effects, e.nid) is given) {
             // `reset(@x)`: its argument is the write's target, not a read
             const c: AExpr | not = calleeOf(e.k)
-            if (c is some && exprName(c) == "reset") return []
+            if (c is given && exprName(c) == "reset") return []
             let acc: CellUse[] = []
             for (const x of exprKids(e).slice(1)) { acc = acc.concat(readsInExpr(t, x)) }
             return acc
@@ -15408,7 +15409,7 @@ ${
     fn fnRefs(all: FnFacts[], f: FnFacts) -> FnRef[] {
         let out: FnRef[] = []
         for (const r of f.scan.refs) {
-            if (factsOf(all, r.sym) is some) out = out.concat([r])
+            if (factsOf(all, r.sym) is given) out = out.concat([r])
         }
         return out
     }
@@ -15506,13 +15507,13 @@ ${
         for (const it of items) {
             const k: AItemK = it.k
             const f: AFn | not = fnOfItemK(k)
-            if (f is some) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
+            if (f is given) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
             const p: AProgram | not = programOfK(k)
-            if (p is some) acc = dbsInProgram(g, file, p, scope, acc)
+            if (p is given) acc = dbsInProgram(g, file, p, scope, acc)
             const n: ANode | not = markupOfItemK(k)
-            if (n is some) acc = dbsInNode(g, file, n, scope, acc)
+            if (n is given) acc = dbsInNode(g, file, n, scope, acc)
             const d: ADecl | not = declOfItemK(k)
-            if (d is some) acc = dbsInDecl(g, file, d, scope, acc)
+            if (d is given) acc = dbsInDecl(g, file, d, scope, acc)
         }
         return acc
     }
@@ -15521,14 +15522,14 @@ ${
     // its single direct-child `<db src=>` (ruling 11a); else not a scope.
     fn dbsInProgram(g: Globals, file: string, p: AProgram, outer: int, acc: RDbs) -> RDbs {
         const a: AAttr | not = attrNamed(p.attrs, "db")
-        if (a is some) {
+        if (a is given) {
             const rd: RDb = dbOfAttr(file, a, acc.st)
             return dbsInItems(g, file, p.items, p.nid, withScope(acc, p.nid, rd.db, rd.st))
         }
         const sup: AElem | not = supplyingDb(g, p.items)
-        if (sup is some) {
+        if (sup is given) {
             const src: AAttr | not = attrNamed(sup.attrs, "src")
-            if (src is some) {
+            if (src is given) {
                 const rs: RDb = dbOfAttr(file, src, acc.st)
                 const both: RDbs = withScope(withScope(acc, p.nid, rs.db, rs.st), sup.nid, rs.db, rs.st)
                 return dbsInItems(g, file, p.items, p.nid, both)
@@ -15543,10 +15544,10 @@ ${
         let found: AElem[] = []
         for (const it of items) {
             const n: ANode | not = markupOfItemK(it.k)
-            if (n is some) {
+            if (n is given) {
                 const e: AElem | not = elemOfANode(n)
-                if (e is some) {
-                    if (isDbElem(g, e) && attrNamed(e.attrs, "src") is some) found = found.concat([e])
+                if (e is given) {
+                    if (isDbElem(g, e) && attrNamed(e.attrs, "src") is given) found = found.concat([e])
                 }
             }
         }
@@ -15582,7 +15583,7 @@ ${
         let inner: int = scope
         if (isDbElem(g, e)) {
             const src: AAttr | not = attrNamed(e.attrs, "src")
-            if (src is some) {
+            if (src is given) {
                 if (scopeDbOf(acc.scopes, e.nid) is not) {
                     const rd: RDb = dbOfAttr(file, src, acc.st)
                     acc = withScope(acc, e.nid, rd.db, rd.st)
@@ -15610,7 +15611,7 @@ ${
             }
         }
         const r: AElem | not = d.renders
-        if (r is some) acc = dbsInElem(g, file, r, scope, acc)
+        if (r is given) acc = dbsInElem(g, file, r, scope, acc)
         return acc
     }
 
@@ -15802,7 +15803,7 @@ ${
         let seen: int[] = []
         for (const x of ss) {
             const d: Db | not = x.db
-            if (d is some) {
+            if (d is given) {
                 if (seen.indexOf(d.sym.id) < 0) {
                     out = out.concat([d])
                     seen = seen.concat([d.sym.id])
@@ -15892,7 +15893,7 @@ ${
                 const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
                 st = sr.st
                 const si: SqlInfo | not = sr.info
-                if (si is some) {
+                if (si is given) {
                     sqls = sqls.concat([si])
                     if (sr.creates) creates = creates.concat([si.db.id])
                 }
@@ -15939,7 +15940,7 @@ ${
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is some) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
             }
         }
         return st
@@ -15961,11 +15962,11 @@ ${
         for (const ref of fnRefs(all, f)) {
             if (placeOf(ps, ref.sym) != PlaceK.Server) {
                 const c: Reach | not = clientReachOf(sum, ref.sym)
-                if (c is some) {
+                if (c is given) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-002", "server function `" + f.name + "()` reaches client-only code: `" + [f.name + "()"].concat(c.chain).join(" → ") + "` " + c.what + " (§12.4 — reactive state and the DOM live in the browser, S451 R2). Pass the value in as an argument, extract the shared logic into a pure function (§33) that touches no cell, or duplicate the logic inside `" + f.name + "()`")
                 }
                 const u: Reach | not = routeOpenOf(sum, ref.sym)
-                if (u is some) {
+                if (u is given) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: `" + [f.name + "()"].concat(u.chain).join(" → ") + "` — " + u.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
                 }
             }
@@ -15988,13 +15989,13 @@ ${
         if (fs is not) return st
         for (const p of fs.f.params) {
             const pty: Type | not = boundParamType(bindFact(cx.t.binds, p.nid))
-            if (pty is some) st = wireDiag(cx, f, pty, "E-ROUTE-004", "parameter `" + p.name + "`", p.span, st)
+            if (pty is given) st = wireDiag(cx, f, pty, "E-ROUTE-004", "parameter `" + p.name + "`", p.span, st)
         }
         const rt: Type | not = fs.info.ret
-        if (rt is some) {
+        if (rt is given) {
             const r: AType | not = fs.f.ret
             let sp: ASpan = f.span
-            if (r is some) sp = r.span
+            if (r is given) sp = r.span
             st = wireDiag(cx, f, rt, "E-ROUTE-003", "return type", sp, st)
         }
         return st
@@ -16115,7 +16116,7 @@ ${
                 const c: Reach | not = waitsOf(sum, r.sym)
                 if (pk == PlaceK.Server) {
                     st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
-                } else if (c is some) {
+                } else if (c is given) {
                     st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`) — " + waitFix())
                 }
             }
@@ -16132,7 +16133,7 @@ ${
     fn positionDb(g: Globals, rd: RDbs, file: string, s: SqlSite, st: AS) -> AS {
         if (file != g.entry) return st
         const scope: int = siteScope(rd.sites, s.nid)
-        if (scope >= 0 && scopeDbOf(rd.scopes, scope) is some) return st
+        if (scope >= 0 && scopeDbOf(rd.scopes, scope) is given) return st
         return addDiag(st, file, s.span, "E-SQL-004", sql004Text())
     }
 
@@ -16455,7 +16456,7 @@ ${
                     }
                 }
                 const pr: PosRef | not = posRefTo(prefs, c.f.sym)
-                if (pr is some && who == "") {
+                if (pr is given && who == "") {
                     who = pr.what
                     at = pr.file + ":" + lineOf(g, pr.file, pr.span.start)
                 }
@@ -16633,9 +16634,9 @@ ${
     // an `if` without `else`. What a `return <call>` returns is the CALLEE's
     // (retCallsOf — the summary closes it, G7).
     fn ownNoValue(fs: FnSrc) -> boolean {
-        if (fs.info.ret is some || fs.info.failable) return false
+        if (fs.info.ret is given || fs.info.failable) return false
         const r: AType | not = fs.f.ret
-        if (r is some) return declaresVoid(r)
+        if (r is given) return declaresVoid(r)
         if (blockHasBareReturn(fs.f.body)) return true
         return !blockYieldsOnAllPaths(fs.f.body)
     }
@@ -16712,9 +16713,9 @@ ${
         if (x is not) return []
         let out: int[] = retCallsExpr(t, x)
         const c: AExpr | not = calleeOf(x.k)
-        if (c is some) {
+        if (c is given) {
             const s: Sym | not = fnSymOf(nameFact(t.names, c.nid))
-            if (s is some) out = [s.id].concat(out)
+            if (s is given) out = [s.id].concat(out)
         }
         return out
     }
@@ -16956,7 +16957,7 @@ ${
 
     fn planBraced(cx: PCx, b: ABlock, ps: PS) -> PS {
         const r: AExpr | not = blockReference(b)
-        if (r is some) return planReference(cx, r, ps)
+        if (r is given) return planReference(cx, r, ps)
         return planBlock(cx, b, ps)
     }
 
@@ -16984,7 +16985,7 @@ ${
         const pk: PlaceK = placeOf(cx.s.places, sym)
         if (pk == PlaceK.Server || pk == PlaceK.Split) return false
         if (cx.s.inherited.indexOf(sym) >= 0) return false
-        return waitsOf(cx.s, sym) is some
+        return waitsOf(cx.s, sym) is given
     }
 
     fn planBlock(cx: PCx, b: ABlock, ps0: PS) -> PS {
@@ -17034,7 +17035,7 @@ ${
         const k: AExprK = e.k
         const t: AExpr | not = assignTargetOf(k)
         const v: AExpr | not = assignedValue(e)
-        if (t is some && v is some) {
+        if (t is given && v is given) {
             let pos: Pos = okPos()
             if (isIndexTarget(t)) pos = { refused: "the value of an indexed write (`@xs[i] = …`) — its index is evaluated in the write, after the value; it arrives with the U1b ANF follow-up. Evaluate the call into a `const` first" }
             return planExpr(cx, v, pos, ps).ps
@@ -17172,16 +17173,16 @@ ${
     fn planExpr(cx: PCx, e: AExpr, pos: Pos, ps0: PS) -> PX {
         let ps: PS = ps0
         const sp: SuspendK | not = suspendKindAt(cx, e)
-        if (sp is some) {
+        if (sp is given) {
             // the point's own arguments are evaluated before it suspends
             ps = planKids(cx, suspendArgs(e), pos, ps).ps
             if (pos.refused != "") return { found: true, ps: pdiag(ps, cx, e.span, suspendWhat(sp) + " in " + pos.refused) }
             ps = routedChecks(cx, e, sp, ps)
             // a suspending handling form's arms run in its continuation: none may suspend (first cut)
             const hh: AHandled | not = handledOf(e.k)
-            if (hh is some) ps = planArms(cx, hh, ps)
+            if (hh is given) ps = planArms(cx, hh, ps)
             const bind: Sym | not = handledOutcome(cx, e)
-            if (bind is some) return { found: true, ps: addAt(ps, { nid: e.nid, bind: bind, kind: sp }) }
+            if (bind is given) return { found: true, ps: addAt(ps, { nid: e.nid, bind: bind, kind: sp }) }
             const rb: RPSym = pmint(ps, "settled")
             return { found: true, ps: addAt(rb.ps, { nid: e.nid, bind: rb.s, kind: sp }) }
         }
@@ -17313,23 +17314,23 @@ ${
     // Is `e` a suspension point (and of which kind)?
     fn suspendKindAt(cx: PCx, e: AExpr) -> SuspendK | not {
         const h: AHandled | not = handledOf(e.k)
-        if (h is some) {
+        if (h is given) {
             const hf: HandledFact | not = handledFactIn(cx.t, e.nid)
-            if (hf is some) {
+            if (hf is given) {
                 const rf: RemoteFact | not = hf.remote
-                if (rf is some) {
+                if (rf is given) {
                     if (callerRemote(cx.s, rf.caller)) return SuspendK.SRemote(rf.callee)
                     return not
                 }
             }
             const f: Sym | not = callSym(cx.t, h.subject)
-            if (f is some) {
+            if (f is given) {
                 if (waitingClientFn(cx, f.id)) return SuspendK.SWaits(f)
             }
             return not
         }
         const c: Sym | not = callSym(cx.t, e)
-        if (c is some) {
+        if (c is given) {
             if (waitingClientFn(cx, c.id)) return SuspendK.SWaits(c)
         }
         return not
@@ -17363,7 +17364,7 @@ ${
     fn suspendArgs(e: AExpr) -> AExpr[] {
         const h: AHandled | not = handledOf(e.k)
         let call: AExpr = e
-        if (h is some) call = h.subject
+        if (h is given) call = h.subject
         const k: AExprK = call.k
         return match k {
             .Call(callee: c, args: a) :> a
@@ -17410,7 +17411,7 @@ ${
         const fs: FnSrc | not = fnSrcOf(cx.g, f.id)
         if (fs is not) return ps
         if (fs.info.arity < 0) ps = pdiag(ps, cx, e.span, "a client call of `" + fs.info.name + "`, whose parameters are not all typed — the call's arguments cross the wire, encoded against each parameter's declared type (§57); declare every parameter's type")
-        if (fs.info.ret is some || retOf(ps.plan, f.id) is some) return ps
+        if (fs.info.ret is given || retOf(ps.plan, f.id) is given) return ps
         if (!fs.info.failable && yieldsNoValue(cx.s, f.id)) return ps          // no value: the 204 contract
         const rt: RetType = provenReturn(cx, fs.f.body)
         const ty: Type | not = rt.ty
@@ -17441,7 +17442,7 @@ ${
             const vt: VType = exprType(cx.t, x.nid)
             const t: Type | not = knownType(vt)
             if (t is not) return { ty: not, why: "the type of a returned value is not proven" }
-            if (ty is some) {
+            if (ty is given) {
                 if (!(ty == t)) return { ty: not, why: "its returns carry different types" }
             }
             ty = t
@@ -17700,7 +17701,7 @@ ${
         for (const n of ns) {
             const k: ANodeK = n.k
             const el: AElem | not = elemOfNode(k)
-            if (el is some) out = addNames(out, elemBound(cx, el, all))
+            if (el is given) out = addNames(out, elemBound(cx, el, all))
         }
         return out
     }
@@ -17769,7 +17770,7 @@ ${
         if (e is not) return []
         let out: BindKey[] = []
         const used: Sym | not = useDeclOf(elemFact(t.elems, e.nid))
-        if (used is some) {
+        if (used is given) {
             for (const a of e.attrs) {
                 const i: int = constructIdx(attrFact(t.attrs, a.nid))
                 if (i >= 0) out = out.concat([{ decl: used.id, idx: i }])
@@ -17926,7 +17927,7 @@ ${
         for (const n of ns) {
             const k: ANodeK = n.k
             const el: AElem | not = elemOfNode(k)
-            if (el is some) {
+            if (el is given) {
                 if (elemCarries(cx, el)) return true
             }
         }
@@ -18027,7 +18028,7 @@ ${
         for (const f of files) {
             for (const it of f.items) {
                 const imp: AImport | not = importOf(it)
-                if (imp is some) {
+                if (imp is given) {
                     for (const n of imp.names) {
                         if (!exportedAnywhere(g, n.name)) {
                             st = addDiag(st, f.path, n.span, "E-IMPORT-NOT-EXPORTED", "`" + n.name + "` is not exported by `" + imp.from + "`")
@@ -18057,7 +18058,7 @@ ${
         }
         for (const d of g.decls) {
             const ad: ADecl | not = d.d
-            if (ad is some) {
+            if (ad is given) {
                 if (ad.name == name && ad.exported) return true
             }
         }

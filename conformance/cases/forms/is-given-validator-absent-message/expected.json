@@ -1,0 +1,20 @@
+{
+  "id": "forms-is-given-validator-absent-message",
+  "description": "§55.1 / §55.10 — the presence validator's OWN failure and inline message: `<nick is given(\"…\")> = not` starts absent, so `is given` fails with `.NotSome` and its Level-1 inline message renders at `<errors of=>`; isValid is false. (The sibling forms/is-given-validator-inline-message exercises only the length message, because a bound text input never holds `not`.)",
+  "language-version": "1.0",
+  "spec": "§55.10",
+  "rationale": "§55.1: `is given` — value exists (absence `not` fails), error tag `.NotSome`, bareword-or-inline-override. §55.10 Level 1: a per-field inline override wins over the shipped default. Provenance: ruling:user-voice-scrml.md S462 \"a, validator too, go\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-VALIDATOR-", "E-SCOPE-", "E-STATE-", "E-MARKUP-", "E-CODEGEN-"],
+    "state": {
+      "signup.nick.isValid": false,
+      "signup.nick.errors": [{ "tag": "NotSome" }]
+    },
+    "domAnchored": [
+      { "selector": "#err .scrml-error", "count": 1 },
+      { "selector": "#err .scrml-error", "text": "Please give a nickname" }
+    ]
+  }
+}

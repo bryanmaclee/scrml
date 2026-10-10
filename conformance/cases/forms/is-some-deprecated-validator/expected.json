@@ -1,0 +1,16 @@
+{
+  "id": "forms-is-some-deprecated-validator",
+  "description": "§55.1 / §63.5 — the soft-deprecated validator spelling `<nick is some length(>=3)>`. It declares the cell (before S462 impl#1 silently dropped it) and is the same predicate as `<nick is given>`: typing \"ab\" leaves a present value, so the presence predicate passes and does not short-circuit, and `length(>=3)` fails — errors = [.LengthFailed] only, #all renders one .scrml-error, isValid false. One W-IS-SOME-DEPRECATED (Info). Runtime identical to forms/is-given-validator.",
+  "language-version": "deprecated",
+  "spec": "§55.1",
+  "rationale": "§55.1 (S462) — `<x is some>` is the soft-deprecated spelling of `<x is given>`: the same predicate, the same `.NotSome` tag, the same short-circuit (§55.12), and each site SHALL surface W-IS-SOME-DEPRECATED. §42.2.5 — `\"\"`-like present values pass the presence predicate (it is not `req`). Provenance: ruling:user-voice-scrml.md S462 \"a, validator too, go\".",
+  "expect": {
+    "codes": ["W-IS-SOME-DEPRECATED"],
+    "codeCounts": { "W-IS-SOME-DEPRECATED": 1 },
+    "severity": { "W-IS-SOME-DEPRECATED": "info" },
+    "notCodePrefixes": ["E-"],
+    "input": [{ "input": "#nick", "value": "ab" }],
+    "state": { "signup.nick.isValid": false },
+    "domAnchored": [{ "selector": "#all .scrml-error", "count": 1 }]
+  }
+}

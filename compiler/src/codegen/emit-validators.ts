@@ -5,7 +5,7 @@
  * `ValidatorEntry` objects), emit a derived computation that walks the
  * validator entries in declaration order, calls C6's `_scrml_validator_fire`
  * per entry, accumulates a list of `ValidationError`-shaped objects with the
- * §55.12 short-circuit rule (req/is some fail on empty cell → skip remaining),
+ * §55.12 short-circuit rule (req/is given fail on empty cell → skip remaining),
  * and produces TWO derived outputs:
  *
  *   - `<qualifiedField>.errors`  — array of ValidationError objects
@@ -66,11 +66,11 @@
  *
  * # Short-circuit (§55.12)
  *
- * When the validator's name is `"req"` or `"is some"` AND the fire returns
+ * When the validator's name is `"req"` or `"is given"` AND the fire returns
  * non-null (i.e., the predicate failed), the runner does an early `return errors;`
  * so subsequent validators aren't run. Per SPEC §55.12 lines 25337-25339:
  *
- *   "Short-circuit rule: when `req` (or `is some`) FAILS on an empty / null
+ *   "Short-circuit rule: when `req` (or `is given`) FAILS on an empty / null
  *    cell, the remaining validators are SKIPPED. Only `.Required` (or
  *    `.NotSome`) is reported."
  */
@@ -237,7 +237,7 @@ export function emitValidatorRunnerSidecar(
  * Emit a single JS block-statement that fires one validator and either:
  *   - pushes the error onto `errors` and continues (composition case), OR
  *   - pushes the error onto `errors` and `return errors;` (short-circuit case
- *     for `req` / `is some`).
+ *     for `req` / `is given`).
  *
  * The block is wrapped in a `{ ... }` so `const error` doesn't shadow across
  * iterations.
@@ -246,14 +246,14 @@ function emitOneValidatorBlock(validator: any, exprCtx: EmitExprContext): string
   const name = validator.name as string;
   const argsExprs = lowerValidatorArgs(validator, exprCtx);
 
-  // §55.12 short-circuit: req / is some failure on empty/null cell terminates.
+  // §55.12 short-circuit: req / is given failure on empty/null cell terminates.
   // The C6 runtime returns null on pass; non-null on fail. Per SPEC §55.12:
-  // "when req (or is some) FAILS on an empty / null cell, the remaining
+  // "when req (or is given) FAILS on an empty / null cell, the remaining
   //  validators are SKIPPED."
   // The "empty/null cell" condition is enforced by the predicate's fail return —
-  // req/is some only fail on empty/null per their semantics (§55.1, §42.2.5),
-  // so a non-null fire-result FROM req or is some IS the short-circuit signal.
-  const isShortCircuiter = (name === "req" || name === "is some");
+  // req/is given only fail on empty/null per their semantics (§55.1, §42.2.5),
+  // so a non-null fire-result FROM req or is given IS the short-circuit signal.
+  const isShortCircuiter = (name === "req" || name === "is given" || name === "is some");
 
   // C1 (R27): the two-bound range form `length(>=N, <=M)` (SPEC §55.1 worked
   // example) lowers to MULTIPLE relational-predicate args. The runtime

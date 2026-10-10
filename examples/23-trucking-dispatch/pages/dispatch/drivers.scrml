@@ -151,7 +151,7 @@
                                       </span>
                                   </td>
                                   <td class="px-3 py-3 text-sm text-slate-700">
-                                      <span if=(d.current_location is some && d.current_location != "")>
+                                      <span if=(d.current_location is given && d.current_location != "")>
                                           ${d.current_location}
                                       </>
                                       <span if=(d.current_location is not || d.current_location == "") class="text-slate-400">
@@ -159,7 +159,7 @@
                                       </>
                                   </td>
                                   <td class="px-3 py-3 text-sm">
-                                      <a if=(d.current_load_id is some) class="text-blue-600 hover:underline" href="/dispatch/loads/${d.current_load_id}">
+                                      <a if=(d.current_load_id is given) class="text-blue-600 hover:underline" href="/dispatch/loads/${d.current_load_id}">
                                           Load #${d.current_load_id}
                                           <span class="text-xs text-slate-500 block">
                                               ${d.current_origin_city} → ${d.current_destination_city}
