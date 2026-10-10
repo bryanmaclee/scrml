@@ -1,0 +1,24 @@
+// §42.2.3 / §63 (S462) — the SOFT-DEPRECATED in-place presence guard, kept in the legacy form ON
+// PURPOSE: during the window it runs identically to `if (x is given) { … }` and surfaces one
+// W-GIVEN-PRESENCE-DEPRECATED per guard. Its canonical twin is
+// condition/given-presence-canonical-twin. Do NOT run `scrml fix` over this case.
+${
+    <seen> = "init"
+    <both> = "init"
+    <blank> = "init"
+
+    function go() {
+        let name: string | not = "ada"
+        let age: int | not = not
+        let empty: string | not = ""
+        given name :> { @seen = "hello " + name }
+        given name, age :> { @both = "both present" }
+        given empty :> { @blank = "empty string is present" }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="seen">${@seen}</p>
+    <p id="both">${@both}</p>
+    <p id="blank">${@blank}</p>
+</program>

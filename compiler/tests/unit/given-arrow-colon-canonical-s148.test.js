@@ -124,20 +124,29 @@ describe("§A: given-guard separatorGlyph preserved on the AST node", () => {
 
 // ---------------------------------------------------------------------------
 // §B — W-GIVEN-ARROW-LEGACY firing scope (standalone given guards)
+//
+// S462 ("a, go") — the in-place presence guard itself is soft-deprecated
+// (W-GIVEN-PRESENCE-DEPRECATED, §42.2.3 / §63). A standalone `given x => { … }`
+// now fires THAT code once, and NOT W-GIVEN-ARROW-LEGACY as well: one site, one
+// diagnostic, whose message names the whole rewrite (`if (x is given) { … }`),
+// which retires the separator together with the guard. W-GIVEN-ARROW-LEGACY
+// remains only for the §66.7.5 rebind head `given c = @h => { … }`.
 // ---------------------------------------------------------------------------
 
 describe("§B: W-GIVEN-ARROW-LEGACY guard-context scope", () => {
-  test("`given x => { ... }` fires the lint once (info severity)", () => {
+  test("`given x => { ... }` fires W-GIVEN-PRESENCE-DEPRECATED once, not W-GIVEN-ARROW-LEGACY (S462 — no double-fire)", () => {
     const result = compile("b/eq.scrml", PROGRAM("  given x => { use(x) }"));
-    const lints = diagsOf(result, "W-GIVEN-ARROW-LEGACY");
+    expect(diagsOf(result, "W-GIVEN-ARROW-LEGACY").length).toBe(0);
+    const lints = diagsOf(result, "W-GIVEN-PRESENCE-DEPRECATED");
     expect(lints.length).toBe(1);
     expect(lints[0].severity).toBe("info");
-    expect(lints[0].message).toContain(":>");
+    expect(lints[0].message).toContain("if (x is given)");
   });
 
-  test("multi-var `given x, y => { ... }` fires the lint once", () => {
+  test("multi-var `given x, y => { ... }` fires W-GIVEN-PRESENCE-DEPRECATED once, not W-GIVEN-ARROW-LEGACY", () => {
     const result = compile("b/multi.scrml", PROGRAM("  given x, y => { use(x, y) }"));
-    expect(diagsOf(result, "W-GIVEN-ARROW-LEGACY").length).toBe(1);
+    expect(diagsOf(result, "W-GIVEN-ARROW-LEGACY").length).toBe(0);
+    expect(diagsOf(result, "W-GIVEN-PRESENCE-DEPRECATED").length).toBe(1);
   });
 
   test("`given x :> { ... }` does NOT fire the lint", () => {
@@ -151,10 +160,10 @@ describe("§B: W-GIVEN-ARROW-LEGACY guard-context scope", () => {
     expect(diagsOf(result, "W-GIVEN-ARROW-LEGACY").length).toBe(0);
   });
 
-  test("info-level partition: W-GIVEN-ARROW-LEGACY lands in result.warnings, never result.errors (S93)", () => {
+  test("partition: W-GIVEN-PRESENCE-DEPRECATED on a `=>` guard lands in result.warnings, never result.errors (S93)", () => {
     const result = compile("b/partition.scrml", PROGRAM("  given x => { use(x) }"));
-    const inWarnings = (result.warnings || []).filter((e) => e.code === "W-GIVEN-ARROW-LEGACY");
-    const inErrors = (result.errors || []).filter((e) => e.code === "W-GIVEN-ARROW-LEGACY");
+    const inWarnings = (result.warnings || []).filter((e) => e.code === "W-GIVEN-PRESENCE-DEPRECATED");
+    const inErrors = (result.errors || []).filter((e) => e.code === "W-GIVEN-PRESENCE-DEPRECATED" || e.code === "W-GIVEN-ARROW-LEGACY");
     expect(inWarnings.length).toBe(1);
     expect(inErrors.length).toBe(0);
   });

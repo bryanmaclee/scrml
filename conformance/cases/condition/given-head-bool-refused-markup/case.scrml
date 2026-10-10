@@ -1,0 +1,7 @@
+// §42.2.3 (S462 "a") — the same refusal inside a markup `${ … }`: a `given` head that is a
+// comparison is E-SYNTAX-044; write `${ if (@count > 0) { … } }`.
+<count>: int = 1
+
+<main>
+    ${ given @count > 0 :> { <p id="pos">positive</p> } }
+</main>

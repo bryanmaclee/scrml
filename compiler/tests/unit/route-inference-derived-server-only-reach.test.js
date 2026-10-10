@@ -528,7 +528,7 @@ ${IMPORT}
 ${IMPORT}
 <pw> = "secret"
 <ok> = true
-\${ given @ok { const <h> = hashPassword(@pw) } }
+\${ given @ok :> { const <h> = hashPassword(@pw) } }
 <div>hi</div>
 </program>`;
     expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(1);

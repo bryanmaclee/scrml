@@ -7,34 +7,34 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1613 of 1613 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1622 of 1622 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 144 | 8.9% |
+| PASS | 152 | 9.4% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 56 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 620 | 38.4% |
-| UNSUPPORTED | 793 | 49.2% |
+| NOT-TWINNED | 622 | 38.3% |
+| UNSUPPORTED | 792 | 48.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 200; of those, 144 hold (72.0%). Runtime half executed on the bootstrap for 46 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 208; of those, 152 hold (73.1%). Runtime half executed on the bootstrap for 48 case(s).
 
-- **Vacuous** passes: 11 of 144 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **133**.
+- **Vacuous** passes: 11 of 152 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **141**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 556 · parse-reject 237.
+UNSUPPORTED by reason: bootstrap-unsupported 554 · parse-reject 238.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **715** — PASS 81 · FAIL 52 · UNSUPPORTED 582. Twin holds 81 (non-vacuous 73). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **722** — PASS 89 · FAIL 52 · UNSUPPORTED 581. Twin holds 89 (non-vacuous 81). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (622 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 70 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -46,9 +46,9 @@ NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
 - 41 — rhs-decl: declaration in a markup position (⚑ O38)
 - 35 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
+- 33 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
-- 31 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
@@ -105,7 +105,7 @@ NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
-| condition | 26 | 18 | · | · | · | 5 | 3 | · | · |
+| condition | 35 | 23 | · | · | · | 7 | 5 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -114,7 +114,7 @@ NOT-TWINNED by reason (620 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 71 | 20 | · | 5 | · | 5 | 41 | · | · |
+| error | 71 | 23 | · | 5 | · | 5 | 38 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | · | · | 1 | · | 1 | 17 | · | · |
@@ -296,7 +296,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (144)
+### PASS / CODES-ONLY (152)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -324,6 +324,11 @@ none
 - `condition/bool-condition-pos` — PASS
 - `condition/bool-or-not-bare-neg` — PASS
 - `condition/explicit-pair-value-positions-pos` — PASS
+- `condition/given-guard-braceless-refused` — PASS · TWIN
+- `condition/given-head-bool-refused-logic` — PASS · TWIN
+- `condition/given-head-names-accepted` — PASS · TWIN
+- `condition/given-presence-canonical-twin` — PASS · TWIN
+- `condition/given-presence-deprecated-guard` — PASS · TWIN
 - `condition/known-array-if-neg` — PASS
 - `condition/known-int-if-neg` — PASS
 - `condition/known-int-markup-if-neg` — PASS
@@ -375,6 +380,8 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
+- `error/failable-match-nonexhaustive-err` — PASS · TWIN
+- `error/failable-match-nonexhaustive-ok` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
 - `error/handler-recovery-into-cell` — PASS · TWIN
@@ -382,6 +389,7 @@ none
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
+- `error/propagate-incompat-variants` — PASS · TWIN
 - `error/propagate-non-failable-callee-neg` — PASS · TWIN
 - `error/propagate-non-failable-callee-pos` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
@@ -443,7 +451,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (793)
+### UNSUPPORTED (792)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -562,6 +570,8 @@ none
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `codegen/cg-export-enum-library-rep` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `components/invalid-prop-decl-syntax-clean` — parse-reject: E-PARSE-EXPR: expected an expression, found `:`
+- `condition/given-head-bool-refused-markup` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `condition/given-presence-deprecated-arm` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `condition/known-int-while-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `condition/presence-bare-optional-while-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `condition/unresolved-unannotated-param-neg` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
@@ -703,8 +713,6 @@ none
 - `error/failable-handler-lift` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/failable-handler-lift-success` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `error/failable-match-nonexhaustive-err` — twin · bootstrap-unsupported: `given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)
-- `error/failable-match-nonexhaustive-ok` — twin · bootstrap-unsupported: `given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)
 - `error/for-await-not-in-scrml` — twin · bootstrap-unsupported: an unannotated parameter `items` — bootstrap slice M2 needs `items: Type` (Core parameters are typed)
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-guard-in-arrow-rt` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
@@ -714,7 +722,6 @@ none
 - `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
 - `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
 - `error/match-failable-ok-arm-rt` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
-- `error/propagate-incompat-variants` — twin · bootstrap-unsupported: `given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)
 - `error/propagate-reaches-handler` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/propagate-success-unwrap` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1239,7 +1246,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (620)
+### NOT-TWINNED (622)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1372,6 +1379,8 @@ none
 - `condition/given-cell-guard-multi-all-or-nothing-pos` — not mechanical: rhs-decl: type `Item | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/given-cell-guard-worked-example-absent-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/given-cell-guard-worked-example-present-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `condition/given-presence-deprecated-markup` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `condition/given-rebind-no-presence-lint` — not mechanical: rhs-decl: type `string | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/is-given-expr-twin` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/is-some-deprecated-expr` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)

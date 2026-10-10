@@ -1,0 +1,12 @@
+{
+  "id": "condition-given-head-names-accepted",
+  "description": "§42.2.3 — the control for condition/given-head-bool-refused-*: identifier-list heads (`given a :>`, `given a, b =>`) are accepted — no E-SYNTAX-044, no error at all. Each guard surfaces the S462 soft-deprecation W-GIVEN-PRESENCE-DEPRECATED (2).",
+  "language-version": "deprecated",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: `given-guard ::= 'given' identifier-list (':>' | '=>') block` — an identifier-list head is well-formed; the in-place guard is soft-deprecated (S462 \"a, go\") and surfaces W-GIVEN-PRESENCE-DEPRECATED. Provenance: ruling:user-voice-scrml.md S462 \"a\".",
+  "expect": {
+    "codes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "codeCounts": { "W-GIVEN-PRESENCE-DEPRECATED": 2, "E-SYNTAX-044": 0 },
+    "notCodePrefixes": ["E-"]
+  }
+}

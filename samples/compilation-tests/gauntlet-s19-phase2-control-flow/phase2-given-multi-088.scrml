@@ -1,8 +1,8 @@
-// given x, y => { body } — presence guard, multi var
+// presence test, multi var — `if (x is given && y is given) { body }` (was the S462-deprecated `given x, y => { body }`; migrated by `scrml fix`)
 ${
     let first: string | not = "a"
     let last: string | not = "b"
-    given first, last => {
+    if (first is given && last is given) {
         log(first + " " + last)
     }
     function log(s: string) { let _ = s }

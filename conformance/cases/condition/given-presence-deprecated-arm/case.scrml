@@ -1,0 +1,14 @@
+// §42.2.3 / §63 (S462) — the SOFT-DEPRECATED `given x :>` match arm, kept in the legacy form ON
+// PURPOSE: it surfaces W-GIVEN-PRESENCE-DEPRECATED; its canonical spelling is `else :>` after the
+// `not :>` arm. Do NOT run `scrml fix` over this case.
+${
+    function greet(name: string | not) -> string {
+        return match name {
+            not :> "nobody"
+            given name :> "hello " + name
+        }
+    }
+}
+<program>
+    <p id="out">${greet("ada")}</p>
+</program>

@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 113 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
+// 115 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -98,6 +98,7 @@ ${
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
             "W-ARM-PIPE-LEGACY" :> Severity.Info
+            "W-GIVEN-PRESENCE-DEPRECATED" :> Severity.Info
             "W-IS-SOME-DEPRECATED" :> Severity.Info
             "W-MATCH-ARROW-LEGACY" :> Severity.Info
             // §34 Severity: Error
@@ -187,6 +188,7 @@ ${
             "E-SQL-008" :> Severity.Error
             "E-STRUCT-DUPLICATE-KEY" :> Severity.Error
             "E-SYNTAX-010" :> Severity.Error
+            "E-SYNTAX-044" :> Severity.Error
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
             "E-TYPE-020" :> Severity.Error

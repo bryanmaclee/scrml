@@ -1,0 +1,13 @@
+{
+  "id": "condition-given-head-bool-refused-markup",
+  "description": "§42.2.3 — inside a markup `${ … }`, a `given` head that is a comparison (`given @count > 0 :> { <p>…</p> }`) is not an identifier-list and SHALL be refused with E-SYNTAX-044 (exactly once), as in logic context. No W-GIVEN-PRESENCE-DEPRECATED on a malformed head.",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"A `given` head SHALL contain only an identifier-list\"; the refusal applies in both logic and markup-`${}` contexts (the E-SYNTAX-044 / E-SYNTAX-045 family is context-independent). Provenance: ruling:user-voice-scrml.md S462 \"a\".",
+  "expect": {
+    "codes": ["E-SYNTAX-044"],
+    "codeCounts": { "E-SYNTAX-044": 1 },
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "severity": { "E-SYNTAX-044": "error" }
+  }
+}

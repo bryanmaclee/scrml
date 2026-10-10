@@ -8,7 +8,7 @@ ${
     }
 
     function inner(x: int)! InnerError {
-        given x < 0 :> fail InnerError.Alpha
+        if (x < 0) { fail InnerError.Alpha }
         return 1
     }
 
