@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-given-arm-undeclared-name-neg",
+  "description": "`given n` in `match name { … }` with no `n` in scope is E-SCOPE-001 — `given` narrows an existing variable, it binds nothing (S462 review F3).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"`given` narrows in place; it does NOT rebind to a new name … A `given` head SHALL contain only an identifier-list\" and its match-arm form is `given x :> handlePresence(x)` with `x` the scrutinee. The arm used to compile and throw `ReferenceError: n is not defined` at page init.",
+  "expect": {
+    "codes": [
+      "E-SCOPE-001"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

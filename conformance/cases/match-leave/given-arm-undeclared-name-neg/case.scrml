@@ -1,0 +1,11 @@
+${
+    let name: string | not = "alice"
+    match name {
+        not :> log("absent")
+        given n :> log("present")
+    }
+    function log(s: string) { let _ = s }
+}
+<program>
+    <p>ok</>
+</>

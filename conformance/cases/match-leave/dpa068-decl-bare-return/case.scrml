@@ -1,0 +1,25 @@
+${
+    type E:enum = { Boom(msg: string), Other }
+    type E2:enum = { Wrapped(msg: string) }
+    type K:enum = { A, B, C }
+    <out> : string = "none"
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    function risky(n: number)! E {
+        if (n < 0) { fail E.Boom("neg") }
+        return n
+    }
+    function lab(k: K) -> string {
+        const y = match k {
+            .A :> "a"
+            .B :> return "early"
+            .C :> "c"
+        }
+        return "got:" + y
+    }
+    function go() {
+        @out = lab(K.B)
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@out}</>

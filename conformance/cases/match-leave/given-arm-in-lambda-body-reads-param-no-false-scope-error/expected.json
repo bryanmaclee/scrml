@@ -1,0 +1,13 @@
+{
+  "id": "match-leave-given-arm-in-lambda-body-reads-param-no-false-scope-error",
+  "description": "`(q) => match @k { given n :> q + n … }` — an arm body reading the enclosing lambda's parameter gets no false E-SCOPE-001 (S462 review X1).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "As above: the lambda parameter `q` is in scope in the arm body.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCOPE-001"
+    ]
+  }
+}

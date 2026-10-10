@@ -4594,11 +4594,17 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     return emitStructuredMatchExpr(bridgedMulti, { errors: ctx.errors });
   }
 
+  // S462 review M1 — a match whose FIRST arm is a `given` arm was re-read by the statement
+  // parser at AST time (ast-builder `attachStructuredExpressionMatches`); lower
+  // those structured arms, so the `given` arm is not dropped.
+  const structured = (node as { structured?: { body?: unknown[] } }).structured;
   const bridgedNode = {
     kind: "match-expr",
     header: "",
     headerExpr: node.subject,
-    body: node.rawArms.map((arm) => ({ kind: "bare-expr", expr: arm })),
+    body: structured && Array.isArray(structured.body)
+      ? structured.body
+      : node.rawArms.map((arm) => ({ kind: "bare-expr", expr: arm })),
   };
   // Forward the error channel so the structured emitter's D hard-error
   // (E-CG-003 on a zero-lowerable-arm match — gate-emitted-js-parse-invariant-

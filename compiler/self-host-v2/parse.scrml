@@ -680,15 +680,27 @@ ${
         }
         const end: int = armEnd(tp)
         const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
-        // review LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's own spelling):
-        // a `fail` arm is a one-statement block (it leaves the function)
-        if (failAhead(sub)) {
+        // §18.2 `leave-stmt` (S462, ruling dpa-068 W1): `arm-body ::= expression |
+        // block-body | leave-stmt`. A bare `fail <variant>` / `return [expr]` arm is
+        // a one-statement block — it leaves the function exactly as `{ fail … }` /
+        // `{ return … }` does. (`fail` was admitted here before the ruling, citing
+        // a §19.5.2 spelling S454 had removed; `return` fell through to the
+        // expression parser and was reported as an undeclared name, E-SCOPE-001.)
+        if (failAhead(sub) || isWord(sub, "return")) {
+            const kw: string = cur(sub).text
             const start: int = cur(sub).start
-            const rf: RStmt = parseFail(sub)
+            const rf: RStmt = parseStmt(sub)
             let ft: TP = rf.tp
-            if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `fail`", cur(ft))
+            if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `" + kw + "`", cur(ft))
             const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
             return { body: AArmBody.ArmBlock(fb), tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
+        }
+        // `break` / `continue` are leave statements too (§18.2), but the bootstrap
+        // has no loops for them to leave.
+        if (isWord(sub, "break") || isWord(sub, "continue")) {
+            const bt: TP = diagAt(sub, "E-BOOTSTRAP-UNSUPPORTED", "a `" + cur(sub).text + "` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap", cur(sub))
+            const rb: RExpr = mkE(bt, cur(sub).start, AExprK.Recovered)
+            return { body: AArmBody.ArmExpr(rb.e), tp: { toks: tp.toks, i: end, nid: rb.tp.nid, diags: rb.tp.diags, file: tp.file } }
         }
         const r: RExpr = parseAssign(sub)
         let st: TP = r.tp
@@ -700,9 +712,11 @@ ${
     }
 
     // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
-    // a `|` (the next arm), the first token on a later line, or the start of
-    // the next arm on the same line (`.A :> 1  .B :> 2` — a pattern followed
-    // by its separator, which no expression contains).
+    // a `|` (the next arm), the first token on a later line unless the line
+    // above ends in a §7.2.2 rule-2 continuation token (`.Boom(m) :> "a:" +⏎ m`
+    // is one arm — dpa-068 D12), or the start of the next arm on the same line
+    // (`.A :> 1  .B :> 2` — a pattern followed by its separator, which no
+    // expression contains).
     fn armEnd(tp: TP) -> int {
         let i: int = tp.i
         let depth: int = 0
@@ -710,7 +724,7 @@ ${
             const x: PTok = tp.toks[i]
             if (x.cls == TC.End) return i
             if (depth == 0 && i > tp.i) {
-                if (x.line != tp.toks[i - 1].line) return i
+                if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
                 if (x.cls == TC.Punct && x.text == "|") return i
                 if (armStartsAt(tp.toks, i)) return i
             }
@@ -722,6 +736,24 @@ ${
             i = i + 1
         }
         return tp.toks.length - 1
+    }
+
+    // §7.2.2 rule 2 — does token `k`, the last of its line, continue the
+    // expression onto the next line? The closed list: a binary operator, `=` and
+    // the compound assignments, `.` / `?.`, a conditional `?` / `:`, `,`, `=>`,
+    // `:>`, and a prefix `!` / `typeof` / `new`. A `?` written against its
+    // operand (`load(id)?`) is §19.5 propagation and ends the expression.
+    fn continuesLine(ts: PTok[], k: int) -> boolean {
+        const t: PTok = ts[k]
+        if (t.cls == TC.Keyword || t.cls == TC.Ident) {
+            return ["in", "instanceof", "is", "typeof", "new", "and", "or"].indexOf(t.text) >= 0
+        }
+        if (t.cls != TC.Punct) return false
+        if (t.text == "?") return !(k > 0 && touching(ts[k - 1], t))
+        return ["+", "-", "*", "/", "%", "**", "==", "!=", "===", "!==", "<", ">", "<=", ">=",
+                "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>",
+                "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
+                ".", "?.", ":", ",", "=>", ":>", "!"].indexOf(t.text) >= 0
     }
 
     // Does an arm's pattern start at token `i` — `.V`, `::V`, `_`, `else`,

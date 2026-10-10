@@ -1,0 +1,22 @@
+{
+  "id": "match-leave-expr-arm-continuation-joins",
+  "description": "A single-expression arm body whose line ends in `+` continues onto the next line (§7.2.2 rule 2): `.Boom(m) :> \"a:\" +⏎ m` is one arm.",
+  "language-version": "1.0",
+  "spec": "§7.2.2",
+  "rationale": "§7.2.2 \"Arm heads\": \"A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2)\"; `+` is on rule 2's closed list. (The bootstrap split this arm — dpa-068 D12.)",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-PARSE-001"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "out": "got:a:neg"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+${
+    <a> : string = "unset"
+    <b> : string = "unset"
+    <c> : string = "unset"
+    <d> : string = "unset"
+    function decl(name: string | not) -> string {
+        let out = match name {
+            not :> "absent"
+            given name :> "hi " + name
+        }
+        return out
+    }
+    function ret(name: string | not) -> string {
+        return match name {
+            not :> "none"
+            given name :> "ret " + name
+        }
+    }
+    function stmt(v: number | not) -> number {
+        match v {
+            not :> { return 1 }
+            given v :> { return 2 }
+        }
+        return 3
+    }
+    function go() {
+        @a = decl("al")
+        @b = ret("bo")
+        @c = "" + stmt(5) + stmt(not)
+        @d = decl(not)
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="a">${@a}</>
+<p id="b">${@b}</>
+<p id="c">${@c}</>
+<p id="d">${@d}</>

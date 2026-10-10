@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-top-level-given-guard-return-neg",
+  "description": "A `return` in a top-level standalone `given @name :> { return }` guard has no function to leave: E-STMT-RETURN-OUTSIDE-FUNCTION (S462 review B2).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "The guard's block runs in place at the top of the logic block; a `return` there would leave the client init function and skip the event wiring after it. §34 E-STMT-RETURN-OUTSIDE-FUNCTION.",
+  "expect": {
+    "codes": [
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

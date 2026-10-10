@@ -72,6 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
+import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
@@ -10860,6 +10861,26 @@ function annotateNodes(
     const key = nodeKey(n);
     let resolvedType: ResolvedType;
 
+    // S462 review M1 — a `match` in expression position whose FIRST arm is a
+    // `given` arm was re-read by the statement parser (ast-builder
+    // `attachStructuredExpressionMatches`); its `given` arms are checked here, in
+    // this statement's scope, exactly as an in-statement `given` arm is (head-name
+    // resolution, W-GIVEN-PRESENCE-DEPRECATED, the body). Only the `given` arms:
+    // every other arm was checked on the primary path.
+    const nestedMatches = (n as { __nestedMatches?: ASTNodeLike[] }).__nestedMatches;
+    if (Array.isArray(nestedMatches)) {
+      for (const m of nestedMatches) {
+        const mBody = (m as { body?: ASTNodeLike[] }).body;
+        if (!Array.isArray(mBody)) continue;
+        for (const arm of mBody) {
+          if (arm && typeof arm === "object" && arm.kind === "given-guard") {
+            (arm as { __inMatchBody?: boolean }).__inMatchBody = true;
+            visitNode(arm);
+          }
+        }
+      }
+    }
+
     switch (n.kind) {
       // ------------------------------------------------------------------
       // Markup element
@@ -14281,6 +14302,24 @@ function annotateNodes(
             ggSpan,
             "info",
           ));
+        }
+        // §42.2.3 — `given x` narrows an EXISTING variable in place; it binds no
+        // name ("No variable is rebound to a new name"). Each head name must
+        // therefore resolve like any other read: an undeclared one is
+        // E-SCOPE-001, not a guard that throws `ReferenceError` when it runs
+        // (S462 review F3 — `match name { given n -> … }` with no `n`).
+        // A REBIND head (`given c = @h :>`) introduces its name — its disposition is
+        // E-SYNTAX-045 / §66.7.5, not a read — and a malformed head already has
+        // its one diagnostic; neither is resolved here.
+        if (!isRebind && !malformedHead) {
+          const ggVars = Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : [];
+          const ggIsCell = Array.isArray((n as { variableIsCell?: unknown }).variableIsCell) ? (n as { variableIsCell: unknown[] }).variableIsCell : [];
+          const ggSpan2 = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          ggVars.forEach((v, i) => {
+            if (typeof v !== "string" || !v) return;
+            const identName = ggIsCell[i] === true ? `@${v}` : v;
+            checkLogicExprIdents({ kind: "ident", name: identName, span: ggSpan2 }, ggSpan2, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          });
         }
         // Walk the guard body so nested statements still get visited (the
         // default-case recursion would otherwise own this; we replicate it).
@@ -23448,6 +23487,11 @@ function checkLoopControl(
       return;
     }
 
+    // §18.2 `leave-stmt` (S462): a bare leave arm carries its statement as
+    // `leaveStmt`; it is checked exactly as the braced `{ break }` is.
+    const leaveStmt = (node as { leaveStmt?: ASTNodeLike }).leaveStmt;
+    if (leaveStmt && typeof leaveStmt === "object") walkNode(leaveStmt, loopDepth, insideFn);
+
     // For all other nodes, recurse into body/consequent/alternate/children
     const nodeBody = node.body as ASTNodeLike[] | undefined;
     if (Array.isArray(nodeBody)) walk(nodeBody, loopDepth, insideFn);
@@ -23471,6 +23515,86 @@ function checkLoopControl(
   }
 
   walk(nodes, 0, false);
+
+  checkTopLevelReturn(nodes, errors, filePath);
+}
+
+/**
+ * E-STMT-RETURN-OUTSIDE-FUNCTION (§34) — a `return` in a `${ … }` logic block
+ * OUTSIDE any function: a top-level statement, or one nested only in control
+ * flow that runs in place (`if` / loop bodies, `match` arms — braced or a bare
+ * §18.2 leave arm — and a decl-position `match`). There is no function for it
+ * to leave; emitted as-is it would leave the client's init function and skip
+ * everything after it, event wiring included (S462 review F4). Function,
+ * lambda and handler bodies, lifecycle bodies (`on mount`, `when …`) and every
+ * other construct that lowers to its own function are NOT entered: a `return`
+ * there is legal.
+ */
+function checkTopLevelReturn(nodes: ASTNodeLike[], errors: TSError[], filePath: string): void {
+  const STOP = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
+  const report = (n: ASTNodeLike): void => {
+    const s = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    errors.push(new TSError(
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      `E-STMT-RETURN-OUTSIDE-FUNCTION: \`return\` at line ${s.line} is not inside a function — it is at ` +
+      "the top level of a `${ … }` logic block (in an `if`, a loop or a `match` arm there), where there is " +
+      "no function for it to leave. Move the code into a function and `return` from that, or select with " +
+      "`if` / `match` without leaving.",
+      s,
+    ));
+  };
+  const seen = new Set<unknown>();
+  // `anchor`: for statements PARSED from an arm's text (their spans are the
+  // probe's, not the file's) the diagnostic points at the arm that holds them.
+  const inPlace = (n: unknown, anchor: ASTNodeLike | null = null): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) inPlace(c, anchor); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    switch (node.kind) {
+      case "return-stmt": report(anchor ?? node); return;
+      case "if-stmt": inPlace(node.consequent, anchor); inPlace(node.alternate, anchor); inPlace(node.body, anchor); return;
+      case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body, anchor); return;
+      // A standalone `given x :> { … }` guard runs its block in place (S462 review B2).
+      case "given-guard": inPlace(node.body, anchor); return;
+      case "match-stmt": case "match-expr":
+        // EVERY arm form — structured block, bare leave, inline text, a raw-text
+        // alternation / literal arm (`bare-expr`), a §18.19 product arm — through
+        // the one arm-body reader (S462 review N1).
+        if (Array.isArray(node.body)) {
+          for (const arm of node.body as ASTNodeLike[]) {
+            if (!arm || typeof arm !== "object") continue;
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? (arm.kind === "match-arm-block" || arm.kind === "given-guard" ? null : arm));
+          }
+        }
+        return;
+      case "guarded-expr":
+        // A `!{}` handler at the top level is in place too: `risky() !{ .X :> return }`.
+        if (Array.isArray(node.arms)) {
+          for (const arm of node.arms as ASTNodeLike[]) {
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? node);
+          }
+        }
+        return;
+      case "let-decl": case "const-decl": case "tilde-decl":
+        inPlace(node.matchExpr, anchor); inPlace(node.guardedNode, anchor); return;
+      default: return;
+    }
+  };
+  const findLogic = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) findLogic(c); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    if (typeof node.kind === "string" && STOP.has(node.kind)) return;
+    if (node.kind === "logic" && Array.isArray(node.body)) { inPlace(node.body); }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "span" || !v || typeof v !== "object") continue;
+      findLogic(v);
+    }
+  };
+  findLogic(nodes);
 }
 
 // ---------------------------------------------------------------------------

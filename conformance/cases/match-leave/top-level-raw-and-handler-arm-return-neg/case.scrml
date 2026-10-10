@@ -1,0 +1,29 @@
+${
+    type K:enum = { A, B, C }
+    type E:enum = { X, Y }
+    <k> : K = .A
+    <out> : string = "init"
+    function risky()! E { fail E.X }
+    match @k {
+        .A | .B :> return
+        .C :> @out = "c"
+    }
+    match @k {
+        .A | .B :> { return }
+        .C :> @out = "c"
+    }
+    match (@k, @k) {
+        (.A, .A) :> return
+        _ :> @out = "x"
+    }
+    risky() !{
+        .X :> return
+        .Y :> @out = "y"
+    }
+    let v = risky() !{
+        .X :> { return }
+        .Y :> 1
+    }
+}
+<button id="go" onclick=${@out = "clicked"}>go</>
+<p id="out">${@out}</>

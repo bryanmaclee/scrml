@@ -1,0 +1,23 @@
+{
+  "id": "match-leave-given-arm-legacy-arrow-keeps-body",
+  "description": "A `given x -> body` arm (the deprecated `->` match-arm separator) keeps its body, exactly as `given x :> body` does (S462 review F3).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2: a match arm separator is `:>`, with `=>` and `->` deprecated aliases that \"parse, build, and emit identically\"; §42.2.3 puts `given` in a match arm. The `->` body was dropped as `({})`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-SCOPE-001"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "a": "hi al",
+      "b": "absent"
+    }
+  }
+}

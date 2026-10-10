@@ -54,7 +54,7 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
+import { parseExprToNode, emitStringFromTree as _emitStringFromTreeForMatch, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
 import { declExtent, liveStmtNothingReason, liveLabelIsTargeted } from "../native-parser/body-top-coverage.js";
 import * as acornForEffects from "acorn";
@@ -494,6 +494,184 @@ export function mountBodyExprNode(body, parse) {
   if (!node || !node.span || typeof node.span.end !== "number") return node;
   // Non-whitespace after the parsed span = an un-consumed trailing statement.
   return body.slice(node.span.end).trim() ? undefined : node;
+}
+
+/**
+ * §7.2.2 rule 2 — the closed list of CONTINUATION tokens: a statement (and a
+ * single-expression arm body) continues onto the next line only when its line
+ * ends in one of these. Spelled as token TEXT; the KEYWORD-shaped members are
+ * the word operators (`in`, `instanceof`, `is`, `typeof`, `new`). A conditional
+ * `?` is a continuation; a `?` glued to its operand is the §19.5 propagation
+ * operator and ends the expression (rule 2, "adjacency decides the role").
+ */
+const RULE2_CONTINUATION_TEXT = new Set([
+  "+", "-", "*", "/", "%", "**", "==", "!=", "===", "!==", "<", ">", "<=", ">=",
+  "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>",
+  "=", "+=", "-=", "*=", "/=", "%=", "**=", "&&=", "||=", "??=", "&=", "|=", "^=", "<<=", ">>=", ">>>=",
+  ".", "?.", ":", ",", "=>", ":>", "->", "!",
+]);
+const RULE2_CONTINUATION_WORDS = new Set(["in", "instanceof", "is", "typeof", "new", "and", "or"]);
+
+/** Does `tok` — the last token of a line — continue the expression onto the next line? (§7.2.2 rule 2) */
+function armLineEndsInContinuation(tok, prevTok) {
+  if (!tok) return false;
+  const t = tok.text;
+  if ((tok.kind === "PUNCT" || tok.kind === "OPERATOR") && RULE2_CONTINUATION_TEXT.has(t)) return true;
+  if ((tok.kind === "KEYWORD" || tok.kind === "IDENT") && RULE2_CONTINUATION_WORDS.has(t)) return true;
+  if ((tok.kind === "PUNCT" || tok.kind === "OPERATOR") && t === "?") {
+    // A conditional `?` has whitespace before it; `load(id)?` (glued to its
+    // operand) is the §19.5 propagation operator and ends the expression.
+    const glued = !!(prevTok && prevTok.span && tok.span &&
+      typeof prevTok.span.end === "number" && prevTok.span.end === tok.span.start);
+    return !glued;
+  }
+  return false;
+}
+
+/**
+ * Does `tok` — the first token of a line — start a new item (§7.2.2 rule 5: an
+ * expression start, or an arm head at arm level) rather than lean on the line
+ * above (an operator, which §7.2.2 rule 3 makes an error)?
+ */
+function armLineStartsNewItem(tok) {
+  if (!tok) return false;
+  switch (tok.kind) {
+    case "IDENT": return !RULE2_CONTINUATION_WORDS.has(tok.text);
+    case "KEYWORD": return !RULE2_CONTINUATION_WORDS.has(tok.text);
+    case "AT_IDENT":
+    case "STRING":
+    case "NUMBER":
+    case "BLOCK_REF":
+      return true;
+    case "PUNCT":
+    case "OPERATOR":
+      return tok.text === "(" || tok.text === "[";
+    default:
+      return false;
+  }
+}
+
+/**
+ * §18.2 `leave-stmt` (S462, ruling dpa-068 W1) — a single-expression arm body
+ * that is a leave statement: `return [expr]`, `fail <variant>`, `break [Label]`,
+ * `continue [Label]`. `text` is the arm body as the arm parser collected it,
+ * which already ends where an arm body ends (§7.2.2 "Arm heads", the
+ * `armBody` extent of collectExpr). Returns `{ node }` — the same statement
+ * node the statement parser builds for that statement, so every lowering emits
+ * it as a statement of the arm (never by splicing the text, which dpa-068 D8
+ * showed changes meaning) — or `{ error }` for a malformed leave, or `null`
+ * when `text` is not a leave statement at all.
+ */
+export function parseLeaveArmBody(text, filePath, startOffset) {
+  if (typeof text !== "string") return null;
+  const t = text.trim();
+  const m = /^(return|fail|break|continue)(?![A-Za-z0-9_$])\s*([\s\S]*)$/.exec(t);
+  if (!m) return null;
+  const kw = m[1];
+  const rest = m[2].trim();
+  const span = { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + t.length, line: 1, col: 1 };
+  if (kw === "return") {
+    if (!rest) return { node: { kind: "return-stmt", expr: "", span } };
+    return { node: { kind: "return-stmt", expr: rest, exprNode: safeParseExprToNodeGlobal(rest, filePath, startOffset ?? 0), span } };
+  }
+  if (kw === "fail") {
+    const f = rest ? _parseFailExprString(t, filePath, startOffset ?? 0) : null;
+    if (!f) {
+      return { error: rest
+        ? "`" + t.slice(0, 60) + "` is not a `fail` of an error variant. A leaving arm `:> fail …` names the variant: `fail .Variant(args)` or `fail ErrorType.Variant(args)` (§19.3.1, §18.2)."
+        : "`fail` in an arm needs the error variant it fails with, starting on the same line: `:> fail .Variant(args)` (§18.2 \"Leaving arms\")." };
+    }
+    return { node: f };
+  }
+  // break / continue, with an optional label.
+  if (rest && !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rest)) {
+    return { error: "`" + kw + "` in an arm takes at most a loop label: `:> " + kw + "` or `:> " + kw + " Label` (§18.2 \"Leaving arms\")." };
+  }
+  return { node: { kind: kw === "break" ? "break-stmt" : "continue-stmt", label: rest || null, span } };
+}
+
+/**
+ * S462 review M1 — §42.2.3 "In match arms": a `given x :> body` arm. The
+ * expression parser carries a `match` written in an expression position (a call
+ * argument, `@v = match …`, `x = match …`, a derived cell) as a `match-expr`
+ * ExprNode whose arms are raw TEXT (`rawArms`), and no reader of that text knows
+ * a `given` arm: the arm was silently dropped, and a malformed `given` head got
+ * no E-SYNTAX-044. For a match whose FIRST arm is a `given` arm, this pass
+ * (a later `given` arm is glued into the arm before it by the expression
+ * parser's arm splitter and is NOT reached — S462 review X2, filed with the
+ * single-reader redesign; neither is a match inside a lambda, X1)
+ * re-reads the match with the STATEMENT parser — the one that reads `given`
+ * heads (head check, separators, arm body) for `const d = match` / `return
+ * match` — and attaches the resulting `match-stmt` as `structured` on the
+ * ExprNode. Codegen lowers the structured arms; the type system visits its
+ * `given` arms through `__nestedMatches` on the owning statement (deprecation
+ * lint, head-name scope). Both side-fields are NON-enumerable so the generic AST
+ * walkers do not see the arms a second time. Only the `given`-head diagnostics of
+ * the re-read are reported: every other arm was already read, and checked, on
+ * the primary path.
+ */
+// (HANDLER_STMT_ID_BASE + 900_000_000 — the constant is declared later in this module.)
+const _exprMatchStmtIds = { next: 1_000_000_000 + 900_000_000 };
+const _EXPR_KEY_RE = /(?:Expr|ExprNode|exprNode)$/;
+const _GIVEN_HEAD_CODES = new Set(["E-SYNTAX-044", "E-SYNTAX-045"]);
+function attachStructuredExpressionMatches(nodes, errors, filePath) {
+  const seen = new WeakSet();
+  const reread = (m, owner) => {
+    if (m.structured !== undefined || !Array.isArray(m.rawArms) || !m.subject) return;
+    if (Array.isArray(m.subjects) && m.subjects.length >= 2) return;
+    // Sound pre-filter: only an arm that BEGINS with the word `given` can be a
+    // (in practice: only the FIRST arm — a later `given` arm arrives glued to the
+    // previous raw arm, X2)
+    // `given` arm; whether it is one is decided by the parse below.
+    if (!m.rawArms.some((a) => typeof a === "string" && /^\s*given(?![A-Za-z0-9_$])/.test(a))) return;
+    // The statement already carries this very match as a structured `matchExpr`
+    // (a derived `const <x> = match …`, read and type-checked there): lower that
+    // one; do not read it a second time.
+    if (owner && owner.matchExpr && Array.isArray(owner.matchExpr.body) && (owner.initExpr === m || owner.exprNode === m)) {
+      Object.defineProperty(m, "structured", { value: owner.matchExpr, enumerable: false, configurable: true, writable: true });
+      return;
+    }
+    let subjectText = "";
+    try { subjectText = _emitStringFromTreeForMatch(m.subject); } catch { return; }
+    const sp = owner && owner.span ? owner.span : { start: 0, line: 1, col: 1 };
+    const text = "match " + subjectText + " {\n" + m.rawArms.join("\n") + "\n}";
+    let res = null;
+    try {
+      res = parseHandlerStatementListCore({ kind: "expr", raw: text, span: sp }, filePath, _exprMatchStmtIds, null,
+        typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1);
+    } catch { res = null; }
+    const stmt = res && Array.isArray(res.stmts) && res.stmts.length === 1 ? res.stmts[0] : null;
+    if (!stmt || (stmt.kind !== "match-stmt" && stmt.kind !== "match-expr") || !Array.isArray(stmt.body)) return;
+    for (const e of res.parseErrors ?? []) {
+      if (e && _GIVEN_HEAD_CODES.has(e.code)) errors.push(e);
+    }
+    Object.defineProperty(m, "structured", { value: stmt, enumerable: false, configurable: true, writable: true });
+    if (owner) {
+      const list = Array.isArray(owner.__nestedMatches) ? owner.__nestedMatches : [];
+      list.push(stmt);
+      Object.defineProperty(owner, "__nestedMatches", { value: list, enumerable: false, configurable: true, writable: true });
+    }
+  };
+  // `inFn`: inside a lambda / function expression. A match there is NOT re-read:
+  // its `given` arms would be checked in the OWNING STATEMENT's scope, which does
+  // not hold the lambda's parameters (S462 review X1 — a false E-SCOPE-001 for
+  // `(q) => match … { given q :> … }`). Such a match keeps main's behaviour; the
+  // single-reader redesign that closes it is filed in known-gaps.
+  const walk = (n, owner, inExpr, inFn) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr, inFn); return; }
+    if (inExpr && !inFn && n.kind === "match-expr") reread(n, owner);
+    const nextOwner = !inExpr && typeof n.kind === "string" && n.span ? n : owner;
+    const childInFn = inFn || (inExpr && n.kind === "lambda");
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (!v || typeof v !== "object") continue;
+      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k), childInFn);
+    }
+  };
+  walk(nodes, null, false, false);
 }
 
 /**
@@ -6053,6 +6231,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // this, `collectExpr` greedily consumes sibling-decl tokens into the
     // child's init string. The `compoundBody` flag enables that boundary.
     const inCompoundBody = !!(opts && opts.compoundBody);
+    // §7.2.2 "Arm heads" — a single-expression arm body (`.A :> expr`) ends at its
+    // line break unless the line ends in a rule-2 continuation token. Set by the
+    // inline match-arm forms; see the ARM-BODY-EXTENT break in the loop below.
+    const armBodyExtent = !!(opts && opts.armBody);
     const parts = [];
     // S458 — the source-AS-WRITTEN form of each quoted STRING part (index → text). The
     // `expr` join cooks a string's escapes (right for a JS value); a component
@@ -6732,6 +6914,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             reportMissingSemicolonIfSameLine(tok);
             break;
           }
+        }
+        // ARM-BODY-EXTENT (§7.2.2 "Arm heads" + rule 8; dpa-068 D8). A
+        // single-expression arm body ends at its line break unless the line ends
+        // in a rule-2 continuation token. The generic ASI-NEWLINE test below only
+        // breaks after a VALUE-ending token, so a body ending in `return` (a
+        // keyword: complete per rule 8) or one followed by a literal line joined
+        // the next line — `.A :> return⏎ "orphan"` collected as `return "orphan"`.
+        // A next line that starts with an operator (`?`, `:`, `+`, `.member`, …)
+        // is left to the existing rules: §7.2.2 rule 3 makes it an error, which
+        // impl#1 does not implement yet, and joining keeps today's behaviour.
+        if (
+          armBodyExtent &&
+          parts.length > 0 &&
+          angleDepth === 0 &&
+          tok.span && lastTok.span &&
+          typeof tok.span.line === "number" && typeof lastTok.span.line === "number" &&
+          tok.span.line > lastTok.span.line &&
+          !armLineEndsInContinuation(lastTok, prevLastTok) &&
+          (armLineStartsNewItem(tok) ||
+            // §7.2.2 rule 8 / §18.2: a leave keyword with nothing after it on its
+            // line is complete — `fail`'s operand must start on the same line.
+            (lastTok.kind === "KEYWORD" && parts.length === 1 &&
+              (lastTok.text === "return" || lastTok.text === "fail" ||
+               lastTok.text === "break" || lastTok.text === "continue")))
+        ) {
+          break;
         }
         // BUG-ASI-NEWLINE: When at depth 0 and the current token is on a new line
         // relative to the last consumed token, AND the last consumed token ends a
@@ -8210,6 +8418,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // head, only ≥ 2-position product patterns are recognized (single-scrutinee
   // arms are untouched). Saved/restored across nested matches.
   let _multiScrutineeArity = 0;
+  // The `_nestedBlockDepth` of the innermost `match { … }` body being parsed (0 = none) — its ARM level.
+  let _matchArmBodyDepth = 0;
 
   /**
    * Parse a braced body `{ ... }` into a structured LogicNode[] tree.
@@ -11596,7 +11806,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // E-SYNTAX-044, widened from the property path. The rebind head keeps E-SYNTAX-045.
       // Recovery skips the rest of the head on the `given` line.
       skipGivenComments();
-      if (!rebind && !malformedHead && (variables.length === 0 || !isMatchArrow(peek()))) {
+      // A `given` ARM of a match takes a match arm's separators (§18.2), so the
+      // deprecated `->` alias (two tokens here) is a separator at arm level.
+      const armDashArrow = _matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
+        peek().kind === "PUNCT" && peek().text === "-" &&
+        !!peek(1) && peek(1).text === ">" && !!peek(1).span && !!peek().span &&
+        peek(1).span.start === peek().span.end;
+      if (!rebind && !malformedHead && (variables.length === 0 || (!isMatchArrow(peek()) && !armDashArrow))) {
         malformedHead = true;
         const onHeadLine = (t) => t != null && t.kind !== "EOF" && t.span != null && t.span.line === startTok.span.line;
         const bad = peek();
@@ -11621,6 +11837,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume the arm separator
         separatorConsumed = true;
         skipGivenComments();
+      } else if (_matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
+                 peek().kind === "PUNCT" && peek().text === "-" &&
+                 peek(1) && peek(1).text === ">" && peek(1).span && peek().span &&
+                 peek(1).span.start === peek().span.end) {
+        // §18.2: a `match` arm's separator is `:>`, with `=>` and `->` as
+        // deprecated aliases. A `given` ARM is a match arm, so `->` is its
+        // separator too (it is two tokens here). The standalone guard keeps
+        // its own `:>` / `=>` grammar (§42.2.3).
+        consume(); consume();
+        separatorGlyph = "->";
+        separatorConsumed = true;
+        skipGivenComments();
       }
       // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
       // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
@@ -11632,13 +11860,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ? peek().text : "";
       // parse body
       let body = [];
+      // §42.2.3 "In match arms": `given x :> handlePresence(x)` — a `given` ARM of
+      // a `match` takes an `arm-body` (§18.2), so a single expression is its body.
+      // Before this the expression was left behind as a sibling statement of the
+      // match body that no lowering reads, so the arm was silently dropped
+      // (g-impl1-given-match-arm-body-dropped-s462). The expression becomes the
+      // body's one statement, so it is type- and scope-checked like any other.
+      // Only at ARM level and after a separator: a standalone `given` guard still
+      // requires a block.
+      let armExprBody = false;
       if (peek().kind === "PUNCT" && peek().text === "{") {
         consume(); // consume '{'
         body = parseRecursiveBody();
+      } else if (separatorConsumed && _matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
+                 peek().kind !== "EOF" && !(peek().kind === "PUNCT" && peek().text === "}")) {
+        const exprStartTok = peek();
+        const { expr: armExpr } = collectExpr(null, { armBody: true });
+        const armText = armExpr.trim();
+        if (armText) {
+          body = [{ id: ++counter.next, kind: "bare-expr", expr: armText, exprNode: safeParseExprToNode(armText, exprStartTok.span?.start ?? 0), span: spanOf(exprStartTok, peek()) }];
+          armExprBody = true;
+        }
       }
       return {
         id: ++counter.next,
         kind: "given-guard",
+        ...(armExprBody ? { armExprBody: true } : {}),
         variables,
         variableIsCell,
         separatorGlyph,
@@ -11703,7 +11950,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const { expr: header } = collectExpr("{");
       // §18.19 — `match` heads may be multi-scrutinee; arity-aware body parse
       // (no-op for switch/try — detectMultiScrutineeHead returns null).
-      const body = parseMatchBodyWithArity(header);
+      const body = parseMatchBodyWithArity(header, keyword === "match");
       const node = {
         id: ++counter.next,
         kind: `${keyword}-stmt`,
@@ -12273,7 +12520,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Consume `(` … `)` (parenCloseK is the peek-offset of the `)`).
         for (let k = 0; k <= prod.parenCloseK; k++) consume();
         for (let _a = 0; _a < prod.arrow.len; _a++) consume(); // arm arrow
-        const { expr: result } = collectExpr();
+        const { expr: result } = collectExpr(null, { armBody: true });
         const trimmedResult = result.trim();
         return {
           id: ++counter.next,
@@ -12537,7 +12784,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               if (peek().text === ')') consume(); // ')'
             }
             for (let _a = 0; _a < _arrowI1.len; _a++) consume(); // arm arrow
-            const { expr: result } = collectExpr();
+            const { expr: result } = collectExpr(null, { armBody: true });
             const trimmedResult = result.trim();
             return {
               id: ++counter.next,
@@ -12563,7 +12810,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (!afterArrow || afterArrow.text !== '{') {
           const startTok = consume(); // consume 'else'
           for (let _a = 0; _a < _arrowI2.len; _a++) consume(); // arm arrow
-          const { expr: result } = collectExpr();
+          const { expr: result } = collectExpr(null, { armBody: true });
           const trimmedResult = result.trim();
           return {
             id: ++counter.next,
@@ -12587,7 +12834,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (!afterArrow || afterArrow.text !== '{') {
           const startTok = consume(); // consume 'not'
           for (let _a = 0; _a < _arrowI3.len; _a++) consume(); // arm arrow
-          const { expr: result } = collectExpr();
+          const { expr: result } = collectExpr(null, { armBody: true });
           const trimmedResult = result.trim();
           return {
             id: ++counter.next,
@@ -12611,7 +12858,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (!afterArrow || afterArrow.text !== '{') {
           const startTok = consume(); // consume '_'
           for (let _a = 0; _a < _arrowI4.len; _a++) consume(); // arm arrow
-          const { expr: result } = collectExpr();
+          const { expr: result } = collectExpr(null, { armBody: true });
           const trimmedResult = result.trim();
           return {
             id: ++counter.next,
@@ -12641,7 +12888,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             ? `'${rawText}'`
             : `"${rawText}"`;
           for (let _a = 0; _a < _arrowI5.len; _a++) consume(); // arm arrow
-          const { expr: result } = collectExpr();
+          const { expr: result } = collectExpr(null, { armBody: true });
           const trimmedResult = result.trim();
           return {
             id: ++counter.next,
@@ -13481,14 +13728,103 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // scrutinee count for the duration (so a single-position `( pat )` arm is
   // recognized as a wrong-arity product arm → E-MATCH-SCRUTINEE-ARITY). Assumes
   // the next token is the body `{`. Restores the prior arity (nested matches).
-  function parseMatchBodyWithArity(headerText) {
+  function parseMatchBodyWithArity(headerText, isMatch = true) {
     if (peek().text !== "{") return [];
     consume(); // consume `{`
     const saved = _multiScrutineeArity;
+    const savedArmDepth = _matchArmBodyDepth;
     const mh = detectMultiScrutineeHead(headerText);
     _multiScrutineeArity = mh ? mh.length : 0;
-    try { return parseRecursiveBody(); }
-    finally { _multiScrutineeArity = saved; }
+    // The arm level of THIS match body: parseRecursiveBody increments
+    // _nestedBlockDepth on entry, so its direct statements sit at depth + 1.
+    // (A `switch` / `try` body shares this parser and has no arm level.)
+    _matchArmBodyDepth = isMatch ? _nestedBlockDepth + 1 : 0;
+    let body;
+    try { body = parseRecursiveBody(); }
+    finally { _multiScrutineeArity = saved; _matchArmBodyDepth = savedArmDepth; }
+    if (isMatch) {
+      reportOrphanArmLines(body);
+      markPropagateArms(body);
+      markLeaveArms(body);
+    }
+    return body;
+  }
+
+  // §18.2 `leave-stmt` (S462 W1): a single-expression arm body that is
+  // `return [expr]` / `fail <variant>` / `break [Label]` / `continue [Label]`
+  // carries its statement node as `leaveStmt`; every match lowering emits it as
+  // the arm's one statement. A `fail` arm the decl parser already resolved
+  // (`failExpr`, errarm-refail) reuses that node.
+  function markLeaveArms(body) {
+    if (!Array.isArray(body)) return;
+    for (const child of body) {
+      if (!child || child.kind !== "match-arm-inline" || typeof child.result !== "string") continue;
+      if (child.failExpr) { child.leaveStmt = child.failExpr; continue; }
+      const r = parseLeaveArmBody(child.result, filePath, child.span?.start ?? 0);
+      if (!r) continue;
+      if (r.error) {
+        errors.push(new TABError("E-PARSE-001", r.error, child.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
+        continue;
+      }
+      child.leaveStmt = child.span ? { ...r.node, span: child.span } : r.node;
+    }
+  }
+
+  // §19.5.1 `propagation-expr ::= expression '?'` is an expression, so it is an
+  // `arm-body` (§18.2). A single-expression arm body whose LAST token is a lone
+  // `?` is that operator: the arm body ends there (a conditional `?` needs the
+  // operands that follow it, and a `?` ending the line before them is joined
+  // with them — §7.2.2 rule 2 — so it is never the last token of a collected
+  // body). Stamp the operand for codegen, which otherwise emitted the `?`
+  // literally (`= f(n) ?;`, E-CODEGEN-INVALID-LOGIC — dpa-068 D4).
+  function markPropagateArms(body) {
+    if (!Array.isArray(body)) return;
+    for (const child of body) {
+      if (!child || child.kind !== "match-arm-inline" || typeof child.result !== "string") continue;
+      const r = child.result.trim();
+      if (!r.endsWith("?") || r.endsWith("??") || r.endsWith("?.?")) continue;
+      const operand = r.slice(0, -1).trim();
+      if (!operand) continue;
+      child.propagateOperand = operand;
+      child.propagateOperandExpr = safeParseExprToNode(operand, child.span?.start ?? 0);
+    }
+  }
+
+  // §7.2.2 "Arm heads": directly inside a `match { … }` body a line begins an
+  // ARM. A line there that is no arm — an expression with no arm separator,
+  // e.g. the `"orphan"` after `.A :> return` (a single-expression arm body ends
+  // at its line break, rule 8) — "is a parse error". Before this it was
+  // collected as a bare statement in the match body that no lowering reads, so
+  // it was silently DROPPED (dpa-068 D8: `.A :> return⏎ "orphan"`).
+  function reportOrphanArmLines(body) {
+    if (!Array.isArray(body)) return;
+    // A body with NO arm at all is not an arm list: the keyword-led `match`
+    // parser also captures a function NAMED `match` (`function match(a, b) { … }`,
+    // the stdlib router — see applyMultiScrutineeHead), whose body is statements.
+    const isArmChild = (c) => !!c && (c.kind === "match-arm-inline" || c.kind === "match-arm-block" ||
+      c.kind === "given-guard" ||
+      (c.kind === "bare-expr" && /:>|=>|-\s*>/.test(String(c.expr ?? "").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""'))));
+    if (!body.some(isArmChild)) return;
+    for (const child of body) {
+      if (!child || child.kind !== "bare-expr") continue;
+      const text = String(child.expr ?? "").trim();
+      if (!text) continue;
+      // A raw arm (`"a" | "b" :> x`, `0 -> f()`) is an arm the codegen re-parses.
+      const noStrings = text.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+      if (/:>|=>|-\s*>/.test(noStrings)) continue;
+      // A malformed arm HEAD (`.Circle(r) if r > 10 :>`, a §18.10 guard clause)
+      // is an arm the author meant; its own diagnostic (E-SYNTAX-011, …) owns it.
+      if (/^(?:\.\s*[A-Z]|::)/.test(text)) continue;
+      errors.push(new TABError(
+        "E-PARSE-001",
+        `\`${text.length > 60 ? text.slice(0, 60) + "…" : text}\` is not a match arm. Inside a \`match { … }\` ` +
+        "body each line begins an arm (`.Variant :> body`, `else :> body`, …) (§18.2, §7.2.2). A " +
+        "single-expression arm body ends at its line break unless the line ends in an operator " +
+        "that continues it, so this line is not part of the arm above. Join it to the arm's line, " +
+        "end the line above with an operator, or wrap the arm body in `{ … }`.",
+        child.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      ));
+    }
   }
 
   function parseOneMatchAsExpr(declStartTok) {
@@ -16449,7 +16785,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const { expr: header } = collectExpr("{");
       // §18.19 — `match` heads may be multi-scrutinee; arity-aware body parse
       // (no-op for switch/try — detectMultiScrutineeHead returns null).
-      const body = parseMatchBodyWithArity(header);
+      const body = parseMatchBodyWithArity(header, keyword === "match");
       const node = {
         id: ++counter.next,
         kind: `${keyword}-stmt`,
@@ -23593,6 +23929,11 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
   // fire-site error and this walker emission never both appear for the same
   // switch keyword.
   collectForbiddenSwitches(nodes, errors, filePath);
+
+  // S462 review M1 — a `match` in EXPRESSION position (`@v = match …`, a call
+  // argument, `x = match …`) is carried by the expression parser as raw arm text,
+  // which reads no `given` arm. Those matches get the statement parser's arms.
+  attachStructuredExpressionMatches(nodes, errors, filePath);
 
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
