@@ -1,0 +1,7 @@
+<program>
+<items> = [{ id: 1, code: "go()", url: "/one", t: "tip" }]
+<ul id="b">${ for (const it of @items) { lift <li><button onClick=it.code>b</button></li> } }</ul>
+<ul id="e"><each in=@items key=@.id as it><li><button onClick=it.code>b</button></li></each></ul>
+<ul id="h">${ for (const it of @items) { lift <li><a href=it.url>l</a></li> } }</ul>
+<ul id="t"><each in=@items key=@.id as it><li><span title=it.t>t</span></li></each></ul>
+</program>

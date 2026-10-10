@@ -7790,16 +7790,61 @@ ${
             }
             return addDiag(st, env.file, e.span, "E-DECL-STAR-PREDEFINED", "`<*" + e.tag + "/>` — a predefined (HTML) declaration has no shared instance (§66.6.5)")
         }
-        for (const a of e.attrs) {
-            if (fieldIndex(d.info, a.name) >= 0) {
-                st = addDiag(st, env.file, a.span, "E-DECL-STAR-REF-ATTR-WRITE", "`" + a.name + "=` on `<*" + e.tag + ">` would write the referenced instance — a `<*x>` reference is read-only; write through logic (§66.6.7)")
-            }
-        }
+        st = starRefAttrs(env, e, fieldNames(d.info), st)
         if (st.diags.length == st0.diags.length) {
             // s442: the shared instance, inlined (resolveStarShared)
             st = resolveStarShared(env, e, d, st)
         }
         return st
+    }
+
+    // s462 (O18 RULED, SPEC §66.6.9 rule 3): the attributes of a `<*x>`
+    // reference. One naming a field of the referenced instance would write it —
+    // E-DECL-STAR-REF-ATTR-WRITE (§66.6.7). `if=` / `else-if=` / `else` are the
+    // open residue O18-r: left to the conditional-host check, which refuses them
+    // on a reference (chainHostRefused). Any other — `as=`, `class`, `style`,
+    // `key=`, `show=`, `on…` … — is undeclared, E-DECL-USE-ATTR: a reference
+    // makes no instance, binds no handle and writes no element. (Before s462 a
+    // non-field attribute here was dropped silently.)
+    fn starRefAttrs(env: Env, e: AElem, written: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of e.attrs) {
+            if (nameIn(written, a.name)) {
+                st = addDiag(st, env.file, a.span, "E-DECL-STAR-REF-ATTR-WRITE", "`" + a.name + "=` on `<*" + e.tag + ">` would write the referenced instance — a `<*x>` reference is read-only; write through logic (§66.6.7)")
+            } else if (a.name == "as") {
+                st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`as=` on `<*" + e.tag + ">` — a `<*x>` reference is the instance that already exists, not a new one, and binds no handle; address it from logic as `@" + e.tag + "` (§66.6.9, §66.7.1)")
+            } else if (!isChainAttr(a.name)) {
+                st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<*" + e.tag + ">` has no attribute `" + a.name + "` — a `<*x>` reference carries no undeclared attribute, and nothing it writes reaches an element of the renders (§66.6.9)")
+            }
+        }
+        return st
+    }
+
+    fn nameIn(names: string[], n: string) -> boolean {
+        for (const x of names) {
+            if (x == n) return true
+        }
+        return false
+    }
+
+    fn fieldNames(d: DeclInfo) -> string[] {
+        let out: string[] = []
+        for (const f of d.fields) { out = out.concat([f.sym.hint]) }
+        return out
+    }
+
+    // The attributes and child fields of the field declared by the ADecl
+    // `fieldNid` in `ds` — what a `<*f>` reference of that field could write.
+    fn fieldSubNames(ds: DeclSrc, fieldNid: int) -> string[] {
+        for (const fd of fieldDecls(ds)) {
+            if (fd.nid == fieldNid) {
+                let out: string[] = []
+                for (const a of fd.attrs) { out = out.concat([a.name]) }
+                for (const c of childFields(fd.body)) { out = out.concat([c.name]) }
+                return out
+            }
+        }
+        return []
     }
 
     // ---- s442: `<*f/>` of a field, and state-child bodies ----------------------
@@ -7831,9 +7876,8 @@ ${
     fn resolveStarField(env: Env, e: AElem, sf: StarField, st0: AS) -> AS {
         let st: AS = st0
         const f: FieldInfo = sf.decl.fields[sf.idx]
-        if (e.attrs.length > 0) {
-            return addDiag(st, env.file, e.span, "E-DECL-STAR-REF-ATTR-WRITE", "`<*" + e.tag + ">` names the field `" + e.tag + "` of this instance — a `<*x>` reference takes no attributes here (§66.6.7)")
-        }
+        st = starRefAttrs(env, e, fieldSubNames(sf.src, f.nid), st)
+        if (st.diags.length > st0.diags.length) return st
         // s442: a child field with its own `renders` (§66.4 rule 2: "a field that
         // needs its own … `renders` … is a CHILD declaration") renders it here,
         // for THIS instance (§66.6.2) — resolved in this declaration's context.
@@ -8335,10 +8379,19 @@ ${
             } else {
                 const i: int = fieldIndex(d.info, a.name)
                 if (i < 0 && a.name == "show") {
-                    // s451: §17.2 `show=` on a use — see showHostCheck
-                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on a use of `<" + e.tag + ">` is not in the bootstrap — only an HTML element is shown / hidden (§17.2); wrap the use in one: `<div show=…><" + e.tag + " …/></div>`")
+                    // s451: §17.2 `show=` hides an ELEMENT; a use is not one.
+                    // s462 (O18 RULED, §66.6.9 rule 2): an undeclared attribute on a
+                    // use — E-DECL-USE-ATTR (was E-BOOTSTRAP-UNSUPPORTED).
+                    st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `show` — a use is not an element, so `show=` (§17.2) has nothing to hide; wrap the use in one: `<div show=…><" + e.tag + " …/></div>` (§66.6.9)")
+                } else if (i < 0 && a.name == "key") {
+                    // s462 (§66.6.9 rule 4, dpa-069 D-7): never a DOM attribute, never a reconciliation key
+                    st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `key` — `key=` on a use is neither a DOM attribute nor a reconciliation key; an instance in an `<each>` row is keyed by the row's `key=` (§66.6.9, §66.7.3)")
                 } else if (i < 0) {
-                    st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "`")
+                    // s462 (O18 RULED, §66.6.9 rule 2): every undeclared attribute —
+                    // `class`, `style`, `id`, `aria-*`, `data-*`, `on…`, `bind:…`,
+                    // `key=`, a misspelled field — is refused; nothing falls through
+                    // to an element of the renders.
+                    st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "` — a use carries only its declaration's declared attributes and fields, `as=`, and `if=` / `else-if=` / `else`; nothing it writes reaches an element of the renders (§66.6.9)")
                 } else {
                     const f: FieldInfo = d.info.fields[i]
                     st = resolveConstructValue(penv, a.value, f.ty, st)

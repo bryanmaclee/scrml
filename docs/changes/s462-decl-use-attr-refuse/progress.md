@@ -1,3 +1,6 @@
 2026-10-09T17:25:05-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ac10ad44b9db2f4d5; brief fetched
 2026-10-09T17:50:44-06:00 baseline corpus measurement (bootstrap, as-is + fix-s66 twin): 2706 files, 0 E-DECL-USE-ATTR / 0 E-DECL-STAR-REF-ATTR-WRITE sites. Probe: plain-use scope already refuses class/style/id/aria/data/on/key/href/bind:/class:; GAP = <*x> reference silently drops undeclared attrs (class, key, as).
 2026-10-09T17:53:42-06:00 SPEC: §66.14 r4, §66.15 provenance+table reversal, §66.15.3 X (Nominal), §66.20 row, §66.22 O18 RULED/O18-r/O46, §15.5 id= struck, §34 row, §5.2 legacy qualifiers
+2026-10-09T18:05:36-06:00 bootstrap: starRefAttrs (refs refuse undeclared attrs, as= incl.), show/key messages, use-attr.test.js (46 tests), 4 tests updated, mutations.js 5 s462 rows RED + mirror preload symlink fix. CI slice steps green.
+2026-10-09T18:16:49-06:00 conformance: 2 plain-element sink cases added (PASS impl#1); legacy undeclared-attr-* cases kept+annotated as legacy route; severity.scrml regen; first commit attempt OOM-killed in pre-commit (sibling suites)
+2026-10-09T18:29:39-06:00 commit attempt 2 failed only on live-Postgres db-migrate-pg (passes 10/10 alone; shared PG with sibling suites) — retrying

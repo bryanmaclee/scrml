@@ -1,0 +1,13 @@
+{
+  "id": "attr-executable-sink-srcdoc-each-lift-plain-neg",
+  "description": "S462 (dpa-069 item 7): the sink pin of `undeclared-attr-srcdoc-each-lift-neg`, moved onto a PLAIN element. `srcdoc=it.d` on a body-authored `<iframe>` in `lift` AND in `<each>` writes row data into an HTML document — refused at the write, in both positions. Under O18 (RULED S462, SPEC §66.6.9) no §66 use-site attribute reaches an element, so this is the route a `srcdoc` sink takes in a §66 program; the component-route case stays for impl#1's legacy `const X = <…>` form through its §63 window.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 (S457) `srcdoc` in every form: \"A `srcdoc` attribute (any case) on an element whose value is not a static string — … a variable `srcdoc=@doc` / `srcdoc=it.html` … — SHALL be a compile error (E-ATTR-INTERP-EXECUTABLE) in every position rule 2 names\" (`<each>` rows and `lift` markup among them).",
+  "expect": {
+    "codes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "notCodes": [],
+    "severity": { "E-ATTR-INTERP-EXECUTABLE": "error" },
+    "codeCounts": { "E-ATTR-INTERP-EXECUTABLE": 2 }
+  }
+}
