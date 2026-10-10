@@ -1,0 +1,11 @@
+// §42.2.3 (S462 "a") — the control for the head refusal: an identifier-list head (one name, and
+// a comma-separated list, with the legacy `=>` too) is accepted — no E-SYNTAX-044. The guard itself
+// is soft-deprecated, so each surfaces W-GIVEN-PRESENCE-DEPRECATED.
+${
+    function pick(a: string | not, b: int | not) -> string {
+        given a :> { return "a" }
+        given a, b => { return "ab" }
+        return "none"
+    }
+}
+<p>${pick("x", 1)}</p>

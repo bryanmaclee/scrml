@@ -56,7 +56,9 @@ const HELP = `scrml fix <file|dir> [options]
 
 Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class; arm-pipe: a
 \`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5; is-some: \`x is some\`
-and the validator \`<x is some>\` → \`is given\`, §42.2.2a / §55.1; client-server-call: an
+and the validator \`<x is some>\` → \`is given\`, §42.2.2a / §55.1; given-presence: the in-place
+\`given x, y :> { … }\` guard → \`if (x is given && y is given) { … }\` and a \`given x :>\` match arm →
+\`else :>\`, §42.2.3; client-server-call: an
 unhandled client call of a server function → \`f() !{ .Transport(_) :> { return } }\`, §19.9.10;
 sql-failable: an unhandled \`?{}\` READ in a server function that is not \`!\` →
 \`?{…}.get() !{ _ :> not }\` / \`.all() !{ _ :> [] }\`, §19.8.3; every WRITE — any \`.run()\`, a bare

@@ -3620,6 +3620,21 @@ function fullSpan(bsSpan, filePath) {
   };
 }
 
+/**
+ * §42.2.3 / S462 "a" — E-SYNTAX-044, widened: "A `given` head SHALL contain only an
+ * identifier-list." A head is `given <name>[, <name>]* :>` (or the legacy `=>`); anything else in
+ * it — a comparison or call (`given id < 0 :>`), no name, no separator — is refused. The message
+ * names the fix: a condition is an `if`. `found` is the offending token's text ("" at a line end).
+ */
+function givenHeadError(found) {
+  const what = found ? `\`${found}\`` : "the end of the line";
+  return (
+    `E-SYNTAX-044: a \`given\` head is a list of names followed by \`:>\` (\`given x, y :> { … }\`, §42.2.3); ` +
+    `found ${what} instead. To run code when a condition holds, write \`if (<cond>) { … }\`; ` +
+    `to run it when a value is present, write \`if (x is given) { … }\`.`
+  );
+}
+
 function tokenSpan(tok, filePath) {
   return {
     file: filePath,
@@ -11503,7 +11518,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Multi: `given x, y => { body }` — all-or-nothing; body runs only if ALL vars present
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
+      // (The `given` of an `x is given` test never reaches here: the collectors consume it as
+      // the second word of the operator — `givenContinuesIsOperator` / `endsPresenceGiven`.)
       const variables = [];
+      // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
+      // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
+      const spellings = [];
+      let rebind = false;
+      // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
+      let malformedHead = false;
       // s461 — parallel to `variables`: true where the head identifier was
       // written as a reactive CELL (`given @x`). `variables` holds the name with
       // the `@` stripped (the narrowing consumers key on the bare name), so without
@@ -11511,17 +11534,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
       const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
+      // S462 (review N2) — a comment inside a `given` head or before its block is whitespace.
+      const skipGivenComments = () => { while (peek().kind === "COMMENT") consume(); };
+      while ((skipGivenComments(), peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
         const isCell = name.startsWith("@");
         if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
+          malformedHead = true;
           errors.push(new TABError(
             "E-SYNTAX-044",
             `E-SYNTAX-044: \`given\` takes bare identifiers, not property paths (§42.2.3). ` +
-            `Bind the property to a local variable first: \`let n = ${name}.<field>\`, then \`given n { ... }\`.`,
+            `Bind the property to a local variable first: \`let n = ${name}.<field>\`, then test it: \`if (n is given) { ... }\`.`,
             tokenSpan(identTok, filePath),
           ));
           while (peek().kind === "PUNCT" && peek().text === ".") {
@@ -11545,6 +11571,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // Recover: skip the `= <rhs>` up to the separator (`:>`/`=>`) or body `{`,
           // keeping `name` as a narrowed variable so the rest of the guard parses.
           consume(); // consume `=`
+          rebind = true; // §66.7.5 rebind head — not the in-place presence guard (S462)
           while (
             peek().kind !== "EOF" &&
             !(peek().kind === "PUNCT" && peek().text === "{") &&
@@ -11554,11 +11581,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        spellings.push(identTok.text);
         variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
           break;
+        }
+      }
+      // S462 "a" — §42.2.3: "A `given` head SHALL contain only an identifier-list."
+      // Anything else between `given` and its `:>` / `=>` — a comparison or a call
+      // (`given id < 0 :> fail …`, which used to parse as a presence guard with an EMPTY
+      // body and a `fail` that always ran), no name, no separator (`given n { … }`) — is
+      // E-SYNTAX-044, widened from the property path. The rebind head keeps E-SYNTAX-045.
+      // Recovery skips the rest of the head on the `given` line.
+      skipGivenComments();
+      if (!rebind && !malformedHead && (variables.length === 0 || !isMatchArrow(peek()))) {
+        malformedHead = true;
+        const onHeadLine = (t) => t != null && t.kind !== "EOF" && t.span != null && t.span.line === startTok.span.line;
+        const bad = peek();
+        errors.push(new TABError(
+          "E-SYNTAX-044",
+          givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
+        ));
+        while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
+          consume();
         }
       }
       // consume the separator. `:>` canonical, `=>` deprecated alias
@@ -11567,10 +11615,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // W-GIVEN-ARROW-LEGACY lint + `migrate --fix` can see the deprecated form
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
+      let separatorConsumed = false;
       if (isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
+        separatorConsumed = true;
+        skipGivenComments();
       }
+      // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
+      // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
+      // followed by the body run unconditionally; the type system refuses it (E-SYNTAX-044) unless
+      // the node is a match arm (`given x :> expr` — arm bodies may be expressions).
+      const bracelessBody = separatorConsumed && !malformedHead && !rebind &&
+        !(peek().kind === "PUNCT" && peek().text === "{");
+      const bracelessFound = bracelessBody && peek().kind !== "EOF" && peek().span != null && peek().span.line === startTok.span.line
+        ? peek().text : "";
       // parse body
       let body = [];
       if (peek().kind === "PUNCT" && peek().text === "{") {
@@ -11583,6 +11642,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         variables,
         variableIsCell,
         separatorGlyph,
+        spellings,
+        rebind,
+        malformedHead,
+        bracelessBody,
+        bracelessFound,
         body,
         span: spanOf(startTok, peek()),
       };
@@ -16664,7 +16728,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Multi: `given x, y => { body }` — all-or-nothing; body runs only if ALL vars present
     if (tok.kind === "KEYWORD" && tok.text === "given") {
       const startTok = consume(); // consume 'given'
+      // (The `given` of an `x is given` test never reaches here: the collectors consume it as
+      // the second word of the operator — `givenContinuesIsOperator` / `endsPresenceGiven`.)
       const variables = [];
+      // S462 — the names as WRITTEN (`@user` keeps its `@`), for the
+      // W-GIVEN-PRESENCE-DEPRECATED message and the `given-presence` fix rule.
+      const spellings = [];
+      let rebind = false;
+      // S462 "a" — a head that is not `given <names> :>` (E-SYNTAX-044).
+      let malformedHead = false;
       // s461 — parallel to `variables`: true where the head identifier was
       // written as a reactive CELL (`given @x`). `variables` holds the name with
       // the `@` stripped (the narrowing consumers key on the bare name), so without
@@ -16672,17 +16744,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // cell to a bare JS name (ReferenceError at runtime — §42.2.3 / §42.5).
       const variableIsCell = [];
       // Collect comma-separated plain identifiers (§42.2.3 v1: no property paths)
-      while (peek().kind === "IDENT" || peek().kind === "AT_IDENT") {
+      // S462 (review N2) — a comment inside a `given` head or before its block is whitespace.
+      const skipGivenComments = () => { while (peek().kind === "COMMENT") consume(); };
+      while ((skipGivenComments(), peek().kind === "IDENT" || peek().kind === "AT_IDENT")) {
         const identTok = consume();
         let name = identTok.text;
         const isCell = name.startsWith("@");
         if (isCell) name = name.slice(1); // strip @ if user wrote @x
         // §42.2.3: `given` takes plain identifiers, NOT property paths. Reject `given u.name`.
         if (peek().kind === "PUNCT" && peek().text === ".") {
+          malformedHead = true;
           errors.push(new TABError(
             "E-SYNTAX-044",
             `E-SYNTAX-044: \`given\` takes bare identifiers, not property paths (§42.2.3). ` +
-            `Bind the property to a local variable first: \`let n = ${name}.<field>\`, then \`given n { ... }\`.`,
+            `Bind the property to a local variable first: \`let n = ${name}.<field>\`, then test it: \`if (n is given) { ... }\`.`,
             tokenSpan(identTok, filePath),
           ));
           // Skip past `.ident(.ident)*` to keep parsing going
@@ -16707,6 +16782,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // Recover: skip the `= <rhs>` up to the separator (`:>`/`=>`) or body `{`,
           // keeping `name` as a narrowed variable so the rest of the guard parses.
           consume(); // consume `=`
+          rebind = true; // §66.7.5 rebind head — not the in-place presence guard (S462)
           while (
             peek().kind !== "EOF" &&
             !(peek().kind === "PUNCT" && peek().text === "{") &&
@@ -16716,11 +16792,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
         variables.push(name);
+        spellings.push(identTok.text);
         variableIsCell.push(isCell);
         if (peek().kind === "PUNCT" && peek().text === ",") {
           consume(); // consume ','
         } else {
           break;
+        }
+      }
+      // S462 "a" — §42.2.3: "A `given` head SHALL contain only an identifier-list."
+      // Anything else between `given` and its `:>` / `=>` — a comparison or a call
+      // (`given id < 0 :> fail …`, which used to parse as a presence guard with an EMPTY
+      // body and a `fail` that always ran), no name, no separator (`given n { … }`) — is
+      // E-SYNTAX-044, widened from the property path. The rebind head keeps E-SYNTAX-045.
+      // Recovery skips the rest of the head on the `given` line.
+      skipGivenComments();
+      if (!rebind && !malformedHead && (variables.length === 0 || !isMatchArrow(peek()))) {
+        malformedHead = true;
+        const onHeadLine = (t) => t != null && t.kind !== "EOF" && t.span != null && t.span.line === startTok.span.line;
+        const bad = peek();
+        errors.push(new TABError(
+          "E-SYNTAX-044",
+          givenHeadError(onHeadLine(bad) ? bad.text : ""),
+          tokenSpan(onHeadLine(bad) ? bad : startTok, filePath),
+        ));
+        while (onHeadLine(peek()) && !(peek().kind === "PUNCT" && peek().text === "{") && !isMatchArrow(peek())) {
+          consume();
         }
       }
       // consume the separator. `:>` canonical, `=>` deprecated alias
@@ -16729,10 +16826,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // W-GIVEN-ARROW-LEGACY lint + `migrate --fix` can see the deprecated form
       // (mirrors the match-arm `armArrow` field — S147).
       let separatorGlyph = ":>";
+      let separatorConsumed = false;
       if (isMatchArrow(peek())) {
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
+        separatorConsumed = true;
+        skipGivenComments();
       }
+      // S462 fix round 1 (F1) — §42.2.3 `given-guard ::= 'given' identifier-list (':>' | '=>') block`:
+      // a body that is not a `{ … }` block. As a STANDALONE guard it used to lower to an empty `if`
+      // followed by the body run unconditionally; the type system refuses it (E-SYNTAX-044) unless
+      // the node is a match arm (`given x :> expr` — arm bodies may be expressions).
+      const bracelessBody = separatorConsumed && !malformedHead && !rebind &&
+        !(peek().kind === "PUNCT" && peek().text === "{");
+      const bracelessFound = bracelessBody && peek().kind !== "EOF" && peek().span != null && peek().span.line === startTok.span.line
+        ? peek().text : "";
       // parse body
       let body = [];
       if (peek().kind === "PUNCT" && peek().text === "{") {
@@ -16745,6 +16853,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         variables,
         variableIsCell,
         separatorGlyph,
+        spellings,
+        rebind,
+        malformedHead,
+        bracelessBody,
+        bracelessFound,
         body,
         span: spanOf(startTok, peek()),
       });

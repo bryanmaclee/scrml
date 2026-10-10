@@ -5,7 +5,7 @@ ${
     }
 
     function loadThing(id: int)! LoadError {
-        given id < 0 :> fail LoadError.NotFound
+        if (id < 0) { fail LoadError.NotFound }
         return "ok"
     }
 
