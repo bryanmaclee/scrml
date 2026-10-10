@@ -32,9 +32,20 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 5 |
 | MED | 566 | 5 |
-| LOW | 327 | 0 |
+| LOW | 328 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 — a declaration field named `as` can never be constructed: `<card as=c/>` binds a handle instead, silently; `<card as="x"/>` is E-DECL-AS — `NEW S462; LOW; open (pre-existing)`
+
+<!-- @gap id=g-bootstrap-decl-field-named-as-shadowed-by-handle-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveUse — the `a.name == "as"` branch runs before fieldIndex) prov=review:s462-decl-use-attr-refuse-r1 -->
+
+`<card as:string="x" title:string="t"/>` + `renders <div>${as}</div>`, used as `<card as=c title="T"/>`, compiles
+clean (executed S462): `as=` is read as the §66.7.2 handle, so the field keeps its default and nothing reports the
+collision. A quoted value (`as="hello"`) is refused with E-DECL-AS ("`as=` takes a name"), which names the handle,
+not the field. Linked to **O41** (§66.2.3 — whether structural words like `as` are legal attribute names); the fix
+waits on that ruling (refuse `as` as a field name, or a precedence rule). Found by the S462 review of
+s462-decl-use-attr-refuse; not caused by it.
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 

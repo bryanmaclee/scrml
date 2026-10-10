@@ -1,7 +1,14 @@
 <program>
 <items> = [{ id: 1, code: "go()", url: "/one", t: "tip" }]
+<viaLift> = 0
+<viaEach> = 0
+function pickLift(i) { @viaLift = @viaLift + i }
+function pickEach(i) { @viaEach = @viaEach + i * 10 }
 <ul id="b">${ for (const it of @items) { lift <li><button onClick=it.code>b</button></li> } }</ul>
 <ul id="e"><each in=@items key=@.id as it><li><button onClick=it.code>b</button></li></each></ul>
+<ul id="bl">${ for (const it of @items) { lift <li><button class="go" onClick=pickLift(it.id)>go</button></li> } }</ul>
+<ul id="el"><each in=@items key=@.id as it><li><button class="go" onClick=pickEach(it.id)>go</button></li></each></ul>
 <ul id="h">${ for (const it of @items) { lift <li><a href=it.url>l</a></li> } }</ul>
 <ul id="t"><each in=@items key=@.id as it><li><span title=it.t>t</span></li></each></ul>
+<p id="o">${@viaLift}/${@viaEach}</p>
 </program>
