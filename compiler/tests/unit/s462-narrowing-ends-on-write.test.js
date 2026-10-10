@@ -1095,3 +1095,22 @@ describe("S462 Q18 — an event handler inside an `if=` gate keeps that cell's n
     expect(nM(`<div if=@user>\${ clear() }<button onclick={ @out = @user.name }>go</button></div>`)).toBe(1);
   });
 });
+
+describe("S462 Q18 — a realistic site (trucking load-detail shape), its cell annotated `T | not`", () => {
+  const site = (gate) => `<program>
+type Load:struct = { ref: string }
+<currentLoad>: Load | not = not
+<loaded> = false
+<out> = ""
+<div ${gate} class="space-y-6"><h2>\${@currentLoad.ref}</h2><button onclick={ @out = @currentLoad.ref }>accept</button></div>
+<p>\${@out}</p>
+</program>
+`;
+  test("a bare `if=@currentLoad` gate: children and handler both legal", () => {
+    expect(e046(site("if=@currentLoad")).length).toBe(0);
+  });
+  test("the corpus's parenthesized compound gate narrows neither on impl#1 (carried g-impl1-condition-rule-s460)", () => {
+    // Pinned so a fix of that gap shows up here: the child read AND the handler read fire today.
+    expect(e046(site("if=(@loaded && @currentLoad is some)")).length).toBe(2);
+  });
+});
