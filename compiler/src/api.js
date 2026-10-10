@@ -61,7 +61,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -2264,9 +2264,22 @@ function _compileScrmlImpl(options = {}) {
       return null;
     }
 
+    // S462 — the exported-name set of each stdlib module read here, for the
+    // E-IMPORT-004 check below (null = the source could not be read).
+    const stdlibNameSets = new Map();
+    const _exportedNamesOf = (astExports) => {
+      const set = new Set();
+      for (const exp of astExports) {
+        if (!exp.exportedName) continue;
+        for (const n of exp.exportedName.split(",").map(s => s.trim()).filter(Boolean)) set.add(n);
+      }
+      return set;
+    };
+
     for (const absPath of stdlibPaths) {
       if (moduleResult.exportRegistry.has(absPath)) continue; // already seeded (re-export inheritance)
       const astExports = _parseStdlibExports(absPath);
+      stdlibNameSets.set(absPath, astExports ? _exportedNamesOf(astExports) : null);
       if (!astExports) continue;
       // Build the per-name value map from the stdlib file's exports.
       const names = new Map();
@@ -2340,6 +2353,30 @@ function _compileScrmlImpl(options = {}) {
         moduleResult.exportRegistry.set(absPath, names);
       }
     }
+
+    // S462 — §21.3 / §41.3.1: a `scrml:` import of a name the stdlib module does
+    // not export is E-IMPORT-004, judged against the names this seed just read
+    // (one reader). The hint scan of the other stdlib modules runs only when a
+    // name is missing.
+    let _exporters = null;
+    const exportersOf = (name) => {
+      if (_exporters === null) {
+        _exporters = new Map();
+        for (const { specifier, absPath } of listStdlibModules()) {
+          const exps = _parseStdlibExports(absPath);
+          if (!exps) continue;
+          for (const n of _exportedNamesOf(exps)) {
+            if (!_exporters.has(n)) _exporters.set(n, []);
+            _exporters.get(n).push(specifier);
+          }
+        }
+      }
+      return _exporters.get(name) ?? [];
+    };
+    collectErrors(
+      "MOD",
+      validateStdlibImports(moduleResult.importGraph, (p) => stdlibNameSets.get(p), exportersOf),
+    );
     return null;
   });
 

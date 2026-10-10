@@ -309,7 +309,7 @@ describe("beforeWrite (compileScrml) — the planned units ARE the written units
   });
 
   test("returning false writes nothing at all — not even the stdlib bundle", () => {
-    const p = project({ "index.scrml": `<program>\n  \${ import { formatDate } from "scrml:format" }\n  <p>\${formatDate(new Date())}</p>\n</program>\n` });
+    const p = project({ "index.scrml": `<program>\n  \${ import { formatDate } from "scrml:time" }\n  <p>\${formatDate(new Date())}</p>\n</program>\n` });
     const res = compileScrml({ inputFiles: [join(p.src, "index.scrml")], outputDir: p.dist, write: true, log: () => {}, beforeWrite: () => false });
     expect(res.fileCount).toBe(0);
     expect(existsSync(p.dist)).toBe(false);
