@@ -5045,7 +5045,16 @@ effect-body   ::= '$' '{' logic-content '}'
   observable by any conforming implementation. `reset-on=` resets triggered by the same write are applied
   before any effect body runs (§6.8.4 rule 4).
 - **Timing.** An effect body runs after the triggering write completes and before the next microtask boundary.
-  Engine transition effects for the same write run first (§51.7.1).
+  Engine transition effects for the same write run first (§51.7.1). **The render gates that write affects
+  settle first too:** an `if=` / `else-if=` / `else` subtree the write mounts or unmounts, and an `<each>` list
+  (or per-row `if=`) the write reconciles, are already in their new state when the body of an `<effect>` (or a
+  retiring `when … changes`) triggered by the same write runs — a body that reads the DOM sees the post-gate DOM,
+  including rows already reconciled, whatever order the effect and the gates were registered in (§42.3.5 relies
+  on this: a gated subtree's handler cannot be reached by user code triggered by the write that removed it).
+  > **Provenance:** ruling:user-voice-scrml.md S462 "a" (Q18) · S462 narrowing review #7 (R7-1: a
+  > `when @user changes { …click() }` registered before the gate reached the still-mounted handler) · **Direction
+  > of change: behaviour change** — before S462, an effect registered before a gate could run while the gated
+  > subtree was still mounted (registration order decided); now the gate always settles first.
 - **Scope and teardown.** An `<effect>` is associated **at compile time, by its position in the tree**, with the
   nearest enclosing element scope or route region (§6.7.2, §6.7.2.1) — exactly like `<request>`. It is
   registered when that owner mounts and **unregistered when it destroys** (§6.7.2 teardown step 1); no

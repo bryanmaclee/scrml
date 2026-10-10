@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
+| HIGH | 251 | 5 |
 | MED | 576 | 6 |
 | LOW | 343 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -24091,6 +24091,16 @@ A function route inference escalates for a non-SQL reason is called from the cli
 <!-- @gap id=g-helper-call-in-nested-block-not-awaited-s462 sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts,compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-client.ts(auto-await of a statement-position call of an async client function — not traced) prov=review:s462-fix-round-3-NEW-4;empirical:s462-narrowing-ends-on-write -->
 
 Agent-executed on the s462 head (`40888e005`): `server function save() -> int { return 1 }`, `function helper() { save() }`; `show()` calling `helper()` at its top level emits `await _scrml_helper_5();`, inside `if (@user is given) { helper(); @out = @user?.name }` it emits `_scrml_helper_5();`. §13.2 says a statically-known Promise-returning callee is awaited, so the nested form is a codegen defect (the rest of the block runs before `save()` returns, and a rejection is unhandled). The §42.3.5 narrowing reader keeps treating such a call as a suspension (fail closed, S462 Q11), which is correct once the call is awaited.
+
+### g-etype046-blind-in-component-body-handlers-s462 — E-TYPE-046 never checks an event handler inside a component body: `const C = <section><button onclick={ @count = @user.name.length }>…</section>` (and the arrow form `onclick=${() => { @count = @user.name.length }}`) compiles clean with `<user>: User | not`, and throws in Chromium after `@user = not`; a render read `${@user.name}` in the same component DOES fire — `NEW S462; HIGH; open`
+<!-- @gap id=g-etype046-blind-in-component-body-handlers-s462 sev=HIGH status=open locus=compiler/src/component-expander.ts(the expanded body's attribute values stay raw text — no `exprNode`, no handler statement list — so presence-narrowing's walk sees nothing to check in a handler; the E-TYPE-031 path builds them for its MARKED copy only, `checkOptionalFnPropCalls` parseAttrExprs);compiler/src/type-system.ts(checkOptionalMemberAccess walks the expanded tree) prov=review:s462-narrowing-review-8;empirical:s462-narrowing-round8 -->
+
+Reproduced on the S462 head (round 8): both handler forms exit 0 with no diagnostic. The component-body render read fires because `${}` logic blocks in the re-parsed body ARE parsed. A fix gives the expanded body's handler values the same trees TAB builds at top level (the E-TYPE-031 check already does this for its own copy — reuse it, one parser), then the existing §42.3.5 walk (including the Q18 gate rule, which R7-2 made component-aware) applies unchanged. Newly-rejecting: measure the corpus first.
+
+### g-etype046-blind-in-explicit-lift-markup-s462 — E-TYPE-046 does not check explicit `lift` markup at all: `${ for (x of @xs) { lift <p>${@user.name}</p> } }` and `lift <button onclick={ @out = @user.name }>…` compile clean with `<user>: User | not` — neither the render read nor the handler is judged — `NEW S462 (made explicit; the walker comment calls it a pre-existing coverage hole); HIGH; open`
+<!-- @gap id=g-etype046-blind-in-explicit-lift-markup-s462 sev=HIGH status=open locus=compiler/src/presence-narrowing.ts(walkNodeNarrowed does not descend into a `lift-expr`'s markup; only the implied-lift check pieces of `expandCheckPieces` are judged) prov=review:s462-narrowing-review-8;empirical:s462-narrowing-round7 -->
+
+Closing it is newly-rejecting (measure the corpus). When it closes, an `if=` inside a `for … lift` row must NOT narrow (its children or its handlers): it is a display toggle, not a render gate — `g-lift-row-if-is-display-toggle-not-a-render-gate-s462`.
 
 ### g-lift-row-if-is-display-toggle-not-a-render-gate-s462 — an `if=` inside a `for … lift` row lowers to a `style.display` toggle (the element stays mounted and its listeners reachable), so it is NOT a render gate: the §42.3.5 Q18 exemption (a gated handler keeps the gate's narrowing) must not apply there, and its children are not unmounted either — `NEW S462; MED; open`
 <!-- @gap id=g-lift-row-if-is-display-toggle-not-a-render-gate-s462 sev=MED status=open locus=compiler/src/codegen/emit-lift.js(LIFT-3 per-item if= display toggle ~:1547, `_scrml_if__…` + `_scrml_reactive_subscribe`);compiler/src/presence-narrowing.ts(walkNodeNarrowed — does not descend into a lift-expr's markup) prov=empirical:s462-narrowing-round7 -->

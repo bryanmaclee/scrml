@@ -175,6 +175,68 @@ describe("S462 round 7 — the gate unmounts before a user effect of the same wr
   });
 });
 
+// S462 round 8 (N8-1) — an effect CREATED while a gate mounts its subtree runs its initial
+// pass only; it is not in the write's effect snapshot, so it does not run again for the
+// same write. Counted with a spy on `_scrml_render_value`. Expected numbers = main's
+// (pre-ordering) counts for the toggle-ON writes; on toggle OFF main rendered `${@show}`
+// once into the nested subtree that was being removed (1) — with render-gates first the
+// subtree is unmounted (its display effects disposed) before that render (0).
+function compileMountCount(source, baseName) {
+  const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const tmpDir = resolve(tmpRoot, `case-${uniq}`);
+  const outDir = resolve(tmpDir, "out");
+  mkdirSync(tmpDir, { recursive: true });
+  const tmpInput = resolve(tmpDir, `${baseName}.scrml`);
+  writeFileSync(tmpInput, source);
+  const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
+  const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+  const html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
+  const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
+  const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  document.body.innerHTML = (bodyMatch ? bodyMatch[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+  globalThis.__s462_renders = 0;
+  new Function("window", "document",
+    `${runtimeJs}\nconst __rv = _scrml_render_value; _scrml_render_value = function(el, v) { globalThis.__s462_renders++; return __rv(el, v); };\n${clientJs}`,
+  )(window, document);
+  document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  return errors;
+}
+async function rendersOf(id) {
+  globalThis.__s462_renders = 0;
+  document.querySelector(id).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  await flush();
+  return globalThis.__s462_renders;
+}
+const TOGGLES = `\${ function on() { @show = true } function off() { @show = false } }
+<button id="on" onclick=on()>on</button><button id="off" onclick=off()>off</button>`;
+
+describe("S462 round 8 — N8-1: one effect snapshot per write (no double run)", () => {
+  test("`<div if=@show><p>${@show}</p><p>${@n}</p></div>`: 4 renders per toggle-on, as on main", async () => {
+    expect(compileMountCount(`<program>
+<show> = false
+<n>: int = 1
+${TOGGLES}
+<div if=@show><p>\${@show}</p><p>\${@n}</p></div>
+</program>
+`, "snapflat")).toEqual([]);
+    await flush();
+    expect([await rendersOf("#on"), await rendersOf("#off"), await rendersOf("#on")]).toEqual([4, 0, 4]);
+  });
+  test("a nested gated subtree: 8 renders per toggle-on, as on main; none into the removed subtree", async () => {
+    expect(compileMountCount(`<program>
+<show> = false
+<inner> = true
+<n>: int = 1
+${TOGGLES}
+<div if=@show><p>\${@show}</p><section if=@inner><p>\${@n}</p><p>\${@show}</p></section></div>
+</program>
+`, "snapnested")).toEqual([]);
+    await flush();
+    expect([await rendersOf("#on"), await rendersOf("#off"), await rendersOf("#on")]).toEqual([8, 0, 8]);
+  });
+});
+
 describe("S462 Q18 — a gated handler cannot run once its gate removed it", () => {
   test("compiles clean; the detached button's click runs nothing", async () => {
     const { errors } = compileAndMount(SRC, "gated");
