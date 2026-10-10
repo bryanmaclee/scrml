@@ -37,6 +37,9 @@ const EXCLUDED = {
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",
+  // §42.2.3 / §66.7.5 (S462) — `given-guard.rebind` marks the rebind head `given c = @h :>` so the
+  // W-GIVEN-PRESENCE-DEPRECATED lint skips it. A boolean flag; the binder is `variables` (in the table).
+  "given-guard.rebind": "a boolean flag (rebind head vs in-place presence guard), not a name; the binder is `variables`",
   // s461 — `given-guard.variableIsCell` is a boolean[] parallel to `variables` (in the
   // table): true where the head name was written `@x` (a cell), for codegen's lowering.
   "given-guard.variableIsCell": "a boolean flag per head name (cell vs local), not a name; the names are `variables` (in the table)",

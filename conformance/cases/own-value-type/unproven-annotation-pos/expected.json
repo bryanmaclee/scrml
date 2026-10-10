@@ -1,0 +1,31 @@
+{
+  "id": "own-value-type-unproven-annotation-pos",
+  "description": "§66.3 rule 10 positive twin of unproven-annotation-neg: `:int` over a call with a DECLARED return (`mk() -> int`) and over a call with an inferred-and-proven return (`six()` returns a literal) is not E-DECL-TYPE-UNPROVEN; the values render (5 7).",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 10 fires only when the initializer's value is \"a call of a function whose return is neither declared nor inferred-and-proven (rule 5)\"; rule 5 (g): a return is inferred-and-proven when every `return` carries a member of the set. ruling:user-voice-scrml.md S462 \"go on the package\".",
+  "expect": {
+    "notCodes": [
+      "E-DECL-TYPE-UNPROVEN",
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "5 7"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-STATE-UNDECLARED=2"
+        ],
+        "runtime": "sha256:1427f3c8efc01cf3"
+      }
+    }
+  }
+}

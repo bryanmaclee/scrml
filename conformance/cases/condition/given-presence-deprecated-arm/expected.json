@@ -1,0 +1,13 @@
+{
+  "id": "condition-given-presence-deprecated-arm",
+  "description": "§42.2.3 — the soft-deprecated `given name :>` present-case arm of a `match` over a `string | not` value surfaces W-GIVEN-PRESENCE-DEPRECATED (Info; exactly 1) and is accepted (no E- code: the `not` arm plus the `given` arm are exhaustive). CODES HALF ONLY: the run-time half is not asserted here, because impl#1 drops the body of a `given` match arm (g-impl1-given-match-arm-body-dropped-s462) — the §63.5 identity with `else :>` does not hold on impl#1 today. The legacy spelling is the PURPOSE of this case; it is not migrated.",
+  "language-version": "deprecated",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3 (S462) — the `given x :>` match arm is SOFT-DEPRECATED (canonical: `else :>` after the `not :>` arm) and surfaces W-GIVEN-PRESENCE-DEPRECATED; §63.5 — the W-code is a conformance-required code during the window. Provenance: ruling:user-voice-scrml.md S462 \"a, go\".",
+  "expect": {
+    "codes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "codeCounts": { "W-GIVEN-PRESENCE-DEPRECATED": 1 },
+    "severity": { "W-GIVEN-PRESENCE-DEPRECATED": "info" },
+    "notCodePrefixes": ["E-"]
+  }
+}

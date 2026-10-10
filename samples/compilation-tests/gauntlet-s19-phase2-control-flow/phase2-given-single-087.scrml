@@ -1,7 +1,7 @@
-// given x => { body } — presence guard, single var
+// presence test, single var — `if (x is given) { body }` (was the S462-deprecated `given x => { body }`; migrated by `scrml fix`)
 ${
     let name: string | not = "alice"
-    given name => {
+    if (name is given) {
         let upper = name.toUpperCase()
         log(upper)
     }

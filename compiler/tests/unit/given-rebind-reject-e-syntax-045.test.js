@@ -163,7 +163,7 @@ describe("§D: multi-identifier `given @x, @y :>` narrow-in-place", () => {
 // ---------------------------------------------------------------------------
 
 describe("§E: disambiguation — `=>` / `==` are not rebinds", () => {
-  test("`given x => { ... }` fires W-GIVEN-ARROW-LEGACY but NOT E-SYNTAX-045", () => {
+  test("`given x => { ... }` fires the presence deprecation but NOT E-SYNTAX-045", () => {
     const SRC = `<program>
   <name>: string | not = not
   function show() { given name => { return name } }
@@ -171,10 +171,27 @@ describe("§E: disambiguation — `=>` / `==` are not rebinds", () => {
 </program>
 `;
     const r = compile("e-arrow.scrml", SRC);
-    // The deprecated separator is its own diagnostic; the rebind check must not
-    // double-fire on `=>` (an OPERATOR token, not a bare `=` PUNCT).
+    // The rebind check must not fire on `=>` (an OPERATOR token, not a bare `=`
+    // PUNCT). S462: the in-place guard is soft-deprecated as a whole, so the
+    // site's one diagnostic is W-GIVEN-PRESENCE-DEPRECATED (it subsumes the
+    // separator lint W-GIVEN-ARROW-LEGACY on a presence guard — no double-fire).
     expect(hasCode(r, "E-SYNTAX-045")).toBe(false);
-    expect(hasCode(r, "W-GIVEN-ARROW-LEGACY")).toBe(true);
+    expect(hasCode(r, "W-GIVEN-PRESENCE-DEPRECATED")).toBe(true);
+    expect(hasCode(r, "W-GIVEN-ARROW-LEGACY")).toBe(false);
+  });
+
+  test("S462: the rebind head `given n = @name :>` does NOT fire W-GIVEN-PRESENCE-DEPRECATED", () => {
+    const SRC = `<program>
+  <name>: string | not = not
+  function show() { given n = @name :> { return n } }
+  <p>x</p>
+</program>
+`;
+    const r = compile("e-rebind-no-presence-lint.scrml", SRC);
+    // §66.7.5's rebind form is not in the §63 window (ruling S462); on impl#1 it
+    // stays E-SYNTAX-045.
+    expect(hasCode(r, "E-SYNTAX-045")).toBe(true);
+    expect(hasCode(r, "W-GIVEN-PRESENCE-DEPRECATED")).toBe(false);
   });
 
   test("an `==` equality after the ident is not treated as a rebind", () => {
