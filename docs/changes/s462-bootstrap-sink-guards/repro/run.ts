@@ -19,7 +19,7 @@ const click = (process.argv.find((a) => a.startsWith("--click=")) ?? "--click=")
 const boot = await loadBootstrapModules();
 const src = readFileSync(file, "utf8");
 const fe = frontEnd(boot.mods, [{ path: "app.scrml", src }], "app.scrml");
-const diags = [...(fe.parseDiags ?? []), ...(fe.diags ?? []), ...(fe.infos ?? [])];
+const diags = [...(fe.diags ?? []), ...(fe.infos ?? [])]; // fe.diags already holds the parse diagnostics
 console.log("DIAGS:", diags.length ? diags.map((d: any) => `${d.code}: ${d.message}`).join("\n       ") : "(none)");
 if (!fe.core) { console.log("NO CORE (compile reported an error)"); process.exit(0); }
 const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");

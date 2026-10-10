@@ -1,2 +1,3 @@
 2026-10-09T17:59:23-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a116fa748643cc5e7
 2026-10-09T18:03:12-06:00 REPRODUCED on origin/main 980cb3001 in headless Chromium (playwright): srcdoc=@doc -> window.pwned=1 (iframe script ran); href=@bad javascript:alert(1) -> click opens alert("1"); reactive re-write @good='vbscript:x' written verbatim. Bootstrap emits no diagnostic for either. Repro: repro/{run,chrome}.ts + {href,srcdoc}.scrml
+2026-10-09T18:39:33-06:00 runtime guard (verbatim impl#1 runtime-url-guard.js block + attr/urlGuardOf) + compile-time srcdoc/on-text refusals in analyze/parse + one/online/onboarding exemption + severity regen + slice-m4/sink-guards.test.js (25) + unit drift test; slice-m1/m2/m4 green
