@@ -57,6 +57,7 @@
  */
 
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
 /** A source span (the subset this module reads / passes through). */
 export type NarrowSpan = { file?: string; start?: number; end?: number; line?: number; col?: number };
@@ -88,6 +89,24 @@ export interface PresenceNarrowingOptions {
    * `null` / absent: this node writes nothing a consumer tracks.
    */
   endsAt?(node: Rec): string[] | "all" | null;
+  /**
+   * S462 Q10 ("a") — the receivers a STATEMENT proves present once it has run: a write
+   * whose value is provably present ("a struct/object literal, a value of a non-optional
+   * type") "narrows the place again from that point".
+   */
+  narrowsAt?(stmt: Rec): string[];
+  /**
+   * S462 Q12 ("a") — the receivers a function body created here does NOT inherit (it may
+   * run later; it re-tests). Reactive cells; a captured LOCAL keeps its narrowing.
+   * Absent: every narrowing is inherited.
+   */
+  closureDrops?(key: string): boolean;
+  /**
+   * S462 Q12 ("a") — is argument `index` of this call a callback a built-in calls
+   * synchronously and does not retain (`.map` / `.filter` / … on a KNOWN built-in
+   * receiver)? Such a lambda keeps the narrowing of its position.
+   */
+  syncCallbackArg?(call: Rec, index: number): boolean;
 }
 
 /** The narrowings a piece of code ends: a set of receiver keys, or every one. */
@@ -115,6 +134,14 @@ export interface NarrowEndInfo {
   span: NarrowSpan;
   /** True when it ended at a call whose write set cannot be determined. */
   unresolved: boolean;
+  /**
+   * Why it ended: a write in `src` (`"write"`), a function body that may run later
+   * (`"closure"`, S462 Q12), or a deferred body judged after the rest of its block
+   * (`"deferred"`).
+   */
+  why: "write" | "closure" | "deferred";
+  /** The code whose write ended it — `findEndCause` names the node inside it. */
+  src?: unknown;
 }
 const ENDED_INFO = new WeakMap<ReadonlySet<string>, ReadonlyMap<string, NarrowEndInfo>>();
 
@@ -124,7 +151,13 @@ export function narrowingEndedAt(present: ReadonlySet<string>, key: string): Nar
 }
 
 /** The presence set with every ended receiver removed (recording where, for diagnostics). */
-function withoutEnds(present: ReadonlySet<string>, ends: NarrowEnds, at?: NarrowSpan): ReadonlySet<string> {
+function withoutEnds(
+  present: ReadonlySet<string>,
+  ends: NarrowEnds,
+  at?: NarrowSpan,
+  src?: unknown,
+  why: NarrowEndInfo["why"] = "write",
+): ReadonlySet<string> {
   if (ends !== "all" && ends.size === 0) return present;
   if (present.size === 0) return present;
   const removed = ends === "all" ? [...present] : [...ends].filter((k) => present.has(k));
@@ -133,9 +166,33 @@ function withoutEnds(present: ReadonlySet<string>, ends: NarrowEnds, at?: Narrow
   for (const k of removed) out.delete(k);
   const prior = ENDED_INFO.get(present);
   const info = new Map(prior ?? []);
-  if (at) for (const k of removed) info.set(k, { span: at, unresolved: ends === "all" });
+  if (at) for (const k of removed) info.set(k, { span: at, unresolved: ends === "all", why, src });
   if (info.size > 0) ENDED_INFO.set(out, info);
   return out;
+}
+
+/**
+ * The FIRST node inside `src`, in the order `endsWithin` reads it, whose own write ends
+ * `key` (or every narrowing) — so a diagnostic can name the call / assignment itself.
+ */
+export function findEndCause(src: unknown, key: string, opts: Pick<PresenceNarrowingOptions, "endsAt">): Rec | null {
+  if (!opts.endsAt || !src || typeof src !== "object") return null;
+  if (Array.isArray(src)) {
+    for (const el of src) { const c = findEndCause(el, key, opts); if (c) return c; }
+    return null;
+  }
+  const n = src as Rec;
+  if (typeof n.kind === "string" && DEFINITION_KINDS.has(n.kind)) return null;
+  for (const k of Object.keys(n)) {
+    if (k === "span" || k === "attrs") continue;
+    const v = n[k];
+    if (v && typeof v === "object") { const c = findEndCause(v, key, opts); if (c) return c; }
+  }
+  if (typeof n.kind === "string") {
+    const own = opts.endsAt(n);
+    if (own === "all" || (own && own.includes(key))) return n;
+  }
+  return null;
 }
 
 /** Keys minus the ended ones. */
@@ -337,7 +394,7 @@ export function walkExprNarrowed(
     let p = present;
     for (const el of node) {
       walkExprNarrowed(el, p, span, opts);
-      p = withoutEnds(p, endsWithin(el, opts), atOf(el, span));
+      p = withoutEnds(p, endsWithin(el, opts), span, el);
     }
     return;
   }
@@ -346,7 +403,7 @@ export function walkExprNarrowed(
   if (typeof n.kind === "string" && ARM_LIST_KINDS.has(n.kind)) {
     // S462 (F5a) — a value-position `match`: the header, then the arms as alternatives.
     walkExprNarrowed(n.headerExpr, present, span, opts);
-    const after = withoutEnds(present, endsWithin(n.headerExpr, opts), atOf(n.headerExpr, span));
+    const after = withoutEnds(present, endsWithin(n.headerExpr, opts), span, n.headerExpr);
     walkAlternatives((n.body as unknown[]) ?? [], after, span, opts);
     return;
   }
@@ -354,7 +411,7 @@ export function walkExprNarrowed(
     const cond = (n.condition ?? n.test) as unknown;
     walkExprNarrowed(cond, present, span, opts);
     const condEnds = endsWithin(cond, opts);
-    const after = withoutEnds(present, condEnds, atOf(cond, span));
+    const after = withoutEnds(present, condEnds, span, cond);
     walkExprNarrowed(n.consequent, withKeys(after, facts(cond, true, opts)), span, opts);
     walkExprNarrowed(n.alternate, withKeys(after, facts(cond, false, opts)), span, opts);
     return;
@@ -363,30 +420,60 @@ export function walkExprNarrowed(
     // `A && B` evaluates B only when A is true; `A || B` only when A is false.
     walkExprNarrowed(n.left, present, span, opts);
     const leftEnds = endsWithin(n.left, opts);
-    const after = withoutEnds(present, leftEnds, atOf(n.left, span));
+    const after = withoutEnds(present, leftEnds, span, n.left);
     walkExprNarrowed(n.right, withKeys(after, facts(n.left, n.op === "&&", opts)), span, opts);
     return;
   }
-  if (n.kind === "lambda" && n.body && typeof n.body === "object" && (n.body as Rec).kind === "block") {
-    walkBodyNarrowed(((n.body as Rec).stmts as unknown[]) ?? [], present, span, opts);
+  if (n.kind === "call" && opts.syncCallbackArg && Array.isArray(n.args)) {
+    // S462 Q12 — mark the lambdas a known built-in calls synchronously (they keep the
+    // narrowing of their position); every other lambda starts without cell narrowings.
+    (n.args as unknown[]).forEach((a, i) => {
+      if (a && typeof a === "object" && opts.syncCallbackArg!(n, i)) SYNC_CALLBACKS.add(a as object);
+    });
+  }
+  if (n.kind === "lambda") {
+    const inner = closureEntry(present, n, span, opts);
+    if (n.body && typeof n.body === "object" && (n.body as Rec).kind === "block") {
+      walkBodyNarrowed(((n.body as Rec).stmts as unknown[]) ?? [], inner, span, opts);
+      return;
+    }
+    // Parameter defaults and an expression body: run when the lambda is called.
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") walkExprNarrowed(v, inner, span, opts);
+    }
     return;
   }
   if (opts.expandOpaque && n.kind === "escape-hatch") {
     const stmts = opts.expandOpaque(n);
-    if (stmts) { walkBodyNarrowed(stmts, present, span, opts); return; }
+    if (stmts) { walkBodyNarrowed(stmts, closureEntry(present, n, span, opts), span, opts); return; }
   }
   // Operands in evaluation order (a call's callee, then its arguments, then the call
-  // itself — whose own write the PARENT applies through `endsWithin`). A lambda's
-  // expression body runs when it is called, not here: it ends nothing after it.
+  // itself — whose own write the PARENT applies through `endsWithin`).
   let p = present;
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
     if (v && typeof v === "object") {
       walkExprNarrowed(v, p, span, opts);
-      if (n.kind !== "lambda") p = withoutEnds(p, endsWithin(v, opts), atOf(v, span));
+      if (n.kind !== "lambda") p = withoutEnds(p, endsWithin(v, opts), span, v);
     }
   }
+}
+
+/** Lambdas a known built-in calls synchronously (S462 Q12) — set by the call above them. */
+const SYNC_CALLBACKS = new WeakSet<object>();
+
+/**
+ * S462 Q12 ("a") — the presence set a function body created HERE starts with: it may run
+ * later, after writes this walk does not see, so it does not inherit the narrowing of
+ * reactive cells (`closureDrops`) — unless a known built-in calls it synchronously.
+ */
+function closureEntry(present: ReadonlySet<string>, fn: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
+  if (!opts.closureDrops || present.size === 0 || SYNC_CALLBACKS.has(fn)) return present;
+  const drop = new Set([...present].filter((k) => opts.closureDrops!(k)));
+  return withoutEnds(present, drop, fn.kind === "function-decl" ? atOf(fn, span) : span, fn, "closure");
 }
 
 function spanOf(node: Rec, fallback: NarrowSpan): NarrowSpan {
@@ -469,17 +556,21 @@ export function walkNodeNarrowed(
   if (Array.isArray(node)) { walkBodyNarrowed(node, present, span, opts); return; }
   const n = node as Rec;
   const here = spanOf(n, span);
+  if (n.kind === "function-decl" && opts.closureDrops) {
+    // S462 Q12 — a function declared inside a narrowed scope runs when called, later.
+    present = closureEntry(present, n, here, opts);
+  }
   if (typeof n.kind === "string" && LOOP_KINDS.has(n.kind)) {
     // S462 — the body, the per-iteration test and the C-style update run again after
     // themselves: a write anywhere in them ends the narrowing for all of them. The
     // iterable / C-style init runs once, before.
     const c = n.cStyleParts as Rec | undefined;
     let before = present;
-    if (c && c.initExpr) before = withoutEnds(before, endsWithin(c.initExpr, opts), here);
-    if (n.iterExpr) before = withoutEnds(before, endsWithin(n.iterExpr, opts), here);
+    if (c && c.initExpr) before = withoutEnds(before, endsWithin(c.initExpr, opts), here, c.initExpr);
+    if (n.iterExpr) before = withoutEnds(before, endsWithin(n.iterExpr, opts), here, n.iterExpr);
     const loopEnds = unionEnds(unionEnds(endsWithin(n.body, opts), endsWithin(n.condExpr, opts)),
       c ? unionEnds(endsWithin(c.condExpr, opts), endsWithin(c.updateExpr, opts)) : NO_ENDS);
-    const inLoop = withoutEnds(before, loopEnds, here);
+    const inLoop = withoutEnds(before, loopEnds, here, n);
     for (const k of EXPR_KEYS) {
       if (n[k] && typeof n[k] === "object") walkExprNarrowed(n[k], inLoop, here, opts);
     }
@@ -492,7 +583,7 @@ export function walkNodeNarrowed(
   for (const k of EXPR_KEYS) {
     if (n[k] && typeof n[k] === "object") {
       walkExprNarrowed(n[k], p, here, opts);
-      p = withoutEnds(p, endsWithin(n[k], opts), atOf(n[k], here));
+      p = withoutEnds(p, endsWithin(n[k], opts), here, n[k]);
     }
   }
   present = p;
@@ -506,8 +597,12 @@ export function walkNodeNarrowed(
         if (!val || typeof val !== "object") continue;
         const isGuard = attr.name === "if" || attr.name === "else-if";
         const hb = (val.handlerBlock as Rec | undefined)?.stmts;
-        if (Array.isArray(hb)) walkBodyNarrowed(hb, isGuard ? present : inner, here, opts);
-        else walkExprNarrowed(val, isGuard ? present : inner, here, opts);
+        // S462 Q12 — an event handler (any form: a statement list, an expression, a
+        // lambda) is a function body: it runs later, so it re-tests reactive cells.
+        const isHandler = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
+        const at = isGuard ? present : isHandler ? closureEntry(inner, val, here, opts) : inner;
+        if (Array.isArray(hb)) walkBodyNarrowed(hb, at, here, opts);
+        else walkExprNarrowed(val, at, here, opts);
       }
     }
     walkBodyNarrowed((n.children as unknown[]) ?? [], inner, here, opts);
@@ -573,15 +668,17 @@ export function walkBodyNarrowed(
       // for what the whole block does — `endsWithin` — so they end the narrowing AFTER
       // the block). It runs after the rest of the list, so it is judged with what the
       // rest of the list may write already ended.
-      walkNodeNarrowed(node, withoutEnds(acc, mayWriteWithin(pieces.slice(i + 1), opts), atOf(r, span)), span, opts);
+      walkNodeNarrowed(node, withoutEnds(acc, mayWriteWithin(pieces.slice(i + 1), opts), atOf(r, span), pieces.slice(i + 1), "deferred"), span, opts);
       continue;
     }
     walkNodeNarrowed(node, acc, span, opts);
     if (r && typeof r === "object") {
-      acc = withoutEnds(acc, endsWithin(r, opts), atOf(r, span));
+      acc = withoutEnds(acc, endsWithin(r, opts), atOf(r, span), r);
       // An early return's facts hold for the rest of the list — less what the `else`
       // branch (which runs on the way here) may write.
       acc = withKeys(acc, keysWithoutEnds(earlyReturnKeys(r, opts), r.kind === "if-stmt" ? endsWithin(r.alternate, opts) : NO_ENDS));
+      // S462 Q10 — a write of a provably present value narrows the place again.
+      if (opts.narrowsAt) acc = withKeys(acc, opts.narrowsAt(r));
     }
   }
 }

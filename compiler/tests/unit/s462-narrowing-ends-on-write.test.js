@@ -12,11 +12,15 @@
  * `checkOptionalMemberAccess`; E-TYPE-031 (optional fn props) shares the walker.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, setDefaultTimeout } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+
+// Each case is a whole compile (~50 ms alone); under a loaded full-suite run one has
+// taken > 5 s, so the default per-test timeout is widened (as the executed-DB tests do).
+setDefaultTimeout(30_000);
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let n = 0;
@@ -558,5 +562,172 @@ describe("S462 fix round 1 — spurious rejections removed", () => {
     function show(c: bool) {
         if (@user is not) { return } else { clear() }
         @out = @user.name }`)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 2 (re-review of 5219250944) + bryan rulings S462 Q10 / Q11 / Q12 ("a").
+// ---------------------------------------------------------------------------
+function prog3(logic) {
+  return `<program>
+type User:struct = { name: string }
+type Item:struct = { title: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<words>: string[] = []
+<items>: Item[] = []
+\${
+    function clear() { @user = not }
+    function noop() { @out = "z" }
+${logic}
+}
+<p>\${@out}</p>
+</program>
+`;
+}
+const all3 = (logic) => e046(prog3(logic));
+const n3 = (logic) => all3(logic).length;
+
+describe("S462 fix round 2 — N1: destructuring binders shadow file functions", () => {
+  test("const { noop } = { noop: clear }; noop()", () => {
+    expect(n3(`
+    function show() { if (@user is given) { const { noop } = { noop: clear }
+            noop()
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("const { a: noop } = { a: clear }; noop()", () => {
+    expect(n3(`
+    function show() { if (@user is given) { const { a: noop } = { a: clear }
+            noop()
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("a destructured parameter ({ noop })", () => {
+    expect(n3(`
+    function apply({ noop }) { if (@user is given) { noop()
+            @out = @user.name } }
+    function go() { apply({ noop: clear }) }`)).toBe(1);
+  });
+});
+
+describe("S462 fix round 2 — N2: ordinary built-in code is not refused", () => {
+  test("a known array method's callback parameter has the element's shape", () => {
+    expect(n3(`
+    function show() { if (@user is given) {
+            const ws = @words.map(w => w.trim())
+            const xs = @items.filter(i => i.title.includes("a"))
+            const ps = @user.name.split(",").map(p => p.trim())
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("console.* with function-free arguments; new Date() is a built-in receiver", () => {
+    expect(n3(`
+    function show() { if (@user is given) { console.log("x")
+            const d = new Date()
+            const s = d.toISOString()
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("a local from a call with a declared primitive return type", () => {
+    expect(n3(`
+    function fmt(s: string) -> string { return s }
+    function show() { if (@user is given) { const t = fmt(@user.name)
+            const u = t.trim()
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("an UNTYPED parameter is not trusted; the message names the call and the reason", () => {
+    const errs = all3(`
+    function show(q) { if (@user is given) { const t = q.trim()
+            @out = @user.name } }`);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("`q.trim()`");
+    expect(errs[0].message).toContain("not known to be a built-in value");
+  });
+});
+
+describe("S462 Q10 — a write of a provably present value re-narrows", () => {
+  test("an object literal written after the narrowing ended", () => {
+    expect(n3(`
+    function show() { if (@user is given) { clear()
+            @user = { name: "b" }
+            @out = @user.name } }`)).toBe(0);
+  });
+  test("with no prior test at all", () => {
+    expect(n3(`
+    function show() { @user = { name: "c" }
+        @out = @user.name }`)).toBe(0);
+  });
+  test("a write of `not` does not", () => {
+    expect(n3(`
+    function show() { @user = not
+        @out = @user.name }`)).toBe(1);
+  });
+  test("a write of a possibly-absent value does not", () => {
+    expect(n3(`
+    function show(u: User | not) { @user = u
+        @out = @user.name }`)).toBe(1);
+  });
+});
+
+describe("S462 Q11 — a suspension point ends every cell narrowing", () => {
+  test("a server call (the compiler awaits it); the message names the suspension", () => {
+    const errs = all3(`
+    server function save() -> int { return 1 }
+    function show() { if (@user is given) { const r = save()
+            @out = @user.name } }`);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("`save()` is a server call");
+    expect(errs[0].message).toContain("suspension point");
+  });
+  test("a call of a client function that awaits a server call", () => {
+    expect(n3(`
+    server function save() -> int { return 1 }
+    function persist() { const r = save() }
+    function show() { if (@user is given) { persist()
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("a re-test after the suspension narrows again", () => {
+    expect(n3(`
+    server function save() -> int { return 1 }
+    function show() { if (@user is given) { const r = save()
+            if (@user is given) { @out = @user.name } } }`)).toBe(0);
+  });
+});
+
+describe("S462 Q12 — a function body created in a narrowed scope re-tests reactive cells", () => {
+  test("a lambda", () => {
+    const errs = all3(`
+    function show() { if (@user is given) { const f = () => @user.name
+            @out = f() } }`);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("does not reach into the function");
+  });
+  test("a scheduled callback", () => {
+    expect(n3(`
+    function put(s: string) { @out = s }
+    function show() { if (@user is given) { setTimeout(() => put(@user.name), 10) } }`)).toBe(1);
+  });
+  test("a nested function declaration", () => {
+    expect(n3(`
+    function show() { if (@user is given) {
+            function inner() -> string { return @user.name }
+            @out = inner() } }`)).toBe(1);
+  });
+  test("an event-handler body under `if=@user`", () => {
+    expect(e046(`<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<div if=@user><button onclick={ @out = @user.name }>go</button></div>
+<p>\${@out}</p>
+</program>
+`).length).toBe(1);
+  });
+  test("a lambda a built-in calls synchronously keeps the narrowing", () => {
+    expect(n3(`
+    function show() { if (@user is given) { const xs = @words.map(w => w + @user.name)
+            @out = xs.join(",") } }`)).toBe(0);
+  });
+  test("a re-test inside the function narrows", () => {
+    expect(n3(`
+    function show() { if (@user is given) { const f = () => (@user is given ? @user.name : "")
+            @out = f() } }`)).toBe(0);
   });
 });

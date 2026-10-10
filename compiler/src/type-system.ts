@@ -89,8 +89,8 @@ import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { boundNamesOf } from "./binding-names.ts";
-import { walkBodyNarrowed, narrowingEndedAt } from "./presence-narrowing.ts";
-import { buildNarrowingEndsAt, arrayShape, recordShape, PRIM_SHAPE, UNKNOWN_SHAPE, type ValueShape } from "./narrowing-write-set.ts";
+import { walkBodyNarrowed, narrowingEndedAt, findEndCause } from "./presence-narrowing.ts";
+import { buildNarrowingEndsAt, arrayShape, recordShape, maybeAbsent, PRIM_SHAPE, UNKNOWN_SHAPE, type ValueShape } from "./narrowing-write-set.ts";
 import { impliedLiftCheckPieces } from "./implied-lift-desugar.ts";
 // §17.1.1 if-chain child SHAPE — the ONE module that knows where a collapsed
 // `if=`/`else-if=`/`else` chain keeps its branch bodies. See `case "if-chain"`.
@@ -31729,8 +31729,13 @@ function valueShapeOfType(t: ResolvedType | null | undefined, depth = 0): ValueS
       });
     }
     case "union": {
-      const members = (t as UnionType).members.filter((m) => m && m.kind !== "not");
-      if (members.length === 1) return valueShapeOfType(members[0], depth + 1);
+      const all = (t as UnionType).members;
+      const members = all.filter((m) => m && m.kind !== "not");
+      if (members.length === 1) {
+        const inner = valueShapeOfType(members[0], depth + 1);
+        // `T | not` — possibly absent (S462 Q10: a write of it does not re-narrow).
+        return members.length < all.length ? maybeAbsent(inner) : inner;
+      }
       return UNKNOWN_SHAPE;
     }
     case "enum":
@@ -31855,15 +31860,24 @@ function checkOptionalMemberAccess(
     const cell = bareCellName(node);
     return cell && optionalCells.has(cell) ? cell : null;
   };
+  // S462 (§42.3.5) — the write-set reader: what a node writes (a write to a narrowed cell
+  // ends its narrowing — `@cell = …`, `reset(@cell)`, a call of a function of this file
+  // whose write set holds the cell, a call whose write set cannot be determined, a
+  // suspension point), which statements re-narrow (Q10), which lambdas a built-in calls
+  // synchronously (Q12).
+  const writeSet = buildNarrowingEndsAt(topNodes as unknown[], {
+    receiverKey,
+    typeShape: typeRegistry ? (ann: string) => valueShapeOfType(resolveTypeExpr(ann, typeRegistry)) : undefined,
+  });
+  const endsOpts = { endsAt: writeSet.endsAt };
   walkBodyNarrowed(topNodes as unknown[], new Set<string>(), fileSpan, {
     receiverKey,
-    // S462 (§42.3.5) — a write to a narrowed cell ends its narrowing: `@cell = …`,
-    // `reset(@cell)`, a call of a function of this file whose write set holds the cell,
-    // and a call whose write set cannot be determined (ends every narrowing).
-    endsAt: buildNarrowingEndsAt(topNodes as unknown[], {
-      receiverKey,
-      typeShape: typeRegistry ? (ann: string) => valueShapeOfType(resolveTypeExpr(ann, typeRegistry)) : undefined,
-    }),
+    endsAt: writeSet.endsAt,
+    narrowsAt: writeSet.narrowsAt,
+    syncCallbackArg: writeSet.syncCallbackArg,
+    // S462 Q12 — every key here is a reactive cell: a function body created in a narrowed
+    // scope does not inherit it.
+    closureDrops: () => true,
     // An `if=` guard names the cell bare or `@`-prefixed (§42.4).
     guardKey: (node: unknown): string | null => {
       const t = node as { kind?: string; name?: string } | undefined;
@@ -31881,14 +31895,23 @@ function checkOptionalMemberAccess(
       if (!recv.optional) return;
       const cell = bareCellName(n.object);
       if (cell && present.has(cell)) return;
-      // S462 — a receiver that WAS narrowed and then written: name the write (the root
-      // cause), not only "narrow the receiver".
+      // S462 — a receiver that WAS narrowed and then lost it: name the cause (the call /
+      // write itself and why), not only "narrow the receiver".
       const ended = cell ? narrowingEndedAt(present, cell) : undefined;
-      fire(receiverLabel(n.object), span as Span, ended
-        ? (ended.unresolved
-          ? ` The narrowing of \`@${cell}\` ended at line ${ended.span.line ?? "?"}: a call there runs code whose writes cannot be determined (a function value, an imported or unknown function), so it may set \`@${cell}\` to \`not\` — a write ends the narrowing from that point (§42.3.5). Test \`@${cell}\` again after the call, or read it before.`
-          : ` The narrowing of \`@${cell}\` ended at line ${ended.span.line ?? "?"}: \`@${cell}\` is written there (directly, in a nested block, or by a function that writes it) — a write ends the narrowing from that point (§42.3.5). Test \`@${cell}\` again after the write.`)
-        : "");
+      let note = "";
+      if (ended && cell) {
+        const line = ended.span.line ?? "?";
+        if (ended.why === "closure") {
+          note = ` The narrowing of \`@${cell}\` does not reach into the function created at line ${line}: it may run later, after \`@${cell}\` is written, so a reactive cell is re-tested inside it (§42.3.5, S462). Test \`@${cell}\` again inside the function.`;
+        } else if (ended.why === "deferred") {
+          note = ` This deferred body runs when its block exits — after the writes that follow it (line ${line} on), which may set \`@${cell}\` to \`not\` (§42.3.5). Test \`@${cell}\` again inside the deferred body.`;
+        } else {
+          const cause = findEndCause(ended.src, cell, endsOpts);
+          const why = cause ? writeSet.describeEnd(cause, cell) : `\`@${cell}\` may be written there`;
+          note = ` The narrowing of \`@${cell}\` ended at line ${line}: ${why}. A write ends the narrowing from that point (§42.3.5) — test \`@${cell}\` again after it, or read it before.`;
+        }
+      }
+      fire(receiverLabel(n.object), span as Span, note);
     },
   });
 }

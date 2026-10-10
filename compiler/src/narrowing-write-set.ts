@@ -40,6 +40,7 @@
  */
 
 import { mayWriteWithin, unionEnds, type NarrowEnds } from "./presence-narrowing.ts";
+import { boundNamesOf } from "./binding-names.ts";
 
 type Rec = Record<string, unknown>;
 
@@ -49,32 +50,44 @@ type Rec = Record<string, unknown>;
 
 /** What is known about a value. */
 export interface ValueShape {
-  /** A built-in method called on it runs no scrml code of its own (string, number, array). */
+  /** A built-in method called on it runs no scrml code of its own (string, number, array, Date). */
   builtinMethods: boolean;
   /** It is not, and contains no, function (safe to hand to a built-in as data). */
   functionFree: boolean;
+  /** It is provably never `not` (S462 Q10: a write of it re-narrows). */
+  present: boolean;
   /** A field's shape, or null if unknown. */
   field(name: string): ValueShape | null;
   /** An element's shape (an array), or null if unknown. */
   element(): ValueShape | null;
 }
 
-export const UNKNOWN_SHAPE: ValueShape = { builtinMethods: false, functionFree: false, field: () => null, element: () => null };
+export const UNKNOWN_SHAPE: ValueShape = { builtinMethods: false, functionFree: false, present: false, field: () => null, element: () => null };
 export const FUNCTION_SHAPE: ValueShape = UNKNOWN_SHAPE;
-export const PRIM_SHAPE: ValueShape = { builtinMethods: true, functionFree: true, field: () => PRIM_SHAPE, element: () => PRIM_SHAPE };
+export const PRIM_SHAPE: ValueShape = { builtinMethods: true, functionFree: true, present: true, field: () => PRIM_SHAPE, element: () => PRIM_SHAPE };
+/** The value `not`. */
+const NOT_SHAPE: ValueShape = { builtinMethods: false, functionFree: true, present: false, field: () => null, element: () => null };
+/** A `Date` (`new Date(…)`): built-in methods, no function inside. */
+const DATE_SHAPE: ValueShape = { builtinMethods: true, functionFree: true, present: true, field: () => null, element: () => null };
 
 export function arrayShape(element: ValueShape): ValueShape {
   return {
     builtinMethods: true,
     functionFree: element.functionFree,
+    present: true,
     field: (name) => (name === "length" ? PRIM_SHAPE : null),
     element: () => element,
   };
 }
 
 /** A value with known fields (a struct / object literal): no built-in methods. */
-export function recordShape(functionFree: boolean, field: (name: string) => ValueShape | null): ValueShape {
-  return { builtinMethods: false, functionFree, field, element: () => null };
+export function recordShape(functionFree: boolean, field: (name: string) => ValueShape | null, present = true): ValueShape {
+  return { builtinMethods: false, functionFree, present, field, element: () => null };
+}
+
+/** The same shape, but possibly `not` (`T | not`). */
+export function maybeAbsent(s: ValueShape): ValueShape {
+  return s.present ? { ...s, present: false } : s;
 }
 
 function joinShapes(a: ValueShape, b: ValueShape): ValueShape {
@@ -82,6 +95,7 @@ function joinShapes(a: ValueShape, b: ValueShape): ValueShape {
   return {
     builtinMethods: a.builtinMethods && b.builtinMethods,
     functionFree: a.functionFree && b.functionFree,
+    present: a.present && b.present,
     field: () => null,
     element: () => null,
   };
@@ -91,11 +105,13 @@ const PRIM_TYPE_NAMES = new Set(["string", "int", "number", "float", "bool", "bo
 
 /** The syntactic reading of a type annotation, used when the consumer gives no type reader. */
 function syntacticShape(annotation: string): ValueShape {
-  let t = annotation.replace(/\s+/g, "");
-  t = t.replace(/^not\|/, "").replace(/\|not$/, "").replace(/\?$/, "");
-  if (PRIM_TYPE_NAMES.has(t)) return PRIM_SHAPE;
-  if (t.endsWith("[]")) return arrayShape(syntacticShape(t.slice(0, -2)));
-  return UNKNOWN_SHAPE;
+  const raw = annotation.replace(/\s+/g, "");
+  const t = raw.replace(/^not\|/, "").replace(/\|not$/, "").replace(/\?$/, "");
+  const absent = t !== raw;
+  let s: ValueShape = UNKNOWN_SHAPE;
+  if (PRIM_TYPE_NAMES.has(t)) s = PRIM_SHAPE;
+  else if (t.endsWith("[]")) s = arrayShape(syntacticShape(t.slice(0, -2)));
+  return absent ? maybeAbsent(s) : s;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,8 +157,24 @@ const BUILTIN_METHODS = new Set([
   "toLocaleUpperCase", "trim", "trimEnd", "trimStart",
   // Number / common
   "toFixed", "toPrecision", "toExponential", "toString", "toLocaleString", "valueOf",
+  // Date
+  "getTime", "getFullYear", "getMonth", "getDate", "getDay", "getHours", "getMinutes",
+  "getSeconds", "getMilliseconds", "getTimezoneOffset", "getUTCFullYear", "getUTCMonth",
+  "getUTCDate", "getUTCDay", "getUTCHours", "getUTCMinutes", "getUTCSeconds",
+  "toISOString", "toDateString", "toTimeString", "toLocaleDateString", "toLocaleTimeString",
+  "toUTCString", "toJSON",
   // Promise
   "then", "catch", "finally",
+]);
+
+/**
+ * S462 Q12 / N2a — array methods that CALL their function argument synchronously and do
+ * not retain it. On a receiver KNOWN to be an array, a lambda passed to one keeps the
+ * narrowing of its position, and its parameters get the element's shape.
+ */
+const SYNC_CALLBACK_METHODS = new Set([
+  "map", "filter", "forEach", "find", "findIndex", "findLast", "findLastIndex", "some",
+  "every", "reduce", "reduceRight", "flatMap", "sort", "toSorted",
 ]);
 
 /** Built-in methods whose result is a primitive (string / number / boolean). */
@@ -153,9 +185,17 @@ const PRIM_RESULT_METHODS = new Set([
   "substr", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
   "trimEnd", "trimStart", "toFixed", "toPrecision", "toExponential", "toString",
   "toLocaleString",
+  "getTime", "getFullYear", "getMonth", "getDate", "getDay", "getHours", "getMinutes",
+  "getSeconds", "getMilliseconds", "getTimezoneOffset", "getUTCFullYear", "getUTCMonth",
+  "getUTCDate", "getUTCDay", "getUTCHours", "getUTCMinutes", "getUTCSeconds",
+  "toISOString", "toDateString", "toTimeString", "toLocaleDateString", "toLocaleTimeString",
+  "toUTCString", "toJSON",
 ]);
 /** Built-in array methods whose result is an array of the receiver's elements. */
 const SAME_ARRAY_METHODS = new Set(["filter", "slice", "concat", "reverse", "sort", "toReversed", "toSorted", "toSpliced"]);
+
+/** `new Date(…)` — its result is a known built-in receiver (N2b). */
+const DATE_CTOR = new Set(["Date"]);
 
 /** Built-in constructors (`new C(…)`): no scrml code except through their arguments. */
 const BUILTIN_CONSTRUCTORS = new Set([
@@ -169,7 +209,7 @@ const BUILTIN_CONSTRUCTORS = new Set([
 
 type Res =
   | { kind: "fn"; decl: Rec }
-  | { kind: "value"; shape: () => ValueShape }
+  | { kind: "value"; shape: () => ValueShape; src?: unknown }
   | { kind: "global" };
 
 const GLOBAL: Res = { kind: "global" };
@@ -177,18 +217,23 @@ const UNKNOWN_VALUE: Res = { kind: "value", shape: () => UNKNOWN_SHAPE };
 
 class Scope {
   readonly names = new Map<string, Res>();
+  /** A scope whose bindings could not be read (an escape-hatch arrow's parameters). */
+  opaque = false;
   constructor(readonly parent: Scope | null) {}
   lookup(name: string): Res | null {
     for (let s: Scope | null = this; s; s = s.parent) {
       const r = s.names.get(name);
       if (r) return r;
+      if (s.opaque) return UNKNOWN_VALUE;   // it may be one of the unread parameters
     }
     return null;
   }
   /** Declare `name`; a second, different declaration in the same scope is ambiguous. */
   declare(name: string, res: Res): void {
     const prior = this.names.get(name);
-    if (prior && !(prior.kind === "fn" && res.kind === "fn" && prior.decl === res.decl)) {
+    const same = prior && ((prior.kind === "fn" && res.kind === "fn" && prior.decl === res.decl)
+      || (prior.kind === "value" && res.kind === "value" && prior.src !== undefined && prior.src === res.src));
+    if (prior && !same) {
       this.names.set(name, UNKNOWN_VALUE);
       return;
     }
@@ -196,18 +241,13 @@ class Scope {
   }
 }
 
-/** Every bound name in a destructuring pattern (or a plain name). */
-function patternNames(p: unknown, out: string[] = []): string[] {
-  if (typeof p === "string") { if (/^[A-Za-z_$][\w$]*$/.test(p)) out.push(p); return out; }
-  if (!p || typeof p !== "object") return out;
-  if (Array.isArray(p)) { for (const x of p) patternNames(x, out); return out; }
-  const r = p as Rec;
-  for (const k of Object.keys(r)) {
-    if (k === "span" || k === "kind" || k === "defaultExpr" || k === "default") continue;
-    const v = r[k];
-    if (typeof v === "string" && (k === "name" || k === "local" || k === "alias" || k === "binding")) patternNames(v, out);
-    else if (v && typeof v === "object") patternNames(v, out);
-  }
+/** The names an import binds locally. */
+function importNames(imp: unknown): string[] {
+  const r = imp as Rec | undefined;
+  if (!r || typeof r !== "object") return [];
+  const out: string[] = [];
+  if (Array.isArray(r.names)) for (const n of r.names) if (typeof n === "string") out.push(n);
+  if (Array.isArray(r.specifiers)) for (const sp of r.specifiers as Rec[]) if (typeof sp?.local === "string") out.push(sp.local as string);
   return out;
 }
 
@@ -222,6 +262,23 @@ export interface WriteSetOptions {
   receiverKey(node: unknown): string | null;
   /** The shape of a written type (`string`, `User | not`, `int[]`, …), or null if unknown. */
   typeShape?(annotation: string): ValueShape | null;
+  /**
+   * The statements of a block-bodied arrow the parser kept as an escape hatch — the SAME
+   * expansion (the same objects) the narrowing walk reads, so names inside resolve.
+   */
+  expandOpaque?(node: Rec): unknown[] | null;
+}
+
+/** The per-file answers the §42.3.5 reader asks for (presence-narrowing.ts options). */
+export interface NarrowingWriteSet {
+  /** What evaluating one node writes (its own effect). */
+  endsAt(node: Rec): string[] | "all" | null;
+  /** S462 Q10 — the receivers a statement re-narrows (a write of a provably present value). */
+  narrowsAt(stmt: Rec): string[];
+  /** S462 Q12 — is argument `index` of `call` a lambda a known built-in calls synchronously? */
+  syncCallbackArg(call: Rec, index: number): boolean;
+  /** A sentence naming the node and why it ends a narrowing (for the diagnostic). */
+  describeEnd(node: Rec, key: string): string;
 }
 
 interface Ctx {
@@ -232,19 +289,38 @@ interface Ctx {
   cellShapes: Map<string, () => ValueShape>;
   /** Each function declaration → its write set (the fixpoint's current answer). */
   writeSets: Map<Rec, NarrowEnds>;
+  /** Function declarations whose call SUSPENDS (a compiler-inserted await) — S462 Q11. */
+  suspends: Set<Rec>;
   /** The `endsWithin` options in force (a fresh object per fixpoint pass = fresh memo). */
   opts: { endsAt: (n: Rec) => string[] | "all" | null };
+  /** Parsed type annotations. */
+  annShape(ann: string): ValueShape;
+}
+
+/** The parameter list of an arrow / function kept as escape-hatch text, or null. */
+function escapeParams(raw: string): string | null {
+  const t = raw.trim().replace(/^async\s+/, "");
+  const fn = /^function\s*\*?\s*[A-Za-z_$]?[\w$]*\s*\(([\s\S]*?)\)\s*\{/.exec(t);
+  if (fn) return fn[1];
+  const paren = /^\(([\s\S]*?)\)\s*=>/.exec(t);
+  if (paren) return paren[1];
+  const single = /^([A-Za-z_$][\w$]*)\s*=>/.exec(t);
+  if (single) return single[1];
+  return null;
 }
 
 /**
- * Build the `endsAt` answer for one file: resolve every name through scope, compute the
- * write sets of the file's functions (least fixpoint, `"all"` absorbing), then answer.
+ * Build the per-file answers: resolve every name through scope, compute the write sets
+ * of the file's functions (least fixpoint, `"all"` absorbing), then answer.
  */
-export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions): (node: Rec) => string[] | "all" | null {
+export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions): NarrowingWriteSet {
   const ownEnds = (n: Rec): string[] | "all" | null => ownWrite(n, ctx);
-  const ctx: Ctx = { wopts, resolution: new WeakMap(), cellShapes: new Map(), writeSets: new Map(), opts: { endsAt: ownEnds } };
-  const annShape = (ann: string): ValueShape => {
-    try { return wopts.typeShape?.(ann) ?? syntacticShape(ann); } catch { return syntacticShape(ann); }
+  const ctx: Ctx = {
+    wopts, resolution: new WeakMap(), cellShapes: new Map(), writeSets: new Map(), suspends: new Set(),
+    opts: { endsAt: ownEnds },
+    annShape: (ann: string): ValueShape => {
+      try { return wopts.typeShape?.(ann) ?? syntacticShape(ann); } catch { return syntacticShape(ann); }
+    },
   };
 
   // --- cells (file-level `state-decl`s) and the file scope ---------------------------
@@ -256,16 +332,16 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
       if (!r || typeof r !== "object") continue;
       if (r.kind === "function-decl" && typeof r.name === "string") scope.declare(r.name, { kind: "fn", decl: r });
       else if (typeof r.kind === "string" && VALUE_DECL_KINDS.has(r.kind)) {
-        const names = patternNames(r.name);
+        const names = boundNamesOf(r.name);
         const single = typeof r.name === "string";
         const ann = typeof r.typeAnnotation === "string" ? r.typeAnnotation : null;
         for (const nm of names) {
           scope.declare(nm, single
-            ? { kind: "value", shape: lazyShape(() => (ann ? annShape(ann) : shapeOfExpr(r.initExpr, ctx))) }
-            : UNKNOWN_VALUE);
+            ? { kind: "value", src: r, shape: lazyShape(() => (ann ? ctx.annShape(ann) : shapeOfExpr(r.initExpr, ctx))) }
+            : { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
         }
       } else if (r.kind === "import-decl") {
-        for (const nm of patternNames(r)) scope.declare(nm, UNKNOWN_VALUE);
+        for (const nm of importNames(r)) scope.declare(nm, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
       }
     }
   };
@@ -282,10 +358,12 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     if (r.kind === "function-decl") fnDecls.push(r);
     if (!inFn && r.kind === "state-decl" && typeof r.name === "string" && r._isReactiveAssign !== true) {
       const ann = typeof r.typeAnnotation === "string" ? r.typeAnnotation : null;
-      const shape = lazyShape(() => (ann ? annShape(ann) : shapeOfExpr(r.initExpr, ctx)));
+      const shape = lazyShape(() => (ann ? ctx.annShape(ann) : shapeOfExpr(r.initExpr, ctx)));
       ctx.cellShapes.set(r.name, ctx.cellShapes.has(r.name) ? () => UNKNOWN_SHAPE : shape);
     }
-    if (!inFn && Array.isArray(r.imports)) for (const imp of r.imports) for (const nm of patternNames(imp)) root.declare(nm, UNKNOWN_VALUE);
+    if (!inFn && Array.isArray(r.imports)) {
+      for (const imp of r.imports) for (const nm of importNames(imp)) root.declare(nm, { kind: "value", src: imp, shape: () => UNKNOWN_SHAPE });
+    }
     const enters = r.kind === "function-decl" || r.kind === "lambda";
     for (const k of Object.keys(r)) {
       if (k === "span") continue;
@@ -296,17 +374,22 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
   collectFile(topNodes, false);
 
   // --- resolve every identifier --------------------------------------------------------
-  const declareParams = (params: unknown, scope: Scope): void => {
+  /** N2a — the parameter shapes a known array method gives its callback. */
+  const paramHints = new WeakMap<object, ValueShape[]>();
+  const declareParams = (params: unknown, scope: Scope, hints: ValueShape[] | undefined): void => {
     if (!Array.isArray(params)) return;
-    for (const p of params) {
+    params.forEach((p, i) => {
       const pr = p as Rec | undefined;
-      if (!pr) continue;
+      if (!pr) return;
       const ann = typeof pr.typeAnnotation === "string" ? pr.typeAnnotation : null;
-      const names = Array.isArray(pr.boundNames) ? (pr.boundNames as string[]) : patternNames(pr.name);
+      const names = boundNamesOf(pr);
+      const hint = hints?.[i];
       for (const nm of names) {
-        scope.declare(nm, ann && names.length === 1 ? { kind: "value", shape: lazyShape(() => annShape(ann)) } : UNKNOWN_VALUE);
+        if (ann && names.length === 1) scope.declare(nm, { kind: "value", src: pr, shape: lazyShape(() => ctx.annShape(ann)) });
+        else if (hint && names.length === 1 && typeof pr.name === "string") scope.declare(nm, { kind: "value", src: pr, shape: () => hint });
+        else scope.declare(nm, { kind: "value", src: pr, shape: () => UNKNOWN_SHAPE });
       }
-    }
+    });
   };
   const walk = (n: unknown, scope: Scope): void => {
     if (!n || typeof n !== "object") return;
@@ -321,9 +404,40 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
       if (!r.name.startsWith("@")) ctx.resolution.set(r, scope.lookup(r.name) ?? GLOBAL);
       return;
     }
+    if (r.kind === "call" && Array.isArray(r.args)) {
+      // N2a — a known array method's callback parameters get the element's shape.
+      walk(r.callee, scope);
+      const callee = unparen(r.callee);
+      if (callee && callee.kind === "member" && typeof callee.property === "string" && SYNC_CALLBACK_METHODS.has(callee.property)) {
+        const method = callee.property;
+        const recvExpr = callee.object;
+        const el = lazyShape(() => {
+          const recv = shapeOfExpr(recvExpr, ctx);
+          return recv.builtinMethods ? recv.element() ?? UNKNOWN_SHAPE : UNKNOWN_SHAPE;
+        });
+        const lazyEl: ValueShape = {
+          get builtinMethods() { return el().builtinMethods; },
+          get functionFree() { return el().functionFree; },
+          get present() { return el().present; },
+          field: (k) => el().field(k),
+          element: () => el().element(),
+        };
+        const hints = method === "reduce" || method === "reduceRight"
+          ? [UNKNOWN_SHAPE, lazyEl, PRIM_SHAPE]
+          : method === "sort" || method === "toSorted" ? [lazyEl, lazyEl] : [lazyEl, PRIM_SHAPE];
+        for (const a of r.args as unknown[]) if (a && typeof a === "object" && (a as Rec).kind === "lambda") paramHints.set(a as object, hints);
+      }
+      for (const a of r.args as unknown[]) walk(a, scope);
+      for (const k of Object.keys(r)) {
+        if (k === "span" || k === "callee" || k === "args") continue;
+        const v = r[k];
+        if (v && typeof v === "object") walk(v, scope);
+      }
+      return;
+    }
     if (r.kind === "function-decl" || r.kind === "lambda") {
       const fs = new Scope(scope);
-      declareParams(r.params, fs);
+      declareParams(r.params, fs, paramHints.get(r));
       for (const p of (r.params as Rec[] | undefined) ?? []) walk((p as Rec)?.defaultValue, scope);
       const body = r.body as Rec | unknown[] | undefined;
       if (Array.isArray(body)) walk(body, fs);
@@ -335,14 +449,27 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
       }
       return;
     }
+    if (r.kind === "escape-hatch" && wopts.expandOpaque) {
+      // A block-bodied arrow kept as text: resolve the statements the walk will read. Its
+      // parameters shadow; if they cannot be read, every name inside is unknown.
+      const stmts = wopts.expandOpaque(r);
+      if (stmts) {
+        const fs = new Scope(scope);
+        const params = typeof r.raw === "string" ? escapeParams(r.raw) : null;
+        if (params === null) fs.opaque = true;
+        else for (const nm of boundNamesOf(params)) fs.declare(nm, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
+        walk(stmts, fs);
+      }
+      return;
+    }
     if (r.kind === "for-stmt" || r.kind === "for-expr") {
       walk(r.iterExpr, scope);
       const fs = new Scope(scope);
       const iter = r.iterExpr;
-      for (const nm of patternNames(r.variable)) {
+      for (const nm of boundNamesOf(r.variable)) {
         fs.declare(nm, typeof r.variable === "string"
-          ? { kind: "value", shape: lazyShape(() => shapeOfExpr(iter, ctx).element() ?? UNKNOWN_SHAPE) }
-          : UNKNOWN_VALUE);
+          ? { kind: "value", src: r, shape: lazyShape(() => shapeOfExpr(iter, ctx).element() ?? UNKNOWN_SHAPE) }
+          : { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
       }
       walk(r.cStyleParts, fs);
       walk(r.body, fs);
@@ -351,14 +478,14 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     if (typeof r.header === "string" && Array.isArray(r.body) && typeof r.kind !== "string") {
       // a `catch (e) { … }` node: its header binds names
       const cs = new Scope(scope);
-      for (const nm of r.header.match(/[A-Za-z_$][\w$]*/g) ?? []) cs.declare(nm, UNKNOWN_VALUE);
+      for (const nm of r.header.match(/[A-Za-z_$][\w$]*/g) ?? []) cs.declare(nm, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
       walk(r.body, cs);
       return;
     }
     let inner = scope;
     if (Array.isArray(r.payloadBindings) && r.payloadBindings.length > 0) {
       inner = new Scope(scope);
-      for (const nm of patternNames(r.payloadBindings)) inner.declare(nm, UNKNOWN_VALUE);
+      for (const nm of boundNamesOf(r.payloadBindings)) inner.declare(nm, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
     }
     for (const k of Object.keys(r)) {
       if (k === "span") continue;
@@ -367,6 +494,30 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     }
   };
   walk(topNodes, root);
+
+  // --- S462 Q11: which functions SUSPEND when called (a compiler-inserted await) -------
+  // A server function, an `async` one, or one whose body (not a nested function or
+  // lambda) awaits, yields, or calls a suspending function. Least fixpoint.
+  const bodySuspends = (n: unknown): boolean => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) return n.some(bodySuspends);
+    const r = n as Rec;
+    if (r.kind === "function-decl" || r.kind === "lambda" || r.kind === "escape-hatch") return false;
+    if (isSuspensionNode(r, ctx)) return true;
+    for (const k of Object.keys(r)) {
+      if (k === "span") continue;
+      const v = r[k];
+      if (v && typeof v === "object" && bodySuspends(v)) return true;
+    }
+    return false;
+  };
+  for (const d of fnDecls) if (d.isServer === true || d.isAsync === true) ctx.suspends.add(d);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const d of fnDecls) {
+      if (!ctx.suspends.has(d) && bodySuspends(d.body)) { ctx.suspends.add(d); grew = true; }
+    }
+  }
 
   // --- write sets: least fixpoint over the function declarations ----------------------
   for (const d of fnDecls) ctx.writeSets.set(d, new Set<string>());
@@ -386,7 +537,20 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     }
   }
   ctx.opts = { endsAt: ownEnds };
-  return ownEnds;
+
+  return {
+    endsAt: ownEnds,
+    narrowsAt: (stmt) => narrowsAgain(stmt, ctx),
+    syncCallbackArg: (call, index) => {
+      const callee = unparen(call.callee);
+      const arg = (call.args as unknown[] | undefined)?.[index] as Rec | undefined;
+      if (!arg || arg.kind !== "lambda") return false;
+      if (!callee || callee.kind !== "member" || typeof callee.property !== "string") return false;
+      if (!SYNC_CALLBACK_METHODS.has(callee.property)) return false;
+      return shapeOfExpr(callee.object, ctx).builtinMethods;
+    },
+    describeEnd: (node, key) => describeEnd(node, key, ctx),
+  };
 }
 
 /** A memoised, cycle-safe lazy shape. */
@@ -437,7 +601,9 @@ function shapeOfExpr(e: unknown, ctx: Ctx): ValueShape {
   if (!r || typeof r !== "object") return UNKNOWN_SHAPE;
   switch (r.kind) {
     case "lit":
-      return PRIM_SHAPE;
+      return r.litType === "not" ? NOT_SHAPE : PRIM_SHAPE;
+    case "new":
+      return globalNamed(unparen(r.callee), DATE_CTOR, ctx) ? DATE_SHAPE : UNKNOWN_SHAPE;
     case "array": {
       const els = (r.elements as unknown[] | undefined) ?? [];
       if (els.length === 0) return arrayShape(UNKNOWN_SHAPE);
@@ -482,12 +648,19 @@ function shapeOfExpr(e: unknown, ctx: Ctx): ValueShape {
       const callee = unparen(r.callee);
       if (!callee) return UNKNOWN_SHAPE;
       if (callee.kind === "ident") {
-        return globalNamed(callee, BUILTIN_FUNCTIONS, ctx) ? PRIM_SHAPE : UNKNOWN_SHAPE;
+        if (globalNamed(callee, BUILTIN_FUNCTIONS, ctx)) return PRIM_SHAPE;
+        // N2c — a function of the file with a DECLARED return type.
+        const res = ctx.resolution.get(callee);
+        if (res && res.kind === "fn" && typeof res.decl.returnTypeAnnotation === "string" && res.decl.returnTypeAnnotation.trim() !== "") {
+          return ctx.annShape(res.decl.returnTypeAnnotation);
+        }
+        return UNKNOWN_SHAPE;
       }
       if (callee.kind === "member" && typeof callee.property === "string") {
         const obj = unparen(callee.object);
         const ns = globalNamed(obj, BUILTIN_NAMESPACES, ctx);
         if (ns === "Math" || ns === "Number") return PRIM_SHAPE;
+        if (ns === "Date" && callee.property === "now") return PRIM_SHAPE;
         if (ns === "JSON" && callee.property === "stringify") return PRIM_SHAPE;
         if (ns) return UNKNOWN_SHAPE;
         const recv = shapeOfExpr(obj, ctx);
@@ -524,6 +697,11 @@ function ownWrite(n: Rec, ctx: Ctx): string[] | "all" | null {
       return key(n.target);
     case "call":
       return toAnswer(callWrites(n, ctx));
+    case "unary":
+      // S462 Q11 — an explicit `await` is a suspension point.
+      return n.op === "await" ? "all" : null;
+    case "yield-stmt":
+      return "all";
     case "new": {
       const callee = unparen(n.callee);
       if (globalNamed(callee, BUILTIN_CONSTRUCTORS, ctx)) return toAnswer(argWrites(n.args, ctx));
@@ -555,7 +733,12 @@ function callWrites(n: Rec, ctx: Ctx): NarrowEnds {
   if (callee.kind === "ident" && typeof callee.name === "string") {
     if (callee.name.startsWith("@")) return "all";              // a cell holding a function
     const res = ctx.resolution.get(callee);
-    if (res && res.kind === "fn") return ctx.writeSets.get(res.decl) ?? "all";
+    if (res && res.kind === "fn") {
+      // S462 Q11 — a call the compiler awaits is a suspension point: another handler
+      // may write any cell meanwhile.
+      if (ctx.suspends.has(res.decl)) return "all";
+      return ctx.writeSets.get(res.decl) ?? "all";
+    }
     if (res !== GLOBAL) return "all";                              // a parameter / local / import / unresolved
     if (SCHEDULING_FUNCTIONS.has(callee.name)) return new Set();   // runs later, not here
     if (BUILTIN_FUNCTIONS.has(callee.name)) return argWrites(n.args, ctx);
@@ -632,3 +815,122 @@ function argEnds(a: unknown, ctx: Ctx): NarrowEnds {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// S462 Q11 / Q10 / the diagnostic.
+// ---------------------------------------------------------------------------
+
+/** Is this node itself a suspension point (an `await`, a `yield`, a call the compiler awaits)? */
+function isSuspensionNode(r: Rec, ctx: Ctx): boolean {
+  if (r.kind === "unary" && r.op === "await") return true;
+  if (r.kind === "yield-stmt") return true;
+  if (r.kind === "call") {
+    const callee = unparen(r.callee);
+    if (callee && callee.kind === "ident") {
+      const res = ctx.resolution.get(callee);
+      if (res && res.kind === "fn" && ctx.suspends.has(res.decl)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * S462 Q10 ("a") — "a write whose value is provably present (a struct/object literal, a
+ * value of a non-optional type) narrows the place again from that point." A statement
+ * that is a plain `=` write of the place with such a value.
+ */
+function narrowsAgain(stmt: Rec, ctx: Ctx): string[] {
+  const key = (place: unknown): string | null => ctx.wopts.receiverKey(place);
+  let place: unknown = null;
+  let value: unknown = null;
+  if (stmt.kind === "state-decl" && typeof stmt.name === "string" && stmt._isReactiveAssign === true) {
+    place = { kind: "ident", name: "@" + stmt.name };
+    value = stmt.initExpr;
+  } else if (stmt.kind === "reactive-assign" && typeof stmt.target === "string") {
+    place = { kind: "ident", name: "@" + stmt.target };
+    value = stmt.valueExpr;
+  } else if (stmt.kind === "bare-expr") {
+    const e = unparen(stmt.exprNode);
+    if (e && e.kind === "assign" && e.op === "=") { place = e.target; value = e.value; }
+  }
+  if (!place || !value) return [];
+  const k = key(place);
+  if (!k) return [];
+  return shapeOfExpr(value, ctx).present ? [k] : [];
+}
+
+/** A short source-like label for a node (`w.trim()`, `clear()`, `@user = …`). */
+function labelOf(n: unknown, depth = 0): string {
+  const r = unparen(n);
+  if (!r || depth > 6) return "…";
+  switch (r.kind) {
+    case "ident": return String(r.name);
+    case "member": return `${labelOf(r.object, depth + 1)}${r.optional === true ? "?." : "."}${String(r.property)}`;
+    case "index": return `${labelOf(r.object, depth + 1)}[…]`;
+    case "call": return `${labelOf(r.callee, depth + 1)}(${Array.isArray(r.args) && r.args.length > 0 ? "…" : ""})`;
+    case "new": return `new ${labelOf(r.callee, depth + 1)}(…)`;
+    case "unary": return r.op === "await" ? `await ${labelOf(r.argument, depth + 1)}` : "…";
+    case "yield-stmt": return "yield";
+    case "state-decl": return `@${String(r.name)} = …`;
+    case "reactive-assign": return `@${String(r.target)} = …`;
+    case "assign": return `${labelOf(r.target, depth + 1)} ${String(r.op ?? "=")} …`;
+    case "reset-expr": return `reset(${labelOf(r.target, depth + 1)})`;
+    case "escape-hatch": return typeof r.raw === "string" && r.raw.length <= 40 ? r.raw : "an expression kept as text";
+    default: return "…";
+  }
+}
+
+/** Why this node ends the narrowing of `key` — named, with the actual reason. */
+function describeEnd(n: Rec, key: string, ctx: Ctx): string {
+  const at = "`" + labelOf(n) + "`";
+  const cell = "`@" + key + "`";
+  switch (n.kind) {
+    case "state-decl":
+    case "reactive-assign":
+    case "assign":
+    case "reset-expr":
+      return `${at} writes ${cell}`;
+    case "unary":
+      return `${at} is a suspension point — while it waits, another handler may write ${cell}`;
+    case "yield-stmt":
+      return `\`yield\` is a suspension point — while it waits, another handler may write ${cell}`;
+    case "new":
+      return `${at} constructs with a constructor the compiler does not know, so its writes cannot be determined`;
+    case "escape-hatch":
+      return `${at} is an expression the compiler cannot read, so its writes cannot be determined`;
+    case "reactive-array-mutation":
+    case "call": {
+      if (n.kind === "reactive-array-mutation") return `\`@${String(n.target)}.${String(n.method)}(…)\` is handed a function it may call, whose writes cannot be determined`;
+      const callee = unparen(n.callee);
+      if (callee && callee.kind === "ident" && typeof callee.name === "string") {
+        if (callee.name.startsWith("@")) return `${at} calls a function held in a cell — its writes cannot be determined`;
+        const res = ctx.resolution.get(callee);
+        if (res && res.kind === "fn") {
+          if (ctx.suspends.has(res.decl)) {
+            const what = res.decl.isServer === true
+              ? "is a server call (the compiler awaits it)"
+              : "suspends (it awaits — a server call or an `await` inside it — so the compiler awaits the call)";
+            return `${at} ${what} — a suspension point: while it waits, another handler may write ${cell}`;
+          }
+          const ws = ctx.writeSets.get(res.decl);
+          return ws === "all"
+            ? `${at} makes a call whose writes cannot be determined`
+            : `${at} writes ${cell}`;
+        }
+        if (res && res.kind === "value") return `${at} calls a function VALUE (a parameter or a local) — its writes cannot be determined`;
+        if (BUILTIN_FUNCTIONS.has(callee.name)) return `${at} is handed a value that may be a function it calls`;
+        return `${at} calls an imported or unknown function — its writes cannot be determined`;
+      }
+      if (callee && callee.kind === "member" && typeof callee.property === "string") {
+        const obj = unparen(callee.object);
+        const builtin = globalNamed(obj, BUILTIN_NAMESPACES, ctx) !== null
+          || (BUILTIN_METHODS.has(callee.property) && shapeOfExpr(obj, ctx).builtinMethods);
+        if (builtin) return `${at} is handed a value that may be a function it calls (a lambda, a function, or a value of unknown type)`;
+        return `${at} — the receiver's type is not known to be a built-in value, so \`.${callee.property}\` may be any function, whose writes cannot be determined`;
+      }
+      return `${at} calls the result of an expression — its writes cannot be determined`;
+    }
+    default:
+      return `${at} ends it`;
+  }
+}
