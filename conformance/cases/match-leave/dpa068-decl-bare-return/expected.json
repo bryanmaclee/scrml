@@ -1,0 +1,22 @@
+{
+  "id": "match-leave-dpa068-decl-bare-return",
+  "description": "A bare `return \"early\"` arm of a decl-position `match` returns from the function (it does not become the bound value). (dpa-068 probe c05)",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "ruling:user-voice-scrml.md S462 \"2 W1\" — §18.2 `arm-body ::= expression | block-body | leave-stmt`; `leave-stmt ::= 'return' expression? | 'fail' variant-expr | 'break' Label? | 'continue' Label?`, arms only (match arms in statement, decl and value position, `!{}` handler arms, engine message arms); legality by context (§7). A bare leave arm means what the braced one-statement block means: `return` / `fail` leave the enclosing function (§19.3.3), `break` / `continue` the enclosing loop (§19.4.3).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "out": "early"
+    },
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-SCOPE-001"
+    ]
+  }
+}

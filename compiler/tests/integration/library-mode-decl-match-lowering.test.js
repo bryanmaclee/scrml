@@ -140,7 +140,10 @@ export const VIA = LOCAL`,
       `export const M = match 1, 2 { 1, 2 :> "both" _, _ :> "no" }`,
     );
     // A limitation — but it must be LOUD (a build error), not a silent bad value.
-    expect(r.errorCodes).toContain("E-CODEGEN-INVALID-LOGIC");
+    // S462: the unparenthesized `1, 2 :>` is not an arm pattern (§18.19 wants
+    // `(1, 2) :>`), and a line at arm level that forms no arm is now a PARSE
+    // error (§7.2.2 "Arm heads") rather than a codegen crash.
+    expect(r.errorCodes).toContain("E-PARSE-001");
     expect(r.libExists).toBe(false);
   });
 

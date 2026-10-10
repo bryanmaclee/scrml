@@ -1,0 +1,24 @@
+{
+  "id": "match-leave-returned-multi-match-braced-leave-and-inner-break",
+  "description": "In `return match (a, b) { … }` a braced arm that writes then `return`s leaves the function (S462 review F2); a `break` of a loop INSIDE a value block arm is that loop's, not a leave of the match (F5); a `?` arm of a multi-scrutinee statement or decl match propagates (F7).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§19.4.3: an arm LEAVES when it ends in `return` / `fail` on every path; a `break` that targets a loop inside the arm never crosses the arm boundary. §19.5.2: `?` returns the error from the enclosing function.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CG-003",
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "out": "early/other/1",
+      "log": "side;r=4;",
+      "seen": "s:neg,d:neg"
+    }
+  }
+}

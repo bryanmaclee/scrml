@@ -1,0 +1,18 @@
+{
+  "id": "match-leave-top-level-raw-and-handler-arm-return-neg",
+  "description": "A `return` in a top-level arm of EVERY form has no function to leave: an alternation arm bare (`.A | .B :> return`) and braced, a §18.19 product arm, and `!{}` handler arms (statement and decl) — each is E-STMT-RETURN-OUTSIDE-FUNCTION (S462 review N1).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2 \"Leaving arms\": legality by context — `return` needs an enclosing function. Raw-text arm forms (alternation, product, handler) were never walked, so they compiled clean and the `return` left the client init function or was swallowed; the arm body is now read by the one arm-body reader (arm-body-statements.ts).",
+  "expect": {
+    "codes": [
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "codeCounts": {
+      "E-STMT-RETURN-OUTSIDE-FUNCTION": 5
+    },
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

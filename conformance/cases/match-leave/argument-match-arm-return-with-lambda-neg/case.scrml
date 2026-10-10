@@ -1,0 +1,15 @@
+${
+    type K:enum = { A, B }
+    <out> : string = "none"
+    function show(s: string) -> string { return "[" + s + "]" }
+    function pick(a: K, b: K) -> string {
+        const s = show(match (a, b) {
+            (.A, .A) :> { [1].forEach((x) => x); return "early" }
+            _ :> "other"
+        })
+        return s
+    }
+    function go() { @out = pick(K.A, K.A) }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@out}</p>

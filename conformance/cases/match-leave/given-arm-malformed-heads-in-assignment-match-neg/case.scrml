@@ -1,0 +1,36 @@
+${
+    type K:enum = { A, B }
+    <v> : number = 0
+    function f(x: number) -> number { return x }
+    function go() {
+        let n: number | not = 5
+        let obj = { f: 1 }
+        let c = 1
+        @v = match K.A {
+            given obj.f :> 1
+            .A :> 2
+            .B :> 3
+        }
+        @v = match K.A {
+            given f(n) :> 1
+            .A :> 2
+            .B :> 3
+        }
+        @v = match K.A {
+            given n < 0 :> 1
+            .A :> 2
+            .B :> 3
+        }
+        @v = match K.A {
+            given (c) :> 1
+            .A :> 2
+            .B :> 3
+        }
+        @v = match K.A {
+            given n = 3 :> 1
+            .A :> 2
+            .B :> 3
+        }
+    }
+}
+<button id="go" onclick=go()>go</>

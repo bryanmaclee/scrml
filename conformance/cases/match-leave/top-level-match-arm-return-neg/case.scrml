@@ -1,0 +1,11 @@
+${
+    type K:enum = { A, B }
+    <k> : K = .A
+    <out> : string = "init"
+    match @k {
+        .A :> return
+        .B :> @out = "b"
+    }
+}
+<button id="go" onclick=${@out = "clicked"}>go</>
+<p id="out">${@out}</>

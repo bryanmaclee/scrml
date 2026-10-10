@@ -7,34 +7,34 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1639 of 1639 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1684 of 1684 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 165 | 10.1% |
+| PASS | 176 | 10.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 59 | 3.6% |
+| FAIL | 59 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 622 | 37.9% |
-| UNSUPPORTED | 793 | 48.4% |
+| NOT-TWINNED | 631 | 37.5% |
+| UNSUPPORTED | 818 | 48.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 224; of those, 165 hold (73.7%). Runtime half executed on the bootstrap for 52 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 235; of those, 176 hold (74.9%). Runtime half executed on the bootstrap for 63 case(s).
 
-- **Vacuous** passes: 11 of 165 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **154**.
+- **Vacuous** passes: 11 of 176 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **165**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 59; the other 30 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 554 · parse-reject 239.
+UNSUPPORTED by reason: bootstrap-unsupported 578 · parse-reject 240.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **727** — PASS 90 · FAIL 55 · UNSUPPORTED 582. Twin holds 90 (non-vacuous 82). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **763** — PASS 101 · FAIL 55 · UNSUPPORTED 607. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (622 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (631 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 70 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -44,18 +44,18 @@ NOT-TWINNED by reason (622 cases; a case counts once per distinct reason):
 - 51 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 41 — rhs-decl: declaration in a markup position (⚑ O38)
-- 35 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
+- 39 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
+- 34 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
-- 33 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
+- 13 — const-cell: initializer extent could not be verified against impl#1's AST
 - 13 — rhs-decl: declaration text not found at the AST site
-- 12 — const-cell: initializer extent could not be verified against impl#1's AST
+- 12 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
-- 8 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
@@ -131,6 +131,7 @@ NOT-TWINNED by reason (622 cases; a case counts once per distinct reason):
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
+| match-leave | 45 | 11 | · | · | · | 9 | 25 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 45 | 1 | · | 13 | · | 8 | 23 | · | · |
@@ -303,7 +304,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (165)
+### PASS / CODES-ONLY (176)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -423,6 +424,17 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
+- `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN
+- `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN
+- `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-fail` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-return-stmt` — PASS · TWIN
+- `match-leave/dpa068-guard-bare-return-valuepos` — PASS · TWIN
+- `match-leave/dpa068-guard-stmt-bare-fail-then-after` — PASS · TWIN
+- `match-leave/dpa068-handler-value-bare-return` — PASS · TWIN
+- `match-leave/expr-arm-continuation-joins` — PASS · TWIN
+- `match-leave/failable-stmt-arm-braced-fail-propagates` — PASS · TWIN
+- `match-leave/failable-stmt-arm-braced-return-leaves-fn` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
 - `module/e-import-004-stdlib-subpath-name-clean` — PASS · TWIN
 - `own-value-type/base-type-neg` — PASS
@@ -471,7 +483,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (793)
+### UNSUPPORTED (818)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -918,6 +930,31 @@ none
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-codes/e-type-025-enum-subject-neg` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-codes/e-type-026-match-in-logic-neg` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `match-leave/arm-body-ends-at-line-break-neg` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/bare-break-continue-arm-no-loop-neg` — twin · bootstrap-unsupported: a `break` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
+- `match-leave/decl-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/decl-multi-scrutinee-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-leave/dpa068-decl-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-nested-match-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
+- `match-leave/dpa068-stmt-bare-fail` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/dpa068-stmt-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/given-arm-body-lowered` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/given-arm-in-expression-position-match` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `match-leave/given-arm-legacy-arrow-keeps-body` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-leave/given-arm-undeclared-name-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/stmt-arm-braced-break-continue-loop` — twin · bootstrap-unsupported: member access `.C` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-leave/stmt-arm-braced-fail-propagates` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/value-arm-leave-word-in-string-not-a-leave` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-allow-list-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1267,7 +1304,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (622)
+### NOT-TWINNED (631)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1677,6 +1714,15 @@ none
 - `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/engine-msg-arm-break-continue-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/engine-msg-arm-inner-loop-and-default-param-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/given-arm-in-derived-match` — not mechanical: rhs-decl: type `number | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against impl#1's 
+- `match-leave/top-level-given-guard-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `given-guard` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `match-leave/top-level-match-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `match-leave/top-level-raw-and-handler-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `module/e-import-001-export-outside-logic-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
 - `module/e-import-008-host-import-no-manifest-reject` — not mechanical: program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `${}` unwrapped

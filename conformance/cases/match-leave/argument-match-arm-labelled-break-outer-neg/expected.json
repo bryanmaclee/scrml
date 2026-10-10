@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-argument-match-arm-labelled-break-outer-neg",
+  "description": "`break outer` inside an inner `for` of a value-position arm targets a loop OUTSIDE the arm, so the arm leaves: E-CG-003, not a codegen crash (S462 review N4).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§19.4.3: a `break` whose target is outside the arm leaves it. The leave classifier tracks loop labels; an unlabelled `break` in the inner loop would be that loop's.",
+  "expect": {
+    "codes": [
+      "E-CG-003"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

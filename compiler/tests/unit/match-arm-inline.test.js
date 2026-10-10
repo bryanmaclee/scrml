@@ -317,13 +317,15 @@ describe("match-arm-inline end-to-end compilation", () => {
   });
 
   test("§17 mixed inline + block arms compile correctly", () => {
+    // S462: the block arm yields its tail value. A "{ return ... }" arm would LEAVE, and at the
+    // top level of a logic block there is no function to leave (E-STMT-RETURN-OUTSIDE-FUNCTION).
     const src = `<program>
 \${
   type S:enum = { A, B, C }
   @s: S = S.A
   let r = match @s {
     .A => "alpha"
-    .B => { return "bravo" }
+    .B => { "bravo" }
     .C => "charlie"
   }
 }
