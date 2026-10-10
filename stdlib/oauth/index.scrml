@@ -143,7 +143,7 @@ ${
                 return await _redisClientFor(url).get(key)
             }
             .Store(kv) :> {
-                return kvGet(kv, key) !{ ::ParseFailed(m) -> not }
+                return kvGet(kv, key) !{ .ParseFailed(m) :> not }
             }
         }
     }
@@ -174,6 +174,11 @@ ${
                 + "memoryAdapter() for dev, OAuthStore.Redis(url) or "
                 + "OAuthStore.Store(kvStore) for prod."
             )
+        }
+        // "" is a defined value, not absence: an empty Redis URL is refused
+        // rather than silently read as "the default client".
+        if (storage.variant == "Redis" && storage.data.url == "") {
+            throw new Error("[scrml:oauth] OAuthStore.Redis(\"\") — pass a Redis URL, or OAuthStore.Redis(not) for the default client.")
         }
     }
 

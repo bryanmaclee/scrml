@@ -134,6 +134,17 @@ describe("scrml:store — createStore()", () => {
         close(s)
     })
 
+    test("S9b: keys(prefix) is exact and case-sensitive; % and _ are literal", () => {
+        const s = createStore(":memory:")
+        set(s, "user:1", 1)
+        set(s, "USER:2", 2)
+        set(s, "50%_off", 3)
+        set(s, "50xyoff", 4)
+        expect(keys(s, "user:")).toEqual(["user:1"])
+        expect(keys(s, "50%_")).toEqual(["50%_off"])
+        close(s)
+    })
+
     test("S10: clear() removes all keys in namespace", () => {
         const s = createStore(":memory:")
         set(s, "a", 1)

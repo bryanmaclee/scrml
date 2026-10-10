@@ -7,6 +7,18 @@
 //   - googleConfig(opts)               → config object
 //   - parseIdToken(tokens)             → claims | null   (UNVERIFIED — no sig check)
 
+// S462 fix round 1 — mirrors the scrml enum declared in stdlib/oauth/google.scrml. An enum is a
+// run-time value (scrml code constructs `OAuthError.ParseFailed(…)`), so the shim
+// MUST export it: the server bundle imports every enum name it is given, and
+// a missing ES export is a link error that takes the whole bundle down.
+// Same shape the compiler emits for payload variants ({ variant, data }).
+export const OAuthError = Object.freeze({
+  ParseFailed: function(message) {
+    return { variant: "ParseFailed", data: { message } };
+  },
+  variants: ["ParseFailed"],
+});
+
 export function googleConfig(opts) {
   if (!opts) throw new Error("[scrml:oauth/google] opts required");
   const extra = {

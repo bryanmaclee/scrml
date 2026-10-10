@@ -160,6 +160,13 @@ function _assertStorage(storage) {
         + "OAuthStore.Store(kvStore) for prod.",
     );
   }
+  // "" is a defined value, not absence (scrml has no null): an empty Redis URL
+  // is refused rather than silently read as "the default client".
+  if (storage.variant === "Redis" && storage.data.url === "") {
+    throw new Error(
+      "[scrml:oauth] OAuthStore.Redis(\"\") — pass a Redis URL, or OAuthStore.Redis(not) for the default client.",
+    );
+  }
 }
 
 function _assertConfig(config) {

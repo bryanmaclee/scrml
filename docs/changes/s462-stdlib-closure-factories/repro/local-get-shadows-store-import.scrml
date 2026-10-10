@@ -1,0 +1,13 @@
+<program>
+import { get, createStore } from 'scrml:store'
+
+function get(key) {
+    return key
+}
+
+server function probe() {
+    return get("k")
+}
+
+<p>${probe()}</p>
+</program>

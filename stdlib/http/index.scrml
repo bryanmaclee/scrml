@@ -121,13 +121,35 @@ ${
         authorization: string | not
     }
 
-    const _NO_CLIENT = { baseUrl: "", defaults: {}, authorization: not }
+    const _NO_CLIENT = Object.freeze({ baseUrl: "", defaults: Object.freeze({}), authorization: not })
 
-    // A request target is either a URL or an HttpClient. A client is the
-    // non-string target that carries `defaults`; a URL string (or a URL
-    // object, which has no `defaults`) is a URL.
+    // Build a client that OWNS its defaults: a fresh copy (headers included),
+    // frozen all the way down. Two clients never share a mutable `defaults`,
+    // and a wrapper never aliases the wrapped client's, so a write to one
+    // client's headers cannot leak into another client's requests.
+    function _makeClient(baseUrl, defaults, authorization) {
+        const own = _mergeOptions(defaults, not)
+        if (own.headers) Object.freeze(own.headers)
+        return Object.freeze({
+            baseUrl: baseUrl || "",
+            defaults: Object.freeze(own),
+            authorization: authorization
+        })
+    }
+
+    // A request target is either a URL or an HttpClient. A client is an
+    // object that HAS a `baseUrl` field (whatever its `defaults` hold).
     function _isClient(target) {
-        return target is some && typeof target != "string" && target.defaults is some
+        return target is some && typeof target == "object" && Object.hasOwn(target, "baseUrl")
+    }
+
+    // The URL-first form keeps the pre-S462 behaviour for what fetch accepts
+    // as its input — a string, a URL object, or a Request. Anything else is
+    // refused rather than stringified into fetch("[object Object]").
+    function _assertUrlTarget(target, fnName) {
+        if (typeof target == "string") return
+        if (target instanceof URL || target instanceof Request) return
+        throw new TypeError(`[scrml:http] ${fnName}: the first argument must be a URL (string, URL or Request) or an HttpClient from withBaseUrl / withAuth / withDefaults`)
     }
 
     // Resolve a path against the client's base URL. Absolute URLs pass through.
@@ -172,6 +194,7 @@ ${
         if (_isClient(target)) {
             return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "GET" })
         }
+        _assertUrlTarget(target, "get")
         return _request(target, { ...pathOrOptions, method: "GET" })
     }
 
@@ -185,6 +208,7 @@ ${
         if (_isClient(target)) {
             return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "POST", body: b })
         }
+        _assertUrlTarget(target, "post")
         return _request(target, { ...b, method: "POST", body: a })
     }
 
@@ -197,6 +221,7 @@ ${
         if (_isClient(target)) {
             return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PUT", body: b })
         }
+        _assertUrlTarget(target, "put")
         return _request(target, { ...b, method: "PUT", body: a })
     }
 
@@ -209,6 +234,7 @@ ${
         if (_isClient(target)) {
             return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "DELETE" })
         }
+        _assertUrlTarget(target, "del")
         return _request(target, { ...pathOrOptions, method: "DELETE" })
     }
 
@@ -221,6 +247,7 @@ ${
         if (_isClient(target)) {
             return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PATCH", body: b })
         }
+        _assertUrlTarget(target, "patch")
         return _request(target, { ...b, method: "PATCH", body: a })
     }
 
@@ -238,7 +265,7 @@ ${
      */
     export function withBaseUrl(baseUrl, wrapped) {
         const base = wrapped is some ? wrapped : _NO_CLIENT
-        return { baseUrl: baseUrl, defaults: base.defaults, authorization: base.authorization }
+        return _makeClient(baseUrl, base.defaults, base.authorization)
     }
 
     /**
@@ -277,7 +304,7 @@ ${
     export function withAuth(token, scheme, wrapped) {
         const sch = scheme || "Bearer"
         const base = wrapped is some ? wrapped : _NO_CLIENT
-        return { baseUrl: base.baseUrl, defaults: base.defaults, authorization: `${sch} ${token}` }
+        return _makeClient(base.baseUrl, base.defaults, `${sch} ${token}`)
     }
 
     /**
@@ -295,11 +322,7 @@ ${
      */
     export function withDefaults(defaults, wrapped) {
         const base = wrapped is some ? wrapped : _NO_CLIENT
-        return {
-            baseUrl: base.baseUrl,
-            defaults: _mergeOptions(base.defaults, defaults),
-            authorization: base.authorization
-        }
+        return _makeClient(base.baseUrl, _mergeOptions(base.defaults, defaults), base.authorization)
     }
 
     /**

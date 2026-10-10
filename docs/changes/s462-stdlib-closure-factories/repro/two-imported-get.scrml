@@ -1,0 +1,10 @@
+<program>
+import { get } from 'scrml:http'
+import { get } from 'scrml:store'
+
+server function probe(s) {
+    return get(s, "k")
+}
+
+<p>${probe(not)}</p>
+</program>

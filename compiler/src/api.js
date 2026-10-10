@@ -2226,6 +2226,13 @@ function _compileScrmlImpl(options = {}) {
     // `reExportSource` (honoring `renames` for `export { x as y }`) recovers the
     // real function kind + async modifier declared at the source. Depth-capped
     // so a pathological / cyclic re-export chain cannot loop.
+    // S462 fix round 1 — `export type X:enum = ...` (run-time variant object) vs
+    // `:struct` / alias (erased). Read off the export's raw text, which TAB keeps.
+    function _stdlibTypeIsEnum(exp) {
+      if (!exp || exp.exportKind !== "type") return false;
+      return /^export\s+type\s+[A-Za-z_$][\w$]*\s*:\s*enum\b/.test(String(exp.raw ?? ""));
+    }
+
     function _resolveStdlibExport(absPath, localName, depth) {
       if (depth > 8) return null;
       const exports = _parseStdlibExports(absPath);
@@ -2249,7 +2256,7 @@ function _compileScrmlImpl(options = {}) {
         }
         const namesList = exp.exportedName.split(",").map(s => s.trim()).filter(Boolean);
         if (namesList.includes(localName)) {
-          return { kind: exp.exportKind || "unknown", isAsync: !!exp.isAsync };
+          return { kind: exp.exportKind || "unknown", isAsync: !!exp.isAsync, typeIsEnum: _stdlibTypeIsEnum(exp) };
         }
       }
       return null;
@@ -2268,6 +2275,7 @@ function _compileScrmlImpl(options = {}) {
         for (const name of namesList) {
           let kind = exp.exportKind || "unknown";
           let isAsync = !!exp.isAsync;
+          let typeIsEnum = _stdlibTypeIsEnum(exp);
           // Re-export: chase the source module for the terminal kind + async
           // modifier so the auto-await classifier sees through it (Issue #26).
           if (exp.exportKind === "re-export" && exp.reExportSource) {
@@ -2281,6 +2289,7 @@ function _compileScrmlImpl(options = {}) {
             if (resolved) {
               kind = resolved.kind;
               isAsync = resolved.isAsync;
+              typeIsEnum = resolved.typeIsEnum === true;
             } else if (serverOnlyStdlibPaths.has(absPath)) {
               // jwt-auth-bypass (2026-07-11, HIGH) — FAIL CLOSED. The re-export
               // could NOT be resolved to a terminal {kind, isAsync} (missing /
@@ -2324,6 +2333,13 @@ function _compileScrmlImpl(options = {}) {
             category,
             isComponent,
             ...(isAsync ? { isAsync: true } : {}),
+            // S462 fix round 1 — does this TYPE export have a run-time value?
+            // An `:enum` does (the shim exports its frozen variant object; scrml
+            // code constructs `KvError.ParseFailed(...)`); a `:struct` / alias does
+            // not (annotations are erased). emit-server drops a non-runtime type
+            // name from a `scrml:` import so the server bundle never imports an
+            // export the shim cannot have ("Export named 'KvStore' not found").
+            ...(kind === "type" ? { typeHasRuntimeValue: typeIsEnum === true } : {}),
           });
         }
       }

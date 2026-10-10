@@ -389,3 +389,50 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         close(store);
     });
 });
+
+// S462 fix round 1 — the pre-S462 call shapes fail LOUD (they used to return a
+// neutral { ok: true } while sending nothing). Nothing is minted or stored.
+describe("scrml:auth — S462 migration guard (loud, not silent)", () => {
+    const flows = [
+        ["requestMagicLink", requestMagicLink, "magic-link"],
+        ["requestEmailVerification", requestEmailVerification, "email-verify"],
+        ["requestPasswordReset", requestPasswordReset, "pwreset"],
+    ];
+    for (const [name, fn, ns] of flows) {
+        test(`F20 ${name}: legacy { store, sendEmail } is refused; nothing stored`, async () => {
+            const store = createStore(":memory:", ns);
+            const { box, sendEmail } = makeCapture();
+            await expect(fn("u@x", { store, sendEmail })).rejects.toThrow(/no longer an options field/);
+            expect(box.calls).toBe(0);
+            expect(keys(store)).toEqual([]);
+            close(store);
+        });
+        test(`F21 ${name}: swapped (email, sendEmail, { store }) is refused`, async () => {
+            const store = createStore(":memory:", ns);
+            const { box, sendEmail } = makeCapture();
+            await expect(fn("u@x", sendEmail, { store })).rejects.toThrow(/options object came where the function belongs/);
+            expect(box.calls).toBe(0);
+            expect(keys(store)).toEqual([]);
+            close(store);
+        });
+        test(`F22 ${name}: a missing / non-function sendEmail is refused`, async () => {
+            const store = createStore(":memory:", ns);
+            await expect(fn("u@x", { store })).rejects.toThrow(/sendEmail must be a function/);
+            await expect(fn("u@x", { store }, "not-a-fn")).rejects.toThrow(/sendEmail must be a function/);
+            expect(keys(store)).toEqual([]);
+            close(store);
+        });
+    }
+    test("F23 resetPassword: legacy { store, updateHash } and a non-function updateHash are refused; the token survives", async () => {
+        const store = createStore(":memory:", "pwreset");
+        const { box, sendEmail } = makeCapture();
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
+        await expect(resetPassword(box.token, "pw", { store, updateHash: () => {} })).rejects.toThrow(/no longer an options field/);
+        await expect(resetPassword(box.token, "pw", { store }, "nope")).rejects.toThrow(/updateHash must be a function/);
+        await expect(resetPassword(box.token, "pw", () => {}, { store })).rejects.toThrow(/options object came where the function belongs/);
+        // Not consumed by any refused call:
+        const ok = await resetPassword(box.token, "pw", { store }, () => {});
+        expect(ok.valid).toBe(true);
+        close(store);
+    });
+});

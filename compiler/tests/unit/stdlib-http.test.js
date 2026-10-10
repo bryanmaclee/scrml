@@ -216,6 +216,42 @@ function multipart(fields) {
     return fd
 }
 
+describe("scrml:http — client isolation + target detection (S462 fix round 1)", () => {
+    beforeEach(stubFetch)
+    afterEach(restoreFetch)
+    test("H14: two clients never share defaults; a client is deeply frozen", async () => {
+        const one = http.withBaseUrl("https://one.test")
+        expect(Object.isFrozen(one)).toBe(true)
+        expect(Object.isFrozen(one.defaults)).toBe(true)
+        expect(() => { one.defaults.headers = { Leak: "yes" } }).toThrow()
+        await http.get(http.withBaseUrl("https://two.test"), "/p")
+        expect(fetchCalls[0].init.headers.Leak).toBeUndefined()
+    })
+    test("H15: a wrapper owns a COPY of the wrapped client's defaults (headers too)", () => {
+        const inner = http.withDefaults({ headers: { "X-A": "1" } })
+        const outer = http.withAuth("t", "Bearer", inner)
+        expect(outer.defaults).not.toBe(inner.defaults)
+        expect(outer.defaults.headers).not.toBe(inner.defaults.headers)
+        expect(Object.isFrozen(outer.defaults.headers)).toBe(true)
+        expect(outer.defaults).toEqual(inner.defaults)
+    })
+    test("H16: a hand-built client with defaults: null is still a client (keeps its auth)", async () => {
+        await http.get({ baseUrl: "https://h.test", defaults: null, authorization: "Bearer z" }, "/x")
+        expect(fetchCalls[0].url).toBe("https://h.test/x")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Bearer z")
+    })
+    test("H17: URL / Request objects keep the pre-S462 URL-first behaviour", async () => {
+        await http.get(new URL("https://u.test/a"))
+        expect(fetchCalls[0].url).toBe("https://u.test/a")
+    })
+    test("H18: any other non-string target is refused, never fetch(\"[object Object]\")", async () => {
+        await expect(http.get({ defaults: {} }, "/x")).rejects.toThrow(/first argument must be a URL/)
+        await expect(http.post(42, {})).rejects.toThrow(/first argument must be a URL/)
+        await expect(http.del(null)).rejects.toThrow(/first argument must be a URL/)
+        expect(fetchCalls.length).toBe(0)
+    })
+})
+
 describe("scrml:http — withAuth (Tier 3, real shim)", () => {
     beforeEach(stubFetch)
     afterEach(restoreFetch)

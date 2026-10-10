@@ -493,6 +493,10 @@ describe("scrml:oauth — real shim drives each storage tag", () => {
     kvClose(kv);
   });
 
+  test("R4 OAuthStore.Redis(\"\") is refused (\"\" is a value, not absence)", async () => {
+    await expect(realOauth.startFlow(realCfg(OAuthStore.Redis("")), "s")).rejects.toThrow(/Redis\(not\)/);
+  });
+
   test("R3 a non-tag storage (the pre-S462 method object) is refused", async () => {
     const legacy = { put() {}, get() {}, del() {} };
     await expect(realOauth.startFlow(realCfg(legacy), "s")).rejects.toThrow(/OAuthStore value/);

@@ -17,6 +17,7 @@ ${
     //   }
     // ---------------------------------------------------------------------------
 
+    export { KvError, KvStore } from './kv.scrml'
     export { createStore, createSessionStore, createCounter } from './kv.scrml'
     export { get, set, del, has, keys, clear, close, purgeExpired } from './kv.scrml'
     export { increment, decrement, count, resetCount } from './kv.scrml'

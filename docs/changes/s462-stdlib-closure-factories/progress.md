@@ -18,3 +18,4 @@ FIX ROUND 1 for s462-stdlib-closure-factories — S239 review of d6fc8e04d = LAN
 8 nits: `increment(c,k,null)` now adds 1 (base 0) — note it in the changelog; new kv.scrml code uses legacy arm forms (W-ARM-PIPE-LEGACY / W-MATCH-ARROW-LEGACY) — rewrite to canonical `:>`; `OAuthStore.Redis("")` → treat "" as not (default client) or refuse; limiter fields caller-mutable — acceptable, note it.
 
 Gates (ALL incl. CI-only): pre-commit · conformance · browser tier as ci.yml · types:check · tracking tiers (integration + lsp + commands) as ci.yml after `bun run pretest` · `bun scripts/s34-census.ts --check-new --base 980cb3001cfd99711457890c6a88b2b2e546991b` · facts --check. Report new SHA + per-item disposition.
+2026-10-09T21:21:28-06:00 fix round 1 items 1-6 + nits implemented; targeted tests green (667); prototype stdlib 0; types:check OK. Committing.

@@ -16,7 +16,7 @@
 import { describe, test, expect } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
@@ -177,10 +177,13 @@ describe("CONF-TRY-CATCH-IN-SCRML-SOURCE: stdlib/http regression-fire verificati
       .filter(n => typeof n === "number")
       .sort((a, b) => a - b);
 
-    // (S462: +11 / +73 after the HttpClient config-struct migration — the
-    // header usage note and the client helpers above get/post/… — and the
-    // retry(fn, opts, shouldRetry) positional-predicate change.)
-    expect(lines).toContain(80);
-    expect(lines).toContain(341);
+    // S462: the pins were literal line numbers and broke on every edit above
+    // them; the fires must sit exactly on the file's two `try {` lines
+    // (`_request` and `retry`), derived from the source itself.
+    const tryLines = readFileSync(httpFile, "utf8").split("\n")
+      .map((l, i) => (/^\s*try\s*\{/.test(l) ? i + 1 : 0))
+      .filter((n) => n > 0);
+    expect(tryLines.length).toBe(2);
+    expect(lines).toEqual(tryLines);
   });
 });

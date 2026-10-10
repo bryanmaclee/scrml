@@ -76,7 +76,7 @@ ${
      * Example:
      *   const store = createStore("./data/app.db")
      *   set(store, "user:1", { name: "Alice" })
-     *   const user = get(store, "user:1") !{ ::ParseFailed(m) -> not }
+     *   const user = get(store, "user:1") !{ .ParseFailed(m) :> not }
      *
      *   // With TTL (auto-expires after 60 seconds):
      *   set(store, "session:abc", { userId: 1 }, 60)
@@ -100,7 +100,7 @@ ${
                 "SELECT key FROM kv_store WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
             ),
             keysPrefix: db.prepare(
-                "SELECT key FROM kv_store WHERE namespace = ? AND key LIKE ? ESCAPE '\\' AND (expires_at IS NULL OR expires_at > ?)"
+                "SELECT key FROM kv_store WHERE namespace = ? AND substr(key, 1, length(?)) = ? AND (expires_at IS NULL OR expires_at > ?)"
             ),
             clear: db.prepare(
                 "DELETE FROM kv_store WHERE namespace = ?"
@@ -127,7 +127,7 @@ ${
             return not
         }
         return safeCall(() => JSON.parse(row.value)) !{
-            | ::Thrown(msg, name) -> {
+            .Thrown(msg, name) :> {
                 fail KvError::ParseFailed(msg)
             }
         }
@@ -169,8 +169,8 @@ ${
     export function keys(store, prefix) {
         const now = Date.now()
         if (prefix) {
-            const escaped = prefix.replace(/[%_\\]/g, "\\$&")
-            const rows = store.statements.keysPrefix.all(store.namespace, escaped + "%", now)
+            // Exact, case-SENSITIVE prefix match (LIKE is case-insensitive in SQLite).
+            const rows = store.statements.keysPrefix.all(store.namespace, prefix, prefix, now)
             return rows.map(r => r.key)
         }
         const rows = store.statements.keys.all(store.namespace, now)
@@ -233,7 +233,7 @@ ${
      * Increment a counter by `by` (default: 1). Returns the new value.
      */
     export function increment(counter, key, by) {
-        const current = get(counter, key) !{ ::ParseFailed(m) -> 0 } || 0
+        const current = get(counter, key) !{ .ParseFailed(m) :> 0 } || 0
         const next = current + (by is some ? by : 1)
         set(counter, key, next)
         return next
@@ -243,7 +243,7 @@ ${
      * Decrement a counter by `by` (default: 1). Returns the new value.
      */
     export function decrement(counter, key, by) {
-        const current = get(counter, key) !{ ::ParseFailed(m) -> 0 } || 0
+        const current = get(counter, key) !{ .ParseFailed(m) :> 0 } || 0
         const next = current - (by is some ? by : 1)
         set(counter, key, next)
         return next
@@ -253,7 +253,7 @@ ${
      * Get the current value of a counter (0 if not set).
      */
     export function count(counter, key) {
-        return get(counter, key) !{ ::ParseFailed(m) -> 0 } || 0
+        return get(counter, key) !{ .ParseFailed(m) :> 0 } || 0
     }
 
     /**
@@ -272,11 +272,11 @@ ${
 
         // set + get — get is failable, handle with !{}
         set(store, "hello", "world")
-        assertEqual(get(store, "hello") !{ ::ParseFailed(m) -> not }, "world")
+        assertEqual(get(store, "hello") !{ .ParseFailed(m) :> not }, "world")
 
         // JSON value
         set(store, "user", { name: "Alice", age: 30 })
-        const user = get(store, "user") !{ ::ParseFailed(m) -> not }
+        const user = get(store, "user") !{ .ParseFailed(m) :> not }
         assertEqual(user.name, "Alice")
         assertEqual(user.age, 30)
 
@@ -287,7 +287,7 @@ ${
         // del
         del(store, "hello")
         assertFalsy(has(store, "hello"))
-        assertFalsy(get(store, "hello") !{ ::ParseFailed(m) -> not } is some)
+        assertFalsy(get(store, "hello") !{ .ParseFailed(m) :> not } is some)
 
         // keys
         set(store, "a", 1)

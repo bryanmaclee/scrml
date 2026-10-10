@@ -621,10 +621,37 @@ const _FLOW_SUBJECTS = Object.freeze({
   pwreset: "Reset your password",
 });
 
-// S462: `sendEmail` is a positional argument (a function is PASSED, never
-// stored in the options value).
-async function _requestTokenFlow(email, options, sendEmail, purpose, defaultTtl) {
+// S462 migration guard (fail LOUD, never a silent no-op). The pre-S462 shape
+// `requestX(email, { store, sendEmail })` would otherwise store a token and
+// send nothing; a swapped `requestX(email, sendEmail, { store })` would store
+// nothing and send nothing — both with a neutral `{ ok: true }`. Checked
+// BEFORE anything is minted or stored.
+function _flowOptions(fnName, signature, options, legacyField) {
+  if (typeof options === "function") {
+    throw new Error(`[scrml:auth] ${fnName}: the options object came where the function belongs — the signature is ${signature}`);
+  }
   const opts = options || {};
+  if (opts[legacyField] !== undefined && opts[legacyField] !== null) {
+    throw new Error(`[scrml:auth] ${fnName}: \`${legacyField}\` is no longer an options field (S462) — pass it positionally: ${signature}`);
+  }
+  return opts;
+}
+
+const _FLOW_SIGNATURES = Object.freeze({
+  "magic-link": ["requestMagicLink", "requestMagicLink(email, { store, baseUrl?, ttl? }, sendEmail)"],
+  "email-verify": ["requestEmailVerification", "requestEmailVerification(email, { store, baseUrl?, ttl? }, sendEmail)"],
+  pwreset: ["requestPasswordReset", "requestPasswordReset(email, { store, baseUrl?, ttl? }, sendEmail)"],
+});
+
+// S462: `sendEmail` is a REQUIRED positional argument (a function is PASSED,
+// never stored in the options value). Without it the token could never leave
+// the server, so a missing / non-function sendEmail is refused, not ignored.
+async function _requestTokenFlow(email, options, sendEmail, purpose, defaultTtl) {
+  const [fnName, signature] = _FLOW_SIGNATURES[purpose];
+  const opts = _flowOptions(fnName, signature, options, "sendEmail");
+  if (typeof sendEmail !== "function") {
+    throw new Error(`[scrml:auth] ${fnName}: sendEmail must be a function (third argument) — ${signature}`);
+  }
   const store = opts.store;
   const baseUrl = opts.baseUrl || "";
   const ttl = _resolveTtlSeconds(opts.ttl, defaultTtl);
@@ -634,16 +661,14 @@ async function _requestTokenFlow(email, options, sendEmail, purpose, defaultTtl)
   if (store) kvSet(store, token, record, ttl);
 
   const link = `${baseUrl}?token=${token}`;
-  if (typeof sendEmail === "function") {
-    // Enumeration resistance: a send failure (e.g. an SMTP 550 for an unknown
-    // recipient) MUST NOT change the neutral result, or request* becomes an
-    // account-existence oracle. Await for back-pressure but swallow the outcome
-    // (a real deployment logs it out-of-band).
-    try {
-      await sendEmail(email, { subject: _FLOW_SUBJECTS[purpose], link, token });
-    } catch (_e) {
-      /* swallow — the result is neutral regardless of send success */
-    }
+  // Enumeration resistance: a send failure (e.g. an SMTP 550 for an unknown
+  // recipient) MUST NOT change the neutral result, or request* becomes an
+  // account-existence oracle. Await for back-pressure but swallow the outcome
+  // (a real deployment logs it out-of-band).
+  try {
+    await sendEmail(email, { subject: _FLOW_SUBJECTS[purpose], link, token });
+  } catch (_e) {
+    /* swallow — the result is neutral regardless of send success */
   }
   // Neutral — never leak the token or the account's existence to the caller.
   return _NEUTRAL_REQUEST;
@@ -718,7 +743,13 @@ export function verifyResetToken(token, options) {
 //      burns it (acceptable — no reuse; the user re-requests).
 // S462: `updateHash` is a positional argument, not an options field.
 export async function resetPassword(token, newPassword, options, updateHash) {
-  const opts = options || {};
+  const signature = "resetPassword(token, newPassword, { store }, updateHash)";
+  const opts = _flowOptions("resetPassword", signature, options, "updateHash");
+  // A present-but-not-a-function updateHash is a call-shape error (thrown);
+  // an ABSENT one keeps the pre-S462 explicit `no-update-hash` result below.
+  if (updateHash !== undefined && updateHash !== null && typeof updateHash !== "function") {
+    throw new Error(`[scrml:auth] resetPassword: updateHash must be a function (fourth argument) — ${signature}`);
+  }
 
   // A — updateHash presence (no token touched yet → retryable on misconfig).
   if (typeof updateHash !== "function") {

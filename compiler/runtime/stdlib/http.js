@@ -97,16 +97,45 @@ async function _request(url, options) {
 // Clients (S462) — an HttpClient is a plain config STRUCT, never an object of
 // functions (a function is not stored in a value, SPEC §14.3):
 //   { baseUrl: string, defaults: options, authorization: string | null }
+// Every constructor returns a NEW, deeply frozen client with its own copy of
+// `defaults`.
 // The request functions take either a URL or a client as their first argument.
 // ---------------------------------------------------------------------------
 
-const _NO_CLIENT = Object.freeze({ baseUrl: "", defaults: {}, authorization: null });
+const _NO_CLIENT = Object.freeze({ baseUrl: "", defaults: Object.freeze({}), authorization: null });
 
-// A client is the non-string target that carries `defaults`. A URL string (or
-// a URL object, which has no `defaults`) is a URL.
+// Build a client that OWNS its defaults: a fresh copy (headers included), then
+// frozen all the way down. Two clients never share a mutable `defaults`, and a
+// wrapper never aliases the wrapped client's (a write to one client's headers
+// cannot leak into another's requests).
+function _makeClient(baseUrl, defaults, authorization) {
+  const own = _mergeOptions(defaults, null);
+  if (own.headers) Object.freeze(own.headers);
+  return Object.freeze({
+    baseUrl: baseUrl || "",
+    defaults: Object.freeze(own),
+    authorization: authorization === undefined ? null : authorization,
+  });
+}
+
+// A client is an object that HAS a `baseUrl` field (whatever its `defaults`
+// hold — a hand-built `{ baseUrl, defaults: null }` is still a client).
 function _isClient(target) {
-  return target !== null && target !== undefined && typeof target !== "string"
-    && target.defaults !== null && target.defaults !== undefined;
+  return target !== null && typeof target === "object" && Object.hasOwn(target, "baseUrl");
+}
+
+// The URL-first form keeps the pre-S462 behaviour for what fetch() accepts as
+// its input: a string, a URL object, or a Request. Anything else (a plain
+// object that is not a client, a number, not) is refused here rather than
+// stringified into fetch("[object Object]").
+function _assertUrlTarget(target, fnName) {
+  if (typeof target === "string") return;
+  if (typeof URL !== "undefined" && target instanceof URL) return;
+  if (typeof Request !== "undefined" && target instanceof Request) return;
+  throw new TypeError(
+    `[scrml:http] ${fnName}: the first argument must be a URL (string, URL or Request) or an HttpClient `
+      + "from withBaseUrl / withAuth / withDefaults",
+  );
 }
 
 // Resolve a path against the client's base URL. Absolute URLs pass through.
@@ -144,6 +173,7 @@ export async function get(target, pathOrOptions, options) {
   if (_isClient(target)) {
     return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "GET" });
   }
+  _assertUrlTarget(target, "get");
   return _request(target, { ...pathOrOptions, method: "GET" });
 }
 
@@ -152,6 +182,7 @@ export async function post(target, a, b, c) {
   if (_isClient(target)) {
     return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "POST", body: b });
   }
+  _assertUrlTarget(target, "post");
   return _request(target, { ...b, method: "POST", body: a });
 }
 
@@ -160,6 +191,7 @@ export async function put(target, a, b, c) {
   if (_isClient(target)) {
     return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PUT", body: b });
   }
+  _assertUrlTarget(target, "put");
   return _request(target, { ...b, method: "PUT", body: a });
 }
 
@@ -168,6 +200,7 @@ export async function del(target, pathOrOptions, options) {
   if (_isClient(target)) {
     return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "DELETE" });
   }
+  _assertUrlTarget(target, "del");
   return _request(target, { ...pathOrOptions, method: "DELETE" });
 }
 
@@ -176,12 +209,13 @@ export async function patch(target, a, b, c) {
   if (_isClient(target)) {
     return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PATCH", body: b });
   }
+  _assertUrlTarget(target, "patch");
   return _request(target, { ...b, method: "PATCH", body: a });
 }
 
 export function withBaseUrl(baseUrl, wrapped) {
   const base = wrapped || _NO_CLIENT;
-  return { baseUrl, defaults: base.defaults, authorization: base.authorization };
+  return _makeClient(baseUrl, base.defaults, base.authorization);
 }
 
 export function isOk(response) {
@@ -197,17 +231,13 @@ export function isError(response) {
 export function withAuth(token, scheme, wrapped) {
   const sch = scheme || "Bearer";
   const base = wrapped || _NO_CLIENT;
-  return { baseUrl: base.baseUrl, defaults: base.defaults, authorization: `${sch} ${token}` };
+  return _makeClient(base.baseUrl, base.defaults, `${sch} ${token}`);
 }
 
 // Defaults merge OVER the wrapped client's defaults (headers by key).
 export function withDefaults(defaults, wrapped) {
   const base = wrapped || _NO_CLIENT;
-  return {
-    baseUrl: base.baseUrl,
-    defaults: _mergeOptions(base.defaults, defaults),
-    authorization: base.authorization,
-  };
+  return _makeClient(base.baseUrl, _mergeOptions(base.defaults, defaults), base.authorization);
 }
 
 // retry(fn, opts?, shouldRetry?) — `opts` is data only; the predicate is a

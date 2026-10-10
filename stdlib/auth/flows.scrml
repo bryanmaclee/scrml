@@ -39,12 +39,43 @@ ${
     import { get as kvGet, set as kvSet, del as kvDel } from 'scrml:store'
 
     /**
-     * Shared request half — mint + store a token, optionally send the email,
-     * and return a neutral result. `purpose` selects the store namespace at the
-     * caller and the email subject here.
+     * S462 migration guard — fail LOUD, never a silent no-op. The pre-S462
+     * shape `requestX(email, { store, sendEmail })` would store a token and
+     * send nothing; a swapped `requestX(email, sendEmail, { store })` would
+     * store and send nothing — both returning a neutral `{ ok: true }`.
+     * (Mirrors the runtime shim, which throws; checked before anything is
+     * minted or stored.)
+     */
+    function flowOptions(fnName, signature, opts, legacyField) {
+        if (typeof opts == "function") {
+            throw new Error(`[scrml:auth] ${fnName}: the options object came where the function belongs — the signature is ${signature}`)
+        }
+        const options = opts is some ? opts : {}
+        if (options[legacyField] is some) {
+            throw new Error(`[scrml:auth] ${fnName}: \`${legacyField}\` is no longer an options field (S462) — pass it positionally: ${signature}`)
+        }
+        return options
+    }
+
+    fn flowName(purpose) {
+        if (purpose == "magic-link")   return "requestMagicLink"
+        if (purpose == "email-verify") return "requestEmailVerification"
+        return "requestPasswordReset"
+    }
+
+    /**
+     * Shared request half — mint + store a token, send the email (sendEmail is
+     * REQUIRED: without it the token could never leave the server), and return
+     * a neutral result. `purpose` selects the store namespace at the caller
+     * and the email subject here.
      */
     function requestTokenFlow(email, opts, sendEmail, purpose, defaultTtl) {
-        const options = opts is some ? opts : {}
+        const name = flowName(purpose)
+        const signature = `${name}(email, { store, baseUrl?, ttl? }, sendEmail)`
+        const options = flowOptions(name, signature, opts, "sendEmail")
+        if (typeof sendEmail != "function") {
+            throw new Error(`[scrml:auth] ${name}: sendEmail must be a function (third argument) — ${signature}`)
+        }
         const store = options.store
         const baseUrl = options.baseUrl is some ? options.baseUrl : ""
         // A non-numeric ttl (e.g. "15m") would compute Date.now() + NaN = NaN — a
@@ -57,13 +88,11 @@ ${
         if (store is some) kvSet(store, token, record, ttl)
 
         const link = `${baseUrl}?token=${token}`
-        if (sendEmail is some) {
-            // Enumeration resistance: a send failure (e.g. an SMTP 550 for an
-            // unknown recipient) MUST NOT change the neutral result, or request*
-            // becomes an account-existence oracle. Swallow via safeCallAsync.
-            safeCallAsync(() => sendEmail(email, { subject: subjectFor(purpose), link: link, token: token })) !{
-                ::Thrown(m, n) -> not
-            }
+        // Enumeration resistance: a send failure (e.g. an SMTP 550 for an
+        // unknown recipient) MUST NOT change the neutral result, or request*
+        // becomes an account-existence oracle. Swallow via safeCallAsync.
+        safeCallAsync(() => sendEmail(email, { subject: subjectFor(purpose), link: link, token: token })) !{
+            .Thrown(m, n) :> not
         }
         // Neutral — never leak the token or the account's existence to the caller.
         return { ok: true }
@@ -81,7 +110,7 @@ ${
         if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
 
         const record = kvGet(store, token) !{
-            ::ParseFailed(m) -> not
+            .ParseFailed(m) :> not
         }
         if (record is not) return { valid: false, reason: "used-or-invalid" }
         if (expectedPurpose is some && record.purpose != expectedPurpose) {
@@ -128,8 +157,8 @@ ${
      *   const res = verifyMagicLink(token, { store })
      *   if (res.valid) { issueSession(res.email) }
      *
-     * @param sendEmail — optional function (to, { subject, link, token }) that
-     *                    delivers the link; omitted → nothing is sent
+     * @param sendEmail — REQUIRED function (to, { subject, link, token }) that
+     *                    delivers the link (missing → refused, see flowOptions)
      */
     export function requestMagicLink(email, opts, sendEmail) {
         return requestTokenFlow(email, opts, sendEmail, "magic-link", 900)
@@ -178,7 +207,13 @@ ${
      * @param updateHash — function (email, hash) that persists the new hash
      */
     export function resetPassword(token, newPassword, opts, updateHash) {
-        const options = opts is some ? opts : {}
+        const signature = "resetPassword(token, newPassword, { store }, updateHash)"
+        const options = flowOptions("resetPassword", signature, opts, "updateHash")
+        // A present-but-not-a-function updateHash is a call-shape error; an
+        // ABSENT one keeps the explicit `no-update-hash` result below.
+        if (updateHash is some && typeof updateHash != "function") {
+            throw new Error(`[scrml:auth] resetPassword: updateHash must be a function (fourth argument) — ${signature}`)
+        }
         // A — updateHash presence (no token touched yet → retryable on misconfig).
         if (updateHash is not) return { valid: false, reason: "no-update-hash" }
         // B — atomic single-use consume (existence + expiry + purpose + delete).

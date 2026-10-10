@@ -20,6 +20,18 @@ import { Database } from "bun:sqlite";
 // host wall-clock via the single sanctioned scrml:time touch (S179 clock de-leak)
 import { now as clockNow } from "./time.js";
 
+// S462 fix round 1 — mirrors the scrml enum declared in stdlib/store/kv.scrml. An enum is a
+// run-time value (scrml code constructs `KvError.ParseFailed(…)`), so the shim
+// MUST export it: the server bundle imports every enum name it is given, and
+// a missing ES export is a link error that takes the whole bundle down.
+// Same shape the compiler emits for payload variants ({ variant, data }).
+export const KvError = Object.freeze({
+  ParseFailed: function(message) {
+    return { variant: "ParseFailed", data: { message } };
+  },
+  variants: ["ParseFailed"],
+});
+
 function _initDb(db) {
   db.run(`
     CREATE TABLE IF NOT EXISTS kv_store (
@@ -54,12 +66,11 @@ export function createStore(dbPath, namespace) {
     keys: db.prepare(
       "SELECT key FROM kv_store WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
     ),
-    // ESCAPE takes ONE character: the JS string "\\" is a single backslash.
-    // (Pre-S462 this read "\\\\" — two characters — so keys(prefix) threw
-    // "ESCAPE expression must be a single character" on every call; the old
-    // copy-based unit test never exercised the shim.)
+    // Prefix match by substr, not LIKE: exact and case-SENSITIVE, and `%` / `_`
+    // are ordinary characters. (Pre-S462 the LIKE form passed ESCAPE two
+    // characters and threw on every call; it was also case-insensitive.)
     keysPrefix: db.prepare(
-      "SELECT key FROM kv_store WHERE namespace = ? AND key LIKE ? ESCAPE '\\' AND (expires_at IS NULL OR expires_at > ?)"
+      "SELECT key FROM kv_store WHERE namespace = ? AND substr(key, 1, length(?)) = ? AND (expires_at IS NULL OR expires_at > ?)"
     ),
     clear: db.prepare("DELETE FROM kv_store WHERE namespace = ?"),
     deleteExpired: db.prepare(
@@ -108,8 +119,8 @@ export function has(store, key) {
 export function keys(store, prefix) {
   const now = clockNow();
   if (prefix) {
-    const escaped = prefix.replace(/[%_\\]/g, "\\$&");
-    const rows = store.statements.keysPrefix.all(store.namespace, escaped + "%", now);
+    // Exact, case-SENSITIVE prefix match (LIKE is case-insensitive in SQLite).
+    const rows = store.statements.keysPrefix.all(store.namespace, prefix, prefix, now);
     return rows.map((r) => r.key);
   }
   const rows = store.statements.keys.all(store.namespace, now);

@@ -82,6 +82,35 @@ import { SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE } from "../
 // prune pass is somehow skipped (it is a bare comment line).
 const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
 
+/**
+ * S462 fix round 1 — drop the specifiers of a `scrml:` import that name a TYPE
+ * with no run-time value (a `:struct` / alias). The STDLIB-EXPORT-SEED stage
+ * (api.js) records `typeHasRuntimeValue` per type export: `true` for an
+ * `:enum` (its shim exports the frozen variant object), `false` otherwise.
+ * A name the registry does not know is KEPT (unknown is not proof of erasure).
+ */
+function dropErasedStdlibTypeSpecifiers(
+  specs: Array<{ imported: string; local: string }>,
+  source: string,
+  importerPath: string,
+  exportRegistry: Map<string, Map<string, any>> | null,
+): Array<{ imported: string; local: string }> {
+  if (!exportRegistry || specs.length === 0) return specs;
+  let sourceMap: Map<string, any> | undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { resolveModulePath } = require("../module-resolver.js");
+    sourceMap = exportRegistry.get(resolveModulePath(source, importerPath));
+  } catch {
+    return specs;
+  }
+  if (!sourceMap) return specs;
+  return specs.filter(({ imported }) => {
+    const entry = sourceMap!.get(imported);
+    return !(entry && entry.category === "type" && entry.typeHasRuntimeValue === false);
+  });
+}
+
 // GITI-012 / fix-server-eq-helper-import: structural-equality helper source.
 // SPEC §45 emits `_scrml_structural_eq(a, b)` for any `==`/`!=` whose operands
 // aren't statically primitive (see emit-expr.ts). The helper lives in the
@@ -2919,7 +2948,18 @@ export function generateServerJs(
         });
         continue;
       }
-      const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
+      // S462 fix round 1 — a `scrml:` import of a TYPE with no run-time value
+      // (a `:struct` / alias, e.g. `KvStore`, `HttpClient`, `RateLimiter`) is
+      // erased here. The stdlib shim has no such export, and an ES import of a
+      // missing name is a LINK error that takes the whole server bundle down
+      // (every route) — while W-TYPE-031 tells authors to annotate with exactly
+      // these types. Enum types keep their specifier: they ARE run-time values
+      // (`KvError.ParseFailed(…)`) and their shims export them.
+      const runtimeKept = jsSource.startsWith("scrml:")
+        ? dropErasedStdlibTypeSpecifiers(kept, jsSource, filePath, _asyncExportRegistry as any)
+        : kept;
+      if (runtimeKept.length === 0) continue;
+      const names = runtimeKept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
       lines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
     }
   }

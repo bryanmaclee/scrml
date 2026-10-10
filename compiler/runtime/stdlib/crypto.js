@@ -10,6 +10,18 @@
 //   - hmac(secret, payload)             → Promise<string>       [browser-safe]
 //   - safeCompare(a, b)                 → boolean               [browser-safe]
 
+// S462 fix round 1 — mirrors the scrml enum declared in stdlib/crypto/index.scrml. An enum is a
+// run-time value (scrml code constructs `CryptoError.VerifyFailed(…)`), so the shim
+// MUST export it: the server bundle imports every enum name it is given, and
+// a missing ES export is a link error that takes the whole bundle down.
+// Same shape the compiler emits for payload variants ({ variant, data }).
+export const CryptoError = Object.freeze({
+  VerifyFailed: function(message) {
+    return { variant: "VerifyFailed", data: { message } };
+  },
+  variants: ["VerifyFailed"],
+});
+
 export function hash(algorithm, input) {
   if (typeof input !== "string") input = String(input);
   if (algorithm === "argon2") {
