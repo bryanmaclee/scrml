@@ -654,7 +654,10 @@ function shapeOfExpr(e: unknown, ctx: Ctx): ValueShape {
     }
     case "member": {
       const obj = shapeOfExpr(r.object, ctx);
-      return typeof r.property === "string" ? obj.field(r.property) ?? UNKNOWN_SHAPE : UNKNOWN_SHAPE;
+      const f = typeof r.property === "string" ? obj.field(r.property) ?? UNKNOWN_SHAPE : UNKNOWN_SHAPE;
+      // S462 fix round 4 (R4-2) — `a?.f` is `not` when `a` is, and a field read through a
+      // value not provably present is not provably present either (Q10 reads `.present`).
+      return r.optional === true || !obj.present ? maybeAbsent(f) : f;
     }
     case "index":
       // S462 fix round 3 (NEW-2) — an index may be out of range: the element is NOT provably

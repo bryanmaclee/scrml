@@ -835,3 +835,58 @@ describe("S462 fix round 3 — the note names the untrusted call inside a callba
     expect(errs[0].message).toContain("`acc.concat(…)`");
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 4 (re-review #4 of 88a33c700).
+// ---------------------------------------------------------------------------
+describe("S462 fix round 4 — R4-1: block arrows with several / default / rest parameters are checked", () => {
+  test("reduce((a, w) => { … clear() … }) is a loop body", () => {
+    expect(all4(`
+    function show() { if (@user is given) { const r = @words.reduce((a, w) => { const s = a + @user.name
+                clear()
+                return s }, "") } }`).length).toBe(1);
+  });
+  test("toSorted((a, b) => { … clear() … })", () => {
+    expect(all4(`
+    function show() { if (@user is given) { const r = @words.toSorted((a, b) => { @out = @user.name
+                clear()
+                return 0 }) } }`).length).toBe(1);
+  });
+  test("forEach((w, i) => { … clear() })", () => {
+    expect(all4(`
+    function show() { if (@user is given) { @words.forEach((w, i) => { @out = @user.name
+                clear() }) } }`).length).toBe(1);
+  });
+  test("unguarded reads in (a, b) => { … } and (a = 1) => { … }", () => {
+    expect(all4(`
+    function show() { const f = (a, b) => { @out = @user.name }
+        const g = (a = 1) => { @out = @user.name }
+        f(1, 2)
+        g() }`).length).toBe(2);
+  });
+  test("twin: a guarded read in a two-parameter block arrow", () => {
+    expect(all4(`
+    function show() { const f = (a, b) => { if (@user is given) { @out = @user.name } }
+        f(1, 2) }`).length).toBe(0);
+  });
+});
+
+describe("S462 fix round 4 — R4-2: an optional-chained field is not provably present (Q10)", () => {
+  test("`@user = @box?.owner` does not re-narrow", () => {
+    expect(e046(`<program>
+type User:struct = { name: string }
+type Box:struct = { owner: User }
+<user>: User | not = { name: "a" }
+<box>: Box | not = not
+<out> = ""
+\${
+    function clear() { @user = not }
+    function show() { clear()
+        @user = @box?.owner
+        @out = @user.name }
+}
+<p>\${@out}</p>
+</program>
+`).length).toBe(1);
+  });
+});
