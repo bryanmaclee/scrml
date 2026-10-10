@@ -72,6 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
+import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
@@ -23436,19 +23437,40 @@ function checkTopLevelReturn(nodes: ASTNodeLike[], errors: TSError[], filePath: 
     ));
   };
   const seen = new Set<unknown>();
-  const inPlace = (n: unknown): void => {
+  // `anchor`: for statements PARSED from an arm's text (their spans are the
+  // probe's, not the file's) the diagnostic points at the arm that holds them.
+  const inPlace = (n: unknown, anchor: ASTNodeLike | null = null): void => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
-    if (Array.isArray(n)) { for (const c of n) inPlace(c); return; }
+    if (Array.isArray(n)) { for (const c of n) inPlace(c, anchor); return; }
     const node = n as ASTNodeLike & Record<string, unknown>;
     switch (node.kind) {
-      case "return-stmt": report(node); return;
-      case "if-stmt": inPlace(node.consequent); inPlace(node.alternate); inPlace(node.body); return;
-      case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body); return;
-      case "match-stmt": case "match-expr": inPlace(node.body); return;
-      case "match-arm-block": case "given-guard": inPlace(node.body); return;
-      case "match-arm-inline": inPlace(node.leaveStmt); return;
-      case "let-decl": case "const-decl": case "tilde-decl": inPlace(node.matchExpr); return;
+      case "return-stmt": report(anchor ?? node); return;
+      case "if-stmt": inPlace(node.consequent, anchor); inPlace(node.alternate, anchor); inPlace(node.body, anchor); return;
+      case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body, anchor); return;
+      case "match-stmt": case "match-expr":
+        // EVERY arm form — structured block, bare leave, inline text, a raw-text
+        // alternation / literal arm (`bare-expr`), a §18.19 product arm — through
+        // the one arm-body reader (S462 review N1).
+        if (Array.isArray(node.body)) {
+          for (const arm of node.body as ASTNodeLike[]) {
+            if (!arm || typeof arm !== "object") continue;
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? (arm.kind === "match-arm-block" || arm.kind === "given-guard" ? null : arm));
+          }
+        }
+        return;
+      case "guarded-expr":
+        // A `!{}` handler at the top level is in place too: `risky() !{ .X :> return }`.
+        if (Array.isArray(node.arms)) {
+          for (const arm of node.arms as ASTNodeLike[]) {
+            const st = armStatements(arm);
+            if (st) inPlace(st, anchor ?? node);
+          }
+        }
+        return;
+      case "let-decl": case "const-decl": case "tilde-decl":
+        inPlace(node.matchExpr, anchor); inPlace(node.guardedNode, anchor); return;
       default: return;
     }
   };

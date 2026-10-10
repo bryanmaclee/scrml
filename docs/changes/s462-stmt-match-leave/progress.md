@@ -11,3 +11,4 @@
 2026-10-10T10:42:31-06:00 fix round 1: F3 (given head scope + -> arm sep), F4 (checkTopLevelReturn), F6 (bare break/continue E-LOOP incl. msg arms); 6 cases; corpus: 080/075/076 newly refused (ill-formed samples).
 2026-10-10T11:05:34-06:00 merged origin/main (2897ba133); regen SPEC-INDEX + bootstrap report; pinned 6 esm known-throws; host-global-scan --check rc=0; s34 census PASS; types OK; 36/36 match-leave.
 2026-10-10T11:32:58-06:00 final: tiers 5630/0; emit-differential vs origin/main 2897ba133: 22 diag-changed (19 new match-leave cases + samples 080/075/076), 44 artifact-changed (inline lowering), nothing else.
+2026-10-10T12:16:38-06:00 fix round 2: N1+N4 (arm-body-statements.ts one reader; top-level return all arm forms incl !{}; labels). corpus 0 change.

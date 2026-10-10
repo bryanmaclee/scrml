@@ -6,6 +6,7 @@ import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNam
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
@@ -1966,68 +1967,17 @@ function armLeaves(arm: MatchArm): string | null {
 }
 
 /**
- * The leave a raw-text arm body performs, decided from PARSED statements — a
- * leave statement, a propagation `expr?`, or a `{ … }` block parsed with the
- * statement parser — never by scanning the text (S462 review F1: a leave word
- * inside a string or template literal is not a leave; F5: a nested function's
- * `return` is not the arm's). A single expression that is none of these cannot
- * contain a leave: scrml has no expression-position `return` / `fail` / `break`
- * / `continue` (§18.2). A block that does not parse is not classified here — the
- * IIFE lowering of it fails on its own.
+ * The leave a raw-text arm body performs (S462 review F1/F5/N4): a propagation
+ * `expr?`, or — through the ONE arm-body reader (`arm-body-statements.ts`) — a
+ * leave statement or a `{ … }` block parsed to statements. Never a text scan.
  */
 function leaveInArmText(text: string): string | null {
   const t = (text ?? "").trim();
   if (!t) return null;
-  const leave = leaveStmtFromArmText(t);
-  if (leave) return leaveKindOf(leave);
   if (propagateOperandOfArmText(t) !== null) return "?";
-  if (t.startsWith("{") && t.endsWith("}") && _matchArmResultIsBlockBody(t)) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { parseStatementText } = require("../validators/defer-structure.ts") as { parseStatementText: (t: string, f?: string) => { ok: boolean; stmts?: any[] } };
-    const parsed = parseStatementText(t, "<match-arm>");
-    return parsed.ok && Array.isArray(parsed.stmts) ? leaveInStatements(parsed.stmts) : null;
-  }
-  return null;
-}
-
-function leaveKindOf(n: any): string | null {
-  switch (n?.kind) {
-    case "return-stmt": return "return";
-    case "fail-expr": return "fail";
-    case "propagate-expr": return "?";
-    case "break-stmt": return "break";
-    case "continue-stmt": return "continue";
-    default: return null;
-  }
-}
-
-const _ARM_LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
-
-/**
- * Does a statement list leave the arm it is the body of — a `return` / `fail` /
- * `?`, or a `break` / `continue` NOT aimed at a loop the list itself contains
- * (S462 review F5: a `break` inside an inner `for` is that loop's)? A nested
- * function, lambda or `fn` body is its own scope and is not entered.
- */
-function leaveInStatements(stmts: any): string | null {
-  let found: string | null = null;
-  const seen = new Set<any>();
-  const walk = (n: any, loopDepth: number): void => {
-    if (found || !n || typeof n !== "object" || seen.has(n)) return;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const c of n) walk(c, loopDepth); return; }
-    const k = n.kind;
-    if (k === "function-decl" || k === "fn-decl" || k === "lambda") return;
-    if (k === "return-stmt" || k === "fail-expr" || k === "propagate-expr") { found = leaveKindOf(n); return; }
-    if (k === "break-stmt" || k === "continue-stmt") {
-      if (loopDepth === 0) found = leaveKindOf(n);
-      return;
-    }
-    const inner = _ARM_LOOP_KINDS.has(k) ? loopDepth + 1 : loopDepth;
-    for (const [key, v] of Object.entries(n)) if (key !== "span" && v && typeof v === "object") walk(v, inner);
-  };
-  walk(stmts, 0);
-  return found;
+  if (t.startsWith("{") && !_matchArmResultIsBlockBody(t)) return null; // an object literal
+  const stmts = armBodyStatementsFromText(t);
+  return stmts ? leaveInStatements(stmts) : null;
 }
 
 /** §19.5 — the operand of a raw arm body that is a propagation `expr?`, else null. */
