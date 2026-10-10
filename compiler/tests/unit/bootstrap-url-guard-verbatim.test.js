@@ -8,9 +8,10 @@
 // runtime-url-guard.js, then run `bun scripts/sync-bootstrap-url-guard.ts --write`.
 
 import { describe, test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+
 import {
   BOOT_RUNTIME_PATH,
+  readText,
   currentBlock,
   expectedBlock,
   isInSync,
@@ -19,18 +20,19 @@ import { URL_GUARD_RUNTIME_SOURCE } from "../../src/runtime-template.js";
 
 describe("bootstrap runtime carries impl#1's §5.2 URL guard verbatim", () => {
   test("the block between the markers equals compiler/src/runtime-url-guard.js (`export ` stripped)", () => {
-    const runtime = readFileSync(BOOT_RUNTIME_PATH, "utf8");
+    const runtime = readText(BOOT_RUNTIME_PATH);
     expect(currentBlock(runtime).block).toBe(expectedBlock());
     expect(isInSync()).toBe(true);
   });
 
   test("it is the same text impl#1's client runtime inlines (URL_GUARD_RUNTIME_SOURCE)", () => {
-    const want = URL_GUARD_RUNTIME_SOURCE.endsWith("\n") ? URL_GUARD_RUNTIME_SOURCE : URL_GUARD_RUNTIME_SOURCE + "\n";
+    const src = URL_GUARD_RUNTIME_SOURCE.replace(/\r\n/g, "\n"); // a CRLF (Windows) checkout reads the same text
+    const want = src.endsWith("\n") ? src : src + "\n";
     expect(expectedBlock()).toBe(want);
   });
 
   test("the bootstrap's bound-attribute write goes through the guard (no second list in the runtime)", () => {
-    const runtime = readFileSync(BOOT_RUNTIME_PATH, "utf8");
+    const runtime = readText(BOOT_RUNTIME_PATH);
     const { before, after } = currentBlock(runtime);
     const outside = before + after;
     // `attr` asks the guard; the only URL-attribute table is the verbatim one.

@@ -25,9 +25,18 @@ export const BOOT_RUNTIME_PATH = join(ROOT, "compiler", "self-host-v2", "slice-m
 export const BEGIN_MARKER = "// >>> BEGIN verbatim compiler/src/runtime-url-guard.js\n";
 export const END_MARKER = "// <<< END verbatim compiler/src/runtime-url-guard.js\n";
 
+/**
+ * A file's text with CRLF read as LF. A Windows clone (`core.autocrlf=true`, the windows CI job)
+ * checks both files out with CRLF; the comparison is of the TEXT, not the checkout's line endings
+ * (and the marker lines end in `\n`).
+ */
+export function readText(path: string): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
 /** The block the bootstrap runtime must carry: the guard source, `export ` stripped. */
 export function expectedBlock(): string {
-  const src = readFileSync(GUARD_SOURCE_PATH, "utf8").replace(/^export /gm, "");
+  const src = readText(GUARD_SOURCE_PATH).replace(/^export /gm, "");
   return src.endsWith("\n") ? src : src + "\n";
 }
 
@@ -43,7 +52,7 @@ export function currentBlock(runtime: string): { before: string; block: string; 
 }
 
 export function isInSync(): boolean {
-  return currentBlock(readFileSync(BOOT_RUNTIME_PATH, "utf8")).block === expectedBlock();
+  return currentBlock(readText(BOOT_RUNTIME_PATH)).block === expectedBlock();
 }
 
 if (import.meta.main) {
@@ -53,7 +62,7 @@ if (import.meta.main) {
     console.error("usage: bun scripts/sync-bootstrap-url-guard.ts --write | --check");
     process.exit(2);
   }
-  const runtime = readFileSync(BOOT_RUNTIME_PATH, "utf8");
+  const runtime = readText(BOOT_RUNTIME_PATH);
   const cur = currentBlock(runtime);
   const want = expectedBlock();
   if (check) {
