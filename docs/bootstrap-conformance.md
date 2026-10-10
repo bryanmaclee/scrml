@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1622 of 1622 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1634 of 1634 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 152 | 9.4% |
+| PASS | 164 | 10.0% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 56 | 3.5% |
+| FAIL | 56 | 3.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 622 | 38.3% |
-| UNSUPPORTED | 792 | 48.8% |
+| NOT-TWINNED | 622 | 38.1% |
+| UNSUPPORTED | 792 | 48.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 208; of those, 152 hold (73.1%). Runtime half executed on the bootstrap for 48 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 220; of those, 164 hold (74.5%). Runtime half executed on the bootstrap for 52 case(s).
 
-- **Vacuous** passes: 11 of 152 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **141**.
+- **Vacuous** passes: 11 of 164 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **153**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -136,6 +136,7 @@ NOT-TWINNED by reason (622 cases; a case counts once per distinct reason):
 | module | 40 | · | · | 10 | · | 8 | 22 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
+| own-value-type | 12 | 12 | · | · | · | · | · | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
 | parse-variant | 8 | · | · | 6 | · | · | 2 | · | · |
@@ -296,7 +297,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (152)
+### PASS / CODES-ONLY (164)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -417,6 +418,18 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-pos` — PASS
+- `own-value-type/base-type-neg` — PASS
+- `own-value-type/base-type-pos` — PASS
+- `own-value-type/boundary-export-neg` — PASS
+- `own-value-type/boundary-persist-literal-pos` — PASS
+- `own-value-type/boundary-persist-neg` — PASS
+- `own-value-type/cycle-outranks-neg` — PASS
+- `own-value-type/infer-nonliteral-pos` — PASS
+- `own-value-type/not-inferable-logical-neg` — PASS
+- `own-value-type/not-inferable-member-neg` — PASS
+- `own-value-type/not-inferable-unproven-call-neg` — PASS
+- `own-value-type/unproven-annotation-neg` — PASS
+- `own-value-type/unproven-annotation-pos` — PASS
 - `persist/counter-persist-local-pos` — PASS
 - `persist/hold-without-persist-neg` — PASS
 - `persist/key-required-neg` — PASS

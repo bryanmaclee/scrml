@@ -55,6 +55,13 @@
 [esm] conformance/cases/match-codes/e-syntax-010-else-not-last-pos/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/module/e-import-003-import-inside-fn-reject/case.scrml  # emit-client-esm: 'import' and 'export' may only appear at the top level
 [esm] conformance/cases/module/e-scope-010-filescope-duplicate-reject/case.scrml  # emit-client-esm: Identifier 'dup' has already been declared
+[esm] conformance/cases/own-value-type/base-type-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/base-type-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/boundary-export-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/boundary-persist-literal-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/boundary-persist-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/infer-nonliteral-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
+[esm] conformance/cases/own-value-type/not-inferable-logical-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved — §66 opener; §66 is Nominal on impl#1 (s462-own-value-inference)
 [esm] conformance/cases/persist/counter-persist-local-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/persist/prepaint-without-persist-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
 [esm] conformance/cases/persist/storage-unknown-neg/case.scrml  # emit-client-esm: The keyword 'let' is reserved
