@@ -31,10 +31,16 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 5 |
-| MED | 567 | 5 |
+| MED | 568 | 5 |
 | LOW | 333 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-stdlib-import-004-missing-s462 — the bootstrap (impl#2) does not check `scrml:` imports or named `scrml:` re-exports against the stdlib module's export list (E-IMPORT-004, §41.3.1 / §21.4) — `NEW S462; MED; open`
+
+<!-- @gap id=g-bootstrap-stdlib-import-004-missing-s462 sev=MED status=open locus=compiler/self-host-v2(module resolution — no stdlib export table) prov=empirical:s462-stdlib-import-004-bootstrap-conformance -->
+
+impl#1 implements the check as of S462 (`module-resolver.js` `validateStdlibImports`, fed by the STDLIB-EXPORT-SEED stage). `bun scripts/bootstrap-conformance.ts` reports three of the new cases as bootstrap FAILs: `module/e-import-004-stdlib-name-not-exported-reject` and `module/e-import-004-stdlib-submodule-only-name-reject` (missing E-IMPORT-004 — not in the bootstrap's sources), and `module/e-import-004-stdlib-name-exported-clean` (the twin emits an unasserted E-SCOPE-001 for the imported stdlib name — the bootstrap does not bind stdlib imports at all). The re-export case `module/e-import-004-stdlib-reexport-missing-name-reject` is UNSUPPORTED there (the bootstrap's slice M2 does not parse an `export { … } from` statement in a logic block). Fix direction: give the bootstrap the stdlib module's `.scrml` export list (the same one reader impl#1 uses), then judge imports and named re-exports against it.
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 

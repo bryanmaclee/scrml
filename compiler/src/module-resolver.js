@@ -1277,6 +1277,33 @@ export function validateStdlibImports(graph, namesOf, exportersOf = () => []) {
         errors.push(err);
       }
     }
+    // §21.4 (S462 Q19 ruling) — a NAMED re-export from a `scrml:` module is checked
+    // against that module's exports, reported at the re-export, as a relative
+    // re-export is (validateReExports). `export *` from a stdlib module stays
+    // unexpanded (§21.4); `vendor:` and `.js` sources are not checked.
+    for (const exp of entry?.exports ?? []) {
+      if (!exp || exp.isReExportAll || !exp.reExportSource) continue;
+      const spec = exp.reExportSpecifier;
+      if (typeof spec !== "string" || !spec.startsWith("scrml:")) continue;
+      if (isStdlibCompilerFamily(spec)) continue;
+      if (graph.has(exp.reExportSource)) continue; // in the compile set — validateReExports judged it
+      const exported = namesOf(exp.reExportSource);
+      if (!(exported instanceof Set)) continue;
+      const imported = exp.localName ?? exp.name;
+      if (exported.has(imported)) continue;
+      const clause = `export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"`;
+      const base = stdlibMissingNameMessage(imported, { source: spec, absSource: exp.reExportSource }, exported,
+        exportersOf(imported).filter((s) => s !== spec));
+      const err = new ModuleError(
+        "E-IMPORT-004",
+        base.replace(`is not exported by \`${spec}\`.`, `is not exported by \`${spec}\`, so it cannot be re-exported (\`${clause}\`).`),
+        exp.span ? { ...exp.span, file: exp.span.file ?? filePath } : null,
+      );
+      err.reExportedMissingName = exp.name;
+      err.importerFile = toPosix(filePath);
+      err.targetFile = toPosix(exp.reExportSource);
+      errors.push(err);
+    }
   }
   return errors;
 }

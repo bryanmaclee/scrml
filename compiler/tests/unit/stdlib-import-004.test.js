@@ -230,6 +230,36 @@ describe("§53.14.6 — imported stdlib types reach the importer's type registry
   });
 });
 
+describe("§21.4 (S462 Q19) — a named re-export from scrml: is checked", () => {
+  test("§13 `export { NotAThing } from \"scrml:crypto\"` is E-IMPORT-004 at the re-export; valid and aliased names pass", () => {
+    const dir = join(root, "reexport");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "m.scrml"), [
+      "${",
+      "    export { NotAThing, hash } from \"scrml:crypto\"",
+      "    export { generateUUID as uuid } from \"scrml:crypto\"",
+      "}",
+      "",
+    ].join("\n"));
+    writeFileSync(join(dir, "app.scrml"), "${\n    import { hash, uuid } from './m.scrml'\n}\n<p>${hash}${uuid}</>\n");
+    const res = compileScrml({
+      inputFiles: [join(dir, "app.scrml"), join(dir, "m.scrml")],
+      outputDir: join(dir, "dist"), write: false, log: () => {},
+    });
+    const e4 = (res.errors ?? []).filter((e) => e.code === "E-IMPORT-004");
+    expect(e4.length).toBe(1);
+    expect(e4[0].message).toContain("`NotAThing` is not exported by `scrml:crypto`, so it cannot be re-exported");
+    expect(String(e4[0].span?.file ?? "")).toContain("m.scrml");
+  });
+
+  test("§14 a named re-export from a vendor: module is not checked (unchanged)", () => {
+    const graph = new Map([["/app/m.scrml", { imports: [], exports: [
+      { name: "x", localName: "x", reExportSource: "/app/vendor/v.scrml", reExportSpecifier: "vendor:v" },
+    ] }]]);
+    expect(validateStdlibImports(graph, () => new Set())).toEqual([]);
+  });
+});
+
 describe("validateStdlibImports (unit)", () => {
   const imp = (source, names, extra = {}) => ({
     source, names, absSource: `/std/${source.slice(6)}.scrml`, isDefault: false, span: null, ...extra,

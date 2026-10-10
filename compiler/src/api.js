@@ -2222,6 +2222,15 @@ function _compileScrmlImpl(options = {}) {
           }
         }
       }
+      // S462 Q19 — a named `export { … } from "scrml:…"` is judged against the same
+      // export table (validateStdlibImports), so its module is read here too.
+      for (const exp of entry.exports ?? []) {
+        if (exp && !exp.isReExportAll && typeof exp.reExportSpecifier === "string" &&
+            exp.reExportSpecifier.startsWith("scrml:") && exp.reExportSource && exp.reExportSource.endsWith(".scrml")) {
+          stdlibPaths.add(exp.reExportSource);
+          if (isServerOnlyScrmlModuleSource(exp.reExportSpecifier)) serverOnlyStdlibPaths.add(exp.reExportSource);
+        }
+      }
     }
     if (stdlibPaths.size === 0) return null;
 
