@@ -236,7 +236,7 @@ scrml ships a focused stdlib. Import from `scrml:<module>` (§41.3 value imports
 
 | stdlib module | What it is | Replaces (npm) |
 |---|---|---|
-| `scrml:data` | `validate(data, schema)`, rule builders (`required`, `email`, `minLength`, `pattern`, etc.) + `pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`. **Plus (S65) `parseVariant(json, EnumType)`** — boundary-parsing primitive for tagged-variant JSON with compile-time enum-only enforcement. Failure type `ParseError:enum` (variants `MissingDiscriminator`, `UnknownVariant(tag)`, `InvalidPayload(field, reason)`, `Malformed(reason)`). FIRST general-position member of the type-as-argument family — see SPEC §41.13 + §53.14. | zod, yup, joi, lodash |
+| `scrml:data` | `validate(data, schema, check?)` over rules as data — the `Rule` enum (`Rule.Req`, `Rule.Email`, `Rule.MinLength(n)`, `Rule.Pattern(re)`, `Rule.Custom(tag)`, etc.) + `pick`, `omit`, `groupBy`, `sortBy`, `unique`, `flatten`. **Plus (S65) `parseVariant(json, EnumType)`** — boundary-parsing primitive for tagged-variant JSON with compile-time enum-only enforcement. Failure type `ParseError:enum` (variants `MissingDiscriminator`, `UnknownVariant(tag)`, `InvalidPayload(field, reason)`, `Malformed(reason)`). FIRST general-position member of the type-as-argument family — see SPEC §41.13 + §53.14. | zod, yup, joi, lodash |
 | `scrml:auth` | `hashPassword`, `verifyPassword`, `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `createRateLimiter`, TOTP | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
 | `scrml:crypto` | `hash(algo, input)`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
 | `scrml:http` | Typed `fetch` wrapper with timeout + retry | axios, got, node-fetch |
