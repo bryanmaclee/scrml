@@ -77,3 +77,4 @@ Re-measure corpus (0 new expected) + gates incl. CI-only ones: `bun scripts/s34-
 2026-10-09T20:39:57-06:00 FIX ROUND 3: NEW-1 sync-callback body = loop body (may-write subtracted on entry); NEW-2 index/.at not present (Q10); note names the call inside a callback (acc.concat) — unit 77 green
 2026-10-09T20:55:12-06:00 FIX ROUND 3 docs: NEW-3 appended to implicit-coercion gap; NEW-4 verified (await missing inside nested block only) + filed g-helper-call-in-nested-block-not-awaited-s462; resolved-text test count 77
 2026-10-09T21:06:43-06:00 FIX ROUND 3 gates: s34-census --check-new --base 42d1a7459 FAILED on E-TYPE-046 rows (no emitter provenance) -> added emitter note (type-system.ts:31829) -> PASS; tracking tiers 5607 pass/0 fail; corpus 2719: 0 new on pre-existing
+2026-10-09T21:13:08-06:00 FIX ROUND 3 verify: conformance 1540/1605 + 65 xfail; browser-baseline PASS (one parser-disagreement refusal, retry PASS); bootstrap slices green; types OK
