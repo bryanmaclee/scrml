@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-inferred-nested-broadcast",
+  "description": "§38.10.3 / §12.2 Trigger 7 (S462 fix round 1) — a `broadcast()` inside a NESTED function declaration places the enclosing `onclient:*` handler on the server (a nested declaration is emitted inline in its parent and is not itself a channel function), so E-CHANNEL-006 fires. Before, the nested call was not seen and the handler shipped to the client calling an undefined `broadcast`.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §12.2",
+  "source-test": "compiler/tests/unit/channel-onclient-inferred-server.test.js",
+  "rationale": "§12.2 Trigger 7 places a channel-body function whose body calls `broadcast()`; the nested declaration is part of that body. §38.10.3 refuses an `onclient:*` handler §12.2 places on the server.",
+  "expect": {
+    "codes": ["E-CHANNEL-006"],
+    "severity": { "E-CHANNEL-006": "error" }
+  }
+}
