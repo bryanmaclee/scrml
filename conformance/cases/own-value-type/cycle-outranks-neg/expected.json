@@ -1,0 +1,30 @@
+{
+  "id": "own-value-type-cycle-outranks-neg",
+  "description": "§66.3 rule 8: `<a=(@b + 1)/>` / `<b=(@a + 1)/>` are both cyclic and unannotated — the cycle diagnostic E-DERIVED-CIRCULAR-DEP wins and E-DECL-TYPE-NOT-INFERABLE is not reported.",
+  "language-version": "1.0",
+  "spec": "§66.3, §6.6.10",
+  "rationale": "§66.3 rule 8: \"When an unannotated own value's initializer reaches that own value again through other own values, the cycle's diagnostic is reported and `E-DECL-TYPE-NOT-INFERABLE` is not: for derived values (§66.9 rule 3) that is `E-DERIVED-CIRCULAR-DEP` (§6.6.10)\". ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 6).",
+  "expect": {
+    "codes": [
+      "E-DERIVED-CIRCULAR-DEP"
+    ],
+    "notCodes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "severity": {
+      "E-DERIVED-CIRCULAR-DEP": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:E-DERIVED-CIRCULAR-DEP",
+          "severity:code 'E-DERIVED-CIRCULAR-DEP' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

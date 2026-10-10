@@ -1,0 +1,19 @@
+{
+  "id": "condition-given-presence-canonical-twin",
+  "description": "§42.4 / §63.5 — the canonical twin of condition/given-presence-deprecated-guard: each in-place `given` guard written as the explicit presence test (`if (name is given)`, `if (name is given && age is given)`, `if (empty is given)`). It reaches the SAME state as the deprecated form and surfaces no W-GIVEN-PRESENCE-DEPRECATED — the pair is the §63.5 runtime-identity assertion for the window.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.2.4 — `x is given` is the explicit presence test, true when x is not `not` (\"\" is present, §42.1.1); §42.4 statement 7 — a compound spells presence explicitly (`x is given && y is given`). §63.5 — the deprecated `given` guard's runtime is identical to this canonical form's. Provenance: ruling:user-voice-scrml.md S462 \"a, go\" (the rewrite target), S460 \"a′, go\" (the explicit pair).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "seen": "hello ada", "both": "init", "blank": "empty string is present" },
+    "domAnchored": [
+      { "selector": "#seen", "text": "hello ada" },
+      { "selector": "#both", "text": "init" },
+      { "selector": "#blank", "text": "empty string is present" }
+    ]
+  }
+}

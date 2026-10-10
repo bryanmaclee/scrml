@@ -1,0 +1,38 @@
+{
+  "id": "own-value-type-infer-nonliteral-pos",
+  "description": "§66.3 rule 5: unannotated non-literal own values drawn from every member of the inferable set (a typed @ref, arithmetic, `/`, a comparison, a ternary, `.length`, `+` over strings, a sequence literal, a call with a declared return, a call with an inferred-and-proven return) compile with no own-value type code, and the derived values track their dependency (base 3 → 4).",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 5: \"An own value written without `:T` whose initializer is not a literal takes its type from its INITIALIZER … The initializer SHALL be a member of the inferable set\" — literals; a typed `@ref`; arithmetic, comparison, ternary and `.length` over members; a call of a function whose return type is DECLARED or INFERRED-AND-PROVEN. ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 rulings 2–3).",
+  "expect": {
+    "notCodes": [
+      "E-DECL-TYPE-NOT-INFERABLE",
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY",
+      "E-DECL-TYPE-UNPROVEN"
+    ],
+    "input": [
+      {
+        "click": "#inc"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "8 1.5 10 2 ab! 8 0.75"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=8",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=9"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

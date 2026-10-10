@@ -1,0 +1,13 @@
+// §42.2.3 / §63 (S462) — the SOFT-DEPRECATED in-place presence guard in a markup `${ … }`
+// (the §42.3.5 worked-example shape), kept in the legacy form ON PURPOSE: it surfaces
+// W-GIVEN-PRESENCE-DEPRECATED. Do NOT run `scrml fix` over this case.
+<user>: { name: string } | not = { name: "ada" }
+
+${
+    function rename() { @user = { name: "bob" } }
+}
+
+<main>
+    <button id="go" onclick=rename()>Rename</button>
+    ${ given @user :> { <p id="name">${@user.name}</p> } }
+</main>

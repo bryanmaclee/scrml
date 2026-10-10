@@ -1,0 +1,13 @@
+{
+  "id": "condition-given-head-bool-refused-logic",
+  "description": "§42.2.3 — a `given` head with a comparison in it (`given id < 0 :> fail LoadError.NotFound`, in a function body) is not an identifier-list and SHALL be refused with E-SYNTAX-044 (exactly once). Before S462 impl#1 read it as a presence guard on `id` with an EMPTY body, emitted `< 0` as a stray statement and ran the `fail` unconditionally (g-given-bool-expr-fail-runs-unconditionally-s460). The refusal stands alone: no W-GIVEN-PRESENCE-DEPRECATED on a malformed head.",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: \"A `given` head SHALL contain only an identifier-list\" (`given-guard ::= 'given' identifier-list (':>' | '=>') block`); E-SYNTAX-044 is the head refusal (widened S462 from the property path to any non-identifier-list head). Provenance: ruling:user-voice-scrml.md S462 \"a\".",
+  "expect": {
+    "codes": ["E-SYNTAX-044"],
+    "codeCounts": { "E-SYNTAX-044": 1 },
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "severity": { "E-SYNTAX-044": "error" }
+  }
+}

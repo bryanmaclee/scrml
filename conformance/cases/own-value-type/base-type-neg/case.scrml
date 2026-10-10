@@ -1,0 +1,8 @@
+// §66.3 rule 6 negative twin — the inferred `int` is a real write contract: a `number` literal into it is refused.
+<program>
+    let <k=(1 + 2)/>
+    <main>
+        <p>${@k}</p>
+        <button onclick=(@k = 2.5)>set</button>
+    </main>
+</program>
