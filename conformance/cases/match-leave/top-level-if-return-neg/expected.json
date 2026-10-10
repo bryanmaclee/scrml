@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-top-level-if-return-neg",
+  "description": "`if (…) { return }` at the top of a `${}` logic block is E-STMT-RETURN-OUTSIDE-FUNCTION — the same path as the match-arm case; it compiled clean on base too (S462 review F4).",
+  "language-version": "1.0",
+  "spec": "§4",
+  "rationale": "§34 E-STMT-RETURN-OUTSIDE-FUNCTION: \"`return` outside of a function\".",
+  "expect": {
+    "codes": [
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

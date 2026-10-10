@@ -1,0 +1,15 @@
+{
+  "id": "match-leave-top-level-match-arm-return-neg",
+  "description": "A bare `.A :> return` arm of a match at the top of a `${}` logic block has no function to leave: E-STMT-RETURN-OUTSIDE-FUNCTION (S462 review F4).",
+  "language-version": "1.0",
+  "spec": "§18.2",
+  "rationale": "§18.2 \"Leaving arms\": legality by context — `return` needs an enclosing function. Emitted as-is it left the client's init function and skipped the event wiring after it.",
+  "expect": {
+    "codes": [
+      "E-STMT-RETURN-OUTSIDE-FUNCTION"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}

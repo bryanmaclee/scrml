@@ -11379,6 +11379,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         separatorGlyph = peek().text === "=>" ? "=>" : ":>";
         consume(); // consume the arm separator
         separatorConsumed = true;
+      } else if (_matchArmBodyDepth > 0 && _matchArmBodyDepth === _nestedBlockDepth &&
+                 peek().kind === "PUNCT" && peek().text === "-" &&
+                 peek(1) && peek(1).text === ">" && peek(1).span && peek().span &&
+                 peek(1).span.start === peek().span.end) {
+        // §18.2: a `match` arm's separator is `:>`, with `=>` and `->` as
+        // deprecated aliases. A `given` ARM is a match arm, so `->` is its
+        // separator too (it is two tokens here). The standalone guard keeps
+        // its own `:>` / `=>` grammar (§42.2.3).
+        consume(); consume();
+        separatorGlyph = "->";
+        separatorConsumed = true;
       }
       // parse body
       let body = [];
@@ -13283,7 +13294,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         errors.push(new TABError("E-PARSE-001", r.error, child.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
         continue;
       }
-      child.leaveStmt = r.node;
+      child.leaveStmt = child.span ? { ...r.node, span: child.span } : r.node;
     }
   }
 

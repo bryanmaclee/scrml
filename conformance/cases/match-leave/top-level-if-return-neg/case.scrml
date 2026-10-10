@@ -1,0 +1,7 @@
+${
+    <flag> : boolean = true
+    <out> : string = "init"
+    if (@flag) { return }
+}
+<button id="go" onclick=${@out = "clicked"}>go</>
+<p id="out">${@out}</>

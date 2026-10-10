@@ -26830,7 +26830,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-STMT-FOR-BINDING-INIT | §49 | A for-in / for-of binding may not have an initializer. | Error |
 | E-STMT-FOR-DECL-COUNT | §49 | A for-in / for-of declaration must declare exactly one binding. | Error |
 | E-STMT-FOR-SEMICOLON | §49 | Expected `;` after the `for` init or test clause. | Error |
-| E-STMT-RETURN-OUTSIDE-FUNCTION | §4, §51.0.S.2.3 | `return` outside of a function. Includes a `return` in an engine message arm, bare (`.Go :> return`) or braced — a message arm is not a function body (§18.2 "Leaving arms", S462; impl#1 emits it at `compiler/src/symbol-table.ts`, was E-CODEGEN-INVALID-LOGIC — dpa-068 D10). | Error |
+| E-STMT-RETURN-OUTSIDE-FUNCTION | §4, §51.0.S.2.3 | `return` outside of a function. Includes a `return` in an engine message arm, bare (`.Go :> return`) or braced — a message arm is not a function body (§18.2 "Leaving arms", S462; impl#1 emits it at `compiler/src/symbol-table.ts`, was E-CODEGEN-INVALID-LOGIC — dpa-068 D10). Also a `return` at the top of a `${ … }` logic block, or nested there only in control flow that runs in place (`if` / loop bodies, `match` arms — bare or braced — and a decl-position `match`): impl#1 emits it at `compiler/src/type-system.ts` `checkTopLevelReturn` (S462 review F4; before, such a `return` compiled clean and left the client's init function). | Error |
 | E-STMT-FUNCTION-NAME | §4 | Expected a name after `function`. | Error |
 | E-STMT-FUNCTION-BODY | §4 | Expected `{` to open a function body. | Error |
 | E-STMT-UNCLOSED-FUNCTION-BODY | §4 | Expected `}` to close a function body. | Error |

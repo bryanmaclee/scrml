@@ -14202,6 +14202,21 @@ function annotateNodes(
             "info",
           ));
         }
+        // §42.2.3 — `given x` narrows an EXISTING variable in place; it binds no
+        // name ("No variable is rebound to a new name"). Each head name must
+        // therefore resolve like any other read: an undeclared one is
+        // E-SCOPE-001, not a guard that throws `ReferenceError` when it runs
+        // (S462 review F3 — `match name { given n -> … }` with no `n`).
+        {
+          const ggVars = Array.isArray((n as { variables?: unknown }).variables) ? (n as { variables: unknown[] }).variables : [];
+          const ggIsCell = Array.isArray((n as { variableIsCell?: unknown }).variableIsCell) ? (n as { variableIsCell: unknown[] }).variableIsCell : [];
+          const ggSpan2 = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          ggVars.forEach((v, i) => {
+            if (typeof v !== "string" || !v) return;
+            const identName = ggIsCell[i] === true ? `@${v}` : v;
+            checkLogicExprIdents({ kind: "ident", name: identName, span: ggSpan2 }, ggSpan2, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          });
+        }
         // Walk the guard body so nested statements still get visited (the
         // default-case recursion would otherwise own this; we replicate it).
         const ggBody = (n as { body?: ASTNodeLike[] }).body;
@@ -23265,6 +23280,11 @@ function checkLoopControl(
       return;
     }
 
+    // §18.2 `leave-stmt` (S462): a bare leave arm carries its statement as
+    // `leaveStmt`; it is checked exactly as the braced `{ break }` is.
+    const leaveStmt = (node as { leaveStmt?: ASTNodeLike }).leaveStmt;
+    if (leaveStmt && typeof leaveStmt === "object") walkNode(leaveStmt, loopDepth, insideFn);
+
     // For all other nodes, recurse into body/consequent/alternate/children
     const nodeBody = node.body as ASTNodeLike[] | undefined;
     if (Array.isArray(nodeBody)) walk(nodeBody, loopDepth, insideFn);
@@ -23288,6 +23308,63 @@ function checkLoopControl(
   }
 
   walk(nodes, 0, false);
+
+  checkTopLevelReturn(nodes, errors, filePath);
+}
+
+/**
+ * E-STMT-RETURN-OUTSIDE-FUNCTION (§34) — a `return` in a `${ … }` logic block
+ * OUTSIDE any function: a top-level statement, or one nested only in control
+ * flow that runs in place (`if` / loop bodies, `match` arms — braced or a bare
+ * §18.2 leave arm — and a decl-position `match`). There is no function for it
+ * to leave; emitted as-is it would leave the client's init function and skip
+ * everything after it, event wiring included (S462 review F4). Function,
+ * lambda and handler bodies, lifecycle bodies (`on mount`, `when …`) and every
+ * other construct that lowers to its own function are NOT entered: a `return`
+ * there is legal.
+ */
+function checkTopLevelReturn(nodes: ASTNodeLike[], errors: TSError[], filePath: string): void {
+  const STOP = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
+  const report = (n: ASTNodeLike): void => {
+    const s = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    errors.push(new TSError(
+      "E-STMT-RETURN-OUTSIDE-FUNCTION",
+      `E-STMT-RETURN-OUTSIDE-FUNCTION: \`return\` at line ${s.line} is not inside a function — it is at ` +
+      "the top level of a `${ … }` logic block (in an `if`, a loop or a `match` arm there), where there is " +
+      "no function for it to leave. Move the code into a function and `return` from that, or select with " +
+      "`if` / `match` without leaving.",
+      s,
+    ));
+  };
+  const seen = new Set<unknown>();
+  const inPlace = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) inPlace(c); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    switch (node.kind) {
+      case "return-stmt": report(node); return;
+      case "if-stmt": inPlace(node.consequent); inPlace(node.alternate); inPlace(node.body); return;
+      case "for-stmt": case "while-stmt": case "do-while-stmt": inPlace(node.body); return;
+      case "match-stmt": case "match-expr": inPlace(node.body); return;
+      case "match-arm-block": case "given-guard": inPlace(node.body); return;
+      case "match-arm-inline": inPlace(node.leaveStmt); return;
+      case "let-decl": case "const-decl": case "tilde-decl": inPlace(node.matchExpr); return;
+      default: return;
+    }
+  };
+  const findLogic = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) findLogic(c); return; }
+    const node = n as ASTNodeLike & Record<string, unknown>;
+    if (typeof node.kind === "string" && STOP.has(node.kind)) return;
+    if (node.kind === "logic" && Array.isArray(node.body)) { inPlace(node.body); }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "span" || !v || typeof v !== "object") continue;
+      findLogic(v);
+    }
+  };
+  findLogic(nodes);
 }
 
 // ---------------------------------------------------------------------------

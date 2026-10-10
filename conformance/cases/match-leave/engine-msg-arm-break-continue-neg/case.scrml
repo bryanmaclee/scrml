@@ -1,0 +1,15 @@
+${
+    type Phase:enum = { Idle, Busy }
+    type Msg:enum = { Go, Stop }
+}
+<engine for=Phase initial=.Idle accepts=Msg>
+  <Idle rule=.Busy>
+    .Go :> break
+    _   :> @phase
+  </>
+  <Busy rule=.Idle>
+    .Stop :> { continue }
+    _     :> @phase
+  </>
+</>
+<button id="go" onclick=@phase.advance(.Go)>go</>

@@ -205,6 +205,37 @@ import { tokenizeLogic } from "./tokenizer.ts";
  * Tokenized, so a `return` inside a string, a comment, a nested `function`
  * body or an arrow body (`=> { … }`) does not count.
  */
+export function messageArmBodyLoopExits(bodyRaw: string, isBlockBody: boolean): Array<"break" | "continue"> {
+  if (typeof bodyRaw !== "string" || !/\b(break|continue)\b/.test(bodyRaw)) return [];
+  let toks: Array<{ kind: string; text: string }>;
+  try { toks = tokenizeLogic(bodyRaw, 0, 1, 1, []) as Array<{ kind: string; text: string }>; } catch { return []; }
+  const ownDepth = isBlockBody ? 1 : 0;
+  let depth = 0;
+  const scopeDepths: number[] = [];   // braces opened by a nested function OR a loop body
+  let pendingScope = false;
+  const out: Array<"break" | "continue"> = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.kind === "COMMENT") continue;
+    if (t.kind === "KEYWORD" && (t.text === "function" || t.text === "fn" || t.text === "for" || t.text === "while" || t.text === "do")) pendingScope = true;
+    if ((t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text === "=>" && toks[i + 1]?.text === "{") pendingScope = true;
+    if (t.kind === "PUNCT" && t.text === "{") {
+      depth++;
+      if (pendingScope) { scopeDepths.push(depth); pendingScope = false; }
+      continue;
+    }
+    if (t.kind === "PUNCT" && t.text === "}") {
+      if (scopeDepths.length && scopeDepths[scopeDepths.length - 1] === depth) scopeDepths.pop();
+      depth--;
+      continue;
+    }
+    if (t.kind === "KEYWORD" && (t.text === "break" || t.text === "continue") && scopeDepths.length === 0 && depth >= ownDepth) {
+      out.push(t.text);
+    }
+  }
+  return out;
+}
+
 export function messageArmBodyHasOwnReturn(bodyRaw: string, isBlockBody: boolean): boolean {
   if (typeof bodyRaw !== "string" || !/\breturn\b/.test(bodyRaw)) return false;
   let toks: Array<{ kind: string; text: string }>;
@@ -7728,6 +7759,20 @@ export function validateEngineStateChildrenAndRules(
     // only a `return` at the arm's own statement level counts; one inside a
     // nested function or arrow body is that function's.
     for (const arm of arms) {
+      // A `break` / `continue` of the arm's own has no loop to leave (E-LOOP-001 /
+      // E-LOOP-002, §49.9) — bare or braced, as §18.2 makes them the same.
+      for (const lk of messageArmBodyLoopExits(arm.bodyRaw, arm.isBlockBody)) {
+        const isBreak = lk === "break";
+        errors.push({
+          code: isBreak ? "E-LOOP-001" : "E-LOOP-002",
+          message:
+            `${isBreak ? "E-LOOP-001" : "E-LOOP-002"}: the message arm \`${arm.isWildcard ? "_" : "." + arm.variantName} :>\` ` +
+            `in state-child \`<${sc.tag}>\` contains a \`${lk}\` that is not inside any loop. ` +
+            `\`${lk}\` may only appear inside a \`while\`, \`do...while\`, or \`for...of\` loop body.`,
+          span: messageArmSpan(arm),
+          severity: "error",
+        });
+      }
       if (!messageArmBodyHasOwnReturn(arm.bodyRaw, arm.isBlockBody)) continue;
       const armLabel = arm.isWildcard ? "_" : `.${arm.variantName}`;
       errors.push({

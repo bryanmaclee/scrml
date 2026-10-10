@@ -1,0 +1,16 @@
+{
+  "id": "match-leave-engine-msg-arm-break-continue-neg",
+  "description": "`break` / `continue` in an engine message arm (bare or braced) have no loop: E-LOOP-001 / E-LOOP-002 (S462 review F6).",
+  "language-version": "1.0",
+  "spec": "§51.0.S.2.3",
+  "rationale": "§51.0.S.2.3 + §18.2: a message arm's body is an `arm-body`; legality by context — `break` / `continue` need an enclosing loop.",
+  "expect": {
+    "codes": [
+      "E-LOOP-001",
+      "E-LOOP-002"
+    ],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ]
+  }
+}
