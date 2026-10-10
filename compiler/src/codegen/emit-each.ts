@@ -1559,7 +1559,7 @@ function renderTemplateChildToJs(
         lines.push(`${indent}${fragmentVar}.appendChild(${curVar});`);
         for (const _l of maybeWrapEachPerItemEffect(
           [`${indent}${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${ifCond}));`],
-          iterVarName, indent,
+          iterVarName, indent, true,
         )) lines.push(_l);
       } else {
         // DEFERRED — decision (b). A per-row `if=` that is NOT the sole item root
@@ -3357,7 +3357,7 @@ function enclosingResolvePreludeLines(codeForScan: string, indent: string): stri
   return out;
 }
 
-function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, indent: string): string[] {
+function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, indent: string, gate = false): string[] {
   const ctx = currentEachReconcileCtx();
   if (!ctx || ctx.iterVar !== iterVarName) return bodyLines;
   const out: string[] = [];
@@ -3384,7 +3384,8 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
   // Re-indent body lines +2 so the wrapped statement nests cleanly inside the
   // effect (the caller passes them at the binding's own indent).
   for (const l of bodyLines) out.push("  " + l);
-  out.push(`${indent}}));`);
+  // S462 round 7 (R7-1): `gate` — a render-gate effect (a per-row `if=` swap).
+  out.push(gate ? `${indent}}, true));` : `${indent}}));`);
   return out;
 }
 
@@ -4032,7 +4033,8 @@ export function emitNestedEachFromMarkup(
   for (const l of emitEachReconcileLines(eachBlock, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
     lines.push(l);
   }
-  lines.push(`${indent}}));`);
+  // S462 round 7 (R7-1): a nested list reconcile (row removal) is a render-gate effect.
+  lines.push(`${indent}}, true));`);
   return lines;
 }
 
@@ -4446,7 +4448,8 @@ export function emitEachBodyRenderForFile(
     // with the now-present mount without re-subscribing.
     dispatchers.push(`_scrml_each_renderers[${JSON.stringify(`each_${nsId(node.id)}`)}] = ${renderFnName};`);
     dispatchers.push(`${renderFnName}();`);
-    dispatchers.push(`_scrml_effect_static(${renderFnName});`);
+    // S462 round 7 (R7-1): the list reconcile (row removal) is a render-gate effect.
+    dispatchers.push(`_scrml_effect_static(${renderFnName}, true);`);
   }
   } finally {
     // i175 — drop the per-file bind-support ctx so a later caller (or the

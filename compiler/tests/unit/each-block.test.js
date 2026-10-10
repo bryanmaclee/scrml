@@ -104,8 +104,8 @@ describe("each-block §1 — canonical <each in=@cell>", () => {
     expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     // Client JS emits the render function.
     expect(clientJs).toMatch(/function _scrml_each_render_[0-9a-z]{8}_\d+\(\)/);
-    // Reactive subscription via _scrml_effect_static.
-    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_[0-9a-z]{8}_\d+\)/);
+    // Reactive subscription via _scrml_effect_static. (a render-gate effect, S462 r7)
+    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_[0-9a-z]{8}_\d+, true\)/);
     // The source @cell is read through _scrml_reactive_get (V5-strict).
     expect(clientJs).toContain('_scrml_reactive_get("items")');
     // Reconcile_list call shape.

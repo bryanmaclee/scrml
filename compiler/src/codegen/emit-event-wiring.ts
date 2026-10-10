@@ -2216,7 +2216,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           reactiveRewire.push(`          } else {`);
           reactiveRewire.push(`            if (_scrml_mr_${suffix} !== null) _scrml_if_unmount_${suffix}();`);
           reactiveRewire.push(`          }`);
-          reactiveRewire.push(`        });`);
+          // S462 round 7 (R7-1): a render-gate effect — runs before user effects of a write.
+          reactiveRewire.push(`        }, true);`);
           const drainExit = exitClass ? ` _scrml_if_endexit_${suffix}();` : "";
           reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_ifa_${suffix}, function() { _scrml_if_unmount_${suffix}();${drainExit} _scrml_ifd_${suffix}(); });`);
           reactiveRewire.push(`      }`);
@@ -2885,7 +2886,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
       // Initial render + region-tracked reactive effect.
       reactiveRewire.push(`        _scrml_update_chain_${chainSlug}();`);
-      reactiveRewire.push(`        var _scrml_chain_${chainSlug}_disp = _scrml_effect(_scrml_update_chain_${chainSlug});`);
+      // S462 round 7 (R7-1): a render-gate effect — runs before user effects of a write.
+      reactiveRewire.push(`        var _scrml_chain_${chainSlug}_disp = _scrml_effect(_scrml_update_chain_${chainSlug}, true);`);
       // Region teardown — unmount active mount branches + dispose the effect.
       reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_chain_${chainSlug}_anchor, function() {`);
       for (const branch of allBranches) {

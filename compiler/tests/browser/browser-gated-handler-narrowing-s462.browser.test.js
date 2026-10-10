@@ -126,6 +126,55 @@ describe("S462 round 6 — a direct listener on a removed element does not run",
   });
 });
 
+// S462 round 7 (R7-1) — a `when … changes` effect subscribed BEFORE the `if=` controller
+// runs on the same write. Render-gate effects run first (runtime `_scrml_trigger` phases),
+// so by the time the user effect clicks `.b`, the gated button is gone.
+const SRC_WHEN = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<runs>: int = 0
+\${
+    function poke() { const el = document.querySelector(".b")
+        if (el) { el.click() } }
+    when @user changes { @runs = @runs + 1
+        poke() }
+    function signOut() { @user = not }
+}
+<button id="clear" onclick=signOut()>sign out</button>
+<div if=@user>
+    <button class="b" onclick={ @out = @user.name }>show</button>
+</div>
+<p id="o">\${@out}</p>
+</program>
+`;
+
+describe("S462 round 7 — the gate unmounts before a user effect of the same write runs", () => {
+  test("a `when` that clicks the gated button after the write finds it gone", async () => {
+    const { errors } = compileAndMount(SRC_WHEN, "gatedwhen");
+    expect(errors).toEqual([]);
+    await flush();
+    expect(document.querySelector(".b")).not.toBeNull();
+    const seen = [];
+    const onError = (e) => { seen.push(e?.error ?? e?.message ?? e); };
+    window.addEventListener("error", onError);
+    const origConsoleError = console.error;
+    console.error = (...a) => { seen.push(a); };
+    try {
+      document.querySelector("#clear").dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      await flush();
+    } finally {
+      window.removeEventListener("error", onError);
+      console.error = origConsoleError;
+    }
+    expect(seen).toEqual([]);
+    expect(document.querySelector(".b")).toBeNull();
+    expect(globalThis.__s462q18_get("out")).toBe("");
+    // The `when` body ran exactly once for the one write (same run count as before).
+    expect(globalThis.__s462q18_get("runs")).toBe(1);
+  });
+});
+
 describe("S462 Q18 — a gated handler cannot run once its gate removed it", () => {
   test("compiles clean; the detached button's click runs nothing", async () => {
     const { errors } = compileAndMount(SRC, "gated");
