@@ -24,7 +24,7 @@
 
 import { describe, test, expect, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, mkdtempSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, basename } from "path";
 import { tmpdir } from "os";
 import * as shim from "../../runtime/stdlib/data.js";
 import { compileScrml } from "../../src/api.js";
@@ -326,7 +326,9 @@ function compileToDir(srcPath, name) {
   mkdirSync(outDir, { recursive: true });
   const result = compileScrml({ inputFiles: [srcPath], write: true, outputDir: outDir, log: () => {} });
   const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
-  const base = srcPath.split("/").pop().replace(/\.scrml$/, "");
+  // basename(), not split("/") — on Windows the path separator is `\`, and a
+  // split on "/" yields the whole path, so the artifact lookup missed.
+  const base = basename(srcPath, ".scrml");
   const clientPath = join(outDir, `${base}.client.js`);
   const runtimePath = join(outDir, result.runtimeFilename ?? "scrml-runtime.js");
   return {
@@ -352,6 +354,8 @@ describe("§4 lockstep — compiled validate.scrml ≡ the shim", () => {
 
   test("the stdlib source compiles clean", () => {
     expect(compiled.errors.map((e) => e.code)).toEqual([]);
+    expect(compiled.clientJs.length).toBeGreaterThan(0);
+    expect(compiled.runtimeJs.length).toBeGreaterThan(0);
   });
 
   test("the compiler's Rule lowering equals the shim's Rule, variant by variant", () => {
@@ -427,6 +431,7 @@ describe("§6 end-to-end — an adopter validates in the pruned runtime", () => 
 `);
     const compiled = compileToDir(src, "adopter");
     expect(compiled.errors.map((e) => e.code)).toEqual([]);
+    expect(compiled.clientJs.length).toBeGreaterThan(0);
     // The emitted runtime is the PRUNED per-app artifact, and it carries Rule.
     expect(compiled.runtimeJs).toContain("WithMessage");
     const s = runWithHook(compiled, "__out.errs = errs; __out.ok = ok;");
