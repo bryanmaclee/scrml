@@ -18,34 +18,38 @@ import { describe, test, expect } from "bun:test";
 import { CHUNK_DEPENDENCIES, applyChunkDependencies } from "../../src/codegen/runtime-chunks.ts";
 
 describe("§1 CHUNK_DEPENDENCIES table", () => {
-  test("scope chunk depends on timers", () => {
-    expect(CHUNK_DEPENDENCIES.scope).toBeDefined();
-    expect(CHUNK_DEPENDENCIES.scope).toContain("timers");
+  test("scope has NO edge (S461: the S124 scope → timers/animation edge is retired)", () => {
+    // `_scrml_destroy_scope` now typeof-guards its two cross-chunk calls; an edge from an
+    // always-seeded chunk would re-ship timers + animation on every page.
+    expect(CHUNK_DEPENDENCIES.scope).toBeUndefined();
   });
 
-  test("scope chunk depends on animation", () => {
-    expect(CHUNK_DEPENDENCIES.scope).toContain("animation");
+  test("meta → metaemit → {urlguard, errors}; urlguard → errors (§22.4.1, S461)", () => {
+    expect(CHUNK_DEPENDENCIES.meta).toContain("metaemit");
+    expect(CHUNK_DEPENDENCIES.metaemit).toContain("urlguard");
+    expect(CHUNK_DEPENDENCIES.metaemit).toContain("errors");
+    expect(CHUNK_DEPENDENCIES.urlguard).toContain("errors");
   });
 });
 
 describe("§2 applyChunkDependencies — direct edge pull", () => {
-  test("scope present → timers + animation pulled in", () => {
-    const chunks = new Set(["core", "scope", "errors"]);
+  test("scope present → timers + animation NOT pulled (S461)", () => {
+    const chunks = new Set(["core", "scope"]);
     applyChunkDependencies(chunks);
-    expect(chunks.has("timers")).toBe(true);
-    expect(chunks.has("animation")).toBe(true);
+    expect(chunks.has("timers")).toBe(false);
+    expect(chunks.has("animation")).toBe(false);
   });
 
-  test("scope present with timers already → animation still added", () => {
-    const chunks = new Set(["core", "scope", "timers", "errors"]);
+  test("reset present → errors pulled (its reset-apply reports through _scrml_error_boundary_log)", () => {
+    const chunks = new Set(["core", "scope", "reset"]);
     applyChunkDependencies(chunks);
-    expect(chunks.has("animation")).toBe(true);
+    expect(chunks.has("errors")).toBe(true);
   });
 
-  test("scope present with animation already → timers still added", () => {
-    const chunks = new Set(["core", "scope", "animation", "errors"]);
+  test("ssr present → errors pulled", () => {
+    const chunks = new Set(["core", "ssr"]);
     applyChunkDependencies(chunks);
-    expect(chunks.has("timers")).toBe(true);
+    expect(chunks.has("errors")).toBe(true);
   });
 });
 
@@ -94,16 +98,9 @@ describe("§5 applyChunkDependencies — fixed-point shape", () => {
   });
 
   test("multi-pass closure: changes propagate transitively", () => {
-    // The current CHUNK_DEPENDENCIES table is shallow (depth 1), but the
-    // fixed-point loop tolerates future deeper chains. This test exists as
-    // a regression guard if the table grows. We can only test what's in the
-    // table today; if `scope → timers → X` ever lands, augment here.
-    const chunks = new Set(["scope"]);
+    // meta → metaemit → urlguard → errors is a depth-3 chain in today's table.
+    const chunks = new Set(["meta"]);
     applyChunkDependencies(chunks);
-    expect(chunks.has("scope")).toBe(true);
-    expect(chunks.has("timers")).toBe(true);
-    expect(chunks.has("animation")).toBe(true);
-    // No other chunks pulled in by the scope edge alone.
-    expect(chunks.size).toBe(3);
+    expect([...chunks].sort()).toEqual(["errors", "meta", "metaemit", "urlguard"]);
   });
 });

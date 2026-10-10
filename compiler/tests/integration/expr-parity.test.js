@@ -14,7 +14,9 @@
 
 import { describe, test, expect } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { readdirSync, statSync, readFileSync } from "fs";
+import { readdirSync, statSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import * as acorn from "acorn";
 import { resolve, join, basename, dirname } from "path";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
@@ -69,6 +71,11 @@ const FIELD_PAIRS = [
   { exprField: "callbackExpr", strField: "callback" },
   { exprField: "fnExpr",       strField: "fn" },
   { exprField: "argsExpr",     strField: "args" },
+  // s461 — an ExprNode LIST: a reactive array mutation carries one node per
+  // argument (§6.5.1). Each element is emitted; the emitted list must also parse
+  // as a call with EXACTLY that many arguments (a comma-sequence merge or a
+  // wrong split changes the count).
+  { exprField: "argExprs",     strField: "args", list: true },
   { exprField: "bodyExpr",     strField: "bodyRaw" },
   { exprField: "fileExpr",     strField: "file" },
   { exprField: "urlExpr",      strField: "url" },
@@ -114,6 +121,7 @@ function checkFile(filePath) {
   const result = {
     totalExprs: 0,
     withExprNode: 0,
+    listElems: 0,
     emitErrors: [],
     compileError: null,
   };
@@ -137,9 +145,29 @@ function checkFile(filePath) {
 
   for (const node of allNodes) {
     if (SKIP_KINDS.has(node.kind)) continue;
-    for (const { exprField, strField } of FIELD_PAIRS) {
+    for (const { exprField, strField, list } of FIELD_PAIRS) {
       const strVal = node[strField];
       if (typeof strVal !== "string" || !strVal.trim()) continue;
+
+      if (list) {
+        const elems = Array.isArray(node[exprField]) ? node[exprField] : null;
+        result.totalExprs++;
+        if (!elems) continue;
+        result.withExprNode++;
+        result.listElems += elems.length;
+        try {
+          const emitted = elems.map((e) => emitExpr(e, ctx));
+          const call = acorn.parseExpressionAt(`f(${emitted.join(", ")})`, 0, {
+            ecmaVersion: "latest", allowAwaitOutsideFunction: true,
+          });
+          if (call.type !== "CallExpression" || call.arguments.length !== elems.length) {
+            throw new Error(`emitted ${call.arguments?.length ?? "?"} argument(s) for ${elems.length} ExprNode(s): f(${emitted.join(", ")})`);
+          }
+        } catch (e) {
+          result.emitErrors.push({ nodeKind: node.kind ?? "(arm)", exprField, raw: strVal.slice(0, 120), error: e.message });
+        }
+        continue;
+      }
 
       result.totalExprs++;
       const exprNode = node[exprField];
@@ -228,4 +256,44 @@ describe("ExprNode codegen parity", () => {
     console.log(`Compile errors: ${grandTotalCompileErrors}`);
     console.log(`===============================\n`);
   });
+});
+
+// The examples/samples corpus holds no multi-argument reactive array mutation,
+// so the `argExprs` pair is exercised on an inline fixture (s461).
+describe("ExprNode codegen parity — reactive array mutation argument lists (argExprs)", () => {
+  test("every argument's ExprNode emits, and the list keeps its argument count", () => {
+    const dir = resolve(tmpdir(), `scrml-expr-parity-s461-${process.pid}-${Date.now().toString(36)}`);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "mutations.scrml");
+    writeFileSync(file, `\${
+    <ls>: number[] = [1, 2]
+    <p> = 9
+    <k> = 1
+    <obj> = { f: 5 }
+    <items> = [3, 4]
+    <words>: string[] = []
+    function f(x) { return x + 1 }
+    function go() {
+        @ls.splice(0, 0, @p, @obj.f, f(@p))
+        @ls.splice(1, 0, ...@items)
+        @ls.push(@p, @k)
+        @ls.fill(@k, 0, 2)
+        @words.unshift("a,b", "c")
+        @ls.sort((a, b) => a - b)
+        @ls.pop()
+    }
+}
+<button onclick=go()>go</button>
+<p>\${@ls.length} \${@words.length}</p>
+`);
+    try {
+      const result = checkFile(file);
+      expect(result.emitErrors).toEqual([]);
+      // 5 + 3 + 2 + 3 + 2 + 1 + 0 argument ExprNodes across the 7 mutations.
+      expect(result.listElems).toBe(16);
+      expect(result.compileError).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
 });

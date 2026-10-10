@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 247 | 6 |
-| MED | 565 | 5 |
-| LOW | 330 | 0 |
+| HIGH | 247 | 5 |
+| MED | 567 | 5 |
+| LOW | 332 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -4580,7 +4580,7 @@ Three independent axes hide in that 235 B, and **only one of them is compression
 
 **What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=resolved resolved-by=#1365 -->
 
-> **RESOLVED S459 (#1365):** `scrml build` now ships comment/whitespace-stripped browser JS (§47.9.9). The shell runtime is **7,442 B** gzip -9 (was 26,211; under the 16,384 aspiration), the counter 5,101; the ratchet ceiling is now **7,630 B**. Tree-shaking (ruled S459, not yet built) is the next reduction (measured: shell → ~3,400 B).
+> **RESOLVED S459 (#1365):** `scrml build` now ships comment/whitespace-stripped browser JS (§47.9.9). The shell runtime is **7,442 B** gzip -9 (was 26,211; under the 16,384 aspiration), the counter 5,101; the ratchet ceiling is now **7,630 B**. Tree-shaking (ruled S459, not yet built) is the next reduction (measured: shell → ~3,400 B). **S461:** the first tree-shake pass landed — errors chunk by reference, the scope → timers/animation edge retired, the §51.12/§51.14 machine helpers out of core, the route-splitter-only mount/vendor-ref/prefetch chunks gated on `emitPerRoute` — shell **5,907 B**, counter **3,604 B**, ceiling **6,095 B**. The re-measured reachability floor is 3,510 B; the remaining gap is the `utilities` chunk (soft-nav engine bundled with helpers the shell does not call). See `docs/changes/s461-runtime-tree-shake/`.
 
 > **S440 (PA-measured):** after #1137 (Date/built-in cell + `==` runtime rules) the gated counter-shape runtime sits **9 B under** the Phase-B 16 KB gzip gate — the aspiration gate on the counter shape is back on a knife edge, independent of the shell overage above.
 
@@ -16050,8 +16050,11 @@ walk of state-child bodies, so an unknown capitalised tag there stays `E-COMPONE
 `E-ENGINE-STATE-CHILD-MISSING` is gone; the shape now compiles with `W-ENGINE-MATCH-IN-STATE-CHILD` (see
 `g-nested-block-match-in-dispatched-arm-silently-drops`). Layers (2) and (3) remain on the hold ref, pending the ruling.
 
-### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431)`
-<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431); RESOLVED S461 (s461-splice-multi-arg)`
+<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+> **S461 (AUTO) — the quote loss is RESOLVED by `s461-splice-multi-arg`, by a different route than the held S429 branch.** Every reactive array-mutation argument is now its own ExprNode (`argExprs`), printed through the ExprNode printer, so strings keep their quotes and no TEXT-level rewrite touches them (`"use fn here"` and `"x + +y"` are tested verbatim). **The held branch `origin/hold/s429-mutation-arg-string-quotes` @ `257dfeca` is NOT superseded in full and was NOT deleted.** It also carries `@set(@o,"a",9)` → path deep-set, computed bracket indexes, `upload()` args, block comments inside args, and the `conformance/cases/loop/loop-006-neg` labelled-for fix. Those parts remain unlanded; bryan decides whether to port them or drop the branch.
+
+**RESOLVED S461** (s461-splice-multi-arg): conformance restoration of §6.5.1, no SPEC change. ROOT: the ast-builder's statement-position `@name.<method>(` recognisers joined the argument tokens' TEXT (a STRING token's text has no delimiters) and parsed the whole list as ONE expression, a comma sequence. Now `collectReactiveArrayMutationArgs` splits the list at its top-level `,` PUNCT tokens, re-quotes STRING tokens (`typeTokenText`), and parses one ExprNode per argument (node field `argExprs`; a spread becomes `spread`). emit-logic lowers each through the ExprNode printer, never the text rewriter, so the S429 hold's LOUD→SILENT string-rewrite concern does not arise. Executed: `splice(0, 0, @p)` gives [1,2] on base and [9,1,2] on the branch. Pinned by `compiler/tests/unit/reactive-array-mutation-multi-arg-s461.test.js` and the conformance cases `reactive/mutating-method-multi-arg-cell-read` and `reactive/mutating-method-string-arg` (xfail removed).
 > **S440 reconfirmed (dpa-052 D1, DD-executed at `048df04db`):** still live on main — `@q.push("x")` → `E-SCOPE-001: Undeclared identifier 'x'`; same for `.unshift("x")`, `.push("has space")`, `.push({ t: "x" })`, whatever the cell's declared type. Controls pass: `.push(1)`, `.push("x", "y")`, `let s = "x"; @q.push(s)`, `@q = [...@q, "x"]`. It blocks §66.19.5's own worked shape; the hold ref above has not landed.
 
 `function a() { @groups.splice(0, 1, { id: 1, name: "S" }) }` emits `.splice(0 , 1 , { id : 1 , name : S })` — compiles
@@ -23848,13 +23851,17 @@ The S456 write scan (§8.10.3 — hoist only a body proven not to write) accepts
 <!-- @gap id=g-impl1-match-arm-sql-server-boundary-s455 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(match-arm structured-body emission ~:2796, PA-located-verify) prov=review:s455-hoist-dev -->
 Found while fixing #1325; not hoist-root.
 
-### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; open (pre-existing, data loss)`
+### g-splice-multi-arg-comma-expression-s459 — `@ls.splice(0, 0, @p)` compiles to `.splice((0, 0, x))`, a comma expression: the insert is silently lost (and with some values the array emptied) — `NEW S459; MED; RESOLVED S461 (s461-splice-multi-arg)`
 PA-verified on main 3a4a3639a: `<ls>: number[] = [1,2]; <p> = 9; function ins() { @ls.splice(0, 0, @p) }` emits `splice((0, 0, _scrml_cs_reactive_get("p")))`. The literal-argument form `splice(0, 0, p)` emits correctly; an argument that reads a cell triggers it. Found by the S459 refinement-2a review.
-<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=open locus=searched:reactive array-mutation lowering (emit-expr.ts / rewrite.ts) — not traced prov=empirical:S459-PA-reproduced -->
+<!-- @gap id=g-splice-multi-arg-comma-expression-s459 sev=MED status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=empirical:S459-PA-reproduced -->
 
-### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; open (pre-existing)`
+**RESOLVED S461** (s461-splice-multi-arg): conformance restoration of §6.5.1, no SPEC change. ROOT: the ast-builder's statement-position `@name.<method>(` recognisers joined the argument tokens' TEXT (a STRING token's text has no delimiters) and parsed the whole list as ONE expression, a comma sequence. Now `collectReactiveArrayMutationArgs` splits the list at its top-level `,` PUNCT tokens, re-quotes STRING tokens (`typeTokenText`), and parses one ExprNode per argument (node field `argExprs`; a spread becomes `spread`). emit-logic lowers each through the ExprNode printer, never the text rewriter, so the S429 hold's LOUD→SILENT string-rewrite concern does not arise. Executed: `splice(0, 0, @p)` gives [1,2] on base and [9,1,2] on the branch. Pinned by `compiler/tests/unit/reactive-array-mutation-multi-arg-s461.test.js` and the conformance cases `reactive/mutating-method-multi-arg-cell-read` and `reactive/mutating-method-string-arg` (xfail removed).
+
+### g-push-object-literal-string-scope-s459 — `@rows.push({ u: "b", n: @m })` fails E-SCOPE-001 "Undeclared identifier `b`" — `NEW S459; LOW; RESOLVED S461 (s461-splice-multi-arg)`
 Reviewer- and builder-executed (S459 refinement rounds); PA-unverified.
-<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=open locus=searched:reactive array-mutation argument lowering prov=review:s459-refinement-2a -->
+<!-- @gap id=g-push-object-literal-string-scope-s459 sev=LOW status=resolved resolved-by=s461-splice-multi-arg locus=compiler/src/ast-builder.js(collectReactiveArrayMutationArgs,both-statement-recognisers) prov=review:s459-refinement-2a -->
+
+**RESOLVED S461** (s461-splice-multi-arg): the same root as g-splice-multi-arg-comma-expression-s459. The argument collector dropped the STRING delimiters, so `"b"` became the identifier `b`. Pinned by test section F of `reactive-array-mutation-multi-arg-s461.test.js`.
 
 ### g-bare-assign-to-param-emits-const-redeclaration-s459 — `function g(n) { n = 6; return n }` emits `const n = 6` → E-CODEGEN-INVALID-LOGIC ("Identifier 'n' has already been declared") — `NEW S459; MED; open (pre-existing, loud)`
 `tildeDeclIsRebind` never sees parameters. Found by the D1 round-5 agent; agent-executed.
@@ -24300,6 +24307,38 @@ S460: #1370, #1371, #1372 and the copy-in branch were each re-merged against mai
 - (c) Keep committing, but drop the volatile parts (SPEC-INDEX line ranges, absolute counts) so unrelated PRs stop touching the same lines.
 
 **Severity LOW:** no product impact. The cost is serialized landing and a recurring hand-merge step where a wrong `--theirs` can lose content.
+
+> **S461 filings (AUTO run): the non-blocking findings of the S461 S239 reviews.** Each was found by an adversarial reviewer on a frozen landing commit; "reviewer-executed" means the reviewer compiled and ran the reproducer; the PA did not re-run it unless stated. Scratch reproducers live under `/root/.cache/scrml-rev/` in the S461 cloud container and are NOT durable — each entry quotes its shape so it can be re-derived.
+
+### G-ESCAPE-HATCH-ARG-TEXT-REWRITE-CORRUPTS-STRINGS-S461 — an expression the parser cannot read (an "escape-hatch" node, e.g. an IIFE with a block body) still goes through the TEXT-level rewrite passes, so a string inside it is rewritten: `@ls.push((() => { const s = "use fn here"; return s })())` emits `"use function here"` — `NEW S461; MED; open (pre-existing class)`
+<!-- @gap id=g-escape-hatch-arg-text-rewrite-corrupts-strings-s461 sev=MED status=open locus=searched:compiler/src/codegen/rewrite.ts(text rewrite passes applied to escape-hatch ExprNodes),compiler/src/codegen/emit-expr.ts — not traced prov=review:S461-splice-multi-arg-r1 -->
+
+Reviewer-executed on the #1381 landing (`068417d`, `e42e87a`). Same corruption on main for a `const r = (() => { const s = "use fn here"; return s })()` initialiser, so the root is the escape-hatch text rewrite, not the #1381 argument splitter. #1381 made it reachable in a new position: on base the same push FAILED LOUDLY (the quotes were already lost → E-CODEGEN-INVALID-LOGIC); now it compiles and silently ships a changed string. Regex literals: `/use fn/` → `/use function/` on base and head alike, every position. **Severity MED:** silent wrong output at exit 0, narrow shape. Related: [[g-mutating-method-string-args-lose-their-quotes]].
+
+### G-ECHANNEL006-BLOCK-SCOPED-BINDING-HIDES-SERVER-HANDLER-S461 — a `const onOpen` declared inside a loop or block in the channel body suppresses E-CHANNEL-006 for a channel-level `server function onOpen` handler, though the block binding is not visible at the channel — `NEW S461; LOW; open`
+<!-- @gap id=g-echannel006-block-scoped-binding-hides-server-handler-s461 sev=LOW status=open locus=compiler/src/type-system.ts(collectHandlerBindings — counts value bindings inside nested block/loop bodies) prov=review:S461-e-channel-006-r2 -->
+
+Reviewer-executed on #1379 (`1190043`). Shape: channel with `onclient:open=onOpen(e)`, `${ server function onOpen(e) {…} for (…) { const onOpen = x } }` → compiles, onopen calls `_scrml_fetch_onOpen_<n>` (a server round-trip). Accepted on main before #1379 too (no regression). Fix: do not descend into loop/block bodies when counting value bindings. A `for (const onOpen of …)` loop VARIABLE is already handled correctly.
+
+### G-ECHANNEL006-VS-CODEGEN-HANDLER-NAME-RESOLUTION-S461 — when one handler name is declared both plain and `server` in two scopes, E-CHANNEL-006 (lexical, innermost wins) and codegen (file-wide) pick different functions; component-local functions also leak to file scope in codegen — `NEW S461; LOW; open`
+<!-- @gap id=g-echannel006-vs-codegen-handler-name-resolution-s461 sev=LOW status=open locus=compiler/src/type-system.ts(checkClientHandlerNotServer region order) vs the channel listener emit in compiler/src/codegen/emit-channel.ts(handler name resolution — not traced) prov=review:S461-e-channel-006-r1;review:S461-e-channel-006-r2 -->
+
+Reviewer-executed on #1379. Shapes: top-level plain `function onOpen` + channel-local `server function onOpen` → the check refuses (innermost = server); codegen would call the top-level plain one. Top-level server `onOpen` + a COMPONENT-local plain `onOpen` → refused; codegen calls the component's. The refusal errs safe (it never accepts a server call), and these programs are ambiguous already — the defect is the two resolvers disagreeing; codegen's file-wide choice looks like the real bug. Corpus: 0 programs.
+
+### G-TIMER-IN-GIVEN-MARKUP-BODY-NOT-STARTED-S461 — a `<timer>` inside a markup `given @u :> { … }` body is emitted as a literal `<timer>` element (`createElement("timer")`) and never ticks — `NEW S461; MED; open (adjacent to #1380)`
+<!-- @gap id=g-timer-in-given-markup-body-not-started-s461 sev=MED status=open locus=searched:compiler/src/implied-lift-desugar.ts(given-body implied lift),compiler/src/codegen(timer element lowering) — not traced prov=review:S461-runtime-tree-shake -->
+
+Reviewer-executed (probe p14) during the #1382 review, on main after #1380. #1380 made markup `given` bodies render through the §17.6.10 implied lift; a structural element (`<timer>`) inside that lift is lowered as plain HTML instead of the timer runtime. Before #1380 the whole body was dropped, so this is newly VISIBLE rather than newly broken. Check `<poll>` and other structural elements in the same position.
+
+### G-COMPONENT-TIMER-SURVIVES-IF-UNMOUNT-S461 — a component's `<timer>` inside an `if=` keeps ticking after the `if=` unmounts the component (15 → 28 ticks after hide in the probe) — `NEW S461; MED; open (pre-existing)`
+<!-- @gap id=g-component-timer-survives-if-unmount-s461 sev=MED status=open locus=searched:compiler/src/runtime-template.js(_scrml_destroy_scope / scope timer teardown),compiler/src/codegen(component if= unmount) — not traced prov=review:S461-runtime-tree-shake -->
+
+Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pre-existing, not caused by the tree-shake (which only `typeof`-guarded the teardown calls). A leaked interval per mount/unmount cycle.
+
+### G-LATE-RUNTIME-REASSEMBLY-AFTER-EGRESS-SCANS-S461 — the post-emit late chunk gate (#1382) re-assembles the runtime AFTER the stdlib-client-chunk gate, the protected-field egress scan and the SQL-leak scan have run, so text from a chunk added late is never scanned by them — `NEW S461; LOW; open`
+<!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
+
+Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
 
 ### G-BOOTSTRAP-NO-CHANNEL-HANDLER-CHECKS-S462 — the bootstrap (`compiler/self-host-v2/`) has none of the channel handler checks: no E-CHANNEL-005, E-CHANNEL-HANDLER-SHADOW or E-CHANNEL-006 (declared or §12.2-placed), and no handler-name resolution to build them on — `NEW S462; LOW; open (bootstrap twin)`
 <!-- @gap id=g-bootstrap-no-channel-handler-checks-s462 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `E-CHANNEL-00[56]`, `E-CHANNEL-HANDLER-SHADOW`, `onclient` — zero hits; the only channel diagnostic is E-CHANNEL-OUTSIDE-PROGRAM at analyze.scrml:1425) prov=empirical:s462-channel-006-inferred -->
