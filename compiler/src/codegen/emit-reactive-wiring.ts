@@ -3,7 +3,7 @@ import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
-import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, checkLoopBinderWrites } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmMutableLocals, checkLoopBinderWrites } from "./emit-lift.js";
 import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
@@ -750,7 +750,7 @@ function emitIfChainForArms(
   const collector: IfChainCollector = { id: String(++_ifChainSeq), target: stmt, conds: [], hasElse: false };
   const marked = emitStmtRecorded(stmt, side, () => {
     pushIfChainCollector(collector);
-    pushLiftLive();
+    pushLiftLive(liftArmMutableLocals(stmt));
     try {
       return emitPlain();
     } finally {
@@ -778,60 +778,101 @@ function emitIfChainForArms(
 }
 
 /**
- * g-impl1-markup-if-branch-memo-stale-render-s462 — file-local driver for the
- * arm-selector shape of a `${ if … }` lift group (see emitLiftGroup), emitted
- * once per file that uses it.
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — file-local drivers for the
+ * arm-selector shape of a `${ if … }` lift group (see emitLiftIfChainGroup),
+ * emitted once per file that uses it.
  *
- * `_scrml_lift_branch_run(host, armOf, arm, body, mkEffect, mkStatic)` renders
- * arm `arm` into `host` inside its own effect, so the arm RE-RENDERS when a
- * value its body reads directly changes, and only then. The selector effect
- * that called it re-runs on the chain's conditions alone, and replaces the run
- * only when the selected arm changes. Reads that the body's markup wires
- * itself (a text interpolation, an attribute binding) each have their own
- * effect and update in place — they change no element, so listeners and input
- * state survive.
+ * `_scrml_lift_if_group(host, armOf, body, mkEffect, mkStatic)` — the group.
+ *   Its SELECTOR effect is the group's render gate and the ONLY place the
+ *   chain's conditions are evaluated: `armOf()` once per run. It owns the
+ *   selected arm; when the index changes it stops the current arm run, clears
+ *   the host and starts the new arm's run (`-1`: no arm, the host stays empty).
+ *   ⚑ A render-gate scheduling PRIORITY (render gates before user effects on
+ *   the same write) attaches at the one `mkEffect(select)` call below.
  *
- *   - `armOf()` re-evaluates the chain's selector. Every effect of the run is
- *     gated on it (untracked): a cell write that is about to switch arms can
- *     reach an effect of the outgoing arm before the selector effect, and that
- *     effect must not render a value its arm's condition no longer admits
- *     (`@user.name` once `@user` is `not`). The selector effect then disposes
- *     the run.
- *   - Effect ownership is `_scrml_lift_scoped_run`'s: the body receives
- *     tracking wrappers as `_scrml_effect` / `_scrml_effect_static` (lexically
- *     shadowed), every effect the body creates is alive-gated to this run, the
- *     run-pass effects and every static effect are disposed when the run is
- *     replaced, and the lift target is saved and restored.
- *   - `mkEffect` / `mkStatic` are the constructors in scope where the group is
- *     emitted — inside a mount-deferred or nested group they are that group's
- *     own tracking wrappers, so the run is torn down with its host's mount.
+ * `_scrml_lift_arm_run(host, arm, isCurrent, body, mkEffect, mkStatic)` — one
+ *   arm. It renders the arm's body in its own effect, so the arm RE-RENDERS when
+ *   a value the body reads directly changes, and only then; the markup bindings
+ *   the lift emitter wires as their own effects (emit-lift.js LIVE mode) update
+ *   in place, so listeners and input state survive.
+ *     · Every effect of the run is gated on `isCurrent()`, which compares the
+ *       selector's OWN arm — no condition is re-evaluated. A write that is about
+ *       to switch arms can reach an outgoing arm's effect before the selector;
+ *       such an effect may still run, and an error it throws is reported only
+ *       if its arm is still current once the write has settled (a microtask
+ *       later) — `@user.name` read as `@user` turns `not` is not an error.
+ *     · Ownership: the body receives tracking wrappers as `_scrml_effect` /
+ *       `_scrml_effect_static` (lexically shadowed). Every effect a render
+ *       creates — during the render or later (a keyed list's rows added after
+ *       the first render) — is owned by that render and disposed when the arm
+ *       re-renders or the run stops.
+ *     · Re-entrancy: the body renders into a fragment that reaches the host
+ *       only if the run is still alive when the body returns. A body that
+ *       writes its own condition makes the selector stop this run in the
+ *       middle of its render; the rest of that render is discarded, the effects
+ *       it goes on to create are disposed at once, and the render effect —
+ *       disposed while running, which the runtime re-subscribes when the run
+ *       returns — is disposed again once the write has settled.
+ *   `mkEffect` / `mkStatic` are the constructors in scope where the group is
+ *   emitted — inside a mount-deferred or nested group they are that group's own
+ *   tracking wrappers, so the group is torn down with its host.
  */
 const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
-  "function _scrml_lift_branch_run(host, armOf, arm, body, mkEffect, mkStatic) {",
-  "  const current = () => _scrml_untracked(armOf) === arm;",
-  "  let stop = null;",
-  "  const d = mkEffect(function() {",
-  "    if (stop) { stop(); stop = null; }",
-  "    if (!current()) return;",
+  "function _scrml_lift_if_group(host, armOf, body, mkEffect, mkStatic) {",
+  "  let arm = null;",
+  "  let stopRun = null;",
+  "  const select = function() {",
+  "    const next = armOf();",
+  "    if (next === arm) return;",
+  "    arm = next;",
+  "    if (stopRun) { const stop = stopRun; stopRun = null; stop(); }",
   "    host.replaceChildren();",
-  "    const disposers = [];",
-  "    let collecting = true;",
-  "    let alive = true;",
-  "    const own = (make, keepAlways) => function(fn) {",
-  "      const dd = make(function() { if (alive && current()) fn(); });",
-  "      if ((collecting || keepAlways) && typeof dd === \"function\") disposers.push(dd);",
-  "      return dd;",
-  "    };",
-  "    const prevTarget = _scrml_lift_target;",
-  "    try {",
-  "      body(host, own(mkEffect, false), own(mkStatic, true), arm);",
-  "    } finally {",
-  "      collecting = false;",
-  "      _scrml_lift_target = prevTarget;",
+  "    if (next !== -1) stopRun = _scrml_lift_arm_run(host, next, () => arm === next, body, mkEffect, mkStatic);",
+  "  };",
+  "  // The group's render gate (see the note on a scheduling priority above).",
+  "  const d = mkEffect(select);",
+  "  return function() { if (typeof d === \"function\") d(); if (stopRun) { const stop = stopRun; stopRun = null; stop(); } };",
+  "}",
+  "function _scrml_lift_arm_run(host, arm, isCurrent, body, mkEffect, mkStatic) {",
+  "  let alive = true;",
+  "  let rendering = false;",
+  "  let owned = new Set();",
+  "  const live = () => alive && isCurrent();",
+  "  const gate = (fn) => function() {",
+  "    if (!live()) return;",
+  "    try { fn(); } catch (e) {",
+  "      queueMicrotask(() => { if (live()) console.error(\"scrml effect error:\", e); });",
   "    }",
-  "    stop = function() { alive = false; for (let i = disposers.length - 1; i >= 0; i--) disposers[i](); disposers.length = 0; };",
-  "  });",
-  "  return function() { if (typeof d === \"function\") d(); if (stop) { stop(); stop = null; } };",
+  "  };",
+  "  const own = (make) => function(fn) {",
+  "    const set = owned;",
+  "    const d = make(gate(fn));",
+  "    if (typeof d === \"function\") { if (alive) set.add(d); else d(); }",
+  "    return d;",
+  "  };",
+  "  const disposeOwned = () => { const set = owned; owned = new Set(); for (const d of set) d(); };",
+  "  const render = mkEffect(gate(function() {",
+  "    disposeOwned();",
+  "    const frag = host.ownerDocument.createDocumentFragment();",
+  "    const prevTarget = _scrml_lift_target;",
+  "    rendering = true;",
+  "    try {",
+  "      body(frag, own(mkEffect), own(mkStatic), arm);",
+  "    } finally {",
+  "      rendering = false;",
+  "      _scrml_lift_target = prevTarget;",
+  "      if (alive) host.replaceChildren(frag);",
+  "    }",
+  "  }));",
+  "  return function() {",
+  "    if (!alive) return;",
+  "    alive = false;",
+  "    if (typeof render === \"function\") {",
+  "      render();",
+  "      if (rendering) queueMicrotask(render);",
+  "    }",
+  "    disposeOwned();",
+  "  };",
   "}",
 ];
 
@@ -952,7 +993,7 @@ function emitLiftGroup(
  *      on the conditions' reads only; when the index is unchanged it returns,
  *      and when it changes it disposes the current arm run, clears the host and
  *      starts the new arm's run (`-1`: no arm taken, the host stays empty).
- *   2. The arm run (`_scrml_lift_branch_run`) renders the arm's body — the
+ *   2. The arm run (`_scrml_lift_arm_run`) renders the arm's body — the
  *      chain's own code, with each condition replaced by an arm-index test — in
  *      its own effect. Markup reads update in place through the per-binding
  *      effects the lift emitter creates for them (emit-lift.js "live" mode,
@@ -961,29 +1002,14 @@ function emitLiftGroup(
  */
 function emitLiftIfChainGroup(out: string[], hostExpr: string, chain: LiftIfChain): void {
   _liftBranchRunUsed = true;
-  const targetVar = genVar("lift_tgt");
   const armOfVar = genVar("lift_arm_of");
-  const branchVar = genVar("lift_branch");
-  const stopVar = genVar("lift_stop");
   const noArm = chain.hasElse ? String(chain.conds.length) : "-1";
   const selector = chain.conds.map((c, i) => `(${c}) ? ${i} : `).join("") + noArm;
-  out.push(`const ${targetVar} = ${hostExpr};`);
-  out.push(`function ${armOfVar}() { return ${selector}; }`);
-  out.push(`let ${branchVar} = null;`);
-  out.push(`let ${stopVar} = null;`);
-  out.push(`_scrml_effect(function() {`);
-  out.push(`  const _branch = ${armOfVar}();`);
-  out.push(`  if (_branch === ${branchVar}) return;`);
-  out.push(`  ${branchVar} = _branch;`);
-  out.push(`  if (${stopVar}) { ${stopVar}(); ${stopVar} = null; }`);
-  out.push(`  ${targetVar}.innerHTML = "";`);
-  out.push(`  if (_branch === -1) return;`);
-  out.push(`  ${stopVar} = _scrml_lift_branch_run(${targetVar}, ${armOfVar}, _branch, function(${LIFT_MOUNT_HOST_PARAM}, _scrml_effect, _scrml_effect_static, _scrml_arm) {`);
+  out.push(`_scrml_lift_if_group(${hostExpr}, function ${armOfVar}() { return ${selector}; }, function(${LIFT_MOUNT_HOST_PARAM}, _scrml_effect, _scrml_effect_static, _scrml_arm) {`);
   out.push(`  _scrml_lift_target = ${LIFT_MOUNT_HOST_PARAM};`);
   out.push(`  ${chain.armCode}`);
   out.push(`  _scrml_lift_target = null;`);
-  out.push(`  }, _scrml_effect, _scrml_effect_static);`);
-  out.push(`});`);
+  out.push(`}, _scrml_effect, _scrml_effect_static);`);
 }
 
 /** Check if an AST statement contains a lift-expr anywhere in its tree. */

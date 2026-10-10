@@ -103,8 +103,8 @@ export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 
 // g-impl1-markup-if-branch-memo-stale-render-s462 — LIVE mode. Active while the
 // arm bodies of a `${ if … }` lift group are emitted (emit-reactive-wiring.ts
-// emitStmtCollectingIfChain). Such an arm renders inside its own effect
-// (`_scrml_lift_branch_run`), which re-renders the arm when a value the arm
+// emitIfChainForArms). Such an arm renders inside its own effect
+// (`_scrml_lift_arm_run`), which re-renders the arm when a value the arm
 // reads directly changes. A markup binding must not make it re-render: that
 // would replace every element of the arm — an input loses its typed text and
 // focus — whenever any interpolation in the arm changes. So in LIVE mode each
@@ -114,23 +114,160 @@ export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 // `_scrml_effect`, whose reads the arm's effect does not see. The arm run owns
 // those effects and disposes them with the arm. Inside a reconciled per-item
 // factory the reconcile ctx's live-keyed effects take precedence, unchanged.
-// A counter, not a flag, so nested pushes compose.
-let _scrml_lift_live_depth = 0;
-export function pushLiftLive() { _scrml_lift_live_depth++; }
-export function popLiftLive() { _scrml_lift_live_depth--; }
+//
+// A binding's own effect re-evaluates its expression LATER, when a cell it reads
+// changes — so it may only read values that cannot have changed since the arm
+// rendered. A local of the arm that is reassigned or mutated (a `let` running
+// total, a `while` counter, a `let` written after the lift, an object a method
+// call may change) would be read at its FINAL value: `let total = 0; for (x of
+// [1, 2, 3]) { total = total + x; lift <p>${total + @n}</p> }` showed 7|7|7 for
+// 2|4|7. Each LIVE push therefore carries the arm's MUTABLE local names
+// (liftArmMutableLocals, from the AST); a binding whose expression reads one is
+// left as it is, and the arm's effect re-renders it.
+// A stack, so nested pushes compose (the innermost set governs).
+const _scrml_lift_live_stack = [];
+export function pushLiftLive(mutableNames) { _scrml_lift_live_stack.push(mutableNames ?? new Set()); }
+export function popLiftLive() { _scrml_lift_live_stack.pop(); }
 const _LIFT_LIVE_READ_RE = /_scrml_(?:reactive|derived)_get\(/;
+
+/**
+ * Do the free identifiers of the emitted JS `js` include any of `names`? Parsed
+ * with acorn: a member's property name and an object key are not references.
+ * Compiler-generated names (`_scrml_…`) are never arm locals. Unparseable text
+ * answers yes — the binding then stays as it is, which is always correct.
+ */
+function _jsReadsAnyName(js, names) {
+  if (!names || names.size === 0) return false;
+  let ast;
+  try {
+    ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "script", allowReturnOutsideFunction: true });
+  } catch {
+    return true;
+  }
+  let hit = false;
+  const walk = (node, parent, key) => {
+    if (hit || !node || typeof node.type !== "string") return;
+    if (node.type === "Identifier") {
+      const isProp = parent && (
+        (parent.type === "MemberExpression" && key === "property" && !parent.computed) ||
+        (parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand)
+      );
+      if (!isProp && !node.name.startsWith("_scrml_") && names.has(node.name)) hit = true;
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") walk(c, node, k); }
+      else if (v && typeof v.type === "string") walk(v, node, k);
+    }
+  };
+  walk(ast, null, null);
+  return hit;
+}
+
+function _liftLiveActive() {
+  return _scrml_lift_live_stack.length > 0 && !currentLiftReconcileCtx();
+}
+function _liftLiveMutable() {
+  return _scrml_lift_live_stack[_scrml_lift_live_stack.length - 1];
+}
+
 /**
  * The first render call of a keyed list (`_scrml_render_list_N`). Its static
  * effect keeps the list reconciled; in LIVE mode the first call must not ALSO
  * subscribe the enclosing arm to the collection, or every change to the list
- * would re-render the whole arm instead of reconciling it in place.
+ * would re-render the whole arm instead of reconciling it in place — unless the
+ * collection expression (`iterableJs`) reads a mutable arm local, which the
+ * static effect would read at its final value; then the arm keeps the read.
  */
-export function liftInitialRenderCall(renderFn) {
-  return _scrml_lift_live_depth > 0 && !currentLiftReconcileCtx() ? `_scrml_untracked(${renderFn});` : `${renderFn}();`;
+export function liftInitialRenderCall(renderFn, iterableJs) {
+  if (!_liftLiveActive() || _jsReadsAnyName(String(iterableJs ?? ""), _liftLiveMutable())) return `${renderFn}();`;
+  return `_scrml_untracked(${renderFn});`;
 }
-/** True when LIVE mode is active (outside a reconcile ctx) and `js` reads a cell. */
+/** True when LIVE mode is active (outside a reconcile ctx), `js` reads a cell and no mutable arm local. */
 function liftLiveWraps(js) {
-  return _scrml_lift_live_depth > 0 && !currentLiftReconcileCtx() && _LIFT_LIVE_READ_RE.test(js);
+  return _liftLiveActive() && _LIFT_LIVE_READ_RE.test(js) && !_jsReadsAnyName(js, _liftLiveMutable());
+}
+
+/**
+ * The names an arm-selector `if` chain's arms declare that a LIVE binding must
+ * not read (see LIVE mode above): every name the chain declares except one that
+ * provably keeps the value it had when the binding was created —
+ *   - a `const` / `lin` declaration, a function declaration, a function
+ *     parameter, a per-iteration `for … of` binder, or a single keywordless
+ *     declaration (`y = x * 2`, a fresh block-scoped binding),
+ *   - that is never written: not assigned (`x = …`, `x += …`, `x++`, a second
+ *     keywordless binding), and not the root of a member write or of a method
+ *     call (`o.v = 2`, `arr.push(x)` — the contents change).
+ * A `let`, a C-style loop counter, or anything written or mutated is mutable.
+ * Names declared outside the chain are not collected: re-rendering the arm
+ * does not recompute them, so the arm and a binding's effect read the same.
+ * (Mutation through a function the local is passed to is not seen.)
+ */
+export function liftArmMutableLocals(root) {
+  const kinds = new Map();
+  const written = new Set();
+  const add = (name, kind) => {
+    const names = typeof name === "string" ? (name ? [name] : [])
+      : (isDestructurePattern(name) ? [..._iterDestructureBindNames(name)] : []);
+    for (const n of names) {
+      if (!kinds.has(n)) kinds.set(n, []);
+      kinds.get(n).push(kind);
+    }
+  };
+  const write = (t) => {
+    let c = t;
+    while (c && (c.kind === "member" || c.kind === "index")) c = c.object;
+    if (c && c.kind === "ident" && typeof c.name === "string" && !c.name.startsWith("@")) written.add(c.name);
+  };
+  const visit = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    switch (n.kind) {
+      case "let-decl": add(n.name, "let"); break;
+      case "const-decl":
+      case "lin-decl": add(n.name, "const"); break;
+      case "tilde-decl": add(n.name, "tilde"); break;
+      case "for-stmt": {
+        add(n.variable, "loop");
+        const it = typeof n.iterable === "string" ? n.iterable : "";
+        const m = it.match(/^\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)/);
+        if (m) add(m[1], "let");
+        break;
+      }
+      case "function-decl":
+        add(n.name, "const");
+        for (const prm of Array.isArray(n.params) ? n.params : []) add(typeof prm === "string" ? prm : prm?.name, "param");
+        break;
+      case "assign": write(n.target); break;
+      case "unary":
+      case "update":
+        if (n.op === "++" || n.op === "--" || n.kind === "update") write(n.argument);
+        break;
+      case "call":
+        if (n.callee && (n.callee.kind === "member" || n.callee.kind === "index")) write(n.callee.object);
+        break;
+      case "bare-expr":
+        if (!n.exprNode && typeof n.expr === "string") {
+          const m = n.expr.match(_BARE_WRITE);
+          if (m) written.add(m[1] || m[2]);
+        }
+        break;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  const out = new Set();
+  for (const [name, ks] of kinds) {
+    const keywordless = ks.filter((k) => k === "tilde").length;
+    const stable = ks.every((k) => k === "const" || k === "loop" || k === "param" || k === "tilde");
+    if (!stable || keywordless > 1 || (keywordless === 1 && ks.length > 1) || written.has(name)) out.add(name);
+  }
+  return out;
 }
 
 /**
@@ -143,7 +280,7 @@ export function resetLiftModuleState() {
   _scrml_lift_reconcile_ctx_stack.length = 0;
   _scrml_lift_scope_names_stack.length = 0;
   _scrml_lift_non_keyed_depth = 0;
-  _scrml_lift_live_depth = 0;
+  _scrml_lift_live_stack.length = 0;
   _scrml_lift_request_ids_stack.length = 0;
 }
 
@@ -2998,7 +3135,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
       lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     }
     lines.push(`}`);
-    lines.push(liftInitialRenderCall(renderFn));
+    lines.push(liftInitialRenderCall(renderFn, rewrittenIterable));
     // Item-dependent inner lists use a DYNAMIC effect: their deps (the current
     // outer item's collection) CHANGE across runs, so first-run-only tracking
     // (_scrml_effect_static) would keep subscribing to the create-time item and

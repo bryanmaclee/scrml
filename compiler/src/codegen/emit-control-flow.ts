@@ -979,7 +979,7 @@ function _emitForStmtInner(
     // absence is null; runtime stores may yield either).
     lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     lines.push(`}`);
-    lines.push(liftInitialRenderCall(renderFn));
+    lines.push(liftInitialRenderCall(renderFn, rewrittenIterable));
     lines.push(`_scrml_effect_static(${renderFn});`);
     return lines.join("\n");
   }

@@ -30,6 +30,15 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-markup-if-arm-s462");
 
+// Counts the effects the page creates, disposes and runs (`globalThis.__fx`), so a
+// test can assert that a cycle leaves no live effect behind. Wraps the runtime's
+// two effect constructors in place; the client code calls them by name.
+const EFFECT_COUNTERS = `
+globalThis.__fx = { live: 0, runs: 0 };
+{ const o = _scrml_effect; _scrml_effect = function(fn) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
+{ const o = _scrml_effect_static; _scrml_effect_static = function(fn) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
+`;
+
 function compileAndMount(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);
@@ -49,7 +58,7 @@ function compileAndMount(source, baseName) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n` + captureInsideChunkScope(
+    `${runtimeJs}\n${EFFECT_COUNTERS}\n` + captureInsideChunkScope(
       clientJs,
       `globalThis.__s462_set = typeof _scrml_cs_reactive_set === "function" ? _scrml_cs_reactive_set : _scrml_reactive_set;\n`,
     ),
@@ -437,7 +446,7 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
 `, "multi-stmt");
     // Only a group that is exactly one `if` chain takes the arm-selector shape;
     // this one is emitted plainly (no arm run, no per-binding effect).
-    expect(clientJs).not.toContain("_scrml_lift_branch_run(");
+    expect(clientJs).not.toContain("_scrml_lift_if_group(");
     expect(clientJs).not.toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent/);
     expect(text("#p")).toBe("n=0");
     set("n", 6);
@@ -539,5 +548,159 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
     set("on", true);
     await flush();
     expect([...document.querySelectorAll("#ul .v")].map((e) => e.textContent)).toEqual(["x-1", "y-1"]);
+  });
+
+  // ---- S462 fix round 1 (S239 review of db40d22a8) -------------------------
+
+  test("F1 — a binding that reads a mutable arm local keeps the value it had when the arm rendered (for running total)", async () => {
+    compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="h1">\${ if (@on) { let total = 0; for (x of [1, 2, 3]) { total = total + x; lift <p class="r">\${total + @n}</p> } } }</div>
+<div id="h3">\${ if (@on) { let idx = 0; for (it of ["x", "y"]) { idx = idx + 1; lift <p class="q" data-i=\${idx * 10 + @n}>\${it}</p> } } }</div>
+</program>
+`, "f1-total");
+    const r = () => [...document.querySelectorAll("#h1 .r")].map((e) => e.textContent);
+    const q = () => [...document.querySelectorAll("#h3 .q")].map((e) => e.getAttribute("data-i"));
+    expect(r()).toEqual(["1", "3", "6"]);
+    expect(q()).toEqual(["10", "20"]);
+    set("n", 1);
+    await flush();
+    // Pre-fix: 7|7|7 and 21|21 — every binding read the FINAL local.
+    expect(r()).toEqual(["2", "4", "7"]);
+    expect(q()).toEqual(["11", "21"]);
+    set("on", false);
+    await flush();
+    set("on", true);
+    await flush();
+    expect(r()).toEqual(["2", "4", "7"]);
+  });
+
+  test("F1 — a while counter in an attribute", async () => {
+    compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="h">\${ if (@on) { let i = 0; while (i < 3) { i = i + 1; lift <p class="w" title="t\${i}-\${@n}">w</p> } } }</div>
+</program>
+`, "f1-while");
+    const t = () => [...document.querySelectorAll("#h .w")].map((e) => e.getAttribute("title"));
+    expect(t()).toEqual(["t1-0", "t2-0", "t3-0"]);
+    set("n", 1);
+    await flush();
+    expect(t()).toEqual(["t1-1", "t2-1", "t3-1"]);
+  });
+
+  test("F1 — a let reassigned after the lift: the binding shows the value at the lift", async () => {
+    compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="h1">\${ if (@on) { let label = "first"; lift <p id="p">\${label + ":" + @n}</p>; label = "second" } }</div>
+</program>
+`, "f1-late-let");
+    expect(text("#p")).toBe("first:0");
+    set("n", 1);
+    await flush();
+    expect(text("#p")).toBe("first:1");
+  });
+
+  test("F1 — a const local and a per-iteration binder still update in place", async () => {
+    const { clientJs } = compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="h">\${ if (@on) { const base = 100; for (x of [1, 2]) { lift <p class="c">\${base + x + @n}</p> } } }</div>
+</program>
+`, "f1-const");
+    const c = () => [...document.querySelectorAll("#h .c")].map((e) => e.textContent);
+    expect(c()).toEqual(["101", "102"]);
+    const first = document.querySelector("#h .c");
+    set("n", 1);
+    await flush();
+    expect(c()).toEqual(["102", "103"]);
+    expect(document.querySelector("#h .c")).toBe(first);
+    expect(clientJs).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent/);
+  });
+
+  test("F2 — the chain's conditions are evaluated once per write that reaches them, never by a binding", async () => {
+    compileAndMount(`<program>
+<n> = 0
+<m> = 5
+\${
+  function big(v) {
+    globalThis.__s462_checks = (globalThis.__s462_checks || 0) + 1
+    return v > 1
+  }
+}
+<div id="host">\${ if (big(@n)) { lift <p id="a">a-\${@m}</p> } else if (@n == 1) { lift <p id="one">one-\${@m}</p> } else { lift <div id="no"><p>\${@m}</p><p>\${@m}</p><p>\${@m}</p><p>\${@m}</p><p>\${@m}</p></div> } }</div>
+</program>
+`, "f2-once");
+    globalThis.__s462_checks = 0;
+    for (let i = 0; i < 10; i++) set("m", 10 + i);
+    await flush();
+    // A write the conditions do not read evaluates none of them (pre-fix: one
+    // evaluation per binding per write — 5 bindings here).
+    expect(globalThis.__s462_checks).toBe(0);
+    expect([...document.querySelectorAll("#no p")].map((e) => e.textContent)).toEqual(["19", "19", "19", "19", "19"]);
+    set("n", 1);
+    await flush();
+    expect(globalThis.__s462_checks).toBe(1);
+    expect(text("#one")).toBe("one-19");
+    set("n", 2);
+    await flush();
+    expect(globalThis.__s462_checks).toBe(2);
+    expect(text("#a")).toBe("a-19");
+  });
+
+  test("F3 — an arm that writes its own condition while re-rendering leaves exactly one arm, and leaks nothing", async () => {
+    compileAndMount(`<program>
+<on> = true
+<n> = 0
+<div id="h1">\${ if (@on) { @on = @n < 3; lift <p class="arm-on">on-\${@n}</p> } else { lift <p class="arm-off">off-\${@n}</p> } }</div>
+</program>
+`, "f3-reentrant");
+    const arms = () => [...document.querySelectorAll("#h1 p")].map((e) => e.className + ":" + e.textContent);
+    expect(arms()).toEqual(["arm-on:on-0"]);
+    set("n", 5);
+    await flush();
+    expect(arms()).toEqual(["arm-off:off-5"]);
+    set("n", 0); set("on", true);
+    await flush();
+    expect(arms()).toEqual(["arm-on:on-0"]);
+    const base = globalThis.__fx.live;
+    for (let i = 0; i < 200; i++) { set("n", 0); set("on", true); set("n", 5); }
+    await flush();
+    expect(arms()).toEqual(["arm-off:off-5"]);
+    set("n", 0); set("on", true);
+    await flush();
+    expect(arms()).toEqual(["arm-on:on-0"]);
+    expect(globalThis.__fx.live).toBe(base);
+  });
+
+  test("F4 — rows a keyed list adds after the first render are disposed with the arm", async () => {
+    compileAndMount(`<program>
+<items> = [{ id: 0, v: 0 }]
+<on> = true
+<sel> = 0
+<div id="h1">\${ if (@on) { lift <ul>\${ for (it of @items) { lift <li>\${it.v}-\${@sel}</li> } }</ul> } else { lift <p id="off">off</p> } }</div>
+</program>
+`, "f4-late-rows");
+    set("on", false);
+    await flush();
+    const baseline = globalThis.__fx.live;
+    set("on", true);
+    await flush();
+    for (let i = 1; i <= 100; i++) set("items", Array.from({ length: i + 1 }, (_, k) => ({ id: k, v: k })));
+    await flush();
+    expect(document.querySelectorAll("#h1 li").length).toBe(101);
+    set("sel", 1);
+    await flush();
+    expect(document.querySelectorAll("#h1 li")[5].textContent).toBe("5-1");
+    set("on", false);
+    await flush();
+    expect(text("#off")).toBe("off");
+    expect(globalThis.__fx.live).toBe(baseline);
+    const runs = globalThis.__fx.runs;
+    set("sel", 2);
+    await flush();
+    expect(globalThis.__fx.runs).toBe(runs);
   });
 });

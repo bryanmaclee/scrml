@@ -38,8 +38,9 @@ export declare function liftScopeNamesCopy(): Set<string>;
 
 export declare function pushLiftNonKeyed(): void;
 export declare function popLiftNonKeyed(): void;
-export declare function pushLiftLive(): void;
-export declare function liftInitialRenderCall(renderFn: string): string;
+export declare function pushLiftLive(mutableNames?: Set<string>): void;
+export declare function liftInitialRenderCall(renderFn: string, iterableJs?: string): string;
+export declare function liftArmMutableLocals(root: object): Set<string>;
 export declare function popLiftLive(): void;
 export declare function liftNonKeyedActive(): boolean;
 

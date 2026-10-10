@@ -31,3 +31,31 @@ Pre-existing / env notes:
   the 6th (request-id-render-bridge item 4) was a text pin on the old `if (cond)` shape.
 - browser-baseline --check: one run hit the "parser disagrees" interleave flake (47 vs 48);
   re-runs PASS (48 asserted, name set unchanged).
+
+## Fix round 1 (S239 review of db40d22a8 → FIX; brief: BRIEF-fix1.md)
+
+- [x] F1 HIGH — LIVE bindings no longer close over mutable arm locals. `liftArmMutableLocals`
+      (emit-lift.js) walks the chain's AST: a name is safe only if it is a `const`/`lin`, a
+      function name or parameter, a per-iteration `for … of` binder, or a single keywordless
+      declaration, AND is never assigned, updated, or the root of a member write or method call.
+      Each LIVE push carries that set; a binding (or a keyed list's untracked first render) whose
+      emitted expression reads one (acorn free-identifier walk) stays unwrapped, so the arm effect
+      re-renders it. Residual: mutation through a function the local is passed to is not seen.
+- [x] F2 MED — the chain's conditions are evaluated only by the selector. The selector
+      (`_scrml_lift_if_group`) owns the selected arm; every arm-run gate compares against it.
+      Glitch safety without re-evaluation: an outgoing arm's effect that throws before the
+      selector runs is reported only if the arm is still current a microtask later.
+- [x] F3 MED-LOW — re-entrancy: the arm renders into a fragment that reaches the host only if
+      the run is still alive after body(); effects created after the run stopped are disposed at
+      once; the render effect, disposed mid-run (the runtime re-subscribes it when the run
+      returns), is disposed again on a microtask.
+- [x] F4 LOW — every effect a render creates, early or late (keyed rows added later), is owned
+      by that render and disposed on re-render / swap.
+- Tests: 7 new browser cases (F1 ×4, F2, F3 200-cycle live count, F4 101 rows); the 6 bug
+  cases fail on db40d22a8.
+
+⚑ COORDINATION (narrowing branch — runtime effect PRIORITY): the selector effect is the group's
+render gate. It is created at exactly ONE place: `const d = mkEffect(select);` inside
+`_scrml_lift_if_group` (LIFT_BRANCH_RUN_HELPER, emit-reactive-wiring.ts). Attach the render-gate
+priority there. Once render gates run first, the microtask-deferred error reporting in
+`_scrml_lift_arm_run`'s gate becomes a no-op path (it stays correct). Scheduler not changed here.
