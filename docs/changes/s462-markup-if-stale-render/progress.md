@@ -59,3 +59,11 @@ render gate. It is created at exactly ONE place: `const d = mkEffect(select);` i
 `_scrml_lift_if_group` (LIFT_BRANCH_RUN_HELPER, emit-reactive-wiring.ts). Attach the render-gate
 priority there. Once render gates run first, the microtask-deferred error reporting in
 `_scrml_lift_arm_run`'s gate becomes a no-op path (it stays correct). Scheduler not changed here.
+- [x] merged origin/main 801419299 (known-gaps conflict = @generated:gap-counts hunk only →
+      resolved + `state.ts --write`; FACTS / bootstrap-conformance regenerated; master-list = main).
+- [x] host-global-scan caught Set / queueMicrotask / console in the new driver → routed via `_scrml_g`.
+- [x] gates on 888a9dd23: pre-commit 34336/0 · tiers 5630/0/10 skip · browser-baseline PASS (48) ·
+      s34-census PASS (base 801419299) · host-global-scan 0 · facts · state · spec-index ·
+      bootstrap-conformance · severity · snippet-gate 128/0 · corpus-compile-floor · types-gate.
+- [x] emit-differential base 801419299 vs head: 0 compile/diagnostic/syntax deltas; 172 artifact
+      diffs = 165 project-root-path only + the same 7 chain-group client.js files.
