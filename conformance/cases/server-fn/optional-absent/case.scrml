@@ -1,7 +1,7 @@
 ${
     type User:struct = { id: number, name: string }
     <user> : User | not = not
-    const <userLabel> = @user is some ? @user.name : "anonymous"
+    const <userLabel> = @user is given ? @user.name : "anonymous"
     function loadUser() : User | not {
         rows = ?{`SELECT id, name FROM users LIMIT 1`} !{ _ :> [] }
         return rows[0]

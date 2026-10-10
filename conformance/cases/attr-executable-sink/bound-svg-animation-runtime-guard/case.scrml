@@ -1,0 +1,13 @@
+<program>
+<bad> = "javascript:alert(1)"
+<good> = "/ok"
+<list> = "/a;javascript:alert(2)"
+<animated> = "fill"
+<svg>
+  <a href="/x"><set id="e" attributeName="href" to=(@bad)/><text>e</text></a>
+  <a href="/x"><set id="g" attributeName="href" to=(@good)/><text>g</text></a>
+  <a href="/x"><animate id="v" attributeName="xlink:href" values=(@list)/><text>v</text></a>
+  <rect width="1" height="1"><set id="n" attributeName="width" to=(@bad)/></rect>
+  <rect width="1" height="1"><set id="c" attributeName=(@animated) to=(@bad)/></rect>
+</svg>
+</program>

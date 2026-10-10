@@ -6,7 +6,7 @@ ${
         // `is some` inside a callback: the compiler's own placeholder for it
         // never reaches the program as an author name, nor the artifact.
         Promise.resolve(5).then(function (v) {
-            if (v is some) { @msg = "some" }
+            if (v is given) { @msg = "some" }
         })
     }
 }

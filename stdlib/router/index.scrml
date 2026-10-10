@@ -73,7 +73,7 @@ ${
 
         const params = {}
         keys.forEach((key, idx) => {
-            if (m[idx + 1] is some) {
+            if (m[idx + 1] is given) {
                 params[key] = m[idx + 1]
             }
         })
@@ -132,7 +132,7 @@ ${
 
         if (query && Object.keys(query).length > 0) {
             const qs = Object.entries(query)
-                .filter(([, v]) => v is some)
+                .filter(([, v]) => v is given)
                 .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
                 .join("&")
             if (qs) url += "?" + qs
@@ -210,17 +210,17 @@ ${
         assertTruthy(urlWithQuery.includes("tab=profile"))
 
         const m1 = match("/users/:id", "/users/42")
-        assertTruthy(m1 is some)
+        assertTruthy(m1 is given)
         assertEqual(m1.params.id, "42")
 
-        assertFalsy(match("/users/:id", "/posts/1") is some)
+        assertFalsy(match("/users/:id", "/posts/1") is given)
 
         const m2 = match("/files/*", "/files/a/b/c")
-        assertTruthy(m2 is some)
+        assertTruthy(m2 is given)
         assertEqual(m2.params["*"], "a/b/c")
 
         const m3 = match("/users/:id", "/users/99?tab=settings")
-        assertTruthy(m3 is some)
+        assertTruthy(m3 is given)
         assertEqual(m3.params.id, "99")
         assertEqual(m3.query.tab, "settings")
     }

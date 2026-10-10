@@ -43,7 +43,7 @@
         if (name == "")                          fail SaveError.EmptyName
         if (!email.includes("@"))                fail SaveError.InvalidEmail(email)
         const existing = ?{`SELECT id FROM users WHERE email = ${email}`}.get()
-        if (existing is some)                    fail SaveError.DuplicateEmail(email)
+        if (existing is given)                    fail SaveError.DuplicateEmail(email)
         ?{`INSERT INTO users (name, email) VALUES (${name}, ${email})`}.run()
       }
 

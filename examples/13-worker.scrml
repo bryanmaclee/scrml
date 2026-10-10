@@ -82,7 +82,7 @@ ${
     </>
 
     <!-- Show results only when @result has a value — use `is some` for presence check (§42.2.4). -->
-    <div class="p-4 bg-gray-100 rounded-lg mt-4" if=(@result is some)>
+    <div class="p-4 bg-gray-100 rounded-lg mt-4" if=(@result is given)>
         <p>
             Found <strong>${@result.count}</strong>
             primes up to <strong>${@result.limit}</strong>.

@@ -48,7 +48,7 @@
       function saveNote(body)! -> SaveError {
         if (body.length < 3) fail SaveError.TooShort
         const existing = ?{`SELECT id FROM notes WHERE body = ${body}`}.get()
-        if (existing is some) fail SaveError.Duplicate(body)
+        if (existing is given) fail SaveError.Duplicate(body)
         ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
       }
 

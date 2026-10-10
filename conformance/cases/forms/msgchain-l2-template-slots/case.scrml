@@ -1,0 +1,49 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .Required:        "{field} cannot be left empty",
+        .LengthFailed:    "{field} needs a length {predicate}",
+        .PatternMismatch: "{field} must match {re}",
+        .MinFailed:       "{field} must be {threshold} or more",
+        .MaxFailed:       "{field} must be {threshold} or less",
+        .GtFailed:        "{field} must exceed {expected}",
+        .LtFailed:        "{field} must stay under {expected}",
+        .GteFailed:       "{field} must be at least {expected}",
+        .LteFailed:       "{field} must be at most {expected}",
+        .EqFailed:        "{field} must be {{{expected}}",
+        .NeqFailed:       "{field} cannot be {forbidden}",
+        .OneOfFailed:     "{field} must be one of {set}",
+        .NotInFailed:     "{field} cannot be {set}",
+    })
+    <vform>
+        <nick  req>                    = <input id="nick"  type="text"/>
+        <name  length(>=2)>            = <input id="name"  type="text"/>
+        <email pattern(/^[^@]+@[^@]+$/)> = <input id="email" type="text"/>
+        <age   min(18)>                = <input id="age"   type="number"/>
+        <cap   max(120)>               = <input id="cap"   type="number"/>
+        <score gt(0)>                  = <input id="score" type="number"/>
+        <lvl   lt(100)>                = <input id="lvl"   type="number"/>
+        <hi    gte(1)>                 = <input id="hi"    type="number"/>
+        <lo    lte(10)>                = <input id="lo"    type="number"/>
+        <pin   eq("1234")>             = <input id="pin"   type="text"/>
+        <code  neq("0000")>            = <input id="code"  type="text"/>
+        <role  oneOf(["Admin","Editor"])> = <input id="role" type="text"/>
+        <tag   notIn(["banned"])>      = <input id="tag"   type="text"/>
+    </>
+}
+<vform><nick/><name/><email/><age/><cap/><score/><lvl/><hi/><lo/><pin/><code/><role/><tag/></>
+<div id="e-nick"><errors of=@vform.nick/></div>
+<div id="e-name"><errors of=@vform.name/></div>
+<div id="e-email"><errors of=@vform.email/></div>
+<div id="e-age"><errors of=@vform.age/></div>
+<div id="e-cap"><errors of=@vform.cap/></div>
+<div id="e-score"><errors of=@vform.score/></div>
+<div id="e-lvl"><errors of=@vform.lvl/></div>
+<div id="e-hi"><errors of=@vform.hi/></div>
+<div id="e-lo"><errors of=@vform.lo/></div>
+<div id="e-pin"><errors of=@vform.pin/></div>
+<div id="e-code"><errors of=@vform.code/></div>
+<div id="e-role"><errors of=@vform.role/></div>
+<div id="e-tag"><errors of=@vform.tag/></div>
+</program>

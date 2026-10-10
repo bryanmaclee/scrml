@@ -94,7 +94,7 @@
         const already = ?{`
           SELECT id FROM contact_messages WHERE email = ${email} AND body = ${body}
         `}.get()
-        if (already is some) fail .SubmitFailed("this message was already sent")
+        if (already is given) fail .SubmitFailed("this message was already sent")
         ?{`
           INSERT INTO contact_messages (name, email, body)
           VALUES (${name}, ${email}, ${body})

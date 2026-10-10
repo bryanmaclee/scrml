@@ -241,7 +241,7 @@ ${
             why = why.concat(b.why)
             const d: WireDef | not = b.def
             // a refused def contributes only its `why`
-            if (d is some) {
+            if (d is given) {
                 defs = defs.concat([d])
             }
         }

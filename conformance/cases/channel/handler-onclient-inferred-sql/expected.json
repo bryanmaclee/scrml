@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-inferred-sql",
+  "description": "§38.10.3 (S462) — an `onclient:*` handler declared as a plain `function` whose body runs a `?{}` query is placed on the server by §12.2 Trigger 1, and fires E-CHANNEL-006. Before S462 it compiled at exit 0 and the browser's `ws.onopen` called a fetch stub — a POST round-trip on every socket open.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.9, §12.2",
+  "source-test": "compiler/tests/unit/channel-onclient-inferred-server.test.js",
+  "rationale": "§38.10.3 (ruling:user-voice-scrml.md S462 \"a\"): a function designated as the handler for an `onclient:*` attribute SHALL NOT be placed on the server by §12.2; §12.2 Trigger 1 places a function that runs a `?{}` query.",
+  "expect": {
+    "codes": ["E-CHANNEL-006"],
+    "severity": { "E-CHANNEL-006": "error" }
+  }
+}

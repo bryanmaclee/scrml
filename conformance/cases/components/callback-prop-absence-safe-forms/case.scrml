@@ -20,7 +20,7 @@ const ErEqNot = <div class="ereqnot" props={ onGo?: () => void }>
     <button class="g" onclick=${() => { if (onGo == not) return; onGo() }}>g</button>
 </>
 const IsSome = <div class="issome" props={ onGo?: () => void }>
-    <button class="g" onclick=${() => { if (onGo is some) { onGo() } }}>g</button>
+    <button class="g" onclick=${() => { if (onGo is given) { onGo() } }}>g</button>
 </>
 const Truthy = <div class="truthy" props={ onGo?: () => void }>
     <button class="g" onclick=${ if (onGo) { onGo() } }>g</button>

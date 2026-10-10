@@ -1,0 +1,18 @@
+{
+  "id": "attr-executable-sink-bound-svg-animation-runtime-guard",
+  "description": "§5.2 rules 2–3 (S457), the parenthesized expression form: an SVG animation value `to=(@cell)` / `values=(@cell)` whose static `attributeName` names a URL attribute — or whose `attributeName` is computed — is judged at runtime against the animated attribute; `values` judges every `;` entry; a static non-URL `attributeName` leaves the value unjudged. Written in forms both implementations compile (s462-bootstrap-sink-guards — the bootstrap's twin of svg-animation-url-runtime-guard, whose `${…}` forms the bootstrap does not parse).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 2 *SVG animation values (S457)*: `to`/`from`/`by`/`values` on `<set>`/`<animate>`/… IS a URL-valued attribute \"when `attributeName` is written as a static string naming an attribute of the URL-valued list … and ALSO when `attributeName` is not a static string\". Rule 3 *SVG animation values*: \"The judgment is made against the animated attribute (`\\\"about:blank\\\"` replaces the whole value); `values` judges every `;`-separated entry … When `attributeName` is not a static string, the value is judged as a URL on an unknown attribute\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "domAnchored": [
+      { "selector": "#e", "attr": { "to": "about:blank" } },
+      { "selector": "#g", "attr": { "to": "/ok" } },
+      { "selector": "#v", "attr": { "values": "about:blank" } },
+      { "selector": "#n", "attr": { "to": "javascript:alert(1)" } },
+      { "selector": "#c", "attr": { "to": "about:blank" } }
+    ]
+  }
+}

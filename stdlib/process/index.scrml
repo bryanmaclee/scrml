@@ -41,7 +41,7 @@ ${
     export function env(key) {
         if (key is not) return not
         const val = process.env[String(key)]
-        return val is some ? val : not
+        return val is given ? val : not
     }
 
     /**
@@ -77,7 +77,7 @@ ${
      *   exit(1) — exits with code 1 (error)
      */
     export function exit(code) {
-        process.exit(code is some ? code : 0)
+        process.exit(code is given ? code : 0)
     }
 
     /**

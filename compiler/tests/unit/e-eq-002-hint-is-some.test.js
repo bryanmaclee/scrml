@@ -1,6 +1,10 @@
 /**
  * e-eq-002-hint-is-some.test.js — g-e-eq-002-hint-suggests-the-double-negative (S410).
  *
+ * S462: the advised presence form is now `is given` — `is some` is its soft-deprecated
+ * spelling (§42.2.2a, ruling:user-voice-scrml.md S462 "a, validator too, go"), and a
+ * diagnostic must not steer to a deprecated form.
+ *
  * `E-EQ-002` fires on `== not` / `!= not`. Its `!=` arm used to advise `is not not`,
  * which IS legal scrml but is exactly the double-negative the language provides
  * `is some` to avoid:
@@ -45,10 +49,11 @@ function eqDiag(source, name) {
 }
 
 describe("E-EQ-002 hint (g-e-eq-002-hint-suggests-the-double-negative)", () => {
-  test("`!= not` advises `is some`, NOT the double-negative `is not not`", () => {
+  test("`!= not` advises `is given`, NOT the double-negative `is not not` (nor the deprecated `is some`)", () => {
     const d = eqDiag("${ let x = a != not }\n<div>hi</div>", "neq-not");
     expect(d).not.toBeNull();
-    expect(d.message).toContain("is some");
+    expect(d.message).toContain("is given");
+    expect(d.message).not.toContain("is some");
     // The whole point of the fix — the discouraged form must be gone.
     expect(d.message).not.toContain("is not not");
   });
@@ -59,6 +64,7 @@ describe("E-EQ-002 hint (g-e-eq-002-hint-suggests-the-double-negative)", () => {
     expect(d.message).toContain("is not");
     // `== not` asks "is x absent?"; `is some` there would be exactly backwards.
     expect(d.message).not.toContain("is some");
+    expect(d.message).not.toContain("is given");
   });
 
   // ⚑ S411 — THE ASSERTIONS ABOVE ARE TOKEN CHECKS, AND A TOKEN CHECK CANNOT SEE A
@@ -78,10 +84,10 @@ describe("E-EQ-002 hint (g-e-eq-002-hint-suggests-the-double-negative)", () => {
     // The span still covers BOTH halves of the sentence, which is the whole point —
     // that is what a bare toContain("is some") could not do.
     expect(d.message).toContain(
-      "`!= not` is not valid — use `is some` to check for presence (§45).",
+      "`!= not` is not valid — use `is given` to check for presence (§45).",
     );
     // The specific inversion that shipped: presence advice sold as an absence check.
-    expect(d.message).not.toContain("`is some` to check for absence");
+    expect(d.message).not.toContain("`is given` to check for absence");
   });
 
   test("SENTENCE-LEVEL — the `==` advice and its purpose clause agree (absence)", () => {

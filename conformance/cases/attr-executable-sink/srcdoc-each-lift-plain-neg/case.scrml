@@ -1,0 +1,5 @@
+<program>
+<items> = [{ id: 1, d: "hello" }]
+<ul>${ for (const it of @items) { lift <li><iframe srcdoc=it.d></iframe></li> } }</ul>
+<ul><each in=@items key=@.id as it><li><iframe srcdoc=it.d></iframe></li></each></ul>
+</program>

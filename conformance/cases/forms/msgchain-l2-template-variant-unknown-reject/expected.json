@@ -1,0 +1,12 @@
+{
+  "id": "forms-msgchain-l2-template-variant-unknown-reject",
+  "description": "§41.12 — a registerMessages key that is not a ValidationError variant (`.TooShort`, the pre-catalog spelling of LengthFailed in the old §41.12 example) is refused with E-MESSAGE-VARIANT-UNKNOWN: no error carries that tag, so the entry could never be read.",
+  "language-version": "1.0",
+  "spec": "§41.12, §55.9",
+  "rationale": "§41.12: the map keys are ValidationError variants (§55.9); a key that is not one SHALL be refused with E-MESSAGE-VARIANT-UNKNOWN. Without it the template's slots cannot be checked either (the slot table is per variant).",
+  "expect": {
+    "codes": ["E-MESSAGE-VARIANT-UNKNOWN"],
+    "notCodes": ["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-SLOT-UNKNOWN", "E-MESSAGE-TEMPLATE-MALFORMED"],
+    "codeCounts": { "E-MESSAGE-VARIANT-UNKNOWN": 1 }
+  }
+}

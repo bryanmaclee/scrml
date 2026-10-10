@@ -7,52 +7,52 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1615 of 1615 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1649 of 1649 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 150 | 9.3% |
+| PASS | 155 | 9.4% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 56 | 3.5% |
+| FAIL | 56 | 3.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 602 | 37.3% |
-| UNSUPPORTED | 807 | 50.0% |
+| NOT-TWINNED | 625 | 37.9% |
+| UNSUPPORTED | 813 | 49.3% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 206; of those, 150 hold (72.8%). Runtime half executed on the bootstrap for 55 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 211; of those, 155 hold (73.5%). Runtime half executed on the bootstrap for 57 case(s).
 
-- **Vacuous** passes: 11 of 150 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **139**.
+- **Vacuous** passes: 11 of 155 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **144**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 56; the other 29 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 571 · parse-reject 236.
+UNSUPPORTED by reason: bootstrap-unsupported 575 · parse-reject 238.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **736** — PASS 87 · FAIL 52 · UNSUPPORTED 597. Twin holds 87 (non-vacuous 79). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **746** — PASS 92 · FAIL 52 · UNSUPPORTED 602. Twin holds 92 (non-vacuous 84). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (602 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (625 cases; a case counts once per distinct reason):
 
 - 98 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 68 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 70 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 62 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
+- 51 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
+- 51 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
 - 49 — rhs-decl: `…` initializer needs a type (CTX — O35)
-- 46 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
-- 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
-- 40 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
-- 36 — rhs-decl: declaration in a markup position (⚑ O38)
+- 41 — rhs-decl: declaration in a markup position (⚑ O38)
+- 37 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 31 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
-- 29 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
-- 28 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
+- 31 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
-- 10 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- 11 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
@@ -97,15 +97,15 @@ NOT-TWINNED by reason (602 cases; a case counts once per distinct reason):
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
-| attr-executable-sink | 15 | · | · | · | · | 7 | 8 | · | · |
+| attr-executable-sink | 21 | 5 | · | · | · | 9 | 7 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
 | block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
-| channel | 44 | · | · | · | · | 32 | 12 | · | · |
+| channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 67 | · | · | 2 | · | 64 | 1 | · | · |
-| condition | 24 | 18 | · | · | · | 3 | 3 | · | · |
+| condition | 26 | 18 | · | · | · | 5 | 3 | · | · |
 | control-flow | 68 | 12 | · | 2 | · | 18 | 36 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
@@ -120,7 +120,7 @@ NOT-TWINNED by reason (602 cases; a case counts once per distinct reason):
 | fn | 19 | · | · | 1 | · | 1 | 17 | · | · |
 | foreign | 16 | · | · | · | · | 7 | 9 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
-| forms | 54 | 12 | · | · | · | 38 | 4 | · | · |
+| forms | 66 | 12 | · | · | · | 49 | 5 | · | · |
 | hostmethod | 1 | · | · | · | · | · | 1 | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 56 | 5 | · | 1 | · | 32 | 18 | · | · |
@@ -131,7 +131,7 @@ NOT-TWINNED by reason (602 cases; a case counts once per distinct reason):
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
-| match-leave | 27 | 11 | · | · | · | 2 | 14 | · | · |
+| match-leave | 36 | 11 | · | · | · | 5 | 20 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 40 | · | · | 10 | · | 8 | 22 | · | · |
@@ -297,8 +297,13 @@ none
 
 none
 
-### PASS / CODES-ONLY (150)
+### PASS / CODES-ONLY (155)
 
+- `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
+- `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
+- `attr-executable-sink/event-attr-paren-data-text-neg` — PASS · TWIN
+- `attr-executable-sink/srcdoc-bound-cell-neg` — PASS · TWIN
+- `attr-executable-sink/srcdoc-interp-neg` — PASS · TWIN
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
 - `auth/auth-attr-unrecognized-literal-no-login-lint-pos` — PASS
@@ -450,7 +455,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (807)
+### UNSUPPORTED (813)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -474,7 +479,6 @@ none
 - `attr-executable-sink/non-handler-and-raster-data-pos` — twin · bootstrap-unsupported: `online="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/safe-interp-pos` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `attr-executable-sink/srcdoc-data-forms-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `attr-executable-sink/srcdoc-interp-neg` — twin · bootstrap-unsupported: `srcdoc="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expres
 - `attr-executable-sink/svg-animation-literal-scheme-neg` — twin · bootstrap-unsupported: `to="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression
 - `attr-executable-sink/url-scheme-interp-neg` — twin · bootstrap-unsupported: `href="…"` holds a `${…}` interpolation — a quoted value with `${…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expressi
 - `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
@@ -783,6 +787,7 @@ none
 - `form-for/formfor-valid-enables-submit` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `forms/derived-refinement-type-accepted` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<doubled`
+- `forms/msgchain-l2-template-fn-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `registerMessages` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
@@ -898,7 +903,9 @@ none
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-codes/e-type-025-enum-subject-neg` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-codes/e-type-026-match-in-logic-neg` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `match-leave/arm-body-ends-at-line-break-neg` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/bare-break-continue-arm-no-loop-neg` — twin · bootstrap-unsupported: a `break` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/decl-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/decl-multi-scrutinee-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `match-leave/dpa068-decl-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
@@ -907,11 +914,15 @@ none
 - `match-leave/dpa068-stmt-bare-fail` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/dpa068-stmt-bare-return` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/given-arm-body-lowered` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/given-arm-legacy-arrow-keeps-body` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/given-arm-undeclared-name-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `match-leave/multi-scrutinee-stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `match-leave/return-match-arm-propagate` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/returned-multi-match-braced-leave-and-inner-break` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-leave/stmt-arm-braced-break-continue-loop` — twin · bootstrap-unsupported: member access `.C` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `match-leave/stmt-arm-braced-fail-propagates` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
+- `match-leave/value-arm-leave-word-in-string-not-a-leave` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-allow-list-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1260,10 +1271,12 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (602)
+### NOT-TWINNED (625)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/on-attr-lift-each-plain-listener-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/srcdoc-each-lift-plain-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/srcdoc-row-data-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/svg-animation-url-runtime-guard` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/undeclared-attr-on-attr-lift-listener-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1290,6 +1303,11 @@ none
 - `channel/handler-onclient-arity` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-arity-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-arity-string-comma-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-inferred-broadcast` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-inferred-cell-write-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-inferred-nested-broadcast` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-inferred-sql` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/handler-onclient-inferred-t5-only-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-server-fn` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-server-fn-imported` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `channel/handler-onclient-server-fn-ok` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
@@ -1386,6 +1404,8 @@ none
 - `condition/given-cell-guard-multi-all-or-nothing-pos` — not mechanical: rhs-decl: type `Item | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/given-cell-guard-worked-example-absent-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `condition/given-cell-guard-worked-example-present-pos` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `condition/is-given-expr-twin` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `condition/is-some-deprecated-expr` — not mechanical: rhs-decl: type `U | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-010-else-on-for-without-lift-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-011-for-in-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
@@ -1529,13 +1549,24 @@ none
 - `forms/errors-element-no-of-pos` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
 - `forms/errors-empty-no-dom` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<code>` shar
 - `forms/errors-first-all-rollup` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<code>` shar
+- `forms/is-given-validator` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<nick>` shar
+- `forms/is-given-validator-absent-message` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `forms/is-given-validator-inline-message` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<nick>` shar
+- `forms/is-some-deprecated-validator` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<nick>` shar
 - `forms/isvalid-rollup` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-colon-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-dynamic-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-inline-static-accepted` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-l1-inline-override-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-l2-registered-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l2-template-function-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l2-template-malformed-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l2-template-runtime-refused` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l2-template-slot-unknown-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<age>` share
+- `forms/msgchain-l2-template-slots` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<nick>` shares
+- `forms/msgchain-l2-template-variant-unknown-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
 - `forms/msgchain-l4-match-escape-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-message-is-text` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<password>` 
 - `forms/multierror-compose-order` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pw>` shares
 - `forms/shortcircuit-req-empty` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pw>` shares
 - `forms/submitted-on-submit` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
@@ -1649,7 +1680,10 @@ none
 - `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `match-leave/dpa068-engine-msg-arm-bare-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/engine-msg-arm-break-continue-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `match-leave/engine-msg-arm-return-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `match-leave/top-level-match-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `module/e-import-001-export-outside-logic-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
 - `module/e-import-008-host-import-no-manifest-reject` — not mechanical: program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `${}` unwrapped

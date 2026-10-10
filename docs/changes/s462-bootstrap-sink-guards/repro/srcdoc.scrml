@@ -1,0 +1,4 @@
+<program>
+    let <doc:string="<script>parent.pwned = 1</script>"/>
+    <iframe id="f" srcdoc=@doc></iframe>
+</program>

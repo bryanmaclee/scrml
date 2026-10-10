@@ -341,7 +341,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -373,7 +373,7 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentLoad is some) class="space-y-6">
+          <div if=(@loaded && @currentLoad is given) class="space-y-6">
 
               <!-- Header card -->
               <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -387,37 +387,37 @@
                           </h1>
                           <div class="text-sm text-slate-600 mt-1">
                               ${@currentLoad.commodity}
-                              <span if=(@currentLoad.weight_lbs is some)> · ${@currentLoad.weight_lbs} lbs</>
+                              <span if=(@currentLoad.weight_lbs is given)> · ${@currentLoad.weight_lbs} lbs</>
                           </div>
                       </div>
                       <div class="text-right">
                           <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClassesOf(@currentLoad)}">
-                              ${@currentLoad is some ? statusLabel(@currentLoad.status) : ""}
+                              ${@currentLoad is given ? statusLabel(@currentLoad.status) : ""}
                           </span>
-                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is given ? formatRate(@currentLoad.rate_dollars) : ""}</div>
                       </div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 text-sm">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900 font-semibold">${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
+                          <div class="text-slate-900 font-semibold">${@currentLoad is given ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@currentLoad is some ? @currentLoad.origin_address is not ? "" : @currentLoad.origin_address : ""}
+                              ${@currentLoad is given ? @currentLoad.origin_address is not ? "" : @currentLoad.origin_address : ""}
                           </div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Estimated delivery</div>
-                          <div class="text-slate-900 font-semibold">${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
+                          <div class="text-slate-900 font-semibold">${@currentLoad is given ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@currentLoad is some ? @currentLoad.destination_address is not ? "" : @currentLoad.destination_address : ""}
+                              ${@currentLoad is given ? @currentLoad.destination_address is not ? "" : @currentLoad.destination_address : ""}
                           </div>
                       </div>
                   </div>
               </section>
 
               <!-- Driver / current location (only when in transit) -->
-              <section if=(@assignment is some) class="bg-white rounded-lg border border-slate-200 p-6">
+              <section if=(@assignment is given) class="bg-white rounded-lg border border-slate-200 p-6">
                   <h2 class="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3">
                       Carrier &amp; equipment
                   </h2>
@@ -426,7 +426,7 @@
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Driver</div>
                           <div class="text-slate-900 font-semibold">${@assignment.driver_name}</div>
                           <div if=showDriverLocation(@currentLoad.status) class="text-xs text-slate-600 mt-1">
-                              <span if=(@assignment.driver_location is some && @assignment.driver_location != "")>
+                              <span if=(@assignment.driver_location is given && @assignment.driver_location != "")>
                                   Last seen: ${@assignment.driver_location}
                               </>
                               <span if=(@assignment.driver_location is not || @assignment.driver_location == "") class="text-slate-400">
@@ -457,7 +457,7 @@
               </section>
 
               <!-- No-driver-yet card for pre-dispatched states -->
-              <section if=(@currentLoad is some && (@assignment is not && @currentLoad.status != "Tendered" && @currentLoad.status != "Cancelled")) class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+              <section if=(@currentLoad is given && (@assignment is not && @currentLoad.status != "Tendered" && @currentLoad.status != "Cancelled")) class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
                   Carrier not yet assigned. Your dispatcher is matching equipment now.
               </section>
 
@@ -467,15 +467,15 @@
                    (single-use guard at the DB) + advances load to dispatched.
                    Replay protection: the second click hits a row with
                    consumed_at != NULL → server returns "already used". -->
-              <section if=(@currentLoad is some && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <section if=(@currentLoad is given && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div class="flex items-start justify-between gap-4">
                       <div class="text-sm text-blue-900">
                           <strong>Rate confirmation pending.</strong> Your dispatcher has
                           booked this load. Sign the rate confirmation to release it
                           for driver dispatch.
                           <div class="text-xs text-blue-700 mt-1">
-                              Total rate: <strong>${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</strong>
-                              · Pickup: ${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}
+                              Total rate: <strong>${@currentLoad is given ? formatRate(@currentLoad.rate_dollars) : ""}</strong>
+                              · Pickup: ${@currentLoad is given ? formatPickupAt(@currentLoad.pickup_at) : ""}
                           </div>
                       </div>
                       <button
@@ -490,13 +490,13 @@
               </div>
 
               <!-- Tendered: awaiting rate -->
-              <section if=(@currentLoad is some && (@currentLoad.status == "Tendered")) class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+              <section if=(@currentLoad is given && (@currentLoad.status == "Tendered")) class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
                   <strong>Quote pending.</strong> The dispatcher is preparing a rate for this load.
                   You'll see it here once it's ready.
               </section>
 
               <!-- Cancelled -->
-              <section if=(@currentLoad is some && (@currentLoad.status == "Cancelled")) class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
+              <section if=(@currentLoad is given && (@currentLoad.status == "Cancelled")) class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
                   This load has been cancelled.
               </section>
 
@@ -505,10 +505,10 @@
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-emerald-900">
                           <strong>Invoice ready.</strong>
-                          <span if=(@invoice is some && @invoice.paid_at is not)>
+                          <span if=(@invoice is given && @invoice.paid_at is not)>
                               Outstanding · due ${@invoice && @invoice.due_at ? @invoice.due_at.substring(0, 10) : ""}
                           </>
-                          <span if=(@invoice is some && @invoice.paid_at is some) class="text-emerald-700">
+                          <span if=(@invoice is given && @invoice.paid_at is given) class="text-emerald-700">
                               Paid.
                           </>
                       </div>
@@ -531,7 +531,7 @@
 
                   <ul if=(@loadEvents.length > 0) class="space-y-2">
                       <each in=@loadEvents as ev key=__index__>
-                          <li if=(@currentLoad is some && (isForThisLoad(ev.loadId, @currentLoad.id))) class="flex items-start gap-3 text-sm">
+                          <li if=(@currentLoad is given && (isForThisLoad(ev.loadId, @currentLoad.id))) class="flex items-start gap-3 text-sm">
                               <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
                                   ${ev.at == "" ? "" : ev.at.substring(11, 16)}
                               </span>

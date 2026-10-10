@@ -229,7 +229,7 @@ ${
     }
 
     fn otherwiseDecl(s: Sym, w: CssPart[] | not) -> OutDecl[] {
-        if (w is some) return [OutDecl.Custom(s, w)]
+        if (w is given) return [OutDecl.Custom(s, w)]
         return []
     }
 
@@ -300,7 +300,7 @@ ${
     }
 
     fn pseudoText(n: string, a: string | not) -> string {
-        if (a is some) return ":" + n + "(" + a + ")"
+        if (a is given) return ":" + n + "(" + a + ")"
         return ":" + n
     }
 
@@ -511,7 +511,7 @@ ${
     fn variantNames(acc: string[], arms: TokenArm[], w: CssPart[] | not) -> string[] {
         let out: string[] = addName(acc, "Token.OnVariant")
         for (const a of arms) { out = partsNames(out, a.value) }
-        if (w is some) {
+        if (w is given) {
             out = partsNames(addName(out, "Token.OnVariant.Otherwise"), w)
         }
         return out

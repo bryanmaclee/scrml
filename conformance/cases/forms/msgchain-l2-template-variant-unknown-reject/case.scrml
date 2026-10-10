@@ -1,0 +1,12 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .TooShort: "{field} is too short",
+    })
+    <signup>
+        <name length(>=2)> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+</program>

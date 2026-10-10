@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-inferred-cell-write-ok",
+  "description": "§38.10.3 clean neg (S462) — an `onclient:*` handler that writes a channel cell stays on the client (a channel-cell write is client-side sync, §38.4; it is not a §12.2 trigger) and compiles with no E-CHANNEL-006. The delta from `channel/handler-onclient-inferred-broadcast` is the handler body: a cell write instead of `broadcast()`.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.4, §12.2",
+  "source-test": "compiler/tests/unit/channel-onclient-inferred-server.test.js",
+  "rationale": "§12.2 Trigger 7: a channel-cell WRITE does NOT escalate — so the handler is not placed on the server and §38.10.3 does not reject it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-006"]
+  }
+}

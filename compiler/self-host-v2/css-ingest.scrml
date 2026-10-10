@@ -267,7 +267,7 @@ ${
             if (j < t.length) {
                 const explicit: Combinator | not = combOf(charAt(t, j))
                 let comb: Combinator = Combinator.Descendant
-                if (explicit is some) {
+                if (explicit is given) {
                     comb = explicit
                     j = j + 1
                     while (j < t.length && isSpace(charAt(t, j))) { j = j + 1 }
@@ -347,9 +347,9 @@ ${
                 buf = ""
                 const tok: Sym | not = lookup(names.tokens, n)
                 const cell: Sym | not = lookup(names.cells, n)
-                if (tok is some) {
+                if (tok is given) {
                     parts = parts.concat([CssPart.TokenVar(tok)])
-                } else if (cell is some) {
+                } else if (cell is given) {
                     if (inToken) {
                         why = why.concat(["a theme token whose value reads the cell `@" + n + "` (O47 — OPEN)"])
                     } else {
@@ -417,7 +417,7 @@ ${
     // The position a node's CHILDREN are at.
     fn childPlace(n: INode, at: Place, seen: string[]) -> Place {
         const origin: string | not = strAt(n, "_expandedFrom")
-        if (origin is some) return { level: "component", scope: origin, dup: at.dup || hasStr(seen, origin), root: true }
+        if (origin is given) return { level: "component", scope: origin, dup: at.dup || hasStr(seen, origin), root: true }
         // Any node below the root inside an instance (an element, an each-block, a
         // `${}` …) moves its children off the root: fail closed, never widen.
         if (at.level == "component") return { level: at.level, scope: at.scope, dup: at.dup, root: false }
@@ -425,7 +425,7 @@ ${
         if (k == "logic") return at
         if (k == "markup") {
             const tag: string | not = strAt(n, "tag")
-            if (tag is some) {
+            if (tag is given) {
                 if (tag == "program") return at
             }
             return { level: "element", scope: "", dup: at.dup, root: false }
@@ -439,7 +439,7 @@ ${
         if (id is not) return false
         for (const b of bs) {
             const other: number | not = numAt(b.node, "id")
-            if (other is some) {
+            if (other is given) {
                 if (other == id) return true
             }
         }
@@ -456,7 +456,7 @@ ${
         for (const b of bs) {
             const other: number | not = numAt(b.node, "id")
             let same = false
-            if (other is some) {
+            if (other is given) {
                 if (other == id && b.at.level == at.level && b.at.scope == at.scope) same = true
             }
             if (same) {
@@ -492,7 +492,7 @@ ${
         let acc: Acc = a
         if (k == "state-decl") {
             const name: string | not = strAt(n, "name")
-            if (name is some) {
+            if (name is given) {
                 if (!hasStr(acc.cells, name)) {
                     acc = { programs: acc.programs, cells: acc.cells.concat([name]), themes: acc.themes, blocks: acc.blocks,
                             seen: acc.seen, why: acc.why }
@@ -501,7 +501,7 @@ ${
         }
         if (k == "markup") {
             const tag: string | not = strAt(n, "tag")
-            if (tag is some) {
+            if (tag is given) {
                 if (tag == "program") {
                     acc = { programs: acc.programs.concat([n]), cells: acc.cells, themes: acc.themes, blocks: acc.blocks,
                             seen: acc.seen, why: acc.why }
@@ -510,7 +510,7 @@ ${
         }
         const inner: Place = childPlace(n, at, acc.seen)
         const origin: string | not = strAt(n, "_expandedFrom")
-        if (origin is some) {
+        if (origin is given) {
             if (!hasStr(acc.seen, origin)) {
                 acc = { programs: acc.programs, cells: acc.cells, themes: acc.themes, blocks: acc.blocks,
                         seen: acc.seen.concat([origin]), why: acc.why }
@@ -545,7 +545,7 @@ ${
                 why = why.concat(["a `<theme>` token with no name"])
             } else if (text is not) {
                 why = why.concat(["the `<theme>` token `" + name + "` has no value"])
-            } else if (findRec(recs, name) is some) {
+            } else if (findRec(recs, name) is given) {
                 why = why.concat(["the theme token `" + name + "` is declared twice (§66.17 item 4: one namespace)"])
             } else if (hasStr(cells, name)) {
                 why = why.concat(["the theme token `" + name + "` and a cell share the name (§66.17 item 4: one namespace — E-THEME-TOKEN-CELL-COLLISION, analyze's to fire)"])
@@ -667,7 +667,7 @@ ${
             let cellSym: Sym = mkSym(0, r.cell)
             if (r.cell.length > 0) {
                 const c: Sym | not = lookup(cellNames, r.cell)
-                if (c is some) {
+                if (c is given) {
                     cellSym = c
                 } else {
                     why = why.concat(["`<theme for=@" + r.cell + ">` names no cell the shim sees"])
@@ -695,7 +695,7 @@ ${
     fn emptyDecl() -> CssDecl { return { prop: "", value: [] } }
 
     fn isFlatRule(r: INode) -> boolean {
-        return strAt(r, "prop") is some && strAt(r, "selector") is not
+        return strAt(r, "prop") is given && strAt(r, "selector") is not
     }
 
     fn declOf(d: INode, names: Names) -> DeclR {
@@ -839,14 +839,14 @@ ${
         let rs: StyleRule[] = []
         for (const r of rules) {
             const at: string | not = strAt(r, "atRule")
-            if (at is some) {
+            if (at is given) {
                 if (!global) {
                     why = why.concat(["the at-rule `" + trimmed(at) + "` in a component `#{}`"])
                 } else {
                     const h: HoistR = hoistOf(at)
                     if (h.why.length > 0) {
                         why = why.concat([h.why])
-                    } else if (h.imp is some) {
+                    } else if (h.imp is given) {
                         imports = imports.concat([h.imp])
                     } else {
                         charsets = charsets.concat([h.charset])
@@ -878,13 +878,13 @@ ${
         if (programs.length == 0) return { on: false, why: [] }
         for (const a of nodesAt(programs[0], "attrs")) {
             const n: string | not = strAt(a, "name")
-            if (n is some) {
+            if (n is given) {
                 if (n == "reset") {
                     const v: INode | not = nodeAt(a, "value")
-                    if (v is some) {
+                    if (v is given) {
                         const k: string = kindAt(v)
                         const s: string | not = strAt(v, "value")
-                        if (k == "string-literal" && s is some) {
+                        if (k == "string-literal" && s is given) {
                             if (s == "none") return { on: false, why: [] }
                         }
                     }

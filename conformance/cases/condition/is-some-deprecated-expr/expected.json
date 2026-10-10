@@ -1,0 +1,19 @@
+{
+  "id": "condition-is-some-deprecated-expr",
+  "description": "§42.2.2a / §63.5 — the soft-deprecated presence spelling `x is some` in a value position (`const present: bool = @user is some`), a compound condition (`@user is some && @n > 0`) and a parenthesized `if=` test. The deprecated form is in-contract during the window: it surfaces W-IS-SOME-DEPRECATED (Info) once per site (3 here) and runs identically to its canonical twin condition/is-given-expr-twin — clicking #go sets @user, so @label = \"present\" (@n is 0) and #who renders. The legacy spelling is the PURPOSE of this case; it is not migrated.",
+  "language-version": "deprecated",
+  "spec": "§42.2.2a",
+  "rationale": "§42.2.2a (S462) — `expr is some` SHALL parse and behave identically to `expr is given` in every position, and SHALL surface W-IS-SOME-DEPRECATED (Info, §34) at each site. §63.5 — during the window the W-code is a conformance-required code and the deprecated form's runtime is identical to the canonical form's. Provenance: ruling:user-voice-scrml.md S462 \"a, validator too, go\".",
+  "expect": {
+    "codes": ["W-IS-SOME-DEPRECATED"],
+    "codeCounts": { "W-IS-SOME-DEPRECATED": 3 },
+    "severity": { "W-IS-SOME-DEPRECATED": "info" },
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "label": "present" },
+    "domAnchored": [
+      { "selector": "#out", "text": "present" },
+      { "selector": "#who", "text": "signed in" }
+    ]
+  }
+}

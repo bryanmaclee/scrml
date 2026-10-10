@@ -54,7 +54,7 @@ export interface FeatureUsage {
   // (NOT in catalog: email/url/numeric/integer — stdlib `scrml:data`; custom — §55.9 enum tag.)
   validators: {
     req: boolean;
-    "is some": boolean;       // V5-strict: 2-word predicate name
+    "is given": boolean;      // 2-word predicate name (`is some` is its soft-deprecated spelling, S462)
     length: boolean;
     pattern: boolean;
     min: boolean;
@@ -177,7 +177,7 @@ export function emptyUsage(): FeatureUsage {
   return {
     validators: {
       req: false,
-      "is some": false,
+      "is given": false,
       length: false,
       pattern: false,
       min: false,
@@ -226,7 +226,7 @@ export function fullUsage(): FeatureUsage {
   return {
     validators: {
       req: true,
-      "is some": true,
+      "is given": true,
       length: true,
       pattern: true,
       min: true,
@@ -277,7 +277,7 @@ export function mergeUsage(a: FeatureUsage, b: FeatureUsage): FeatureUsage {
   return {
     validators: {
       req: a.validators.req || b.validators.req,
-      "is some": a.validators["is some"] || b.validators["is some"],
+      "is given": a.validators["is given"] || b.validators["is given"],
       length: a.validators.length || b.validators.length,
       pattern: a.validators.pattern || b.validators.pattern,
       min: a.validators.min || b.validators.min,

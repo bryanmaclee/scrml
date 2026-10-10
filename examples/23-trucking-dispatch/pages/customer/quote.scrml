@@ -224,7 +224,7 @@
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
-              <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+              <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
               <button onclick=logout() class="hover:text-blue-300">Logout</button>
           </nav>
       </header>
@@ -248,12 +248,12 @@
               ${@errorMessage}
           </div>
 
-          <div if=(@loaded && @currentCustomer is some && @currentCustomer.account_status != "active") class="bg-amber-50 border border-amber-200 text-amber-900 rounded-md px-4 py-3 mb-4">
+          <div if=(@loaded && @currentCustomer is given && @currentCustomer.account_status != "active") class="bg-amber-50 border border-amber-200 text-amber-900 rounded-md px-4 py-3 mb-4">
               <strong>Account ${@currentCustomer.account_status}.</strong>
               You cannot tender new loads until the account is reactivated by your dispatcher.
           </div>
 
-          <form if=(@loaded && @currentCustomer is some && @currentCustomer.account_status == "active") onsubmit=submit() class="space-y-6 bg-white border border-slate-200 rounded-lg p-6">
+          <form if=(@loaded && @currentCustomer is given && @currentCustomer.account_status == "active") onsubmit=submit() class="space-y-6 bg-white border border-slate-200 rounded-lg p-6">
 
               <fieldset>
                   <legend class="text-sm font-semibold text-slate-700 mb-2">Origin</legend>

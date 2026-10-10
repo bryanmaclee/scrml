@@ -1,0 +1,43 @@
+{
+  "id": "forms-msgchain-l2-template-slots",
+  "description": "§41.12.1 / §55.10 Level 2 — registered message TEMPLATES fill their named slots at `<errors of=>`, for every ValidationError variant a markup validator produces (13 of the 15; NotSome and Custom are covered by the unit tier). Each field fails one validator; its rendered message is the registered template with `{field}` = the leaf field name and the variant's §55.9 payload slot filled: `{predicate}` → `>= 2`, `{re}` → the pattern as written, `{threshold}`, `{expected}`, `{forbidden}` → the value, `{set}` → the elements joined by `, `. `{{` renders a literal `{` and a lone `}` is text (`pin must be {1234}`).",
+  "language-version": "1.0",
+  "spec": "§41.12.1, §55.9, §55.10",
+  "rationale": "S462 ruling (user-voice-scrml.md S462 \"go on the package\", item 2): registerMessages values are message templates with named slots, not functions. The registered templates are DEVELOPER-AUTHORED source, so their rendering is normative and asserted verbatim; the slot table (field + the §55.9 payload names) and the rendering rules are §41.12.1 rules 3-4. The validator inputs mirror the vocab-*-invalid sibling cases. PAYLOAD-SHAPE NOTE: §55.9 declares LengthFailed's payload `predicate: string`; impl#1 carries `{op, value}` and §41.12.1 rule 4 renders it `<op> <value>` — both shapes render `>= 2`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-MESSAGE-"],
+    "input": [
+      { "input": "#nick",  "value": "" },
+      { "input": "#name",  "value": "A" },
+      { "input": "#email", "value": "nope" },
+      { "input": "#age",   "value": "10" },
+      { "input": "#cap",   "value": "999" },
+      { "input": "#score", "value": "0" },
+      { "input": "#lvl",   "value": "500" },
+      { "input": "#hi",    "value": "0" },
+      { "input": "#lo",    "value": "50" },
+      { "input": "#pin",   "value": "9999" },
+      { "input": "#code",  "value": "0000" },
+      { "input": "#role",  "value": "Guest" },
+      { "input": "#tag",   "value": "banned" }
+    ],
+    "domAnchored": [
+      { "selector": ".scrml-error", "count": 13 },
+      { "selector": "#e-nick .scrml-error",  "text": "nick cannot be left empty" },
+      { "selector": "#e-name .scrml-error",  "text": "name needs a length >= 2" },
+      { "selector": "#e-email .scrml-error", "text": "email must match /^[^@]+@[^@]+$/" },
+      { "selector": "#e-age .scrml-error",   "text": "age must be 18 or more" },
+      { "selector": "#e-cap .scrml-error",   "text": "cap must be 120 or less" },
+      { "selector": "#e-score .scrml-error", "text": "score must exceed 0" },
+      { "selector": "#e-lvl .scrml-error",   "text": "lvl must stay under 100" },
+      { "selector": "#e-hi .scrml-error",    "text": "hi must be at least 1" },
+      { "selector": "#e-lo .scrml-error",    "text": "lo must be at most 10" },
+      { "selector": "#e-pin .scrml-error",   "text": "pin must be {1234}" },
+      { "selector": "#e-code .scrml-error",  "text": "code cannot be 0000" },
+      { "selector": "#e-role .scrml-error",  "text": "role must be one of Admin, Editor" },
+      { "selector": "#e-tag .scrml-error",   "text": "tag cannot be banned" }
+    ]
+  }
+}

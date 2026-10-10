@@ -47,7 +47,7 @@ ${
     export function githubConfig(opts) {
         if (!opts) throw new Error("[scrml:oauth/github] opts required")
         const extra = {}
-        if (opts.allowSignup is some) {
+        if (opts.allowSignup is given) {
             extra.allow_signup = opts.allowSignup ? "true" : "false"
         }
         if (opts.login) extra.login = opts.login

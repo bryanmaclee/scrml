@@ -38,10 +38,10 @@ ${
      * caller and the email subject here.
      */
     function requestTokenFlow(email, opts, purpose, defaultTtl) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         const store = options.store
         const sendEmail = options.sendEmail
-        const baseUrl = options.baseUrl is some ? options.baseUrl : ""
+        const baseUrl = options.baseUrl is given ? options.baseUrl : ""
         // A non-numeric ttl (e.g. "15m") would compute Date.now() + NaN = NaN — a
         // never-expiring token. Fall back to the default for anything non-numeric
         // (the runtime shim rejects it loudly at mint time).
@@ -49,10 +49,10 @@ ${
 
         const token = generateToken(32)
         const record = { email: email, purpose: purpose, expiresAt: Date.now() + ttl * 1000 }
-        if (store is some) store.set(token, record, ttl)
+        if (store is given) store.set(token, record, ttl)
 
         const link = `${baseUrl}?token=${token}`
-        if (sendEmail is some) {
+        if (sendEmail is given) {
             // Enumeration resistance: a send failure (e.g. an SMTP 550 for an
             // unknown recipient) MUST NOT change the neutral result, or request*
             // becomes an account-existence oracle. Swallow via safeCallAsync.
@@ -71,7 +71,7 @@ ${
      * and left intact (a cross-submitted token stays usable for its own flow).
      */
     function peekTokenFlow(token, opts, expectedPurpose) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         const store = options.store
         if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
 
@@ -79,7 +79,7 @@ ${
             ::ParseFailed(m) -> not
         }
         if (record is not) return { valid: false, reason: "used-or-invalid" }
-        if (expectedPurpose is some && record.purpose != expectedPurpose) {
+        if (expectedPurpose is given && record.purpose != expectedPurpose) {
             return { valid: false, reason: "used-or-invalid" }
         }
         // Fail-closed: a missing / non-finite expiresAt is treated as expired
@@ -99,10 +99,10 @@ ${
      * logically-expired record.
      */
     function verifyTokenFlow(token, opts, expectedPurpose) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         const result = peekTokenFlow(token, options, expectedPurpose)
         if (result.valid || result.reason == "expired") {
-            if (options.store is some && token) options.store.delete(token)
+            if (options.store is given && token) options.store.delete(token)
         }
         return result
     }
@@ -168,7 +168,7 @@ ${
      *   })
      */
     export function resetPassword(token, newPassword, opts) {
-        const options = opts is some ? opts : {}
+        const options = opts is given ? opts : {}
         // A — updateHash presence (no token touched yet → retryable on misconfig).
         const updateHash = options.updateHash
         if (updateHash is not) return { valid: false, reason: "no-update-hash" }
@@ -189,7 +189,7 @@ ${
         fn makeStubStore() {
             const m = new Map()
             return {
-                get(key)          { const v = m.get(key); return v is some ? v : not }
+                get(key)          { const v = m.get(key); return v is given ? v : not }
                 set(key, value)   { m.set(key, value) }
                 delete(key)       { m.delete(key) }
             }
@@ -203,7 +203,7 @@ ${
         // request never returns the token — it is captured only via the email.
         const req = requestMagicLink("user@example.com", { store: magicStore, sendEmail: sendEmail, baseUrl: "https://app/login" })
         assertTruthy(req.ok)
-        assertTruthy(captured is some)
+        assertTruthy(captured is given)
 
         // verify succeeds once.
         const ok = verifyMagicLink(captured, { store: magicStore })
