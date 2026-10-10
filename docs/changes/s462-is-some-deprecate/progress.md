@@ -38,3 +38,36 @@ Address this before completing your current task.
 - 2026-10-09T17:07:40-06:00 F2: is given("msg")/is some("msg") read via shared collectValidatorCallArgs; unit test + conformance forms/is-given-validator-inline-message; regen bootstrap-conformance + FACTS
 - 2026-10-09T17:25:31-06:00 F3a template-literal + ^{} meta sites; F3b given in meta-allow-list JS_RESERVED_WORDS + route-inference (scheduling.ts list is SQL keywords — not applicable); F4 SPEC §42.2.4 direction note (newly-rejecting unquoted if=@u is given -> E-ATTR-UNQUOTED-OPERATOR, conformance restoration toward is some); corpus count unquoted if=…is given = 0 (1 unquoted is some, in docs/changes repro, already rejected at base); F5 typed-opener validator message; gap filed g-typed-opener-validators-drop-the-declaration-s462
 - 2026-10-09T17:47:38-06:00 cost gate: a build does no is-some site work unless its text holds is\s+some (validate-emit trucking test had timed out at 34s under load avg 32; re-measured within noise of main; test passes alone 25.6s)
+
+## FIX ROUND 2 brief
+
+FIX ROUND 2 for s462-is-some-deprecate — re-review of 6fbbff738 = FIX-FIRST on one NEW HIGH. Append this message verbatim to progress.md ("FIX ROUND 2 brief") and commit; same process rules. Do NOT merge origin/main yet.
+
+NEW-1 (HIGH, PA-REPRODUCED on 6fbbff738: exit 0, the `g(1)` call absent from client JS): an end-of-line `x is given` swallows the NEXT statement when that line starts with an identifier. Repro:
+```
+<program>
+<x>: string = "a"
+<o>: bool = false
+<k>: number = 0
+${
+    function g(v) { @k = 1 }
+    function f(a) {
+        @o = a is given
+        g(1)
+        let z = a is given
+        console.log(z)
+        if (a is given) { g(2) }
+        return z
+    }
+}
+<p>${f(@x)} ${@o} ${@k}</p>
+</program>
+```
+`g(1)` and `console.log(z)` vanish; the `is some` spelling keeps both. BASE was E-SYNTAX-045 here, so your change turned an error into a silent statement drop. Reviewer's cause (verify): the ASI newline boundary in both collectors in ast-builder.js (the `endsValue` / `startsStmt` check next to the two `givenContinuesIsOperator()` call sites, ~:6289 / ~:7137) — `endsValue` doesn't treat the `given` of `is given` as ending a value (KEYWORD outside VALUE_KW), so no break and the next line joins the expression; the expression parser then drops trailing content. Fix structurally: the `given` accepted by `givenContinuesIsOperator` ENDS A VALUE in both ASI checks. Tests per collector: a call line, a `console.log` line, an `@cell =` line, a `let` line, and `return` after `x is given`; also the `^{}` meta case (`const has = x is given` then `emit(…)` must give the same diagnostic shape as `is some`). Then sweep: any OTHER keyword that can end an expression and is outside VALUE_KW (`not` is already a value? check) — report.
+Re-check the §42.2.4 SPEC sentence "impl#1 parses and lowers `is given` exactly as `is some` in every position" is TRUE after the fix (prove with a both-spellings differential over a battery of positions incl. end-of-line + next statement).
+
+ALSO (LOW): (a) a comment between `is` and `some` (`is /* c */ some`, `is // c⏎ some`) hides the deprecated spelling from the lint + fix — either make the confirmation skip comments (structurally, from tokens) or file a gap; prefer the fix. (b) file a known-gap (pre-existing, both spellings): a LITERAL operand (`"s" is some`, `` `t` is some ``) lowers to just the literal — the test is dropped. (c) conformance `forms/is-given-validator-inline-message` never exercises `is given`'s own message — add a `not`-valued case so its message renders.
+
+Report: new FINAL_SHA, before/after for NEW-1 + each item, gates re-run (pre-commit, conformance, browser-tier, types:check, bootstrap slices).
+
+Address this before completing your current task.
