@@ -51,6 +51,16 @@ function reExportedNames(file) {
   return [...names].map((s) => JSON.parse(s));
 }
 
+// A SUBMODULE specifier of a client-registered module (`scrml:data/table-for`)
+// always fires E-STDLIB-CLIENT-CHUNK-MISSING on the client side — the classic
+// bundle reads `_scrml_stdlib.data/table-for`, a division (runtime-chunks.ts,
+// invariant 65) — even for a type-only import. That is a separate, filed gap
+// (g-type-only-submodule-import-fires-client-chunk-missing-s462); this test
+// pins the SERVER load, so such specifiers are listed but not compiled here.
+const CLIENT_CHUNK_SRC = readFileSync(join(ROOT, "compiler", "src", "codegen", "runtime-chunks.ts"), "utf8");
+const isClientRegistered = (mod) => CLIENT_CHUNK_SRC.includes(`'stdlib-${mod}'`);
+const skippedClientSubmodules = [];
+
 // specifier -> Map(typeName -> category)
 const population = new Map();
 for (const mod of readdirSync(STDLIB)) {
@@ -67,7 +77,9 @@ for (const mod of readdirSync(STDLIB)) {
     const sub = f.replace(/\.scrml$/, "");
     if (!f.endsWith(".scrml") || sub === "index" || !existsSync(join(SHIMS, mod, `${sub}.js`))) continue;
     const subTypes = declaredTypes(join(dir, f));
-    if (subTypes.size) population.set(`scrml:${mod}/${sub}`, subTypes);
+    if (!subTypes.size) continue;
+    if (isClientRegistered(mod)) { skippedClientSubmodules.push(`scrml:${mod}/${sub}`); continue; }
+    population.set(`scrml:${mod}/${sub}`, subTypes);
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-stdlib-subpath-name-clean",
+  "description": "§41.4 / §41.3.1 — a subpath specifier `scrml:auth/jwt` names the stdlib submodule stdlib/auth/jwt.scrml, which exports `JwtError`; the import resolves cleanly (no E-IMPORT-004, no E-IMPORT-006). The twin of the submodule-only-name reject case.",
+  "language-version": "1.0",
+  "spec": "§41.4",
+  "rationale": "§41.4's protocol-prefix table lists `scrml:utils/string` as a `scrml:` specifier, so `scrml:<module>/<sub>` is a module path, resolved against the stdlib (§41.5) and judged against that submodule's own export list (§21.3 via §41.3.1).",
+  "expect": { "codes": [], "notCodes": ["E-IMPORT-004", "E-IMPORT-006"], "notCodePrefixes": ["E-IMPORT-"] }
+}

@@ -1,0 +1,4 @@
+${
+    import { totallyBogus } from 'scrml:data'
+}
+<p>${totallyBogus}</>

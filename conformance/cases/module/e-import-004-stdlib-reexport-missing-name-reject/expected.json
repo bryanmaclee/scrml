@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-stdlib-reexport-missing-name-reject",
+  "description": "§21.4 (S462 Q19) — m.scrml re-exports `{ hash, NotAThing }` from `scrml:crypto`; `scrml:crypto` exports `hash` but not `NotAThing`, so the named re-export fires E-IMPORT-004 at the re-export. The module exists, so E-IMPORT-006 does NOT fire.",
+  "language-version": "1.0",
+  "spec": "§21.4",
+  "rationale": "§21.4: \"A named re-export from a `scrml:` module SHALL be checked against that module's exports (E-IMPORT-004, reported at the re-export).\" Before S462 a named re-export from a stdlib module was never checked and the re-exported name was `undefined` at run time.",
+  "expect": { "codes": ["E-IMPORT-004"], "notCodes": ["E-IMPORT-006"] }
+}

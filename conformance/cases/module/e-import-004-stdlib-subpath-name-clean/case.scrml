@@ -1,0 +1,4 @@
+${
+    import { JwtError } from 'scrml:auth/jwt'
+}
+<p>hello</>

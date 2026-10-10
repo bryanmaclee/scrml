@@ -1,0 +1,14 @@
+- 2026-10-09T22:03:18-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ae416d11287a8c8bd; brief fetched
+- 2026-10-09T22:04:31-06:00 REPRODUCED: scrml:data {required,totallyBogus} compiles clean; protect-001 verifyHash from scrml:auth compiles clean
+- 2026-10-09T22:08:10-06:00 impl: validateStdlibImports (module-resolver.js) wired in STDLIB-EXPORT-SEED (api.js); repro now E-IMPORT-004 w/ hints. Next: corpus measurement
+- 2026-10-09T22:31:14-06:00 gate (no-bail) 31842 pass/8 fail — all 8 load flakes, re-run clean in isolation. Fixed test fixtures randomUUID(scrml:random)->randomInt, formatDate scrml:format->scrml:time; samples protect-001 (verifyHash -> scrml:crypto 3-arg), gauntlet-r14 elixir uuid->generateUUID
+- 2026-10-09T22:47:48-06:00 addendum (stdlib exported TYPES) appended to BRIEF.md
+- 2026-10-09T23:04:45-06:00 addendum 2 appended; sample commit OOM-killed (exit 137) once, retrying
+- 2026-10-09T23:17:08-06:00 addendum-2 work: sub-shims, type-import prune, parity test, unit+conformance tests; committing
+- 2026-10-09T23:27:32-06:00 addendum-1: stdlib types seeded via shared stdlibModuleAst reader; corpus type-import sites (10 files) show no diagnostic change vs main except stdlib-path-exemption noise
+- 2026-10-10T09:56:53-06:00 gates: pre-commit green (31903/0), lsp+commands+top-level+render-map 3221/0, browser-baseline PASS, types-gate OK, s34-census PASS, corpus-floor PASS, snippet-gate PASS, facts regen, bootstrap-conformance regen (+3 bootstrap FAILs on new cases: impl#2 lacks stdlib E-IMPORT-004)
+- 2026-10-10T10:26:46-06:00 fix round: F1+F2 erase seam after CG; committing
+- 2026-10-10T10:51:15-06:00 Q19: named re-export from scrml: checked (validateStdlibImports); SPEC §21.4/§21.6/§34 amended; corpus newly-rejected = 0; conformance case + known-gap g-bootstrap-stdlib-import-004-missing-s462
+- 2026-10-10T11:17:28-06:00 F4 done (meta-import + shim-missing double reports); committing
+- 2026-10-10T11:31:57-06:00 F5: enum-shape parity + ParseError drift guard + data.js ParseError shape + comment; committing
+- 2026-10-10T11:51:30-06:00 merged origin/main d8f5e21b4 (includes 91bfe3e03 + #1389 Rule/validate); known-gaps both sides kept; generated docs regen; data/validate.js sub-shim follows #1389; §2 test uses isValid
