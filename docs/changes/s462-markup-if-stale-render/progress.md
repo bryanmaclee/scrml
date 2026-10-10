@@ -67,3 +67,18 @@ priority there. Once render gates run first, the microtask-deferred error report
       bootstrap-conformance · severity · snippet-gate 128/0 · corpus-compile-floor · types-gate.
 - [x] emit-differential base 801419299 vs head: 0 compile/diagnostic/syntax deltas; 172 artifact
       diffs = 165 project-root-path only + the same 7 chain-group client.js files.
+
+## Fix round 2 (re-review #2 of 821da6c69 → FIX)
+
+- [x] F1 (round 2) HIGH — the mutability analysis was unsound (aliases, closures, mutation through
+      a callee). Replaced by the conservative rule: a binding gets its own LIVE effect ONLY when its
+      expression reads no name declared inside the chain (`liftArmDeclaredNames`: let/const/lin/
+      keywordless decls, loop binders incl. C-style counters, destructured names, function and
+      lambda names + params). Cells, file-scope names and globals are fine. `liftArmMutableLocals`
+      deleted. Tests m1_1, m1_2, m1_3, m1_4, m1_6, m1_7 (the five named ones fail on 821da6c69);
+      m1_5 (`[o.v] = [40]`) fails the compile with E-CODEGEN-INVALID-LOGIC on base and head alike —
+      not a runtime case.
+- [ ] WAITING on coordinator signal: narrowing branch's `_scrml_effect(fn, gate=true)` priority.
+      Then: item 2 (selector `mkEffect(select)` → gate=true; test g1) and item 3 (remove the
+      microtask error suppression; e1 both forms + e3 behave like the plain group). Do not merge
+      main until the signal.

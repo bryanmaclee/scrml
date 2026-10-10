@@ -3,7 +3,7 @@ import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
-import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmMutableLocals, checkLoopBinderWrites } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites } from "./emit-lift.js";
 import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
@@ -750,7 +750,7 @@ function emitIfChainForArms(
   const collector: IfChainCollector = { id: String(++_ifChainSeq), target: stmt, conds: [], hasElse: false };
   const marked = emitStmtRecorded(stmt, side, () => {
     pushIfChainCollector(collector);
-    pushLiftLive(liftArmMutableLocals(stmt));
+    pushLiftLive(liftArmDeclaredNames(stmt));
     try {
       return emitPlain();
     } finally {

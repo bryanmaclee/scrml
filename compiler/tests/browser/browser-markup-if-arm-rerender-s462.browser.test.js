@@ -603,22 +603,71 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
     expect(text("#p")).toBe("first:1");
   });
 
-  test("F1 — a const local and a per-iteration binder still update in place", async () => {
+  test("F1 — a binding reading an arm-declared name stays with the arm; one reading only cells and file-scope names updates in place", async () => {
     const { clientJs } = compileAndMount(`<program>
 <on> = true
 <n> = 0
+\${ const BASE = 100 }
 <div id="h">\${ if (@on) { const base = 100; for (x of [1, 2]) { lift <p class="c">\${base + x + @n}</p> } } }</div>
+<div id="h2">\${ if (@on) { lift <p id="g">\${BASE + @n}</p> } }</div>
 </program>
 `, "f1-const");
     const c = () => [...document.querySelectorAll("#h .c")].map((e) => e.textContent);
     expect(c()).toEqual(["101", "102"]);
-    const first = document.querySelector("#h .c");
+    expect(text("#g")).toBe("100");
+    const g = document.querySelector("#g");
     set("n", 1);
     await flush();
     expect(c()).toEqual(["102", "103"]);
-    expect(document.querySelector("#h .c")).toBe(first);
-    expect(clientJs).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent/);
+    expect(text("#g")).toBe("101");
+    // `BASE + @n` reads a cell and a file-scope name only: its own effect, same node.
+    expect(document.querySelector("#g")).toBe(g);
+    expect(clientJs).toMatch(/_scrml_effect\(function\(\) \{ _scrml_lift_tn_\d+\.textContent = _scrml_g\.String\(\(BASE \+/);
   });
+
+  // ---- S462 fix round 2 (re-review of 821da6c69): aliases and closures ------
+  // A value an arm declares can change behind the binding's back without being
+  // reassigned. Each case renders, then writes @n: the arm must show what a
+  // fresh render shows, never the arm-local's later state.
+  const M1 = [
+    ["m1_1 — a const object mutated by a function it is passed to",
+      `function bump(o) { o.v = o.v + 100 }\n<div id="h">\${ if (@on) { const o = { v: 1 }; lift <p class="r">\${o.v + @n}</p>; bump(o) } }</div>`,
+      ["1"], ["2"]],
+    ["m1_2 — a closure over a let",
+      `<div id="h">\${ if (@on) { let c = 1; const get = () => c; lift <p class="r">\${get() + @n}</p>; c = 50 } }</div>`,
+      ["1"], ["2"]],
+    ["m1_3 — Object.assign on a const object",
+      `<div id="h">\${ if (@on) { const o = { v: 1 }; lift <p class="r">\${o.v + @n}</p>; Object.assign(o, { v: 70 }) } }</div>`,
+      ["1"], ["2"]],
+    ["m1_4 — splice on a const array",
+      `<div id="h">\${ if (@on) { const arr = [1]; lift <p class="r">\${arr[0] + @n}</p>; arr.splice(0, 1, 30) } }</div>`,
+      ["1"], ["2"]],
+    // m1_5 (`[o.v] = [40]`) is not here: it fails the compile with
+    // E-CODEGEN-INVALID-LOGIC on base and head alike (a destructuring write is not
+    // lowered), so there is no runtime to compare.
+    ["m1_6 — a const alias of an array pushed to later",
+      `<div id="h">\${ if (@on) { const items = [1, 2, 3]; let acc = []; for (x of items) { acc.push(x); const snap = acc; lift <p class="r">\${snap.length + @n}</p> } } }</div>`,
+      ["1", "2", "3"], ["2", "3", "4"]],
+    ["m1_7 — a loop binder aliasing an element mutated later",
+      `<div id="h">\${ if (@on) { const items = [{ v: 1 }, { v: 2 }]; for (x of items) { lift <p class="r">\${x.v + @n}</p> }; items[0].v = 90 } }</div>`,
+      ["1", "2"], ["2", "3"]],
+  ];
+  for (const [name, body, init, afterN] of M1) {
+    test(name, async () => {
+      const { errors } = compileAndMount(`<program>\n<on> = true\n<n> = 0\n${body}\n</program>\n`, name.slice(0, 4));
+      expect(errors).toEqual([]);
+      const r = () => [...document.querySelectorAll("#h .r")].map((e) => e.textContent);
+      expect(r()).toEqual(init);
+      set("n", 1);
+      await flush();
+      expect(r()).toEqual(afterN);
+      set("on", false);
+      await flush();
+      set("on", true);
+      await flush();
+      expect(r()).toEqual(afterN);
+    });
+  }
 
   test("F2 — the chain's conditions are evaluated once per write that reaches them, never by a binding", async () => {
     compileAndMount(`<program>

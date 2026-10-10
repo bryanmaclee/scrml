@@ -116,17 +116,20 @@ export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 // factory the reconcile ctx's live-keyed effects take precedence, unchanged.
 //
 // A binding's own effect re-evaluates its expression LATER, when a cell it reads
-// changes — so it may only read values that cannot have changed since the arm
-// rendered. A local of the arm that is reassigned or mutated (a `let` running
-// total, a `while` counter, a `let` written after the lift, an object a method
-// call may change) would be read at its FINAL value: `let total = 0; for (x of
-// [1, 2, 3]) { total = total + x; lift <p>${total + @n}</p> }` showed 7|7|7 for
-// 2|4|7. Each LIVE push therefore carries the arm's MUTABLE local names
-// (liftArmMutableLocals, from the AST); a binding whose expression reads one is
-// left as it is, and the arm's effect re-renders it.
+// changes — so it may only read values the arm's render cannot have left behind.
+// ANY name the chain's arms declare can hold such a value: a `let` reassigned
+// after the lift, a running total, a `const` object mutated in place (`bump(o)`,
+// `Object.assign(o, …)`), a `const` alias of an array pushed to later, a loop
+// binder aliasing an element mutated later, a closure over a `let` — the effect
+// would read the FINAL state (`let total … lift <p>${total + @n}</p>` showed
+// 7|7|7 for 2|4|7). Proving a local unchanged needs alias and escape analysis,
+// so the rule is the conservative one: a binding gets its own effect ONLY when
+// its expression reads no name declared inside the chain (liftArmDeclaredNames);
+// cells, file-scope names and globals are fine. Every other binding stays as it
+// is, and the arm's effect re-renders it with the values of a fresh render.
 // A stack, so nested pushes compose (the innermost set governs).
 const _scrml_lift_live_stack = [];
-export function pushLiftLive(mutableNames) { _scrml_lift_live_stack.push(mutableNames ?? new Set()); }
+export function pushLiftLive(armNames) { _scrml_lift_live_stack.push(armNames ?? new Set()); }
 export function popLiftLive() { _scrml_lift_live_stack.pop(); }
 const _LIFT_LIVE_READ_RE = /_scrml_(?:reactive|derived)_get\(/;
 
@@ -168,7 +171,7 @@ function _jsReadsAnyName(js, names) {
 function _liftLiveActive() {
   return _scrml_lift_live_stack.length > 0 && !currentLiftReconcileCtx();
 }
-function _liftLiveMutable() {
+function _liftLiveArmNames() {
   return _scrml_lift_live_stack[_scrml_lift_live_stack.length - 1];
 }
 
@@ -177,81 +180,52 @@ function _liftLiveMutable() {
  * effect keeps the list reconciled; in LIVE mode the first call must not ALSO
  * subscribe the enclosing arm to the collection, or every change to the list
  * would re-render the whole arm instead of reconciling it in place — unless the
- * collection expression (`iterableJs`) reads a mutable arm local, which the
- * static effect would read at its final value; then the arm keeps the read.
+ * collection expression (`iterableJs`) reads a name the arm declares, which the
+ * static effect could read in a later state; then the arm keeps the read.
  */
 export function liftInitialRenderCall(renderFn, iterableJs) {
-  if (!_liftLiveActive() || _jsReadsAnyName(String(iterableJs ?? ""), _liftLiveMutable())) return `${renderFn}();`;
+  if (!_liftLiveActive() || _jsReadsAnyName(String(iterableJs ?? ""), _liftLiveArmNames())) return `${renderFn}();`;
   return `_scrml_untracked(${renderFn});`;
 }
-/** True when LIVE mode is active (outside a reconcile ctx), `js` reads a cell and no mutable arm local. */
+/** True when LIVE mode is active (outside a reconcile ctx), `js` reads a cell and no arm-declared name. */
 function liftLiveWraps(js) {
-  return _liftLiveActive() && _LIFT_LIVE_READ_RE.test(js) && !_jsReadsAnyName(js, _liftLiveMutable());
+  return _liftLiveActive() && _LIFT_LIVE_READ_RE.test(js) && !_jsReadsAnyName(js, _liftLiveArmNames());
 }
 
 /**
- * The names an arm-selector `if` chain's arms declare that a LIVE binding must
- * not read (see LIVE mode above): every name the chain declares except one that
- * provably keeps the value it had when the binding was created —
- *   - a `const` / `lin` declaration, a function declaration, a function
- *     parameter, a per-iteration `for … of` binder, or a single keywordless
- *     declaration (`y = x * 2`, a fresh block-scoped binding),
- *   - that is never written: not assigned (`x = …`, `x += …`, `x++`, a second
- *     keywordless binding), and not the root of a member write or of a method
- *     call (`o.v = 2`, `arr.push(x)` — the contents change).
- * A `let`, a C-style loop counter, or anything written or mutated is mutable.
- * Names declared outside the chain are not collected: re-rendering the arm
- * does not recompute them, so the arm and a binding's effect read the same.
- * (Mutation through a function the local is passed to is not seen.)
+ * Every name an arm-selector `if` chain declares anywhere inside it — `let`,
+ * `const`, `lin`, keywordless declarations, loop binders (C-style counters
+ * included), destructured names, function names and parameters, lambda
+ * parameters. A LIVE binding may read none of them (see LIVE mode above).
  */
-export function liftArmMutableLocals(root) {
-  const kinds = new Map();
-  const written = new Set();
-  const add = (name, kind) => {
-    const names = typeof name === "string" ? (name ? [name] : [])
-      : (isDestructurePattern(name) ? [..._iterDestructureBindNames(name)] : []);
-    for (const n of names) {
-      if (!kinds.has(n)) kinds.set(n, []);
-      kinds.get(n).push(kind);
-    }
-  };
-  const write = (t) => {
-    let c = t;
-    while (c && (c.kind === "member" || c.kind === "index")) c = c.object;
-    if (c && c.kind === "ident" && typeof c.name === "string" && !c.name.startsWith("@")) written.add(c.name);
+export function liftArmDeclaredNames(root) {
+  const out = new Set();
+  const add = (name) => {
+    if (typeof name === "string") { if (name) out.add(name); return; }
+    if (isDestructurePattern(name)) for (const b of _iterDestructureBindNames(name)) out.add(b);
+    else if (name && typeof name === "object" && typeof name.name === "string" && name.name) out.add(name.name);
   };
   const visit = (n) => {
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) { for (const c of n) visit(c); return; }
     switch (n.kind) {
-      case "let-decl": add(n.name, "let"); break;
+      case "let-decl":
       case "const-decl":
-      case "lin-decl": add(n.name, "const"); break;
-      case "tilde-decl": add(n.name, "tilde"); break;
+      case "lin-decl":
+      case "tilde-decl":
+        add(n.name);
+        break;
       case "for-stmt": {
-        add(n.variable, "loop");
+        add(n.variable);
         const it = typeof n.iterable === "string" ? n.iterable : "";
         const m = it.match(/^\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)/);
-        if (m) add(m[1], "let");
+        if (m) add(m[1]);
         break;
       }
       case "function-decl":
-        add(n.name, "const");
-        for (const prm of Array.isArray(n.params) ? n.params : []) add(typeof prm === "string" ? prm : prm?.name, "param");
-        break;
-      case "assign": write(n.target); break;
-      case "unary":
-      case "update":
-        if (n.op === "++" || n.op === "--" || n.kind === "update") write(n.argument);
-        break;
-      case "call":
-        if (n.callee && (n.callee.kind === "member" || n.callee.kind === "index")) write(n.callee.object);
-        break;
-      case "bare-expr":
-        if (!n.exprNode && typeof n.expr === "string") {
-          const m = n.expr.match(_BARE_WRITE);
-          if (m) written.add(m[1] || m[2]);
-        }
+      case "lambda":
+        add(n.name);
+        for (const prm of Array.isArray(n.params) ? n.params : []) add(prm);
         break;
     }
     for (const k of Object.keys(n)) {
@@ -261,12 +235,6 @@ export function liftArmMutableLocals(root) {
     }
   };
   visit(root);
-  const out = new Set();
-  for (const [name, ks] of kinds) {
-    const keywordless = ks.filter((k) => k === "tilde").length;
-    const stable = ks.every((k) => k === "const" || k === "loop" || k === "param" || k === "tilde");
-    if (!stable || keywordless > 1 || (keywordless === 1 && ks.length > 1) || written.has(name)) out.add(name);
-  }
   return out;
 }
 
