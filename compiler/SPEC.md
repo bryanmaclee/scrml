@@ -45775,14 +45775,14 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 
    | member | its type |
    |---|---|
-   | (a) a **literal**: rule 3's numeric, string and boolean literals (a `-` before a numeric literal included), and a non-empty sequence literal `[…]` whose elements are all such literals of one base type | the literal's (rule 3); `[1, 2, 3]` → `int[]`, `[1, 2.5]` → `number[]` |
+   | (a) a **literal**: rule 3's numeric, string and boolean literals (a `-` before a numeric literal included), a non-empty sequence literal `[…]` whose elements are all such literals of one base type, and a QUALIFIED unit variant `E.V` (§14.10: legal everywhere; the bare `.V` is O35(b)) | the literal's (rule 3); `[1, 2, 3]` → `int[]`, `[1, 2.5]` → `number[]`; `Phase.Idle` → `Phase` |
    | (b) a **typed `@ref`**: `@x` where `x` is a cell whose type is written, or is itself inferred under this rule; or `@d` naming a declaration (its shared instance, §66.7.1) | `x`'s type; `d` |
    | (c) **arithmetic** over members: `+`, `-`, `*`, `%`, unary `-` | two `int`s → `int`; any other two numbers → `number`; `+` over two `string`s → `string` |
    | (c′) `/` over two numbers | `number` (`/` between two `int`s is E-INT-DIVISION, §66.20) |
    | (d) a **comparison** over members: `<`, `<=`, `>`, `>=`, `==`, `!=` | `bool` |
    | (e) a **ternary** `t ? a : b` whose test is a member typed `bool` and whose arms are members of one base type | that type (`int` with `number` → `number`) |
    | (f) **`.length`** of a member typed `string` or a sequence | `int` |
-   | (g) a **call** `f(…)` of a function whose return type is DECLARED (`-> T`) or INFERRED-AND-PROVEN (below) | that return type |
+   | (g) a **call** `f(…)` of a function whose return type is DECLARED (`-> T`) or INFERRED-AND-PROVEN (below); a payload variant's construction `E.V(…)` is a call whose declared type is `E` | that return type; `E` |
 
    A function's return is **inferred-and-proven** when the function declares no return type, is not failable
    (`!`, §19.4) and is not server-placed (§13.7), its body ends in `return` on every path, and every `return`

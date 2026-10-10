@@ -58,6 +58,13 @@ describe("rule 5 — every member of the set infers, unannotated, with no diagno
     expect(tag(seq)).toBe("Seq");
     expect(tag(typeOf("    <r=(1 + 2.5)/>", "r").ty)).toBe("Num");
   });
+  test("a QUALIFIED variant `E.V` is a literal of `E` (rule 5 (a)) — typed, though the binder still refuses the form (dd D5)", () => {
+    const t = typeOf("    type Phase:enum = { Idle, Serving }\n    <m=(Phase.Serving)/>", "m");
+    expect(tag(t.ty)).toBe("Named");
+    expect(t.trusted).toBe(true);
+    // D5 (pre-existing, not this change): the binder reports `Phase` undeclared; no own-value code piles on
+    expect(codes("    type Phase:enum = { Idle, Serving }\n    <m=(Phase.Serving)/>")).not.toContain("E-DECL-TYPE-NOT-INFERABLE");
+  });
   test("the origin: Literal for a literal, Inferred for a non-literal member", () => {
     expect(tag(typeOf("    <r=1/>", "r").origin)).toBe("Literal");
     expect(tag(typeOf("    let <b:int=2/>\n    <r=(@b)/>", "r").origin)).toBe("Inferred");

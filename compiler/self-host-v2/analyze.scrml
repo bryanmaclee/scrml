@@ -2182,7 +2182,7 @@ ${
             return { t: t, done: done.concat([t]) }
         }
         const r: RInf = inferValue(cx, s.init, stack.concat(["@" + name]), [], done)
-        const t2: OwnT = { name: name, ty: r.r.ty, origin: originOf(r.r, name, literalOf(s.init) is some) }
+        const t2: OwnT = { name: name, ty: r.r.ty, origin: originOf(r.r, name, literalInit(cx, s.init)) }
         return { t: t2, done: r.done.concat([t2]) }
     }
 
@@ -2309,7 +2309,34 @@ ${
         return infBlamed()
     }
 
+    // Rule 5 (a)'s literals, the qualified variant included — what rule 9's
+    // boundary exemption ("a literal own value is unaffected") reads.
+    fn literalInit(cx: InferCx, v: AAttrValue) -> boolean {
+        if (literalOf(v) is some) return true
+        const e: AExpr | not = valueExpr(v)
+        if (e is not) return false
+        const mo: AExpr | not = memberObj(e)
+        if (mo is not) return false
+        return qualifiedVariant(cx, mo, memberName(e.k)) is some
+    }
+
+    // Rule 5 (a): a QUALIFIED variant `E.V` names its enum — a literal of `E`
+    // (the bare `.V` is O35(b), outside the set). `not` when `e` is not one.
+    fn qualifiedVariant(cx: InferCx, o: AExpr, n: string) -> Type | not {
+        const en: string = exprName(o)
+        if (en == "") return not
+        const s: TypeStub | not = stubNamed(cx.te, en)
+        if (s is not) return not
+        if (!s.isEnum) return not
+        for (const m of s.members) {
+            if (m.hint == n) return Type.Named(s.sym)
+        }
+        return not
+    }
+
     fn inferMember(cx: InferCx, o: AExpr, n: string, stack: string[], ps: ParamT[], done: OwnT[]) -> RInf {
+        const qv: Type | not = qualifiedVariant(cx, o, n)
+        if (qv is some) return rinf(infOk(qv), done)
         const r: RInf = inferE(cx, o, stack, ps, done)
         if (r.r.kind >= 3) return r
         if (n != "length") return rinf(infOut("the member path `." + n + "`"), r.done)
@@ -2409,7 +2436,13 @@ ${
     fn inferCall(cx: InferCx, callee: AExpr, stack: string[], done: OwnT[]) -> RInf {
         const n: string = exprName(callee)
         if (n == "") {
-            if (memberCall(callee) is some) return rinf(infOut("a method call"), done)
+            // rule 5 (g): a payload variant's construction `E.V(…)` — its type is `E`, declared
+            const mc: MethodCall | not = memberCall(callee)
+            if (mc is some) {
+                const qv: Type | not = qualifiedVariant(cx, mc.obj, mc.method)
+                if (qv is some) return rinf(infOk(qv), done)
+                return rinf(infOut("a method call"), done)
+            }
             return rinf(infOut("a call of a computed function"), done)
         }
         let found: FnSrc | not = not
@@ -2489,12 +2522,13 @@ ${
         const lit: Type | not = literalOf(init)
         if (lit is some) return { name: name, ty: lit, origin: TypeOrigin.Literal }
         const r: RInf = inferValue(cx, init, [], [], tab)
+        const isLit: boolean = literalInit(cx, init)
         const isAttr: boolean = role == FieldRole.Attribute
-        if (isAttr) {
+        if (isAttr && !isLit) {
             if (r.r.kind >= 3) return { name: name, ty: not, origin: TypeOrigin.Blamed }
             return { name: name, ty: not, origin: TypeOrigin.Failed("an attribute's default is inferred from a literal only (§66.3 rule 3 — O35(a) is open), and this one is not a literal") }
         }
-        return { name: name, ty: r.r.ty, origin: originOf(r.r, name, false) }
+        return { name: name, ty: r.r.ty, origin: originOf(r.r, name, isLit) }
     }
 
     // Rule 10: a WRITTEN type over an initializer whose value is unresolvable.
@@ -2564,7 +2598,7 @@ ${
                 resolved = false
             }
             origin = ot.origin
-            if (bnd != "" && role == FieldRole.Child && literalOf(init) is not) origin = TypeOrigin.Boundary(bnd)
+            if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
         if (isLet && seqElem(ty) is some) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
