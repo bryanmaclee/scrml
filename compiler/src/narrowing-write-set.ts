@@ -291,6 +291,8 @@ interface Ctx {
   writeSets: Map<Rec, NarrowEnds>;
   /** Function declarations whose call SUSPENDS (a compiler-inserted await) — S462 Q11. */
   suspends: Set<Rec>;
+  /** Function declarations placed on the server (`server`, or their own `?{}` / `transaction`). */
+  servers: Set<Rec>;
   /** The `endsWithin` options in force (a fresh object per fixpoint pass = fresh memo). */
   opts: { endsAt: (n: Rec) => string[] | "all" | null };
   /** Parsed type annotations. */
@@ -316,7 +318,7 @@ function escapeParams(raw: string): string | null {
 export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions): NarrowingWriteSet {
   const ownEnds = (n: Rec): string[] | "all" | null => ownWrite(n, ctx);
   const ctx: Ctx = {
-    wopts, resolution: new WeakMap(), cellShapes: new Map(), writeSets: new Map(), suspends: new Set(),
+    wopts, resolution: new WeakMap(), cellShapes: new Map(), writeSets: new Map(), suspends: new Set(), servers: new Set(),
     opts: { endsAt: ownEnds },
     annShape: (ann: string): ValueShape => {
       try { return wopts.typeShape?.(ann) ?? syntacticShape(ann); } catch { return syntacticShape(ann); }
@@ -511,7 +513,27 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     }
     return false;
   };
-  for (const d of fnDecls) if (d.isServer === true || d.isAsync === true) ctx.suspends.add(d);
+  // A function whose own body holds `?{}` SQL / a `transaction` is placed on the server
+  // (§12.2 Trigger 1) even without the `server` keyword; its client call is a fetch the
+  // compiler awaits. (Route inference's other escalation triggers are not mirrored here
+  // — g-narrowing-suspension-misses-inferred-server-fns-s462.)
+  const serverOnly = (n: unknown): boolean => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) return n.some(serverOnly);
+    const r = n as Rec;
+    if (r.kind === "function-decl" || r.kind === "lambda") return false;
+    if (r.kind === "sql" || r.kind === "sql-ref" || r.kind === "transaction-block") return true;
+    for (const k of Object.keys(r)) {
+      if (k === "span") continue;
+      const v = r[k];
+      if (v && typeof v === "object" && serverOnly(v)) return true;
+    }
+    return false;
+  };
+  for (const d of fnDecls) {
+    if (d.isServer === true || serverOnly(d.body)) ctx.servers.add(d);
+    if (ctx.servers.has(d) || d.isAsync === true) ctx.suspends.add(d);
+  }
   for (let grew = true; grew;) {
     grew = false;
     for (const d of fnDecls) {
@@ -907,7 +929,7 @@ function describeEnd(n: Rec, key: string, ctx: Ctx): string {
         const res = ctx.resolution.get(callee);
         if (res && res.kind === "fn") {
           if (ctx.suspends.has(res.decl)) {
-            const what = res.decl.isServer === true
+            const what = ctx.servers.has(res.decl)
               ? "is a server call (the compiler awaits it)"
               : "suspends (it awaits — a server call or an `await` inside it — so the compiler awaits the call)";
             return `${at} ${what} — a suspension point: while it waits, another handler may write ${cell}`;

@@ -676,6 +676,15 @@ describe("S462 Q11 — a suspension point ends every cell narrowing", () => {
     expect(errs[0].message).toContain("`save()` is a server call");
     expect(errs[0].message).toContain("suspension point");
   });
+  test("a function placed on the server by its own `?{}` (no `server` keyword)", () => {
+    const errs = compile(prog3(`
+    function count() -> int { const r = ?{\`SELECT 1 AS n\`}.get()
+        return 1 }
+    function show() { if (@user is given) { const r = count()
+            @out = @user.name } }`)).filter((e) => e.code === "E-TYPE-046");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("`count()` is a server call");
+  });
   test("a call of a client function that awaits a server call", () => {
     expect(n3(`
     server function save() -> int { return 1 }
