@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 247 | 5 |
-| MED | 566 | 5 |
-| LOW | 328 | 0 |
+| MED | 567 | 5 |
+| LOW | 333 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24197,6 +24197,8 @@ Related: [[g-splitargs-ignores-string-regex-comment-context-s460]].
 
 **S461 (AUTO) — part 4 RESOLVED, parts 1–3 still open:** E-CHANNEL-006 now fires when an `onclient:*` handler resolves (channel body → file top level → import) to a `server function` / `server fn`; `compiler/src/type-system.ts` `checkClientHandlerNotServer` beside E-CHANNEL-005. prov=pa-ruled:spec §38.10.3 "A function designated as the handler for an `onclient:*` attribute SHALL NOT be declared `server function`. The compiler SHALL emit E-CHANNEL-006 and reject the program." · newly-rejecting · corpus MEASURED zero (3303 non-stdlib + 53 stdlib files compiled; 0 newly failing outside the 3 new `-err` cases; every accepted program byte-identical). Change-id `s461-e-channel-006`. Not covered: a plain `function` handler that route inference promotes to the server (auto-questions.md "promoted-onclient-handler"); the LSP single-file path does not judge imported handlers; the bootstrap has none of the channel handler checks.
 
+**S462 — the "not covered" promoted-handler case is now covered:** E-CHANNEL-006 also fires when §12.2 places an `onclient:*` handler on the server (Triggers 1, 2, 3, 5, 7 tested), read from route inference's routeMap; route inference no longer exempts an onclient handler from Trigger 7. Change-id `s462-channel-006-inferred`, prov=ruling:user-voice-scrml.md S462 "a" · newly-rejecting · corpus measured 0 newly refused (2633 files). Parts 1–3 remain open; the bootstrap half is filed as [[g-bootstrap-no-channel-handler-checks-s462]].
+
 Source: `docs/changes/s460-onclient-shadow/progress.md`, "Final state → Surfaced, not fixed". All four parts were re-verified on main `3d0e54e21`. Probes are in `/home/bryan-maclee/.cache/scrml-agent-tmp/s460-gaps-b/r3/`.
 1. `c1.scrml`: `onclient:open=onOpen(@count)` → **E-CODEGEN-INVALID-LOGIC**. The argument goes into the listener as raw text, and `@count` is never lowered to a cell read. This fails closed.
 2. `c2.scrml`: `onserver:open=hello(who)` compiles (exit 0). `.server.js` has `if (ws.data.__ch === "chat") { await hello(who); }`, where `who` is declared nowhere: a ReferenceError on the first connection. The same holds for `onserver:close`. E-CHANNEL-005 / -HANDLER-SHADOW cover only `onserver:message` and `onclient:*`, so nothing checks these arguments.
@@ -24353,3 +24355,107 @@ Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pr
 <!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
 
 Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
+
+### G-BOOTSTRAP-NO-CHANNEL-HANDLER-CHECKS-S462 — the bootstrap (`compiler/self-host-v2/`) has none of the channel handler checks: no E-CHANNEL-005, E-CHANNEL-HANDLER-SHADOW or E-CHANNEL-006 (declared or §12.2-placed), and no handler-name resolution to build them on — `NEW S462; LOW; open (bootstrap twin)`
+<!-- @gap id=g-bootstrap-no-channel-handler-checks-s462 sev=LOW status=open locus=searched:compiler/self-host-v2/*.scrml(grep `E-CHANNEL-00[56]`, `E-CHANNEL-HANDLER-SHADOW`, `onclient` — zero hits; the only channel diagnostic is E-CHANNEL-OUTSIDE-PROGRAM at analyze.scrml:1425) prov=empirical:s462-channel-006-inferred -->
+
+impl#1 emits all three from `compiler/src/type-system.ts` (`checkChannelHandlerBindings`, `checkClientHandlerNotServer`). Since S462 (change-id `s462-channel-006-inferred`, ruling:user-voice-scrml.md S462 "a") E-CHANNEL-006 also fires when §12.2 places the handler on the server; impl#1 reads that from route inference's routeMap. A bootstrap twin needs (1) the handler-name resolution order of §38.10.3 (channel body → file top level → other channels' bodies → import), and (2) the bootstrap's own §12.2 placement (`analyze.scrml` already places functions for §12.4 checks, ~:13873) to read — not a second "does it broadcast" detector. Not small, so not twinned in the S462 change. The conformance cases (`channel/handler-onclient-*`) are NOT-TWINNED in `docs/bootstrap-conformance.md` (rhs-decl, ⚑ O38) before they reach this gap.
+
+**Severity LOW:** impl#1 enforces the rule; the gap is bootstrap parity only.
+
+### G-FN-PURITY-BLIND-TO-CHANNEL-HUB-CALLS-S462 — the §48.3 `fn` body check does not count `broadcast()` / `disconnect()` as side effects, so `fn announce() { broadcast(…) }` compiles clean and I-FN-PROMOTABLE can suggest `fn` for a function that publishes to every subscriber — `NEW S462; LOW; open`
+<!-- @gap id=g-fn-purity-blind-to-channel-hub-calls-s462 sev=LOW status=open locus=compiler/src/lint-i-fn-promotable.js:runIFnPromotable(probes checkFnBodyProhibitions; skips only the routeMap server set)+searched:compiler/src/type-system.ts(checkFnBodyProhibitions — no broadcast/disconnect term found; not traced further) prov=empirical:s462-channel-006-inferred(/home/bryan-maclee/.cache/scrml-agent-tmp/s462-channel-006-inferred/r/fnb.scrml);ruling-side-finding:user-voice-scrml.md-S462-"a" -->
+
+Found on the S462 reproducer: `onclient:open=onOpen(e)` with `function onOpen(e) { broadcast({ joined: true }) }` drew `I-FN-PROMOTABLE — function onOpen body meets the fn body constraints`. **That instance is closed by `s462-channel-006-inferred`:** the lint skips functions route inference places on the server, and the handler was only off that list because route inference exempted onclient handlers from §12.2 Trigger 7 — the exemption is gone (the program is now refused with E-CHANNEL-006). **The root is not closed:** `fn announce() { broadcast({ joined: true }) }` inside a `<channel>` body compiles with no `E-FN-*` diagnostic (probe `fnb.scrml` above; the `fn` is server-placed and runs the broadcast from an HTTP route). A channel hub call publishes to, or drops, every subscriber — it is not pure under §48.3, and §12.2 Trigger 7's scope clause ("NOT to `fn`") assumes a `fn` cannot contain one.
+
+**Fix direction (not decided):** treat `broadcast()` / `disconnect()` as prohibited side effects in the `fn` body check (newly-rejecting — needs a ruling and a corpus measurement), which also stops the lint suggesting `fn` for them. A lint-only skip would be a second "does it broadcast" reader.
+
+**Severity LOW:** no silent misbehaviour measured — the `fn` still runs on the server and broadcasts. The cost is a purity contract that does not hold and a lint that can recommend breaking it.
+
+**S462 fix round 1 (F4) — the SPEC and impl#1 also disagree on placement.** §12.2 Trigger 7's scope clause says the trigger applies "NOT to `fn`", yet impl#1 places `fn announce() { broadcast({ joined: true }) }` (inside a `<channel>` body, called from a client `function go()` on a button) on the SERVER: `announce` gets `__ri_route_announce_1`, its body (with the §38.6 `broadcast` binding) is in `server.js`, and `go` awaits `_scrml_fetch_announce_3()` (probe `fnb.scrml`, same directory as above). Behaviour not changed here. Whichever way the purity question is ruled, the Trigger 7 scope clause and the implementation should be made to agree (either the clause names `fn`, or a hub call in a `fn` is refused).
+
+### G-T5-ONCLIENT-AND-MARKUP-REFS-NOT-CLIENT-CALLERS-S462 — an `onclient:` attribute or a markup `${f()}` reference does not count as a CLIENT caller for §12.2 Trigger 5, so a shared pure helper is placed on the server: a socket open or a render does a POST round-trip (a §38.10.2 violation for the `onclient:` case) — `NEW S462; MED; open`
+<!-- @gap id=g-t5-onclient-and-markup-refs-not-client-callers-s462 sev=MED status=open locus=compiler/src/route-inference.ts:5741(Step 5c directClientCount counts inverseCallerMap function-body edges only)+route-inference.ts:5399(markupReferencedNames — gates only indirect escalation, never counted as a direct client caller)+compiler/src/codegen/emit-channel.ts:collectChannelAttrHandlerNames(the onclient set is not consulted by 5c) prov=review:S462-s239-channel-006-inferred;ruling:user-voice-scrml.md-S462-"a"(fix round 1, T5 exemption) -->
+
+SPEC §12.2 Trigger 5: *"A function with at least one client-classified caller SHALL remain ambient."* An `onclient:*` attribute registers its handler as `ws.onopen`/`onclose`/`onerror` inside the client IIFE (§38.10.2), and a markup interpolation `${fmt(2)}` calls `fmt` during render — both are client call sites. Route inference's Step 5c counts neither, so a function whose only *function* caller is server-side is promoted. Reproducer (S462 review):
+
+```scrml
+<program>
+${
+  function fmt(e) { return 1 }
+  server function boot() { return fmt(1) }
+}
+<channel name="c" onclient:open=fmt(e)>
+    <joined> = 0
+</>
+<p>${@joined} ${fmt(2)}</p>
+<button onclick=boot()>b</button>
+</program>
+```
+
+compiles at exit 0 with `fmt` server-placed: `ws.onopen` and the render call a fetch stub. **E-CHANNEL-006 deliberately does not fire here** (ruling S462 "a", fix round 1: a handler placed ONLY by Trigger 5 is exempt until this is decided — §38.10.3), so main's behaviour is preserved byte-for-byte.
+
+**Why it is not simply "count them as client callers":** measured S462 — treating the `onclient:` attribute as a direct client caller keeps `onOpen` ambient, and then the server function calls an `onOpen` that `server.js` never defines (a ReferenceError at request time, exit 0). The same happens today to any ambient function a server function calls (control: a cell-writing `bump()` called from a `?{}` server function and from a client function). That is the placement fork recorded in [[g-5c-caller-context-promotes-a-derived-read-helper-to-the-server]] (refuse vs dual-place); this gap is its `onclient:` + markup-reference instance and should be ruled with it. When it is ruled, drop the Trigger 5 exemption from `type-system.ts` `checkClientHandlerNotServer` (`isCallerContext`) and §38.10.3.
+
+**Severity MED:** silent placement change (a round trip per socket open or render) at exit 0; no data leak measured.
+
+### G-CHANNEL-SAME-NAME-FUNCTIONS-NOT-DISTINGUISHED-S462 — two `<channel>` bodies that declare same-named functions are not distinguished: placement and handler binding are keyed by NAME, so the wrong channel's function can be bound, and §12.2 Trigger 7 judges the name, not the declaration — `NEW S462; LOW; open (pre-existing)`
+<!-- @gap id=g-channel-same-name-functions-not-distinguished-s462 sev=LOW status=open locus=compiler/src/codegen/emit-channel.ts:446(collectChannelFunctionMap — Map<fnName, channelName>, last write wins)+compiler/src/route-inference.ts:4937(Step 3 Trigger 7 looks the function up by name) prov=review:S462-s239-channel-006-inferred(F2) -->
+
+Reproducer (S462 review):
+
+```scrml
+<program>
+<channel name="a" onclient:open=onOpen(e)>
+    <joined> = 0
+    ${ function onOpen(e) { @joined = @joined + 1 } }
+</>
+<channel name="b">
+    <hits> = 0
+    ${ function onOpen(e) { broadcast({ hits: 1 }) } }
+</>
+<p>${@joined}</p>
+<button onclick=onOpen(1)>go</button>
+</program>
+```
+
+- **Base `42d1a7459`:** `ws.onopen` and the button both bind to channel `b`'s `onOpen` — the BROADCASTING one — emitted on the client calling an undefined `broadcast` (the removed name-keyed onclient exemption also exempted `b`'s function, because `a`'s attribute named `onOpen`).
+- **After `s462-channel-006-inferred`:** `ws.onopen` and the button bind to `a`'s client `onOpen` (correct), and `b`'s `onOpen` gains a server route plus a client fetch stub nothing calls. Accepted at review as more correct (progress.md, fix round 1, F2).
+
+What remains is the name keying itself: two same-named declarations in one file's channel bodies are one entry in `collectChannelFunctionMap`, and which one a reference reaches is decided by emit order, not scope. Fix direction: key by declaration (span / node identity) and resolve each reference by the §38.10.3 innermost-first rule. Possibly a duplicate-declaration error is the right answer instead — functions hoist file-wide (§38.10.2), so two channel-body `onOpen`s are arguably one name declared twice; needs a ruling.
+
+**Severity LOW:** needs two same-named functions in one file; reproduced only by construction.
+
+### G-CHANNEL-BROADCAST-DETECTOR-NOT-SCOPE-AWARE-S462 — §12.2 Trigger 7's `broadcast()` / `disconnect()` detector matches source text with no scope awareness, so a nested local or parameter NAMED `broadcast` / `disconnect` places the enclosing channel function on the server — `NEW S462; LOW; open`
+<!-- @gap id=g-channel-broadcast-detector-not-scope-aware-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason — regex `(^|[^.\w$])(broadcast|disconnect)\s*\(` over each statement's emitted text; no binding resolution) prov=review:S462-s239-channel-006-inferred-rereview(N1) -->
+
+`detectChannelBroadcastReason` decides "this calls the channel built-in" from the text of each statement. It does not resolve the callee, so a shadowing binding counts as the built-in. Since fix round 1 (F3) it also looks inside nested function declarations, so a nested PARAMETER named `broadcast` now reaches it:
+
+```scrml
+function bump(n) {
+    function apply(broadcast) { return broadcast(n) }
+    @joined = apply(x => x + 1)
+}
+```
+
+`bump` (in a `<channel>` body) is placed on the server and becomes a server route with a CPS fetch at exit 0. If `bump` is an `onclient:*` handler, E-CHANNEL-006 fires on a correct program (a false refusal). This is the same "two readers of one text" shape as Rule 7: the placement reads text, while the language reads bindings.
+
+**Fix direction:** resolve the callee structurally. A call counts only when its callee is the identifier `broadcast` / `disconnect` and resolves to the channel built-in, not to a shadowing parameter, local, or nested function in an enclosing scope. **Measured (S462, probe `n1b.scrml` = the shape above in a `<channel>` body, called from a button):** base `42d1a7459` keeps `bump` on the client; after fix round 1 (`e78ad371e`) `bump` gets `__ri_route_bump_*` plus a fetch stub. So the shadowing-parameter shape is a regression from F3 (descending nested declarations), not a pre-existing one. The regex itself is older: a statement whose text contains `broadcast(` is matched whatever `broadcast` is bound to, for the statement kinds it scans (`bare-expr`, `return-stmt`, the declaration kinds). Probe `n1.scrml` (`const broadcast = (x) => x + 1` then `@joined = broadcast(n)`) is NOT placed on either side, because that assignment's statement kind is not scanned.
+
+**Severity LOW:** needs a user binding named after a channel built-in. Fails closed or toward the server (an extra round trip, or a false E-CHANNEL-006); no data leak.
+
+### G-DEAD-NESTED-BROADCASTER-ESCALATES-PARENT-UNEXPLAINED-S462 — a DEAD nested function that calls `broadcast()` still places its parent on the server, and the resulting E-CHANNEL-SERVER-CELL-READ does not name the cause — `NEW S462; LOW (review NIT); open`
+<!-- @gap id=g-dead-nested-broadcaster-escalates-parent-unexplained-s462 sev=LOW status=open locus=compiler/src/route-inference.ts:2277(detectChannelBroadcastReason descends nested function-decl bodies without asking whether the nested function is reachable)+route-inference.ts:6418(E-CHANNEL-SERVER-CELL-READ message names the cell read, not the placement trigger) prov=review:S462-s239-channel-006-inferred-rereview(N2) -->
+
+```scrml
+function bump(n) {
+    function never() { broadcast({ joined: n }) }
+    @joined = @joined + n
+}
+```
+
+`never` is never called, and W-DEAD-FUNCTION says it will be tree-shaken. Its `broadcast()` still places `bump` on the server (fix round 1, F3: a nested hub call counts for the parent), so `bump`'s read of the channel cell `@joined` fires E-CHANNEL-SERVER-CELL-READ. The two diagnostics disagree about whether `never` exists, and the error does not say that a dead nested function is what moved `bump` to the server. Measured (probe `n2.scrml`, `bump` in a `<channel>` body called from a button): base `42d1a7459` exit 0; after fix round 1 (`e78ad371e`) exit 1 with that error. So this refusal is new with F3, though the corpus measurement found no program that hits it. A nested `?{}` inside a dead nested function already placed its parent the same way before S462 (`walkBodyForTriggers`; not re-probed here).
+
+**Fix direction:** either skip unreachable nested declarations when collecting a parent's triggers, or have the placement-dependent errors (E-CHANNEL-SERVER-CELL-READ, E-CHANNEL-006) name the trigger and where it is, as E-CHANNEL-006 already does. The second is cheaper and fixes the diagnostic for every cause.
+
+**Severity LOW (the review graded it a NIT; the ledger has no NIT tier and `NOMINAL` means "specified, not yet built"):** the program is refused loudly; the cost is a confusing message.
