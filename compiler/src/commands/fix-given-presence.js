@@ -155,12 +155,36 @@ function skipWs(source, i) {
   return i;
 }
 const isWordChar = (c) => c !== undefined && /[A-Za-z0-9_$]/.test(c);
+/** Does a `//` or `/* … *\/` comment start at `i`? */
+const startsComment = (source, i) => source[i] === "/" && (source[i + 1] === "/" || source[i + 1] === "*");
+/**
+ * Skip whitespace AND comments — the source-side twin of the parser's `skipGivenComments`
+ * (ast-builder.js; S462 review N2 / delta-review D1): a comment between `:>` and the `{` of the
+ * block is whitespace. An unterminated block comment stops the skip (fail closed).
+ */
+function skipWsAndComments(source, i) {
+  for (;;) {
+    i = skipWs(source, i);
+    if (source[i] === "/" && source[i + 1] === "/") {
+      const nl = source.indexOf("\n", i);
+      if (nl === -1) return source.length;
+      i = nl + 1;
+    } else if (source[i] === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end === -1) return i;
+      i = end + 2;
+    } else {
+      return i;
+    }
+  }
+}
+const COMMENT_IN_HEAD = "a comment inside the `given` head — the rewrite replaces the head and would delete it; left for a human";
 
 /**
  * Confirm a `given` head against the source. Returns
  * `{ ok: true, names, sepStart, sepEnd, sep, braceAt }` or `{ ok: false, reason }`.
- * Only whitespace may separate the head's parts; a comment, a property path or any other
- * token is a reason to leave the site alone.
+ * Only whitespace may separate the head's parts; a comment there, a property path or any other
+ * token is a reason to leave the site alone. Between the separator and the `{` a comment is whitespace.
  */
 function readHead(source, node) {
   const start = node.span.start;
@@ -175,9 +199,11 @@ function readHead(source, node) {
   const names = [];
   for (let k = 0; k < recorded.length; k++) {
     const at = skipWs(source, i);
+    if (startsComment(source, at)) return { ok: false, reason: COMMENT_IN_HEAD };
     if (k > 0) {
       if (source[at] !== ",") return { ok: false, reason: "the guard's head is not a comma-separated identifier list in the source — left for a human" };
       i = skipWs(source, at + 1);
+      if (startsComment(source, i)) return { ok: false, reason: COMMENT_IN_HEAD };
     } else {
       if (at === i) return { ok: false, reason: "no whitespace after `given` — left for a human" };
       i = at;
@@ -190,6 +216,7 @@ function readHead(source, node) {
     i += name.length;
   }
   const sepStart = skipWs(source, i);
+  if (startsComment(source, sepStart)) return { ok: false, reason: COMMENT_IN_HEAD };
   const sep = source.slice(sepStart, sepStart + 2);
   if (source[sepStart] === ".") {
     return { ok: false, reason: "a property path in a `given` head (E-SYNTAX-044) — there is nothing to rewrite to; left as written" };
@@ -200,7 +227,9 @@ function readHead(source, node) {
   if (typeof node.separatorGlyph === "string" && node.separatorGlyph !== sep) {
     return { ok: false, reason: "the separator in the source is not the one impl#1 recorded — left for a human" };
   }
-  const braceAt = skipWs(source, sepStart + 2);
+  // A comment between the separator and the block is whitespace (it stays: only the head up to
+  // the separator is replaced).
+  const braceAt = skipWsAndComments(source, sepStart + 2);
   return { ok: true, names, sepStart, sepEnd: sepStart + 2, sep, braceAt };
 }
 
@@ -263,6 +292,13 @@ function planSite(source, site) {
     return {
       edit: { start: node.span.start, end: nameEnd, text: "else", line: lineOf(source, node.span.start), detail: `\`given ${name}\` arm → \`else\`` },
     };
+  }
+  if (source[head.braceAt] === "{" && skipWs(source, head.sepEnd) !== head.braceAt) {
+    // S462 delta review D1: the comment is fine in the guard (the parser skips it), but impl#1
+    // reads `if (…) // c⏎{ … }` as an `if` whose body is a nested block (an extra `{ … }`, and
+    // the declarations in it lose their typing) — the verify compile sees different codes.
+    // Moving the comment is the author's call.
+    return { reason: "a comment between `:>` and the guard's block — impl#1 reads `if (…) /* c */ { … }` as a nested block, so the rewrite would not compile the same; move the comment inside the block (or above the guard) and run `scrml fix` again" };
   }
   if (source[head.braceAt] !== "{") {
     return { reason: "the guard's body is not a `{ … }` block (E-SYNTAX-044: a guard body is a block; braces decide what the guard covers) — left for a human" };
@@ -412,7 +448,7 @@ function knownCause(site) {
   const names = Array.isArray(site.node.spellings) ? site.node.spellings : [];
   const hasMarkup = (site.node.body ?? []).some((b) => b && typeof b === "object" && /markup|lift|html-fragment/.test(String(b.kind ?? "")));
   if (hasMarkup && names.some((n) => typeof n === "string" && n.startsWith("@"))) {
-    return " (in markup, impl#1 lowers `${ if (@cell is given) { … } }` with a branch memo (`_scrml_lift_branch_N`) that skips the re-render while presence holds, so `${@cell.field}` inside it goes stale; `given @cell` re-renders — the rewrite would make it worse — g-impl1-markup-if-branch-memo-stale-render-s462)";
+    return " (in markup, impl#1 lowers `${ if (@cell is given) { … } }` with a branch memo (`_scrml_lift_branch_N`) that skips the re-render while the branch holds (any markup `if`, emit-reactive-wiring.ts emitLiftGroup), so `${@cell.field}` inside it goes stale; `given @cell` re-renders — the rewrite would make it worse — g-impl1-markup-if-branch-memo-stale-render-s462)";
   }
   return "";
 }

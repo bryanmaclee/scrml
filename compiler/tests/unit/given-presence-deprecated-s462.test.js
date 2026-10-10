@@ -535,3 +535,27 @@ describe("§F: post-merge (S462 landing prep)", () => {
     expect(clientJs(r)).toContain("return 3;");
   });
 });
+
+describe("§G: delta review D1 — the fix rule reads a comment before the block structurally", () => {
+  test("`given x :> // note⏎{ … }` / `given x :> /* c */ { … }`: located, and left with the REAL reason", () => {
+    // The guard itself compiles (§F). The rewrite is refused because impl#1 reads
+    // `if (…) /* c */ { … }` as a nested block (different codes) — the blocker says so, not
+    // the false "is not a `{ … }` block".
+    const src = LOGIC("    given x :> // note\n    {\n        let _a = x\n    }\n    given x :> /* c */ { let _b = x }");
+    const r = fixGivenPresence(src, { filePath: join(TMP, "g/comment-before-block.scrml") });
+    expect(r.changed).toBe(false);
+    expect(r.blockers.length).toBe(2);
+    for (const b of r.blockers) {
+      expect(b.reason).toContain("a comment between `:>` and the guard's block");
+      expect(b.reason).not.toContain("is not a `{ … }` block");
+    }
+  });
+
+  test("a comment INSIDE the head is left for a human with that reason (the rewrite would delete it)", () => {
+    const src = LOGIC("    given x /* c */ :> { let _a = x }");
+    const r = fixGivenPresence(src, { filePath: join(TMP, "g/comment-in-head.scrml") });
+    expect(r.changed).toBe(false);
+    expect(r.blockers.length).toBe(1);
+    expect(r.blockers[0].reason).toContain("a comment inside the `given` head");
+  });
+});
