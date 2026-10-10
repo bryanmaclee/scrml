@@ -565,6 +565,12 @@ function walkHandlerFunctionValue(val: Rec, at: ReadonlySet<string>, span: Narro
   let fn = (val.exprNode as Rec | undefined) ?? null;
   while (fn && fn.kind === "paren" && fn.expr && typeof fn.expr === "object") fn = fn.expr as Rec;
   if (!fn) return false;
+  const readable = fn.kind === "lambda" || (fn.kind === "escape-hatch" && !!opts.expandOpaque?.(fn));
+  if (!readable) return false;
+  // The value and the function node are visited as the expression walk would (a consumer
+  // anchors its diagnostics on them — component-expander's E-TYPE-031 call positions).
+  if (typeof val.kind === "string") opts.onExpr(val, at, span);
+  opts.onExpr(fn, at, span);
   if (fn.kind === "lambda") {
     const p = walkParamDefaults(fn, at, span, opts);
     const body = fn.body as Rec | undefined;

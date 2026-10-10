@@ -1220,3 +1220,19 @@ describe("S462 round 6 (merge of s461 argExprs) — a reactive array mutation's 
             @out = @user.name } }`)).toBe(0);
   });
 });
+
+describe("S462 round 6 — F6-3/F6-4: an arrow handler value's E-TYPE-031 lands on the call", () => {
+  test("the reported column is the `onGo` call, not the attribute", () => {
+    const line = `    <button class="g" onclick=\${(e, x) => { if (onGo is not) { onGo() } }}>g</button>`;
+    const errs = compile(`<program>
+const C = <div class="c" props={ onGo?: () => void }>
+${line}
+</>
+<C/>
+</program>
+`).filter((e) => e.code === "E-TYPE-031");
+    expect(errs.length).toBe(1);
+    expect(errs[0].span.line).toBe(3);
+    expect(errs[0].span.col).toBe(line.lastIndexOf("onGo()") + 1);
+  });
+});
