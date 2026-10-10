@@ -4,3 +4,5 @@
 - 2026-10-09T22:31:14-06:00 gate (no-bail) 31842 pass/8 fail — all 8 load flakes, re-run clean in isolation. Fixed test fixtures randomUUID(scrml:random)->randomInt, formatDate scrml:format->scrml:time; samples protect-001 (verifyHash -> scrml:crypto 3-arg), gauntlet-r14 elixir uuid->generateUUID
 - 2026-10-09T22:47:48-06:00 addendum (stdlib exported TYPES) appended to BRIEF.md
 - 2026-10-09T23:04:45-06:00 addendum 2 appended; sample commit OOM-killed (exit 137) once, retrying
+- 2026-10-09T23:17:08-06:00 addendum-2 work: sub-shims, type-import prune, parity test, unit+conformance tests; committing
+- 2026-10-09T23:27:32-06:00 addendum-1: stdlib types seeded via shared stdlibModuleAst reader; corpus type-import sites (10 files) show no diagnostic change vs main except stdlib-path-exemption noise

@@ -61,7 +61,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -2180,6 +2180,30 @@ function _compileScrmlImpl(options = {}) {
   // for modules that the user actually imports (no eager full-stdlib scan).
   // Cached: each stdlib module is parsed at most once per `compileScrml` call.
   // ---------------------------------------------------------------------------
+  // S462 — the ONE reader of a stdlib module's `.scrml` source: a TAB-only parse,
+  // cached per compile. The STDLIB-EXPORT-SEED stage reads its export list
+  // (names + kinds, E-IMPORT-004); the importedTypes seeder below reads its
+  // type declarations (§53.14.6). Returns the TAB AST, or null when the file
+  // is missing or does not parse (errors swallowed — a registry-seed reader,
+  // not a diagnostic surface).
+  const _stdlibAstCache = new Map();
+  function stdlibModuleAst(absPath) {
+    const key = absPath;
+    if (_stdlibAstCache.has(key)) return _stdlibAstCache.get(key);
+    let out = null;
+    if (existsSync(absPath)) {
+      try {
+        const src = readFileSync(absPath, "utf8");
+        const tabResult = buildAST(splitBlocks(absPath, src));
+        if (tabResult && tabResult.ast) out = tabResult.ast;
+      } catch {
+        out = null;
+      }
+    }
+    _stdlibAstCache.set(key, out);
+    return out;
+  }
+
   stage("STDLIB-EXPORT-SEED", () => {
     // Collect unique stdlib import absolute paths from the import graph.
     const stdlibPaths = new Set();
@@ -2205,22 +2229,9 @@ function _compileScrmlImpl(options = {}) {
     // at) is parsed at most once per compile. Returns the file's export-decl
     // array, or null on missing-file / parse-failure (errors swallowed — this
     // is a best-effort registry-seed pass, not a diagnostic surface).
-    const _seedParseCache = new Map();
     function _parseStdlibExports(absPath) {
-      if (_seedParseCache.has(absPath)) return _seedParseCache.get(absPath);
-      let out = null;
-      if (existsSync(absPath)) {
-        try {
-          const src = readFileSync(absPath, "utf8");
-          const bsOut = splitBlocks(absPath, src);
-          const tabResult = buildAST(bsOut);
-          if (tabResult && tabResult.ast) out = tabResult.ast.exports || [];
-        } catch {
-          out = null;
-        }
-      }
-      _seedParseCache.set(absPath, out);
-      return out;
+      const ast = stdlibModuleAst(absPath);
+      return ast ? (ast.exports || []) : null;
     }
 
     // Issue #26 (P0 auth-bypass) — resolve a re-export chain to its TERMINAL
@@ -2818,11 +2829,19 @@ function _compileScrmlImpl(options = {}) {
   function getDepRegistry(absSource) {
     if (depRegistryCache.has(absSource)) return depRegistryCache.get(absSource);
     const depFile = ceFileMap.get(absSource);
-    if (!depFile) {
+    // S462 — §53.14.6: "The importing file's `typeRegistry` SHALL include any
+    // imported stdlib types after MOD resolution." A stdlib module is not in the
+    // compile set (its runtime is the JS shim), so its type declarations come
+    // from the same TAB-only reader the STDLIB-EXPORT-SEED stage uses; from here
+    // on it is the local-file path, unchanged.
+    const stdlibAst = !depFile && isStdlibFilePath(absSource) ? stdlibModuleAst(absSource) : null;
+    if (!depFile && !stdlibAst) {
       depRegistryCache.set(absSource, null);
       return null;
     }
-    const depTypeDecls = depFile.typeDecls ?? depFile.ast?.typeDecls ?? [];
+    const depTypeDecls = depFile
+      ? (depFile.typeDecls ?? depFile.ast?.typeDecls ?? [])
+      : (stdlibAst.typeDecls ?? []);
     if (depTypeDecls.length === 0) {
       depRegistryCache.set(absSource, new Map());
       return depRegistryCache.get(absSource);
@@ -2868,6 +2887,25 @@ function _compileScrmlImpl(options = {}) {
 
     // Otherwise, check this file's exports[] for a matching re-export entry.
     const depGraphEntry = moduleResult.importGraph.get(absSource);
+    if (!depGraphEntry && isStdlibFilePath(absSource)) {
+      // S462 — a stdlib module (not a graph node): chase its `export { … } from`
+      // re-exports from the same TAB-only reader (`scrml:auth` → ./jwt.scrml).
+      const ast = stdlibModuleAst(absSource);
+      for (const exp of ast?.exports ?? []) {
+        if (exp.exportKind !== "re-export" || !exp.reExportSource || !exp.exportedName) continue;
+        let sourceLocal = null;
+        if (Array.isArray(exp.renames)) {
+          const hit = exp.renames.find(r => r && r.exported === typeName);
+          if (hit) sourceLocal = hit.local ?? hit.exported;
+        } else if (exp.exportedName.split(",").map(x => x.trim()).includes(typeName)) {
+          sourceLocal = typeName;
+        }
+        if (sourceLocal == null) continue;
+        const found = resolveTypeThroughReExport(resolve(dirname(absSource), exp.reExportSource), sourceLocal, visited);
+        if (found) return found;
+      }
+      return null;
+    }
     if (!depGraphEntry || !depGraphEntry.exports) return null;
 
     for (const exp of depGraphEntry.exports) {

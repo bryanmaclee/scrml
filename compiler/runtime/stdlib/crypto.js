@@ -10,6 +10,16 @@
 //   - hmac(secret, payload)             → Promise<string>       [browser-safe]
 //   - safeCompare(a, b)                 → boolean               [browser-safe]
 
+// CryptoError — mirrors `export type CryptoError:enum = { VerifyFailed(message: string) }`
+// in stdlib/crypto/index.scrml, in the compiler's enum shape (payload variant →
+// { variant, data }); host.js HostError follows the same convention.
+export const CryptoError = Object.freeze({
+  VerifyFailed: function(message) {
+    return { variant: "VerifyFailed", data: { message } };
+  },
+  variants: ["VerifyFailed"],
+});
+
 export function hash(algorithm, input) {
   if (typeof input !== "string") input = String(input);
   if (algorithm === "argon2") {

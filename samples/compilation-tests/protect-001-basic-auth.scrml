@@ -6,7 +6,7 @@
 <program>
 
 ${
-    import { verifyHash } from 'scrml:auth'
+    import { verifyHash } from 'scrml:crypto'
     import { navigate } from 'scrml:router'
 }
 
@@ -32,8 +32,9 @@ ${
                 return "No account found for that email."
             }
 
-            // verifyHash is a hypothetical helper; point is password_hash is in scope.
-            if (!verifyHash(password, user.password_hash)) {
+            // scrml:crypto verifyHash(algorithm, input, storedHash); the point is
+            // that password_hash is in scope here (server side) and never on the client.
+            if (!verifyHash("argon2", password, user.password_hash)) {
                 return "Incorrect password."
             }
 

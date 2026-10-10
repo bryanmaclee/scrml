@@ -676,3 +676,22 @@ export function schemaFor(_StructType, _options) {
     "SPEC §41.15."
   );
 }
+
+// ---------------------------------------------------------------------------
+// table-for.scrml — tableFor defensive fallback
+//
+// Canonical usage is the markup element form `<tableFor for=Struct rows=…>`,
+// which the compiler's type-system stage rewrites into a `<table>` tree before
+// any code emission. If a call reaches this body the rewrite failed — surface
+// a clear error rather than `tableFor is not a function`. (`TableSort`, the
+// module's :struct type, has no run-time value.)
+// ---------------------------------------------------------------------------
+
+export function tableFor(_StructType, _options) {
+  // Defensive fallback only — see header comment.
+  throw new Error(
+    "scrml:data tableFor: internal — call site was not rewritten at compile time. " +
+    "The canonical usage is the markup element form <tableFor for=Struct rows=@rows/> " +
+    "per SPEC §41.16."
+  );
+}

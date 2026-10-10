@@ -1,0 +1,8 @@
+{
+  "id": "e-import-004-stdlib-submodule-only-name-reject",
+  "description": "§21.3 / §41.3.1 — `JwtError` is declared in the submodule `scrml:auth/jwt` and NOT re-exported by `scrml:auth`, so `import { JwtError } from 'scrml:auth'` fires E-IMPORT-004 (the message points at `scrml:auth/jwt`).",
+  "language-version": "1.0",
+  "spec": "§41.3.1",
+  "rationale": "A module's exports are what it declares or re-exports by name; a name only a submodule exports is not exported by the umbrella module. §21.3 E-IMPORT-004 applies to `scrml:` imports per §41.3.1.",
+  "expect": { "codes": ["E-IMPORT-004"], "notCodes": ["E-IMPORT-006"] }
+}
