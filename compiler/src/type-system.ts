@@ -111,6 +111,7 @@ import {
 // boundary check (emit-predicates.ts) and built on the §5.2 URL scheme reader.
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
+import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 
@@ -23491,6 +23492,25 @@ function checkRegisterMessagesCalls(
       here = sp;
     }
     if (kind === "call") checkCall(obj as { callee?: unknown; args?: unknown[]; span?: Span }, here);
+    // S462 FIX1 F1 — an expression acorn cannot read is kept as an `escape-hatch` ParseError and
+    // reaches codegen as TEXT, which lowers it with `rewriteFnKeyword` (`fn` → `function`) before
+    // emitting it. `registerMessages({ .Required: fn(field) { … } })` is such an expression: its
+    // `fn(…) { … }` value makes the whole call unreadable, so without this no call node exists and
+    // nothing in the map — the function value, nor any other template beside it — is checked. Read
+    // what codegen will emit (the same lowering, then the same parser) and check that tree.
+    if (kind === "escape-hatch" && obj.nativeKind === "ParseError" && typeof obj.raw === "string") {
+      const raw = obj.raw as string;
+      let mentionsLocal = false;
+      for (const name of locals) { if (raw.includes(name)) { mentionsLocal = true; break; } }
+      if (mentionsLocal) {
+        const lowered = rewriteFnKeyword(raw);
+        if (lowered !== raw) {
+          let reparsed: ExprNode | null = null;
+          try { reparsed = parseExprToNode(lowered, here.file ?? defaultSpan.file, 0); } catch { reparsed = null; }
+          if (reparsed && (reparsed as { kind?: string }).kind !== "escape-hatch") visit(reparsed, here);
+        }
+      }
+    }
     for (const k in obj) visit(obj[k], here);
   }
 

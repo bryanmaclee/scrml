@@ -4983,29 +4983,9 @@ function _scrml_computed(fn) {
 // ---------------------------------------------------------------------------
 // §55.10 Error message resolution runtime (chunk: 'messages')
 // ---------------------------------------------------------------------------
-// 4-level chain (L12). Levels 1 → 2 → 3 (Level 4 is the consumer-side
-// <match for=ValidationError> escape hatch — not in this catalog).
-//
-//   Level 1: per-(cell,validator) inline override on field declaration
-//            (highest priority; static-string only per L12 Edge F).
-//            Stored by C10's emitter via _scrml_messages_register_inline.
-//   Level 2: project-registered messages — registerMessages({...}).
-//            Stored as enum-tag → parsed MESSAGE TEMPLATE (§41.12.1, S462).
-//            A template is data; no author function runs to produce a message.
-//   Level 3: shipped English defaults — _SCRML_DEFAULT_MESSAGES, templates in
-//            the same grammar. Always available zero-config floor.
-//
-// The template grammar, the per-variant slot table, the defaults and the
-// renderer are inlined from compiler/src/runtime-message-templates.js — the
-// SAME source the compiler parses literal templates with, so the compile-time
-// check (E-MESSAGE-SLOT-UNKNOWN / E-MESSAGE-TEMPLATE-MALFORMED) and this
-// runtime check cannot disagree.
-//
-// Cross-references:
-//   - SPEC §55.10 — 4-level chain
-//   - SPEC §55.9  — ValidationError enum (14 + Custom); payload names = slot names
-//   - SPEC §41.12 — registerMessages API + messageFor; §41.12.1 template grammar
-//   - compiler/src/codegen/emit-messages.ts — Level-1 codegen emission
+// Chain L1 inline override → L2 registered template → L3 shipped default (§55.10;
+// L4 <match> is consumer-side). Templates (§41.12.1) are read by the inlined
+// runtime-message-templates.js — the same reader the compiler checks literals with.
 
 ${MESSAGE_TEMPLATE_RUNTIME_SOURCE}
 // Level-1 storage: keys are "<cellName>::<validatorName>"; values are
@@ -5076,51 +5056,33 @@ function _scrml_messages_register_inline(cellName, validatorName, override) {
   _scrml_messages_inline[cellName + "::" + validatorName] = override;
 }
 
-// Report a template registerMessages refused (§41.12.1 rule 6). The compiler
-// refuses the same templates when they are written as literals; this one only
-// sees templates the compiler could not.
-function _scrml_messages_refuse(tag, why) {
+// A template registerMessages refuses (§41.12.1 rule 6) — one the compiler could not see.
+function _scrml_messages_refuse(text) {
   if (typeof console !== "undefined" && typeof console.error === "function") {
-    console.error("[scrml] registerMessages: the message for ." + tag + " is refused — " + why +
-      " ." + tag + " keeps its earlier registration, or the shipped default if it has none.");
+    console.error("[scrml] registerMessages: " + text);
   }
 }
 
-/**
- * Level-2 registration — public facade for registerMessages (stdlib re-export).
- * Last-write-wins per variant key (§41.12). Composes across multiple calls
- * (each call merges into the table).
- *
- * Every value is a message template (§41.12.1), parsed here against its
- * variant's slots. A value that is not a string, a key that is not a
- * ValidationError variant, a malformed template or a template naming a slot
- * its variant lacks is REFUSED — not registered (an earlier registration for
- * that key stays) and reported — never rendered partially.
- *
- * @param {Object} map — { Required: "Please fill in {field}.", MinFailed: "{field} must be at least {threshold}.", ... }
- */
+// Level-2 registration (registerMessages). Last-write-wins per variant; a refused
+// entry is not stored (an earlier one for that variant stays) and is never rendered.
 function _scrml_messages_register(map) {
   if (!map || typeof map !== "object") return;
   for (const tag of Object.keys(map)) {
     const template = map[tag];
     const slots = _SCRML_MESSAGE_SLOTS[tag];
     if (!slots) {
-      _scrml_messages_refuse(tag, "it is not a ValidationError variant.");
+      _scrml_messages_refuse("." + tag + " is not a ValidationError variant; ignored.");
       continue;
     }
-    if (typeof template !== "string") {
-      _scrml_messages_refuse(tag, 'the value is not a message template (a string such as "Please fill in {field}.").');
+    const parsed = typeof template === "string" ? _scrml_message_template_parse(template, slots) : null;
+    if (parsed && parsed.ok) {
+      _scrml_messages_registered[tag] = parsed.parts;
       continue;
     }
-    const parsed = _scrml_message_template_parse(template, slots);
-    if (!parsed.ok) {
-      _scrml_messages_refuse(tag, parsed.reason === "unknown-slot"
-        ? "the template names {" + parsed.slot + "}, which ." + tag + " does not have (its slots: " +
-          slots.map(function (s) { return "{" + s + "}"; }).join(", ") + ")."
-        : "the template is malformed at offset " + parsed.at + " (a slot is {name}; write {{ for a literal {).");
-      continue;
-    }
-    _scrml_messages_registered[tag] = parsed.parts;
+    const why = !parsed ? "is not a message template (a string)"
+      : parsed.reason === "unknown-slot" ? "names {" + parsed.slot + "}; its slots are {" + slots.join("}, {") + "}"
+      : "is malformed at offset " + parsed.at;
+    _scrml_messages_refuse("the ." + tag + " template " + why + "; refused.");
   }
 }
 

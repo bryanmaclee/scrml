@@ -1,28 +1,8 @@
-// SPEC §41.12.1 — message templates for the §55.10 error-message chain (S462).
-//
-// ONE source for both readers of a message template:
-//   - the COMPILER reads it as an ES module: `type-system.ts` (`checkRegisterMessagesCalls`) parses
-//     every LITERAL `registerMessages` template with `_scrml_message_template_parse` and refuses an
-//     unknown slot (E-MESSAGE-SLOT-UNKNOWN) or a malformed template (E-MESSAGE-TEMPLATE-MALFORMED);
-//   - the RUNTIME inlines this file's source verbatim (`export ` stripped, runtime-template.js chunk
-//     'messages') and parses every template `registerMessages` receives with the same function, so a
-//     template the compiler could not see (a variable, a back-tick string with `${}`) is judged by the
-//     same grammar and the same slot table — and refused, never half-rendered, when it fails.
-// The Level-3 shipped defaults are templates in this grammar too (`_SCRML_DEFAULT_MESSAGES`).
-// Do not write a second slot table or a second template reader anywhere: change this file.
-//
-// Grammar (§41.12.1):
-//     template := ( text | "{{" | slot )*
-//     slot     := "{" name "}"          name := [A-Za-z_][A-Za-z0-9_]*
-//     text     := any character other than "{"
-// Only `{` is special. `{{` is a literal `{`; a `}` outside a slot is ordinary text.
-//
-// This file is inlined into a classic browser script and into the server bundle, so it holds plain
-// function and `const` declarations only — no imports, no TypeScript, and every top-level name carries
-// the `_scrml_` / `_SCRML_` prefix the runtime reserves.
+// §41.12.1 message templates — ONE reader for the compiler and the runtime ('messages' chunk).
+// This file is inlined into the client runtime, so its documentation lives in
+// runtime-message-templates.d.ts. Change the grammar or the slot table here and nowhere else.
 
-// The slots each ValidationError variant (§55.9) offers: the field display name plus the variant's
-// payload fields, by their §55.9 names. Null-prototype: indexed by an error tag, which is data.
+// Slots per ValidationError variant: field + the §55.9 payload names. Null-prototype (keyed by data).
 export const _SCRML_MESSAGE_SLOTS = Object.assign(Object.create(null), {
   Required:        ["field"],
   NotSome:         ["field"],
@@ -41,7 +21,7 @@ export const _SCRML_MESSAGE_SLOTS = Object.assign(Object.create(null), {
   Custom:          ["field", "tag"],
 });
 
-// Level-3 shipped English defaults (§55.10), written in the template grammar above.
+// Level-3 shipped English defaults (§55.10).
 export const _SCRML_DEFAULT_MESSAGES = Object.assign(Object.create(null), {
   Required:        "{field} is required.",
   NotSome:         "{field} is required.",
@@ -68,17 +48,7 @@ function _scrml_message_slot_name_part(ch) {
   return _scrml_message_slot_name_start(ch) || (ch >= "0" && ch <= "9");
 }
 
-/**
- * Parse a message template against the slot list of its variant.
- *
- * Returns `{ ok: true, parts }` — `parts` alternates literal text (a string) and slots
- * (`{ slot: name }`) — or `{ ok: false, reason, at, slot }`:
- *   reason "malformed"    — a `{` at offset `at` that is neither `{{` nor `{` name `}`
- *   reason "unknown-slot" — `{slot}` at offset `at` is not one of `slots`
- *
- * @param {string} text   the template
- * @param {string[]} slots the slot names its variant offers (`_SCRML_MESSAGE_SLOTS[tag]`)
- */
+// Parse -> { ok: true, parts } | { ok: false, reason: "malformed" | "unknown-slot", at, slot }.
 export function _scrml_message_template_parse(text, slots) {
   const parts = [];
   let literal = "";
@@ -116,7 +86,7 @@ export function _scrml_message_template_parse(text, slots) {
   return { ok: true, parts };
 }
 
-// The text one slot renders for an error (§41.12.1 rule 4). An absent payload value renders "".
+// One slot's text (§41.12.1 rule 4); an absent payload value renders "".
 function _scrml_message_slot_text(error, fieldName, slot) {
   let value;
   switch (slot) {
@@ -127,7 +97,7 @@ function _scrml_message_slot_text(error, fieldName, slot) {
     case "expected":  value = error.expected; break;
     case "forbidden": value = error.forbidden; break;
     case "set":       value = error.set; break;
-    // `Custom(tag)`'s payload cannot live on `error.tag` (that is the variant discriminant).
+    // Custom(tag): `error.tag` is the discriminant, so the payload lives elsewhere.
     case "tag":       value = error.tag_string != null ? error.tag_string : error.customTag; break;
     default:          value = null;
   }
@@ -141,13 +111,7 @@ function _scrml_message_slot_text(error, fieldName, slot) {
   return String(value);
 }
 
-/**
- * Render parsed template parts for one error.
- *
- * @param {Array<string|{slot: string}>} parts  from `_scrml_message_template_parse`
- * @param {Object} error                        `{ tag, ...payload }` (§55.9)
- * @param {string} fieldName                    the field display name
- */
+// Render parsed parts for one error ({ tag, ...payload }) and a field display name.
 export function _scrml_message_template_render(parts, error, fieldName) {
   let out = "";
   for (const part of parts) {

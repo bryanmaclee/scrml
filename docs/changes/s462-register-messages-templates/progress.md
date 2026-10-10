@@ -20,3 +20,7 @@ P3 (pre-existing, UNVERIFIED root cause): a multi-line `registerMessages({ .Patt
 
 Gates (ALL, CI-only ones included): pre-commit · conformance · browser tier as ci.yml · `bun run types:check` · the `tracking` tiers (integration + lsp + commands) as ci.yml · `bun scripts/s34-census.ts --check-new --base 980cb3001cfd99711457890c6a88b2b2e546991b`. Report new SHA + per-item disposition.
 - 2026-10-09T20:41:22-06:00 FIX1 P1: default <errors> render escapes the message (_scrml_message_html); SPEC §55.8 'message is text'; conformance msgchain-message-is-text; happy-dom probe pwn 3 -> 0
+- FIX1 F1: escape-hatch ParseError holding a registerMessages local is re-read after codegen's own `rewriteFnKeyword` lowering + parseExprToNode, then checked structurally (fn value → E-MESSAGE-NOT-TEMPLATE; siblings checked). Conformance msgchain-l2-template-fn-reject.
+- FIX1 F3 (INTENDED BYTE CHANGE): an absent/null payload slot now renders "" (§41.12.1 rule 4); the base rendered "undefined"/"null" via string concatenation in the old function defaults (e.g. a MinFailed with no threshold: base "age must be at least undefined.", now "age must be at least .").
+- FIX1 F4: module documentation moved from runtime-message-templates.js (inlined) to its .d.ts; messages chunk header + refusal strings shortened. messages section gzip -9: base 980cb3001 4364 B · 40235db0c 6072 B · fix 4853 B (+489 B vs base). runtime-size-ratchet green.
+- FIX1 F5: runtime refusal for a non-variant key has its own message (".X is not a ValidationError variant; ignored.").

@@ -156,6 +156,18 @@ describe("§2 E-MESSAGE-NOT-TEMPLATE", () => {
     expect(errs.map((e) => e.code)).toEqual(["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-NOT-TEMPLATE"]);
   });
 
+  test("a `fn`-shorthand value is refused (S462 FIX1 F1) — and the rest of the map is still checked", () => {
+    const errs = messageErrors(compile(page(
+      "        .Required: fn(field) { return \"FN \" + field },\n        .MinFailed: \"{field} {bogus}\",")));
+    expect(errs.map((e) => e.code).sort()).toEqual(["E-MESSAGE-NOT-TEMPLATE", "E-MESSAGE-SLOT-UNKNOWN"]);
+    expect(errs[0].span.line).toBeGreaterThan(1);
+  });
+
+  test("a word `fn` inside a well-formed template is not a function", () => {
+    const errs = messageErrors(compile(page("        .Required: \"{field} is required (fn)\",")));
+    expect(errs).toEqual([]);
+  });
+
   test("a number literal value is refused", () => {
     const errs = messageErrors(compile(page("        .Required: 42,")));
     expect(errs.map((e) => e.code)).toEqual(["E-MESSAGE-NOT-TEMPLATE"]);
