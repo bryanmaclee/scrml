@@ -1,0 +1,21 @@
+// §66.3 rule 5 — every member of the inferable set, unannotated, compiles; the derived values track.
+<program>
+    let <base:int=3/>
+    let <scale:number=3/>
+    let <name:string="ab"/>
+    <doubled=(@base * 2)/>
+    <ratio=(@scale / 2)/>
+    <isBig=(@base > 2)/>
+    <pick=(@isBig ? 10 : 20)/>
+    <len=(@name.length)/>
+    <greet=(@name + "!")/>
+    <nums=([1, 2, 3])/>
+    fn twice(x: int) -> int { return x * 2 }
+    function half(y: number) { return y / 2 }
+    <viaDeclared=(twice(@base))/>
+    <viaProven=(half(@ratio))/>
+    <main>
+        <p id="out">${@doubled} ${@ratio} ${@pick} ${@len} ${@greet} ${@viaDeclared} ${@viaProven}</p>
+        <button id="inc" onclick=(@base = @base + 1)>+</button>
+    </main>
+</program>

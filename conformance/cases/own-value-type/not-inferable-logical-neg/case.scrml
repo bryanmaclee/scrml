@@ -1,0 +1,8 @@
+// §66.3 rule 7 — `!` / `&&` are not in the inferable set (rule 5 lists arithmetic, comparison, ternary, `.length`).
+<program>
+    let <open:bool=true/>
+    let <ready:bool=false/>
+    <closed=(!@open)/>
+    <both=(@open && @ready)/>
+    <main><p>x</p></main>
+</program>

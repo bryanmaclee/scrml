@@ -1,0 +1,32 @@
+{
+  "id": "own-value-type-boundary-persist-neg",
+  "description": "§66.3 rule 9 (i) / §6.14.1 rule 5: `let <zoom=(@base * 2) persist=\"local\" key=…/>` is inferable within the file, but its type is a storage contract read on every load — so without `:T` it is E-DECL-TYPE-REQUIRED-AT-BOUNDARY (reported instead of, not beside, any inference code).",
+  "language-version": "1.0",
+  "spec": "§66.3, §6.14.1",
+  "rationale": "§6.14.1 rule 5: \"A `persist=` cell whose initializer is not a literal SHALL be written with `:T`; without it, `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`\"; §66.3 rule 9: \"reported INSTEAD of rule 7's code\". ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 7).",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-REQUIRED-AT-BOUNDARY": 1
+    },
+    "notCodes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-REQUIRED-AT-BOUNDARY' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-TYPE-REQUIRED-AT-BOUNDARY"
+        ]
+      }
+    }
+  }
+}

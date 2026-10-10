@@ -1,0 +1,32 @@
+{
+  "id": "own-value-type-not-inferable-member-neg",
+  "description": "§66.3 rule 7: `<label=(@user.name)/>` — a member path is not in §66.3 rule 5's inferable set, so the unannotated own value is E-DECL-TYPE-NOT-INFERABLE (a hard error, never `unknown`); writing `label:string=` is the fix.",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 7: \"An own value written without `:T` whose initializer is a non-literal outside the set is a compile error … E-DECL-TYPE-NOT-INFERABLE\"; rule 5 lists the set (a member path is named outside it). ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 rulings 3 and 5).",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-NOT-INFERABLE": 1
+    },
+    "severity": {
+      "E-DECL-TYPE-NOT-INFERABLE": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-NOT-INFERABLE' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-TYPE-NOT-INFERABLE",
+          "severity:code 'E-DECL-TYPE-NOT-INFERABLE' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

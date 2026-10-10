@@ -3845,7 +3845,13 @@ code generation begins.
 **Normative statements:**
 
 - The compiler SHALL detect all cycles in the derived reactive dependency graph during
-  Stage 7.
+  Stage 7. A dependency reached THROUGH a called function's body (`<a:int=(g())/>` where `g`
+  returns `@a + 1`) is an edge of that graph like a direct `@` read.
+  ⚑ **Implementation limit, stated (S462 fix round 1):** the bootstrap
+  (`compiler/self-host-v2/analyze.scrml` `derivedCycles`) builds edges from a derived initializer's
+  DIRECT `@` reads only, so a cycle that closes only through a function body compiles there — a
+  divergence from this SHALL, filed as `g-bootstrap-derived-cycle-through-function-s462`; the SHALL
+  stands.
 - A cycle involving any `const <name>` declarations SHALL be a compile error
   (E-REACTIVE-005).
 - The error message SHALL identify all nodes in the cycle and the dependency edges that
@@ -7474,6 +7480,7 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 2. **`key=` is REQUIRED** on every `persist=` cell. `persist=` without `key=` SHALL be `E-PERSIST-KEY-REQUIRED`. The key is an external storage contract, written by the author; the compiler SHALL NOT derive one. (The ruling's reason: a derived key makes a cell rename silently drop every user's saved value, and explicit keys prevent same-origin cross-app collisions.)
 3. **Where legal.** `persist=` is legal on client-owned state cells. On a §66 declaration it governs the **shared instance only** (the §66.16 analog for `server` / `pinned`); a plain instance of a `persist=` declaration is not persisted.
 4. **`persist="cookie"` is DEFERRED** (not in this revision). **IndexedDB is NOT a `persist=` value**: it is asynchronous and cannot be restored at construction. It is a **PLANNED stdlib addition** — planned work, not gated behind an adopter re-trigger — whose surface (sync-looking, auto-awaited stdlib calls per §13.2) is owed a design pass when scheduled.
+5. **A non-literal `persist=` cell carries its type (S462).** A `persist=` cell whose initializer is not a literal SHALL be written with `:T`; without it, `E-DECL-TYPE-REQUIRED-AT-BOUNDARY` (§66.3 rule 9 (i)). The type is the storage contract rule 3 of §6.14.2 decodes against, and — like the key (rule 2) — the compiler does not derive it: an inferred type would move when the initializer is edited, and a narrowing would reset every user's stored value with no diagnostic. A literal-initialized cell is unaffected (`<tabFilter persist="session" key="myapp.filter"> = "all"` above stays legal; its type is the literal's, §66.3 rule 3). *(Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md §6.)*
 
 #### 6.14.2 Semantics
 
@@ -8416,6 +8423,15 @@ this and I signed for it" from "scrml never looked", and neither did scrml.
 adopter's program. The program compiles, emits identically, and exits 0. Nothing that was accepted
 before becomes an error. The adopter is billed nothing for scrml's own coverage debt — they are
 merely told it exists, which they previously could not be.
+
+**Scope — LOCALS only; an own value diverges (S462).** This section governs an unannotated `let` / `const`
+LOCAL. A §66 own value (a declaration's `=` inside the opener) does NOT take `unknown` when its inference is
+defeated: its type is inferred from an enumerated set (§66.3 rule 5) and an initializer outside that set is the
+compile ERROR `E-DECL-TYPE-NOT-INFERABLE` (§66.3 rule 7); an own value written `:T` over an initializer whose
+type cannot be resolved is the ERROR `E-DECL-TYPE-UNPROVEN` (§66.3 rule 10). The divergence is deliberate and
+stated at §66.3: an own value is a declaration whose type is its write contract and is read program-wide, so an
+`unknown` there would silently disable checking at every reader. Nothing in this section changes for locals.
+*(Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md.)*
 
 **Normative statements.**
 
@@ -26392,7 +26408,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-IF-IN-DISPATCHED-ARM | §17.1, §17.1.1, §18.0.1, §51.0.B | **TEMPORARY IMPLEMENTATION RESTRICTION — not a language rule.** An `if=` element, or an `if=`/`else-if=`/`else` chain, appears inside the body of a DISPATCHED arm: a `<match>` block-form arm (§18.0.1) or an `<engine>` state-child (§51.0.B). Those bodies are emitted as HTML strings and injected with `innerHTML` on dispatch, then wired by a per-arm wire function; §17.1 `if=` puts its subtree inside a `<template>`, which that wire function cannot see into, and the `if=` controller itself is created at boot against a document that does not yet contain the arm. The gated subtree would therefore render empty or never appear, with NO runtime error — so the compiler refuses the composition instead of emitting it. Express the condition as ARM STRUCTURE (a variant for the gated state) until the restriction lifts. NOTE: hoisting the `if=` to wrap the whole `<match>`/`<engine>` is NOT a workaround — that is a separate defect. SPEC places no limit on where `if=` may appear; this row is expected to be REMOVED, not amended, when the arm-dispatch path re-runs the conditional controllers against the injected arm root. (S301 — `if=` Phase 2; emitted at `compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm` — **THREE call sites** as of S302: `:1508` (markup `if=`), `:1737` (`if`/`else-if`/`else` chain), `:2727` (`emitGatedStructural`, added with the §17.1.2 widening so the three structural elements refuse identically). The row previously said *two*; it was written before the structural surface existed. **Revert as a unit** — a partial revert leaves one surface refusing and another silently mis-emitting.) | Error |
 | E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | NARROWED S435 (L19 reversed). Fires on exactly two shapes: (1) a BARE (unbraced) event-handler attribute value containing a top-level `;` statement sequence — `onclick=startGame(); track()` — whose extent cannot be told apart from the opener's following attributes; fix: wrap it in braces, `onclick={ startGame(); track() }`, or name a function; (2) a `:`-shorthand body (§4.14) containing multiple statements; fix: the bare-body form. An inline-block handler value (`onclick={ … }`) never fires it. (Stage 0b D4; narrowed per ruling:user-voice-scrml.md S435) (Emitted at `compiler/src/ast-builder.js:17890` — the unbraced bare `;` sequence on an event-handler attribute, at every markup position including `<each>` rows, engine state-children and `<match>` arms (forwarded out of those error-discarding sub-builds by `_forwardSubparseErrors`, S437) — and at `compiler/src/symbol-table.ts:7776` — the multi-statement `:`-shorthand body.) | Error |
 | E-IMPORT-PINNED-INVALID | §21.8.1 | The `pinned` modifier appears on an imported name that is not a state cell or an engine. `pinned` is meaningful only for cell-typed and engine-typed names; remove it for function or type imports. (Stage 0b D4) | Error |
-| E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) | Error |
+| E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) Under §66 the derived cell is a LOCKED declaration with a reactive initializer (§66.9 rule 3), and on an unannotated cycle this code outranks `E-DECL-TYPE-NOT-INFERABLE` (§66.3 rule 8, S462 — ruling:user-voice-scrml.md S462 "go on the package"). (S462: also emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (the derived-cycle check, `derivedCycles`) — program cells, direct `@` reads; a cycle only through a function's body is not traced there — a divergence from §6.6.10's SHALL, filed `g-bootstrap-derived-cycle-through-function-s462`.) | Error |
 | E-USE-INVALID-CTX | §41.12 | `registerMessages(map)` (or another project-level registration API) called from a non-top-level context (inside a function body, inside a worker `<program>`). Registration must happen at app initialisation. (Stage 0b D4) | Error |
 | E-CTRL-011 | §17.4 | `for (... in ...)` is not a valid scrml loop form. scrml iterates values via `of`: `for (item of @items)`. The `in` keyword iterates object keys in JavaScript and does not appear in scrml's vocabulary. (Catalog addition S64 audit; emitted at `compiler/src/ast-builder.js:4087-4093, 6517-6519`) | Error |
 | E-FOR-UNPARENTHESIZED-HEAD | §17.4, §17.4a | (S308.) A braceless (unparenthesized) `for … of` loop head — `for x of @items { ... }` or `for x of @items lift ...` — written without the parentheses the canonical form requires (§17.4a `**Syntax:**` `for (let x of collection) { ... }`). The braceless-head parse branch handles only the legacy English `in` form (`for item in @items { ... }`, value-iteration); a braceless `of` is NOT consumed, so `collectExpr` mis-reads the iterable as the bare token `of` and codegen emits `for (const x of of)` — valid to `node --check`, but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). **Reject + recover:** fires this code once per offending head and RECOVERS by consuming the `of` and collecting the real iterable, so no broken loop is emitted and downstream analysis does not cascade. **Does NOT fire:** the canonical parenthesized `for (x of @items) { ... }`; the legacy braceless English `for item in @items { ... }` form (left unchanged); a `for (... in ...)` inside parentheses (that is `E-CTRL-011`). Emitted in the for-statement parse path at `compiler/src/ast-builder.js` (the braceless-head branch). Partitions into `result.errors`. | Error |
@@ -26400,6 +26416,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-CONTROL-FLOW-IN-MARKUP | §17.4, §7 | (S203 — bare-control-flow-in-markup-diagnostic-2026-06-17.) A bare control-flow STATEMENT — `for (...) { ... }`, `if (...) { ... }`, or `while (...) { ... }` — appears directly in a **markup body** without being wrapped in a `${ ... }` logic block. Per §17.4 (Tier-0 iteration is `${ for/lift }`) and §7 (control flow lives in a logic context), control flow in a markup body MUST be inside a `${ ... }` logic block. A bare `for`/`if`/`while` directly in a markup body is NOT recognised as logic (the §40.8 default-logic auto-lift fires only at `<program>`/`<page>`/`<channel>` direct-child roots, never nested markup; `BARE_DECL_RE` matches declaration keywords only) — pre-fix the whole construct, INCLUDING its inner `${...}` interpolations, was classified as inert `[text]` and SHIPPED RAW into the DOM (a silent-accept). **Reject + recover** (user ruling (a), S203): fires this code ONCE per offending construct and RECOVERS by dropping the raw-text emission — the construct ships NEITHER `for(){}` NOR `${...}` into the DOM. **Does NOT fire:** the canonical `${ for (...) { lift ... } }` form (a `${ }` logic block, not a markup text run); a `<program>`/`<page>`/`<channel>` direct-child default-logic root — ⚑ **NOT because that locus is safe, but because this diagnostic does not reach it: see the S378 correction at the end of this row. Do not read this entry as coverage**; an `if=`/`show=`/`else-if=` attribute condition (§17.0 — an attribute, not a body construct); the `<each>`/`<match>` structural elements; or control flow already inside a `${ }` / logic block. The diagnostic suggests the canonical `<ul>${ for (x of @items) { lift <li>${x}</> } }</>` (Tier-0, §17.4) and names the Tier-1 `<each in=@items>` alternative (§17.7). Sibling of E-UNQUOTED-DISPLAY-TEXT (§4.18.7, S111) — a "bare X in a body that needs a specific wrapping" diagnostic. Emitted by `liftBareDeclarations` at `compiler/src/ast-builder.js` (the markup-text recognition site, gated `parentType === "markup"`; see `BARE_CONTROL_FLOW_IN_MARKUP_RE`). Partitions into `result.errors`. ⚑ **S378 CORRECTION (Rule 4), AND THE HOLE IT EXPOSES IS OPEN.** This row previously listed the default-logic root under **Does NOT fire** giving as its reason that *"the §40.8 auto-lift handles it."* **It does not** — `parentType === "markup"` is the COMPLEMENT of the §40.8 locus, and the auto-lift covers DECLARATIONS only (§40.8, S123 amendment), so that locus is covered by **NEITHER** the lift nor this code: `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into `<body>` as page text, taking with it every diagnostic its contents would have raised. Ruling 3 (user-voice **S375**) directed BOTH halves — correct the claim, and extend the diagnostic to this locus. ⚑ **THE CORRECTION IS LANDED HERE; THE EXTENSION IS HELD** (bryan, **S383**: *"land the stable half"*), so **this row describes ONE locus — a markup body — and that is the current, complete truth of what fires.** The extension was held because extending the LOCUS does not extend the COVERAGE: the recognizer requires a `{`, and at the pre-existing markup locus `if (@a) log(1)`, `switch (@a) { }`, `outer: for (…) { … }` and `do { … } while (@a)` all ship raw source into the DOM today. A braceless control-flow statement cannot be separated from prose by any text-level recognizer — `if (@a) log(1)` vs `if (you ask) we deliver` differ only in whether the tail is code or prose — and prose at a default-logic body-top renders and is a working shape (S368 refused *"diagnose every non-declaration run"* on exactly that ground). **Closing the class is a grammar-derived arc over the parsed tree, and a wider regex is not it.** Problem statement + fixture corpus + the recognizer post-conditions earned across five review rounds: `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. Direction of change when it lands: **newly-rejecting**, owing its own measured migration. ⛑ **S441 — the default-logic half of this hole is CLOSED at the root, not by this code.** A `<program>` / `<page>` / `<channel>` body is code (§40.8 S441 bullet): a bare control-flow statement at its body-top — braced or braceless, `switch`, labelled, `do`/`while` — is parsed as a statement, so it is checked exactly as inside `${ … }` and never ships as page text. `E-CONTROL-FLOW-IN-MARKUP` still names ONE locus, a plain markup body, and its braceless gap there is unchanged. | Error |
 | E-EACH-BODY-DECL-UNSUPPORTED | §17.7.3, §17.7.2 | A `let` / `const` / `function` DECLARATION appears in an `<each>` body interpolation (`${ let nm = @.name }`). The each-body scope (§17.7.3) is the `@.` contextual sigil plus an optional `as` alias — NOT author-declared locals. The decl has no `exprNode`/`raw`, so codegen dropped it silently, while a later `${nm}` still lowered to a bare `String(nm)`: a dangling reference that throws inside the per-item render factory and renders the WHOLE list empty, at exit-0 with no diagnostic (a silent-broken bundle). **Reject (fail-closed), user ruling S339:** fires once per offending decl and returns, so no broken render is emitted. **Does NOT fire:** a bare field-read interpolation (`${@.field}`, or `${x.field}` with `as x`); a declaration OUTSIDE the `<each>` (the ordinary lift); a non-declaration `${expr}`. Supporting author locals in an each body (replay the binding into the per-item factory closure, like the for-lift path) is a separate §17.7.3 language-surface ruling — this row REJECTS until such a ruling lands; it does not forbid the feature. (Catalog addition S339 (peter); emitted at `compiler/src/codegen/emit-each.ts` in the logic-child handler; partitions into `result.errors`.) | Error |
 | E-COND-NOT-BOOLEAN | §42.4, §17.1, §49.2.3 | A condition — an `if` / `else if` statement, a `while` / `do … while` loop, a ternary test, an `if=` / `else-if=` attribute (and `show=`) — whose value is not shown to be a `bool` or a bare `T \| not` presence test: (1) a bare `bool \| not` (the message names both fixes, `x is given` / `x == true`); (2) any other KNOWN type — a number, a string, a sequence, a struct, an enum (no truthiness: write `@count > 0`, `@name != ""`); (3) a value whose type the compiler CANNOT resolve — an unannotated parameter, a call with no declared or inferred return type, an untyped JavaScript-boundary value, `asIs` / `unknown` (the message says the type is unresolved and names the fixes: annotate it, or write `x is given` / `x == true`). A bare `T \| not` as the WHOLE condition is admitted (a presence test, `""` / `0` present, narrows where true). (4) An operand of the condition's own `!` / `&&` / `||` chain whose type the compiler cannot resolve (`if (!g())`, `if (g() && @b)`, `<p show=(g() && @b)>`) — same unresolved message; nested `!` / `&&` / `||` are walked through, call arguments / indexes / ternary arms are value positions and stay silent (§42.4 statement 10; ruling:user-voice-scrml.md S460 "a on F2, go"; newly-rejecting, Nominal on impl#1). Cases (3) and (4) do NOT fire when any Error-severity diagnostic, of any code, has already been reported with a span inside the condition (for (4): inside that operand), nor when it reads a declaration whose written type was refused, calls a function whose written return type was refused, or sits in a construct already refused — no cascade, and not fail-open: the build has already failed (§42.4 statement 6); no case fires across a parse error. **Provenance:** ruling:user-voice-scrml.md S460 "a′, go" · supersedes: ruling:user-voice-scrml.md S440 Truthiness Q2 (conditions only) · keeps S440 #4 = (c), S442. Code accepted S442 (§66.20). **Nominal on impl#1** (impl#1 keeps today's truthiness lowering, §34.0 carry rule; carried gap `g-impl1-condition-rule-s460`); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`checkCond` / `condKnown` / `condUnresolved`). | Error |
+| E-DECL-TYPE-NOT-INFERABLE | §66.3, §66.20 | An own value written without `:T` whose initializer is a non-literal OUTSIDE the inferable set §66.3 rule 5 enumerates (literals; a typed `@ref`; arithmetic, comparison, ternary and `.length` over members; a call with a declared or inferred-and-proven return) — e.g. a member path `@user.name`, an index, a method call, `!` / `&&` / `\|\|`, a call of a function whose return is neither declared nor proven (§66.3 rule 7). Also: an unannotated own value on a cycle through a SEEDED member (§66.3 rule 8 ⚑). An attribute default is not governed by this code (O35(a) is open; S462 fix round 1). A failed own-value inference is a hard error, never `unknown` — this deliberately diverges from §7.5.2's `unknown` + `W-TYPE-031-UNPROVEN` for LOCALS, which is unchanged. The message names the part outside the set and the fix: write `:T` (or `:asIs`). Does NOT fire when an Error lies inside the initializer, when the initializer reads a cell whose own type was refused or not inferred (no cascade), on any member of a reported DERIVED cycle (`E-DERIVED-CIRCULAR-DEP` outranks every own-value code, §66.3 rule 8), or where `E-DECL-TYPE-REQUIRED-AT-BOUNDARY` fires. **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md · supersedes the bootstrap's unnamed `E-TYPE-ANNOTATION-REQUIRED`. Code name: PA reading, for bryan's veto. **Nominal on impl#1** (impl#1 does not compile §66 forms; carried gap `g-impl1-own-value-inference-codes-s462`); emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`ownOrigin` / `originReport`) for own values (program cells and child fields). | Error |
+| E-DECL-TYPE-REQUIRED-AT-BOUNDARY | §66.3, §6.14.1, §52.4.1, §66.14, §66.16, §66.20 | A NON-literal own value written without `:T` where its type leaves the compile: a `persist=` cell (§6.14.1 rule 5 — the stored value is decoded against the current declared type, so an inferred type is a derived storage contract), a `server` cell (§52.4.1 — the wire contract), or an EXPORTED own value or field (§66.14 — the default until O2 / O39 rules) (§66.3 rule 9). A literal own value is unaffected (§6.14's `= "all"` example stays legal). Reported instead of `E-DECL-TYPE-NOT-INFERABLE`, one per declaration. **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md. Code name: PA reading, for bryan's veto. **Nominal on impl#1** (carried gap `g-impl1-own-value-inference-codes-s462`); emitted by the bootstrap for `persist=` and `export` at `compiler/self-host-v2/analyze.scrml` (`boundaryOf` / `originReport`); the server limb is not yet emitted (the bootstrap's parser refuses `server` on a declaration, E-BOOTSTRAP-UNSUPPORTED). | Error |
+| E-DECL-TYPE-UNPROVEN | §66.3, §66.20 | An own value written `:T` (any type but `asIs`) whose initializer's value has a type the compiler cannot resolve — a call of a function whose return is neither declared nor inferred-and-proven (§66.3 rule 5), an unannotated parameter, an untyped foreign / JavaScript-boundary value, `asIs` / `unknown` — reached through §66.3 rule 5's operators (a call's argument is not its value) (§66.3 rule 10). The annotation would otherwise be an unchecked cast. Fix: declare what is untyped (e.g. the function's `-> T`), or write `:asIs`. Error, deliberately (fail-closed): unlike §7.5.2's locals, the gap is an omission in the program the adopter can fix in one edit, and the annotation is a contract other readers trust (compare `E-COND-NOT-BOOLEAN` case 3, S460). Same no-cascade clause as `E-DECL-TYPE-NOT-INFERABLE`. **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md (§5 item 5, §8 ruling 10). Code name and severity: PA reading, for bryan's veto. **Nominal on impl#1** (carried gap `g-impl1-own-value-inference-codes-s462`); emitted by the bootstrap (the call limb) at `compiler/self-host-v2/analyze.scrml` (`originReport`). | Error |
 | E-EACH-NOT-SEQUENCE | §17.7.2 | `<each in=expr>` over a value that is not a sequence (§66.12.1: arrays and tuples; a map iterates through its `.entries()` / `.keys()` / `.values()` array views, §59.8). Fires only when the value is PROVABLY not a sequence: `S | not` over a sequence `S` is admitted (`not` renders `<empty>`, §17.7.4), and an unresolved `in=` type is silent (provable-or-silent). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3; the three SPEC-text OPEN items, #3). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `<each in=@n>` over a `number` cell at exit 0); impl#1 carries it (§34.0). | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. ALSO (S459, impl#1 status per §22.4): the compile-time body contains a statement form impl#1 cannot evaluate at compile time (a payload-binding `match` arm, a multi-subject `match`, a `match` value with a block arm, a destructuring declaration, a declaration whose value is another statement form, a `?{}`, or any statement kind the serializer does not write) — the block is refused, naming the form, rather than evaluated with the statement dropped. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `serializeNode` / `MetaSerializeRefusal`) | Error |
 | E-META-EVAL-002 | §22.4 | (S458 final review F3) a compile-time `^{}` emits markup from inside a `${}` logic body — a statement list, branch, loop, match arm or function body has no markup position to receive it (§22.4.1). Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. ALSO (S457, impl#1 status per §22.4.1): the emitted output contains something other than standard markup elements, text and comments with plain attribute values — a `${}` logic block, a `?{}`, a function, a declaration, a component or a scrml structural element, which would reach code generation without the type system and route inference. ALSO (S459 round 3, PA addendum 3): the emitted output carries an attribute whose name is not on the closed attribute list of §22.12 for its element's namespace (§22.4.1), or an `id` / `name` value in the `_scrml` / `__scrml` namespace. ALSO (S459 round 4, PA decisions F2 / F4): an `id` / `name` value the `document` half of §22.12's *Named properties* rule refuses (it names a member of `document`; the form half is a run-time rule only — ruling:user-voice-scrml.md S460 "n4 b"), or a URL-valued attribute whose value the §5.2 rule 3 test refuses (`javascript:`, a leading-space or `java<LF>script:` spelling, a non-raster `data:` image, …). ALSO (ruling:user-voice-scrml.md S458 "your recs on all four" · PA-ruled S459 consequence (bare data-scrml = the component CSS scope root, emit-css @scope)): the emitted output carries an attribute whose name (ASCII case folded) is `data-scrml` or begins with `data-scrml-` — the compiler-owned attribute namespace of §22.4.1; the runtime `meta.emit` gate refuses the same attribute at run time (§22.12), with no code. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts` — `reparseEmitted` and `checkEmittedNodes`) **Provenance:** ruling:user-voice-scrml.md S457 (the S457 meta allow-list arc) + ruling:user-voice-scrml.md S458 "1a" + ruling:user-voice-scrml.md S458 "your recs on all four". | Error |
@@ -39384,6 +39403,8 @@ The `server` attribute is a bare flag attribute on the V-kill structural decl ta
 
 The full grammar production lives at §6.1.5. `server` joins `pinned` and validator-attrs (§55.1) as a `decl-attr` legal inside the opening tag. The initial value (`expr` in the production) is a placeholder; the compiler replaces it with a server-fetch on mount.
 
+**The annotation is optional only for a literal placeholder (S462).** A `server` cell whose initial value is not a literal SHALL carry its type (`<x server>: T = …`, or in the §66 opener `<x:T=(…) server/>`); without it, `E-DECL-TYPE-REQUIRED-AT-BOUNDARY` (§66.3 rule 9 (ii)). The cell's type is its wire contract (§57.3) and outlives one deploy, so it is written, not inferred. A literal placeholder (`<count server> = 0`) is inferred as everywhere (§66.3 rule 3). *(Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md.)*
+
 `<varName> = <expr>` (no `server` attribute) declares a client-local reactive variable. This is unchanged from §6.1.
 
 The `server` attribute in this position parallels — but is NOT — the (deprecated) `server function` modifier (§52.10). The shared keyword reads as "server-side" in both positions, but the cell-authority mechanism here is independent and remains canonical; only the function modifier is on the deprecation track per Insight 26 (2026-05-08).
@@ -45900,11 +45921,136 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 4. The own value, like every declaration (§66.9), is **locked** unless `let` is written: `<count:int=0/>` is a
    constant; `let <count:int=0/>` is writable (`let` before the `<` — §66.2.5, S447).
 
-> ⚑ **OPEN (not ruled) — O35: the rest of DD §7 #17.** bryan expounded #17 and ruled only its integer-literal
+> **Amendment S462 — O35(d): a NON-LITERAL own value (rules 5–10).** Rule 3 says what a LITERAL own value
+> infers and was silent on every other initializer; that silence is O35(d), now ruled.
+> **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md
+> (§7 recommendation = §8 rulings 1–10, all as recommended) · **supersedes:** nothing written — rule 3's silence
+> on a non-literal own value · **direction of change:** newly-accepting within a file (an inferable non-literal
+> own value needs no `:T`) and newly-rejecting at the boundaries of rule 9 and at rule 10's unproven annotation.
+> Nominal on impl#1 (impl#1 does not compile §66 forms — §66.20); the bootstrap implements it.
+
+5. **Non-literal own-value inference (O35(d)).** An own value written without `:T` whose initializer is not a
+   literal takes its type from its INITIALIZER, and from nothing else — no later write, use or reader feeds
+   it. The initializer SHALL be a member of the **inferable set**, which is closed: it grows only by a ruling.
+   Parentheses are transparent.
+
+   | member | its type |
+   |---|---|
+   | (a) a **literal**: rule 3's numeric, string and boolean literals (a `-` before a numeric literal included), and a non-empty sequence literal `[…]` whose elements are all such literals of one base type | the literal's (rule 3); `[1, 2, 3]` → `int[]`, `[1, 2.5]` → `number[]` |
+   | (b) a **typed `@ref`**: `@x` where `x` is a cell whose type is written, or is itself inferred under this rule | `x`'s type |
+   | (c) **arithmetic** over members: `+`, `-`, `*`, `%`, unary `-` | two `int`s → `int`; any other two numbers → `number` |
+   | (c′) `/` over two numbers | `number` (`/` between two `int`s is E-INT-DIVISION, §66.20) |
+   | (d) a **comparison** over members: `<`, `<=`, `>`, `>=`, `==`, `!=` | `bool` |
+   | (e) a **ternary** `t ? a : b` whose test is a member typed `bool` and whose arms are members of one base type | that type (`int` with `number` → `number`) |
+   | (f) **`.length`** of a member typed `string` or a sequence | `int` |
+   | (g) a **call** `f(…)` of a function whose return type is DECLARED (`-> T`) or INFERRED-AND-PROVEN (below) | that return type |
+
+   **Readings of these categories (PA reading S462 — veto window; not additions to the set).** Each names a form
+   that already IS a member of one of the ruled categories, so the set does not grow:
+   - a QUALIFIED unit variant `E.V` (§14.10: legal everywhere) is a **literal** of `E` (a); the bare `.V` stays
+     O35(b);
+   - a payload variant's construction `E.V(…)` is a **call** whose declared type is `E` (g);
+   - `@d` naming a declaration (its shared instance, §66.7.1) is a **typed `@ref`** of type `d` (b);
+   - `+` over two `string`s is **arithmetic**'s `+` and gives `string` (c).
+
+   A function's return is **inferred-and-proven** when the function declares no return type, is not failable
+   (`!`, §19.4) and is not server-placed (§13.7), its body ends in `return` on every path, and every `return`
+   carries a value whose type is **determined**, all of one base type (`int` with `number` → `number`). A
+   returned value's type is determined — from declarations alone — exactly when it is:
+   - a member of this set;
+   - a parameter or a local with a written type, or a `const` local whose initializer's type is determined;
+   - a member path `v.f` whose `v` has a determined declared type (a struct, a declaration, or an `as=` handle
+     bound — once — in the markup of the program the reading function belongs to) and whose field `f` has a
+     written (or literal) type;
+   - a comparison (`<`, `<=`, `>`, `>=`, `==`, `!=`), `!`, `is given` or `is not` — each a `bool`, whatever its
+     operands;
+   - `a && b` / `a || b` ONLY when both `a` and `b` are determined `bool`s — the operator yields one of its
+     operands, so over anything else its type is not determined (and a `:T` over it is rule 10's);
+   - a ternary whose arms are determined and of one base type;
+   - a call whose return is declared or itself inferred-and-proven.
+
+   Every name is resolved through the function's REAL scopes — the innermost binding wins, so a local, a
+   `given` binding or a handler arm's binder that shadows a parameter is the one read; a binding whose type is
+   neither written nor determined (an unannotated `let`, an arm's binder, an unannotated parameter) does not
+   determine a type. A function whose proof needs its own return (recursion, direct or through another
+   function or cell) is not proven. A call's ARGUMENTS are not judged — only its return.
+   *(Fix rounds 1–2, S462 — PA ruling within bryan's package. Ruling 10 judges "an initializer the TYPER cannot
+   prove"; the list above is what "determined" means, stated exactly. It is NOT identical to any one
+   implementation's typer: it proves a call of an unannotated function whose returns are determined (a typer
+   that leaves every unannotated call unresolved proves less), and it does not prove an index, a method call
+   or an object literal (a typer may type some of those). The ruled fail-closed core — an unannotated
+   parameter, recursion, a non-total body, a failable or server function — is unchanged.)*
+   Everything else is outside the set — among them a member path (`@user.name`), an index (`@xs[0]`), a method
+   call (`@xs.filter(…)`), the logical operators `!` / `&&` / `||` and `is given` / `is not`, `not`, `[]`, an
+   object literal, a bare variant (those four are O35(b)), and a call whose return is neither declared nor
+   proven. (The set is the one the ruling lists — literals, a typed `@ref`, arithmetic / comparison / ternary /
+   `.length` over members, calls with a declared or proven return; it grows only by a ruling, and growing it is
+   safe, since a larger set only accepts more.)
+6. **The inferred type is the BASE type** — never a literal singleton (`<n=(1 + 2)/>` is `int`, not `3`), never
+   a §53 refinement (`@x` typed `int(>0)` gives `int`), and never a sequence's grants (`@xs` typed `int[append]`
+   gives `int[]`, §66.12.1); a `T | not` stays `T | not`. A predicate or a grant is an annotation (§53, §66.12.3):
+   write `:T` to have one.
+7. **Outside the set is an ERROR — `E-DECL-TYPE-NOT-INFERABLE` — never `unknown`.** An own value written without
+   `:T` whose initializer is a non-literal outside the set is a compile error. The message names the
+   initializer's part that is outside the set and the fix: write `:T` (or `:asIs`, §7.5.2, to sign for an
+   untyped value). It does NOT fire when an Error diagnostic already lies inside the initializer, nor when the
+   initializer reads a cell whose own type was refused or could not be inferred — that cell's diagnostic owns
+   it (no cascade). **This deliberately diverges from §7.5.2,** where an unannotated `let` / `const` LOCAL whose
+   inference is defeated becomes `unknown` + `W-TYPE-031-UNPROVEN` and compiles (*"Fail LOUD, not fail
+   closed"*). An own value is not a local: it is a declaration whose type is its write contract (§66.1 rule 5),
+   read by every reader in the program (and, at rule 9's boundaries, outside it); an `unknown` there would
+   silently switch off checking at every one of them. §7.5.2 is unchanged for locals.
+8. **A cycle outranks this rule.** When an unannotated own value's initializer reaches that own value again
+   through other own values, the cycle's diagnostic is reported and `E-DECL-TYPE-NOT-INFERABLE` is not: for
+   derived values (§66.9 rule 3) that is `E-DERIVED-CIRCULAR-DEP` (§6.6.10), whether or not the members are
+   annotated. The cycle outranks EVERY own-value code on its members — rule 7's, rule 9's and rule 10's — so a
+   member of a reported cycle carries the cycle diagnostic alone, whatever else its initializer would draw
+   (S462 fix round 1). A cell that merely READS a member of such a cycle is a cascade (rule 7) and reports nothing.
+   ⚑ A cycle through a SEEDED (`let`) own value has no cycle diagnostic in this specification (construction
+   order, §66.7.6 / O59, is undefined around it); there `E-DECL-TYPE-NOT-INFERABLE` fires on each unannotated
+   member, naming the cycle. Recorded, not ruled.
+9. **`:T` is REQUIRED where the type leaves the compile — `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`.** A non-literal own
+   value (rule 5 (a)'s literals excepted) SHALL carry `:T` when it is:
+   - (i) a **`persist=`** cell (§6.14) — its stored value is decoded against its CURRENT declared type
+     (§6.14.2 rule 3), so an inferred type is a derived storage contract: an edited initializer that narrows
+     the type silently resets every user's stored value. §6.14.1 rule 2 already refuses a derived `key=` for
+     the same reason;
+   - (ii) a **server-authority** cell (`server`, §52.4) — its type is the wire contract (§57.3) across a deploy;
+   - (iii) **exported** (`export` before the `<`, §66.2.5) — the default until O2 / O39 (§66.14) rules what
+     `export` on an own value means; see §66.14's reopening note. An exported CHILD field (§66.14 rule 3) is
+     read the same way — its type leaves the compile as the exported own value's does (PA reading S462 —
+     veto window).
+
+   Without it the declaration is `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`, reported INSTEAD of rule 7's code (one
+   diagnostic per declaration). A literal own value is unaffected: S435 literal inference stands at every
+   boundary, and §6.14's own example (`<tabFilter persist="session" key="myapp.filter"> = "all"`) stays legal.
+10. **`:T` over an unprovable initializer is an ERROR — `E-DECL-TYPE-UNPROVEN`.** An own value written `:T`
+    (any type but `asIs`) whose initializer's VALUE is one whose type the compiler cannot resolve — a call of a
+    function whose return is neither declared nor inferred-and-proven (rule 5), an unannotated parameter, an
+    untyped foreign or JavaScript-boundary value, an `asIs` / `unknown` value — reached through rule 5's
+    operators (a call's argument is not its value) is a compile error: the annotation would otherwise be a cast
+    nothing checks. "Cannot resolve" is rule 5's DETERMINED, read at the initializer: an initializer whose type
+    is determined whatever a sub-call is — a comparison (`mk() == 1` is a `bool`), `!`, a member path through
+    declared types — is resolved; `&&` / `||` resolve to `bool` only over two determined `bool`s, so
+    `<r:bool=(rec(1) || false)/>` with `rec` unproven is this error. The fix is to declare what is untyped (the function's `-> T`, the parameter's type), or to
+    write `:asIs` and sign for it. Same no-cascade clause as rule 7. **Severity: Error, on purpose.** §7.5.2
+    fails loud rather than closed because a defeated LOCAL inference is a gap in the compiler, which the
+    adopter cannot fix. Here the gap is an omission in the program (an unannotated return), the fix is one
+    edit in the adopter's hands, and the annotation is a contract other readers rely on; passing it unproven
+    is the trust-me cast §7.5.2 exists to remove, so it fails closed — as an unresolved condition does
+    (E-COND-NOT-BOOLEAN, §42.4 statement 5, S460).
+
+> ⚑ **O35 — DD §7 #17, partly ruled.** bryan expounded #17 and ruled only its integer-literal
 > half (*"int"*). The rest of the DD's #17 lean is not ruled: **(a)** inference applies to the own value ONLY,
 > and every user attribute MUST carry `:Type` (DD F18; it is also the §66.2.2 (ii) marker); **(b)** an
 > annotation is REQUIRED when the own value is `not`, `[]`, `{}` or a context-less bare variant; **(c)** `<x>`
 > in LOGIC position keeps §14.3.1's meaning — a fresh instance value with defaults (DD F24).
+> ✅ **(d) RULED S462** — *must a non-literal own value carry `:T`?* — rules 5–10 above (infer from an
+> enumerated set; a hard error outside it; `:T` required at `persist=` / server / export; an unproven `:T` is
+> an error). Provenance: ruling:user-voice-scrml.md S462 "go on the package" ·
+> dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md. (a)(b)(c) stay OPEN.
+> Rules 5–10 govern OWN values; an attribute default is not decided by them — what an attribute without
+> `:Type` means is O35(a), still open (S462 fix round 1 withdrew a sentence that had decided it).
 
 > ⚑ **OPEN (not ruled) — O19: an own value AND attributes on one declaration.** Whether a declaration may carry
 > both an own value and attributes/children (`<count:int=0 step:int=1/>`), and if so whether `@count` is the
@@ -47140,6 +47286,16 @@ unless the field is exported — and route the count to bryan.
 > impossible (writes go through an exported function in the defining file) — and so how today's cross-file
 > engine writes (§21.8) migrate — is not ruled. §66.19 routes every cross-file write of an own value through a
 > function exported from the defining file.
+>
+> **The type of an exported own value — the default while O2 / O39 is open (S462).** A NON-literal own value
+> written `export` SHALL carry `:T` (§66.3 rule 9 (iii), `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`); a literal one is
+> inferred as everywhere (§66.3 rule 3). This is the newly-rejecting side, so relaxing it later breaks nothing.
+> It applies to an exported child field as well (rule 3 above: its contract is the public API; PA reading S462 —
+> veto window). **Reopening
+> condition:** if O2 / O39 rules that an own value is never written from another file (cross-file writes go
+> through an exported function, as §66.19 already does), and files are not compiled separately, the requirement
+> on a module-exported own value may be dropped — the type is then read only inside one compile.
+> **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md (§6, §7 item 3).
 
 ### 66.15 Components retire into declarations
 
@@ -47288,6 +47444,10 @@ sentence, which a bare `...` amends.
 `server` (§52) and `pinned` (§6.10) on a declaration **govern its shared instance only**. A plain instance of a
 `server` declaration is a **client-local copy seeded from** the shared instance. *(Non-normative reading, beyond
 the #15 lean: such a copy does not fetch on its own mount and is not server-authoritative.)*
+
+A NON-literal own value written `server` SHALL carry `:T` (§66.3 rule 9 (ii), `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`,
+S462): its type is the wire contract (§57.3). A literal placeholder (`<count:int=0 server/>`, `<count=0 server/>`)
+is inferred as everywhere. **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md.
 
 ### 66.17 `<theme>` — tokens are declarations (T3)
 
@@ -47703,6 +47863,20 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-LET-IN-OPENER`** | Error | `let` (or `export let`) written INSIDE a declaration opener: the S435 in-opener prefix `<let x:T=v/>`, a trailing `<x:T=v let/>`, or a grant on an attribute (`<x let a:T/>`, `<x export let a:T/>`) (§66.2.5, §66.4 rule 6). The message names the fix: `let <x:T=v/>` for the declaration's own value; a child declaration `let <a:T=v/>` (or `export let <a:T=v/>`) in the body for an attribute. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2; sub-rec 4) · supersedes: ruling:S435 "writable cells spelled `let`" (position). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`; the bootstrap's parser and tests migrated S449 — `docs/changes/s449-opener-keywords-land/`). |
 | **`E-GRANT-LET-ON-SEQUENCE`** | Error | `let` on a sequence-typed declaration (`let <xs:int[append]=[]/>`): a sequence carries every grant, including `replace`, in its type's grants — message: *"write `replace` in the type's grants"* (§66.9, O3 = (c)). **Provenance:** ruling:user-voice-scrml.md S435 — O3 = *"c"* (*"`let` on a sequence is a compile error ("write `replace` in the type's grants")"*). Row added S447 (the code was emitted by the bootstrap but unnamed here — DD opener-keyword-vs-attribute-2026-10-01 SF4). **Nominal on impl#1; the bootstrap emits it.** |
 
+**Own-value type codes (S462 — O35(d), §66.3 rules 5–10).**
+
+> **Provenance:** ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md
+> (§8 ruling 5: "a hard error with a §34 row"; rulings 7–9: the boundaries; ruling 10: the unproven annotation).
+> The three NAMES are a PA reading for bryan's veto (the ruling names the conditions, not the codes).
+> **Supersedes:** the bootstrap's unnamed `E-TYPE-ANNOTATION-REQUIRED` (no §34 row, no SPEC basis — dpa-065 D1),
+> which refused every unannotated non-literal own value; it is retired in the bootstrap.
+
+| Code | Severity | Fires when |
+|---|---|---|
+| **`E-DECL-TYPE-NOT-INFERABLE`** | Error | An own value written without `:T` whose initializer is a non-literal outside §66.3 rule 5's inferable set (§66.3 rule 7); also an own value on a cycle through a SEEDED member (§66.3 rule 8 ⚑). An attribute default is not governed by it (O35(a) is open). The message names the part outside the set and the fix (`:T`, or `:asIs`). Not when an Error lies inside the initializer or a cell it reads was itself refused (no cascade); not on a derived cycle (E-DERIVED-CIRCULAR-DEP wins, rule 8); not where E-DECL-TYPE-REQUIRED-AT-BOUNDARY fires. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `ownOrigin` infers in phase A, `originReport` reports in the typer). |
+| **`E-DECL-TYPE-REQUIRED-AT-BOUNDARY`** | Error | A non-literal own value without `:T` that is `persist=` (§6.14.1 rule 5), `server` (§52.4.1, §66.16), or exported (§66.14 — the default while O2 / O39 is open) (§66.3 rule 9). **Nominal on impl#1; the bootstrap emits it** for `persist=` and `export` (`analyze.scrml` `boundaryOf`); the bootstrap's parser refuses `server` on a declaration whole (E-BOOTSTRAP-UNSUPPORTED), so the server limb has no fire site there yet. |
+| **`E-DECL-TYPE-UNPROVEN`** | Error | An own value written `:T` (not `:asIs`) whose initializer's value has a type the compiler cannot resolve — a call of a function whose return is neither declared nor inferred-and-proven, an unannotated parameter, an untyped foreign / JavaScript-boundary value, `asIs` / `unknown` — reached through §66.3 rule 5's operators (§66.3 rule 10). Same no-cascade clause. **Nominal on impl#1; the bootstrap emits it** for the call limb (`analyze.scrml` `originReport`); the bootstrap has no `asIs`, foreign value or parameter in an own-value initializer, so those limbs have no fire site there. |
+
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide
 struct-literal code whose home is §14.3 and whose row is in §34.
@@ -47832,6 +48006,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O33 | §66.3 | Attributes with no default: required at every use, or canonical-empty; their value in the shared instance. |
 | O34 | §66.12.5 | A tuple position with no default, with or without a lifecycle. |
 | O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; `<x>` in logic). |
+| ~~O35(d)~~ RULED S462 | §66.3 | Must a NON-literal own value carry `:T`? RULED: inferred from an enumerated set (§66.3 rule 5, base type, rule 6); outside it a hard error, `E-DECL-TYPE-NOT-INFERABLE` (rule 7; diverges from §7.5.2's locals rule); a cycle's diagnostic wins (rule 8); `:T` required at `persist=` / server / export (rule 9; export is the default until O2 / O39); an unproven `:T` is `E-DECL-TYPE-UNPROVEN` (rule 10). Provenance: ruling:user-voice-scrml.md S462 "go on the package" · dd:scrml-support/docs/deep-dives/own-value-type-annotation-o35d-dpa-065-2026-10-08.md. |
 | O36 | §66.11 | Enforcement of an invariant the compiler cannot prove statically. |
 | ~~O37~~ RULED (c) | §66.12.3 | A helper's result written back into a `replace`-less sequence: "fine" in the answered "type" text vs a `replace` under the one-axis rule (trust return type · certify callee body · leave a replace; PA lean certify). Call direction is ruled. |
 | O38 | §66.5.4 | Whether a declaration at `<program>` / file top level is in "a markup position" for #19, and which instance renders there. (S447: a declaration inside a MARKUP body cannot carry `let` / `export` — §66.2.5.) |

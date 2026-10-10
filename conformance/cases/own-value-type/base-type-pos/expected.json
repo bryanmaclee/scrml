@@ -1,0 +1,36 @@
+{
+  "id": "own-value-type-base-type-pos",
+  "description": "§66.3 rule 6: `let <k=(1 + 2)/>` infers the base type `int` (never the literal singleton `3`), so the write `@k = 7` is accepted and lands (3 → 7).",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 6: \"The inferred type is the BASE type — never a literal singleton (`<n=(1 + 2)/>` is `int`, not `3`)\". ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 4).",
+  "expect": {
+    "notCodes": [
+      "E-TYPE-031",
+      "E-DECL-TYPE-NOT-INFERABLE"
+    ],
+    "input": [
+      {
+        "click": "#set"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "7"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=2"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

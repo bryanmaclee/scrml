@@ -1,0 +1,9 @@
+// §66.3 rules 5 (g) and 7 — a call of a function whose return is neither declared nor provable
+// (it is recursive: its proof needs its own return) is outside the inferable set.
+<program>
+    function count(n: int) {
+        if (n > 0) { return count(n - 1) } else { return 0 }
+    }
+    <v=(count(3))/>
+    <main><p>${@v}</p></main>
+</program>

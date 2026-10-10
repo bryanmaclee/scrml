@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 569 | 5 |
-| LOW | 337 | 0 |
+| MED | 569 | 6 |
+| LOW | 339 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24398,6 +24398,20 @@ Reviewer-executed (probe p17) on base 42d1a74 AND on the #1382 tree alike — pr
 <!-- @gap id=g-late-runtime-reassembly-after-egress-scans-s461 sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(late gate re-run of gateChunksByEmittedReference vs the earlier full-text scans) prov=review:S461-runtime-tree-shake -->
 
 Reviewer, by reading. The chunks are compiler-authored runtime text, so the practical risk is low; the defect is the inconsistent check ORDER (a scan that claims to see the whole shipped client no longer does). Also from the same review: the new `_scrml_timer_` text gate adds `timers` but not `deep_reactive`, unlike the `<timer>`/`<poll>` pre-emit detection (no worse than base).
+
+## §S462-own-value-inference — impl#1 divergence from §66.3 rules 5–10 (O35(d), 2026-10-09; ruling:user-voice-scrml.md S462 "go on the package"; dd own-value-type-annotation-o35d-dpa-065 — change `docs/changes/s462-own-value-inference/`; §66 is Nominal on impl#1, the bootstrap builds it: FILED, not scheduled)
+
+### g-impl1-own-value-inference-codes-s462 — impl#1 DIVERGENCE (filed, not fixed): impl#1 emits none of E-DECL-TYPE-NOT-INFERABLE / E-DECL-TYPE-REQUIRED-AT-BOUNDARY / E-DECL-TYPE-UNPROVEN, and the §66 opener the cases are written in does not parse — `NEW S462; MED; carried`
+<!-- @gap id=g-impl1-own-value-inference-codes-s462 sev=MED status=carried locus=searched:compiler/src(grep `E-DECL-TYPE-` — 0 matches; the §66 opener `<x=(…)/>` / `let <x:T=v/>` reports E-MARKUP-001 / E-STATE-UNDECLARED) prov=ruling:user-voice-scrml.md-S462-"go-on-the-package";SPEC-§66.3-rules-5-10;empirical:s462-xfail-signatures-captured-by-conformance/run.ts---xfail-signature -->
+Governing: SPEC §66.3 rules 5–10, §6.14.1 rule 5, §52.4.1, §66.14 (O2 / O39 note), §66.16; §34 rows E-DECL-TYPE-NOT-INFERABLE / -REQUIRED-AT-BOUNDARY / -UNPROVEN (Nominal on impl#1 — §34.0 carry rule). Conformance: 12 cases `conformance/cases/own-value-type/*` — graded on the bootstrap; all 12 xfail on impl#1 under this gap (signatures captured by `conformance/run.ts --xfail-signature`). The bootstrap implements the persist / export limbs of rule 9 and the call limb of rule 10; the `server` limb has no bootstrap fire site (its parser refuses `server` on a declaration, E-BOOTSTRAP-UNSUPPORTED), and `:asIs` (the named escape hatch) does not exist in the bootstrap (E-TYPE-UNKNOWN).
+
+### g-bootstrap-derived-cycle-through-function-s462 — the bootstrap does not diagnose a derived cycle that closes only THROUGH a function body (`function g() { return @a + 1 }` + `<a:int=(g())/>` compiles; unannotated too) — `NEW S462; LOW; open`
+<!-- @gap id=g-bootstrap-derived-cycle-through-function-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(derivedCycles — edges from a derived field's `reads` are direct `@x` reads only; a call's callee body is not followed) prov=review:S462-s239-fix-round-1-F4;SPEC-§6.6.10 -->
+SPEC §6.6.10: "The compiler SHALL detect all cycles in the derived reactive dependency graph" — a dependency through a called function's body is an edge (stated S462 fix round 1, with this limit recorded beside the SHALL). The bootstrap's `derivedCycles` (s462) follows direct `@` reads only. Fix direction: follow a call's callee body reads — the effect summary (`effects.scrml` / `summarize`) already closes write sets over calls; a read set is not built yet. The own-value inference itself is not fooled (a cell read back through a function's return is "not proven", §66.3 rule 5 (g)), so an UNANNOTATED cell on such a cycle reports E-DECL-TYPE-NOT-INFERABLE; an annotated one is silent.
+
+### g-bootstrap-eq-mixed-types-silent-s462 — the bootstrap's typer accepts `==` / `!=` between provably different primitive types (`let <s:string="a"/>` + `<c=(@s == 1)/>` compiles; the inferred type is `bool`) — `NEW S462; LOW; open (pre-existing)`
+<!-- @gap id=g-bootstrap-eq-mixed-types-silent-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(checkOperands — `.EqPrim :> ts` / `.NeqPrim :> ts`: `==` / `!=` are not judged; the comment defers them to §45.3 E-EQ-001) prov=review:S462-s239-fix-round-1-F8 -->
+Pre-existing leniency surfaced by the S462 review (the own-value inference reads a comparison as `bool`, §66.3 rule 5 (d), and so does the typer). Governing: §45.3 (E-EQ-001). Not caused by S462; filed so the inference's `bool` is not read as a judgment that the comparison is well-typed.
 
 ### G-ERRORS-DEFAULT-RENDER-MESSAGE-AS-HTML-S462 — the `<errors of=>` default render inserted the resolved message into `innerHTML` as HTML, so a payload slot carrying user data became markup: `<confirm req eq(@signup.password)>` + typing `<img id=pwn src=x>` into the password field created an `#pwn` element (per-field render and the compound `all` rollup alike) — `NEW S462; HIGH; RESOLVED S462 (s462-register-messages-templates FIX1 P1)`
 <!-- @gap id=g-errors-default-render-message-as-html-s462 sev=HIGH status=resolved locus=compiler/src/codegen/emit-event-wiring.ts(<errors> default renderOne),compiler/src/runtime-template.js(_scrml_message_html, 'messages' chunk) prov=review:S462-register-messages-templates -->
