@@ -16,3 +16,4 @@ F6 (NIT): `{ f: Rule.Req }` (a bare Rule not in an array) yields three misleadin
 F7 (NIT, pre-existing): note in progress.md only.
 Also add the changelog-ready line to progress.md (the PA writes docs/changelog.md).
 Gates (ALL incl. CI-only): pre-commit · tracking tiers as ci.yml after pretest · browser tier as ci.yml · types:check · `bun scripts/s34-census.ts --check-new --base 980cb3001cfd99711457890c6a88b2b2e546991b` · facts/spec-index --check. Report new SHA + per-item disposition.
+2026-10-09T22:32:32-06:00 FR1: F1 data.js Rule header corrected (qualified Rule.Min(3) only until s462-stdlib-import-004); docs/SPEC already use qualified form only (grep-verified). F2 mirror isRule guard + typeof check; F5 non-string/empty message keeps default (shim+mirror); F6 non-list schema entry -> one specific error (shim+mirror); §4 bad-input lockstep battery (17 cases) added — test 44/44

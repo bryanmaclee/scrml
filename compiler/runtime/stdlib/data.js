@@ -415,10 +415,14 @@ export function paginate(array, page, pageSize) {
 
 // `Rule` mirrors the compiled shape of `export type Rule:enum` in
 // stdlib/data/validate.scrml EXACTLY — a unit variant is its name string, a
-// payload variant is `{ variant, data: { <declared field names> } }` — so a
-// rule built here (`Rule.Min(3)`) and one the compiler lowers from a bare
-// variant in a typed position (`.Min(3)`) are the same value. The payload
-// field names below are the declared names; keep the two in lockstep.
+// payload variant is `{ variant, data: { <declared field names> } }`. The
+// payload field names below are the declared names; keep the two in lockstep
+// (compiler/tests/unit/data-validate-rules-as-data.test.js §4 checks it).
+// Adopters write the QUALIFIED form, `Rule.Min(3)`. A bare `.Min(3)` in a
+// `Rule`-typed position does NOT compile yet: stdlib enum types are not seeded
+// into an importing file's type registry (E-VARIANT-AMBIGUOUS). Once that lands
+// (sibling dispatch s462-stdlib-import-004) the compiler's lowering of `.Min(3)`
+// is this same value.
 export const Rule = Object.freeze({
   Req: "Req",
   Pattern: function (re) { return { variant: "Pattern", data: { re } }; },
@@ -446,7 +450,12 @@ export function validate(data, schema, check) {
   const errors = {};
   for (const field of Object.keys(schema)) {
     const value = data[field];
-    for (const rule of schema[field]) {
+    const rules = schema[field];
+    if (!Array.isArray(rules)) {
+      errors[field] = [`The schema entry for ${field} must be a list of Rule values`];
+      continue;
+    }
+    for (const rule of rules) {
       const message = _data_rule_failure(rule, value, data, check);
       if (message === null) continue;
       errors[field] = errors[field] || [];
@@ -519,7 +528,8 @@ function _data_rule_failure(rule, value, data, check) {
     case "WithMessage": {
       const failure = _data_rule_failure(p.rule, value, data, check);
       if (failure === null) return null;
-      return _data_is_empty(p.message) ? failure : p.message;
+      // Old `message || default` semantics: only a non-empty string replaces.
+      return typeof p.message === "string" && p.message !== "" ? p.message : failure;
     }
     default:
       // Not a Rule value (e.g. a pre-S462 `{ check }` rule object). Fail

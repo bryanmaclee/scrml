@@ -86,7 +86,12 @@ ${
         const errors = {}
         for (const field of Object.keys(schema)) {
             const value = data[field]
-            for (const rule of schema[field]) {
+            const rules = schema[field]
+            if (!Array.isArray(rules)) {
+                errors[field] = [`The schema entry for ${field} must be a list of Rule values`]
+                continue
+            }
+            for (const rule of rules) {
                 const message = ruleFailure(rule, value, data, check)
                 if (message is not) { continue }
                 errors[field] = errors[field] || []
@@ -121,7 +126,19 @@ ${
         return value is not || value == ""
     }
 
+    // A schema entry that is not a Rule value (e.g. a pre-S462 `{ check }`
+    // object) FAILS CLOSED: an unrecognised rule never passes silently. The
+    // test sits before the match because the match is exhaustive over Rule.
+    function isRule(rule) {
+        if (rule is not) { return false }
+        const tag = typeof rule == "object" ? rule.variant : rule
+        return Rule.variants.includes(tag)
+    }
+
     function ruleFailure(rule: Rule, value, data, check) {
+        if (!isRule(rule)) {
+            return "Unknown validation rule — a schema entry must be a Rule value"
+        }
         return match rule {
             .Req :> messageUnless(!isEmpty(value), "This field is required")
             .Pattern(re) :> messageUnless(!value || re.test(String(value)), "Invalid format")
@@ -147,7 +164,7 @@ ${
     }
 
     function customFailure(tag, value, data, check) {
-        if (check is not) {
+        if (typeof check != "function") {
             return `No check function was passed to validate() for Rule.Custom("${tag}")`
         }
         const result = check(tag, value, data)
@@ -157,7 +174,8 @@ ${
 
     function overrideMessage(failure, message) {
         if (failure is not) { return not }
-        return isEmpty(message) ? failure : message
+        // Old `message || default` semantics: only a non-empty string replaces.
+        return typeof message == "string" && message != "" ? message : failure
     }
 
     // ---------------------------------------------------------------------------

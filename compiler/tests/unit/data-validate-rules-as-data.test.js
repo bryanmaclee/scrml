@@ -159,6 +159,31 @@ const PAIRS = [
     [Rule.Req, Rule.MinLength(2), Rule.MaxLength(5), Rule.Pattern(/^[a-z]+$/)]],
 ];
 
+// Bad input — shim and compiled mirror must fail closed IDENTICALLY (FIX ROUND 1 F2/F5/F6).
+const BAD_CASES = [
+  ["legacy { check } object", { f: [{ check: () => ({ valid: true, message: "" }) }] }, undefined],
+  ["unknown string tag", { f: ["NotARule"] }, undefined],
+  ["number entry", { f: [42] }, undefined],
+  ["not entry", { f: [null] }, undefined],
+  ["function entry", { f: [() => true] }, undefined],
+  ["bare Rule, not in a list", { f: Rule.Req }, undefined],
+  ["bare payload Rule, not in a list", { f: Rule.Min(3) }, undefined],
+  ["Custom, no check", { f: [Rule.Custom("t")] }, undefined],
+  ["Custom, string check", { f: [Rule.Custom("t")] }, "nope"],
+  ["Custom, number check", { f: [Rule.Custom("t")] }, 42],
+  ["Custom, object check", { f: [Rule.Custom("t")] }, { t: () => true }],
+  ["WithMessage 0", { f: [Rule.WithMessage(Rule.Req, 0)] }, undefined],
+  ["WithMessage false", { f: [Rule.WithMessage(Rule.Req, false)] }, undefined],
+  ["WithMessage NaN", { f: [Rule.WithMessage(Rule.Req, NaN)] }, undefined],
+  ["WithMessage not", { f: [Rule.WithMessage(Rule.Req, null)] }, undefined],
+  ["WithMessage absent", { f: [Rule.WithMessage(Rule.Req)] }, undefined],
+  ["WithMessage non-Rule inner", { f: [Rule.WithMessage("Nope", "Msg")] }, undefined],
+];
+
+function badBattery(runValidate) {
+  return BAD_CASES.map(([label, schema, check]) => [label, runValidate({ f: "" }, schema, check)]);
+}
+
 function battery(runValidate) {
   const out = [];
   for (const [label, , rules] of PAIRS) {
@@ -237,6 +262,24 @@ describe("§2 custom checks — passed at the call, never stored", () => {
     const errs = validate({ f: "x" }, { f: [Rule.Custom("sku")] });
     expect(errs.f).toHaveLength(1);
     expect(errs.f[0]).toContain('Rule.Custom("sku")');
+  });
+
+  test("FAIL CLOSED — a non-function check is an error, never a throw", () => {
+    for (const bad of ["nope", 42, {}, true]) {
+      const errs = validate({ f: "x" }, { f: [Rule.Custom("sku")] }, bad);
+      expect(errs.f).toEqual(['No check function was passed to validate() for Rule.Custom("sku")']);
+    }
+  });
+
+  test("WithMessage with a non-string or empty message keeps the default (old `message || default`)", () => {
+    for (const m of [0, false, NaN, null, undefined, ""]) {
+      expect(validate({ f: "" }, { f: [Rule.WithMessage(Rule.Req, m)] })).toEqual({ f: ["This field is required"] });
+    }
+  });
+
+  test("a schema entry that is not a list gets ONE specific error", () => {
+    expect(validate({ f: "" }, { f: Rule.Req })).toEqual({ f: ["The schema entry for f must be a list of Rule values"] });
+    expect(validate({ f: "" }, { f: Rule.Min(3) })).toEqual({ f: ["The schema entry for f must be a list of Rule values"] });
   });
 
   test("FAIL CLOSED — a non-Rule schema entry (a pre-S462 { check } object) is an error", () => {
@@ -331,6 +374,15 @@ describe("§4 lockstep — compiled validate.scrml ≡ the shim", () => {
     expect(fnName).toBeTruthy();
     const s = runWithHook(compiled, `__out.validate = ${fnName};`);
     expect(battery(s.validate)).toEqual(battery(validate));
+  });
+
+  test("the compiled scrml validate agrees with the shim on BAD input (fails closed the same way)", () => {
+    const fnName = (compiled.clientJs.match(/function (_scrml_validate_\d+)\(/) || [])[1];
+    const s = runWithHook(compiled, `__out.validate = ${fnName};`);
+    const mirror = badBattery(s.validate);
+    expect(mirror).toEqual(badBattery(validate));
+    // and every bad case is an ERROR, never a silent pass
+    for (const [label, errs] of mirror) expect([label, Object.keys(errs).length]).toEqual([label, 1]);
   });
 });
 
