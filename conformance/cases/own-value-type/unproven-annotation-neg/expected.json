@@ -1,0 +1,32 @@
+{
+  "id": "own-value-type-unproven-annotation-neg",
+  "description": "§66.3 rule 10: `<v:int=(pick(true))/>` where `pick` declares no return type and returns an `int` on one path and a `string` on the other (so its return is not proven) is E-DECL-TYPE-UNPROVEN — never silently accepted.",
+  "language-version": "1.0",
+  "spec": "§66.3",
+  "rationale": "§66.3 rule 10: \"An own value written `:T` (any type but `asIs`) whose initializer's VALUE is one whose type the compiler cannot resolve — a call of a function whose return is neither declared nor inferred-and-proven … is a compile error\". ruling:user-voice-scrml.md S462 \"go on the package\" (dd own-value-type-annotation-o35d-dpa-065 §8 ruling 10; §5 item 5: the annotation \"must not pass silently\").",
+  "expect": {
+    "codes": [
+      "E-DECL-TYPE-UNPROVEN"
+    ],
+    "codeCounts": {
+      "E-DECL-TYPE-UNPROVEN": 1
+    },
+    "severity": {
+      "E-DECL-TYPE-UNPROVEN": "error"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-own-value-inference-codes-s462",
+      "fails": {
+        "codes": [
+          "codeCounts:code 'E-DECL-TYPE-UNPROVEN' fired 0 time(s), expected exactly 1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-DECL-TYPE-UNPROVEN",
+          "severity:code 'E-DECL-TYPE-UNPROVEN' did not fire (expected severity error)"
+        ]
+      }
+    }
+  }
+}

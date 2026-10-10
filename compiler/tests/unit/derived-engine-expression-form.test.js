@@ -258,7 +258,7 @@ describe("§51.0.J modern derived=<expr> — ternary / call / multi-cell", () =>
     const src = `type Level:enum = { High, Low }
 \${
   fn classify(m: int): Level {
-    given m > 500 :> { return .High }
+    if (m > 500) { return .High }
     return .Low
   }
 }

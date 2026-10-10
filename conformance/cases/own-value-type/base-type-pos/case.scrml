@@ -1,0 +1,9 @@
+// §66.3 rule 6 — the inferred type is the BASE type: `(1 + 2)` infers `int`, not the singleton `3`,
+// so a seeded cell built from it takes any `int`.
+<program>
+    let <k=(1 + 2)/>
+    <main>
+        <p id="out">${@k}</p>
+        <button id="set" onclick=(@k = 7)>set</button>
+    </main>
+</program>

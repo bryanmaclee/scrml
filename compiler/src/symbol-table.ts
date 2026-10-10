@@ -4314,7 +4314,10 @@ function checkValidator(
   const signature = lookupPredicate(validator.name);
   if (!signature) {
     // D-FORM-1 — the universal-core vocabulary is CLOSED at fourteen (§55.1 line
-    // 32517). The ONLY escape hatch is `custom(fn)` (stdlib/data/validate.scrml).
+    // 32517). The ONLY escape hatch on a cell is the `custom(fn)` markup predicate
+    // (wiring — a function NAMED in an attribute, never stored). Runtime record
+    // validation is a separate surface: `scrml:data`'s `Rule.Custom(tag)` plus a
+    // `check(tag, value, data)` function passed to `validate` (S462).
     // `email`/`url`/`numeric`/`integer` are NOT first-class predicates — adopters
     // spell them `pattern(/…/)` or `custom(fn)`. Any other bare-attribute name is
     // a typo (e.g. `lenght`) or a would-be stdlib predicate; REJECT it. (Was a

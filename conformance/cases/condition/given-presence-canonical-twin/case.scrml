@@ -1,0 +1,23 @@
+// §42.2.3 / §42.4 / §63.5 (S462) — the canonical twin of condition/given-presence-deprecated-guard:
+// the same program with each in-place `given` guard written as the explicit presence test
+// `x is given` (the `scrml fix` given-presence rewrite). Same run-time effect, no deprecation code.
+${
+    <seen> = "init"
+    <both> = "init"
+    <blank> = "init"
+
+    function go() {
+        let name: string | not = "ada"
+        let age: int | not = not
+        let empty: string | not = ""
+        if (name is given) { @seen = "hello " + name }
+        if (name is given && age is given) { @both = "both present" }
+        if (empty is given) { @blank = "empty string is present" }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="seen">${@seen}</p>
+    <p id="both">${@both}</p>
+    <p id="blank">${@blank}</p>
+</program>
