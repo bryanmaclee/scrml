@@ -6,7 +6,8 @@
 // calls or pure helpers around them.
 //
 // Surface (must match stdlib/oauth/index.scrml exports):
-//   - memoryAdapter()                          → { put, get, del }
+//   - OAuthStore                               → enum: Memory(entries) | Redis(url) | Store(kv)
+//   - memoryAdapter()                          → OAuthStore.Memory(new Map())
 //   - startFlow(config, sessionKey)            → Promise<string>
 //   - exchangeCode(config, sessionKey, code, state) → Promise<tokens>
 //   - refreshToken(config, refreshTokenStr)    → Promise<tokens>
@@ -30,38 +31,121 @@ export { microsoftConfig } from "./oauth/microsoft.js";
 export { discordConfig } from "./oauth/discord.js";
 
 import { post as httpPost, get as httpGet } from "./http.js";
+import { setex, get as redisGet, del as redisDel, createClient } from "./redis.js";
+import { get as kvGet, set as kvSet, del as kvDel } from "./store.js";
 import { generateToken } from "./crypto.js";
 import { generateVerifier, deriveChallenge, PKCE_METHOD } from "./oauth/pkce.js";
 // host wall-clock via the single sanctioned scrml:time touch (S179 clock de-leak)
 import { now as clockNow } from "./time.js";
 
 // ---------------------------------------------------------------------------
-// Storage adapter — in-memory dev-only.
+// Storage — the OAuthStore enum (S462). Mirrors the scrml enum declared in
+// stdlib/oauth/index.scrml; the variant shape is the one the compiler emits
+// for payload variants ({ variant, data: { <field> } }). The caller picks the
+// backend by TAG and the module matches on it — a storage backend is never an
+// object of functions (SPEC §14.3).
+//
+//   OAuthStore.Memory(entries) — in-process Map (dev / single process)
+//   OAuthStore.Redis(url)      — scrml:redis; null/undefined url = default client
+//   OAuthStore.Store(kv)       — a scrml:store KvStore
 // ---------------------------------------------------------------------------
 
+export const OAuthStore = Object.freeze({
+  Memory: function(entries) {
+    return { variant: "Memory", data: { entries } };
+  },
+  Redis: function(url) {
+    return { variant: "Redis", data: { url } };
+  },
+  Store: function(kv) {
+    return { variant: "Store", data: { kv } };
+  },
+  variants: ["Memory", "Redis", "Store"],
+});
+
+// In-memory storage, dev-only. Each call is a fresh, independent store.
 export function memoryAdapter() {
-  const store = new Map();
-  function expired(entry) {
-    return entry.expiresAt !== null && entry.expiresAt !== undefined && entry.expiresAt <= clockNow();
+  return OAuthStore.Memory(new Map());
+}
+
+// One dedicated Redis client per URL for OAuthStore.Redis(url), reused.
+const _redisClients = new Map();
+function _redisClientFor(url) {
+  let client = _redisClients.get(url);
+  if (!client) {
+    client = createClient(url);
+    _redisClients.set(url, client);
   }
-  return {
-    put(key, value, ttlSeconds) {
+  return client;
+}
+
+function _isAbsent(v) {
+  return v === null || v === undefined;
+}
+
+async function _storePut(storage, key, value, ttlSeconds) {
+  switch (storage.variant) {
+    case "Memory": {
       const expiresAt = ttlSeconds && ttlSeconds > 0 ? clockNow() + ttlSeconds * 1000 : null;
-      store.set(key, { value, expiresAt });
-    },
-    get(key) {
-      const entry = store.get(key);
+      storage.data.entries.set(key, { value, expiresAt });
+      return;
+    }
+    case "Redis": {
+      const url = storage.data.url;
+      if (_isAbsent(url)) {
+        await setex(key, value, ttlSeconds);
+      } else {
+        await _redisClientFor(url).send("SETEX", [key, String(ttlSeconds), value]);
+      }
+      return;
+    }
+    case "Store":
+      kvSet(storage.data.kv, key, value, ttlSeconds);
+      return;
+  }
+}
+
+async function _storeGet(storage, key) {
+  switch (storage.variant) {
+    case "Memory": {
+      const entries = storage.data.entries;
+      const entry = entries.get(key);
       if (!entry) return null;
-      if (expired(entry)) {
-        store.delete(key);
+      if (entry.expiresAt !== null && entry.expiresAt !== undefined && entry.expiresAt <= clockNow()) {
+        entries.delete(key);
         return null;
       }
       return entry.value;
-    },
-    del(key) {
-      store.delete(key);
-    },
-  };
+    }
+    case "Redis": {
+      const url = storage.data.url;
+      if (_isAbsent(url)) return await redisGet(key);
+      return await _redisClientFor(url).get(key);
+    }
+    case "Store":
+      return kvGet(storage.data.kv, key);
+  }
+  return null;
+}
+
+async function _storeDel(storage, key) {
+  switch (storage.variant) {
+    case "Memory":
+      storage.data.entries.delete(key);
+      return;
+    case "Redis": {
+      const url = storage.data.url;
+      if (_isAbsent(url)) {
+        await redisDel(key);
+      } else {
+        await _redisClientFor(url).del(key);
+      }
+      return;
+    }
+    case "Store":
+      kvDel(storage.data.kv, key);
+      return;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -69,15 +153,11 @@ export function memoryAdapter() {
 // ---------------------------------------------------------------------------
 
 function _assertStorage(storage) {
-  if (
-    !storage
-    || typeof storage.put !== "function"
-    || typeof storage.get !== "function"
-    || typeof storage.del !== "function"
-  ) {
+  if (!storage || typeof storage !== "object" || !OAuthStore.variants.includes(storage.variant)) {
     throw new Error(
-      "[scrml:oauth] config.storage must be an object with put/get/del methods. "
-        + "Use memoryAdapter() for dev or wire scrml:redis / scrml:store for prod.",
+      "[scrml:oauth] config.storage must be an OAuthStore value: "
+        + "memoryAdapter() for dev, OAuthStore.Redis(url) or "
+        + "OAuthStore.Store(kvStore) for prod.",
     );
   }
 }
@@ -134,9 +214,9 @@ export async function startFlow(config, sessionKey) {
   }
 
   const ttl = 600;
-  await config.storage.put(_stateKey(sessionKey), state, ttl);
+  await _storePut(config.storage, _stateKey(sessionKey), state, ttl);
   if (verifier) {
-    await config.storage.put(_verifierKey(sessionKey), verifier, ttl);
+    await _storePut(config.storage, _verifierKey(sessionKey), verifier, ttl);
   }
 
   return _buildUrl(config.authorizeUrl, params);
@@ -151,12 +231,12 @@ export async function exchangeCode(config, sessionKey, code, state) {
   if (!code) throw new Error("[scrml:oauth] exchangeCode: code required");
   if (!state) throw new Error("[scrml:oauth] exchangeCode: state required");
 
-  const expectedState = await config.storage.get(_stateKey(sessionKey));
-  await config.storage.del(_stateKey(sessionKey));
+  const expectedState = await _storeGet(config.storage, _stateKey(sessionKey));
+  await _storeDel(config.storage, _stateKey(sessionKey));
 
   if (!expectedState || expectedState !== state) {
     const verifierKey = _verifierKey(sessionKey);
-    await config.storage.del(verifierKey);
+    await _storeDel(config.storage, verifierKey);
     const err = new Error(
       "[scrml:oauth] state mismatch — possible CSRF attempt or expired flow",
     );
@@ -167,8 +247,8 @@ export async function exchangeCode(config, sessionKey, code, state) {
   const usePKCE = config.usePKCE !== false;
   let verifier = null;
   if (usePKCE) {
-    verifier = await config.storage.get(_verifierKey(sessionKey));
-    await config.storage.del(_verifierKey(sessionKey));
+    verifier = await _storeGet(config.storage, _verifierKey(sessionKey));
+    await _storeDel(config.storage, _verifierKey(sessionKey));
     if (!verifier) {
       const err = new Error(
         "[scrml:oauth] code_verifier missing from storage — flow expired",

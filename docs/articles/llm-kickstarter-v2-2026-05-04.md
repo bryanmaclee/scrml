@@ -1193,12 +1193,12 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 | stdlib module | Selected exports | Replaces (npm) |
 |---|---|---|
 | `scrml:data` | `validate(data, schema)`, `isValid`, `firstError`; predicate builders `required`, `email`, `minLength/maxLength/exactLength`, `pattern`, `min/max`, `numeric`, `integer`, `oneOf`, `url`, `custom`; transforms `pick`, `omit`, `groupBy`, `indexBy`, `sortBy`, `unique`, `flatten/flattenDeep`, `chunk`, `deepMerge`, `clamp`, `paginate` | zod, yup, joi, lodash |
-| `scrml:auth` | `hashPassword`, `verifyPassword`, `generatePassword`; `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `decodeJwt`; `createRateLimiter`; `generateTotpSecret`, `verifyTotp` (RFC 6238) | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
+| `scrml:auth` | `hashPassword`, `verifyPassword`, `generatePassword`; `signJwt(payload, secret, expiresIn)`, `verifyJwt(token, secret)`, `decodeJwt`; `createRateLimiter` + `check(limiter, key)` / `peek` / `resetLimit`; `generateTotpSecret`, `verifyTotp` (RFC 6238) | bcrypt, jsonwebtoken, speakeasy, express-rate-limit |
 | `scrml:crypto` | `hash(algo, input)`, `verifyHash`, `hmac(secret, payload)`, `safeCompare`, `generateUUID`, `generateToken` | crypto-js, bcryptjs, uuid |
-| `scrml:http` | REST helpers: `get(url, opts)`, `post(url, body, opts)`, `put`, `del`, `patch` (each with timeout + retry support); `withBaseUrl(baseUrl)`, `isOk(response)`, `isError(response)`; **middleware**: `withAuth(token, scheme?)`, `withDefaults(defaults)`, `retry(fn, opts)` (exp backoff + jitter); **uploads**: `multipart(fields)`, `uploadFile(url, file, opts?)` | axios, got, node-fetch, ky |
+| `scrml:http` | REST helpers: `get(url, opts)`, `post(url, body, opts)`, `put`, `del`, `patch` (each with timeout + retry support); **clients**: `withBaseUrl(baseUrl)`, `withAuth(token, scheme?, client?)`, `withDefaults(defaults, client?)` return a config struct you pass FIRST — `get(api, "/users/42")`, `post(api, "/users", body)`; `isOk(response)`, `isError(response)`; `retry(fn, opts)` (exp backoff + jitter); **uploads**: `multipart(fields)`, `uploadFile(url, file, opts?)` | axios, got, node-fetch, ky |
 | `scrml:time` | `formatDate`, `formatTime`, `formatDateTime`, `formatRelative`, `formatDuration`; `parseDate`, `isValidDate`; `startOf(ts, unit)`, `addTime`, `diffTime`; `debounce(fn, ms)`, `throttle(fn, ms)`, `sleep(ms)`; **timezone-aware**: `formatInTimezone(ts, tz, opts?, locale?)`, `nowInTimezone(tz, opts?, locale?)`, `toTimezoneParts(ts, tz)`, `tzOffset(tz, ts?)`; **ISO 8601**: `formatISO(ts)`, `parseISO(str)` | date-fns, dayjs, lodash.debounce, luxon (timezone) |
 | `scrml:format` | `formatCurrency`, `formatNumber`, `formatPercent`, `formatBytes`; `slug`, `pluralize`, `titleCase`, `capitalize`, `toWords`; `truncate`, `padLeft`, `padRight`; **locale-aware Intl**: `compactNumber(n, locale?)`, `formatList(items, type?, locale?)`, `formatRange(start, end, currency?, locale?)`, `formatNumberAdvanced(n, options, locale?)` | slugify, change-case, pluralize |
-| `scrml:store` | `createStore`, `createSessionStore`, `createCounter` (KV / session / counter via SQLite + memory) | connect-sqlite3, basic redis use |
+| `scrml:store` | `createStore`, `createSessionStore`, `createCounter` return a store struct; `get(store, key)`, `set(store, key, value, ttl?)`, `del`, `has`, `keys`; counters `increment(counter, key)`, `count`, `resetCount` (KV / session / counter via SQLite) | connect-sqlite3, basic redis use |
 | `scrml:router` | `match(pattern, path)`, `parseQuery`, `buildUrl(pattern, params, query)`, `navigate(url, opts)`, `currentPath`, `onNavigate(pattern, handler)` | path-to-regexp, qs |
 | `scrml:test` | Assertion family: `assertEqual`, `assertNotEqual`, `assertTruthy`, `assertFalsy`, `assertNull`, `assertDefined`, `assertThrows`, `assertNoThrow`, `assertInRange`, `assertContains`; `group(label, fn)` | chai, parts of jest/expect |
 | `scrml:fs`, `scrml:path`, `scrml:process` | Node compat layer — file ops, path manipulation, env/argv/cwd/exit | (Node built-ins) |
@@ -1210,7 +1210,7 @@ scrml ships a focused stdlib that covers ~80% of typical-app npm needs. Import f
 | `scrml:host` | `safeCall`, `safeCallAsync` — wrap a JS-host API that throws and get a scrml failable result (`HostError`) instead. scrml source has no try/catch; this is the bridge. | (try/catch around host APIs) |
 | `scrml:compiler` | The compiler's own pipeline stages (`compileScrml`, `splitBlocks`, `buildAST`, …) as a module. Tooling use, not app code. | — |
 | `scrml:mcp` | Compiler-internal (MCP dev-tools server behind `<program mcp>`). Do not import it directly. | — |
-| `scrml:oauth` | OAuth 2.0 / OpenID Connect client. Auth-code grant with PKCE (RFC 7636), `refreshToken`, `getUserInfo`, `revoke` (RFC 7009). Storage-adapter injection (`{put, get, del}`) for state + verifier — pair with `scrml:redis`, `scrml:store`, or use `memoryAdapter()` for dev. Provider presets: `googleConfig` (+ `parseGoogleIdToken`), `githubConfig` (classic OAuth Apps), `microsoftConfig` (tenant-scoped Entra), `discordConfig`. Server-side only. | passport, simple-oauth2, next-auth (server primitives), googleapis (auth) |
+| `scrml:oauth` | OAuth 2.0 / OpenID Connect client. Auth-code grant with PKCE (RFC 7636), `refreshToken`, `getUserInfo`, `revoke` (RFC 7009). State + verifier storage is an `OAuthStore` tag: `OAuthStore.Redis(url)` (or `not` for the default client), `OAuthStore.Store(createStore(...))`, or `memoryAdapter()` for dev. Provider presets: `googleConfig` (+ `parseGoogleIdToken`), `githubConfig` (classic OAuth Apps), `microsoftConfig` (tenant-scoped Entra), `discordConfig`. Server-side only. | passport, simple-oauth2, next-auth (server primitives), googleapis (auth) |
 
 If you reach for `import X from 'some-npm-package'` while writing scrml, stop. Check this table first; if you don't see what you need, read the module's `index.scrml` before npm-installing.
 
@@ -1376,8 +1376,8 @@ For third-party identity, reach for `scrml:oauth`. The flow is two server functi
 
 ```scrml
 // fragment — not a complete program in v0.8.0 (see the note below).
-// `oauthStorage` is your { put, get, del } adapter for the state + PKCE verifier.
-import { startFlow, exchangeCode, getUserInfo, googleConfig } from 'scrml:oauth'
+// `storage` picks where the state + PKCE verifier live — an OAuthStore tag.
+import { startFlow, exchangeCode, getUserInfo, googleConfig, OAuthStore } from 'scrml:oauth'
 import { signJwt } from 'scrml:auth'
 
 // Step 1 — user clicks "Sign in with Google" → server returns the redirect URL.
@@ -1386,7 +1386,7 @@ function googleSigninStart(sessionId) {
         clientId:     process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         redirectUri:  "https://app.example.com/auth/google/callback",
-        storage:      oauthStorage,
+        storage:      OAuthStore.Redis(not),   // the default Bun Redis client (REDIS_URL)
     })
     return startFlow(cfg, sessionId)
 }
@@ -1397,7 +1397,7 @@ function googleSigninCallback(sessionId, code, state) {
         clientId:     process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
         redirectUri:  "https://app.example.com/auth/google/callback",
-        storage:      oauthStorage,
+        storage:      OAuthStore.Redis(not),
     })
     const tokens = exchangeCode(cfg, sessionId, code, state)
     const profile = getUserInfo(cfg, tokens.accessToken)
@@ -1406,7 +1406,7 @@ function googleSigninCallback(sessionId, code, state) {
 }
 ```
 
-**Why this is a fragment.** `scrml:oauth` and `scrml:redis` are server-only modules, so every use must sit inside server-placed code — a module-level `const cfg = googleConfig(...)` is a client-side use and fails with `E-STDLIB-CLIENT-CHUNK-MISSING`. And the storage adapter the module expects cannot yet be written inline over `scrml:redis`: `{ put: (k, v, ttl) => setex(k, v, ttl), … }` is rejected with `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`, because the arrows would hand back unawaited async results. `memoryAdapter()` (from `scrml:oauth`) works for development in a single process only.
+**Why this is a fragment.** `scrml:oauth` and `scrml:redis` are server-only modules, so every use must sit inside server-placed code — a module-level `const cfg = googleConfig(...)` is a client-side use and fails with `E-STDLIB-CLIENT-CHUNK-MISSING`. Storage is a TAG the module matches on, never an object of functions (a function is not stored in a value): `OAuthStore.Redis(url)` / `OAuthStore.Store(kvStore)` for production, `memoryAdapter()` for development in a single process only.
 
 Notes:
 - **PKCE is on by default** — public clients (no `clientSecret`) MUST use it. The module enforces this at config-validation time.

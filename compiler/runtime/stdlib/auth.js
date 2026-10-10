@@ -17,13 +17,17 @@
 //   - verifyJwt(token, secret)                → Promise<{valid,payload?,reason?}>
 //   - verifyJwtJwks(token, jwksUrl, opts)     → Promise<{valid,payload?,reason?}> [RS256/JWKS]
 //   - decodeJwt(token)                        → object|null              [pure]
-//   - createRateLimiter(options)              → { check, reset, peek }   [pure in-memory]
+//   - createRateLimiter(options)              → { windowMs, max, entries } [pure in-memory]
+//   - check(limiter, key)                     → { allowed, remaining, resetAt }
+//   - peek(limiter, key)                      → { count, remaining, resetAt }
+//   - resetLimit(limiter, key)                → void
 //   - generateTotpSecret(options)             → { secret, otpauthUrl }
 //   - verifyTotp(code, secret)                → Promise<boolean>
-//   - requestMagicLink / verifyMagicLink            (flows.scrml)        [server-only]
-//   - requestEmailVerification / verifyEmail        (flows.scrml)        [server-only]
-//   - requestPasswordReset / verifyResetToken       (flows.scrml)        [server-only]
-//   - resetPassword(token, newPassword, opts)       (flows.scrml)        [server-only]
+//   - requestMagicLink(email, opts, sendEmail?) / verifyMagicLink(token, opts)        [server-only]
+//   - requestEmailVerification(email, opts, sendEmail?) / verifyEmail(token, opts)    [server-only]
+//   - requestPasswordReset(email, opts, sendEmail?) / verifyResetToken(token, opts)   [server-only]
+//   - resetPassword(token, newPassword, opts, updateHash)                            [server-only]
+//     (flows.scrml; opts = { store: KvStore, baseUrl?, ttl? })
 //
 // Functions marked `server-only` use Bun-only APIs (Bun.password.*) and will
 // throw when called in a browser context. The dispatch app's existing role
@@ -44,6 +48,9 @@ import { floor, max as mathMax } from "./math.js";
 import { now as clockNow } from "./time.js";
 import { get as httpGet } from "./http.js";
 import { generateToken } from "./crypto.js";
+// S462: a flow store is a scrml:store KvStore struct, driven through the store
+// module's free functions (it no longer exposes get/set/delete methods).
+import { get as kvGet, set as kvSet, del as kvDel } from "./store.js";
 
 export async function hashPassword(password) {
   // Argon2id via Bun.password (server-only). Mirrors stdlib/auth/password.scrml
@@ -188,40 +195,46 @@ export function decodeJwt(token) {
 // index.scrml — rate limiter (in-memory) and TOTP (RFC 6238)
 // ---------------------------------------------------------------------------
 
+// The limiter is a config/state STRUCT (S462) — { windowMs, max, entries } —
+// never an object of functions (SPEC §14.3). The per-key counters live in
+// `entries` (a Map) and are updated in place by check / resetLimit, so every
+// call that receives the same limiter shares them (same semantics as the
+// pre-S462 closed-over Map).
 export function createRateLimiter(options) {
-  // Mirrors stdlib/auth/index.scrml line 40-87. In-memory, non-persistent.
+  // Mirrors stdlib/auth/index.scrml createRateLimiter. In-memory, non-persistent.
   const windowMs = (options && options.windowMs) || 15 * 60 * 1000;
   const max = (options && options.max) || 10;
-  const store = new Map();
+  return { windowMs, max, entries: new Map() };
+}
 
+export function check(limiter, key) {
+  const now = clockNow();
+  let entry = limiter.entries.get(key);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + limiter.windowMs };
+    limiter.entries.set(key, entry);
+  }
+  entry.count++;
+  const allowed = entry.count <= limiter.max;
+  const remaining = mathMax(0, limiter.max - entry.count);
+  return { allowed, remaining, resetAt: entry.resetAt };
+}
+
+// `resetLimit`, not `reset` — `reset` is a reserved scrml keyword (§6.8).
+export function resetLimit(limiter, key) {
+  limiter.entries.delete(key);
+}
+
+export function peek(limiter, key) {
+  const now = clockNow();
+  const entry = limiter.entries.get(key);
+  if (!entry || entry.resetAt <= now) {
+    return { count: 0, remaining: limiter.max, resetAt: now + limiter.windowMs };
+  }
   return {
-    check(key) {
-      const now = clockNow();
-      let entry = store.get(key);
-      if (!entry || entry.resetAt <= now) {
-        entry = { count: 0, resetAt: now + windowMs };
-        store.set(key, entry);
-      }
-      entry.count++;
-      const allowed = entry.count <= max;
-      const remaining = mathMax(0, max - entry.count);
-      return { allowed, remaining, resetAt: entry.resetAt };
-    },
-    reset(key) {
-      store.delete(key);
-    },
-    peek(key) {
-      const now = clockNow();
-      const entry = store.get(key);
-      if (!entry || entry.resetAt <= now) {
-        return { count: 0, remaining: max, resetAt: now + windowMs };
-      }
-      return {
-        count: entry.count,
-        remaining: mathMax(0, max - entry.count),
-        resetAt: entry.resetAt,
-      };
-    },
+    count: entry.count,
+    remaining: mathMax(0, limiter.max - entry.count),
+    resetAt: entry.resetAt,
   };
 }
 
@@ -577,7 +590,7 @@ export async function verifyJwtJwks(token, jwksUrl, options) {
 //
 // Each flow is a request*/verify* pair over: a high-entropy token
 // (generateToken(32) = 256 bits), a caller-supplied TTL store (a scrml:store
-// handle with get/set/delete), and a caller-INJECTED sendEmail. Mirrors
+// KvStore in `opts.store`), and a caller-PASSED sendEmail argument. Mirrors
 // stdlib/auth/flows.scrml.
 //
 // SECURITY properties (each a non-negotiable acceptance criterion):
@@ -608,16 +621,17 @@ const _FLOW_SUBJECTS = Object.freeze({
   pwreset: "Reset your password",
 });
 
-async function _requestTokenFlow(email, options, purpose, defaultTtl) {
+// S462: `sendEmail` is a positional argument (a function is PASSED, never
+// stored in the options value).
+async function _requestTokenFlow(email, options, sendEmail, purpose, defaultTtl) {
   const opts = options || {};
   const store = opts.store;
-  const sendEmail = opts.sendEmail;
   const baseUrl = opts.baseUrl || "";
   const ttl = _resolveTtlSeconds(opts.ttl, defaultTtl);
 
   const token = generateToken(32);
   const record = { email, purpose, expiresAt: clockNow() + ttl * 1000 };
-  if (store) store.set(token, record, ttl);
+  if (store) kvSet(store, token, record, ttl);
 
   const link = `${baseUrl}?token=${token}`;
   if (typeof sendEmail === "function") {
@@ -644,7 +658,7 @@ function _peekTokenFlow(token, options, expectedPurpose) {
   const store = opts.store;
   if (!store || !token) return { valid: false, reason: "used-or-invalid" };
 
-  const record = store.get(token);
+  const record = kvGet(store, token);
   if (!record) return { valid: false, reason: "used-or-invalid" };
 
   if (expectedPurpose !== undefined && record.purpose !== expectedPurpose) {
@@ -667,27 +681,27 @@ function _verifyTokenFlow(token, options, expectedPurpose) {
   const result = _peekTokenFlow(token, options, expectedPurpose);
   if (result.valid || result.reason === "expired") {
     const store = (options || {}).store;
-    if (store && token) store.delete(token);
+    if (store && token) kvDel(store, token);
   }
   return result;
 }
 
-export function requestMagicLink(email, options) {
-  return _requestTokenFlow(email, options, "magic-link", 900);
+export function requestMagicLink(email, options, sendEmail) {
+  return _requestTokenFlow(email, options, sendEmail, "magic-link", 900);
 }
 export function verifyMagicLink(token, options) {
   return _verifyTokenFlow(token, options, "magic-link");
 }
 
-export function requestEmailVerification(email, options) {
-  return _requestTokenFlow(email, options, "email-verify", 86400);
+export function requestEmailVerification(email, options, sendEmail) {
+  return _requestTokenFlow(email, options, sendEmail, "email-verify", 86400);
 }
 export function verifyEmail(token, options) {
   return _verifyTokenFlow(token, options, "email-verify");
 }
 
-export function requestPasswordReset(email, options) {
-  return _requestTokenFlow(email, options, "pwreset", 3600);
+export function requestPasswordReset(email, options, sendEmail) {
+  return _requestTokenFlow(email, options, sendEmail, "pwreset", 3600);
 }
 export function verifyResetToken(token, options) {
   return _verifyTokenFlow(token, options, "pwreset");
@@ -702,11 +716,11 @@ export function verifyResetToken(token, options) {
 //      calls the first wins, the second sees not-found).
 //   C. hash + persist. The token is already consumed; a transient throw here
 //      burns it (acceptable — no reuse; the user re-requests).
-export async function resetPassword(token, newPassword, options) {
+// S462: `updateHash` is a positional argument, not an options field.
+export async function resetPassword(token, newPassword, options, updateHash) {
   const opts = options || {};
 
   // A — updateHash presence (no token touched yet → retryable on misconfig).
-  const updateHash = opts.updateHash;
   if (typeof updateHash !== "function") {
     return { valid: false, reason: "no-update-hash" };
   }

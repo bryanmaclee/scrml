@@ -136,7 +136,7 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
     // JWT/TOTP/rate-limit code. Assert the de-leaked shapes are present and the
     // old raw shapes are gone.
     expect(/floor\(clockNow\(\) \/ 1000\)/.test(chunk)).toBe(true);    // de-leaked clock shape (was Date.now())
-    expect(/mathMax\(0, max - entry\.count\)/.test(chunk)).toBe(true);
+    expect(/mathMax\(0, limiter\.max - entry\.count\)/.test(chunk)).toBe(true); // S462 limiter struct
     expect(/floor\(Date\.now\(\) \/ 1000\)/.test(chunk)).toBe(false);  // old raw clock shape gone (S179)
     expect(/Math\.floor\(Date\.now/.test(chunk)).toBe(false);          // old raw shape gone
     expect(/Math\.max\(0,/.test(chunk)).toBe(false);                   // old raw shape gone
@@ -148,16 +148,18 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
 
   test("§4  auth.createRateLimiter is CALLABLE + correct (local-`max` collision case)", () => {
     const stdlib = loadStdlibRegistry();
-    const rl = stdlib.auth.createRateLimiter({ windowMs: 60000, max: 3 });
-    expect(rl.check("ip").remaining).toBe(2);
-    expect(rl.check("ip").remaining).toBe(1);
-    expect(rl.check("ip").remaining).toBe(0);
-    const over = rl.check("ip");
+    // S462: the limiter is a struct; check / peek are free functions.
+    const { createRateLimiter, check, peek } = stdlib.auth;
+    const rl = createRateLimiter({ windowMs: 60000, max: 3 });
+    expect(check(rl, "ip").remaining).toBe(2);
+    expect(check(rl, "ip").remaining).toBe(1);
+    expect(check(rl, "ip").remaining).toBe(0);
+    const over = check(rl, "ip");
     expect(over.allowed).toBe(false);
     // mathMax(0, max - count) clamps remaining at 0 — proves the inlined math
     // `max` (mathMax) coexists with the local rate-limit ceiling `max`.
     expect(over.remaining).toBe(0);
-    expect(rl.peek("ip").remaining).toBe(0);
+    expect(peek(rl, "ip").remaining).toBe(0);
   });
 
   test("§5  no bare `import` survives anywhere in SCRML_RUNTIME", () => {

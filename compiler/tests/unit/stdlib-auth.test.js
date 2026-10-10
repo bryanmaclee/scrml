@@ -19,7 +19,7 @@
  *   A8   createRateLimiter — request beyond max is blocked
  *   A9   createRateLimiter — remaining is 0 when blocked
  *   A10  createRateLimiter — different keys are independent
- *   A11  createRateLimiter — reset() clears counter
+ *   A11  createRateLimiter — resetLimit() clears counter
  *   A12  createRateLimiter — peek() does not increment
  *   A13  generatePassword — default length 16
  *   A14  generatePassword — custom length
@@ -35,6 +35,9 @@
 import { describe, test, expect } from "bun:test";
 import { safeCallAsync } from "../../runtime/stdlib/host.js";
 import { verifyJwtJwks, signJwt as shimSignJwt, decodeJwt as shimDecodeJwt } from "../../runtime/stdlib/auth.js";
+// S462: the rate limiter is a config/state struct + free functions — tested
+// against the REAL shim (was a local copy of the old object-of-closures shape).
+import { createRateLimiter, check, peek, resetLimit } from "../../runtime/stdlib/auth.js";
 
 // ---------------------------------------------------------------------------
 // Extracted pure implementations
@@ -114,33 +117,6 @@ async function verifyJwt(token, secret) {
     return { valid: true, payload: decoded }
 }
 
-function createRateLimiter(options) {
-    const windowMs = (options && options.windowMs) || 15 * 60 * 1000
-    const max = (options && options.max) || 10
-    const store = new Map()
-    return {
-        check(key) {
-            const now = Date.now()
-            let entry = store.get(key)
-            if (!entry || entry.resetAt <= now) {
-                entry = { count: 0, resetAt: now + windowMs }
-                store.set(key, entry)
-            }
-            entry.count++
-            const allowed = entry.count <= max
-            const remaining = Math.max(0, max - entry.count)
-            return { allowed, remaining, resetAt: entry.resetAt }
-        },
-        reset(key) { store.delete(key) },
-        peek(key) {
-            const now = Date.now()
-            const entry = store.get(key)
-            if (!entry || entry.resetAt <= now) return { count: 0, remaining: max, resetAt: now + windowMs }
-            return { count: entry.count, remaining: Math.max(0, max - entry.count), resetAt: entry.resetAt }
-        }
-    }
-}
-
 function generatePassword(length, options) {
     const len = length || 16
     const opts = options || {}
@@ -199,62 +175,71 @@ describe("scrml:auth — decodeJwt()", () => {
 describe("scrml:auth — createRateLimiter()", () => {
     test("A6: first request allowed", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 5 })
-        const result = limiter.check("user@test.com")
+        const result = check(limiter, "user@test.com")
         expect(result.allowed).toBe(true)
     })
 
     test("A7: remaining decrements per request", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 3 })
-        const r1 = limiter.check("key1")
+        const r1 = check(limiter, "key1")
         expect(r1.remaining).toBe(2)
-        const r2 = limiter.check("key1")
+        const r2 = check(limiter, "key1")
         expect(r2.remaining).toBe(1)
-        const r3 = limiter.check("key1")
+        const r3 = check(limiter, "key1")
         expect(r3.remaining).toBe(0)
     })
 
     test("A8: request beyond max is blocked", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 2 })
-        limiter.check("key2")
-        limiter.check("key2")
-        const r3 = limiter.check("key2")
+        check(limiter, "key2")
+        check(limiter, "key2")
+        const r3 = check(limiter, "key2")
         expect(r3.allowed).toBe(false)
     })
 
     test("A9: remaining is 0 when blocked", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 1 })
-        limiter.check("key3")
-        const r2 = limiter.check("key3")
+        check(limiter, "key3")
+        const r2 = check(limiter, "key3")
         expect(r2.remaining).toBe(0)
         expect(r2.allowed).toBe(false)
     })
 
     test("A10: different keys are independent", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 1 })
-        const r1 = limiter.check("alice@test.com")
+        const r1 = check(limiter, "alice@test.com")
         expect(r1.allowed).toBe(true)
-        const r2 = limiter.check("bob@test.com")
+        const r2 = check(limiter, "bob@test.com")
         expect(r2.allowed).toBe(true)
     })
 
-    test("A11: reset() clears counter for key", () => {
+    test("A11: resetLimit() clears counter for key", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 2 })
-        limiter.check("key4")
-        limiter.check("key4")
-        limiter.reset("key4")
-        const r = limiter.check("key4")
+        check(limiter, "key4")
+        check(limiter, "key4")
+        resetLimit(limiter, "key4")
+        const r = check(limiter, "key4")
         expect(r.allowed).toBe(true)
         expect(r.remaining).toBe(1)
     })
 
     test("A12: peek() does not increment counter", () => {
         const limiter = createRateLimiter({ windowMs: 60000, max: 3 })
-        const before = limiter.peek("key5")
+        const before = peek(limiter, "key5")
         expect(before.count).toBe(0)
         expect(before.remaining).toBe(3)
         // peek again — should not increment
-        const again = limiter.peek("key5")
+        const again = peek(limiter, "key5")
         expect(again.count).toBe(0)
+    })
+
+    test("A12b: the limiter is data — no function-valued fields; state is shared by reference", () => {
+        const limiter = createRateLimiter({ windowMs: 60000, max: 2 })
+        expect(Object.keys(limiter).sort()).toEqual(["entries", "max", "windowMs"])
+        for (const v of Object.values(limiter)) expect(typeof v).not.toBe("function")
+        check(limiter, "k")
+        expect(peek(limiter, "k").count).toBe(1)
+        expect(limiter.entries.get("k").count).toBe(1)
     })
 })
 

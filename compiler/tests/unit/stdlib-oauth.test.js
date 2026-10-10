@@ -9,10 +9,11 @@
  *   P1   PKCE verifier — alphabet + length bounds
  *   P2   PKCE challenge — RFC 7636 Appendix B test vector
  *   P3   PKCE challenge — base64url has no padding, no '+' or '/'
- *   M1   memoryAdapter put/get/del round-trip
- *   M2   memoryAdapter ttl expiry
+ *   M1   memoryAdapter — a Memory tag over a fresh Map (S462)
+ *   M2   OAuthStore tag constructors (payload-variant shape)
+ *   R1-R3 REAL shim: .Memory and .Store(kv) round-trips; a method object is refused
  *   C1   _assertConfig — missing fields throw
- *   C2   _assertStorage — non-conforming storage throws
+ *   C2   _assertStorage — a non-OAuthStore storage throws
  *   C3   public client without PKCE rejected
  *   F1   startFlow writes state + verifier to storage; returns URL with
  *        correct query params
@@ -32,6 +33,9 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import * as realOauth from "../../runtime/stdlib/oauth.js";
+import { createStore, get as kvGet, close as kvClose } from "../../runtime/stdlib/store.js";
+const { OAuthStore, memoryAdapter } = realOauth;
 
 // --- Stubbed HTTP (replaces scrml:http get/post) ----------------------------
 
@@ -112,31 +116,36 @@ function generateToken(bytes) {
   return Array.from(buf, b => b.toString(16).padStart(2, "0")).join("");
 }
 
-function memoryAdapter() {
-  const store = new Map();
-  function expired(entry) {
-    return entry.expiresAt !== null && entry.expiresAt <= Date.now();
+// S462: storage is an OAuthStore enum tag, not an object of methods. The tag
+// constructors come from the REAL shim; the copied flow below drives the
+// Memory arm through these mirrors of the shim's _storePut/_storeGet/_storeDel.
+async function _storePut(storage, key, value, ttlSeconds) {
+  const expiresAt = ttlSeconds && ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : null;
+  storage.data.entries.set(key, { value, expiresAt });
+}
+async function _storeGet(storage, key) {
+  return memGet(storage, key);
+}
+async function _storeDel(storage, key) {
+  storage.data.entries.delete(key);
+}
+// Synchronous read of a Memory store (test assertions).
+function memGet(storage, key) {
+  const entry = storage.data.entries.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt !== null && entry.expiresAt <= Date.now()) {
+    storage.data.entries.delete(key);
+    return null;
   }
-  return {
-    put(key, value, ttlSeconds) {
-      const expiresAt = ttlSeconds && ttlSeconds > 0 ? Date.now() + ttlSeconds * 1000 : null;
-      store.set(key, { value, expiresAt });
-    },
-    get(key) {
-      const entry = store.get(key);
-      if (!entry) return null;
-      if (expired(entry)) { store.delete(key); return null; }
-      return entry.value;
-    },
-    del(key) { store.delete(key); },
-  };
+  return entry.value;
 }
 
 function _assertStorage(storage) {
-  if (!storage || typeof storage.put !== "function" || typeof storage.get !== "function" || typeof storage.del !== "function") {
+  if (!storage || typeof storage !== "object" || !OAuthStore.variants.includes(storage.variant)) {
     throw new Error(
-      "[scrml:oauth] config.storage must be an object with put/get/del methods. "
-      + "Use memoryAdapter() for dev or wire scrml:redis / scrml:store for prod."
+      "[scrml:oauth] config.storage must be an OAuthStore value: "
+        + "memoryAdapter() for dev, OAuthStore.Redis(url) or "
+        + "OAuthStore.Store(kvStore) for prod."
     );
   }
 }
@@ -245,8 +254,8 @@ async function startFlow(config, sessionKey) {
     }
   }
   const ttl = 600;
-  await config.storage.put(_stateKey(sessionKey), state, ttl);
-  if (verifier) await config.storage.put(_verifierKey(sessionKey), verifier, ttl);
+  await _storePut(config.storage, _stateKey(sessionKey), state, ttl);
+  if (verifier) await _storePut(config.storage, _verifierKey(sessionKey), verifier, ttl);
   return _buildUrl(config.authorizeUrl, params);
 }
 
@@ -254,10 +263,10 @@ async function exchangeCode(config, sessionKey, code, state) {
   _assertConfig(config);
   if (!code) throw new Error("[scrml:oauth] exchangeCode: code required");
   if (!state) throw new Error("[scrml:oauth] exchangeCode: state required");
-  const expectedState = await config.storage.get(_stateKey(sessionKey));
-  await config.storage.del(_stateKey(sessionKey));
+  const expectedState = await _storeGet(config.storage, _stateKey(sessionKey));
+  await _storeDel(config.storage, _stateKey(sessionKey));
   if (!expectedState || expectedState !== state) {
-    await config.storage.del(_verifierKey(sessionKey));
+    await _storeDel(config.storage, _verifierKey(sessionKey));
     const err = new Error("[scrml:oauth] state mismatch — possible CSRF attempt or expired flow");
     err.name = "OAuthStateMismatch";
     throw err;
@@ -265,8 +274,8 @@ async function exchangeCode(config, sessionKey, code, state) {
   const usePKCE = config.usePKCE !== false;
   let verifier = null;
   if (usePKCE) {
-    verifier = await config.storage.get(_verifierKey(sessionKey));
-    await config.storage.del(_verifierKey(sessionKey));
+    verifier = await _storeGet(config.storage, _verifierKey(sessionKey));
+    await _storeDel(config.storage, _verifierKey(sessionKey));
     if (!verifier) {
       const err = new Error("[scrml:oauth] code_verifier missing from storage — flow expired");
       err.name = "OAuthVerifierMissing";
@@ -417,34 +426,76 @@ describe("scrml:oauth — PKCE", () => {
 
 // --- memoryAdapter ----------------------------------------------------------
 
-describe("scrml:oauth — memoryAdapter", () => {
-  test("M1 put/get/del round-trip", () => {
+describe("scrml:oauth — memoryAdapter / OAuthStore (S462 enum tag)", () => {
+  test("M1 memoryAdapter() is a Memory tag over a fresh Map — no stored functions", () => {
     const a = memoryAdapter();
-    a.put("k", "v", 60);
-    expect(a.get("k")).toBe("v");
-    a.del("k");
-    expect(a.get("k")).toBeNull();
+    expect(a.variant).toBe("Memory");
+    expect(a.data.entries).toBeInstanceOf(Map);
+    expect(memoryAdapter().data.entries).not.toBe(a.data.entries); // independent
+    for (const v of Object.values(a)) expect(typeof v).not.toBe("function");
   });
 
   test("M1 returns null for missing key", () => {
-    expect(memoryAdapter().get("missing")).toBeNull();
+    expect(memGet(memoryAdapter(), "missing")).toBeNull();
   });
 
-  test("M2 ttl=0 stores without expiry", () => {
-    const a = memoryAdapter();
-    a.put("k", "v", 0);
-    expect(a.get("k")).toBe("v");
+  test("M2 the tag constructors build the compiler's payload-variant shape", () => {
+    expect(OAuthStore.Redis("redis://h:6379")).toEqual({ variant: "Redis", data: { url: "redis://h:6379" } });
+    expect(OAuthStore.Redis(null)).toEqual({ variant: "Redis", data: { url: null } });
+    expect(OAuthStore.variants).toEqual(["Memory", "Redis", "Store"]);
+  });
+});
+
+// --- REAL shim storage dispatch (fetch stubbed) -----------------------------
+
+describe("scrml:oauth — real shim drives each storage tag", () => {
+  function realCfg(storage) {
+    return {
+      clientId: "cid", clientSecret: "sec",
+      redirectUri: "https://app.test/cb",
+      authorizeUrl: "https://p.test/authorize", tokenUrl: "https://p.test/token",
+      scopes: ["openid"], usePKCE: true, storage,
+    };
+  }
+  async function roundTrip(cfg, read) {
+    const url = await realOauth.startFlow(cfg, "sess-r");
+    const state = new URL(url).searchParams.get("state");
+    expect(await read("scrml:oauth:state:sess-r")).toBe(state);
+    expect(typeof (await read("scrml:oauth:verifier:sess-r"))).toBe("string");
+    const realFetch = globalThis.fetch;
+    let body = null;
+    globalThis.fetch = async (u, init) => {
+      body = init.body;
+      return new Response(JSON.stringify({ access_token: "at", token_type: "Bearer", expires_in: 60 }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    };
+    try {
+      const tokens = await realOauth.exchangeCode(cfg, "sess-r", "the-code", state);
+      expect(tokens.accessToken).toBe("at");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(String(body)).toContain("code_verifier=");
+    // single-use: both entries cleared
+    expect(await read("scrml:oauth:state:sess-r")).toBeNull();
+    expect(await read("scrml:oauth:verifier:sess-r")).toBeNull();
+  }
+
+  test("R1 .Memory — startFlow persists, exchangeCode consumes", async () => {
+    const storage = memoryAdapter();
+    await roundTrip(realCfg(storage), async (k) => memGet(storage, k));
   });
 
-  test("M2 expired entries return null and self-evict", () => {
-    const a = memoryAdapter();
-    a.put("k", "v", 60);
-    // Reach into the closure isn't possible; instead, simulate by using a
-    // negative-effective ttl via direct manipulation. Here we just assert
-    // the API contract: a fresh entry survives, then expiry would purge.
-    // The real expiry path is exercised by tests that use Date.now()
-    // mocking — out of scope for this shape test. Just confirm fresh fetch.
-    expect(a.get("k")).toBe("v");
+  test("R2 .Store(kv) — state + verifier live in the scrml:store namespace", async () => {
+    const kv = createStore(":memory:", "oauth");
+    await roundTrip(realCfg(OAuthStore.Store(kv)), async (k) => kvGet(kv, k));
+    kvClose(kv);
+  });
+
+  test("R3 a non-tag storage (the pre-S462 method object) is refused", async () => {
+    const legacy = { put() {}, get() {}, del() {} };
+    await expect(realOauth.startFlow(realCfg(legacy), "s")).rejects.toThrow(/OAuthStore value/);
   });
 });
 
@@ -459,12 +510,15 @@ describe("scrml:oauth — config / storage assertions", () => {
     expect(() => _assertConfig({ clientId: "x", redirectUri: "y", authorizeUrl: "a" })).toThrow(/tokenUrl required/);
   });
 
-  test("C2 storage missing put/get/del throws", () => {
-    expect(() => _assertStorage(null)).toThrow(/put\/get\/del/);
-    expect(() => _assertStorage({})).toThrow(/put\/get\/del/);
-    expect(() => _assertStorage({ put: () => {}, get: () => {} })).toThrow(/put\/get\/del/);
-    // Valid shape passes
-    _assertStorage({ put: () => {}, get: () => {}, del: () => {} });
+  test("C2 storage that is not an OAuthStore tag throws", () => {
+    expect(() => _assertStorage(null)).toThrow(/OAuthStore value/);
+    expect(() => _assertStorage({})).toThrow(/OAuthStore value/);
+    expect(() => _assertStorage({ put: () => {}, get: () => {}, del: () => {} })).toThrow(/OAuthStore value/);
+    expect(() => _assertStorage({ variant: "Disk", data: {} })).toThrow(/OAuthStore value/);
+    // Every tag passes
+    _assertStorage(memoryAdapter());
+    _assertStorage(OAuthStore.Redis(null));
+    _assertStorage(OAuthStore.Store({}));
   });
 
   test("C3 public client (no secret) without PKCE rejected", () => {
@@ -508,8 +562,8 @@ describe("scrml:oauth — startFlow", () => {
     expect(q.code_challenge_method).toBe("S256");
 
     // Storage holds matching state + verifier under sessionKey
-    expect(cfg.storage.get("scrml:oauth:state:sess-1")).toBe(q.state);
-    expect(typeof cfg.storage.get("scrml:oauth:verifier:sess-1")).toBe("string");
+    expect(memGet(cfg.storage, "scrml:oauth:state:sess-1")).toBe(q.state);
+    expect(typeof memGet(cfg.storage, "scrml:oauth:verifier:sess-1")).toBe("string");
   });
 
   test("F2 usePKCE=false skips verifier", async () => {
@@ -518,7 +572,7 @@ describe("scrml:oauth — startFlow", () => {
     const q = parseQuery(url);
     expect(q.code_challenge).toBeUndefined();
     expect(q.code_challenge_method).toBeUndefined();
-    expect(cfg.storage.get("scrml:oauth:verifier:sess-x")).toBeNull();
+    expect(memGet(cfg.storage, "scrml:oauth:verifier:sess-x")).toBeNull();
   });
 
   test("F3 extraAuthParams appended verbatim", async () => {
@@ -563,8 +617,8 @@ describe("scrml:oauth — exchangeCode", () => {
     expect(tokens.expiresAt).toBeGreaterThan(Date.now());
 
     // State + verifier are single-use; storage cleared.
-    expect(cfg.storage.get("scrml:oauth:state:sess-4")).toBeNull();
-    expect(cfg.storage.get("scrml:oauth:verifier:sess-4")).toBeNull();
+    expect(memGet(cfg.storage, "scrml:oauth:state:sess-4")).toBeNull();
+    expect(memGet(cfg.storage, "scrml:oauth:verifier:sess-4")).toBeNull();
 
     // The POST went to the token URL with the right body.
     const post = httpCalls.find(c => c.method === "POST");
@@ -587,8 +641,8 @@ describe("scrml:oauth — exchangeCode", () => {
     expect(caught).toBeDefined();
     expect(caught.name).toBe("OAuthStateMismatch");
     // Both state and verifier purged.
-    expect(cfg.storage.get("scrml:oauth:state:sess-5")).toBeNull();
-    expect(cfg.storage.get("scrml:oauth:verifier:sess-5")).toBeNull();
+    expect(memGet(cfg.storage, "scrml:oauth:state:sess-5")).toBeNull();
+    expect(memGet(cfg.storage, "scrml:oauth:verifier:sess-5")).toBeNull();
   });
 
   test("F6 missing verifier throws OAuthVerifierMissing", async () => {
@@ -596,7 +650,7 @@ describe("scrml:oauth — exchangeCode", () => {
     const url = await startFlow(cfg, "sess-6");
     const state = parseQuery(url).state;
     // Manually delete the verifier to simulate expiry.
-    cfg.storage.del("scrml:oauth:verifier:sess-6");
+    cfg.storage.data.entries.delete("scrml:oauth:verifier:sess-6");
     let caught;
     try { await exchangeCode(cfg, "sess-6", "code", state); }
     catch (e) { caught = e; }

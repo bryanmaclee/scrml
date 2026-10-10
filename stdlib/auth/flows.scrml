@@ -5,8 +5,13 @@ ${
     //
     // Each flow is a request*/verify* pair over three collaborators:
     //   - a high-entropy token (generateToken(32) = 256 bits),
-    //   - a caller-supplied TTL store (a scrml:store handle with get/set/delete),
-    //   - a caller-INJECTED sendEmail (no built-in mailer ships here).
+    //   - a caller-supplied TTL store (a scrml:store KvStore, `opts.store`),
+    //   - a caller-PASSED sendEmail function (no built-in mailer ships here).
+    //
+    // S462: functions are PASSED, never stored in a value (§14.3). `sendEmail`
+    // (request*) and `updateHash` (resetPassword) are positional arguments,
+    // not fields of the options object; the store is a KvStore struct the
+    // flows drive through scrml:store's free functions.
     //
     // These are server-only by inference: scrml:crypto + the store's bun:sqlite
     // escalate the importing functions to the server (§12.2). No keyword
@@ -31,16 +36,16 @@ ${
     import { generateToken } from 'scrml:crypto'
     import { hashPassword } from './password.scrml'
     import { safeCallAsync } from 'scrml:host'
+    import { get as kvGet, set as kvSet, del as kvDel } from 'scrml:store'
 
     /**
      * Shared request half — mint + store a token, optionally send the email,
      * and return a neutral result. `purpose` selects the store namespace at the
      * caller and the email subject here.
      */
-    function requestTokenFlow(email, opts, purpose, defaultTtl) {
+    function requestTokenFlow(email, opts, sendEmail, purpose, defaultTtl) {
         const options = opts is some ? opts : {}
         const store = options.store
-        const sendEmail = options.sendEmail
         const baseUrl = options.baseUrl is some ? options.baseUrl : ""
         // A non-numeric ttl (e.g. "15m") would compute Date.now() + NaN = NaN — a
         // never-expiring token. Fall back to the default for anything non-numeric
@@ -49,7 +54,7 @@ ${
 
         const token = generateToken(32)
         const record = { email: email, purpose: purpose, expiresAt: Date.now() + ttl * 1000 }
-        if (store is some) store.set(token, record, ttl)
+        if (store is some) kvSet(store, token, record, ttl)
 
         const link = `${baseUrl}?token=${token}`
         if (sendEmail is some) {
@@ -75,7 +80,7 @@ ${
         const store = options.store
         if (store is not || !token) return { valid: false, reason: "used-or-invalid" }
 
-        const record = store.get(token) !{
+        const record = kvGet(store, token) !{
             ::ParseFailed(m) -> not
         }
         if (record is not) return { valid: false, reason: "used-or-invalid" }
@@ -102,7 +107,7 @@ ${
         const options = opts is some ? opts : {}
         const result = peekTokenFlow(token, options, expectedPurpose)
         if (result.valid || result.reason == "expired") {
-            if (options.store is some && token) options.store.delete(token)
+            if (options.store is some && token) kvDel(options.store, token)
         }
         return result
     }
@@ -118,13 +123,16 @@ ${
      *
      * Example:
      *   const store = createStore("./auth.db", "magic-link")
-     *   requestMagicLink(email, { store, sendEmail, baseUrl: "https://app/login", ttl: 900 })
+     *   requestMagicLink(email, { store, baseUrl: "https://app/login", ttl: 900 }, sendEmail)
      *   // ... user clicks the emailed link ...
      *   const res = verifyMagicLink(token, { store })
      *   if (res.valid) { issueSession(res.email) }
+     *
+     * @param sendEmail — optional function (to, { subject, link, token }) that
+     *                    delivers the link; omitted → nothing is sent
      */
-    export function requestMagicLink(email, opts) {
-        return requestTokenFlow(email, opts, "magic-link", 900)
+    export function requestMagicLink(email, opts, sendEmail) {
+        return requestTokenFlow(email, opts, sendEmail, "magic-link", 900)
     }
     export function verifyMagicLink(token, opts) {
         return verifyTokenFlow(token, opts, "magic-link")
@@ -133,8 +141,8 @@ ${
     /**
      * Email-verification. Namespace the store as "email-verify". Longer TTL (24h).
      */
-    export function requestEmailVerification(email, opts) {
-        return requestTokenFlow(email, opts, "email-verify", 86400)
+    export function requestEmailVerification(email, opts, sendEmail) {
+        return requestTokenFlow(email, opts, sendEmail, "email-verify", 86400)
     }
     export function verifyEmail(token, opts) {
         return verifyTokenFlow(token, opts, "email-verify")
@@ -144,8 +152,8 @@ ${
      * Password-reset. Namespace the store as "pwreset". The caller updates the
      * hash after a valid verify — or use resetPassword to compose the steps.
      */
-    export function requestPasswordReset(email, opts) {
-        return requestTokenFlow(email, opts, "pwreset", 3600)
+    export function requestPasswordReset(email, opts, sendEmail) {
+        return requestTokenFlow(email, opts, sendEmail, "pwreset", 3600)
     }
     export function verifyResetToken(token, opts) {
         return verifyTokenFlow(token, opts, "pwreset")
@@ -162,15 +170,16 @@ ${
      *      burns it — acceptable: no reuse, the user re-requests).
      *
      * Example:
-     *   const res = resetPassword(token, form.newPassword, {
-     *       store,
-     *       updateHash: (email, hash) => ?{`UPDATE users SET password_hash = ${hash} WHERE email = ${email}`}.run()
-     *   })
+     *   function storeHash(email, hash) {
+     *       ?{`UPDATE users SET password_hash = ${hash} WHERE email = ${email}`}.run()
+     *   }
+     *   const res = resetPassword(token, form.newPassword, { store }, storeHash)
+     *
+     * @param updateHash — function (email, hash) that persists the new hash
      */
-    export function resetPassword(token, newPassword, opts) {
+    export function resetPassword(token, newPassword, opts, updateHash) {
         const options = opts is some ? opts : {}
         // A — updateHash presence (no token touched yet → retryable on misconfig).
-        const updateHash = options.updateHash
         if (updateHash is not) return { valid: false, reason: "no-update-hash" }
         // B — atomic single-use consume (existence + expiry + purpose + delete).
         const result = verifyTokenFlow(token, options, "pwreset")
@@ -184,24 +193,17 @@ ${
     ~{
         import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
 
-        // A tiny in-memory stub store (get/set/delete) standing in for a
-        // scrml:store namespace, plus a sendEmail stub that captures the token.
-        fn makeStubStore() {
-            const m = new Map()
-            return {
-                get(key)          { const v = m.get(key); return v is some ? v : not }
-                set(key, value)   { m.set(key, value) }
-                delete(key)       { m.delete(key) }
-            }
-        }
+        import { createStore } from 'scrml:store'
 
+        // Real scrml:store stores (in-memory SQLite), one namespace per
+        // purpose, plus a sendEmail function that captures the token.
         let captured = not
-        const sendEmail = (to, info) => { captured = info.token }
+        function sendEmail(to, info) { captured = info.token }
 
-        const magicStore = makeStubStore()
+        const magicStore = createStore(":memory:", "magic-link")
 
         // request never returns the token — it is captured only via the email.
-        const req = requestMagicLink("user@example.com", { store: magicStore, sendEmail: sendEmail, baseUrl: "https://app/login" })
+        const req = requestMagicLink("user@example.com", { store: magicStore, baseUrl: "https://app/login" }, sendEmail)
         assertTruthy(req.ok)
         assertTruthy(captured is some)
 
@@ -217,11 +219,11 @@ ${
 
         // Purpose-binding (namespace): a magic-link token replayed against a
         // DIFFERENT namespace (pwreset) is not-found — cross-purpose replay fails.
-        const magicStore2 = makeStubStore()
-        let captured2 = not
-        const sendEmail2 = (to, info) => { captured2 = info.token }
-        requestMagicLink("user@example.com", { store: magicStore2, sendEmail: sendEmail2 })
-        const pwStore = makeStubStore()
+        const magicStore2 = createStore(":memory:", "magic-link")
+        captured = not
+        requestMagicLink("user@example.com", { store: magicStore2 }, sendEmail)
+        const captured2 = captured
+        const pwStore = createStore(":memory:", "pwreset")
         const crossed = verifyResetToken(captured2, { store: pwStore })
         assertFalsy(crossed.valid)
         assertEqual(crossed.reason, "used-or-invalid")
@@ -229,10 +231,10 @@ ${
         // Purpose-binding (defense-in-depth): even in ONE mis-wired shared store,
         // the record's purpose is checked — a magic-link token is rejected by the
         // reset verifier AND is NOT consumed, so it still verifies for its own flow.
-        const shared = makeStubStore()
-        let captured3 = not
-        const sendEmail3 = (to, info) => { captured3 = info.token }
-        requestMagicLink("user@example.com", { store: shared, sendEmail: sendEmail3 })
+        const shared = createStore(":memory:", "shared")
+        captured = not
+        requestMagicLink("user@example.com", { store: shared }, sendEmail)
+        const captured3 = captured
         const wrongPurpose = verifyResetToken(captured3, { store: shared })
         assertFalsy(wrongPurpose.valid)
         assertEqual(wrongPurpose.reason, "used-or-invalid")

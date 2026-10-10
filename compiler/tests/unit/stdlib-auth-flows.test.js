@@ -4,8 +4,10 @@
  *
  * Tests the REAL shim (runtime/stdlib/auth.js) against the REAL SQLite store
  * (runtime/stdlib/store.js) for the happy / single-use / namespace-isolation
- * paths, plus an in-memory stub store for the deterministic expiry branch and
- * a captured-token stub sendEmail (dependency injection — no built-in mailer).
+ * paths (records planted directly for the deterministic expiry branch), and a
+ * captured-token stub sendEmail PASSED as an argument (no built-in mailer).
+ * S462: sendEmail / updateHash are positional arguments, never options fields;
+ * the store is a KvStore struct (no duck-typed get/set/delete stub).
  *
  * Coverage:
  *   F1   requestMagicLink + verifyMagicLink — valid once
@@ -35,7 +37,9 @@ import {
     verifyResetToken,
     resetPassword,
 } from "../../runtime/stdlib/auth.js";
-import { createStore } from "../../runtime/stdlib/store.js";
+// S462: a store is a KvStore struct driven by scrml:store's free functions;
+// sendEmail / updateHash are positional arguments of the flows.
+import { createStore, set as kvSet, keys, close } from "../../runtime/stdlib/store.js";
 
 // A stub sendEmail that captures the last token it was asked to send (DI seam).
 function makeCapture() {
@@ -64,27 +68,26 @@ describe("scrml:auth — magic-link flow", () => {
         const { box, sendEmail } = makeCapture();
         await requestMagicLink("user@example.com", {
             store,
-            sendEmail,
             baseUrl: "https://app/login",
             ttl: 900,
-        });
+        }, sendEmail);
         expect(box.token).not.toBeNull();
         const res = verifyMagicLink(box.token, { store });
         expect(res.valid).toBe(true);
         expect(res.email).toBe("user@example.com");
-        store.close();
+        close(store);
     });
 
     test("F2: single-use — a second verify fails", async () => {
         const store = createStore(":memory:", "magic-link");
         const { box, sendEmail } = makeCapture();
-        await requestMagicLink("user@example.com", { store, sendEmail });
+        await requestMagicLink("user@example.com", { store }, sendEmail);
         const first = verifyMagicLink(box.token, { store });
         expect(first.valid).toBe(true);
         const second = verifyMagicLink(box.token, { store });
         expect(second.valid).toBe(false);
         expect(second.reason).toBe("used-or-invalid");
-        store.close();
+        close(store);
     });
 
     test("F3: request is neutral and never returns the token", async () => {
@@ -92,16 +95,15 @@ describe("scrml:auth — magic-link flow", () => {
         const { box, sendEmail } = makeCapture();
         const req = await requestMagicLink("user@example.com", {
             store,
-            sendEmail,
             baseUrl: "https://app/login",
-        });
+        }, sendEmail);
         expect(req.ok).toBe(true);
         // The neutral result carries NO token (the token travels only via email).
         expect(req.token).toBeUndefined();
         expect(Object.keys(req)).toEqual(["ok"]);
         // The link that WAS emailed embeds the token.
         expect(box.lastInfo.link).toContain(box.token);
-        store.close();
+        close(store);
     });
 });
 
@@ -112,7 +114,7 @@ describe("scrml:auth — purpose-binding (namespace isolation)", () => {
         const magicStore = createStore(dbFile, "magic-link");
         const pwStore = createStore(dbFile, "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestMagicLink("user@example.com", { store: magicStore, sendEmail });
+        await requestMagicLink("user@example.com", { store: magicStore }, sendEmail);
         // Same token, WRONG namespace → not found → rejected.
         const crossed = verifyResetToken(box.token, { store: pwStore });
         expect(crossed.valid).toBe(false);
@@ -120,27 +122,28 @@ describe("scrml:auth — purpose-binding (namespace isolation)", () => {
         // And it still verifies correctly in its OWN namespace.
         const correct = verifyMagicLink(box.token, { store: magicStore });
         expect(correct.valid).toBe(true);
-        magicStore.close();
-        pwStore.close();
+        close(magicStore);
+        close(pwStore);
     });
 });
 
 describe("scrml:auth — TTL / expiry", () => {
     test("F5: an expired record → reason expired", () => {
-        // Stub store whose get() returns a record already past its embedded
-        // expiresAt — exercises the flow's authoritative expiry check.
-        const expiredStore = {
-            get: () => ({
-                email: "user@example.com",
-                purpose: "magic-link",
-                expiresAt: Date.now() - 1000,
-            }),
-            set: () => {},
-            delete: () => {},
-        };
-        const res = verifyMagicLink("any-token", { store: expiredStore });
+        // A record whose embedded expiresAt has passed while the store row is
+        // still live (row TTL an hour) — exercises the flow's authoritative
+        // expiry check. (S462: a real KvStore; was a duck-typed stub.)
+        const store = createStore(":memory:", "magic-link");
+        kvSet(store, "any-token", {
+            email: "user@example.com",
+            purpose: "magic-link",
+            expiresAt: Date.now() - 1000,
+        }, 3600);
+        const res = verifyMagicLink("any-token", { store });
         expect(res.valid).toBe(false);
         expect(res.reason).toBe("expired");
+        // Found for the right purpose → consumed even though expired.
+        expect(keys(store)).toEqual([]);
+        close(store);
     });
 });
 
@@ -148,35 +151,35 @@ describe("scrml:auth — email-verify + password-reset flows", () => {
     test("F6: email-verify request/verify works in its namespace", async () => {
         const store = createStore(":memory:", "email-verify");
         const { box, sendEmail } = makeCapture();
-        await requestEmailVerification("user@example.com", { store, sendEmail });
+        await requestEmailVerification("user@example.com", { store }, sendEmail);
         const res = verifyEmail(box.token, { store });
         expect(res.valid).toBe(true);
         expect(res.email).toBe("user@example.com");
         // single-use here too
         expect(verifyEmail(box.token, { store }).valid).toBe(false);
-        store.close();
+        close(store);
     });
 
     test("F7: password-reset request/verify works", async () => {
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
         const res = verifyResetToken(box.token, { store });
         expect(res.valid).toBe(true);
         expect(res.email).toBe("user@example.com");
-        store.close();
+        close(store);
     });
 
     test("F8: resetPassword composes verify + hash + injected updateHash (single-use)", async () => {
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
 
         const updates = [];
         const updateHash = (email, hash) => {
             updates.push({ email, hash });
         };
-        const res = await resetPassword(box.token, "n3w-p@ssw0rd", { store, updateHash });
+        const res = await resetPassword(box.token, "n3w-p@ssw0rd", { store }, updateHash);
         expect(res.valid).toBe(true);
         expect(res.email).toBe("user@example.com");
         expect(updates).toHaveLength(1);
@@ -187,21 +190,21 @@ describe("scrml:auth — email-verify + password-reset flows", () => {
         expect(updates[0].hash.startsWith("$argon2")).toBe(true);
 
         // Single-use: the token was consumed by the verify step.
-        const again = await resetPassword(box.token, "another", { store, updateHash });
+        const again = await resetPassword(box.token, "another", { store }, updateHash);
         expect(again.valid).toBe(false);
         expect(again.reason).toBe("used-or-invalid");
         expect(updates).toHaveLength(1); // no second hash/update
-        store.close();
+        close(store);
     });
 
     test("F9: resetPassword without an injected updateHash → no-update-hash", async () => {
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
         const res = await resetPassword(box.token, "whatever", { store });
         expect(res.valid).toBe(false);
         expect(res.reason).toBe("no-update-hash");
-        store.close();
+        close(store);
     });
 });
 
@@ -211,30 +214,30 @@ describe("scrml:auth — guard rails + entropy", () => {
         expect(verifyMagicLink("t", { store: undefined }).reason).toBe("used-or-invalid");
         const store = createStore(":memory:", "magic-link");
         expect(verifyMagicLink("", { store }).reason).toBe("used-or-invalid");
-        store.close();
+        close(store);
     });
 
     test("F11: enumeration resistance — the request result is neutral regardless of address", async () => {
         const store = createStore(":memory:", "magic-link");
         const { sendEmail } = makeCapture();
-        const a = await requestMagicLink("real-account@example.com", { store, sendEmail });
-        const b = await requestMagicLink("does-not-exist@example.com", { store, sendEmail });
+        const a = await requestMagicLink("real-account@example.com", { store }, sendEmail);
+        const b = await requestMagicLink("does-not-exist@example.com", { store }, sendEmail);
         // Byte-identical neutral shape — no existence signal leaks.
         expect(a).toEqual(b);
         expect(a).toEqual({ ok: true });
-        store.close();
+        close(store);
     });
 
     test("F12: high-entropy tokens — 256-bit hex, distinct per request", async () => {
         const store = createStore(":memory:", "magic-link");
         const c1 = makeCapture();
         const c2 = makeCapture();
-        await requestMagicLink("user@example.com", { store, sendEmail: c1.sendEmail });
-        await requestMagicLink("user@example.com", { store, sendEmail: c2.sendEmail });
+        await requestMagicLink("user@example.com", { store }, c1.sendEmail);
+        await requestMagicLink("user@example.com", { store }, c2.sendEmail);
         expect(c1.box.token).toMatch(/^[0-9a-f]{64}$/); // 32 bytes = 256 bits
         expect(c2.box.token).toMatch(/^[0-9a-f]{64}$/);
         expect(c1.box.token).not.toBe(c2.box.token);
-        store.close();
+        close(store);
     });
 });
 
@@ -246,7 +249,7 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         // ONE store, ONE namespace, wired (incorrectly) for two flows.
         const store = createStore(":memory:", "shared");
         const { box, sendEmail } = makeCapture();
-        await requestMagicLink("user@example.com", { store, sendEmail });
+        await requestMagicLink("user@example.com", { store }, sendEmail);
 
         // Attacker submits the magic-link token to the reset verifier (same store).
         const crossed = verifyResetToken(box.token, { store });
@@ -260,7 +263,7 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         expect(correct.email).toBe("user@example.com");
         // ...and now (used correctly) it is single-use.
         expect(verifyMagicLink(box.token, { store }).valid).toBe(false);
-        store.close();
+        close(store);
     });
 
     // Finding 2 — a sendEmail rejection MUST NOT change the neutral result, or
@@ -273,13 +276,13 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         const throwingAsync = async () => {
             throw new Error("SMTP 550: no such mailbox");
         };
-        const a = await requestMagicLink("real@example.com", { store, sendEmail: throwingSync });
-        const b = await requestMagicLink("ghost@example.com", { store, sendEmail: throwingSync });
-        const c = await requestMagicLink("ghost@example.com", { store, sendEmail: throwingAsync });
+        const a = await requestMagicLink("real@example.com", { store }, throwingSync);
+        const b = await requestMagicLink("ghost@example.com", { store }, throwingSync);
+        const c = await requestMagicLink("ghost@example.com", { store }, throwingAsync);
         expect(a).toEqual({ ok: true });
         expect(b).toEqual({ ok: true });
         expect(c).toEqual({ ok: true });
-        store.close();
+        close(store);
     });
 
     // Finding 5 — resetPassword must not burn the single-use token before it can
@@ -287,7 +290,7 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
     test("F15: resetPassword with a missing updateHash leaves the token usable on retry", async () => {
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
 
         // First attempt: no updateHash → rejected, token NOT consumed.
         const bad = await resetPassword(box.token, "new-pw", { store });
@@ -297,10 +300,10 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         // Retry with a proper updateHash → succeeds (token was preserved).
         const updates = [];
         const updateHash = (email, hash) => updates.push({ email, hash });
-        const good = await resetPassword(box.token, "new-pw", { store, updateHash });
+        const good = await resetPassword(box.token, "new-pw", { store }, updateHash);
         expect(good.valid).toBe(true);
         expect(updates).toHaveLength(1);
-        store.close();
+        close(store);
     });
 
     test("F16: resetPassword with a throwing updateHash CONSUMES the token (accepted trade-off; no reuse)", async () => {
@@ -311,15 +314,12 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         // BEFORE consuming, so it stays retryable.)
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
 
         let threw = false;
         try {
-            await resetPassword(box.token, "new-pw", {
-                store,
-                updateHash: () => {
-                    throw new Error("DB write failed");
-                },
+            await resetPassword(box.token, "new-pw", { store }, () => {
+                throw new Error("DB write failed");
             });
         } catch (e) {
             threw = true;
@@ -328,35 +328,28 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
 
         // The token was consumed by the atomic step before the throw — a retry
         // sees not-found.
-        const retry = await resetPassword(box.token, "new-pw", {
-            store,
-            updateHash: () => {},
-        });
+        const retry = await resetPassword(box.token, "new-pw", { store }, () => {});
         expect(retry.valid).toBe(false);
         expect(retry.reason).toBe("used-or-invalid");
-        store.close();
+        close(store);
     });
 
     // Finding 3a — a non-finite / missing expiresAt must FAIL-CLOSED (reject),
     // matching the JWKS exp path (was fail-open: the token never expired).
     test("F17: a record with NaN / absent expiresAt is rejected (fail-closed)", () => {
-        const nanStore = {
-            get: () => ({ email: "u@x", purpose: "magic-link", expiresAt: NaN }),
-            set: () => {},
-            delete: () => {},
-        };
-        const r1 = verifyMagicLink("t", { store: nanStore });
+        // S462: the store is a real KvStore; plant the malformed records
+        // directly (a row TTL of an hour keeps them readable).
+        const store = createStore(":memory:", "magic-link");
+        kvSet(store, "t-nan", { email: "u@x", purpose: "magic-link", expiresAt: NaN }, 3600);
+        const r1 = verifyMagicLink("t-nan", { store });
         expect(r1.valid).toBe(false);
         expect(r1.reason).toBe("expired");
 
-        const absentStore = {
-            get: () => ({ email: "u@x", purpose: "magic-link" }), // no expiresAt
-            set: () => {},
-            delete: () => {},
-        };
-        const r2 = verifyMagicLink("t", { store: absentStore });
+        kvSet(store, "t-absent", { email: "u@x", purpose: "magic-link" }, 3600); // no expiresAt
+        const r2 = verifyMagicLink("t-absent", { store });
         expect(r2.valid).toBe(false);
         expect(r2.reason).toBe("expired");
+        close(store);
     });
 
     // Finding 3b — a non-numeric ttl must be rejected at mint (was NaN expiresAt
@@ -366,33 +359,33 @@ describe("scrml:auth — flows security regressions (adversarial review)", () =>
         const { sendEmail } = makeCapture();
         let threw = false;
         try {
-            await requestMagicLink("u@x", { store, sendEmail, ttl: "15m" });
+            await requestMagicLink("u@x", { store, ttl: "15m" }, sendEmail);
         } catch (e) {
             threw = true;
         }
         expect(threw).toBe(true);
         // Nothing was minted (the throw is BEFORE store.set).
-        expect(store.keys().length).toBe(0);
-        store.close();
+        expect(keys(store).length).toBe(0);
+        close(store);
     });
 
     // Finding 2 — the atomic single-use consume closes the TOCTOU race.
     test("F19: two concurrent resetPassword with one token — exactly one succeeds", async () => {
         const store = createStore(":memory:", "pwreset");
         const { box, sendEmail } = makeCapture();
-        await requestPasswordReset("user@example.com", { store, sendEmail });
+        await requestPasswordReset("user@example.com", { store }, sendEmail);
 
         const updates = [];
         const updateHash = (email, hash) => updates.push({ email, hash });
         // resetPassword consumes synchronously (before its first await), so the
         // first of the two racing calls wins the atomic get-then-delete.
         const [a, b] = await Promise.all([
-            resetPassword(box.token, "pw-a", { store, updateHash }),
-            resetPassword(box.token, "pw-b", { store, updateHash }),
+            resetPassword(box.token, "pw-a", { store }, updateHash),
+            resetPassword(box.token, "pw-b", { store }, updateHash),
         ]);
         const successes = [a, b].filter((r) => r.valid).length;
         expect(successes).toBe(1);
         expect(updates).toHaveLength(1);
-        store.close();
+        close(store);
     });
 });

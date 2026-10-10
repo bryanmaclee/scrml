@@ -3,10 +3,15 @@
 // Hand-written ES module mirroring stdlib/store/kv.scrml. SQLite-backed
 // key-value store via bun:sqlite.
 //
-// Surface:
-//   - createStore(dbPath, namespace?)        → store handle
-//   - createSessionStore(dbPath)             → store handle (namespace="session")
-//   - createCounter(dbPath, namespace?)      → counter handle
+// Surface (S462 — a store is a KvStore struct passed to free functions):
+//   - createStore(dbPath, namespace?)        → KvStore { namespace, db, statements }
+//   - createSessionStore(dbPath)             → KvStore (namespace="session")
+//   - createCounter(dbPath, namespace?)      → KvStore (namespace="counters")
+//   - get(store, key) / set(store, key, value, ttl?) / del(store, key)
+//   - has(store, key) / keys(store, prefix?) / clear(store) / close(store)
+//   - purgeExpired(store)
+//   - increment(counter, key, by?) / decrement(counter, key, by?)
+//   - count(counter, key) / resetCount(counter, key)
 //
 // All operations require Bun (uses bun:sqlite). In a browser context any call
 // will throw because `bun:sqlite` cannot be imported.
@@ -27,112 +32,130 @@ function _initDb(db) {
   `);
 }
 
+// A store is a KvStore config/state STRUCT (S462) — never an object of
+// functions (SPEC §14.3):
+//   { namespace, db, statements }
+// The free functions below take it as their first argument.
 export function createStore(dbPath, namespace) {
   const ns = namespace || "default";
   const db = new Database(dbPath);
   _initDb(db);
 
-  const stmtGet = db.prepare(
-    "SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?"
-  );
-  const stmtSet = db.prepare(
-    "INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)"
-  );
-  const stmtDelete = db.prepare(
-    "DELETE FROM kv_store WHERE namespace = ? AND key = ?"
-  );
-  const stmtKeys = db.prepare(
-    "SELECT key FROM kv_store WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
-  );
-  const stmtKeysPrefix = db.prepare(
-    "SELECT key FROM kv_store WHERE namespace = ? AND key LIKE ? ESCAPE '\\\\' AND (expires_at IS NULL OR expires_at > ?)"
-  );
-  const stmtClear = db.prepare("DELETE FROM kv_store WHERE namespace = ?");
-  const stmtDeleteExpired = db.prepare(
-    "DELETE FROM kv_store WHERE namespace = ? AND expires_at IS NOT NULL AND expires_at <= ?"
-  );
-
-  return {
-    get(key) {
-      const now = clockNow();
-      const row = stmtGet.get(ns, key);
-      if (!row) return null;
-      if (row.expires_at !== null && row.expires_at <= now) {
-        stmtDelete.run(ns, key);
-        return null;
-      }
-      try {
-        return JSON.parse(row.value);
-      } catch (e) {
-        return row.value;
-      }
-    },
-    set(key, value, ttl) {
-      const expiresAt = ttl ? clockNow() + ttl * 1000 : null;
-      stmtSet.run(ns, key, JSON.stringify(value), expiresAt);
-    },
-    delete(key) {
-      stmtDelete.run(ns, key);
-    },
-    has(key) {
-      const now = clockNow();
-      const row = stmtGet.get(ns, key);
-      if (!row) return false;
-      if (row.expires_at !== null && row.expires_at <= now) {
-        stmtDelete.run(ns, key);
-        return false;
-      }
-      return true;
-    },
-    keys(prefix) {
-      const now = clockNow();
-      if (prefix) {
-        const escaped = prefix.replace(/[%_\\]/g, "\\$&");
-        const rows = stmtKeysPrefix.all(ns, escaped + "%", now);
-        return rows.map((r) => r.key);
-      }
-      const rows = stmtKeys.all(ns, now);
-      return rows.map((r) => r.key);
-    },
-    clear() {
-      stmtClear.run(ns);
-    },
-    close() {
-      db.close();
-    },
-    purgeExpired() {
-      stmtDeleteExpired.run(ns, clockNow());
-    },
+  const statements = {
+    get: db.prepare(
+      "SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?"
+    ),
+    set: db.prepare(
+      "INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)"
+    ),
+    delete: db.prepare(
+      "DELETE FROM kv_store WHERE namespace = ? AND key = ?"
+    ),
+    keys: db.prepare(
+      "SELECT key FROM kv_store WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)"
+    ),
+    // ESCAPE takes ONE character: the JS string "\\" is a single backslash.
+    // (Pre-S462 this read "\\\\" — two characters — so keys(prefix) threw
+    // "ESCAPE expression must be a single character" on every call; the old
+    // copy-based unit test never exercised the shim.)
+    keysPrefix: db.prepare(
+      "SELECT key FROM kv_store WHERE namespace = ? AND key LIKE ? ESCAPE '\\' AND (expires_at IS NULL OR expires_at > ?)"
+    ),
+    clear: db.prepare("DELETE FROM kv_store WHERE namespace = ?"),
+    deleteExpired: db.prepare(
+      "DELETE FROM kv_store WHERE namespace = ? AND expires_at IS NOT NULL AND expires_at <= ?"
+    ),
   };
+
+  return { namespace: ns, db, statements };
+}
+
+export function get(store, key) {
+  const now = clockNow();
+  const row = store.statements.get.get(store.namespace, key);
+  if (!row) return null;
+  if (row.expires_at !== null && row.expires_at <= now) {
+    store.statements.delete.run(store.namespace, key);
+    return null;
+  }
+  try {
+    return JSON.parse(row.value);
+  } catch (e) {
+    return row.value;
+  }
+}
+
+export function set(store, key, value, ttl) {
+  const expiresAt = ttl ? clockNow() + ttl * 1000 : null;
+  store.statements.set.run(store.namespace, key, JSON.stringify(value), expiresAt);
+}
+
+export function del(store, key) {
+  store.statements.delete.run(store.namespace, key);
+}
+
+export function has(store, key) {
+  const now = clockNow();
+  const row = store.statements.get.get(store.namespace, key);
+  if (!row) return false;
+  if (row.expires_at !== null && row.expires_at <= now) {
+    store.statements.delete.run(store.namespace, key);
+    return false;
+  }
+  return true;
+}
+
+export function keys(store, prefix) {
+  const now = clockNow();
+  if (prefix) {
+    const escaped = prefix.replace(/[%_\\]/g, "\\$&");
+    const rows = store.statements.keysPrefix.all(store.namespace, escaped + "%", now);
+    return rows.map((r) => r.key);
+  }
+  const rows = store.statements.keys.all(store.namespace, now);
+  return rows.map((r) => r.key);
+}
+
+export function clear(store) {
+  store.statements.clear.run(store.namespace);
+}
+
+export function close(store) {
+  store.db.close();
+}
+
+export function purgeExpired(store) {
+  store.statements.deleteExpired.run(store.namespace, clockNow());
 }
 
 export function createSessionStore(dbPath) {
   return createStore(dbPath, "session");
 }
 
+// A counter is a KvStore (default namespace "counters") holding integers.
 export function createCounter(dbPath, namespace) {
-  const store = createStore(dbPath, namespace || "counters");
-  return {
-    increment(key, by) {
-      const current = store.get(key) || 0;
-      const next = current + (by !== undefined ? by : 1);
-      store.set(key, next);
-      return next;
-    },
-    decrement(key, by) {
-      const current = store.get(key) || 0;
-      const next = current - (by !== undefined ? by : 1);
-      store.set(key, next);
-      return next;
-    },
-    reset(key) {
-      store.set(key, 0);
-    },
-    get(key) {
-      return store.get(key) || 0;
-    },
-    close() {
-      store.close();
-    },
-  };
+  return createStore(dbPath, namespace || "counters");
+}
+
+export function increment(counter, key, by) {
+  const current = get(counter, key) || 0;
+  const next = current + (by !== undefined && by !== null ? by : 1);
+  set(counter, key, next);
+  return next;
+}
+
+export function decrement(counter, key, by) {
+  const current = get(counter, key) || 0;
+  const next = current - (by !== undefined && by !== null ? by : 1);
+  set(counter, key, next);
+  return next;
+}
+
+export function count(counter, key) {
+  return get(counter, key) || 0;
+}
+
+// `resetCount`, not `reset` — `reset` is a reserved scrml keyword (§6.8).
+export function resetCount(counter, key) {
+  set(counter, key, 0);
 }

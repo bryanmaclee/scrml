@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S462 — stdlib API change: no function is stored in a value (change `s462-stdlib-closure-factories`)
+
+**Breaking stdlib API (no §63 window — these are stdlib functions, not language forms).** Ruling: bryan S462 "go on the package" (no-function-in-value migration). Every former object-of-closures factory now returns DATA and the behaviour lives in free functions:
+- `scrml:http` — `withBaseUrl(url, client?)` / `withAuth(token, scheme?, client?)` / `withDefaults(defaults, client?)` return an `HttpClient` struct `{ baseUrl, defaults, authorization }`; pass it first: `get(api, "/x")`, `post(api, "/x", body)` (the URL-first `get(url)` / `post(url, body)` are unchanged). Re-wrapping `withAuth` now replaces the credential (outermost wins).
+- `scrml:auth` — `createRateLimiter(opts)` returns `{ windowMs, max, entries }`; `limiter.check(k)` → `check(limiter, k)`, `.peek(k)` → `peek(limiter, k)`, `.reset(k)` → `resetLimit(limiter, k)`. Flows: `requestMagicLink(email, { store, sendEmail })` → `requestMagicLink(email, { store }, sendEmail)` (same for `requestEmailVerification` / `requestPasswordReset`); `resetPassword(token, pw, { store, updateHash })` → `resetPassword(token, pw, { store }, updateHash)`.
+- `scrml:store` — `createStore` / `createSessionStore` / `createCounter` return a `KvStore` struct; `store.get(k)` → `get(store, k)`, `.set` → `set(store, …)`, `.delete` → `del(store, k)`, `.has/.keys/.clear/.close/.purgeExpired` likewise; counters: `increment(c, k, by?)`, `decrement`, `count(c, k)` (was `.get`), `resetCount(c, k)` (was `.reset`).
+- `scrml:oauth` — `config.storage` is an `OAuthStore` tag: `memoryAdapter()` (= `OAuthStore.Memory(new Map())`), `OAuthStore.Redis(url | not)`, `OAuthStore.Store(kvStore)`. A `{ put, get, del }` adapter object is refused at `startFlow` / `exchangeCode`.
+- Fixed on the way: `scrml:store` `keys(store, prefix)` threw on every call in the shipped shim (`ESCAPE` given two characters).
+
 ## S461 — 2026-10-09 (AUTO — the first unattended cloud run; owner absent) — the whole AUTO queue except two rulings landed; every code PR S239-reviewed, three after a fix round
 
 **Landed (7 PRs):** #1375 refinement copy-in (S459 "a" / S460 "a on copy-in"; re-merged, generated docs regenerated, runtime-template guard re-proved) · #1377 ESM per-route chunks transformed before the §47.9.9 strip and hash · #1378 explicit 30 s timeout on 211 executed-DB test sites (Windows 5 s flakes) · #1379 E-CHANNEL-006 emitted (§38.10.3 SHALL; pa-ruled, corpus measured zero) · #1380 `given @cell :>` reads the cell; a markup given body renders (§42.3.5's own worked example was a ReferenceError) · #1382 runtime tree-shake (S459 "measure first, 1 and 3"): shell runtime 7,442 → 5,907 B, ratchet 7,630 → 6,095 B · #1381 reactive array-mutation arguments lower one by one (`splice(0,0,@p)` data loss; lost string quotes) — see the S461 hand-off for its merge state.

@@ -41,7 +41,7 @@ ${
      *   redirectUri,     // required — must match the registered redirect URI
      *   tenant?,         // default "common" — see tenant table above
      *   scopes?,         // default ["openid","profile","email","offline_access"]
-     *   storage,         // required — put/get/del adapter
+     *   storage,         // required — an OAuthStore tag (e.g. memoryAdapter())
      *   prompt?,         // optional — "login","consent","select_account","none"
      *   loginHint?,      // optional — prefill username
      *   domainHint?,     // optional — skip account picker by tenant hint

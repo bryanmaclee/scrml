@@ -5,15 +5,20 @@ ${
     //
     // Re-exports all functions from kv.scrml.
     //
+    // A store is a KvStore config/state STRUCT (S462) — pass it as the first
+    // argument of the free functions; it holds no functions of its own.
+    //
     // Usage:
-    //   ${ import { createStore, createCounter, createSessionStore } from 'scrml:store' }
+    //   ${ import { createStore, set, get } from 'scrml:store' }
     //
     //   function saveSession(id, data) {
     //       const sessions = createStore("./data/sessions.db", "sessions")
-    //       sessions.set(id, data, 3600)  // expires in 1 hour
+    //       set(sessions, id, data, 3600)  // expires in 1 hour
     //   }
     // ---------------------------------------------------------------------------
 
     export { createStore, createSessionStore, createCounter } from './kv.scrml'
+    export { get, set, del, has, keys, clear, close, purgeExpired } from './kv.scrml'
+    export { increment, decrement, count, resetCount } from './kv.scrml'
 }
 </program>

@@ -32,7 +32,7 @@ ${
      *   clientSecret?,   // required for confidential clients; PKCE-only public allowed
      *   redirectUri,     // required — must match a registered redirect URI
      *   scopes?,         // default: ["identify","email"]
-     *   storage,         // required — put/get/del adapter
+     *   storage,         // required — an OAuthStore tag (e.g. memoryAdapter())
      *   prompt?,         // optional — "consent" | "none"
      * }
      */

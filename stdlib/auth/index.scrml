@@ -5,11 +5,12 @@ ${
     //
     // Re-exports JWT (incl. verifyJwtJwks RS256/JWKS), password, and the
     // magic-link / email-verify / password-reset flows. Also provides:
-    //   - createRateLimiter: in-memory rate limiter for auth endpoints
+    //   - createRateLimiter + check / peek / resetLimit: in-memory rate limiter
+    //     for auth endpoints (the limiter is a config/state struct, S462)
     //   - generateTotpSecret / verifyTotp: RFC 6238 TOTP (2FA)
     //
     // Usage:
-    //   ${ import { signJwt, verifyJwt, hashPassword, createRateLimiter } from 'scrml:auth' }
+    //   ${ import { signJwt, verifyJwt, hashPassword, createRateLimiter, check } from 'scrml:auth' }
     // ---------------------------------------------------------------------------
 
     export { signJwt, verifyJwt, verifyJwtJwks, decodeJwt } from './jwt.scrml'
@@ -26,69 +27,83 @@ ${
      * Tracks requests per key (e.g., IP address or user ID) within a fixed
      * (tumbling) time window. Uses an in-memory Map — does not persist across restarts.
      *
+     * The limiter is DATA (S462): its window, its limit, and the per-key
+     * counters (`entries`, a Map the free functions below update in place).
+     * It holds no functions — pass it to check / peek / resetLimit. Keep one
+     * limiter per policy (e.g. a module-level const in a server file); every
+     * call that receives the same limiter shares its counters.
+     *
      * @param options — { windowMs: number, max: number }
      *   windowMs — time window in milliseconds (e.g., 15 * 60 * 1000 for 15min)
      *   max      — maximum requests allowed per key within the window
      *
-     * @returns { check(key: string) → { allowed: boolean, remaining: number, resetAt: number } }
+     * @returns RateLimiter — { windowMs, max, entries }
      *
      * Example:
      *   const limiter = createRateLimiter({ windowMs: 15 * 60 * 1000, max: 5 })
      *
      *   function login(email, password) {
-     *       const result = limiter.check(email)
-     *       if (!result.allowed) {
-     *           throw new Error(`Too many attempts. Try again at ${new Date(result.resetAt).toISOString()}`)
-     *       }
-     *       // ... proceed with login
+     *       const result = check(limiter, email)
+     *       if (!result.allowed) return { ok: false, retryAt: result.resetAt }
+     *       // ... proceed with login; on success:
+     *       resetLimit(limiter, email)
      *   }
      */
+    export type RateLimiter:struct = {
+        windowMs: number,
+        max: number,
+        entries: asIs
+    }
+
     export function createRateLimiter(options) {
         const windowMs = (options && options.windowMs) || 15 * 60 * 1000
         const max = (options && options.max) || 10
+        // entries: Map<key, { count: number, resetAt: number }>
+        return { windowMs: windowMs, max: max, entries: new Map() }
+    }
 
-        // Map<key, { count: number, resetAt: number }>
-        const store = new Map()
+    /**
+     * Count one request for `key` and report whether it is allowed.
+     * @returns { allowed: boolean, remaining: number, resetAt: number }
+     */
+    export function check(limiter, key) {
+        const now = Date.now()
+        let entry = limiter.entries.get(key)
 
+        if (!entry || entry.resetAt <= now) {
+            entry = { count: 0, resetAt: now + limiter.windowMs }
+            limiter.entries.set(key, entry)
+        }
+
+        entry.count++
+        const allowed = entry.count <= limiter.max
+        const remaining = Math.max(0, limiter.max - entry.count)
+
+        return { allowed, remaining, resetAt: entry.resetAt }
+    }
+
+    /**
+     * Clear the counter for a specific key (e.g., after a successful login).
+     * Named `resetLimit` — `reset` is a reserved scrml keyword (§6.8).
+     */
+    export function resetLimit(limiter, key) {
+        limiter.entries.delete(key)
+    }
+
+    /**
+     * Get the current state for a key without counting a request.
+     * @returns { count: number, remaining: number, resetAt: number }
+     */
+    export function peek(limiter, key) {
+        const now = Date.now()
+        const entry = limiter.entries.get(key)
+        if (!entry || entry.resetAt <= now) {
+            return { count: 0, remaining: limiter.max, resetAt: now + limiter.windowMs }
+        }
         return {
-            check(key) {
-                const now = Date.now()
-                let entry = store.get(key)
-
-                if (!entry || entry.resetAt <= now) {
-                    entry = { count: 0, resetAt: now + windowMs }
-                    store.set(key, entry)
-                }
-
-                entry.count++
-                const allowed = entry.count <= max
-                const remaining = Math.max(0, max - entry.count)
-
-                return { allowed, remaining, resetAt: entry.resetAt }
-            },
-
-            /**
-             * Reset the counter for a specific key (e.g., after successful login).
-             */
-            reset(key) {
-                store.delete(key)
-            },
-
-            /**
-             * Get the current state for a key without incrementing.
-             */
-            peek(key) {
-                const now = Date.now()
-                const entry = store.get(key)
-                if (!entry || entry.resetAt <= now) {
-                    return { count: 0, remaining: max, resetAt: now + windowMs }
-                }
-                return {
-                    count: entry.count,
-                    remaining: Math.max(0, max - entry.count),
-                    resetAt: entry.resetAt
-                }
-            }
+            count: entry.count,
+            remaining: Math.max(0, limiter.max - entry.count),
+            resetAt: entry.resetAt
         }
     }
 
@@ -216,32 +231,36 @@ ${
         const limiter = createRateLimiter({ windowMs: 60000, max: 3 })
 
         // First 3 requests allowed
-        const r1 = limiter.check("user@example.com")
+        const r1 = check(limiter, "user@example.com")
         assertTruthy(r1.allowed)
         assertEqual(r1.remaining, 2)
 
-        const r2 = limiter.check("user@example.com")
+        const r2 = check(limiter, "user@example.com")
         assertTruthy(r2.allowed)
         assertEqual(r2.remaining, 1)
 
-        const r3 = limiter.check("user@example.com")
+        const r3 = check(limiter, "user@example.com")
         assertTruthy(r3.allowed)
         assertEqual(r3.remaining, 0)
 
         // 4th request blocked
-        const r4 = limiter.check("user@example.com")
+        const r4 = check(limiter, "user@example.com")
         assertFalsy(r4.allowed)
         assertEqual(r4.remaining, 0)
 
         // Different key is unaffected
-        const r5 = limiter.check("other@example.com")
+        const r5 = check(limiter, "other@example.com")
         assertTruthy(r5.allowed)
 
-        // Reset clears the counter
-        limiter.reset("user@example.com")
-        const r6 = limiter.check("user@example.com")
+        // resetLimit clears the counter
+        resetLimit(limiter, "user@example.com")
+        const r6 = check(limiter, "user@example.com")
         assertTruthy(r6.allowed)
         assertEqual(r6.remaining, 2)
+
+        // peek reads without counting
+        assertEqual(peek(limiter, "user@example.com").count, 1)
+        assertEqual(peek(limiter, "user@example.com").count, 1)
     }
 }
 </program>
