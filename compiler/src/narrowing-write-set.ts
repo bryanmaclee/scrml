@@ -566,7 +566,7 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     syncCallbackArg: (call, index) => {
       const callee = unparen(call.callee);
       const arg = (call.args as unknown[] | undefined)?.[index] as Rec | undefined;
-      if (!arg || arg.kind !== "lambda") return false;
+      if (!arg || (arg.kind !== "lambda" && !(arg.kind === "escape-hatch" && wopts.expandOpaque?.(arg)))) return false;
       if (!callee || callee.kind !== "member" || typeof callee.property !== "string") return false;
       if (!SYNC_CALLBACK_METHODS.has(callee.property)) return false;
       return shapeOfExpr(callee.object, ctx).builtinMethods;
@@ -802,8 +802,12 @@ function argEnds(a: unknown, ctx: Ctx): NarrowEnds {
       const inner = body?.kind === "block" ? body.stmts : body?.kind === "expr" ? body.value : body;
       return mayWriteWithin(inner, ctx.opts);
     }
-    case "escape-hatch":
-      return "all";
+    case "escape-hatch": {
+      // A block-bodied arrow kept as text: its body, when it can be read (the shared expansion).
+      const stmts = ctx.wopts.expandOpaque?.(r);
+      return stmts ? mayWriteWithin(stmts, ctx.opts) : "all";
+    }
+
     case "ident": {
       const name = r.name as string;
       if (typeof name === "string" && !name.startsWith("@")) {

@@ -31865,9 +31865,39 @@ function checkOptionalMemberAccess(
   // whose write set holds the cell, a call whose write set cannot be determined, a
   // suspension point), which statements re-narrow (Q10), which lambdas a built-in calls
   // synchronously (Q12).
+  // g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow the parser kept
+  // as an escape hatch is read through the one handler statement parser (the same view the
+  // E-TYPE-031 prop check takes, `parseHandlerStatementsForCheck`: an arrow yields its
+  // BODY). One expansion per node, shared by the write-set reader and the walk, so the
+  // names inside resolve and the walk reads the same objects.
+  const opaqueBodies = new WeakMap<object, unknown[] | null>();
+  const expandOpaque = (n: Record<string, unknown>): unknown[] | null => {
+    if (opaqueBodies.has(n)) return opaqueBodies.get(n) ?? null;
+    let out: unknown[] | null = null;
+    const kind = n.nativeKind;
+    if ((kind === "ArrowFunctionExpression" || kind === "FunctionExpression") && typeof n.raw === "string") {
+      try {
+        const stmts = parseHandlerStatementsForCheck({ kind: "expr", raw: n.raw }, fileSpan.file ?? "");
+        if (Array.isArray(stmts)) out = stmts as unknown[];
+      } catch { out = null; }
+      // The re-parse's spans are relative to the arrow's own text (line 1); drop them so a
+      // diagnostic inside lands on the enclosing statement / attribute instead.
+      const unspan = (x: unknown): void => {
+        if (!x || typeof x !== "object") return;
+        if (Array.isArray(x)) { for (const y of x) unspan(y); return; }
+        const r = x as Record<string, unknown>;
+        delete r.span;
+        for (const k of Object.keys(r)) unspan(r[k]);
+      };
+      if (out) unspan(out);
+    }
+    opaqueBodies.set(n, out);
+    return out;
+  };
   const writeSet = buildNarrowingEndsAt(topNodes as unknown[], {
     receiverKey,
     typeShape: typeRegistry ? (ann: string) => valueShapeOfType(resolveTypeExpr(ann, typeRegistry)) : undefined,
+    expandOpaque,
   });
   const endsOpts = { endsAt: writeSet.endsAt };
   walkBodyNarrowed(topNodes as unknown[], new Set<string>(), fileSpan, {
@@ -31875,6 +31905,7 @@ function checkOptionalMemberAccess(
     endsAt: writeSet.endsAt,
     narrowsAt: writeSet.narrowsAt,
     syncCallbackArg: writeSet.syncCallbackArg,
+    expandOpaque,
     // S462 Q12 — every key here is a reactive cell: a function body created in a narrowed
     // scope does not inherit it.
     closureDrops: () => true,

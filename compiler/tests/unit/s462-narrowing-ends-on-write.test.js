@@ -740,3 +740,33 @@ type User:struct = { name: string }
             @out = f() } }`)).toBe(0);
   });
 });
+
+describe("g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow is checked", () => {
+  test("an unguarded read inside a block-bodied arrow fires (at the enclosing statement)", () => {
+    const errs = all3(`
+    function show() { const r = () => { @out = @user.name }
+        r() }`);
+    expect(errs.length).toBe(1);
+    expect(errs[0].span?.line).toBe(12);
+  });
+  test("a guarded read inside one does not", () => {
+    expect(n3(`
+    function show() { const r = () => { if (@user is given) { @out = @user.name } }
+        r() }`)).toBe(0);
+  });
+  test("F2 in its block-bodied form: an arrow parameter named like a file function", () => {
+    expect(n3(`
+    function show() { const run = (noop) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(clear) }`)).toBe(1);
+  });
+  test("a block-bodied lambda a built-in calls synchronously keeps the narrowing", () => {
+    expect(n3(`
+    function show() { if (@user is given) { @words.forEach((w) => { @out = @user.name + w }) } }`)).toBe(0);
+  });
+  test("a block-bodied lambda handed to a built-in: its body's writes count", () => {
+    expect(n3(`
+    function show() { if (@user is given) { @words.forEach((w) => { clear() })
+            @out = @user.name } }`)).toBe(1);
+  });
+});
