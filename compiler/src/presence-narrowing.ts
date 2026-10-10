@@ -183,6 +183,17 @@ export function findEndCause(src: unknown, key: string, opts: Pick<PresenceNarro
   }
   const n = src as Rec;
   if (typeof n.kind === "string" && DEFINITION_KINDS.has(n.kind)) return null;
+  if (n.kind === "call" && Array.isArray(n.args)) {
+    // A callback handed to the call runs inside it: name the call IN its body that ends
+    // the narrowing (`acc.concat(…)`), not the outer call, when there is one.
+    for (const a of n.args as Rec[]) {
+      if (a && a.kind === "lambda" && a.body && typeof a.body === "object") {
+        const b = a.body as Rec;
+        const c = findEndCause(b.kind === "block" ? b.stmts : b.kind === "expr" ? b.value : b, key, opts);
+        if (c) return c;
+      }
+    }
+  }
   for (const k of Object.keys(n)) {
     if (k === "span" || k === "attrs") continue;
     const v = n[k];
@@ -471,7 +482,22 @@ const SYNC_CALLBACKS = new WeakSet<object>();
  * reactive cells (`closureDrops`) — unless a known built-in calls it synchronously.
  */
 function closureEntry(present: ReadonlySet<string>, fn: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
-  if (!opts.closureDrops || present.size === 0 || SYNC_CALLBACKS.has(fn)) return present;
+  if (present.size === 0) return present;
+  if (SYNC_CALLBACKS.has(fn)) {
+    // S462 fix round 3 (NEW-1) — a callback a built-in calls synchronously runs ONCE PER
+    // ELEMENT: it is a loop body. As for `LOOP_KINDS`, what the body may write ends the
+    // narrowing on entry (the next call sees the previous call's writes).
+    const body = fn.kind === "lambda"
+      ? ((fn.body as Rec | undefined)?.kind === "block" ? (fn.body as Rec).stmts : (fn.body as Rec | undefined)?.kind === "expr" ? (fn.body as Rec).value : fn.body)
+      : opts.expandOpaque?.(fn) ?? null;
+    if (body === null || body === undefined) return closureDrop(present, fn, span, opts);
+    return withoutEnds(present, mayWriteWithin(body, opts), span, body);
+  }
+  return closureDrop(present, fn, span, opts);
+}
+
+function closureDrop(present: ReadonlySet<string>, fn: Rec, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
+  if (!opts.closureDrops) return present;
   const drop = new Set([...present].filter((k) => opts.closureDrops!(k)));
   return withoutEnds(present, drop, fn.kind === "function-decl" ? atOf(fn, span) : span, fn, "closure");
 }

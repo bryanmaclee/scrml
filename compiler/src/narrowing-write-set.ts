@@ -179,7 +179,7 @@ const SYNC_CALLBACK_METHODS = new Set([
 
 /** Built-in methods whose result is a primitive (string / number / boolean). */
 const PRIM_RESULT_METHODS = new Set([
-  "at", "charAt", "charCodeAt", "codePointAt", "endsWith", "every", "findIndex", "findLastIndex",
+  "charAt", "charCodeAt", "codePointAt", "endsWith", "every", "findIndex", "findLastIndex",
   "includes", "indexOf", "join", "lastIndexOf", "localeCompare", "normalize", "padEnd",
   "padStart", "repeat", "replace", "replaceAll", "search", "some", "startsWith", "substring",
   "substr", "toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim",
@@ -657,7 +657,9 @@ function shapeOfExpr(e: unknown, ctx: Ctx): ValueShape {
       return typeof r.property === "string" ? obj.field(r.property) ?? UNKNOWN_SHAPE : UNKNOWN_SHAPE;
     }
     case "index":
-      return shapeOfExpr(r.object, ctx).element() ?? UNKNOWN_SHAPE;
+      // S462 fix round 3 (NEW-2) — an index may be out of range: the element is NOT provably
+      // present (Q10 re-narrowing reads `.present`), whatever the element type.
+      return maybeAbsent(shapeOfExpr(r.object, ctx).element() ?? UNKNOWN_SHAPE);
     case "binary":
       if (r.op === "&&" || r.op === "||" || r.op === "??") return joinShapes(shapeOfExpr(r.left, ctx), shapeOfExpr(r.right, ctx));
       return PRIM_SHAPE;

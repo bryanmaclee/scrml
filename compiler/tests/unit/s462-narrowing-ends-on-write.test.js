@@ -770,3 +770,68 @@ describe("g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow 
             @out = @user.name } }`)).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 3 (re-review #3 of 5ebd277eb).
+// ---------------------------------------------------------------------------
+function prog4(logic) {
+  return `<program>
+type User:struct = { name: string, tags: string[] }
+<user>: User | not = { name: "a", tags: [] }
+<users>: User[] = []
+<words>: string[] = ["a", "b"]
+<out> = ""
+\${
+    function clear() { @user = not }
+${logic}
+}
+<p>\${@out}</p>
+</program>
+`;
+}
+const all4 = (logic) => e046(prog4(logic));
+
+describe("S462 fix round 3 — NEW-1: a sync callback body is a loop body", () => {
+  test("forEach: a write later in the callback ends the narrowing for the next call", () => {
+    expect(all4(`
+    function show() { if (@user is given) { @words.forEach((w) => { @out = @user.name
+                clear() }) } }`).length).toBe(1);
+  });
+  test("map with an expression body whose call writes the cell", () => {
+    expect(all4(`
+    function pick2(a: string, b: bool) -> string { return a }
+    function wipe() -> bool { @user = not
+        return true }
+    function show() { if (@user is given) { const xs = @words.map((w) => pick2(@user.name, wipe()))
+            @out = xs.join(",") } }`).length).toBe(1);
+  });
+  test("twin: a callback that writes nothing keeps the narrowing", () => {
+    expect(all4(`
+    function show() { if (@user is given) { @words.forEach((w) => { @out = @user.name + w }) } }`).length).toBe(0);
+  });
+});
+
+describe("S462 fix round 3 — NEW-2: an element access is not provably present (Q10)", () => {
+  test("`@user = @users.at(0)` does not re-narrow", () => {
+    expect(all4(`
+    function show() { clear()
+        @user = @users.at(0)
+        @out = @user.name }`).length).toBe(1);
+  });
+  test("`@user = @users[0]` does not re-narrow", () => {
+    expect(all4(`
+    function show() { clear()
+        @user = @users[0]
+        @out = @user.name }`).length).toBe(1);
+  });
+});
+
+describe("S462 fix round 3 — the note names the untrusted call inside a callback", () => {
+  test("reduce: the accumulator's method call is named", () => {
+    const errs = all4(`
+    function show() { if (@user is given) { const all = @words.reduce((acc, w) => acc.concat([w]), [])
+            @out = @user.name } }`);
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("`acc.concat(…)`");
+  });
+});

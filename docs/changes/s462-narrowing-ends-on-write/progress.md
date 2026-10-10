@@ -74,3 +74,4 @@ N2 note: `@words.reduce((acc, w) => acc.concat([w]), [])` fires because the accu
 HOLD (do not change): the event-handler-as-closure reading (`<div if=@user><button onclick={ @out = @user.name }>` → E-TYPE-046) is going to bryan now; the PA will relay the ruling.
 
 Re-measure corpus (0 new expected) + gates incl. CI-only ones: `bun scripts/s34-census.ts --check-new --base 42d1a7459` (or the base you're on), the tracking tiers (integration + lsp + commands) as ci.yml, browser tier, types:check, bootstrap slices. Report new SHA + per-item disposition.
+2026-10-09T20:39:57-06:00 FIX ROUND 3: NEW-1 sync-callback body = loop body (may-write subtracted on entry); NEW-2 index/.at not present (Q10); note names the call inside a callback (acc.concat) — unit 77 green
