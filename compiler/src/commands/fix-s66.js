@@ -262,7 +262,7 @@ function lineOf(src, off) {
 // AST helpers
 // ---------------------------------------------------------------------------
 
-const SKIP_KEYS = new Set(["span", "initExpr", "exprNode", "argsExpr", "condExpr", "headerExpr", "derivedExprNode"]);
+const SKIP_KEYS = new Set(["span", "initExpr", "exprNode", "argsExpr", "argExprs", "condExpr", "headerExpr", "derivedExprNode"]);
 
 /** Visit every AST node with its ancestor chain (outermost first). */
 function walkAst(root, fn) {

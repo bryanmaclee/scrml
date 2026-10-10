@@ -36,14 +36,12 @@ function opBody(result, name = "op") {
 // The fields codegen lowers for the two reactive-write kinds, normalized over
 // the representational differences between the two parsers that codegen
 // already absorbs: the native bridge leaves the legacy string mirrors
-// (`value`, a path step's `raw`) empty and carries the structured sibling; for
-// a multi-argument or argument-less mutation it carries the argument TEXT in
-// `args` with `argsExpr: null` where the default parser wraps the same text in
-// an escape-hatch.
+// (`value`, a path step's `raw`) empty and carries the structured sibling.
+// For an array mutation both parsers carry one ExprNode per argument on
+// `argExprs` (s461, §6.5.1), so the argument lists are compared structurally,
+// positions aside.
 function argsText(stmt) {
-  if (stmt.argsExpr === undefined || stmt.argsExpr === null) return stmt.args ?? "";
-  if (typeof stmt.argsExpr.raw === "string") return stmt.argsExpr.raw;
-  return JSON.stringify(withoutPositions(stmt.argsExpr));
+  return JSON.stringify(withoutPositions(stmt.argExprs ?? []));
 }
 function project(stmt) {
   const p = { kind: stmt.kind, target: stmt.target };

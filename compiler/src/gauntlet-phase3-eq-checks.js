@@ -885,6 +885,8 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
       if (n.initExpr)  inspectExprNode(n.initExpr,  n.span);
       if (n.exprNode)  inspectExprNode(n.exprNode,  n.span);
       if (n.argsExpr)  inspectExprNode(n.argsExpr,  n.span);
+      // reactive-array-mutation: one ExprNode per argument (s461, §6.5.1).
+      if (Array.isArray(n.argExprs)) for (const a of n.argExprs) if (a) inspectExprNode(a, n.span);
 
       // F-NULL-002 fix: markup-node attributes carry their own exprNodes.
       if (Array.isArray(n.attrs)) inspectAttrs(n.attrs);
