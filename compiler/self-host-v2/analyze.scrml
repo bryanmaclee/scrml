@@ -2108,12 +2108,19 @@ ${
     // binder reports each written type once, where it stands). `res` (fix
     // round 1, F2): RESOLVE mode — is the value's type DETERMINED (rule 5 (g)'s
     // proven return, rule 10)? — rather than MEMBERSHIP mode (is the
-    // initializer in rule 5's set?). Resolve mode also reads a comparison or a
-    // logical operator as `bool` whatever its operands, and a member path / an
-    // `as=` handle through declared types. `types` / `decls` / `handles`: the
+    // initializer in rule 5's set?). Resolve mode also reads a comparison, `!`,
+    // `is given` / `is not` as `bool` whatever their operands (`&&` / `||` only
+    // over two `bool`s — N1), and a member path / an owner-scoped `as=` handle
+    // through declared types (N2). What it proves is SPEC §66.3 rule 5's list. `types` / `decls` / `handles`: the
     // declared struct and declaration fields a member path reads.
+    // `hscope` (fix round 2, N2): the OWNER whose `as=` handles a bare `@h`
+    // may name here — the program's nid inside a program-file function or a
+    // program cell's initializer (the binder's scope there), -1 elsewhere (no
+    // handle is read: an unresolved one is simply not determined). `prog` /
+    // `progFile`: the program's nid and file.
     type InferCx:struct = { te: TypeEnv, fns: FnSrc[], st: AS, srcs: OwnSrc[], res: boolean,
-                            types: TypeInfo[], decls: DeclStub[], handles: HandleInfo[] }
+                            types: TypeInfo[], decls: DeclStub[], handles: HandleInfo[],
+                            hscope: int, prog: int, progFile: string }
     type RInf:struct = { r: Inf, done: OwnT[] }
     type ROwn:struct = { t: OwnT, done: OwnT[] }
     // A `return` and the names in scope where it stands.
@@ -2133,7 +2140,39 @@ ${
         return { ty: r.ty, kind: r.kind, why: r.why, cyc: r.cyc, at: { file: file, start: af.span.start, end: af.span.end } }
     }
     fn withRes(cx: InferCx, res: boolean) -> InferCx {
-        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: res, types: cx.types, decls: cx.decls, handles: cx.handles }
+        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: res, types: cx.types, decls: cx.decls, handles: cx.handles,
+                 hscope: cx.hscope, prog: cx.prog, progFile: cx.progFile }
+    }
+    fn withHscope(cx: InferCx, h: int) -> InferCx {
+        return { te: cx.te, fns: cx.fns, st: cx.st, srcs: cx.srcs, res: cx.res, types: cx.types, decls: cx.decls, handles: cx.handles,
+                 hscope: h, prog: cx.prog, progFile: cx.progFile }
+    }
+
+    fn fileOfFn(cx: InferCx, af: AFn) -> string {
+        for (const f of cx.fns) {
+            if (f.f.nid == af.nid) return f.info.file
+        }
+        return ""
+    }
+
+    fn programNid(ds: DeclStub[]) -> int {
+        for (const d of ds) {
+            if (d.isProgram) return d.nid
+        }
+        return -1
+    }
+
+    // N1: `a && b` / `a || b` is a determined `bool` only when both operands
+    // are; an unresolved operand is unresolved (rule 10 reports it), any other
+    // operand leaves the value undetermined (JavaScript returns an operand).
+    fn andOrInf(a: Inf, b: Inf, o: BinOp) -> Inf {
+        const bad: Inf = worse(a, b)
+        if (bad.kind >= 2) return bad
+        if (bad.kind == 1) return infUnres(binWord(o) + " over an operand whose type is not determined — its value is an operand, not a `bool`")
+        const x: Type | not = a.ty
+        const y: Type | not = b.ty
+        if (x is some && y is some && kindOf(x) == 3 && kindOf(y) == 3) return infOk(Type.Bool)
+        return infUnres(binWord(o) + " over a non-`bool` operand — its value is that operand, not a `bool`")
     }
 
     // Of two results, the one that decides the report: blamed > cycle >
@@ -2324,10 +2363,22 @@ ${
             return rinf(refInf(ro.t, stack), ro.done)
         }
         if (cx.res) {
-            for (const h of cx.handles) {
-                if (h.name == n) {
-                    if (h.conditional) return rinf(infOk(Type.Maybe(Type.Named(h.target))), done)
-                    return rinf(infOk(Type.Named(h.target)), done)
+            // N2: only a handle of the scope's OWNER, and only when the name is
+            // UNIQUE there (the binder's lookup for a program-level body); any
+            // other handle reading is not determined
+            if (cx.hscope >= 0) {
+                let hit: HandleInfo | not = not
+                let count = 0
+                for (const h of cx.handles) {
+                    if (h.name == n && h.owner == cx.hscope) {
+                        hit = h
+                        count = count + 1
+                    }
+                }
+                if (count > 1) return rinf(infOut("`@" + n + "`, an `as=` handle bound more than once in its scope"), done)
+                if (hit is some) {
+                    if (hit.conditional) return rinf(infOk(Type.Maybe(Type.Named(hit.target))), done)
+                    return rinf(infOk(Type.Named(hit.target)), done)
                 }
             }
         }
@@ -2493,7 +2544,11 @@ ${
         // RESOLVE mode: a comparison or `&&` / `||` is a `bool` whatever its
         // operands (the typer's answer, F2) — an operand's own fault is the
         // typer's to report
-        if (cx.res && (cmp || (isLogic && o != BinOp.Pipe))) return rinf(infOk(Type.Bool), d)
+        // N1 (fix round 2): `&&` / `||` lower to JavaScript's, which returns an
+        // OPERAND — they are a determined `bool` only when BOTH operands are
+        if (cx.res && cmp) return rinf(infOk(Type.Bool), d)
+        const isAndOr: boolean = o == BinOp.And || o == BinOp.Or
+        if (cx.res && isAndOr) return rinf(andOrInf(rl.r, rr.r, o), d)
         if (isLogic) {
             const bad: Inf = worse(rl.r, rr.r)
             if (bad.kind >= 3) return rinf(bad, d)
@@ -2598,15 +2653,19 @@ ${
     }
 
     // Rule 5 (g)'s INFERRED-AND-PROVEN return (fix round 1, F2: in RESOLVE
-    // mode — every returned value's type DETERMINED, as the typer determines
-    // it: a typed local, a member path through declared types, a comparison;
+    // mode — every returned value's type DETERMINED, as §66.3 rule 5 lists it:
+    // a typed local, a member path through declared types, a comparison;
     // the ruled fail-closed core stays — an unannotated parameter, recursion, a
     // non-total body, a failable or server function). Names resolve through
     // the body's real scopes (F1, retsIn). (The client-call plan's
     // `provenReturn` is a different question: a server function's success type
     // for the wire, §57.4 R10, read off the typer's proven types.)
     fn ownProvenReturn(cx0: InferCx, af: AFn, stack: string[], done: OwnT[]) -> RInf {
-        const cx: InferCx = withRes(cx0, true)
+        // a program-file function reads the program's handles (the binder's
+        // scope for a program-level body); a library function reads none
+        let hs: int = -1
+        if (cx0.progFile == fileOfFn(cx0, af)) hs = cx0.prog
+        const cx: InferCx = withHscope(withRes(cx0, true), hs)
         const who: string = "`" + af.name + "(…)` declares no return type, and its return is not proven: "
         if (!exits(af.body)) return rinf(infUnres(who + "it does not end in `return` on every path"), done)
         let ps: ParamT[] = []
@@ -2857,7 +2916,9 @@ ${
     fn writtenOrigin(cx: InferCx, tab: OwnT[], name: string, init: AAttrValue, where: int) -> TypeOrigin {
         let stack: string[] = []
         if (where == 2) stack = ["@" + name]
-        const r: RInf = inferValue(withRes(cx, true), init, stack, [], tab)
+        let hs: int = -1
+        if (where == 2) hs = cx.prog
+        const r: RInf = inferValue(withHscope(withRes(cx, true), hs), init, stack, [], tab)
         if (r.r.kind == 2) return TypeOrigin.WrittenUnproven(r.r.why, r.r.at)
         return TypeOrigin.Written
     }
@@ -4138,7 +4199,8 @@ ${
         // is written — before any field is built, since a field's `@ref` (in
         // any declaration) resolves against the program's cells
         const icx: InferCx = { te: te0, fns: rf.fs, st: st, srcs: programSrcs(rd.ds), res: false,
-                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, st) }
+                               types: allTypes, decls: rd.ds, handles: allHandles(rd.ds, st),
+                               hscope: programNid(rd.ds), prog: programNid(rd.ds), progFile: entry }
         const ownTab: OwnT[] = ownTable(icx)
         // fields + handles per declaration
         let decls: DeclSrc[] = []
@@ -13226,7 +13288,6 @@ ${
         for (const f of di.fields) {
             const rv: RVT = typeAttrValue(env, f.init, ts)
             ts = rv.ts
-            ts = originReport(env, di, f, ts)      // s462 — §66.3 rules 7–10
             if (f.annotated && f.trusted) {
                 const lk: int = attrLiteralKind(f.init)
                 ts = checkInit(env, f.ty, lk, f.span, "`" + f.sym.hint + "`", ts)
@@ -17483,8 +17544,24 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf }
-        return { files: files, tables: t, diags: domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
+        const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags)
+        // s462 (fix round 2): the own-value type reports run LAST, over every
+        // other pass's diagnostics — so an Error anywhere inside the
+        // initializer, or inside the function a failed proof stands in, owns
+        // the failure whatever pass reported it (no cascade)
+        return { files: files, tables: t, diags: base.concat(originPass(files, t, base)),
                  infos: gatedInfos(vp.gated) }
+    }
+
+    fn originPass(files: FileAst[], t: Tables, prior: Diag[]) -> Diag[] {
+        let ts: TypeState = { exprs: [], diags: prior, contribs: [], presence: [] }
+        const fns: int[] = refusedReturns(files, t)
+        for (const di of t.decls) {
+            const blame: Blame = { spans: errorSpansIn(prior, di.file), syms: [], fns: fns }
+            const env: TEnv = { t: t, file: di.file, errs: fileErrs(files, di.file), locals: [], settled: [], narrowed: [], fnw: [], rows: [], fret: not, blame: blame }
+            for (const f of di.fields) { ts = originReport(env, di, f, ts) }
+        }
+        return ts.diags.slice(prior.length)
     }
 
     // s451 (U1a): a DOM global in a server-triggered body is E-ROUTE-005 (the

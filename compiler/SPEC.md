@@ -45800,21 +45800,31 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
 
    A function's return is **inferred-and-proven** when the function declares no return type, is not failable
    (`!`, §19.4) and is not server-placed (§13.7), its body ends in `return` on every path, and every `return`
-   carries a value whose type is **determined** — the type the compiler's typer determines for it from
-   declarations alone — all of one base type (`int` with `number` → `number`). A returned value's type is
-   determined when it is a member of this set; a parameter or local with a written type; a `const` local whose
-   initializer's type is determined; a member path `v.f` whose `v` has a determined declared type (a struct, a
-   declaration, an `as=` handle) and whose field `f` has a written (or literal) type; a comparison or a logical
-   operator (`bool`, whatever its operands); a ternary whose arms are determined and of one base type; or a
-   call whose return is declared or itself inferred-and-proven. Every name is resolved through the function's
-   REAL scopes — the innermost binding wins, so a local, a `given` binding or a handler arm's binder that
-   shadows a parameter is the one read; a binding whose type is neither written nor determined (an
-   unannotated `let`, an arm's binder, an unannotated parameter) does not determine a type. A function whose
-   proof needs its own return (recursion, direct or through another function or cell) is not proven. A call's
-   ARGUMENTS are not judged — only its return.
-   *(Fix round 1, S462 — PA ruling within bryan's package: ruling 10 judges "an initializer the TYPER cannot
-   prove", so the proven-return judgment is the typer's — not narrower; the ruled fail-closed core (an
-   unannotated parameter, recursion, a non-total body, a failable or server function) is unchanged.)*
+   carries a value whose type is **determined**, all of one base type (`int` with `number` → `number`). A
+   returned value's type is determined — from declarations alone — exactly when it is:
+   - a member of this set;
+   - a parameter or a local with a written type, or a `const` local whose initializer's type is determined;
+   - a member path `v.f` whose `v` has a determined declared type (a struct, a declaration, or an `as=` handle
+     bound — once — in the markup of the program the reading function belongs to) and whose field `f` has a
+     written (or literal) type;
+   - a comparison (`<`, `<=`, `>`, `>=`, `==`, `!=`), `!`, `is given` or `is not` — each a `bool`, whatever its
+     operands;
+   - `a && b` / `a || b` ONLY when both `a` and `b` are determined `bool`s — the operator yields one of its
+     operands, so over anything else its type is not determined (and a `:T` over it is rule 10's);
+   - a ternary whose arms are determined and of one base type;
+   - a call whose return is declared or itself inferred-and-proven.
+
+   Every name is resolved through the function's REAL scopes — the innermost binding wins, so a local, a
+   `given` binding or a handler arm's binder that shadows a parameter is the one read; a binding whose type is
+   neither written nor determined (an unannotated `let`, an arm's binder, an unannotated parameter) does not
+   determine a type. A function whose proof needs its own return (recursion, direct or through another
+   function or cell) is not proven. A call's ARGUMENTS are not judged — only its return.
+   *(Fix rounds 1–2, S462 — PA ruling within bryan's package. Ruling 10 judges "an initializer the TYPER cannot
+   prove"; the list above is what "determined" means, stated exactly. It is NOT identical to any one
+   implementation's typer: it proves a call of an unannotated function whose returns are determined (a typer
+   that leaves every unannotated call unresolved proves less), and it does not prove an index, a method call
+   or an object literal (a typer may type some of those). The ruled fail-closed core — an unannotated
+   parameter, recursion, a non-total body, a failable or server function — is unchanged.)*
    Everything else is outside the set — among them a member path (`@user.name`), an index (`@xs[0]`), a method
    call (`@xs.filter(…)`), the logical operators `!` / `&&` / `||` and `is given` / `is not`, `not`, `[]`, an
    object literal, a bare variant (those four are O35(b)), and a call whose return is neither declared nor
@@ -45864,9 +45874,10 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
     function whose return is neither declared nor inferred-and-proven (rule 5), an unannotated parameter, an
     untyped foreign or JavaScript-boundary value, an `asIs` / `unknown` value — reached through rule 5's
     operators (a call's argument is not its value) is a compile error: the annotation would otherwise be a cast
-    nothing checks. "Cannot resolve" is the typer's judgment (rule 5's DETERMINED): an initializer whose type
-    the typer determines whatever a sub-call is — a comparison (`mk() == 1` is a `bool`), a logical operator, a
-    member path through declared types — is resolved. The fix is to declare what is untyped (the function's `-> T`, the parameter's type), or to
+    nothing checks. "Cannot resolve" is rule 5's DETERMINED, read at the initializer: an initializer whose type
+    is determined whatever a sub-call is — a comparison (`mk() == 1` is a `bool`), `!`, a member path through
+    declared types — is resolved; `&&` / `||` resolve to `bool` only over two determined `bool`s, so
+    `<r:bool=(rec(1) || false)/>` with `rec` unproven is this error. The fix is to declare what is untyped (the function's `-> T`, the parameter's type), or to
     write `:asIs` and sign for it. Same no-cascade clause as rule 7. **Severity: Error, on purpose.** §7.5.2
     fails loud rather than closed because a defeated LOCAL inference is a gap in the compiler, which the
     adopter cannot fix. Here the gap is an omission in the program (an unannotated return), the fix is one

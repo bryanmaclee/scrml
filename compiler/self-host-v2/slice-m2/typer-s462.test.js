@@ -248,6 +248,22 @@ describe("rule 10 — an unproven annotation is an error", () => {
   test("recursion stays unproven (the ruled fail-closed core)", () => {
     expect(codes("    function rec(n: int) { if (n > 0) { return rec(n - 1) } else { return 0 } }\n    <v:int=(rec(2))/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
   });
+  test("fix round 2, N1 — `&&` / `||` are a determined `bool` only when BOTH operands are (JavaScript returns an operand)", () => {
+    const REC = "    function rec(n: int) { if (n > 0) { return rec(n - 1) } else { return \"s\" } }\n";
+    expect(codes(REC + "    function g() { return rec(1) || rec(2) }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual(["E-DECL-TYPE-NOT-INFERABLE"]);
+    expect(codes(REC + "    <r:bool=(rec(1) || false)/>")).toEqual(["E-DECL-TYPE-UNPROVEN"]);
+    expect(codes("    let <a:bool=true/>\n    function g() { return @a && false }\n    <r=(g())/>\n    <q=(@r ? 1 : 2)/>")).toEqual([]);
+    // a provably non-bool operand: the typer's E-OPERATOR-OPERAND-TYPE owns it (no second report)
+    expect(codes("    let <n:int=1/>\n    function g() { return @n || 2 }\n    <r:int=(g())/>")).toEqual(["E-OPERATOR-OPERAND-TYPE", "E-OPERATOR-OPERAND-TYPE"]);
+  });
+  test("fix round 2, N2 — an `as=` handle resolves in its OWNER's scope (the program's), never another declaration's", () => {
+    const pre = "<chip:struct>\n    let <label:int=7/>\n</> renders <p>${label}</p>\n<pane:struct>\n    let <label:string=\"c\"/>\n</> renders <div><chip as=w/></div>\n";
+    const src = pre + "<program>\n    function g() { return @w.label }\n    <r=(g())/>\n    <q=(@r * 2)/>\n    <main><pane as=w/></main>\n</program>\n";
+    const r = frontEnd(mods, [{ path: "app.scrml", src }]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-OPERATOR-OPERAND-TYPE"]);     // @r is the PANE's label: a string
+    const p = r.typed.tables.decls.find((d) => d.sym.id === r.typed.tables.program.id);
+    expect(tag(p.fields.find((f) => f.sym.hint === "r").ty)).toBe("Str");
+  });
   test("the message names the cause and the two fixes", () => {
     const d = run(MK + "    <v:int=(mk(true))/>").diags[0];
     expect(d.message).toContain("`mk(…)`");
