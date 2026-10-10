@@ -39,7 +39,7 @@
  * over a value whose `toString` field is a function — is not treated as a call.
  */
 
-import { mayWriteWithin, unionEnds, type NarrowEnds } from "./presence-narrowing.ts";
+import { mayWriteWithin, paramDefaults, unionEnds, type NarrowEnds } from "./presence-narrowing.ts";
 import { boundNamesOf } from "./binding-names.ts";
 
 type Rec = Record<string, unknown>;
@@ -299,18 +299,6 @@ interface Ctx {
   annShape(ann: string): ValueShape;
 }
 
-/** The parameter list of an arrow / function kept as escape-hatch text, or null. */
-function escapeParams(raw: string): string | null {
-  const t = raw.trim().replace(/^async\s+/, "");
-  const fn = /^function\s*\*?\s*[A-Za-z_$]?[\w$]*\s*\(([\s\S]*?)\)\s*\{/.exec(t);
-  if (fn) return fn[1];
-  const paren = /^\(([\s\S]*?)\)\s*=>/.exec(t);
-  if (paren) return paren[1];
-  const single = /^([A-Za-z_$][\w$]*)\s*=>/.exec(t);
-  if (single) return single[1];
-  return null;
-}
-
 /**
  * Build the per-file answers: resolve every name through scope, compute the write sets
  * of the file's functions (least fixpoint, `"all"` absorbing), then answer.
@@ -378,11 +366,18 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
   // --- resolve every identifier --------------------------------------------------------
   /** N2a — the parameter shapes a known array method gives its callback. */
   const paramHints = new WeakMap<object, ValueShape[]>();
+  // Declares a parameter list's bindings in `scope`. A destructured parameter whose
+  // bindings the parser did not record (the native parser's `{...}` placeholder) makes
+  // the scope opaque — every name inside is unknown (fail closed).
   const declareParams = (params: unknown, scope: Scope, hints: ValueShape[] | undefined): void => {
     if (!Array.isArray(params)) return;
     params.forEach((p, i) => {
       const pr = p as Rec | undefined;
       if (!pr) return;
+      if (typeof pr.name === "string" && !Array.isArray(pr.boundNames) && !/^[A-Za-z_$][\w$]*$/.test(pr.name)) {
+        scope.opaque = true;
+        return;
+      }
       const ann = typeof pr.typeAnnotation === "string" ? pr.typeAnnotation : null;
       const names = boundNamesOf(pr);
       const hint = hints?.[i];
@@ -427,7 +422,9 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
         const hints = method === "reduce" || method === "reduceRight"
           ? [UNKNOWN_SHAPE, lazyEl, PRIM_SHAPE]
           : method === "sort" || method === "toSorted" ? [lazyEl, lazyEl] : [lazyEl, PRIM_SHAPE];
-        for (const a of r.args as unknown[]) if (a && typeof a === "object" && (a as Rec).kind === "lambda") paramHints.set(a as object, hints);
+        for (const a of r.args as unknown[]) {
+          if (a && typeof a === "object" && ((a as Rec).kind === "lambda" || (a as Rec).kind === "escape-hatch")) paramHints.set(a as object, hints);
+        }
       }
       for (const a of r.args as unknown[]) walk(a, scope);
       for (const k of Object.keys(r)) {
@@ -454,12 +451,15 @@ export function buildNarrowingEndsAt(topNodes: unknown[], wopts: WriteSetOptions
     if (r.kind === "escape-hatch" && wopts.expandOpaque) {
       // A block-bodied arrow kept as text: resolve the statements the walk will read. Its
       // parameters shadow; if they cannot be read, every name inside is unknown.
+      // S462 fix round 5 — its parameters are the parser's STRUCTURED list (the same
+      // `LambdaParam[]` a lambda carries), declared exactly as a lambda's are; a named
+      // function expression's own name is bound inside its body (an unknown value).
       const stmts = wopts.expandOpaque(r);
       if (stmts) {
         const fs = new Scope(scope);
-        const params = typeof r.raw === "string" ? escapeParams(r.raw) : null;
-        if (params === null) fs.opaque = true;
-        else for (const nm of boundNamesOf(params)) fs.declare(nm, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
+        if (typeof r.fnName === "string") fs.declare(r.fnName, { kind: "value", src: r, shape: () => UNKNOWN_SHAPE });
+        declareParams(r.params, fs, paramHints.get(r));
+        for (const p of (r.params as Rec[] | undefined) ?? []) walk((p as Rec)?.defaultValue, fs);
         walk(stmts, fs);
       }
       return;
@@ -742,11 +742,14 @@ function ownWrite(n: Rec, ctx: Ctx): string[] | "all" | null {
     }
     case "escape-hatch": {
       // An expression the parser kept as text. A function expression only DEFINES (its
-      // body runs when called). Anything else that could call or assign is unknown.
+      // body runs when called). Anything else is unknown: S462 fix round 5 — no text scan
+      // of `raw` decides whether it calls or assigns (a tagged template `tag\`x\`` calls
+      // with neither `(` nor `=`), so every other escape hatch may write anything.
       const kind = n.nativeKind as string | undefined;
       if (kind === "ArrowFunctionExpression" || kind === "FunctionExpression") return null;
-      const raw = typeof n.raw === "string" ? n.raw : "";
-      return /\(|[^=!<>]=(?!=)|\+\+|--/.test(raw) ? "all" : null;
+      // A literal kept as text (a regex / bigint literal) evaluates nothing.
+      if (kind === "Literal") return null;
+      return "all";
     }
     default:
       return null;
@@ -803,14 +806,16 @@ function argEnds(a: unknown, ctx: Ctx): NarrowEnds {
     case "spread":
       return argEnds(r.argument, ctx);
     case "lambda": {
+      // Its parameter defaults run on the call too (S462 fix round 5).
       const body = r.body as Rec | undefined;
       const inner = body?.kind === "block" ? body.stmts : body?.kind === "expr" ? body.value : body;
-      return mayWriteWithin(inner, ctx.opts);
+      return mayWriteWithin([...paramDefaults(r), inner], ctx.opts);
     }
     case "escape-hatch": {
-      // A block-bodied arrow kept as text: its body, when it can be read (the shared expansion).
+      // A block-bodied arrow kept as text: its parser-recorded parameter defaults and its
+      // body, when it can be read (the shared expansion).
       const stmts = ctx.wopts.expandOpaque?.(r);
-      return stmts ? mayWriteWithin(stmts, ctx.opts) : "all";
+      return stmts ? mayWriteWithin([...paramDefaults(r), stmts], ctx.opts) : "all";
     }
 
     case "ident": {

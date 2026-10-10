@@ -443,8 +443,10 @@ export function walkExprNarrowed(
     });
   }
   if (n.kind === "lambda") {
-    const inner = closureEntry(present, n, span, opts);
+    let inner = closureEntry(present, n, span, opts);
     if (n.body && typeof n.body === "object" && (n.body as Rec).kind === "block") {
+      // S462 fix round 5 — parameter defaults run first, on each call, before the body.
+      inner = walkParamDefaults(n, inner, span, opts);
       walkBodyNarrowed(((n.body as Rec).stmts as unknown[]) ?? [], inner, span, opts);
       return;
     }
@@ -458,7 +460,12 @@ export function walkExprNarrowed(
   }
   if (opts.expandOpaque && n.kind === "escape-hatch") {
     const stmts = opts.expandOpaque(n);
-    if (stmts) { walkBodyNarrowed(stmts, closureEntry(present, n, span, opts), span, opts); return; }
+    if (stmts) {
+      // S462 fix round 5 — the parser's structured parameters: their defaults run first.
+      const inner = walkParamDefaults(n, closureEntry(present, n, span, opts), span, opts);
+      walkBodyNarrowed(stmts, inner, span, opts);
+      return;
+    }
   }
   // Operands in evaluation order (a call's callee, then its arguments, then the call
   // itself — whose own write the PARENT applies through `endsWithin`).
@@ -471,6 +478,30 @@ export function walkExprNarrowed(
       if (n.kind !== "lambda") p = withoutEnds(p, endsWithin(v, opts), span, v);
     }
   }
+}
+
+/**
+ * S462 fix round 5 — the default values of a function value's STRUCTURED parameters (a
+ * `lambda`'s, or a block-bodied arrow escape hatch's parser-recorded `params`), in order.
+ * A default is evaluated on each call, before the body.
+ */
+export function paramDefaults(fn: Rec): unknown[] {
+  const out: unknown[] = [];
+  for (const p of (fn.params as Rec[] | undefined) ?? []) {
+    const d = p && typeof p === "object" ? (p as Rec).defaultValue : undefined;
+    if (d && typeof d === "object") out.push(d);
+  }
+  return out;
+}
+
+/** Walk a function value's parameter defaults (reads checked; their writes end narrowings). */
+function walkParamDefaults(fn: Rec, present: ReadonlySet<string>, span: NarrowSpan, opts: PresenceNarrowingOptions): ReadonlySet<string> {
+  let p = present;
+  for (const d of paramDefaults(fn)) {
+    walkExprNarrowed(d, p, span, opts);
+    p = withoutEnds(p, endsWithin(d, opts), span, d);
+  }
+  return p;
 }
 
 /** Lambdas a known built-in calls synchronously (S462 Q12) — set by the call above them. */
@@ -491,7 +522,8 @@ function closureEntry(present: ReadonlySet<string>, fn: Rec, span: NarrowSpan, o
       ? ((fn.body as Rec | undefined)?.kind === "block" ? (fn.body as Rec).stmts : (fn.body as Rec | undefined)?.kind === "expr" ? (fn.body as Rec).value : fn.body)
       : opts.expandOpaque?.(fn) ?? null;
     if (body === null || body === undefined) return closureDrop(present, fn, span, opts);
-    return withoutEnds(present, mayWriteWithin(body, opts), span, body);
+    // The parameter defaults run on every call too (S462 fix round 5).
+    return withoutEnds(present, mayWriteWithin([...paramDefaults(fn), body], opts), span, body);
   }
   return closureDrop(present, fn, span, opts);
 }

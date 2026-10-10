@@ -37,6 +37,12 @@ const EXCLUDED = {
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",
+  // S462 round 5: a block-bodied arrow / function expression escape hatch carries its parser-
+  // structured parameter list and own name for the §42.3.5 narrowing check. Their scope is the
+  // body, which exists only as TEXT (`raw` / `bodyRaw`); the defer lint parses that whole text
+  // (`textLambdaContainsDefer`, parameters included), so there is no structured subtree to scope.
+  "escape-hatch.params": "check-only structured copy of a text-carried function's parameters; scope = its text body, linted by textLambdaContainsDefer",
+  "escape-hatch.fnName": "a text-carried named function expression's own name; scope = its text body, linted by textLambdaContainsDefer",
   // s461 — `given-guard.variableIsCell` is a boolean[] parallel to `variables` (in the
   // table): true where the head name was written `@x` (a cell), for codegen's lowering.
   "given-guard.variableIsCell": "a boolean flag per head name (cell vs local), not a name; the names are `variables` (in the table)",

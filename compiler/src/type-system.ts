@@ -31746,32 +31746,6 @@ function valueShapeOfType(t: ResolvedType | null | undefined, depth = 0): ValueS
   }
 }
 
-/**
- * S462 fix round 4 (R4-1) — the braced BODY of a parenthesized-parameter arrow or a
- * function expression kept as text (`(a, b = 1, ...r) => { … }` / `function (a, b) { … }`),
- * or null. The parameter list is skipped by bracket depth (a default may hold brackets).
- */
-function arrowBodyText(raw: string): string | null {
-  const t = raw.trim().replace(/^async\s+/, "");
-  let i = t.startsWith("function") ? t.indexOf("(") : t.startsWith("(") ? 0 : -1;
-  if (i < 0) return null;
-  let depth = 0;
-  for (; i < t.length; i++) {
-    const c = t[i];
-    if (c === "(" || c === "[" || c === "{") depth++;
-    else if (c === ")" || c === "]" || c === "}") { depth--; if (depth === 0) break; }
-    else if (c === "\"" || c === "'" || c === "`") {
-      const q = c;
-      for (i++; i < t.length && t[i] !== q; i++) if (t[i] === "\\") i++;
-    }
-  }
-  if (i >= t.length) return null;
-  let rest = t.slice(i + 1).trimStart();
-  if (rest.startsWith("=>")) rest = rest.slice(2).trimStart();
-  else if (!t.startsWith("function")) return null;
-  return rest.startsWith("{") ? rest : null;
-}
-
 /** Describes the VALUE an expression node produces, for per-hop resolution. */
 interface ReceiverValueInfo {
   /** True when the produced value's static type admits `not` (possibly-`not`). */
@@ -31891,33 +31865,28 @@ function checkOptionalMemberAccess(
   // whose write set holds the cell, a call whose write set cannot be determined, a
   // suspension point), which statements re-narrow (Q10), which lambdas a built-in calls
   // synchronously (Q12).
-  // g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow the parser kept
-  // as an escape hatch is read through the one handler statement parser (the same view the
-  // E-TYPE-031 prop check takes, `parseHandlerStatementsForCheck`: an arrow yields its
-  // BODY). One expansion per node, shared by the write-set reader and the walk, so the
-  // names inside resolve and the walk reads the same objects.
+  // g-etype046-blind-in-block-bodied-arrows-s462 — a block-bodied arrow / function
+  // expression the parser kept as an escape hatch is checked through its BODY. S462 fix
+  // round 5: the body is the text the PARSER delimited (`bodyRaw`, acorn's BlockStatement
+  // — a substring of the `raw` codegen emits) and the parameters are the parser's
+  // STRUCTURED `params` (declared by the write-set reader through `boundNamesOf`); no
+  // text scanner reads either. The body is parsed by the one handler statement parser,
+  // as a zero-parameter arrow (parameters are not statements). One expansion per node,
+  // shared by the write-set reader and the walk, so the names inside resolve and the
+  // walk reads the same objects. A hatch without both fields (the parser could not
+  // delimit its source) is not expanded: the write-set reader then treats it as "all".
   const opaqueBodies = new WeakMap<object, unknown[] | null>();
   const expandOpaque = (n: Record<string, unknown>): unknown[] | null => {
     if (opaqueBodies.has(n)) return opaqueBodies.get(n) ?? null;
     let out: unknown[] | null = null;
     const kind = n.nativeKind;
-    if ((kind === "ArrowFunctionExpression" || kind === "FunctionExpression") && typeof n.raw === "string") {
+    if ((kind === "ArrowFunctionExpression" || kind === "FunctionExpression")
+      && typeof n.bodyRaw === "string" && Array.isArray(n.params)) {
       try {
-        const stmts = parseHandlerStatementsForCheck({ kind: "expr", raw: n.raw }, fileSpan.file ?? "");
+        const stmts = parseHandlerStatementsForCheck({ kind: "expr", raw: `() => ${n.bodyRaw}` }, fileSpan.file ?? "");
         if (Array.isArray(stmts)) out = stmts as unknown[];
-        // S462 fix round 4 (R4-1) — the handler parser declines several / default / rest
-        // parameters (its `const <param> = event` prelude cannot express them, a CODEGEN
-        // limit). For CHECKING only, read the body alone: the parameters are declared by
-        // the write-set reader's scope (`escapeParams` + `boundNamesOf`) as untyped locals.
-        if (!out) {
-          const body = arrowBodyText(n.raw);
-          if (body !== null) {
-            const zero = parseHandlerStatementsForCheck({ kind: "expr", raw: `() => ${body}` }, fileSpan.file ?? "");
-            if (Array.isArray(zero)) out = zero as unknown[];
-          }
-        }
       } catch { out = null; }
-      // The re-parse's spans are relative to the arrow's own text (line 1); drop them so a
+      // The re-parse's spans are relative to the body's own text (line 1); drop them so a
       // diagnostic inside lands on the enclosing statement / attribute instead.
       const unspan = (x: unknown): void => {
         if (!x || typeof x !== "object") return;

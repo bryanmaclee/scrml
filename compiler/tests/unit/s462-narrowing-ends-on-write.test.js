@@ -890,3 +890,142 @@ type Box:struct = { owner: User }
 `).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND 5 (re-review #5 of df6fddc4b) — the escape-hatch arrow carries its
+// STRUCTURED parameters and its acorn-delimited body; no text scanner reads either.
+// ---------------------------------------------------------------------------
+function prog5(logic) {
+  return `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+<words>: string[] = ["a", "b"]
+\${
+    function clear() { @user = not }
+    function noop() { @out = "z" }
+${logic}
+}
+<p>\${@out}</p>
+</program>
+`;
+}
+const n5 = (logic) => e046(prog5(logic)).length;
+
+describe("S462 fix round 5 — P1-a: parameters are read structurally (no param scanner)", () => {
+  test("a nested-arrow default does not hide a parameter that shadows a file function", () => {
+    expect(n5(`
+    function show(q) { const run = (f = () => 1, noop) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(1, clear) }`)).toBe(1);
+  });
+  test("a string default holding `)=>`", () => {
+    expect(n5(`
+    function show(q) { const run = (f = ")=>", noop) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(1, clear) }`)).toBe(1);
+  });
+  test("a defaulted parameter that shadows a file function", () => {
+    expect(n5(`
+    function show() { const run = (noop = 1) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(clear) }`)).toBe(1);
+  });
+  test("a destructured parameter with a nested default", () => {
+    expect(n5(`
+    function show() { const run = ({ b = { c: 1 }, noop } = {}) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run({ noop: clear }) }`)).toBe(1);
+  });
+  test("a rest parameter", () => {
+    expect(n5(`
+    function show() { const run = (a, ...noop) => { @out = @user.name }
+        run(1) }`)).toBe(1);
+  });
+  test("a comment between `)` and `=>`", () => {
+    expect(n5(`
+    function show() { const run = (a, noop) /* c */ => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(1, clear) }`)).toBe(1);
+  });
+  test("a named function expression", () => {
+    expect(n5(`
+    function show() { const run = function named(a, noop) { if (@user is given) { noop()
+                @out = @user.name } }
+        run(1, clear) }`)).toBe(1);
+  });
+  test("twin: a non-shadowing default keeps the file function's write set", () => {
+    expect(n5(`
+    function show() { const run = (a, b = "}") => { if (@user is given) { noop()
+                @out = @user.name } }
+        run(1) }`)).toBe(0);
+  });
+});
+
+describe("S462 fix round 5 — P1-b: the body is acorn-delimited (no body scanner)", () => {
+  test("a regex default holding `)`", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach((w, i = /\\)/) => { @out = @user.name
+                clear() }) } }`)).toBe(1);
+  });
+  test("a regex default holding `) => { 1 }`", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach((w, i = /\\) => { 1 }/) => { @out = @user.name
+                clear() }) } }`)).toBe(1);
+  });
+  for (const d of [`"}"`, `")"`, `"=> { }"`]) {
+    test(`a string default ${d}: the unguarded read in the body is checked`, () => {
+      expect(n5(`
+    function show() { const run = (a, b = ${d}) => { @out = @user.name }
+        run(1) }`)).toBe(1);
+    });
+  }
+  test("body strings holding braces", () => {
+    expect(n5(`
+    function show() { const run = (a, b) => { if (@user is given) { const s = "}{"
+                clear()
+                @out = @user.name + s } }
+        run(1, 2) }`)).toBe(1);
+  });
+  test("function (w, i) { … } as a sync callback is a loop body", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach(function (w, i) { @out = @user.name
+                clear() }) } }`)).toBe(1);
+  });
+  test("twin: a callback that writes nothing keeps the narrowing", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach((w, i = /\\)/) => { @out = @user.name + w }) } }`)).toBe(0);
+  });
+});
+
+describe("S462 fix round 5 — parameter defaults run on each call, before the body", () => {
+  test("a default that writes, on a block-bodied sync callback", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach((w, i, a, x = clear()) => { @out = @user.name }) } }`)).toBe(1);
+  });
+  test("a default that writes, on an expression-bodied sync callback", () => {
+    expect(n5(`
+    function show() { if (@user is given) { @words.forEach((w, i, a, x = clear()) => @out = @user.name) } }`)).toBe(1);
+  });
+  test("an unguarded read in a block arrow's default", () => {
+    expect(n5(`
+    function show() { const f = (a, x = @user.name) => { @out = x }
+        f(1) }`)).toBe(1);
+  });
+  test("a destructured array parameter shadows a file function", () => {
+    expect(n5(`
+    function show() { const run = ([noop]) => { if (@user is given) { noop()
+                @out = @user.name } }
+        run([clear]) }`)).toBe(1);
+  });
+});
+
+describe("S462 fix round 5 — no text scan decides what an escape hatch writes", () => {
+  test("a tagged template call (no `(`, no `=`) ends the narrowing", () => {
+    expect(n5(`
+    function tag(s) { @user = not
+        return "" }
+    function show() { if (@user is given) { const t = tag\`x\`
+            @out = @user.name } }`)).toBe(1);
+  });
+});
