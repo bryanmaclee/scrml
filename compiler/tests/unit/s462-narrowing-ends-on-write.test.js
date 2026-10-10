@@ -1204,3 +1204,19 @@ describe("S462 round 6 — F6-3: E-TYPE-031 sees several / default / rest-parame
     expect(e031(`    <button class="g" onclick=\${(e = 1) => { if (onGo is given) { onGo() } }}>g</button>`)).toBe(0);
   });
 });
+
+describe("S462 round 6 (merge of s461 argExprs) — a reactive array mutation's function argument is read", () => {
+  test("`@words.sort(cmp)` where cmp writes the cell ends the narrowing", () => {
+    expect(n5(`
+    function cmp(a: string, b: string) -> int { @user = not
+        return 0 }
+    function show() { if (@user is given) { @words.sort(cmp)
+            @out = @user.name } }`)).toBe(1);
+  });
+  test("twin: a comparator that writes nothing keeps it", () => {
+    expect(n5(`
+    function cmp(a: string, b: string) -> int { return 0 }
+    function show() { if (@user is given) { @words.sort(cmp)
+            @out = @user.name } }`)).toBe(0);
+  });
+});

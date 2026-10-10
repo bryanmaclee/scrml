@@ -387,8 +387,16 @@ function withKeys(present: ReadonlySet<string>, keys: string[]): ReadonlySet<str
   return out;
 }
 
-const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "conditionExpr", "callbackExpr", "valueExpr"];
+// `argExprs` (s461) is an ExprNode LIST — one node per argument of a reactive
+// array mutation (§6.5.1); every other key holds a single ExprNode.
+const EXPR_KEYS = ["exprNode", "initExpr", "condExpr", "headerExpr", "resultExpr", "argsExpr", "argExprs", "conditionExpr", "callbackExpr", "valueExpr"];
 const CHILD_KEYS = ["body", "children", "consequent", "alternate", "cases", "arms"];
+
+/** The ExprNodes an `EXPR_KEYS` field holds, in order (`argExprs` is a list, s461). */
+function exprKeyNodes(v: unknown): Rec[] {
+  if (Array.isArray(v)) return v.filter((e): e is Rec => !!e && typeof e === "object");
+  return v && typeof v === "object" ? [v as Rec] : [];
+}
 
 /**
  * Walk one expression tree, calling `onExpr` with the presence set at every node.
@@ -700,7 +708,7 @@ export function walkNodeNarrowed(
       c ? unionEnds(endsWithin(c.condExpr, opts), endsWithin(c.updateExpr, opts)) : NO_ENDS);
     const inLoop = withoutEnds(before, loopEnds, here, n);
     for (const k of EXPR_KEYS) {
-      if (n[k] && typeof n[k] === "object") walkExprNarrowed(n[k], inLoop, here, opts);
+      for (const e of exprKeyNodes(n[k])) walkExprNarrowed(e, inLoop, here, opts);
     }
     walkBodyNarrowed((n.body as unknown[]) ?? [], inLoop, here, opts);
     return;
@@ -709,9 +717,9 @@ export function walkNodeNarrowed(
   // of the node (the branches of an `if`, the body of a `match`, …).
   let p = present;
   for (const k of EXPR_KEYS) {
-    if (n[k] && typeof n[k] === "object") {
-      walkExprNarrowed(n[k], p, here, opts);
-      p = withoutEnds(p, endsWithin(n[k], opts), here, n[k]);
+    for (const e of exprKeyNodes(n[k])) {
+      walkExprNarrowed(e, p, here, opts);
+      p = withoutEnds(p, endsWithin(e, opts), here, e);
     }
   }
   present = p;

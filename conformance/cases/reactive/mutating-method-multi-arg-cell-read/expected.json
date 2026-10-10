@@ -1,0 +1,34 @@
+{
+  "id": "reactive-mutating-method-multi-arg-cell-read",
+  "description": "§6.5.1 a reactive mutating method called with SEVERAL arguments, one of which reads a cell, receives each argument separately. #ins runs `@ls.splice(0, 0, @ins9)`, which inserts 9 at the front: [9,1,2]. #add runs `@ls.push(@ins9, @k)`, which appends 9 and 1: [9,1,2,9,1]. #wipe runs `@ls.fill(@v, 0, 2)`, which zeroes indexes 0-1: [0,0,2,9,1]. The case pins s461 (gap g-splice-multi-arg-comma-expression-s459): the argument list was lowered as ONE comma expression (`splice((0, 0, ins9))`), which passed only the last value, so the insert was silently lost.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/reactive-array-mutation-multi-arg-s461.test.js",
+  "spec": "§6.5.1",
+  "rationale": "§6.5.1 lists `@arr.splice(start, deleteCount, ...items)` among the mutating methods valid on reactive arrays, and the call performs that method's ordinary JavaScript mutation. Each argument is a separate argument. Nothing in §6.5 makes them one expression. So splice(0, 0, 9) inserts 9 at index 0, push(9, 1) appends both values, and fill(0, 0, 2) zeroes indexes 0 and 1. After #ins, #add and #wipe, @ls is [0,0,2,9,1] and #out shows it.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCOPE-001"
+    ],
+    "input": [
+      {
+        "click": "#ins"
+      },
+      {
+        "click": "#add"
+      },
+      {
+        "click": "#wipe"
+      }
+    ],
+    "state": {
+      "ls": [0, 0, 2, 9, 1]
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "0,0,2,9,1"
+      }
+    ]
+  }
+}

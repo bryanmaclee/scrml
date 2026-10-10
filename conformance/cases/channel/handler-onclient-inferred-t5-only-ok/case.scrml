@@ -1,0 +1,15 @@
+<program>
+
+  ${
+    function fmt(e) { return 1 }
+    server function boot() { return fmt(1) }
+  }
+
+  <channel name="lobby" onclient:open=fmt(e)>
+    <joined> = 0
+  </channel>
+
+  <p>${@joined} ${fmt(2)}</p>
+  <button onclick=boot()>b</button>
+
+</program>

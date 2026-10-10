@@ -103,7 +103,7 @@ ${
                 const now = Date.now()
                 const row = stmtGet.get(ns, key)
                 if (!row) return not
-                if (row.expires_at is some && row.expires_at <= now) {
+                if (row.expires_at is given && row.expires_at <= now) {
                     stmtDelete.run(ns, key)
                     return not
                 }
@@ -137,7 +137,7 @@ ${
                 const now = Date.now()
                 const row = stmtGet.get(ns, key)
                 if (!row) return false
-                if (row.expires_at is some && row.expires_at <= now) {
+                if (row.expires_at is given && row.expires_at <= now) {
                     stmtDelete.run(ns, key)
                     return false
                 }
@@ -216,7 +216,7 @@ ${
              */
             increment(key, by) {
                 const current = store.get(key) !{ ::ParseFailed(m) -> 0 } || 0
-                const next = current + (by is some ? by : 1)
+                const next = current + (by is given ? by : 1)
                 store.set(key, next)
                 return next
             },
@@ -226,7 +226,7 @@ ${
              */
             decrement(key, by) {
                 const current = store.get(key) !{ ::ParseFailed(m) -> 0 } || 0
-                const next = current - (by is some ? by : 1)
+                const next = current - (by is given ? by : 1)
                 store.set(key, next)
                 return next
             },
@@ -277,7 +277,7 @@ ${
         // delete
         store.delete("hello")
         assertFalsy(store.has("hello"))
-        assertFalsy(store.get("hello") !{ ::ParseFailed(m) -> not } is some)
+        assertFalsy(store.get("hello") !{ ::ParseFailed(m) -> not } is given)
 
         // keys
         store.set("a", 1)

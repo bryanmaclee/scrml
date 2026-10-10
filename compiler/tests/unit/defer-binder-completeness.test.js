@@ -43,6 +43,9 @@ const EXCLUDED = {
   // (`textLambdaContainsDefer`, parameters included), so there is no structured subtree to scope.
   "escape-hatch.params": "check-only structured copy of a text-carried function's parameters; scope = its text body, linted by textLambdaContainsDefer",
   "escape-hatch.fnName": "a text-carried named function expression's own name; scope = its text body, linted by textLambdaContainsDefer",
+  // §42.2.3 / §66.7.5 (S462) — `given-guard.rebind` marks the rebind head `given c = @h :>` so the
+  // W-GIVEN-PRESENCE-DEPRECATED lint skips it. A boolean flag; the binder is `variables` (in the table).
+  "given-guard.rebind": "a boolean flag (rebind head vs in-place presence guard), not a name; the binder is `variables`",
   // s461 — `given-guard.variableIsCell` is a boolean[] parallel to `variables` (in the
   // table): true where the head name was written `@x` (a cell), for codegen's lowering.
   "given-guard.variableIsCell": "a boolean flag per head name (cell vs local), not a name; the names are `variables` (in the table)",

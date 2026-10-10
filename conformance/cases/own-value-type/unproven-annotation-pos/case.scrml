@@ -1,0 +1,11 @@
+// §66.3 rule 10 positive twin — declare the return (or let it be provable) and the annotation is checked, not a cast.
+<program>
+    function mk() -> int {
+        const k: int = 5
+        return k
+    }
+    function six() { return 6 }
+    <v:int=(mk())/>
+    <w:int=(six() + 1)/>
+    <main><p id="out">${@v} ${@w}</p></main>
+</program>

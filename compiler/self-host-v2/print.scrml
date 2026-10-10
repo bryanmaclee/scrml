@@ -88,7 +88,7 @@ ${
             t = mint(t, NameKey.SharedGet(d.sym.id), "shared_" + h)
             let i = 0
             for (const f of d.fields) {
-                if (f.graph is some) t = mint(t, NameKey.Edges(d.sym.id, i), h + "_" + f.sym.hint + "_edges")
+                if (f.graph is given) t = mint(t, NameKey.Edges(d.sym.id, i), h + "_" + f.sym.hint + "_edges")
                 i = i + 1
             }
         }
@@ -123,9 +123,9 @@ ${
     // The property name of field `idx` of `owner` (a struct type or a declaration).
     fn memberName(ctx: Ctx, owner: Sym, idx: int) -> string {
         const t: TypeDef | not = findTypeDef(ctx.p, owner)
-        if (t is some) return typeDefMember(t, idx)
+        if (t is given) return typeDefMember(t, idx)
         const d: Decl | not = findDecl(ctx.p, owner)
-        if (d is some) return fieldHint(d, idx)
+        if (d is given) return fieldHint(d, idx)
         return "field" + idx
     }
 
@@ -311,7 +311,7 @@ ${
     // as a Suspend's `on` (check.scrml C-S7 / C12), so `task$` is bound there.
     fn callJs(ctx: Ctx, f: Sym, args: Expr[]) -> JsExpr {
         const fd: Fn | not = findFn(ctx.p, f)
-        if (fd is some) {
+        if (fd is given) {
             if (fd.waits) return jcall(jid(symName(ctx, f)), [jid("task$")].concat(exprsJs(ctx, args)))
         }
         return jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
@@ -614,7 +614,7 @@ ${
     // -------------------------------------------------------------------------
     fn attemptJs(ctx: Ctx, result: Sym | not, call: Failable, ok: OkArm, arms: ErrArm[], assigned: int[]) -> JsStmt[] {
         let out: JsStmt[] = []
-        if (result is some) out = out.concat([JsStmt.SDecl(symName(ctx, result))])
+        if (result is given) out = out.concat([JsStmt.SDecl(symName(ctx, result))])
         const raw: string = symName(ctx, ok.bind)
         out = out.concat([JsStmt.SConst(raw, failableJs(ctx, call))])
         const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), arms, 0, result)
@@ -1052,7 +1052,7 @@ ${
         let cells: JsExpr[] = []
         for (const dep of deps) {
             const d: Decl | not = findDecl(ctx.p, dep.decl)
-            if (d is some) {
+            if (d is given) {
                 cells = cells.concat([fieldCell(instJs(ctx, dep.inst), d, dep.idx)])
             } else {
                 cells = cells.concat([jid("unboundDecl$" + dep.decl.id)])
@@ -1346,7 +1346,7 @@ ${
 
     fn viewConstructs(v: View, ds: Sym, idx: int) -> boolean {
         return match v {
-            .Instance(decl: d, attrs: attrs) :> d.id == ds.id && constructValue(attrs, idx) is some
+            .Instance(decl: d, attrs: attrs) :> d.id == ds.id && constructValue(attrs, idx) is given
             .El(tag: t) :> false
             .Text(text: t) :> false
             .Dyn(e: e) :> false
@@ -1369,7 +1369,7 @@ ${
         for (const f of d.fields) {
             if (isParam(ctx.p, d, k, f)) {
                 const v: Expr | not = constructValue(attrs, k)
-                if (v is some) {
+                if (v is given) {
                     args = args.concat([jthunk(exprJs(ctx, v))])
                 } else {
                     args = args.concat([JsExpr.JUndefined])
@@ -1398,7 +1398,7 @@ ${
             stmts = [JsStmt.SConst(iv, kidSlot(ctx, kid, dsym.hint))]
         } else {
             stmts = [JsStmt.SConst(iv, createJs(ctx, d, attrs, scopeVar()))]
-            if (alias is some) {
+            if (alias is given) {
                 stmts = stmts.concat([sexpr(rtCall(ctx, "bindHandle", [handleJs(ctx, alias), jid(iv)]))])
             }
         }
@@ -1409,7 +1409,7 @@ ${
         // view is disposed with the site, never left in the kid's scope).
         let renderScope: JsExpr = jmember(jid(iv), "scope")
         if (ctx.prebuilt) renderScope = scopeVar()
-        if (d.renders is some) {
+        if (d.renders is given) {
             let slotFn: JsExpr = JsExpr.JNull
             if (slot.length > 0) {
                 const r: Rendered = renderViews(nested(ctx), slot, tid + "/" + pathText(path) + ".slot")
@@ -1451,7 +1451,7 @@ ${
         stmts = stmts.concat([factoryJs(ctx, d)])
         let templates: Template[] = []
         const views: View[] | not = d.renders
-        if (views is some) {
+        if (views is given) {
             const r: Rendered = renderViews(instCtx(ctx, d), views, "scrml:" + h)
             stmts = stmts.concat([JsStmt.SFunc(nameOf(ctx.names, NameKey.Render(d.sym.id)),
                 ["inst$", "scope$", "anchor$", "slot$"], r.stmts)])
@@ -1559,7 +1559,7 @@ ${
         let i = 0
         for (const f of d.fields) {
             const g: TransitionGraph | not = f.graph
-            if (g is some) {
+            if (g is given) {
                 let props: JsProp[] = []
                 for (const e of g.edges) {
                     let targets: JsExpr[] = []
@@ -1694,20 +1694,20 @@ ${
         if (kd is not) return [sexpr(jid("unboundDecl$" + ds.id))]
         const slotE: JsExpr = kidSlot(fctx, k, ds.hint)
         let out: JsStmt[] = [JsStmt.SAssign(slotE, createJs(fctx, kd, attrs, jmember(jid("inst$"), "scope")))]
-        if (alias is some) out = out.concat([sexpr(rtCall(fctx, "bindHandle", [handleJs(fctx, alias), slotE]))])
+        if (alias is given) out = out.concat([sexpr(rtCall(fctx, "bindHandle", [handleJs(fctx, alias), slotE]))])
         return out
     }
 
     fn defaultThunk(ctx: Ctx, d: Decl, f: Field) -> JsExpr {
         const init: Expr | not = f.init
-        if (init is some) return jthunk(exprJs(ctx, init))
+        if (init is given) return jthunk(exprJs(ctx, init))
         return jthunk(rtCall(ctx, "noDefault", [jstr("<" + d.sym.hint + "> attribute `" + f.sym.hint + "`")]))
     }
 
     fn fieldCtor(ctx: Ctx, f: Field, init: JsExpr) -> JsExpr {
         const ps: Persist | not = f.persist
-        if (ps is some && f.wcap is some) return persistedJs(ctx, f, ps, init)
-        if (f.wcap is some) return rtCall(ctx, "seeded", [init])
+        if (ps is given && f.wcap is given) return persistedJs(ctx, f, ps, init)
+        if (f.wcap is given) return rtCall(ctx, "seeded", [init])
         return rtCall(ctx, "derived", [jmember(jid("inst$"), "scope"), init])
     }
 
@@ -1720,7 +1720,7 @@ ${
     fn persistedJs(ctx: Ctx, f: Field, ps: Persist, init: JsExpr) -> JsExpr {
         const wt: WireTable | not = wireBuild(ctx.p, f.ty).table
         let wire: JsExpr = jid("unwireable$" + f.sym.id)
-        if (wt is some) wire = wireTableJs(wt)
+        if (wt is given) wire = wireTableJs(wt)
         const where: PersistStore = ps.store
         const store: string = match where {
             .Local :> "local"
@@ -1879,7 +1879,7 @@ ${
         if (called.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("server routes (the client half of each call — the server artifact is unit U1c)")])
         for (const sf of called) {
             body = body.concat([routeJs(p, sf)])
-            routes = routes.concat([{ fn: sf.sym.hint, path: routePath(sf.sym), value: sf.ret is some }])
+            routes = routes.concat([{ fn: sf.sym.hint, path: routePath(sf.sym), value: sf.ret is given }])
         }
         // s454 (U1b): a function whose calls reach a server function IN PLACE
         // (§12.2 Trigger 5 — server-placed by inheritance) is server code: it
@@ -1936,10 +1936,10 @@ ${
         for (const prm of sf.params) { params = params.concat([wireOrNull(p, prm.ty)]) }
         let result: JsExpr = JsExpr.JNull
         const rt: Type | not = sf.ret
-        if (rt is some) result = wireOrNull(p, rt)
+        if (rt is given) result = wireOrNull(p, rt)
         let error: JsExpr = JsExpr.JNull
         const e: Sym | not = sf.err
-        if (e is some) error = wireOrNull(p, Type.Named(e))
+        if (e is given) error = wireOrNull(p, Type.Named(e))
         return JsStmt.SConst(routeName(sf.sym), JsExpr.JObject([
             { key: "path", value: jstr(routePath(sf.sym)) },
             { key: "params", value: JsExpr.JArray(params) },
@@ -1951,7 +1951,7 @@ ${
     // (C-S4: every routed type has a descriptor, so `null` here is unreachable on a checked Core.)
     fn wireOrNull(p: CoreProgram, t: Type) -> JsExpr {
         const wt: WireTable | not = wireBuild(p, t).table
-        if (wt is some) return wireTableJs(wt)
+        if (wt is given) return wireTableJs(wt)
         return JsExpr.JNull
     }
 
@@ -1960,7 +1960,7 @@ ${
         let ids: int[] = []
         for (const n of allNodes(Node.NProgram(p))) {
             const s: Sym | not = nodeServerCall(n)
-            if (s is some) { if (!hasInt(ids, s.id)) ids = ids.concat([s.id]) }
+            if (s is given) { if (!hasInt(ids, s.id)) ids = ids.concat([s.id]) }
         }
         let out: ServerFn[] = []
         for (const sf of p.server) { if (hasInt(ids, sf.sym.id)) out = out.concat([sf]) }
@@ -2019,8 +2019,8 @@ ${
                     let hit = false
                     for (const n of allNodes(Node.NFn(f))) {
                         const c: Sym | not = nodePlainCallee(n)
-                        if (c is some) {
-                            if (findServerFn(p, c) is some || hasInt(out, c.id)) hit = true
+                        if (c is given) {
+                            if (findServerFn(p, c) is given || hasInt(out, c.id)) hit = true
                         }
                     }
                     if (hit) {

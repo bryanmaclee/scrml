@@ -30,6 +30,18 @@ const _VALIDATOR_RUNTIME_SOURCE = readFileSync(
 ).replace(/^export /gm, "");
 
 /**
+ * SPEC §41.12.1 (S462) — message templates. `runtime-message-templates.js` is the ONE reader of a
+ * `registerMessages` template and the ONE per-variant slot table: the compiler imports it as a module
+ * (type-system.ts refuses a bad LITERAL template), and the runtime inlines its source verbatim here
+ * (chunk 'messages', the validator-runtime pattern above: `export ` stripped, every declaration at
+ * column 0), so a template the compiler could not see is judged by the same grammar at registration.
+ */
+export const MESSAGE_TEMPLATE_RUNTIME_SOURCE = readFileSync(
+  join(__runtime_template_dir, "runtime-message-templates.js"),
+  "utf8",
+).replace(/^export /gm, "");
+
+/**
  * SPEC §5.2 rule 3 (S457) — the URL-attribute scheme guard. `runtime-url-guard.js` is the ONE source
  * of the URL scheme reader and the safe-scheme sets: the compiler imports it as a module
  * (attr-injection-sink.ts), and the runtime inlines its source verbatim here (chunk 'urlguard', the
@@ -753,135 +765,6 @@ function _scrml_init_set(name, fn) {
   _scrml_init_fns[name] = fn;
 }
 
-// --- machine temporal transitions (§51.12) ---
-// _scrml_machine_timers: encodedVarName → timeout id for the currently-armed
-// temporal transition. Transition-guard codegen clears any existing timer on
-// state commit and arms a new one if the destination variant has outgoing
-// temporal rules. Re-entering the same variant clears and re-arms (reset
-// semantics per the deep-dive default).
-const _scrml_machine_timers = Object.create(null);
-function _scrml_machine_clear_timer(name) {
-  const id = _scrml_machine_timers[name];
-  if (id !== undefined) {
-    clearTimeout(id);
-    delete _scrml_machine_timers[name];
-  }
-}
-function _scrml_machine_arm_timer(name, ms, target, meta) {
-  // meta (optional): { fromVariant, label, auditTarget, rulesJson, setterFn, getterName }
-  //   fromVariant — the .From of the temporal rule being armed (used to
-  //     build the audit 'rule' key on expiry: fromVariant + ":" + target).
-  //   label — the rule's guard label if any, else null. Temporal rules
-  //     currently do not take 'given' clauses, so this is conventionally
-  //     null; the slot exists so a future temporal+guard syntax can slot
-  //     straight in.
-  //   auditTarget — the encoded reactive-var name of the machine's audit
-  //     target (the 'audit @log' clause in the machine body), else null.
-  //   rulesJson — the serialized temporal-rule list so the timer can
-  //     re-arm on the downstream variant. Chained temporal rules
-  //     (A after 1s => B, B after 1s => C) must continue automatically
-  //     without the user driving transitions.
-  //   setterFn  — A5-4 (§51.0.M onTimeout): an optional callback invoked
-  //     INSTEAD of the bare _scrml_reactive_set(name, target) at expiry.
-  //     Engine onTimeout codegen passes a function that routes the write
-  //     through the engine's rule= contract guard (the engine helper in
-  //     the 'engine' chunk; see §51.0.F + §51.0.G). When absent (the
-  //     legacy machine path), the original _scrml_reactive_set write is
-  //     used.
-  //   getterName — A5-4: the encoded reactive-var name to read for the
-  //     __prev audit entry. Defaults to name. Currently unused — reserved
-  //     so a future shape (e.g., audit-target read) can opt out.
-  //
-  // S27 (§51.11): timer-fired transitions now push audit entries and
-  // re-arm downstream temporal rules. Previously the timer invoked a
-  // bare _scrml_reactive_set, bypassing both the audit clause and the
-  // per-transition re-arm logic. This violated §51.11.6 "every
-  // successful transition SHALL append" for temporal rules.
-  _scrml_machine_clear_timer(name);
-  _scrml_machine_timers[name] = setTimeout(function () {
-    delete _scrml_machine_timers[name];
-    const __prev = _scrml_reactive_get(name);
-    if (meta && typeof meta.setterFn === "function") {
-      // A5-4: engine-aware setter (routes through the engine's contract
-      // guard so the rule= contract check fires; throws
-      // E-ENGINE-INVALID-TRANSITION if the timer target violates the
-      // contract — defensive, the compile-time check in A5-3 should already
-      // have caught this).
-      meta.setterFn(target);
-    } else {
-      _scrml_reactive_set(name, target);
-    }
-    if (meta && meta.auditTarget) {
-      const entry = Object.freeze({
-        from: __prev,
-        to: target,
-        at: Date.now(),
-        rule: meta.fromVariant + ":" + target,
-        label: meta.label != null ? meta.label : null,
-      });
-      _scrml_reactive_set(
-        meta.auditTarget,
-        (_scrml_reactive_get(meta.auditTarget) || []).concat([entry])
-      );
-    }
-    if (meta && meta.rulesJson) {
-      _scrml_machine_arm_initial(name, meta.rulesJson, meta.auditTarget);
-    }
-  }, ms);
-}
-function _scrml_machine_arm_initial(name, rulesJson, auditTarget) {
-  // Called once per machine-bound reactive after its initial _scrml_reactive_set,
-  // and also re-invoked from _scrml_machine_arm_timer's expiry path so that
-  // chained temporal rules auto-advance. Inspects the current variant and arms
-  // the first matching temporal rule, if any.
-  //
-  // auditTarget (optional, added S27) propagates the machine's audit target
-  // through the re-arm cascade so chained temporal transitions keep auditing.
-  const val = _scrml_reactive_get(name);
-  const variant = (val != null && typeof val === "object" && val.variant != null) ? val.variant : val;
-  const rules = JSON.parse(rulesJson);
-  for (const r of rules) {
-    if (r.from === variant) {
-      const meta = {
-        fromVariant: r.from,
-        label: r.label != null ? r.label : null,
-        auditTarget: auditTarget != null ? auditTarget : null,
-        rulesJson: rulesJson,
-      };
-      _scrml_machine_arm_timer(name, r.afterMs, r.to, meta);
-      return;
-    }
-  }
-}
-
-// --- §51.14 replay primitive ---
-// _scrml_replay(name, log, endIdx?) jumps the machine-bound reactive 'name'
-// to the state recorded at index endIdx of the audit array 'log'. Bypasses
-// the transition guard (§51.5) and the audit push (§51.11), clears any
-// pending temporal timer (§51.12), and emits a standard _scrml_reactive_set
-// so subscribers, derived propagation, and effects all fire normally.
-//
-// Semantics (per SPEC.md §51.14.3):
-//   - endIdx > 0         → state lands at log[endIdx - 1].to
-//   - endIdx == 0        → state lands at log[0].from (or no-op if empty)
-//   - endIdx undefined   → state lands at log[log.length - 1].to (full replay)
-//   - endIdx < 0 or > length → throws E-REPLAY-001-RT
-function _scrml_replay(name, log, endIdx) {
-  const n = (endIdx != null) ? endIdx : log.length;
-  if (n < 0 || n > log.length) {
-    throw new Error("E-REPLAY-001-RT: replay index " + n +
-      " out of bounds for log of length " + log.length +
-      ". Index SHALL be in the range [0, log.length].");
-  }
-  _scrml_machine_clear_timer(name);
-  if (n === 0) {
-    if (log.length === 0) return;  // empty-log no-op (nothing to replay)
-    _scrml_reactive_set(name, log[0].from);
-    return;
-  }
-  _scrml_reactive_set(name, log[n - 1].to);
-}
-
 // Chunk-local cell scope (BUG-6) is inlined per-chunk at codegen (codegen/index.ts buildCellScopePrologue), not here — zero always-loaded bytes.
 function _scrml_reactive_get(name) {
   if (__SCRML_PERF) {
@@ -1186,6 +1069,142 @@ function _scrml_reactive_derived(name, fn) {
 }
 
 // ---------------------------------------------------------------------------
+// §51.12 / §51.14 machine temporal-transition runtime (chunk: 'machine')
+// ---------------------------------------------------------------------------
+// S461 — moved out of 'core': no core function calls these. Pulled by the
+// post-emit \`_scrml_machine_\` / \`_scrml_replay(\` gates in emit-client.ts, and by
+// the 'engine' chunk (CHUNK_DEPENDENCIES engine -> machine), whose <onTimeout>
+// helpers share this backbone.
+// --- machine temporal transitions (§51.12) ---
+// _scrml_machine_timers: encodedVarName → timeout id for the currently-armed
+// temporal transition. Transition-guard codegen clears any existing timer on
+// state commit and arms a new one if the destination variant has outgoing
+// temporal rules. Re-entering the same variant clears and re-arms (reset
+// semantics per the deep-dive default).
+const _scrml_machine_timers = Object.create(null);
+function _scrml_machine_clear_timer(name) {
+  const id = _scrml_machine_timers[name];
+  if (id !== undefined) {
+    clearTimeout(id);
+    delete _scrml_machine_timers[name];
+  }
+}
+function _scrml_machine_arm_timer(name, ms, target, meta) {
+  // meta (optional): { fromVariant, label, auditTarget, rulesJson, setterFn, getterName }
+  //   fromVariant — the .From of the temporal rule being armed (used to
+  //     build the audit 'rule' key on expiry: fromVariant + ":" + target).
+  //   label — the rule's guard label if any, else null. Temporal rules
+  //     currently do not take 'given' clauses, so this is conventionally
+  //     null; the slot exists so a future temporal+guard syntax can slot
+  //     straight in.
+  //   auditTarget — the encoded reactive-var name of the machine's audit
+  //     target (the 'audit @log' clause in the machine body), else null.
+  //   rulesJson — the serialized temporal-rule list so the timer can
+  //     re-arm on the downstream variant. Chained temporal rules
+  //     (A after 1s => B, B after 1s => C) must continue automatically
+  //     without the user driving transitions.
+  //   setterFn  — A5-4 (§51.0.M onTimeout): an optional callback invoked
+  //     INSTEAD of the bare _scrml_reactive_set(name, target) at expiry.
+  //     Engine onTimeout codegen passes a function that routes the write
+  //     through the engine's rule= contract guard (the engine helper in
+  //     the 'engine' chunk; see §51.0.F + §51.0.G). When absent (the
+  //     legacy machine path), the original _scrml_reactive_set write is
+  //     used.
+  //   getterName — A5-4: the encoded reactive-var name to read for the
+  //     __prev audit entry. Defaults to name. Currently unused — reserved
+  //     so a future shape (e.g., audit-target read) can opt out.
+  //
+  // S27 (§51.11): timer-fired transitions now push audit entries and
+  // re-arm downstream temporal rules. Previously the timer invoked a
+  // bare _scrml_reactive_set, bypassing both the audit clause and the
+  // per-transition re-arm logic. This violated §51.11.6 "every
+  // successful transition SHALL append" for temporal rules.
+  _scrml_machine_clear_timer(name);
+  _scrml_machine_timers[name] = setTimeout(function () {
+    delete _scrml_machine_timers[name];
+    const __prev = _scrml_reactive_get(name);
+    if (meta && typeof meta.setterFn === "function") {
+      // A5-4: engine-aware setter (routes through the engine's contract
+      // guard so the rule= contract check fires; throws
+      // E-ENGINE-INVALID-TRANSITION if the timer target violates the
+      // contract — defensive, the compile-time check in A5-3 should already
+      // have caught this).
+      meta.setterFn(target);
+    } else {
+      _scrml_reactive_set(name, target);
+    }
+    if (meta && meta.auditTarget) {
+      const entry = Object.freeze({
+        from: __prev,
+        to: target,
+        at: Date.now(),
+        rule: meta.fromVariant + ":" + target,
+        label: meta.label != null ? meta.label : null,
+      });
+      _scrml_reactive_set(
+        meta.auditTarget,
+        (_scrml_reactive_get(meta.auditTarget) || []).concat([entry])
+      );
+    }
+    if (meta && meta.rulesJson) {
+      _scrml_machine_arm_initial(name, meta.rulesJson, meta.auditTarget);
+    }
+  }, ms);
+}
+function _scrml_machine_arm_initial(name, rulesJson, auditTarget) {
+  // Called once per machine-bound reactive after its initial _scrml_reactive_set,
+  // and also re-invoked from _scrml_machine_arm_timer's expiry path so that
+  // chained temporal rules auto-advance. Inspects the current variant and arms
+  // the first matching temporal rule, if any.
+  //
+  // auditTarget (optional, added S27) propagates the machine's audit target
+  // through the re-arm cascade so chained temporal transitions keep auditing.
+  const val = _scrml_reactive_get(name);
+  const variant = (val != null && typeof val === "object" && val.variant != null) ? val.variant : val;
+  const rules = JSON.parse(rulesJson);
+  for (const r of rules) {
+    if (r.from === variant) {
+      const meta = {
+        fromVariant: r.from,
+        label: r.label != null ? r.label : null,
+        auditTarget: auditTarget != null ? auditTarget : null,
+        rulesJson: rulesJson,
+      };
+      _scrml_machine_arm_timer(name, r.afterMs, r.to, meta);
+      return;
+    }
+  }
+}
+
+// --- §51.14 replay primitive ---
+// _scrml_replay(name, log, endIdx?) jumps the machine-bound reactive 'name'
+// to the state recorded at index endIdx of the audit array 'log'. Bypasses
+// the transition guard (§51.5) and the audit push (§51.11), clears any
+// pending temporal timer (§51.12), and emits a standard _scrml_reactive_set
+// so subscribers, derived propagation, and effects all fire normally.
+//
+// Semantics (per SPEC.md §51.14.3):
+//   - endIdx > 0         → state lands at log[endIdx - 1].to
+//   - endIdx == 0        → state lands at log[0].from (or no-op if empty)
+//   - endIdx undefined   → state lands at log[log.length - 1].to (full replay)
+//   - endIdx < 0 or > length → throws E-REPLAY-001-RT
+function _scrml_replay(name, log, endIdx) {
+  const n = (endIdx != null) ? endIdx : log.length;
+  if (n < 0 || n > log.length) {
+    throw new Error("E-REPLAY-001-RT: replay index " + n +
+      " out of bounds for log of length " + log.length +
+      ". Index SHALL be in the range [0, log.length].");
+  }
+  _scrml_machine_clear_timer(name);
+  if (n === 0) {
+    if (log.length === 0) return;  // empty-log no-op (nothing to replay)
+    _scrml_reactive_set(name, log[0].from);
+    return;
+  }
+  _scrml_reactive_set(name, log[n - 1].to);
+}
+
+// ---------------------------------------------------------------------------
 // §57 Wire Format dual-decoder (chunk: 'wire')
 // ---------------------------------------------------------------------------
 // --- §57 Wire Format dual-decoder (M-7C-D-12 Track 2) ---
@@ -1461,10 +1480,12 @@ function _scrml_destroy_scope(scopeId) {
   _scrml_cleanup_registry.delete(scopeId);
 
   // Step 2: Stop all timers for this scope (§6.7.2, step 2)
-  _scrml_stop_scope_timers(scopeId);
-
   // Step 4: Cancel all pending animation frames for this scope (§6.7.2, step 4)
-  _scrml_cancel_animation_frames(scopeId);
+  // Both registries are filled ONLY by their own chunks ('timers', 'animation'), so
+  // when a chunk is not shipped there is nothing of its kind to stop (S461: they no
+  // longer ride along with this always-included chunk).
+  if (typeof _scrml_stop_scope_timers === "function") _scrml_stop_scope_timers(scopeId);
+  if (typeof _scrml_cancel_animation_frames === "function") _scrml_cancel_animation_frames(scopeId);
 }
 
 // The if= mount scope currently being wired, or null outside a mount. Lives in
@@ -4962,35 +4983,31 @@ function _scrml_computed(fn) {
 // ---------------------------------------------------------------------------
 // §55.10 Error message resolution runtime (chunk: 'messages')
 // ---------------------------------------------------------------------------
-// 4-level chain (L12). Levels 1 → 2 → 3 (Level 4 is the consumer-side
-// \`<match for=ValidationError>\` escape hatch — not in this catalog).
-//
-//   Level 1: per-(cell,validator) inline override on field declaration
-//            (highest priority; static-string only per L12 Edge F).
-//            Stored by C10's emitter via _scrml_messages_register_inline.
-//   Level 2: project-registered messages — \`registerMessages({...})\`.
-//            Stored as enum-tag → (fieldName, ...payload) → string.
-//   Level 3: shipped English defaults — _SCRML_DEFAULT_MESSAGES below.
-//            Always available zero-config floor.
-//
-// Chunk-detection trigger: any state-decl whose validators[] contains an
-// entry with a non-null \`inlineOverride\`, OR (future, C11) any \`<errors of=>\`
-// element. When neither is present this chunk is tree-shaken out entirely.
-//
-// Cross-references:
-//   - SPEC §55.10 (lines 25243-25301) — 4-level chain
-//   - SPEC §55.9  (lines 25212-25241) — ValidationError enum (14 + Custom)
-//   - SPEC §41.12 (lines 17073-17115) — registerMessages API + messageFor
-//   - PA-SCRML-PRIMER §8 — validators + auto-synth surface
-//   - compiler/src/codegen/emit-messages.ts — Level-1 codegen emission
+// Chain L1 inline override → L2 registered template → L3 shipped default (§55.10;
+// L4 <match> is consumer-side). Templates (§41.12.1) are read by the inlined
+// runtime-message-templates.js — the same reader the compiler checks literals with.
 
+${MESSAGE_TEMPLATE_RUNTIME_SOURCE}
 // Level-1 storage: keys are "<cellName>::<validatorName>"; values are
-// override strings. \`::\` is collision-safe (cell names cannot contain it).
+// override strings. "::" is collision-safe (cell names cannot contain it).
 const _scrml_messages_inline = Object.create(null);
 
 // Level-2 storage: keys are ValidationError enum tags ("Required",
-// "MinFailed", "Custom", etc.); values are (fieldName, ...payload) => string.
+// "MinFailed", "Custom", etc.); values are parsed template parts.
 const _scrml_messages_registered = Object.create(null);
+
+// Level-3 storage: the shipped defaults, parsed once at load. A default that
+// failed to parse would be a compiler bug; it is simply left out (the
+// fallback below still answers).
+function _scrml_messages_parse_defaults() {
+  const parsedDefaults = Object.create(null);
+  for (const tag of Object.keys(_SCRML_DEFAULT_MESSAGES)) {
+    const parsed = _scrml_message_template_parse(_SCRML_DEFAULT_MESSAGES[tag], _SCRML_MESSAGE_SLOTS[tag]);
+    if (parsed.ok) parsedDefaults[tag] = parsed.parts;
+  }
+  return parsedDefaults;
+}
+const _scrml_messages_default_parts = _scrml_messages_parse_defaults();
 
 // Tag → validator name mapping for Level-1 inline override lookup. Mirrors
 // the validator-catalog at compile time but lives here so Level-1 lookup
@@ -5000,7 +5017,7 @@ const _scrml_messages_registered = Object.create(null);
 // nothing rather than an Object.prototype member (S459).
 const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Required:        "req",
-  NotSome:         "is some",
+  NotSome:         "is given",
   LengthFailed:    "length",
   PatternMismatch: "pattern",
   MinFailed:       "min",
@@ -5016,79 +5033,19 @@ const _SCRML_TAG_TO_VALIDATOR = Object.assign(Object.create(null), {
   Custom:          "custom",
 });
 
-// Format a relational-predicate payload like { op: ">=", value: 2 } → ">= 2".
-// Used by LengthFailed default. Payload may be null/undefined defensively.
-function _scrml_format_predicate(p) {
-  if (p && typeof p === "object" && typeof p.op === "string") {
-    return p.op + " " + p.value;
-  }
-  return String(p);
-}
-
-// Format a set/array payload for OneOfFailed / NotInFailed defaults.
-function _scrml_format_set(s) {
-  if (Array.isArray(s)) return s.map(v => String(v)).join(", ");
-  return String(s);
-}
-
-// Level-3 default catalog. Each entry takes (fieldName, payload) and returns
-// a non-condescending professional string. Payload shape matches the
-// ValidationError enum at SPEC §55.9 (e.g., MinFailed has \`threshold\`).
-// Uses string concatenation rather than template literals so we don't have to
-// escape every \\\${} inside this template-literal runtime source.
-const _SCRML_DEFAULT_MESSAGES = Object.assign(Object.create(null), {
-  Required:        function (f) { return f + " is required."; },
-  NotSome:         function (f) { return f + " is required."; },
-  LengthFailed:    function (f, p) { return f + " length must satisfy " + _scrml_format_predicate(p) + "."; },
-  PatternMismatch: function (f) { return f + " doesn't match the expected format."; },
-  MinFailed:       function (f, p) { return f + " must be at least " + p + "."; },
-  MaxFailed:       function (f, p) { return f + " must be at most " + p + "."; },
-  GtFailed:        function (f, p) { return f + " must be greater than " + p + "."; },
-  LtFailed:        function (f, p) { return f + " must be less than " + p + "."; },
-  GteFailed:       function (f, p) { return f + " must be greater than or equal to " + p + "."; },
-  LteFailed:       function (f, p) { return f + " must be less than or equal to " + p + "."; },
-  EqFailed:        function (f, p) { return f + " must equal " + p + "."; },
-  NeqFailed:       function (f, p) { return f + " cannot equal " + p + "."; },
-  OneOfFailed:     function (f, p) { return f + " must be one of: " + _scrml_format_set(p) + "."; },
-  NotInFailed:     function (f, p) { return f + " cannot be any of: " + _scrml_format_set(p) + "."; },
-  Custom:          function (f, p) { return f + " failed validation (" + p + ")."; },
-});
-
 // Fallback for unknown/future tags. Keeps messageFor total — never throws,
 // never returns undefined.
 function _scrml_messages_fallback(fieldName) {
   return fieldName + " is invalid.";
 }
 
-// Extract payload values as a positional array for Level-2 function call. The
-// payload-key per tag is documented at runtime-validators.js:36-49.
-function _scrml_extract_payload(error) {
-  switch (error.tag) {
-    case "Required":
-    case "NotSome":
-      return [];
-    case "LengthFailed":    return [error.predicate];
-    case "PatternMismatch": return [error.re];
-    case "MinFailed":       return [error.threshold];
-    case "MaxFailed":       return [error.threshold];
-    case "GtFailed":        return [error.expected];
-    case "LtFailed":        return [error.expected];
-    case "GteFailed":       return [error.expected];
-    case "LteFailed":       return [error.expected];
-    case "EqFailed":        return [error.expected];
-    case "NeqFailed":       return [error.forbidden];
-    case "OneOfFailed":     return [error.set];
-    case "NotInFailed":     return [error.set];
-    case "Custom":          return [error.tag_string != null ? error.tag_string : error.customTag];
-    default:                return [];
-  }
-}
-
-// First payload value (for default-catalog single-arg use). Keeps the default
-// catalog signature simple: \`(field, payload) => string\`.
-function _scrml_extract_payload_first(error) {
-  const arr = _scrml_extract_payload(error);
-  return arr.length > 0 ? arr[0] : undefined;
+// A resolved message is TEXT (§55.8 default render: <p class="scrml-error">\${ messageFor(e) }</p>),
+// and its slots carry user data (an eq(@other) payload is whatever the user typed). The default
+// <errors> render builds HTML, so it escapes the whole message through this before innerHTML.
+function _scrml_message_html(text) {
+  return String(text).replace(/[&<>"']/g, function (ch) {
+    return ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;";
+  });
 }
 
 /**
@@ -5099,20 +5056,33 @@ function _scrml_messages_register_inline(cellName, validatorName, override) {
   _scrml_messages_inline[cellName + "::" + validatorName] = override;
 }
 
-/**
- * Level-2 registration — public facade for \`registerMessages\` (stdlib re-export).
- * Last-write-wins per variant key per SPEC §41.12 line 17096. Composes across
- * multiple calls (each call merges into the table).
- *
- * @param {Object} map — \`{ Required: (field) => "...", MinFailed: (field, n) => "...", ... }\`
- */
+// A template registerMessages refuses (§41.12.1 rule 6) — one the compiler could not see.
+function _scrml_messages_refuse(text) {
+  if (typeof console !== "undefined" && typeof console.error === "function") {
+    console.error("[scrml] registerMessages: " + text);
+  }
+}
+
+// Level-2 registration (registerMessages). Last-write-wins per variant; a refused
+// entry is not stored (an earlier one for that variant stays) and is never rendered.
 function _scrml_messages_register(map) {
   if (!map || typeof map !== "object") return;
   for (const tag of Object.keys(map)) {
-    const fn = map[tag];
-    if (typeof fn === "function") {
-      _scrml_messages_registered[tag] = fn;
+    const template = map[tag];
+    const slots = _SCRML_MESSAGE_SLOTS[tag];
+    if (!slots) {
+      _scrml_messages_refuse("." + tag + " is not a ValidationError variant; ignored.");
+      continue;
     }
+    const parsed = typeof template === "string" ? _scrml_message_template_parse(template, slots) : null;
+    if (parsed && parsed.ok) {
+      _scrml_messages_registered[tag] = parsed.parts;
+      continue;
+    }
+    const why = !parsed ? "is not a message template (a string)"
+      : parsed.reason === "unknown-slot" ? "names {" + parsed.slot + "}; its slots are {" + slots.join("}, {") + "}"
+      : "is malformed at offset " + parsed.at;
+    _scrml_messages_refuse("the ." + tag + " template " + why + "; refused.");
   }
 }
 
@@ -5121,9 +5091,9 @@ function _scrml_messages_register(map) {
  * for a ValidationError-shaped object. Always returns a string (never throws,
  * never returns undefined) so consumers can render unconditionally.
  *
- * @param {Object} error      — \`{ tag: "...", ...payload }\` per §55.9 + runtime-validators
+ * @param {Object} error      — { tag: "...", ...payload } per §55.9 + runtime-validators
  * @param {string} fieldName  — display name of the field (passed by C11)
- * @param {string} [cellName] — qualified cell name (\`signup.email\`); needed for Level-1 lookup
+ * @param {string} [cellName] — qualified cell name (signup.email); needed for Level-1 lookup
  * @returns {string}
  */
 function _scrml_message_for(error, fieldName, cellName) {
@@ -5145,24 +5115,13 @@ function _scrml_message_for(error, fieldName, cellName) {
     }
   }
 
-  // Level 2: project-registered. Function takes (fieldName, ...payloadValues).
-  const registeredFn = _scrml_messages_registered[tag];
-  if (typeof registeredFn === "function") {
-    const payloadArgs = _scrml_extract_payload(error);
-    try {
-      const result = registeredFn(fieldName, ...payloadArgs);
-      if (typeof result === "string") return result;
-    } catch (_e) {
-      // Fall through to Level 3 if user-supplied function throws.
-    }
-  }
+  // Level 2: the project-registered template for the tag.
+  const registered = _scrml_messages_registered[tag];
+  if (registered) return _scrml_message_template_render(registered, error, fieldName);
 
-  // Level 3: shipped English default for the tag.
-  const defaultFn = _SCRML_DEFAULT_MESSAGES[tag];
-  if (typeof defaultFn === "function") {
-    const payload = _scrml_extract_payload_first(error);
-    return defaultFn(fieldName, payload);
-  }
+  // Level 3: the shipped English default template for the tag.
+  const fallbackParts = _scrml_messages_default_parts[tag];
+  if (fallbackParts) return _scrml_message_template_render(fallbackParts, error, fieldName);
 
   // Unknown tag — fallback (never undefined).
   return _scrml_messages_fallback(fieldName);

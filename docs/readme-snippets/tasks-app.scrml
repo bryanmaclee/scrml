@@ -134,7 +134,7 @@ const <visible> = match @filter {
         <each in=@visible key=@.id>
             <li class:done=${!isActive(@.)}>
                 <input type="checkbox"
-                       checked=${@.completed_at is some}
+                       checked=${@.completed_at is given}
                        onchange=${toggle(@.id)}/>
                 ${@.text}
             </li>

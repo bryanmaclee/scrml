@@ -1,0 +1,17 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    const later = "{field} needs {threshold}"
+    registerMessages({
+        .LengthFailed: "{field} needs a length {predicate}",
+    })
+    registerMessages({
+        .LengthFailed: later,
+    })
+    <signup>
+        <name length(>=2)> = <input id="name" type="text"/>
+    </>
+}
+<signup><name/></>
+<div id="err"><errors of=@signup.name/></div>
+</program>

@@ -50,7 +50,7 @@ function loadTasks() {
 
 function insertTask(text: string)! -> TaskError {
     const same = ?{`SELECT id FROM tasks WHERE text = ${text}`}.get()
-    if (same is some) fail .Duplicate
+    if (same is given) fail .Duplicate
     return ?{`INSERT INTO tasks (text, completed_at) VALUES (${text}, ${not})
               RETURNING id, text, completed_at`}.get()
 }
@@ -67,7 +67,7 @@ Three functions touch the database, so the compiler put them on the server. Nobo
 
 `<schema>` is the table you want. `scrml db-migrate tasks.scrml --db tasks.db` compares it with the real database and applies the difference: on an empty file it runs the `CREATE TABLE`; add a column to the schema later and it plans an `ALTER TABLE … ADD COLUMN`.
 
-There is no `null` in scrml. `not` is the one absence value, and you test for it with `is not` / `is some`. `insertTask` can fail, and says so in its type (`! -> TaskError`). `fail .Duplicate` is how it fails. There is no `throw`.
+There is no `null` in scrml. `not` is the one absence value, and you test for it with `is not` / `is given`. `insertTask` can fail, and says so in its type (`! -> TaskError`). `fail .Duplicate` is how it fails. There is no `throw`.
 
 ### 2 — shared state
 

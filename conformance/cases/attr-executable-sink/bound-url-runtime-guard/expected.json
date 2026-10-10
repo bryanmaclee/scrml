@@ -1,0 +1,23 @@
+{
+  "id": "attr-executable-sink-bound-url-runtime-guard",
+  "description": "§5.2 rule 3 (S457), the parenthesized expression form `href=(@cell)`: a URL attribute whose value is a cell read is judged at runtime on every write — a non-admitted scheme writes about:blank (initially and on a reactive re-write); relative URLs, a raster data:image on an image source, and a `data` attribute outside <object> are written unchanged. Written in forms both implementations compile (s462-bootstrap-sink-guards — the bootstrap's twin of url-data-scheme-runtime-guard, whose `${…}` forms the bootstrap does not parse; the bare `href=@cell` form is not used because impl#1 writes it as the static cell NAME — g-unquoted-href-cell-ref-renders-cell-name-s456).",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 3: covered writes include \"(ii) every non-literal value — `href=${expr}`, `href=@cell` where it binds, …\"; \"The write is judged when the element is built AND on every reactive re-write when a dependency changes.\" Leading C0 controls and spaces are ignored and the scheme compares case-insensitively. Element scope: `action` (`form`), `data` (`object`) — \"An attribute the HTML standard makes URL-valued only on particular elements is covered only there\". Admitted: no scheme, http/https/ftp/mailto/tel/sms, and a raster data:image only on an image-source attribute; \"Any other value SHALL be written as `about:blank`\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "input": [{ "click": "#flip" }, { "wait": "settle" }],
+    "domAnchored": [
+      { "selector": "#e", "attr": { "href": "about:blank" } },
+      { "selector": "#g", "attr": { "href": "/ok?a=1" } },
+      { "selector": "#i", "attr": { "src": "data:image/png;base64,AAAA" } },
+      { "selector": "#h", "attr": { "href": "about:blank" } },
+      { "selector": "#d", "attr": { "href": "about:blank" } },
+      { "selector": "#s", "attr": { "href": "about:blank" } },
+      { "selector": "#f", "attr": { "action": "about:blank" } },
+      { "selector": "#o", "attr": { "data": "about:blank" } },
+      { "selector": "#v", "attr": { "data": "javascript:alert(1)" } }
+    ]
+  }
+}

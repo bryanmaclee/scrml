@@ -2,7 +2,7 @@
 ${
     type User:struct = { name: string }
     let u: User | not = not
-    const out = u is some && u.name
+    const out = u is given && u.name
 }
 <program>
     <p>out</>

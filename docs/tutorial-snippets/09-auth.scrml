@@ -7,7 +7,7 @@
   // Reading `session` makes this a server function. The role check runs on
   // the server, so a non-admin's response never contains the admin text.
   function loadAdminReport() {
-    if (session.role is some && session.role == "Admin") {
+    if (session.role is given && session.role == "Admin") {
       return "3 signups are waiting for review."
     }
     return ""

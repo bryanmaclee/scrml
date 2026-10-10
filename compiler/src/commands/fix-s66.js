@@ -21,6 +21,10 @@
  *                   → the §18.2 match arm (`| .V m :>` → `.V(m) :>`; shared-line arms onto their
  *                   own lines). Chained second; its own module (fix-arm-pipe.js) locates the arms
  *                   from impl#1's arm records and verifies each file (identical artifacts).
+ *   is-some         §42.2.2a / §55.1 (S462): the soft-deprecated presence spelling `x is some` (and the
+ *                   validator `<x is some>`) → `is given`. Chained after sql-failable; its own module
+ *                   (fix-is-some.js) locates the sites from impl#1's token streams (the sites
+ *                   W-IS-SOME-DEPRECATED fires on) and verifies each file (identical artifacts).
  *   client-server-call  §19.9.10 (S451; S454 F8): an UNHANDLED client call of a server function
  *                   not declared `!` → `f(…) !{ .Transport(_) :> { return } }` (an event-handler value
  *                   braced). Chained third; its own module (fix-client-server-call.js) locates the
@@ -34,6 +38,12 @@
  *                   (fix-sql-failable.js) locates the queries from impl#1's AST + Route Inference and
  *                   gates each file (re-parse, same codes); a site it cannot rewrite is listed. It
  *                   reports an INFO at every rewritten site: on impl#1 a failure there used to throw.
+ *   given-presence  §42.2.3 / §63 (S462): the soft-deprecated in-place presence guard
+ *                   `given x, y :> { … }` → `if (x is given && y is given) { … }`, and the `given x :>`
+ *                   match arm → `else :>`. Chained sixth, after is-some; its own module
+ *                   (fix-given-presence.js) locates the heads from impl#1's `given-guard` nodes and
+ *                   verifies each site (same codes; artifacts identical but for the parentheses of
+ *                   the presence check). A site impl#1 miscompiles today is listed, never rewritten.
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -89,6 +99,8 @@ import { parseComponentBody } from "../component-expander.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
 import { fixArmPipe } from "./fix-arm-pipe.js";
+import { fixGivenPresence } from "./fix-given-presence.js";
+import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
 import { compileScrml } from "../api.js";
@@ -108,7 +120,7 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "client-server-call", "sql-failable", "is-some", "given-presence", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
@@ -117,6 +129,8 @@ export const S66_RULES = Object.freeze([
   "arm-pipe",
   "client-server-call",
   "sql-failable",
+  "is-some",
+  "given-presence",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -256,7 +270,7 @@ function lineOf(src, off) {
 // AST helpers
 // ---------------------------------------------------------------------------
 
-const SKIP_KEYS = new Set(["span", "initExpr", "exprNode", "argsExpr", "condExpr", "headerExpr", "derivedExprNode"]);
+const SKIP_KEYS = new Set(["span", "initExpr", "exprNode", "argsExpr", "argExprs", "condExpr", "headerExpr", "derivedExprNode"]);
 
 /** Visit every AST node with its ancestor chain (outermost first). */
 function walkAst(root, fn) {
@@ -1300,6 +1314,7 @@ export function fixS66(source, opts = {}) {
     blockers.push(...ap.blockers);
   }
 
+
   /** INFO lines (not blockers): client-server-call's "callers no longer abort", sql-failable's "a failure used to throw". */
   const infos = [];
   if (enabled.has("client-server-call")) {
@@ -1319,6 +1334,25 @@ export function fixS66(source, opts = {}) {
     applied.push(...sf.applied);
     blockers.push(...sf.blockers);
     infos.push(...sf.infos);
+  }
+  if (enabled.has("is-some")) {
+    // §42.2.2a / §55.1 (S462) — `is some` → `is given`. Chained after sql-failable (the handler rules keep their place right after arm-pipe); like arm-pipe: its own structural
+    // location + verification (commands/fix-is-some.js); a file it cannot verify is left untouched
+    // and reported.
+    const is = fixIsSome(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (is.changed) src = is.output;
+    applied.push(...is.applied);
+    blockers.push(...is.blockers);
+  }
+
+  if (enabled.has("given-presence")) {
+    // §42.2.3 / §63 (S462) — the in-place `given` presence guard / `given x :>` arm → the S460 a′
+    // presence test. Chained like arm-pipe: its own structural location + per-site verification
+    // (commands/fix-given-presence.js); a site it cannot verify is left untouched and reported.
+    const gp = fixGivenPresence(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (gp.changed) src = gp.output;
+    applied.push(...gp.applied);
+    blockers.push(...gp.blockers);
   }
 
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).

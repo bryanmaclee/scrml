@@ -604,7 +604,12 @@ describe("§14 per-file .client.js byte regression — A-4.4 chunk-side wiring i
       const withOut = withFlag.outputs.get(filePath);
       expect(withOut).toBeDefined();
       // No links → `prefetch` chunk inactive → client.js byte-identical.
-      expect(withOut.clientJs).toBe(withoutOut.clientJs);
+      // S461 — the per-file BODY must be byte-identical. The one line that may differ is the
+      // `// Requires: scrml-runtime.<hash>.js` header: under emitPerRoute the shared runtime
+      // legitimately carries the route-splitter-only chunks ('mount' / 'vendor-ref' /
+      // 'prefetch'), so its content hash — and so its filename — differs.
+      const normRuntime = (js) => js.replace(/scrml-runtime\.[0-9a-z]+\.js/g, "scrml-runtime.<HASH>.js");
+      expect(normRuntime(withOut.clientJs)).toBe(normRuntime(withoutOut.clientJs));
     }
   });
 });

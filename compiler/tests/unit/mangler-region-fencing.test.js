@@ -114,12 +114,26 @@ beforeAll(() => {
   // (inside the mangle's lookahead set) while the body's `log.length` reads are
   // followed by `.` (outside it), so the unfenced pass renamed the PARAMETER and
   // left every use of it behind.
+  //
+  // S461: `_scrml_replay` moved out of the always-shipped 'core' chunk into the
+  // 'machine' chunk, which ships only for a page that uses it — so the fixture
+  // now calls `replay(...)` on an audited engine to keep the collision site in
+  // the shipped runtime.
   runtimeCollisionFx = fix("runtime-collision.scrml", `<program>
 \${
+type S:enum = { A, B }
+@order: M = S.A
+@hist = []
 function log(n) { console.log(n) }
+function rewind() { replay(@order, @hist) }
 @count = 0
 }
+< engine name=M for=S>
+  .A => .B
+  audit @hist
+</>
 <button onclick=\${ log(@count) }>go</button>
+<button onclick=\${ rewind() }>back</button>
 </program>
 `);
 

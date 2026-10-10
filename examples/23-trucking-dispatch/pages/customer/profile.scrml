@@ -89,7 +89,7 @@
                 <a href="/customer/home" class="hover:text-blue-300">Home</a>
                 <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
                 <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
-                <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
+                <span class="text-slate-400 text-xs" if=(@currentUser is given)>${@currentUser.email}</span>
                 <button onclick=logout() class="hover:text-blue-300">Logout</button>
             </nav>
         </header>
@@ -101,7 +101,7 @@
                 ${@errorMessage}
             </div>
 
-            <div if=(@loaded && @currentCustomer is some) class="space-y-4">
+            <div if=(@loaded && @currentCustomer is given) class="space-y-4">
 
                 <header class="bg-white rounded-lg border border-slate-200 p-6">
                     <div class="flex items-start justify-between">
@@ -112,7 +112,7 @@
                             </p>
                         </div>
                         <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClassesOf(@currentCustomer)}">
-                            ${@currentCustomer is some ? accountStatusLabel(@currentCustomer.account_status) : ""}
+                            ${@currentCustomer is given ? accountStatusLabel(@currentCustomer.account_status) : ""}
                         </span>
                     </div>
                 </header>
@@ -126,22 +126,22 @@
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Contact name</div>
                             <div class="text-slate-900">
-                                <span if=(@currentCustomer.contact_name is some && @currentCustomer.contact_name != "")>${@currentCustomer.contact_name}</>
-                                <span if=(@currentCustomer is some && (@currentCustomer.contact_name is not || @currentCustomer.contact_name == "")) class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_name is given && @currentCustomer.contact_name != "")>${@currentCustomer.contact_name}</>
+                                <span if=(@currentCustomer is given && (@currentCustomer.contact_name is not || @currentCustomer.contact_name == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Email</div>
                             <div class="text-slate-900">
-                                <span if=(@currentCustomer.contact_email is some && @currentCustomer.contact_email != "")>${@currentCustomer.contact_email}</>
-                                <span if=(@currentCustomer is some && (@currentCustomer.contact_email is not || @currentCustomer.contact_email == "")) class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_email is given && @currentCustomer.contact_email != "")>${@currentCustomer.contact_email}</>
+                                <span if=(@currentCustomer is given && (@currentCustomer.contact_email is not || @currentCustomer.contact_email == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Phone</div>
                             <div class="text-slate-900">
-                                <span if=(@currentCustomer.contact_phone is some && @currentCustomer.contact_phone != "")>${@currentCustomer.contact_phone}</>
-                                <span if=(@currentCustomer is some && (@currentCustomer.contact_phone is not || @currentCustomer.contact_phone == "")) class="text-slate-400">—</>
+                                <span if=(@currentCustomer.contact_phone is given && @currentCustomer.contact_phone != "")>${@currentCustomer.contact_phone}</>
+                                <span if=(@currentCustomer is given && (@currentCustomer.contact_phone is not || @currentCustomer.contact_phone == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                     </div>
@@ -156,20 +156,20 @@
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Billing address</div>
                             <div class="text-slate-900">
-                                <span if=(@currentCustomer.billing_address is some && @currentCustomer.billing_address != "")>${@currentCustomer.billing_address}</>
-                                <span if=(@currentCustomer is some && (@currentCustomer.billing_address is not || @currentCustomer.billing_address == "")) class="text-slate-400">—</>
+                                <span if=(@currentCustomer.billing_address is given && @currentCustomer.billing_address != "")>${@currentCustomer.billing_address}</>
+                                <span if=(@currentCustomer is given && (@currentCustomer.billing_address is not || @currentCustomer.billing_address == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Payment terms</div>
                             <div class="text-slate-900">
-                                ${@currentCustomer is some ? paymentTermsLabel(@currentCustomer.payment_terms) : ""}
+                                ${@currentCustomer is given ? paymentTermsLabel(@currentCustomer.payment_terms) : ""}
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer since</div>
                             <div class="text-slate-900">
-                                ${@currentCustomer is some ? @currentCustomer.created_at is not ? "—" : @currentCustomer.created_at.substring(0, 10) : ""}
+                                ${@currentCustomer is given ? @currentCustomer.created_at is not ? "—" : @currentCustomer.created_at.substring(0, 10) : ""}
                             </div>
                         </div>
                     </div>

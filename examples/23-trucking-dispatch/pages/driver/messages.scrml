@@ -91,7 +91,7 @@
         // broadcast (one `<driverEvents>` cell, all events); each payload carries
         // `targetDriverId` so the driver UI filters to its own thread (per
         // channels/driver-events.scrml). Empty until the driver record loads.
-        const <currentDriverEvents> = @driverEvents.filter(ev => @currentDriver is some && ev.targetDriverId == @currentDriver.id)
+        const <currentDriverEvents> = @driverEvents.filter(ev => @currentDriver is given && ev.targetDriverId == @currentDriver.id)
         <channelId> = ""
         <messageHistory> = []
         <loaded> = false
@@ -256,7 +256,7 @@
                              persistence) but we render the live ones here
                              so they appear without a refresh. -->
                         <each in=@currentDriverEvents as ev key=__index__>
-                            <div if=(@currentDriver is some && (ev.type == "message" && isForThisDriver(ev.targetDriverId, @currentDriver.id))) class="max-w-md rounded-lg px-4 py-2 bg-blue-50 border border-blue-200 text-blue-900 ml-auto">
+                            <div if=(@currentDriver is given && (ev.type == "message" && isForThisDriver(ev.targetDriverId, @currentDriver.id))) class="max-w-md rounded-lg px-4 py-2 bg-blue-50 border border-blue-200 text-blue-900 ml-auto">
                                 <div class="text-xs opacity-75 mb-0.5">
                                     Live · ${ev.at == "" ? "" : ev.at.substring(11, 16)}
                                 </div>

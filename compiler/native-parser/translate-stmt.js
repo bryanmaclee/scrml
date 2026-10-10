@@ -772,32 +772,37 @@ function makeReactiveNestedAssignNode(rootName, segments, valueExpr, span, count
 
 // makeReactiveArrayMutationNode — synthesize the live `reactive-array-mutation`
 // from a native `Call` whose callee is `@cell.<method>` with `<method>` an
-// array-mutation. Shape matches ast-builder.js:5649-5657 + emit-logic.ts:3079
-// (`{ target, method, args, argsExpr, span }`). emit-logic emits
-// `emitExprField(node.argsExpr, node.args ?? "", ...)` — it prefers `argsExpr`
-// when present, else `rewriteExpr`s the raw `args` string.
+// array-mutation. Shape matches the LIVE ast-builder node
+// (`{ target, method, args, argExprs, span }`). emit-logic lowers EACH entry of
+// `argExprs` (one live ExprNode per argument, §6.5.1) and joins them as the
+// call's argument list; `args` is the text mirror.
 //
-// SINGLE-arg (`push(5)` / `push(@x)`, the dominant corpus form): translate the
-// one argument to a live ExprNode on `argsExpr` (the robust path — the arg
-// rides the shared expr emitter exactly as a let-RHS would; `@x` -> `_scrml_
-// reactive_get("x")`). `args` is left "".
-//
-// MULTI-arg (`splice(idx, 1)`): there is no single live ExprNode that renders a
-// comma list, so we mirror the LIVE form, which lowers a multi-arg call through
-// the raw-text escape-hatch (`safeParseExprToNode("idx, 1")` -> escape-hatch ->
-// `rewriteExpr`). We serialize the native arg list to the same ` , `-joined
-// token form on `args` and leave `argsExpr` null, so emit-logic's fallback
-// `rewriteExpr(args)` produces the identical `splice(idx , 1)` output.
-function makeReactiveArrayMutationNode(rootName, method, argsExpr, argsRaw, span, counter) {
+// (s461 — this used to carry ONE `argsExpr` for a single argument and only the
+// raw text for several, mirroring a LIVE collector that parsed the whole list
+// as one comma-sequence expression. Both front ends now carry the list.)
+function makeReactiveArrayMutationNode(rootName, method, argExprs, argsRaw, span, counter) {
     return {
         id: stampId(counter),
         kind: "reactive-array-mutation",
         target: rootName,
         method,
         args: typeof argsRaw === "string" ? argsRaw : "",
-        argsExpr: argsExpr === undefined ? null : argsExpr,
+        argExprs: Array.isArray(argExprs) ? argExprs : [],
         span: spanOrZero(span),
     };
+}
+
+// translateMutationArg — one native call argument to a live ExprNode. A spread
+// argument (`...@items`) is the native `Spread` wrapper
+// (`{ kind: "Spread", expression }`); it becomes a live `spread` node around
+// its translated operand.
+function translateMutationArg(a) {
+    if (a !== undefined && a !== null && a.kind === "Spread") {
+        const operand = a.expression !== undefined ? a.expression : a.argument;
+        const argument = translateExpr(operand);
+        return { kind: "spread", span: argument.span, argument };
+    }
+    return translateExpr(a);
 }
 
 // tryReactiveWrite — the FIX-NATIVE recognizer. Given a native ExprStmt
@@ -845,20 +850,14 @@ function tryReactiveWrite(e, span, counter) {
             typeof callee.object.name === "string") {
             const rootName = callee.object.name;
             const nativeArgs = Array.isArray(e.args) ? e.args : [];
-            // SINGLE arg -> a translated live ExprNode on `argsExpr`. MULTI arg
-            // -> the ` , `-joined raw text on `args` (mirroring the LIVE multi-
-            // arg escape-hatch lowering); `argsExpr` stays null so emit-logic's
-            // `rewriteExpr(args)` fallback renders the comma list. ARG-LESS
-            // (`pop()` / `shift()` / `sort()` / `reverse()`) -> both empty.
-            let argsExpr = null;
-            let argsRaw = "";
-            if (nativeArgs.length === 1) {
-                argsExpr = translateExpr(nativeArgs[0]);
-            } else if (nativeArgs.length > 1) {
-                const serialized = serializeNativeArgList(nativeArgs);
-                argsRaw = serialized === null ? "" : serialized;
-            }
-            return makeReactiveArrayMutationNode(rootName, methodName, argsExpr, argsRaw, span, counter);
+            // One live ExprNode per argument (§6.5.1 — separate arguments);
+            // ARG-LESS (`pop()` / `reverse()`) -> an empty list.
+            const argExprs = nativeArgs
+                .filter((a) => a !== undefined && a !== null)
+                .map(translateMutationArg);
+            const serialized = nativeArgs.length > 0 ? serializeNativeArgList(nativeArgs) : "";
+            const argsRaw = serialized === null ? "" : serialized;
+            return makeReactiveArrayMutationNode(rootName, methodName, argExprs, argsRaw, span, counter);
         }
         return null;
     }

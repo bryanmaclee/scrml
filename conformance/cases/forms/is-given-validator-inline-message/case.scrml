@@ -1,0 +1,9 @@
+<program>
+${
+    <signup>
+        <nick is given("Please give a nickname") length(>=3, "Nickname must be at least 3 chars")> = <input id="nick" type="text"/>
+    </>
+}
+<signup><nick/></>
+<div id="err"><errors of=@signup.nick/></div>
+</program>

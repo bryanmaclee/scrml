@@ -575,8 +575,8 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
       ? left.primType
       : right.primType;
     const suggestion = eqNode.op === "=="
-      ? `\`x is not\` (checks for absence) or \`x is some\` for presence`
-      : `\`x is some\` (checks for presence) or \`x is not\` for absence`;
+      ? `\`x is not\` (checks for absence) or \`x is given\` for presence`
+      : `\`x is given\` (checks for presence) or \`x is not\` for absence`;
     errors.push(new GauntletPhase3Error(
       "E-SYNTAX-042",
       `E-SYNTAX-042: \`${tok}\` is not a scrml token — scrml uses \`not\` for absence (§42). ` +
@@ -599,7 +599,7 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
     // A diagnostic that hands the author
     // the form the spec exists to discourage is teaching the wrong idiom at the one
     // moment they are guaranteed to be reading.
-    // `x != not` means "x is present", and `is some` is the canonical spelling of that
+    // `x != not` means "x is present", and `is given` (S462; formerly `is some`) is the canonical spelling of that
     // (§42.2.5: `is some` = value EXISTS). g-e-eq-002-hint-suggests-the-double-negative.
     // ⚑ S411 — advice and purpose clause are ONE string per operator. S410 varied only
     // the form and left "to check for absence" hardcoded, so the `!=` arm read "use
@@ -607,7 +607,7 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
     // them in one literal is what stops the two halves drifting apart again.
     const advice = eqNode.op === "=="
       ? "`is not` to check for absence"
-      : "`is some` to check for presence";
+      : "`is given` to check for presence";
     errors.push(new GauntletPhase3Error(
       "E-EQ-002",
       `E-EQ-002: \`${eqNode.op} not\` is not valid — use ${advice} (§45).`,
@@ -715,7 +715,7 @@ function checkBareNullLit(litNode, fallbackSpan, filePath, errors) {
     "E-SYNTAX-042",
     `E-SYNTAX-042: \`${tok}\` is not a scrml token — scrml uses \`not\` for absence (§42.7). ` +
     `In value position, replace \`${tok}\` with \`not\` (e.g. \`@x = not\`, \`return not\`, ` +
-    `\`{ field: not }\`). For absence checks, use \`x is not\` / \`x is some\`.`,
+    `\`{ field: not }\`). For absence checks, use \`x is not\` / \`x is given\`.`,
     span,
   ));
 }
@@ -885,6 +885,8 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
       if (n.initExpr)  inspectExprNode(n.initExpr,  n.span);
       if (n.exprNode)  inspectExprNode(n.exprNode,  n.span);
       if (n.argsExpr)  inspectExprNode(n.argsExpr,  n.span);
+      // reactive-array-mutation: one ExprNode per argument (s461, §6.5.1).
+      if (Array.isArray(n.argExprs)) for (const a of n.argExprs) if (a) inspectExprNode(a, n.span);
 
       // F-NULL-002 fix: markup-node attributes carry their own exprNodes.
       if (Array.isArray(n.attrs)) inspectAttrs(n.attrs);
@@ -948,7 +950,7 @@ function harvestValueRhsOnIs(ast, filePath, errors) {
     errors.push(new GauntletPhase3Error(
       "E-EQ-005",
       "E-EQ-005: `is <value>` is not valid — `is` is the absence / variant keyword " +
-      "(`x is not` / `x is some` / `x is .Variant`), not a value-equality operator (§45.5). " +
+      "(`x is not` / `x is given` / `x is .Variant`), not a value-equality operator (§45.5). " +
       "Use `==` for value equality (e.g. `x == 0`). Mirror of E-EQ-002 (`x == not` → `x is not`).",
       { file: filePath, start: s.start ?? 0, end: s.end ?? 0, line: s.line ?? 1, col: s.col ?? 1 },
     ));

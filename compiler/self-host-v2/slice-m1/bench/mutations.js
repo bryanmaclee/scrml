@@ -444,9 +444,27 @@ const MUTATIONS = [
     from: "        if (!inProgramCtx(env)) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G1: `<*x/>` of a declaration with no renders accepted (O51)", file: `${SH}/analyze.scrml`,
     from: "        if (nodes.length == 0) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
-  { id: "s442 r1 G1: an attribute on `<*f/>` of a field accepted", file: `${SH}/analyze.scrml`,
-    from: "        if (e.attrs.length > 0) {\n            return addDiag(st, env.file, e.span, \"E-DECL-STAR-REF-ATTR-WRITE\"",
-    to: "        if (false) {\n            return addDiag(st, env.file, e.span, \"E-DECL-STAR-REF-ATTR-WRITE\"", tests: [T4("review-r1.test.js")] },
+  // s462: the `<*f/>` attribute refusal moved into starRefAttrs (one reader for both kinds of reference)
+  { id: "s442 r1 G1 / s462: an attribute on `<*f/>` of a field accepted", file: `${SH}/analyze.scrml`,
+    from: "        st = starRefAttrs(env, e, fieldSubNames(sf.src, f.nid), st)\n",
+    to: "", tests: [T4("review-r1.test.js"), T4("use-attr.test.js")] },
+  // s462-decl-use-attr-refuse (O18 RULED, SPEC §66.6.9)
+  { id: "s462: an undeclared attribute on a plain use accepted (dropped)", file: `${SH}/analyze.scrml`,
+    from: "                    st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\", \"`<\" + e.tag + \">` has no attribute `\" + a.name + \"` — a use carries",
+    to: "                    if (false) st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\", \"`<\" + e.tag + \">` has no attribute `\" + a.name + \"` — a use carries",
+    tests: [T4("use-attr.test.js")] },
+  { id: "s462: an undeclared attribute on a `<*x>` reference dropped silently (the pre-s462 fail-open)", file: `${SH}/analyze.scrml`,
+    from: "            } else if (!isChainAttr(a.name)) {\n                st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\"",
+    to: "            } else if (false) {\n                st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\"",
+    tests: [T4("use-attr.test.js")] },
+  { id: "s462: `as=` on a `<*x>` reference accepted", file: `${SH}/analyze.scrml`,
+    from: "            } else if (a.name == \"as\") {\n                st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\"",
+    to: "            } else if (a.name == \"as\") {\n                st = st\n            } else if (false) {\n                st = addDiag(st, env.file, a.span, \"E-DECL-USE-ATTR\"",
+    tests: [T4("use-attr.test.js")] },
+  { id: "s462: a field-writing attribute on a `<*x>` reference read as merely undeclared", file: `${SH}/analyze.scrml`,
+    from: "        st = starRefAttrs(env, e, fieldNames(d.info), st)\n",
+    to: "        st = starRefAttrs(env, e, [], st)\n",
+    tests: [T4("use-attr.test.js")] },
   { id: "s442 r1 G2: an own value AND attributes accepted (O19 decided silently)", file: `${SH}/analyze.scrml`,
     from: "        if ((hasOwnValue(d.own) || hasOwnType(d)) && d.attrs.length > 0) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G3: `<*x/>` of a declaration with a default-less attribute accepted (O33 → a runtime throw)", file: `${SH}/analyze.scrml`,
@@ -823,7 +841,9 @@ mkdirSync(join(MIRROR, "compiler"), { recursive: true });
 mkdirSync(join(MIRROR, "scripts"), { recursive: true });
 cpSync(join(ROOT, SH), join(MIRROR, SH), { recursive: true });
 cpSync(join(ROOT, "scripts", "lint-no-default-arm.js"), join(MIRROR, "scripts", "lint-no-default-arm.js"));
-for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "bunfig.toml", "package.json"]) {
+// s462: + compiler/tests — bunfig.toml's test preload (`compiler/tests/helpers/tmp-root-preload.js`) must
+// resolve in the mirror, or every `bun test` there dies before running a test (every row read GREEN).
+for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "compiler/tests", "bunfig.toml", "package.json"]) {
   symlinkSync(join(ROOT, rel), join(MIRROR, rel));
 }
 

@@ -1,0 +1,12 @@
+<program>
+
+  <channel name="lobby" onclient:open=onOpen(e)>
+    <joined> = 0
+    function onOpen(e) {
+      @joined = @joined + 1
+    }
+  </channel>
+
+  <p>${@joined}</p>
+
+</program>

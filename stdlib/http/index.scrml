@@ -32,9 +32,9 @@ ${
 
     async function _request(url, options) {
         const opts = options || {}
-        const timeout = opts.timeout is some ? opts.timeout : 10000
+        const timeout = opts.timeout is given ? opts.timeout : 10000
         const retryCount = opts.retry || 0
-        const retryDelay = opts.retryDelay is some ? opts.retryDelay : 1000
+        const retryDelay = opts.retryDelay is given ? opts.retryDelay : 1000
         const extraHeaders = opts.headers || {}
 
         const fetchOptions = {
@@ -44,7 +44,7 @@ ${
         for (const [k, v] of Object.entries(extraHeaders)) {
             fetchOptions.headers[k] = v
         }
-        if (opts.body is some) {
+        if (opts.body is given) {
             if (typeof opts.body == "string") {
                 fetchOptions.body = opts.body
             } else {
@@ -257,10 +257,10 @@ ${
      */
     export async function retry(fn, opts) {
         const o = opts || {}
-        const maxRetries = o.maxRetries is some ? o.maxRetries : 3
-        const baseDelay  = o.baseDelay  is some ? o.baseDelay  : 200
-        const factor     = o.factor     is some ? o.factor     : 2
-        const jitter     = o.jitter     is some ? o.jitter     : 0.2
+        const maxRetries = o.maxRetries is given ? o.maxRetries : 3
+        const baseDelay  = o.baseDelay  is given ? o.baseDelay  : 200
+        const factor     = o.factor     is given ? o.factor     : 2
+        const jitter     = o.jitter     is given ? o.jitter     : 0.2
         const shouldRetry = o.shouldRetry || (() => true)
 
         let lastErr = not

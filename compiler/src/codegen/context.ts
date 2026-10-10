@@ -63,7 +63,8 @@ export interface CompileContext {
    * by the factory):
    *   - 'core'        — _scrml_reactive_get/set/subscribe (used everywhere)
    *   - 'scope'       — _scrml_register_cleanup, _scrml_destroy_scope (used by timers, meta, input)
-   *   - 'errors'      — built-in error classes (NetworkError, ValidationError, etc.)
+   * ('errors' — the built-in error classes + `_scrml_error_boundary_log` — was
+   * always-included until S461; emit-client.ts now adds it by post-emit reference.)
    *
    * All other chunks are conditionally added by detectRuntimeChunks() in
    * emit-client.ts based on AST feature usage.
@@ -136,6 +137,17 @@ export interface CompileContext {
    * pre-populates with an empty record for safety.
    */
   reachabilityRecord?: ReachabilityRecord | null;
+  /**
+   * S461 — true when this compile runs the per-route artifact splitter
+   * (`CgInput.emitPerRoute`, `--emit-per-route`). The splitter is the ONLY
+   * emitter of `_scrml_chunk_mount(` / `_scrml_vendor_require(` /
+   * `_scrml_prefetch_tier1(` / `_scrml_prefetch_tier2(`, so `detectRuntimeChunks`
+   * activates the 'mount' / 'vendor-ref' / 'prefetch' runtime chunks only when it
+   * is set. Before S461 they were activated from the reachability record alone,
+   * which is populated on EVERY compile — so ~every page shipped a 'mount' chunk
+   * nothing called. Defaults to false.
+   */
+  emitPerRoute?: boolean;
   /**
    * S91 A-4.4 — set to `true` by `emit-html.ts` when at least one
    * internal `<a href="/...">` was wired with `data-scrml-prefetch="..."`
@@ -258,7 +270,10 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // stylesheet instead (codegen/emit-transition-css.ts) — an inline <style>
     // is refused under `headers="strict"`'s `default-src 'self'` (§39.2.5) —
     // so the chunk no longer exists.
-    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope', 'errors']),
+    // S461 — 'errors' is no longer seeded: a page that names none of its classes
+    // or `_scrml_error_boundary_log` ships without it (emit-client.ts adds it by
+    // post-emit reference, and runtime-chunks.ts CHUNK_DEPENDENCIES by edge).
+    usedRuntimeChunks: partial.usedRuntimeChunks ?? new Set(['core', 'scope']),
     // C15 — MOD exportRegistry, optional. Defaults to null for tests that
     // bypass the full pipeline; the C15 cross-file mount walker short-circuits
     // when null.
@@ -275,6 +290,7 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // so downstream consumers (A-4 codegen wave) can read the shape without
     // a null-guard; A-2.2+ replaces this with the actual closure analysis.
     reachabilityRecord: partial.reachabilityRecord ?? emptyReachabilityRecord(),
+    emitPerRoute: partial.emitPerRoute ?? false,
     // A-4.4 — `<a data-scrml-prefetch>` emission flag. Defaults to false;
     // `emit-html.ts` flips it to true when at least one internal `<a href>`
     // resolves to a `RouteMap.pages` urlPattern.

@@ -282,7 +282,7 @@ ${
         let out: Sym[] = []
         for (const n of allNodes(root)) {
             const s: Sym | not = sharedOf(n)
-            if (s is some) out = out.concat([s])
+            if (s is given) out = out.concat([s])
         }
         return out
     }

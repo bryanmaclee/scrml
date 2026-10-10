@@ -1,0 +1,375 @@
+/**
+ * S461 — runtime tree-shake: code an app does not use leaves the shared runtime.
+ *
+ * Ruling (bryan, S459, scrml-support/user-voice-scrml.md): "yes, measure first, 1 and 3 for sure"
+ * — (3) move code an app does not use out of the shared runtime into on-demand chunks.
+ * Measurements and the corpus proofs: docs/changes/s461-runtime-tree-shake/progress.md.
+ *
+ * Tree-shaking fails SILENTLY: a helper moved out that some program still calls is a
+ * `ReferenceError` at page init AFTER a green compile (#1029). So every section here pins BOTH
+ * directions — the chunk is gone where nothing names it, AND it is present wherever the emitted
+ * client (or another shipped chunk) names it.
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, copyFileSync } from "fs";
+import { join, resolve } from "path";
+import { tmpdir } from "os";
+import * as acorn from "acorn";
+import { compileScrml } from "../../src/api.js";
+import { RUNTIME_CHUNKS, CHUNK_DEPENDENCIES, applyChunkDependencies } from "../../src/codegen/runtime-chunks.ts";
+
+const REPO = resolve(import.meta.dir, "../../..");
+
+let TMP;
+beforeAll(() => {
+  TMP = mkdtempSync(join(tmpdir(), "s461-tree-shake-"));
+});
+afterAll(() => {
+  if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });
+});
+
+function compileSource(source, opts = {}) {
+  const inputDir = mkdtempSync(join(TMP, "in-"));
+  const filePath = join(inputDir, "app.scrml");
+  writeFileSync(filePath, source);
+  return compileFiles([filePath], inputDir, opts);
+}
+
+function compileRepoFile(rel, opts = {}) {
+  const inputDir = mkdtempSync(join(TMP, "repo-"));
+  const filePath = join(inputDir, rel.split("/").pop());
+  copyFileSync(join(REPO, rel), filePath);
+  return compileFiles([filePath], inputDir, opts);
+}
+
+function compileFiles(inputFiles, inputDir, opts) {
+  const outDir = join(inputDir, "dist");
+  const result = compileScrml({ inputFiles, outputDir: outDir, write: true, log: () => {}, ...opts });
+  const hard = result.errors.filter((e) => e.severity !== "warning");
+  expect(hard).toEqual([]);
+  const runtimePath = result.runtimeFilename ? join(outDir, result.runtimeFilename) : null;
+  const runtime = runtimePath && existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "";
+  const clients = [];
+  for (const [, out] of result.outputs) if (out && out.clientJs) clients.push(out.clientJs);
+  return { result, runtime, client: clients.join("\n") };
+}
+
+/** Top-level names a script declares. */
+function topLevelDecls(src) {
+  const ast = acorn.parse(src, { ecmaVersion: "latest", sourceType: "script" });
+  const names = new Set();
+  for (const st of ast.body) {
+    if (st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") names.add(st.id.name);
+    else if (st.type === "VariableDeclaration") for (const d of st.declarations) if (d.id.type === "Identifier") names.add(d.id.name);
+  }
+  return names;
+}
+
+/** Identifier tokens in reference position (not after a member dot), via acorn's tokenizer. */
+function referencedNames(src) {
+  const out = new Set();
+  let prev = null;
+  for (const t of acorn.tokenizer(src, { ecmaVersion: "latest", sourceType: "script", allowReturnOutsideFunction: true })) {
+    if (t.type.label === "name" && !(prev && prev.type.label === ".")) out.add(t.value);
+    prev = t;
+  }
+  return out;
+}
+
+/**
+ * The S461 proof shape, in miniature: every name the emitted client references that
+ * a moved chunk DEFINES must be defined by the runtime the page loads.
+ */
+function expectNoDanglingFrom(chunkNames, { runtime, client }) {
+  const shipped = topLevelDecls(runtime);
+  const refs = referencedNames(client);
+  for (const chunk of chunkNames) {
+    for (const name of topLevelDecls(RUNTIME_CHUNKS[chunk])) {
+      if (refs.has(name)) expect({ chunk, name, defined: shipped.has(name) }).toEqual({ chunk, name, defined: true });
+    }
+  }
+}
+
+const COUNTER = `<count> = 0
+
+<button onclick={ @count = @count + 1 }>
+  count is \${@count}
+</button>
+`;
+
+const SHELL = `<program>
+  <h1>App shell</h1>
+  <outlet/>
+</program>
+`;
+
+// ---------------------------------------------------------------------------
+// (a) the 'errors' chunk is no longer seeded into every page
+// ---------------------------------------------------------------------------
+
+describe("(a) errors chunk ships by post-emit reference, not unconditionally", () => {
+  test("a page that names no error class / reporter ships without it", () => {
+    for (const src of [COUNTER, SHELL]) {
+      const { runtime, client } = compileSource(src);
+      expect(client).not.toMatch(/_scrml_error_boundary_log|NetworkError/);
+      expect(runtime).not.toContain("class _ScrmlError");
+      expect(runtime).not.toContain("function _scrml_error_boundary_log");
+    }
+  });
+
+  test("a page whose emitted client calls _scrml_error_boundary_log ships the chunk", () => {
+    const built = compileRepoFile("examples/09-error-handling.scrml");
+    expect(built.client).toContain("_scrml_error_boundary_log(");
+    expect(built.runtime).toContain("function _scrml_error_boundary_log");
+    expectNoDanglingFrom(["errors"], built);
+  });
+
+  test("a server-fn page: the chunk ships iff the client names a definition (a quoted variant TAG does not count)", () => {
+    // `variant: "NetworkError"` in a fetch stub is data; the gate's quote-adjacency rule keeps it
+    // from counting. The handler's async catch DOES call the reporter, so this page needs it.
+    const src = `<program>
+  \${ server function ping() { return 1 } }
+  <button onclick=ping()>ping</button>
+</program>
+`;
+    const { runtime, client } = compileSource(src);
+    expect(client).toContain("_scrml_error_boundary_log(");
+    const named = /(?<![\w$.'"`])(?:_ScrmlError|NetworkError|ValidationError|SQLError|AuthError|TimeoutError|ParseError|NotFoundError|ConflictError|_scrml_error_boundary_log|_scrml_error_boundary_uncaught)(?![\w$'"`])/.test(client);
+    expect(runtime.includes("class _ScrmlError")).toBe(named);
+    expectNoDanglingFrom(["errors"], { runtime, client });
+  });
+
+  test("a reference introduced AFTER runtime assembly (the auto-await IIFE lift) still pulls the chunk", () => {
+    // Measured by the S461 corpus sweep: the auto-await stage wraps `@cell = serverFn() !{…}`
+    // in `(async () => {…})().catch(… _scrml_error_boundary_log …)` on the FINAL client text,
+    // after the first reference scan. 25 corpus pages shipped that call with no definition
+    // until generateClientJs re-ran the gates over the final body.
+    const src = `<program auth="none">
+  \${
+    server function getUser(id) { return { id: id } }
+  }
+  <user> = not
+  <button id="load" onclick={ @user = getUser(1) !{ .Transport(_) :> { return } } }>load</button>
+</program>
+`;
+    for (const embedRuntime of [false, true]) {
+      const built = compileSource(src, { embedRuntime });
+      expect(built.client).toContain(".catch(_scrml_async_err => _scrml_error_boundary_log(");
+      if (embedRuntime) {
+        expect(built.client).toContain("function _scrml_error_boundary_log");
+      } else {
+        expect(built.runtime).toContain("function _scrml_error_boundary_log");
+      }
+    }
+  });
+
+  test("every chunk whose own helpers report through _scrml_error_boundary_log pulls 'errors'", () => {
+    // Those calls are typeof-guarded, so a missing edge would not throw — it would silently drop
+    // the report. Derived from the chunk text, not a hand list.
+    const errorsDefs = topLevelDecls(RUNTIME_CHUNKS.errors);
+    for (const [name, text] of Object.entries(RUNTIME_CHUNKS)) {
+      if (name === "errors" || !text) continue;
+      const refs = referencedNames(text);
+      // A chunk that BINDS the name itself (stdlib-data's own `const ParseError`) is not
+      // referring to the runtime class.
+      const names = [...errorsDefs].filter((d) => refs.has(d) && !new RegExp(`\\b(?:const|let|var|function|class)\\s+${d}\\b`).test(text));
+      if (names.length === 0) continue;
+      const closed = applyChunkDependencies(new Set([name]));
+      expect({ chunk: name, names, pullsErrors: closed.has("errors") }).toEqual({ chunk: name, names, pullsErrors: true });
+    }
+  });
+
+  test("the edge table records those chunks explicitly", () => {
+    expect(CHUNK_DEPENDENCIES.reset).toContain("errors");
+    expect(CHUNK_DEPENDENCIES.ssr).toContain("errors");
+    expect(CHUNK_DEPENDENCIES.urlguard).toContain("errors");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (b) the scope → {timers, animation} edge is retired
+// ---------------------------------------------------------------------------
+
+describe("(b) timers + animation ship by trigger, not through the scope edge", () => {
+  test("pages that use neither ship neither", () => {
+    for (const src of [COUNTER, SHELL]) {
+      const { runtime } = compileSource(src);
+      expect(runtime).not.toContain("function _scrml_timer_start");
+      expect(runtime).not.toContain("function _scrml_animation_frame");
+      // ...and the always-shipped teardown guards its calls instead of dangling.
+      expect(runtime).toContain('typeof _scrml_stop_scope_timers === "function"');
+      expect(runtime).toContain('typeof _scrml_cancel_animation_frames === "function"');
+    }
+  });
+
+  test("a <timer> page ships the timers chunk, and every timer helper it names is defined", () => {
+    const src = `<program>
+  <ticks> = 0
+  <timer interval=1000>\${ @ticks = @ticks + 1 }</timer>
+  <p>ticks \${@ticks}</p>
+</program>
+`;
+    const built = compileSource(src);
+    expect(built.client).toContain("_scrml_timer_start(");
+    expect(built.runtime).toContain("function _scrml_timer_start");
+    expect(built.runtime).toContain("function _scrml_stop_scope_timers");
+    expectNoDanglingFrom(["timers", "animation"], built);
+  });
+
+  test("an animationFrame page ships the animation chunk", () => {
+    const built = compileRepoFile("samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-animationframe-in-element-091.scrml");
+    expect(built.client).toContain("animationFrame(");
+    expect(built.runtime).toContain("function animationFrame");
+    expect(built.runtime).toContain("function _scrml_cancel_animation_frames");
+    expectNoDanglingFrom(["timers", "animation"], built);
+  });
+
+  test("executed: a started timer ticks, and its scope teardown stops it", async () => {
+    const src = `<program>
+  <ticks> = 0
+  <timer interval=5>\${ @ticks = @ticks + 1 }</timer>
+  <p>ticks \${@ticks}</p>
+</program>
+`;
+    const { runtime, client } = compileSource(src);
+    expect(client).toContain("_scrml_timer_start(");
+    const live = new Set();
+    const si = (fn, ms) => { const h = setInterval(fn, ms); live.add(h); return h; };
+    const ci = (h) => { live.delete(h); clearInterval(h); };
+    const run = new Function("setInterval", "clearInterval", "window", `${runtime}
+      let n = 0;
+      _scrml_timer_start("scope-1", "t", 5, () => { n++; });
+      return { ticks: () => n, destroy: () => _scrml_destroy_scope("scope-1") };`);
+    const api = run(si, ci, { addEventListener() {} });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(api.ticks()).toBeGreaterThan(0);
+    api.destroy();
+    expect(live.size).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (c) the §51.12 / §51.14 machine helpers leave 'core' for the 'machine' chunk
+// ---------------------------------------------------------------------------
+
+const ENGINE_REPLAY = `<program>
+\${
+  type S:enum = { A, B }
+  @order: M = S.A
+  @log = []
+  function go() { @order = S.B }
+  function back() { replay(@order, @log) }
+}
+< engine name=M for=S>
+  .A => .B
+  audit @log
+</>
+<button onclick=go()>go</button>
+<button onclick=back()>back</button>
+<p>\${@order}</p>
+</program>
+`;
+
+describe("(c) machine helpers ship only where something names them", () => {
+  test("'core' no longer defines them; 'machine' does", () => {
+    for (const name of ["_scrml_machine_timers", "_scrml_machine_clear_timer", "_scrml_machine_arm_timer", "_scrml_machine_arm_initial", "_scrml_replay"]) {
+      expect(topLevelDecls(RUNTIME_CHUNKS.core).has(name)).toBe(false);
+      expect(topLevelDecls(RUNTIME_CHUNKS.machine).has(name)).toBe(true);
+    }
+  });
+
+  test("no core statement references them (the move is not a dangling edge)", () => {
+    const refs = referencedNames(RUNTIME_CHUNKS.core);
+    for (const name of topLevelDecls(RUNTIME_CHUNKS.machine)) expect({ name, inCore: refs.has(name) }).toEqual({ name, inCore: false });
+  });
+
+  test("the engine chunk's own calls into them are covered by an edge", () => {
+    const refs = referencedNames(RUNTIME_CHUNKS.engine);
+    const used = [...topLevelDecls(RUNTIME_CHUNKS.machine)].filter((n) => refs.has(n));
+    expect(used.length).toBeGreaterThan(0);
+    expect(applyChunkDependencies(new Set(["engine"])).has("machine")).toBe(true);
+  });
+
+  test("pages without a machine/replay ship without the chunk", () => {
+    for (const src of [COUNTER, SHELL]) {
+      const { runtime } = compileSource(src);
+      expect(runtime).not.toContain("function _scrml_replay");
+      expect(runtime).not.toContain("_scrml_machine_timers");
+    }
+  });
+
+  test("a replay() page ships it, and every machine helper it names is defined", () => {
+    const built = compileSource(ENGINE_REPLAY);
+    expect(built.client).toContain("_scrml_replay(");
+    expect(built.runtime).toContain("function _scrml_replay");
+    expectNoDanglingFrom(["machine", "engine"], built);
+  });
+
+  test("an <onTimeout> engine ships it through the engine → machine edge", () => {
+    // The client names only `_scrml_engine_*` helpers; it is the ENGINE chunk that calls
+    // `_scrml_machine_arm_timer`. Executed end to end by engine-ontimeout-end-to-end.test.js,
+    // which runs the SHIPPED runtime.
+    const built = compileSource(`<program>
+\${
+  type Phase:enum = { Loading, Done, TimedOut }
+}
+<engine for=Phase initial=.Loading>
+  <Loading rule=(.Done | .TimedOut)>
+    <onTimeout after=30s to=.TimedOut/>
+  </>
+  <Done></>
+  <TimedOut></>
+</>
+</program>`);
+    expect(built.runtime).toContain("function _scrml_engine_arm_state_timers");
+    expect(built.runtime).toContain("function _scrml_machine_arm_timer");
+    expect(built.runtime).toContain("function _scrml_machine_clear_timer");
+    expectNoDanglingFrom(["machine", "engine"], built);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (d) the route-splitter-only chunks are activated only when the splitter runs
+// ---------------------------------------------------------------------------
+
+const LINKED_SHELL = `<program>
+  <nav><a href="/">home</a> <a href="/about">about</a></nav>
+  <h1>App shell</h1>
+  <outlet/>
+</program>
+`;
+
+describe("(d) mount / vendor-ref / prefetch ship only under emitPerRoute", () => {
+  test("a default build ships none of them (the false trigger), and calls none of them", () => {
+    for (const src of [SHELL, LINKED_SHELL]) {
+      const { runtime, client } = compileSource(src);
+      expect(client).not.toMatch(/_scrml_chunk_mount\(|_scrml_vendor_require\(|_scrml_prefetch_tier[12]\(/);
+      expect(runtime).not.toContain("function _scrml_chunk_mount");
+      expect(runtime).not.toContain("function _scrml_vendor_require");
+      expect(runtime).not.toContain("function _scrml_prefetch_tier1");
+    }
+  });
+
+  test("under emitPerRoute, every route chunk's mount / prefetch call has its definition in the runtime", () => {
+    const inputDir = mkdtempSync(join(TMP, "per-route-"));
+    const filePath = join(inputDir, "app.scrml");
+    writeFileSync(filePath, LINKED_SHELL);
+    const outDir = join(inputDir, "dist");
+    const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, emitPerRoute: true, log: () => {} });
+    expect(result.errors.filter((e) => e.severity !== "warning")).toEqual([]);
+    const runtime = readFileSync(join(outDir, result.runtimeFilename), "utf8");
+    const shipped = topLevelDecls(runtime);
+    let calls = 0;
+    for (const chunk of (result.chunks ?? new Map()).values()) {
+      const payload = chunk.payloadJs ?? "";
+      for (const name of ["_scrml_chunk_mount", "_scrml_vendor_require", "_scrml_prefetch_tier1", "_scrml_prefetch_tier2", "_scrml_fetch_chunk"]) {
+        if (payload.includes(`${name}(`)) {
+          calls++;
+          expect({ name, defined: shipped.has(name) }).toEqual({ name, defined: true });
+        }
+      }
+    }
+    expect(calls).toBeGreaterThan(0);
+  });
+});

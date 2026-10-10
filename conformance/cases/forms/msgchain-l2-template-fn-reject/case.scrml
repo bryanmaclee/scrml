@@ -1,0 +1,10 @@
+<program>
+${
+    import { registerMessages } from 'scrml:data'
+    registerMessages({
+        .Required: fn(field) { return "FN " + field },
+        .MinFailed: "{field} {bogus}",
+    })
+}
+<p>x</p>
+</program>

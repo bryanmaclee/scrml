@@ -27,7 +27,7 @@
     <div class="card__body">
       ${render body()}
     </>
-    <div class="card__actions" if=(actions is some)>
+    <div class="card__actions" if=(actions is given)>
       ${render actions()}
     </>
   </>

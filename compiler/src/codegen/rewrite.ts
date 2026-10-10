@@ -1241,7 +1241,8 @@ export function rewriteNotKeyword(expr: string, errors?: any[]): string {
   if (!expr || typeof expr !== "string") return expr;
 
   const hasNot = expr.includes("not");
-  const hasSome = expr.includes("some");
+  // `given` too: `x is given` is the canonical presence spelling (§42.2.4, S460 a′ / S462).
+  const hasSome = expr.includes("some") || expr.includes("given");
   const hasNull = expr.includes("null");
   const hasUndefined = expr.includes("undefined");
 
@@ -1271,7 +1272,7 @@ function lowerParenthesizedStringIsOps(expr: string): string {
   if (!/["']\s*\)\s*is\s/.test(expr)) return expr;
   const blanked = blankLiteralTextInSource(expr);
   if (blanked.length !== expr.length) return expr;
-  const re = /\(\s*(["'])[^"'\n]*\1\s*\)\s+is\s+(not\s+not|some|not)(?![A-Za-z0-9_$])/g;
+  const re = /\(\s*(["'])[^"'\n]*\1\s*\)\s+is\s+(not\s+not|some|given|not)(?![A-Za-z0-9_$])/g;
   let out = "";
   let last = 0;
   for (const m of blanked.matchAll(re)) {
@@ -1378,6 +1379,7 @@ function _rewriteParenthesizedIsOp(segment: string): string {
   const ops: OpDef[] = [
     { suffix: " is not not", op: "presence" },
     { suffix: " is some",    op: "presence" },
+    { suffix: " is given",   op: "presence" },
     { suffix: " is not",     op: "absence"  },
   ];
 
@@ -1545,8 +1547,8 @@ function _rewriteNotSegment(segment: string, errors?: any[]): string {
   // the token and the trailing `not` becomes a stray `null`.
   segment = segment.replace(new RegExp(`(${DOTTED_LHS}) is not not(?![A-Za-z0-9_$])`, "g"),
     '($1 !== null && $1 !== undefined)');
-  // Match `x is some` — positive presence check (§42.2.2a).
-  segment = segment.replace(new RegExp(`(${DOTTED_LHS}) is some(?![A-Za-z0-9_$])`, "g"),
+  // Match `x is given` / `x is some` — positive presence check (§42.2.4 / §42.2.2a).
+  segment = segment.replace(new RegExp(`(${DOTTED_LHS}) is (?:given|some)(?![A-Za-z0-9_$])`, "g"),
     '($1 !== null && $1 !== undefined)');
   // Match `@varName is not` or `identifier is not` or `dotted.path is not` (absence check).
   // The @-prefix is included in the capture so it is preserved in the output

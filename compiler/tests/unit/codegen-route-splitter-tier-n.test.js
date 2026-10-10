@@ -309,6 +309,9 @@ describe("§4 forward-compat — non-empty tier-N admission lights up prefetch c
       fileAST: { filePath: "/abs/app.scrml", ast: { nodes: [] } },
       filePath: "/abs/app.scrml",
       reachabilityRecord: makeRecord({ tier1NonEmpty: false, tierNNonEmpty: true }),
+      // S461 — the splitter (the only caller of the prefetch helpers) runs only under
+      // emitPerRoute, and the chunk is admitted only then.
+      emitPerRoute: true,
     });
     const { generateClientJs } = require("../../src/codegen/emit-client.ts");
     generateClientJs(ctx);
@@ -327,12 +330,26 @@ describe("§4 forward-compat — non-empty tier-N admission lights up prefetch c
       fileAST: { filePath: "/abs/app.scrml", ast: { nodes: [] } },
       filePath: "/abs/app.scrml",
       reachabilityRecord: makeRecord({ tier1NonEmpty: true, tierNNonEmpty: false }),
+      // S461 — the splitter (the only caller of the prefetch helpers) runs only under
+      // emitPerRoute, and the chunk is admitted only then.
+      emitPerRoute: true,
     });
     const { generateClientJs } = require("../../src/codegen/emit-client.ts");
     generateClientJs(ctx);
     expect(ctx.usedRuntimeChunks.has("prefetch")).toBe(true);
     const runtime = assembleRuntime(ctx.usedRuntimeChunks);
     expect(runtime).toContain("function _scrml_fetch_chunk(");
+  });
+
+  test("S461: the same non-empty admission WITHOUT emitPerRoute does not admit the chunk (no splitter, no caller)", () => {
+    const ctx = makeCompileContext({
+      fileAST: { filePath: "/abs/app.scrml", ast: { nodes: [] } },
+      filePath: "/abs/app.scrml",
+      reachabilityRecord: makeRecord({ tier1NonEmpty: true, tierNNonEmpty: true }),
+    });
+    const { generateClientJs } = require("../../src/codegen/emit-client.ts");
+    generateClientJs(ctx);
+    expect(ctx.usedRuntimeChunks.has("prefetch")).toBe(false);
   });
 });
 

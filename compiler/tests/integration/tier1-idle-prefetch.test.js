@@ -269,7 +269,12 @@ describe("§40.9.7 — per-file .client.js NOT touched by A-4.3 atom-emitter reu
       // ~1.5 KB. The worked-example has empty tier-1 for every (EP,
       // role) so the 'prefetch' chunk is NOT added; the .client.js
       // bytes remain identical with vs without emitPerRoute.
-      expect(withOut.clientJs).toBe(withoutOut.clientJs);
+      // S461 — the per-file BODY must be byte-identical. The one line that may differ is the
+      // `// Requires: scrml-runtime.<hash>.js` header: under emitPerRoute the shared runtime
+      // legitimately carries the route-splitter-only chunks ('mount' / 'vendor-ref' /
+      // 'prefetch'), so its content hash — and so its filename — differs.
+      const normRuntime = (js) => js.replace(/scrml-runtime\.[0-9a-z]+\.js/g, "scrml-runtime.<HASH>.js");
+      expect(normRuntime(withOut.clientJs)).toBe(normRuntime(withoutOut.clientJs));
     }
   });
 });

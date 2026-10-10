@@ -1,8 +1,8 @@
-// given x, y => multi-var narrowing
+// `if (x is given && y is given)` — multi-var narrowing (was the S462-deprecated `given x, y =>`; migrated by `scrml fix`)
 ${
     let a: string | not = "x"
     let b: number | not = 2
-    given a, b => {
+    if (a is given && b is given) {
         let _both = a + " " + b
     }
 }

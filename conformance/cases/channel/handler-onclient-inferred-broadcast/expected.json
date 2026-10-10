@@ -1,0 +1,12 @@
+{
+  "id": "channel-handler-onclient-inferred-broadcast",
+  "description": "§38.10.3 (S462) — an `onclient:*` handler declared as a plain `function` whose body calls `broadcast()` is placed on the server by §12.2 Trigger 7, and fires E-CHANNEL-006. Before S462 route inference exempted the handler from Trigger 7: it compiled at exit 0 into the client bundle calling a `broadcast()` the client does not define.",
+  "language-version": "1.0",
+  "spec": "§38.10.3, §38.9, §12.2",
+  "source-test": "compiler/tests/unit/channel-onclient-inferred-server.test.js",
+  "rationale": "§38.10.3 (ruling:user-voice-scrml.md S462 \"a\"): a function designated as the handler for an `onclient:*` attribute SHALL NOT be placed on the server by §12.2; §12.2 Trigger 7 places a channel-body function that calls `broadcast()`.",
+  "expect": {
+    "codes": ["E-CHANNEL-006"],
+    "severity": { "E-CHANNEL-006": "error" }
+  }
+}

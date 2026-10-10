@@ -1,0 +1,26 @@
+// §42.2.2a (S462) — the SOFT-DEPRECATED presence spelling `x is some`, kept ON PURPOSE: during the
+// §63 window it parses identically to `x is given` and surfaces one W-IS-SOME-DEPRECATED per site.
+// Do NOT run `scrml fix` over this case. Its canonical twin is condition/is-given-expr-twin.
+<program>
+type U:struct = { name: string }
+<user>: U | not = not
+<n>: int = 0
+<label> = "init"
+${
+    function check() {
+        const present: bool = @user is some
+        if (@user is some && @n > 0) {
+            @label = "both"
+        } else {
+            @label = present ? "present" : "absent"
+        }
+    }
+    function login() {
+        @user = { name: "Ada" }
+        check()
+    }
+}
+<button id="go" onclick=login()>go</button>
+<p id="out">${@label}</p>
+<p id="who" if=(@user is some)>signed in</p>
+</program>

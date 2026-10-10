@@ -1,0 +1,19 @@
+${
+    <ls>: number[] = [1, 2]
+    <ins9> = 9
+    <k> = 1
+    <v> = 0
+    function ins() {
+        @ls.splice(0, 0, @ins9)
+    }
+    function add() {
+        @ls.push(@ins9, @k)
+    }
+    function wipe() {
+        @ls.fill(@v, 0, 2)
+    }
+}
+<button id="ins" onclick=ins()>ins</>
+<button id="add" onclick=add()>add</>
+<button id="wipe" onclick=wipe()>wipe</>
+<p id="out">${@ls.join(",")}</p>

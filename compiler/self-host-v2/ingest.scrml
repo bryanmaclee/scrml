@@ -192,7 +192,7 @@ ${
         let out: INode[] = []
         for (const v of vs) {
             const o: INode | not = valNode(v)
-            if (o is some) out = out.concat([o])
+            if (o is given) out = out.concat([o])
         }
         return out
     }
@@ -1106,7 +1106,7 @@ ${
             const ann: string | not = strAt(c.n, "typeAnnotation")
             // `<x>: T = v` (§66.21 row 1): the annotation is the field's type.
             let ty: Type | not = v.ty
-            if (ann is some) {
+            if (ann is given) {
                 ty = primTy(ann)
                 if (ty is not) why = why.concat(["decl: a cell annotated with a non-primitive type"])
             }

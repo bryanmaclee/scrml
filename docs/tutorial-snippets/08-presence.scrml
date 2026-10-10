@@ -7,7 +7,7 @@
   <user>: User? = not              // optional — starts absent
   <loggedIn> = false
 
-  const <message> = @user is some ? "Hello, " + @user.name : "Sign in to continue"
+  const <message> = @user is given ? "Hello, " + @user.name : "Sign in to continue"
 
   <div>
     <p>${@message}</p>

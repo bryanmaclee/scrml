@@ -3,7 +3,7 @@ ${
     let s = "a1b2c3"
     let re = /\d/g
     let m: asIs = not
-    while ((m = re.exec(s)) is some) {
+    while ((m = re.exec(s)) is given) {
         let _hit = 1
     }
 }

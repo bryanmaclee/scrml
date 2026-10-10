@@ -69,7 +69,8 @@ describe("MED — a case variant of a scrml control attribute is refused, never 
     renders <b class="card"><slot IF=@ok/></b>
 `;
     expect(codes(prog(`        <card>x</card>`, D))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(prog(`        <*card If=@ok/>`, D.replace("<slot IF=@ok/>", "c")))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    // s462 (O18 RULED, SPEC §66.6.9 rule 3): `If` is no chain attribute — on a `<*x>` reference it is undeclared
+    expect(codes(prog(`        <*card If=@ok/>`, D.replace("<slot IF=@ok/>", "c")))).toEqual(["E-DECL-USE-ATTR"]);
   });
   test("ordinary mixed-case HTML attributes stay legal", async () => {
     const src = prog(`        <p id="m" tabIndex="1" Title="t">x</p>`);

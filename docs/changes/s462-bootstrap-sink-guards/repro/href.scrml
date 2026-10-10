@@ -1,0 +1,7 @@
+<program>
+    let <bad:string="javascript:alert(1)"/>
+    let <good:string="/ok?a=1"/>
+    <a id="e" href=@bad>bound</a>
+    <a id="g" href=@good>safe</a>
+    <button id="flip" onclick=(@good = "vbscript:x")>flip</button>
+</program>

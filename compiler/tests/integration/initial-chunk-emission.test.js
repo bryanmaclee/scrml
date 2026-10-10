@@ -372,7 +372,12 @@ describe("§40.9.7 — per-file .client.js path NOT touched by A-4.2", () => {
       // The per-file .client.js MUST be byte-identical — the chunk
       // emitter is an additive POST-pass; it does not feed back into
       // the per-file emit pipeline.
-      expect(withOut.clientJs).toBe(withoutOut.clientJs);
+      // S461 — the per-file BODY must be byte-identical. The one line that may differ is the
+      // `// Requires: scrml-runtime.<hash>.js` header: under emitPerRoute the shared runtime
+      // legitimately carries the route-splitter-only chunks ('mount' / 'vendor-ref' /
+      // 'prefetch'), so its content hash — and so its filename — differs.
+      const normRuntime = (js) => js.replace(/scrml-runtime\.[0-9a-z]+\.js/g, "scrml-runtime.<HASH>.js");
+      expect(normRuntime(withOut.clientJs)).toBe(normRuntime(withoutOut.clientJs));
     }
   });
 });

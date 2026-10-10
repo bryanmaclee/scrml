@@ -737,7 +737,10 @@ function ownWrite(n: Rec, ctx: Ctx): string[] | "all" | null {
     case "reactive-array-mutation": {
       // `@xs.push(…)` / `@xs.sort(cmp)`: a write UNDER the cell (ends nothing) — but a
       // function argument may be called (a comparator); F4 applies.
-      const a = n.argsExpr;
+      // s461: one ExprNode per argument (`argExprs`); `argsExpr` is the pre-s461 single node.
+      // Neither present (an argument list the parser could not structure) = unknown.
+      const a = Array.isArray(n.argExprs) ? n.argExprs : n.argsExpr;
+      if (a === undefined && typeof n.args === "string" && n.args.trim() !== "") return "all";
       return toAnswer(argWrites(Array.isArray(a) ? a : a ? [a] : [], ctx));
     }
     case "escape-hatch": {

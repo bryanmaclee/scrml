@@ -1,0 +1,8 @@
+<program>
+${
+    <signup>
+        <nick is given("Please give a nickname")> = not
+    </>
+}
+<div id="err"><errors of=@signup.nick/></div>
+</program>

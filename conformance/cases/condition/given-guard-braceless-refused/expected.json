@@ -1,0 +1,13 @@
+{
+  "id": "condition-given-guard-braceless-refused",
+  "description": "§42.2.3 — a standalone `given` guard whose body is not a `{ … }` block (`given id :> fail LoadError.NotFound; return \"ok\"`) SHALL be refused with E-SYNTAX-044 (exactly once, no W-GIVEN-PRESENCE-DEPRECATED). Before S462 impl#1 emitted an empty `if` and then ran the `fail` unconditionally. A `given x :> expr` match arm is a different production and is not refused (condition/given-presence-deprecated-arm).",
+  "language-version": "1.0",
+  "spec": "§42.2.3",
+  "rationale": "§42.2.3: `given-guard ::= 'given' identifier-list (':>' | '=>') block` — a guard body is a block; E-SYNTAX-044 is the malformed-guard refusal. Provenance: PA ruling (S462 fix round 1, pa-ruled under the governing grammar; corpus measured 0), ruling:user-voice-scrml.md S462 \"a\".",
+  "expect": {
+    "codes": ["E-SYNTAX-044"],
+    "codeCounts": { "E-SYNTAX-044": 1 },
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "severity": { "E-SYNTAX-044": "error" }
+  }
+}

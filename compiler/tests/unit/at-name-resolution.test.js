@@ -56,6 +56,8 @@ function collectAtIdents(ast) {
     "exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
     "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr",
     "defaultExpr",
+    // s461 — an ExprNode LIST (one per reactive-array-mutation argument).
+    "argExprs",
   ];
   const found = [];
   const seen = new WeakSet();
@@ -65,17 +67,18 @@ function collectAtIdents(ast) {
     seen.add(n);
     if (Array.isArray(n)) { n.forEach(walk); return; }
     for (const f of EXPR_FIELDS) {
-      const v = n[f];
-      if (v && typeof v === "object" && v.kind) {
-        forEachIdentInExprNode(v, (id) => {
-          if (typeof id.name === "string" && id.name.startsWith("@")) {
-            found.push({
-              name: id.name,
-              resolved: getResolvedStateCell(id),
-              ident: id,
-            });
-          }
-        });
+      for (const v of (Array.isArray(n[f]) ? n[f] : [n[f]])) {
+        if (v && typeof v === "object" && v.kind) {
+          forEachIdentInExprNode(v, (id) => {
+            if (typeof id.name === "string" && id.name.startsWith("@")) {
+              found.push({
+                name: id.name,
+                resolved: getResolvedStateCell(id),
+                ident: id,
+              });
+            }
+          });
+        }
       }
     }
     for (const k of Object.keys(n)) {
@@ -106,6 +109,28 @@ describe("§B3.1 happy path — `@count` in markup interpolation resolves", () =
     expect(atCount.resolved.name).toBe("count");
     expect(atCount.resolved.qualifiedPath).toBe("count");
     expect(atCount.resolved.scope).toBe(sym.fileScope);
+  });
+});
+
+// s461 — a reactive array mutation carries one ExprNode per argument
+// (`argExprs`); every `@cell` argument resolves, not only a lone first one.
+describe("§B3.1b — `@cell` arguments of a multi-argument mutation resolve", () => {
+  test("`@ls.splice(0, 0, @pv, @qv)` — @pv and @qv each resolve to their cell", () => {
+    const src = `<program>\${
+      <ls> = [1]
+      <pv> = 9
+      <qv> = 8
+      function ins() { @ls.splice(0, 0, @pv, @qv) }
+    }<button onclick=ins()>go</button><p>\${@ls.length}</p></program>`;
+    const { sym, ast } = buildAndResolve(src);
+    expect(sym.errors.length).toBe(0);
+    const idents = collectAtIdents(ast);
+    for (const name of ["pv", "qv"]) {
+      const hit = idents.find(i => i.name === "@" + name);
+      expect(hit).toBeDefined();
+      expect(hit.resolved).toBeDefined();
+      expect(hit.resolved.name).toBe(name);
+    }
   });
 });
 
@@ -232,6 +257,8 @@ describe("§B3.7 discrimination — bare `count` (no `@`) is NOT B3-annotated", 
       "exprNode", "initExpr", "argsExpr", "condExpr", "headerExpr",
       "iterExpr", "conditionExpr", "guardExpr", "valueExpr", "rhsExpr",
       "defaultExpr",
+      // s461 — an ExprNode LIST (one per reactive-array-mutation argument).
+      "argExprs",
     ];
     const seen = new WeakSet();
     const bareIdents = [];
@@ -241,13 +268,14 @@ describe("§B3.7 discrimination — bare `count` (no `@`) is NOT B3-annotated", 
       seen.add(n);
       if (Array.isArray(n)) { n.forEach(walk); return; }
       for (const f of EXPR_FIELDS) {
-        const v = n[f];
-        if (v && typeof v === "object" && v.kind) {
-          forEachIdentInExprNode(v, (id) => {
-            if (typeof id.name === "string" && !id.name.startsWith("@")) {
-              bareIdents.push(id);
-            }
-          });
+        for (const v of (Array.isArray(n[f]) ? n[f] : [n[f]])) {
+          if (v && typeof v === "object" && v.kind) {
+            forEachIdentInExprNode(v, (id) => {
+              if (typeof id.name === "string" && !id.name.startsWith("@")) {
+                bareIdents.push(id);
+              }
+            });
+          }
         }
       }
       for (const k of Object.keys(n)) {
