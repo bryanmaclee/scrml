@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
 | MED | 597 | 6 |
-| LOW | 354 | 0 |
+| LOW | 355 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24982,3 +24982,7 @@ Found by S462 review #4. Pre-existing; the arm is text to the type system. The s
 ### g-s462-m1-wording-first-position-only — the S462 M1 commit message says the re-read covers a match whose "arms include a `given` arm"; it covers a FIRST-position `given` arm only (and none inside a lambda) — `NEW S462; MED; open`
 <!-- @gap id=g-s462-m1-wording-first-position-only sev=MED status=open locus=git:commit `fix(s462-stmt-match-leave): review M1 — given arms in expression-position matches` (message only) prov=review:s462-stmt-match-leave-re-review-4 -->
 Corrected in code comments, the conformance case description and the resolution note of `g-impl1-given-match-arm-body-dropped-s462` (S462 review #4). The commit message itself is history and is left as is; this entry is the correction of record.
+
+### g-impl1-lift-sql-whole-rows-in-standard-function-s465 — `lift ?{…}.all()` (no tail) in a standard `function` compiles and lifts whole rows, while `lift ?{…}.all().map(u => u.name)` is E-SYNTAX-002 (§49.6.2) — `NEW S465; LOW; open`
+<!-- @gap id=g-impl1-lift-sql-whole-rows-in-standard-function-s465 sev=LOW status=open locus=searched:compiler/src/type-system.ts(checkLiftInFn — E-SYNTAX-002 "lift is not valid inside a standard function body") — not traced prov=review:s465-sqlchain -->
+Found by the S465 review of the s462 P0 SQL chain fix (probe `lf-tail` / `lf-notail`, a `function f1()` inside `<db>`'s `${}`). After f6f00bb3c the tailed `lift ?{…}.all().map(u => u.name)` parses as an ordinary `lift` expression and gets E-SYNTAX-002, which §49.6.2 prescribes for any `lift` in a standard `function` body. The untailed `lift ?{…}.all()` takes the structured `lift-expr { kind: "sql" }` path and compiles at exit 0 — it lifts the whole rows (S465 review). The inconsistency is the untailed form escaping the §49.6.2 check, not the tailed form's error. Not changed in S465 (record-only per the fix-round brief).

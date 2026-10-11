@@ -69,3 +69,78 @@
       browser-baseline --check 1 (twice): one NEW name "a nested <each> under an element in a lifted each row" — passes alone on
       head and base; the full tier fails it identically on base 1c1e9eee (cross-file state leak, `JSON Parse error … "bad"`).
       Pre-existing/environmental; baseline NOT re-recorded (not this change's to accept).
+
+## S465 fix round 1 (cloud, owner absent) — BRIEF-fix-round-1-S465.md
+- 2026-10-11T20:30Z reset worktree to wip/s464-p0-sql-chain @ 5c5e4064a; node_modules symlinked (package.json == origin/main); pretest OK.
+      Reviewer probes copied to .tmp/probe; base 1c1e9eee5 and WIP 5c5e4064a compilers git-archived under .tmp/ for A/B.
+- F1 [MED] `!{}` on a tailed `?{}` dropped — REPRODUCED (h2-tail-full: head THREW `SQLiteError: integer overflow`,
+      base "qf"; h2-tail-partial/h2-tail-bogus: head compiled, base E-TYPE-080). Root cause: every "is this handler on a
+      query?" test (`handledSqlOfGuardedNode`, type-system `_operandErrorVariants`, the guarded-expr emitter's three
+      sites) asked `sqlQueryExprShape(operand)` — true only when the query is the WHOLE operand. FIX: sql-attempt.ts
+      `sqlQueryHeadOfExpr` finds the query that is the operand's LEFTMOST operand (member/index object, callee, binary
+      left, ternary condition, cast, non-update unary — the operand JS evaluates first) + `replaceSqlQueryHead`;
+      those three consumers use it. Emission: the query is attempt-wrapped and bound first, the tail runs only on
+      success — `const _scrml_query_N = (await _scrml_sql_attempt(…)); let r = (q && q.__scrml_error) ? q : q.name;`.
+      Governing: §44.3 "the `?{}` is a failable expression in every context (§19.8.3, S451 R11)".
+      Pinned (integration, executed routes): const/let/return/reassign failing query → arm; success → tail value;
+      partial handler → E-TYPE-080 for each form; bogus arm → E-TYPE-080. 10 of them fail with the src reverted.
+      NOT covered: `match ?{…}.get().name { … }` (probe h5-match-tail) throws on BASE too (pre-existing; the match
+      scrutinee test still reads the whole-operand shape) — deferred, not a regression of this change.
+- F2 [MED] tailed server cell — REPRODUCED (c4-one, c2-*, c3-*, c-p-*: E-CG-006, raw `?{` in client JS). Root cause:
+      after f6f00bb3c a tailed cell is not a structured `sqlNode`, so codegen classed it a "callable" loader: ≥2 →
+      `/__mountHydrate` (worked), 1 → client-side `await (?{…}.get().name)`. FIX: a `<x server>` initializer that
+      evaluates an inline `?{}` IS §52.6.5 Pattern C ("When the RHS of a `<var server>` declaration is an inline `?{}`
+      query, that `?{}` IS the cell's mount load. The compiler emits a `/__serverLoad/<var>` route that runs the query
+      server-side"): collect.ts `serverVarDeclExprQueries` / `serverVarDeclLoadQuery` (ONE reader for the load
+      classification, the row-scope predicate, `@currentUser` detection and type-system W-AUTH-004);
+      `callableServerVarDecls` excludes them; emit-server `_patternCLoadExpr` evaluates the WHOLE initializer
+      server-side for the route AND the SSR seed (redacted at the sink as before). Also `isServerOnlyNode` now detects
+      a query in a decl initializer structurally (a no-backtick `?{SELECT …}.get().name` slipped the sigil regex and
+      emitted `null /* sql-ref unresolved */.get()` on the client). protect=: rows leaving via `.all().slice(0,1)` /
+      `.all()[0]` / `.get()` stripped; `.all().map(u => u.pw)` / `.get().pw` → E-PROTECT-006 (the route is analysed as
+      an egress). Param-bearing tailed cell → W-AUTH-004, no load (same as untailed). Pinned: 1 cell, no-backtick,
+      query-not-leftmost, 1 and 2 cells in `${}` in `<db>`, 3 protect strip + 2 protect E-PROTECT-006 cases; the
+      earlier 2-cell test now asserts the two `/__serverLoad` routes. All fail with the src reverted (control `.get()`
+      passes on both).
+- F3 [MED] client-side tailed `?{}` — STOPPED, NOT CHANGED (spec conflict surfaced). The code that fits is
+      §13.7 E-VALUE-SERVER-CALL, item 3: "A `?{}` query written directly in the position (`<n> = ?{…}.get()`), outside
+      the right-hand side of a §52 `<x server>` declaration. The query runs on the server; the position would wait for
+      it." — the value positions include "a render expression (a markup `${ … }` interpolation …)" and "an initializer".
+      BUT §13.7's status block: "Status: Nominal / spec-ahead (S451). NORMATIVE; impl#1 does not implement it and is
+      not changed for it (frozen for language semantics, S447 — the divergence is filed: docs/known-gaps.md
+      g-impl1-value-server-call-s451)." Emitting it from impl#1 contradicts that sentence; no other code fits
+      (E-SQL-007 §44.4 is the async-context code with no fire site; E-SQL-QUERY-NOT-READABLE is for unparsed text).
+      Needs a PA/user ruling: lift the impl#1 freeze for item 3 (narrowly: a `?{}` in a client value position) or
+      accept the carried divergence. Measured: cl-interp → W-CG-001 + `null /* sql-ref unresolved */.name` in client;
+      cl-top-const → W-CG-001 + declaration dropped. Base: cl-interp → W-CG-001 (sql block suppressed);
+      cl-top-const(-notail) → `const n = null; // SQL-init for n — client cannot evaluate _scrml_sql (E-CG-006)…` (a null stub, compiles clean).
+- F4 [LOW, record only] `lift ?{…}.all().map(u => u.name)` in a standard function = E-SYNTAX-002 (§49.6.2, correct);
+      untailed `lift ?{…}.all()` compiles and lifts whole rows. Not filed before → filed
+      `g-impl1-lift-sql-whole-rows-in-standard-function-s465` (prov=review:s465-sqlchain). Not changed.
+- 2026-10-11T22:10Z commits: afc72e07b (BRIEF archive), a33bf5849 (F1), ac4ff2747 (F2).
+- [x] targeted corpus differential — every `?{`-bearing .scrml under examples/samples/conformance/stdlib/benchmarks
+      (387 files), each compiled standalone by three compilers: base 1c1e9eee5, WIP 5c5e4064a (both git-archived
+      under .tmp/), head. WIP -> head: compile outcome identical (200 ok / 187 fail both), 0 newly failing,
+      0 newly passing, 0 warning-code diffs, 0 artifact diffs (sha1 of every emitted artifact, compiler root
+      normalized). The only fatal-code diffs are 3 stdlib sources (auth/flows, auth/password, crypto/index) where
+      the WORKTREE compiler applies the stdlib real-path exemption (`isStdlibSourceFile`) and the archived
+      compilers do not (their stdlib is under .tmp/) — base <-> WIP shows 0 such diffs; harness artifact, not a
+      change. base -> head: 0 newly failing; 2 serverJs diffs, identical to base -> WIP (carried from the
+      earlier commits). No corpus source writes a tailed `?{}` handler or a tailed server cell. ../giti and
+      ../flogence are NOT cloned in this container — skipped.
+- [x] gates (head ac4ff2747 + docs): types-gate --check 0 (182 diag, unchanged) · facts --check 1 -> `facts.ts
+      --write` (line counts) -> 0 · state --check 1 -> `state.ts --write` (gap counts, the new F4 gap) -> 0 ·
+      regen-spec-index 0 · bootstrap-conformance 0 · gen-bootstrap-severity 0 · host-global-scan 0 ·
+      s34-census --check-new --base 1c1e9eee PASS · snippet-gate 0 · corpus-compile-floor --check PASS ·
+      pretest 0 · compiler/tests/*.test.js 2239/0 · e2e-render-map 259/0 · lsp+commands 713 pass / 11 fail (the
+      same 11 `scrml dev`/`serve` env failures recorded above) · browser-baseline --check 1: the same one name
+      recorded above ("a nested <each> under an element in a lifted each row"), pre-existing, not re-recorded.
+- pre-commit gate run 1 (before the F1/F2 commits): 32925 pass / 10 fail — 7 env-only (dev-db-no-side-file 5,
+      headless-serve-bind-host 1, promote-safety-harness 1, as recorded above) + 3 in
+      tenant-floor-project-set.test.js (a `pinTenant` route's Set-Cookie absent under full-suite load); that file
+      passes alone 24/0 (and with the files run beside it, 58/0).
+- final pre-commit gate (head ac4ff2747 + docs): 32925 pass / 132 skip / 10 fail — the SAME 10. The 3
+      tenant-floor-project-set failures repeated, so they were checked as real: the same full gate with the WIP
+      compiler source (5c5e4064a `compiler/src`, this round's tests) fails the SAME 3 tenant tests (plus the 20 new
+      S465 tests, as expected) → pre-existing in this container, order-dependent (process-shared state in the one
+      bun process), NOT this change. Not chased (outside scope); recorded here for the PA.
