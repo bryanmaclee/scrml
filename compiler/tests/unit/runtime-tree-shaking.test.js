@@ -267,7 +267,8 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 43 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 44 chunks", () => {
+    // 44 chunks since S462 md phase 1: 'stdlib-md' (the scrml:md reader).
     // 43 chunks since S461: 'machine' (the §51.12 / §51.14 machine temporal-transition
     // helpers + _scrml_replay) split out of the always-included 'core' chunk.
     // 42 chunks since S460 (s460-refine-la merge): 'refine' (§53 S458 2a-fix — the refined-cell
@@ -354,12 +355,14 @@ describe("runtime size", () => {
     // when ANY entry-point chunk admits a non-empty components / vendor-
     // units set.
     //
+    // 44 post-S462 md phase 1: 'stdlib-md' (the scrml:md reader's client chunk).
+    //
     // Prior milestones:
     //   19 chunks post-A-4.3: 'prefetch' chunk for §40.9.7 tier-1 idle-
     //   prefetch (helper: _scrml_prefetch_tier1).
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(43);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(44);
   });
 });
