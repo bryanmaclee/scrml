@@ -48591,7 +48591,7 @@ of the dialect, so every implementation reads a hostile input to the same tree:
   block total at most 4 × the block's length + 1024; past that budget the remaining brackets are text.
 - `W-MD-DEPTH-LIMIT` / `W-MD-SCAN-LIMIT` report a bound that was reached (static bodies only).
 
-U+0000 is read as U+FFFD; CRLF and CR+LF line ends read as LF.
+U+0000 is read as U+FFFD; a CRLF line end reads as LF.
 
 ### 67.10 Styling
 

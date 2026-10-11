@@ -6,8 +6,47 @@
 - [x] stdlib/md/index.scrml parser + tests (compiler/tests/unit/stdlib-md.test.js, 143 tests)
 - [x] generated shim (scripts/gen-md-shim.ts) + compiler/tests/unit/stdlib-md-shim.test.js; the existing
       stdlib-shim-export-parity picks scrml:md up automatically (§1-3 exports, §4 enum shape, §6 async)
-- [ ] SPEC §67 + SPEC-INDEX + §34 codes
-- [ ] gates
+- [x] SPEC §67 + SPEC-INDEX + §34 codes (+ §4.15 row, §4.18.1a note, §5.2 rule-3 bullet, §26.6.5 note, OQ-6 annotation)
+- [x] client chunk `stdlib-md` registered (stdlib-client-registry §1b forces every shim to be classified;
+      the derived rule — no host reach, no credentials — makes md client-registered)
+- [ ] gates (see report)
+
+## Candidate questions for bryan / the PA (normative decisions the rulings did not cover)
+Each is marked "(PA reading, s462-md-phase1)" in §67. Recommendation in brackets.
+1. Dedent does NOT count the closer's line (deviates from the brief and deep-dive §6f wording; their
+   own example needs it). [as implemented]
+2. Second spellings of an IN construct are TEXT + lint, not accepted-with-lint: `_em_`/`__strong__`,
+   `*`/`+` bullets, `1)`, `***`/`___`/`- - -`, `~~~`, a closing `#` run, two-space breaks, '…'/(…)
+   titles, `<dest>`, pipe-less tables, single `~`. Read from F3 "one way to do it". [as implemented]
+3. Lazy continuation is not scrml-md (W-MD-LAZY-CONTINUATION; the line starts a new paragraph). Keeps
+   the parse local (block structure decided line by line). [as implemented]
+4. Table rows must carry both outer pipes (W-MD-TABLE-PIPES). [as implemented]
+5. `E-MD-URL-SCHEME`: a literal unadmitted scheme in a STATIC body is an error — stricter than §5.2's
+   static-string rule (deep-dive §6d PA-decidable default). [yes]
+6. `E-MD-IN-PHRASING`, no `<md inline>` variant in v1 (deep-dive §9 Q2). [error now; inline later if asked]
+7. `<md of=>` accepts `string | not`; `not` renders an empty host (deep-dive §9 Q3). [yes]
+8. `E-MD-OF-BODY` for `of=` plus a body. [yes]
+9. Heading slugs are ASCII `[a-z0-9-]`; non-ASCII letters are dropped ("Café" -> "caf"), "section" when
+   empty, page-wide dedupe including author `id=`s with -1/-2 (deep-dive §9 Q4: suffix, not error).
+   [keep ASCII; alternative: keep Unicode letters like GitHub]
+10. Atoms: inert inside code spans / fences; a constant-folded atom is still text-only; an atom is one
+    letter for flanking; a literal prefix that proves the scheme admits a data-led URL at compile time.
+    [yes]
+11. Bounds are normative: linear time SHALL; 32 nesting; 32 open brackets; link-tail budget 4n+1024
+    (deep-dive §9 Q8). [yes — every reader must read hostile input to the same tree]
+12. W-MD codes are Warnings, reported only for static bodies (never for data). [yes]
+13. The md shim is GENERATED (not hand-written) and the compiler registers a `stdlib-md` client chunk —
+    two compiler-side touches (runtime-chunks.ts, runtime-template.js) beyond "the module". [yes; F4]
+14. Size: the generated reader is 77 KB raw / 20 KB gzip under impl#1 codegen (deep-dive estimated
+    3–6 KB). A phase-3 size target is open (the inlined `_scrml_structural_eq` + `==`-as-call lowering
+    dominate). [set a target before phase 3 ships `of=`]
+15. `</md>` matches case-insensitively, as `</pre>` does (§4.17). [yes]
+
+## Out-of-scope gaps noticed (not fixed here)
+- §4.17 still says "HTML entity-escaping … remains author responsibility"; Q21 (a) (raw bodies emitted
+  with `<`/`>` encoded) is ruled but not in SPEC text, and (per the deep-dive) not built in impl#1.
+- W-LINT-015 names `${ rawHtml(expr) }`, which exists nowhere (deep-dive PA action 2); with F2 ruled it
+  should point at `<md of=…/>` and say scrml has no raw-HTML form.
 
 ## Design decisions (running)
 
