@@ -89,7 +89,8 @@ describe("Issue #26 — (a) verifyPassword predicate bypass closes", () => {
       }`));
     expect(errors).toEqual([]);
     // `!await verifyPassword(...)` === `!(await verifyPassword(...))` — the guard fires.
-    expect(serverJs).toMatch(/if \(!await verifyPassword\(/);
+    // S462 Q20 — the tested operand is also wrapped in the server Promise trap.
+    expect(serverJs).toMatch(/if \(!_scrml_assert_settled\(await verifyPassword\(/);
   });
 });
 
