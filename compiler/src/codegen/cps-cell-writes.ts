@@ -233,11 +233,26 @@ export function planBatchCellReturn(
 }
 
 /**
- * Every batch of a split with the cell its pre-S462 emission returns — the same
- * rule emit-server.ts (`batchReturnCell`) and emit-functions.ts
- * (`buildClientBatchPlan`) apply: the LAST batch returns `returnVarName`; an
- * earlier batch returns its last statement's cell, when that is a `state-decl`.
- * A split with no planned batches is one batch over `serverStmtIndices`.
+ * The cell a batch of a MULTI-batch split returns bare (the legacy shape): its last
+ * statement's cell when that statement is a top-level `state-decl`, else none.
+ * emit-server.ts and emit-functions.ts both use this, so the two sides agree.
+ *
+ * S462 — the LAST batch used to return the split's `returnVarName`, which is the
+ * function's FIRST reactive-server cell and so usually lives in an EARLIER batch.
+ * The last batch then returned nothing and the client set that cell to `undefined`
+ * after it, clobbering the value the earlier batch had delivered (measured on the
+ * §19.9.9.5 `checkout` shape: `@reservationShown` ended `undefined`).
+ */
+export function multiBatchReturnCell(body: unknown[], sortedIndices: number[]): string | null {
+  const last = sortedIndices.length > 0 ? unguard(body[sortedIndices[sortedIndices.length - 1]] as Node) : null;
+  return last && last.kind === "state-decl" && typeof last.name === "string" ? last.name : null;
+}
+
+/**
+ * Every batch of a split with the cell its legacy emission returns: a
+ * single-batch split returns `returnVarName`; each batch of a multi-batch split
+ * returns `multiBatchReturnCell`. A split with no planned batches is one batch
+ * over `serverStmtIndices`.
  */
 export function splitBatchesWithReturnCells(
   body: unknown[],
@@ -247,11 +262,9 @@ export function splitBatchesWithReturnCells(
   if (!Array.isArray(batches) || batches.length <= 1) {
     return [{ indices: [...split.serverStmtIndices], returnCell: split.returnVarName ?? null }];
   }
-  return batches.map((b, bi) => {
+  return batches.map((b) => {
     const indices = Array.isArray(b.indices) ? [...b.indices].sort((x, y) => x - y) : [];
-    if (bi === batches.length - 1) return { indices, returnCell: split.returnVarName ?? null };
-    const last = indices.length > 0 ? unguard(body[indices[indices.length - 1]] as Node) : null;
-    return { indices, returnCell: last && last.kind === "state-decl" && typeof last.name === "string" ? last.name : null };
+    return { indices, returnCell: multiBatchReturnCell(body, indices) };
   });
 }
 

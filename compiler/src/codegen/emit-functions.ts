@@ -4,7 +4,7 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
-import { planBatchCellReturn, cpsCellsApplyLines } from "./cps-cell-writes.ts";
+import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
@@ -321,17 +321,9 @@ function buildClientBatchPlan(
     const indices = Array.isArray(b.indices)
       ? [...b.indices].sort((a, c) => a - c)
       : [];
-    const isLast = bi === batches.length - 1;
-    let returnCell: string | null = null;
-    if (isLast) {
-      returnCell = cpsSplit.returnVarName ?? null;
-    } else if (indices.length > 0) {
-      const lastRaw = body[indices[indices.length - 1]] as ASTNode | undefined;
-      const last = (handledSqlGuardInner(lastRaw) ?? lastRaw) as ASTNode | undefined; // S455 — `@c = ?{…} !{…}`
-      if (last && last.kind === "state-decl" && typeof last.name === "string") {
-        returnCell = last.name;
-      }
-    }
+    // S462 — every batch, the last included, returns its OWN last statement's
+    // cell (cps-cell-writes.ts multiBatchReturnCell; emit-server.ts uses the same).
+    const returnCell: string | null = multiBatchReturnCell(body, indices);
     plan.push({
       batchIndex: bi,
       indices,

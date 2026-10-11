@@ -15,7 +15,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
-import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal } from "./cps-cell-writes.ts";
+import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -4774,15 +4774,12 @@ export function generateServerJs(
     // LAST server statement (the value the batch sends back, and forwards to
     // later batches). The function's final `returnVarName` is the last batch's
     // return; earlier batches return their own last `state-decl` name.
-    function batchReturnCell(serverIndices: number[], isLast: boolean): string | null {
-      if (isLast) return _cpsSplit?.returnVarName ?? null;
-      if (serverIndices.length === 0) return null;
-      const _bodyForRet: any[] = fnNode.body ?? [];
-      const _lastRaw = _bodyForRet[serverIndices[serverIndices.length - 1]];
-      const _last = handledSqlGuardInner(_lastRaw) ?? _lastRaw; // S455 — `@c = ?{…} !{…}`
-      return (_last && _last.kind === "state-decl" && typeof _last.name === "string")
-        ? _last.name
-        : null;
+    // S462 — every batch of a multi-batch split, the last included, returns its
+    // OWN last statement's cell (cps-cell-writes.ts multiBatchReturnCell — the
+    // client plan in emit-functions.ts uses the same rule). The last batch used
+    // to return `returnVarName`, which usually lives in an earlier batch.
+    function batchReturnCell(serverIndices: number[], _isLast: boolean): string | null {
+      return multiBatchReturnCell(fnNode.body ?? [], serverIndices);
     }
     const _emitBatches: EmitBatch[] = [];
     if (_isMultiBatch) {
@@ -4841,17 +4838,8 @@ export function generateServerJs(
         if (!_isMultiBatch) {
           _batchReturnVar = _cpsSplit.returnVarName ?? null;
         } else {
-          const _bIdx = _batch.serverIndices ?? [];
-          const _isLastBatch = _batch.batchIndex === _serverBatches.length - 1;
-          if (_isLastBatch) {
-            _batchReturnVar = _cpsSplit.returnVarName ?? null;
-          } else if (_bIdx.length > 0) {
-            const _lastStmtRaw = _batchBody[_bIdx[_bIdx.length - 1]];
-            const _lastStmt = handledSqlGuardInner(_lastStmtRaw) ?? _lastStmtRaw; // S455
-            if (_lastStmt && _lastStmt.kind === "state-decl" && typeof _lastStmt.name === "string") {
-              _batchReturnVar = _lastStmt.name;
-            }
-          }
+          // S462 — the batch's own last statement's cell, the last batch included.
+          _batchReturnVar = multiBatchReturnCell(_batchBody, _batch.serverIndices ?? []);
         }
       }
       // The CPS view the existing handler-body emission consults. For the

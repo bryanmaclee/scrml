@@ -333,6 +333,48 @@ function load() {
     expect(r.json).toEqual({ name: "bob" });
   }, EXECUTED_DB_TIMEOUT_MS);
 
+  // §19.9.9.5's own worked example: two server batches with a client write between
+  // them. The cell batch 0 computes is computed ON THE SERVER (it reads the
+  // `reserved` row — only `held` crosses the wire), and batch 1, which writes no
+  // cell, must not overwrite it: before S462 the last batch was assigned the
+  // function's FIRST cell and the client set it to batch 1's (empty) result.
+  test("cell writes interleaved with server batches: each batch hands back only its own cell", async () => {
+    const b = await build(`<program db="sqlite:./n1.db">
+<reservationShown> = 0
+<status> = ""
+function checkout(id: number) {
+  let reserved = ?{\`UPDATE totals SET t = t + 1 WHERE rowid = \${id} RETURNING t\`}.get()
+  @reservationShown = reserved.t
+  @status = "charging"
+  ?{\`INSERT INTO users (name, pw, kind) VALUES ('cart', 'x', 'charge')\`}.run()
+}
+<button onclick={ checkout(1) }>c</button>
+<p>\${@reservationShown} \${@status}</p>
+</program>
+`, "multibatch");
+    expect(b.errors.map((e) => e.code)).toEqual([]);
+    expect(b.clientJs).toMatch(/_scrml_batch_1_result/);
+    expect(b.clientJs).not.toMatch(/reactive_set\("reservationShown", _scrml_batch_1_result\)/);
+    // `reserved` (the row) never reaches the client; only the computed cell does.
+    expect(b.clientJs).not.toMatch(/\breserved\b/);
+    const db = new Database(resolve(b.dir, "n1.db"));
+    db.exec("INSERT INTO totals (t) VALUES (41)");
+    db.close();
+    const mod = await import(`file://${b.serverPath}?v=${Date.now()}-${Math.random()}`);
+    const post = async (route, body) => {
+      const resp = await route.handler(new Request(`http://localhost${route.path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t0k", Cookie: "scrml_csrf=t0k" },
+        body: JSON.stringify(body),
+      }));
+      return resp.json();
+    };
+    const r0 = mod.routes.find((r) => r.path.endsWith("__batch_0"));
+    const r1 = mod.routes.find((r) => r.path.endsWith("__batch_1"));
+    expect(await post(r0, { id: 1 })).toBe(42);
+    expect(await post(r1, { id: 1, reservationShown: 42 })).toBe(null);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
   test("a write the server half cannot carry back is refused (E-RI-002), not relocated", async () => {
     const b = await build(`<program db="sqlite:./n1.db">
 <u> = { name: "" }
