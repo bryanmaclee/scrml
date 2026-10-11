@@ -11,7 +11,17 @@
       through a stdlib re-export, renamed type/fn re-export chase)
 - [x] e2e repro tests (integration/s462-p0-unawaited-async-stdlib: base 7 fail,
       head 9 pass) + unit/s462-stdlib-facts-by-imported-name
-- [ ] gates + corpus differential
+- [x] alias-as-value now E-ASYNC-FN-ESCAPES-AS-VALUE (pinned, 4b61610e2)
+- [x] merged origin/main 8b9cd9919 (#1398; clean, FACTS current)
+- [x] gates: pre-commit, tracking tiers, browser-baseline, s34-census,
+      host-global-scan, facts, spec-index, bootstrap-conformance, severity,
+      snippet-gate, corpus-compile-floor, types-gate, delta-lint,
+      conflict-marker, e2e-render-map, self-host-v2 slices — all green
+- [x] corpus differential (2870 files: samples, examples, stdlib, conformance,
+      gauntlet-r25, giti, flogence): newly awaited =
+      gauntlet-r25/dev-1-react.scrml `await sleep(5000)` (SSE generator, was a
+      busy loop) and conformance protect/hmac-constant-key-e006 `await hmac(`
+      (negative case, codes unchanged). No adopter output changed.
 
 Deferred (surfaced, not fixed here):
 - a local `.scrml` that only re-exports stdlib names emits no server-side
