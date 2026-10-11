@@ -48,6 +48,22 @@ Each is marked "(PA reading, s462-md-phase1)" in §67. Recommendation in bracket
     dominate). [set a target before phase 3 ships `of=`]
 15. `</md>` matches case-insensitively, as `</pre>` does (§4.17). [yes]
 
+## S239 review of 5590c52f6 — FIX round (done)
+- MED-1 nested-list trailing blanks returned to the parent (outer looseness) · MED-2 §67.2 rewritten: `${`
+  is taken (balanced extent) not parsed; a slot the reader places in code is restored to its exact source
+  text and never parsed / scope-checked; unclosed `${` = E-MD-INTERP-UNCLOSED naming `<pre>`. Reader half
+  LANDED (`parseSlots`, MdSlot, Slot(i) = caller's index); splitter + parse-after-placement = phase 2.
+- L1 linear headingSlugs · L2 gen-md-shim --check in ci.yml gate job + scripts/git-hooks/pre-commit
+  (the template; the LIVE hook in the shared .git/hooks is machine-local — reinstall via
+  scripts/git-hooks/install.sh, a PA action, not done from a worktree) · L3 lints added (CommonMark's
+  652: 323 exact / 328 linted / 1 silent = #144, the closed `language-` class, documented as intended) ·
+  L4 CommonMark #280 · L5 lone CR · L6 §67.7 size corrected + known-gaps
+  g-stdlib-client-chunks-not-minified-md-s462 (`_loadStdlibChunk` untouched) · L7 §67.9 wording now
+  states block / inline / bracket bounds separately (inline keeps the INNER 32 levels).
+- Candidate #9 settled by PA direction: slugs keep Unicode letters/marks/digits/`_` (github-slugger).
+- Candidate #2 (second spellings as text) awaits bryan's Q22; behaviour unchanged.
+- F-1 (brace-less else drop) is being fixed on another branch; untouched here.
+
 ## Out-of-scope gaps noticed (not fixed here)
 - §4.17 still says "HTML entity-escaping … remains author responsibility"; Q21 (a) (raw bodies emitted
   with `<`/`>` encoded) is ruled but not in SPEC text, and (per the deep-dive) not built in impl#1.

@@ -26888,6 +26888,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MD-IN-PHRASING | §67.2, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) An `<md>` element whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …): its block output would be reparented by the HTML parser. | Error |
 | E-MD-URL-SCHEME | §67.6, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) A literal link destination or image source in a static `<md>` body whose scheme §5.2 rule 2's test does not admit (`javascript:`, `data:text/html`, `data:image/svg+xml`, …). | Error |
 | E-MD-OF-BODY | §67.7, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-3 impl.) An `<md of=…>` that also has a body. | Error |
+| E-MD-INTERP-UNCLOSED | §67.2, §67.11 | (S462 review fix MED-2 — Nominal / spec-ahead; lands with the phase-2 impl.) A `${` in a static `<md>` body with no balanced closing `}` before `</md>`. The splitter takes `${…}` extents without parsing them (§67.2), so an unclosed one has no extent; the message names `<pre>` as the way to show a literal `${` that does not close. | Error |
 
 ---
 
@@ -48274,8 +48275,8 @@ and lowered to a closed set of elements whose content is only text (§67.6).
 **Status.** The rules below are NORMATIVE. Build state:
 - **Phase 1 — LANDED:** this section and the reader `stdlib/md/index.scrml` (`scrml:md`; its runtime
   shim `compiler/runtime/stdlib/md.js` is GENERATED from it by `scripts/gen-md-shim.ts`, §67.8). The
-  reader implements §67.3, §67.5, §67.9, the §67.2 dedent rule and the §67.6 heading slugs, and returns
-  the §67.11 W-MD diagnostics as data.
+  reader implements §67.3, §67.5, §67.9, the §67.2 dedent rule, the reader's half of the §67.2 / §67.4
+  slot rule (`parseSlots`) and the §67.6 heading slugs, and returns the §67.11 W-MD diagnostics as data.
 - **Phase 2 — Nominal / spec-ahead:** the static `<md>` body (§67.2, §67.4) — the block-splitter
   production, the compile-time call into `scrml:md`, the lowering to §67.6 elements, the compiler
   surfacing of W-MD codes and the four `E-MD-*` errors. impl#1 gains this hook per ruling F4 (below).
@@ -48337,11 +48338,25 @@ test (ruling F2: *"same closed element/attribute set, same §5.2 URL guard as st
 a third, orthogonal one. **An `<md>` body is a fourth production.**
 
 - After the `<md>` opener's `>`, the block splitter SHALL scan the body as one text run with **exactly
-  two exits**: `${` (a text-only interpolation, §67.4, whose extent is the §4.18.1b token-depth extent)
-  and the closing tag `</md>`. No other sequence is active: `<tag>`, `</tag>`, `</>`, `<!--`, `//`,
-  `#{`, `?{`, `!{`, `^{`, `~{` and `_{` are markdown text. *(ruling S462 Q21 — what you type is what is
-  shown — and F1; the exit set mirrors §4.17's "only exit its own matching close tag" plus the one
-  interpolation F1 admits.)*
+  two exits**: `${` (a text-only interpolation, §67.4) and the closing tag `</md>`. No other sequence is
+  active: `<tag>`, `</tag>`, `</>`, `<!--`, `//`, `#{`, `?{`, `!{`, `^{`, `~{` and `_{` are markdown
+  text. *(ruling S462 Q21 — what you type is what is shown — and F1; the exit set mirrors §4.17's "only
+  exit its own matching close tag" plus the one interpolation F1 admits.)*
+- **A `${` is taken, not parsed.** At `${` the splitter takes the balanced extent (the §4.18.1b
+  token-depth extent) and records it as a **slot** — its exact source text and its position — WITHOUT
+  parsing it. The slot stands in the reader's input as one U+FFFC (§67.4). Whether a slot is an
+  expression is decided only after `scrml:md` has placed it:
+  - a slot the reader places inside a code span or a fenced code block (its body or its info string) is
+    **inert** — it is restored to its exact source text and is never parsed, name-resolved or
+    scope-checked (a shell fence holding `${HOME:-/tmp}` compiles; no `E-SCOPE-001`);
+  - every other slot is then parsed and checked as an ordinary `${…}` expression (§7.4.2) and renders as
+    text (§67.4).
+  *(PA reading, s462-md-phase1 review fix MED-2: a `${` that became an unconditional expression exit
+  contradicted §67.4's "inert in code". Built in two halves: the reader's half — `parseSlots`, which
+  places slots and restores the source text of those that land in code — is LANDED in phase 1; the
+  splitter's deferred extent and the parse-after-placement are phase 2.)*
+- A `${` with no balanced closing `}` before `</md>` is `E-MD-INTERP-UNCLOSED`; the message names
+  `<pre>` (raw content, §4.17) as the way to show such text. *(Phase 2, Nominal.)*
 - The closing tag is `</md>` (ASCII case-insensitive, as §4.17). Consequently a literal `</md>` cannot
   appear in an `<md>` body, not even in a code span; a document about `<md>` shows it with `<pre>`.
 - End of file before `</md>` is `E-CTX-001` against the opener, recovered as §4.17 does.
@@ -48389,7 +48404,7 @@ except where this section says otherwise.
 | strong | `**text**` | |
 | strikethrough | `~~text~~` | opener and closer the same length (GFM) |
 | inline code | `` `code` `` (any backtick-run length) | content literal; one space each side stripped when both present |
-| fenced code | three or more backticks, an optional info string, the code, a closing run at least as long | the info string's first word is kept only if it matches `[A-Za-z0-9_+-]+`; an info string holding a backtick is not a fence |
+| fenced code | three or more backticks, an optional info string, the code, a closing run at least as long | the info string's backslash escapes resolve, then its first word is kept only if it matches `[A-Za-z0-9_+-]+` (the closed `language-` class; CommonMark would keep any word, e.g. `;` — dropped here by design, with no lint); an info string holding a backtick is not a fence |
 | link | `[text](destination)` / `[text](destination "title")` | destination bare: no spaces, balanced parentheses (≤ 32 deep), `\` escapes |
 | image | `![alt](source)` / `![alt](source "title")` | the alt is the plain text of the bracket content |
 | bullet list | `- item` | content column = after the marker and 1–4 spaces (5+ → 1) |
@@ -48401,20 +48416,22 @@ except where this section says otherwise.
 | escape | `\` before ASCII punctuation | |
 
 A list is **loose** (its item paragraphs are `p` elements) when a blank line separates two items or two
-blocks of one item, and **tight** otherwise (CommonMark 5.3). A bullet item interrupts a paragraph; an
+blocks of one item — including a blank line after a nested list and before more of the item — and
+**tight** otherwise (CommonMark 5.3). An item that starts empty may begin with at most one blank line: an
+empty marker line followed by a blank line is an empty item (CommonMark 5.2, example 280). A bullet item interrupts a paragraph; an
 ordered item interrupts a paragraph only when it is `1.`, and an empty item never does (CommonMark 5.2).
 
 **OUT — read as TEXT, reported with a W-MD code that names the scrml-md spelling** (§67.11):
 
 | Construct | What the reader does | Code |
 |---|---|---|
-| raw HTML (tags, comments, declarations) | text — `<b>` is shown as `<b>` | `W-MD-RAW-HTML` |
-| character references (`&copy;`, `&#97;`) | text, not decoded | `W-MD-ENTITY` |
+| raw HTML (tags, comments, declarations; an HTML block start such as `<div id="x"` even when unclosed) | text — `<b>` is shown as `<b>` | `W-MD-RAW-HTML` |
+| character references (`&copy;`, `&#97;`) — in text, a link destination or title, or a fence's info string | text, not decoded | `W-MD-ENTITY` |
 | angle autolinks (`<https://…>`, `<a@b.c>`) | text | `W-MD-AUTOLINK` |
-| reference links and definitions (`[t][r]`, `[t][]`, `[r]: url`) | text | `W-MD-REFERENCE-LINK` |
+| reference links and definitions (`[t][r]`, `[t][]`, `[r]: url`, a label holding `\]` or running over lines) | text | `W-MD-REFERENCE-LINK` |
 | footnotes (`[^n]`, `[^n]: …`) | text | `W-MD-FOOTNOTE` |
 | task-list items (`- [ ] x`, `- [x] x`) | a list item whose text starts `[ ]` | `W-MD-TASK-LIST` |
-| setext headings (`===` / `---` underline) | `===` is paragraph text; `---` is a thematic break | `W-MD-SETEXT` |
+| setext headings (an underline of `=`, or of `-`) | `=` / `-` / `--` stay paragraph text; `---` (or longer) is a thematic break | `W-MD-SETEXT` |
 | indented code blocks | paragraph text | `W-MD-INDENTED-CODE` |
 
 **Second spellings of an IN construct — also text, also reported** *(ruling F3, "one way to do it";
@@ -48424,7 +48441,7 @@ the per-spelling codes are a PA reading, s462-md-phase1)*:
 |---|---|---|
 | `_em_`, `__strong__` | `W-MD-EMPHASIS-UNDERSCORE` | `*em*`, `**strong**` |
 | `~one~` | `W-MD-STRIKETHROUGH` | `~~del~~` |
-| `* item`, `+ item` | `W-MD-BULLET-MARKER` | `- item` |
+| `* item`, `+ item` (a space or a tab after the marker) | `W-MD-BULLET-MARKER` | `- item` |
 | `1) item` | `W-MD-ORDERED-MARKER` | `1. item` |
 | `***`, `___`, `- - -` | `W-MD-THEMATIC-BREAK` | `---` |
 | `~~~` fence | `W-MD-FENCE-TILDE` | a backtick fence |
@@ -48432,7 +48449,7 @@ the per-spelling codes are a PA reading, s462-md-phase1)*:
 | two trailing spaces | `W-MD-HARD-BREAK-SPACES` (a soft break) | a trailing `\` |
 | `[t](u 'x')`, `[t](u (x))` | `W-MD-LINK-TITLE` | `[t](u "x")` |
 | `[t](<u v>)` | `W-MD-LINK-DESTINATION` | `[t](u%20v)` |
-| a table row without its outer pipes | `W-MD-TABLE-PIPES` | `\| a \| b \|` |
+| a table row without its outer pipes; a plain line right after a table (GFM reads it as a row; here it is a paragraph) | `W-MD-TABLE-PIPES` | `\| a \| b \|` |
 | lazy continuation (an unprefixed line continuing a quote's or list item's paragraph) | `W-MD-LAZY-CONTINUATION` (the line starts a new paragraph after the container) | `>` on every line / indent to the content column |
 
 `_` between word characters was never emphasis (`snake_case_word`) and is not reported. A bare URL
@@ -48466,7 +48483,8 @@ parameters — data is never code)".)*
     `[mail](mailto:${addr})`), §5.2 rule 2's compile-time test admits it and the value cannot change
     the scheme.
 - **Where an atom is inert** — inside a code span and inside a fenced code block (its body and its
-  info string): `${` is shown literally there, as in raw content (§4.17). *(PA reading, s462-md-phase1,
+  info string): the slot is restored to its exact source text, so `${…}` is shown literally, as in raw
+  content (§4.17), and it is never parsed or scope-checked (§67.2). *(PA reading, s462-md-phase1,
   following the deep-dive §6g and Q21.)*
 - A value that folds to a compile-time constant is still text-only: whether an atom is markdown never
   depends on whether it folds. *(PA reading, s462-md-phase1; deep-dive §9 Q1.)*
@@ -48500,7 +48518,10 @@ type MdDoc:struct  = { blocks: MdBlock[], diags: MdDiag[] }
 `Slot` (an inline atom) and `MdSeg.Slot` (an atom inside an attribute value) carry the index of the
 `${…}` they stand for; an `MdSeg[]` holding a `Slot` is data-led (§67.4). Every node kind maps to
 exactly one row of §67.6; there is no other kind. Exported API: `parse(src) -> MdDoc`,
-`dedent(body) -> MdDedent` (§67.2), `headingSlugs(doc, taken) -> string[]` (§67.6).
+`parseSlots(src, slots: MdSlot[]) -> MdDoc` (a static body holding slots, §67.2 / §67.4 — `MdSlot` =
+`{ offset, source }`, the U+FFFC's offset and the `${…}`'s exact source text; `Slot(i)` carries the
+slot's index in `slots`), `dedent(body) -> MdDedent` (§67.2), `headingSlugs(doc, taken) -> string[]`
+(§67.6).
 
 ### 67.6 Output — a closed element set; content is only text
 
@@ -48534,9 +48555,12 @@ execute; the deep-dive §7 rule MD-SAFE.)*
   `![x](data:image/svg+xml,…)`) is `E-MD-URL-SCHEME` *(PA reading, s462-md-phase1, following the
   deep-dive §6d: stricter than §5.2's static-string rule — an author's `href="javascript:…"` is admitted
   as written, but md bodies are pasted prose, and the error can only refuse too much)*.
-- **Heading ids.** In a static `<md>` every heading gets an `id`: the heading's plain text lower-cased,
-  ASCII letters and digits kept, each space and `-` written as `-`, every other character dropped, and
-  `section` when nothing is left; a slug already used on the page (by another heading or an author
+- **Heading ids.** In a static `<md>` every heading gets an `id`, GitHub-style: the heading's plain
+  text lower-cased where the case maps; Unicode letters, combining marks, digits and connector
+  punctuation (`_`) kept; each space and `-` written as `-`; every other character dropped; and
+  `section` when nothing is left (`## 快速入门` → `快速入门`). *(PA direction, s462-md-phase1 review: ids are
+  static and not a safety boundary, and an ASCII-only rule turned every non-Latin heading into
+  `section-N`.)* A slot contributes nothing to a slug; a slug already used on the page (by another heading or an author
   `id=`) gets the first free `-1`, `-2`, … suffix, in document order. (`scrml:md`'s `headingSlugs`
   implements the rule; the compiler passes the page's taken ids.) `<md of=…/>` gives headings **no id**
   *(ruling F2 — "No auto heading ids for data-sourced md (user-chosen ids can clobber DOM globals)")*.
@@ -48563,8 +48587,10 @@ second; both designed together (one dialect, one safety model)." **Nominal / spe
 - A server-rendered first paint (§52.8) reads the value with the same reader on the server and writes the
   same elements; the client's build of the same value SHALL be the same tree.
 - The reader ships as the `stdlib-md` runtime chunk, only on pages that use `of=` (or import `scrml:md`
-  from client code). *(Measured at phase 1, impl#1 codegen: 77 KB raw / 20 KB gzip — above the
-  deep-dive's 3–6 KB estimate; a phase-3 size target is open.)*
+  from client code). *(Measured at the phase-1 review fix, impl#1 codegen: 87 KB raw / 22.5 KB gzip as
+  shipped — the chunk is inlined unminified, comments included (known gap
+  `g-stdlib-client-chunks-not-minified-md-s462`) — and 32 KB / 11 KB gzip minified. Above the
+  deep-dive's 3–6 KB estimate; minification and a size target are phase-3 items.)*
 
 What `of=` does not cover: content injection through data (a comment can still SAY "click here" with an
 `https` link — moderation is the application's); image tracking pixels (the image host sees the
@@ -48590,14 +48616,21 @@ build-time and runtime cannot disagree".)*
 The reader SHALL accept any string and SHALL read it in time linear in its length. The bounds are part
 of the dialect, so every implementation reads a hostile input to the same tree:
 
-- **Nesting** — at most 32 levels of quotes and lists, and at most 32 levels of inline nesting
-  (emphasis, strong, strikethrough, links, images). A deeper marker or delimiter is text.
-- **Brackets** — at most 32 link/image openers open at once; a further `[` is text.
+- **Block nesting** — at most 32 levels of quotes and lists. A quote or list marker that would open the
+  33rd level is text (paragraph content of the 32nd).
+- **Inline nesting** — no inline node is built more than 32 levels deep (emphasis, strong,
+  strikethrough, links, images). The INNER levels are kept: a delimiter pair, or a link / image, whose
+  node would hold 32 levels below it is not made — its delimiters or brackets stay text — and neither is
+  any pair that encloses it. (Delimiters are matched innermost-first, so the innermost 32 levels are the
+  ones that exist when the bound is reached.)
+- **Brackets** — at most 32 link/image openers are open at once, counted left to right; an opener met
+  while 32 are open is text (it never becomes a link).
 - **Link tails** — the characters examined while reading inline-link destinations and titles in one
   block total at most 4 × the block's length + 1024; past that budget the remaining brackets are text.
 - `W-MD-DEPTH-LIMIT` / `W-MD-SCAN-LIMIT` report a bound that was reached (static bodies only).
 
-U+0000 is read as U+FFFD; a CRLF line end reads as LF.
+U+0000 is read as U+FFFD. A line ends at LF, at CRLF and at a lone CR (CommonMark 2.1); all three read
+as LF.
 
 ### 67.10 Styling
 
@@ -48622,6 +48655,7 @@ U+0000 is read as U+FFFD; a CRLF line end reads as LF.
 | `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent (Nominal — lands with the phase-2 impl) |
 | `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body (Nominal — lands with the phase-2 impl) |
 | `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together (Nominal — lands with the phase-3 impl) |
+| `E-MD-INTERP-UNCLOSED` | Error | §67.2: a `${` with no balanced `}` before `</md>`; the message names `<pre>` (Nominal — lands with the phase-2 impl) |
 
 The W-MD codes are produced by `scrml:md` (data: `MdDoc.diags`) and surfaced by the compiler for a
 static body in phase 2; the E-MD codes are compiler checks, phase 2 / phase 3. Every message names the
