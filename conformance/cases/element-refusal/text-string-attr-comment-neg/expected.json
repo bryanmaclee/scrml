@@ -1,0 +1,14 @@
+{
+  "id": "text-string-attr-comment-neg",
+  "description": "`<script` in a string literal, an attribute value, entity-escaped display text and a comment is not an element.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built, decided on the parsed element, never on text.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ]
+  }
+}

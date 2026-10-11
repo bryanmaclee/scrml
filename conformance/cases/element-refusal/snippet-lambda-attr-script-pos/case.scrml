@@ -1,0 +1,6 @@
+<program>
+${ type Item:struct = { id: number } }
+${ const Card = <div props={ it: Item, foot: snippet(v: Item) }>${render foot(it)}</div> }
+<x> = { id: 1 }
+<Card it=@x foot={ (v) => <script>window.pwned = 1</script> }/>
+</program>

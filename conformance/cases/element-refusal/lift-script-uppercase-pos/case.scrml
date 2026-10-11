@@ -1,0 +1,4 @@
+<program>
+<p>page</p>
+${ lift <SCRIPT>x</SCRIPT> }
+</program>

@@ -1,0 +1,5 @@
+<program>
+<p>page</p>
+${ const C = <div><pre><script>window.pwned = 1</script></pre></div> }
+<C/>
+</program>

@@ -1,0 +1,5 @@
+<program>
+<u> = "/evil.js"
+<p>page</p>
+${ lift <script src=@u></script> }
+</program>

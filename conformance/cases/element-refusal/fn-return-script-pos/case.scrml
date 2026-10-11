@@ -1,0 +1,4 @@
+<program>
+${ function mk() { return <script>a</script> } }
+<div>${mk()}</div>
+</program>
