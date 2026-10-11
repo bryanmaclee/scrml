@@ -116,8 +116,12 @@ export const SERVER_STRUCTURAL_EQ_HELPER =
  * a boolean test un-awaited (an await-classifier miss), the test would pass for
  * every input, because a Promise is truthy. This turns that into a thrown
  * internal error, which the route's error path answers with its fixed 500 —
- * never a pass, and never a detail on the wire. A settled value passes through
- * unchanged. Injected into a server module IFF the module references it.
+ * never a pass, and never a detail on the wire. The error's MESSAGE is the same
+ * fixed `Internal Server Error` text the prod entry's `error()` handler answers,
+ * because a CPS route's 500 envelope (without `protect=`) carries `err.message`
+ * to the client; the reason travels only on `cause`, which no envelope reads
+ * (it appears where the server logs the error object). A settled value passes
+ * through unchanged. Injected into a server module IFF the module references it.
  */
 export const SERVER_ASSERT_SETTLED_HELPER: string = [
   "",
@@ -126,7 +130,8 @@ export const SERVER_ASSERT_SETTLED_HELPER: string = [
   "// A Promise is truthy, so the test would pass for every input: fail the request instead.",
   "function _scrml_assert_settled(value) {",
   "  if (value != null && typeof value.then === \"function\") {",
-  "    throw new _scrml_g.Error(\"scrml: an asynchronous standard-library result was tested before it settled\");",
+  "    // The message is the fixed 500 text (a CPS envelope sends err.message); the reason is on `cause`.",
+  "    throw new _scrml_g.Error(\"Internal Server Error\", { cause: \"scrml: an asynchronous standard-library result was tested before it settled\" });",
   "  }",
   "  return value;",
   "}",

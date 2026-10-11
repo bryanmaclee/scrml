@@ -138,8 +138,48 @@ describe("§1 every boolean-test position wraps a direct stdlib call (server)", 
     expect(fn("")).toBe("");
     const obj = { ok: 1 };
     expect(fn(obj)).toBe(obj);
-    expect(() => fn(Promise.resolve(false))).toThrow("tested before it settled");
-    expect(() => fn({ then() {} })).toThrow("tested before it settled");
+    for (const thenable of [Promise.resolve(false), { then() {} }]) {
+      let err = null;
+      try { fn(thenable); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(Error);
+      // The MESSAGE is the fixed 500 text; the reason travels only on `cause`.
+      expect(err.message).toBe("Internal Server Error");
+      expect(err.cause).toBe("scrml: an asynchronous standard-library result was tested before it settled");
+    }
+  });
+
+  test("a CPS route's 500 envelope (no protect=) would carry only the fixed text", () => {
+    // Without protect=, the CPS envelope's message is `String(err && err.message || err)`.
+    // Run THAT emitted expression on the trap's error: the wire text is "Internal Server Error".
+    const { out, codes } = compile({
+      "app.scrml": `<program auth="none" db="./app.db">
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT)\`}
+  </schema>
+  <db src="./app.db" tables="users">
+    \${
+      function getCps() {
+        @msg = ?{\`SELECT pw FROM users WHERE id = 1\`}.get()
+      }
+    }
+  </db>
+  <msg> = ""
+  <button onclick={ getCps() }>y</button>
+  <p>\${@msg}</p>
+</program>
+`,
+    });
+    expect(codes).toEqual([]);
+    const js = out("app.scrml").serverJs ?? "";
+    const m = /data: \{ message: (_scrml_g\.String\(_scrml_cps_err && _scrml_cps_err\.message \|\| _scrml_cps_err\)), fn: "getCps" \}/.exec(js);
+    expect(m).not.toBeNull();
+    const envelopeMessage = new Function("_scrml_g", "_scrml_cps_err", `return ${m[1]};`);
+    const trapErr = new Error("Internal Server Error", { cause: "scrml: an asynchronous standard-library result was tested before it settled" });
+    expect(envelopeMessage(globalThis, trapErr)).toBe("Internal Server Error");
+    // And the helper really throws that shape (same text as the line above).
+    const h = serverOf(`        if (!vp(pass, row.pw)) { return "REJECTED" }
+        return "ACCEPTED"`);
+    expect(h).toContain('throw new _scrml_g.Error("Internal Server Error", { cause: "scrml: an asynchronous standard-library result was tested before it settled" });');
   });
 
   test("a user module that re-exports a stdlib name is the stdlib export (re-export chain)", () => {
