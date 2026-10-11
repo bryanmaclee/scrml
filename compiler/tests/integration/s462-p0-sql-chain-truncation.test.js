@@ -331,9 +331,121 @@ describe("S462 P0 — a server cell initialized by `?{…}` + a tail (§8.11 / �
     }
     expect(Object.keys(bodies).length).toBeGreaterThan(0);
     for (const body of Object.values(bodies)) expect(body).not.toContain(SECRET);
-    const merged = Object.values(bodies).map((b) => JSON.parse(b)).reduce((m, v) => ({ ...m, ...v }), {});
-    expect(merged).toEqual({ firstName: "ada", count: 2 });
+    // S465 — each tailed cell is a §52.6.5 Pattern C load with its own route.
+    expect(bodies).toEqual({
+      "/__serverLoad/firstName": JSON.stringify("ada"),
+      "/__serverLoad/count": "2",
+    });
   }, TIMEOUT);
+});
+
+describe("S465 fix round 1 — EVERY server-cell placement and count with a tail (§52.6.5 Pattern C)", () => {
+  // A `<x server>` initializer that evaluates an inline `?{}` IS the cell's mount
+  // load (§52.6.5 Pattern C): `/__serverLoad/<var>` evaluates the WHOLE
+  // initializer server-side and serves its value. After f6f00bb3c a tailed cell
+  // was a "callable" initializer: with ≥2 of them `/__mountHydrate` served it, but
+  // a SINGLE one (or any cell in a `${}` inside `<db>`) was loaded by a client-side
+  // `await (?{…}.get().name)` — raw query text in client JS → E-CG-006.
+  const loadBodies = async (a) => {
+    const bodies = {};
+    for (const route of a.mod.routes) {
+      if (!/__mountHydrate|__serverLoad/.test(route.path)) continue;
+      const res = await route.handler(new Request(`http://localhost${route.path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+        body: "{}",
+      }));
+      bodies[route.path] = await res.text();
+    }
+    return bodies;
+  };
+  const program = (body) => `<program auth="none" db="./app.db">
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT)\`}
+  </schema>
+${body}
+</program>
+`;
+  // (The client keeps a `// <c server> = ?{…} — inline-?{} …` comment naming the load; no
+  // query text, no unresolved placeholder.)
+  const noQueryOnClient = (a) => {
+    expect(/\?\{(?!…\}|\})/.test(a.clientJs)).toBe(false);
+    expect(a.clientJs.includes("SELECT")).toBe(false);
+    expect(a.clientJs.includes("sql-ref unresolved")).toBe(false);
+  };
+
+  test("ONE top-level cell `<firstName server> = ?{…}.get().name` serves only the name", async () => {
+    const a = await serveApp(program(`  <firstName server> = ?{\`SELECT name, pw FROM users WHERE id = 1\`}.get().name
+  <p>\${@firstName}</p>`));
+    noQueryOnClient(a);
+    const bodies = await loadBodies(a);
+    expect(bodies).toEqual({ "/__serverLoad/firstName": JSON.stringify("ada") });
+  }, TIMEOUT);
+  test("ONE cell, a query without backticks (`?{SELECT …}.get().name`) — no unresolved placeholder on the client", async () => {
+    const a = await serveApp(program(`  <c server> = ?{SELECT name, pw FROM users WHERE id = 1}.get().name
+  <p>\${@c}</p>`));
+    noQueryOnClient(a);
+    expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": JSON.stringify("ada") });
+  }, TIMEOUT);
+  test("ONE cell where the query is not the leftmost operand (`\"x\" + ?{…}.get().name`)", async () => {
+    const a = await serveApp(program(`  <c server> = "x" + ?{\`SELECT * FROM users WHERE id = 1\`}.get().name
+  <p>\${@c}</p>`));
+    noQueryOnClient(a);
+    expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": JSON.stringify("xada") });
+  }, TIMEOUT);
+  test("ONE cell in a `${}` inside `<db>`", async () => {
+    const a = await serveApp(program(`  <db src="./app.db" tables="users">
+  \${
+    <c server> = ?{\`SELECT * FROM users ORDER BY id\`}.all().length
+  }
+  <main><p>\${@c}</p></main>
+  </db>`));
+    noQueryOnClient(a);
+    expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": "2" });
+  }, TIMEOUT);
+  test("TWO cells in a `${}` inside `<db>` — each serves only its value", async () => {
+    const a = await serveApp(program(`  <db src="./app.db" tables="users">
+  \${
+    <c server> = ?{\`SELECT name, pw FROM users WHERE id = 1\`}.get().name
+    <d server> = ?{\`SELECT name, pw FROM users ORDER BY id\`}.all().map(u => u.name)
+  }
+  <main><p>\${@c} \${@d}</p></main>
+  </db>`));
+    noQueryOnClient(a);
+    const bodies = await loadBodies(a);
+    for (const b of Object.values(bodies)) expect(b).not.toContain(SECRET);
+    expect(bodies).toEqual({ "/__serverLoad/c": JSON.stringify("ada"), "/__serverLoad/d": JSON.stringify(["ada", "bob"]) });
+  }, TIMEOUT);
+
+  // protect= (§14.8.9): a row that leaves through the tail is still stripped; the
+  // protected column extracted from its row is E-PROTECT-006 — the route is a
+  // compiler-emitted client egress like any other.
+  const protectedCell = (init) => program(`  <db src="./app.db" tables="users" protect="pw">
+  \${
+    <c server> = ${init}
+  }
+  <main><p>\${@c}</p></main>
+  </db>`);
+  for (const [tail, expected] of [
+    [".all().slice(0, 1)", [{ id: 1, name: "ada" }]],
+    [".all()[0]", { id: 1, name: "ada" }],
+    [".get()", { id: 1, name: "ada" }],
+  ]) {
+    test(`protect=: \`?{SELECT *…}${tail}\` serves the row(s) with the protected column stripped`, async () => {
+      const a = await serveApp(protectedCell(`?{\`SELECT * FROM users ORDER BY id\`}${tail}`));
+      noQueryOnClient(a);
+      const bodies = await loadBodies(a);
+      expect(Object.keys(bodies)).toEqual(["/__serverLoad/c"]);
+      expect(bodies["/__serverLoad/c"]).not.toContain(SECRET);
+      expect(JSON.parse(bodies["/__serverLoad/c"])).toEqual(expected);
+    }, TIMEOUT);
+  }
+  for (const tail of [".all().map(u => u.pw)", ".get().pw"]) {
+    test(`protect=: \`?{SELECT *…}${tail}\` — the protected column outside its row — is E-PROTECT-006`, () => {
+      const { result } = compileApp(protectedCell(`?{\`SELECT * FROM users ORDER BY id\`}${tail}`));
+      expect((result.errors ?? []).map((e) => e.code)).toContain("E-PROTECT-006");
+    });
+  }
 });
 
 describe("S465 fix round 1 — a `!{}` handler on a tailed `?{}` handles the QUERY (§19.8.3 / §44.3)", () => {

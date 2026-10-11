@@ -86,7 +86,7 @@ import { sqlQueryExprShape, sqlQueryHeadOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, h
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import { replaceLiveSqlInterpolations } from "./codegen/sql-lex.ts";
-import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
+import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, serverVarDeclLoadQuery, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -13086,15 +13086,12 @@ function annotateNodes(
             //     passing (a bounded follow-on, not yet shipped); the cell will
             //     NOT hydrate. Replace the generic W-AUTH-001 with the precise
             //     W-AUTH-004 steer (param-free query, or `on mount`).
-            const _sqlNode = (n as ASTNodeLike).sqlNode as
-              | { kind?: string; query?: string; body?: string }
-              | undefined;
-            const _hasInlineSql = !!_sqlNode && _sqlNode.kind === "sql";
-            const _inlineSqlQuery = _hasInlineSql
-              ? (typeof _sqlNode!.query === "string"
-                  ? _sqlNode!.query
-                  : (typeof _sqlNode!.body === "string" ? _sqlNode!.body : ""))
-              : "";
+            // S465 — the SAME reader codegen classifies with (collect.ts
+            // `serverVarDeclLoadQuery`): the structured `sqlNode` query, or the
+            // queries a tailed initializer (`?{…}.get().name`) evaluates.
+            const _patternCQuery = serverVarDeclLoadQuery(n as any);
+            const _hasInlineSql = _patternCQuery !== null;
+            const _inlineSqlQuery = _patternCQuery ?? "";
             // §52 (S233) Fork-3 — a query whose ONLY `${...}` interpolations are
             // the server-ambient `@currentUser` cell (and the ambient is active —
             // no user `<currentUser>` cell shadows the name) is server-resolvable,
