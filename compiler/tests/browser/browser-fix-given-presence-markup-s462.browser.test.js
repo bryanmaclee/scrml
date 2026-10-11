@@ -183,3 +183,77 @@ describe("scrml fix given-presence — a markup guard and its rewrite render ali
     expect(runs.if.shots[1]).toContain("p#name.=bob");
   });
 });
+
+/** Compile + mount `src`, then run `drive` (async) and return what it returns. */
+async function runOne(src, baseName, drive) {
+  const { errors } = compileAndMount(src, baseName);
+  expect(errors).toEqual([]);
+  return drive();
+}
+
+// The ACCEPTED differences of the rewrite (documented in fix-given-presence.js and SPEC §63.7).
+// Both follow from §7.4.2 ("the interpolation site SHALL re-render whenever any referenced cell
+// changes") as #1397 implements it: the arm selector updates a markup binding in place instead of
+// re-rendering the whole guard body. Pinned here so a change to either is seen.
+describe("scrml fix given-presence — accepted differences of the markup rewrite (§7.4.2, #1397)", () => {
+  test("an input inside the guard keeps its text and focus across an unrelated read change (the guard re-creates it)", async () => {
+    const src = `<user>: { name: string } | not = { name: "ada" }
+<n> = 0
+<main>
+    <div id="guard">\${ given @user :> { <div><input id="in"/><p class="who">\${@user.name} \${@n}</p></div> } }</div>
+</main>
+`;
+    const fixed = fixGivenPresence(src, { filePath: resolve(tmpRoot, "input.scrml") });
+    expect(fixed.applied.length).toBe(1);
+    const drive = async () => {
+      const input = document.querySelector("#in");
+      input.value = "typed";
+      input.focus();
+      set("n", 1);
+      await flush();
+      const now = document.querySelector("#in");
+      return { same: now === input, value: now.value, focused: document.activeElement === now, text: document.querySelector(".who").textContent };
+    };
+    const before = await runOne(src, "input-given", drive);
+    const after = await runOne(fixed.output, "input-if", drive);
+    // Both show the new read.
+    expect(before.text).toContain("1");
+    expect(after.text).toContain("1");
+    // The guard re-creates the body: the typed text and the focus are lost.
+    expect(before.same).toBe(false);
+    expect(before.value).toBe("");
+    // The rewrite updates the binding in place.
+    expect(after.same).toBe(true);
+    expect(after.value).toBe("typed");
+    expect(after.focused).toBe(true);
+  });
+
+  test("after a read in the body throws, the rewrite renders again on the next write; the guard stays blank", async () => {
+    const src = `<user>: { name: string } | not = { name: "ada" }
+<s> = "1"
+<main>
+    <div id="guard">\${ given @user :> { <p class="who">\${@user.name} \${JSON.parse(@s)}</p> } }</div>
+</main>
+`;
+    const fixed = fixGivenPresence(src, { filePath: resolve(tmpRoot, "throw.scrml") });
+    expect(fixed.applied.length).toBe(1);
+    const drive = async () => {
+      const orig = console.error;
+      console.error = () => {};
+      try {
+        set("s", "{");
+        await flush();
+        set("s", "2");
+        await flush();
+      } finally {
+        console.error = orig;
+      }
+      return document.querySelector("#guard").textContent;
+    };
+    const before = await runOne(src, "throw-given", drive);
+    const after = await runOne(fixed.output, "throw-if", drive);
+    // (The space between the two interpolations is dropped by both forms alike.)
+    expect(after).toContain("ada2");
+    expect(before.trim()).toBe("");
+  });
+});

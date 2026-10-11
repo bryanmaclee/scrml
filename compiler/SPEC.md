@@ -45000,7 +45000,15 @@ Applying the machine to the existing corpus:
   (`${ given @u :> { <p>${@u.name}</p> } }`) migrates since S462 (s462-fix-rule-followups): its rewrite
   `${ if (@u is given) { … } }` re-renders a changed read while `@u` stays present since #1397
   (`g-impl1-markup-if-branch-memo-stale-render-s462`, resolved). The two emit different lift groups by design, so
-  the rule checks that changed group (same presence test, one arm) and compares the rest as above. A `given @cell`
+  the rule checks that changed group (same presence test, one arm) and compares the rest as above. It rewrites
+  such a guard only when its body is markup only; a body with a statement (a declaration, an assignment, an `if`,
+  a nested guard, an interpolation that writes) is refused, because the guard re-runs its whole body on every
+  read change and the rewrite re-runs a binding only on its own reads. The rewrite's accepted differences, both
+  from §7.4.2 as #1397 implements it (each markup binding updates in place): an input inside the guard keeps its
+  text and focus when another read in the body changes (the guard re-creates it); and after a read in the body
+  throws, the rewrite renders again on the next write, where the guard's group stays blank. A file whose
+  original compile reports an error-severity diagnostic is refused ("file does not compile; cannot verify"):
+  impl#1 emits nothing to compare for it. A `given @cell`
   guard in logic and a markup guard over a plain value migrate since #1380 (S461), which fixed the bare-name
   lowering and the dropped markup body. The rebind head `given c = @h :>` (§66.7.5) is not in the
   window. *(Provenance: ruling:user-voice-scrml.md S462 "a, go".)*

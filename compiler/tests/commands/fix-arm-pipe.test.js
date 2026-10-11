@@ -48,6 +48,24 @@ function codesOf(src) {
 }
 const count = (codes, c) => codes.filter((x) => x === c).length;
 
+describe("arm-pipe — a file that does not compile is not verified vacuously (S462 review, s462-fix-rule-followups)", () => {
+  test("an error-severity diagnostic before the rewrite refuses the file: \"file does not compile; cannot verify\"", () => {
+    const src = program([
+      "    const r = risky(n) !{",
+      "        | .Bad(m) :> m",
+      "        | _ :> \"other\"",
+      "    }",
+      "    return r + undeclaredThing",
+    ]);
+    expect(codesOf(src)).toContain("E-SCOPE-001");
+    const r = fix(src);
+    expect(r.changed).toBe(false);
+    expect(r.applied).toEqual([]);
+    expect(r.blockers.length).toBeGreaterThan(0);
+    expect(r.blockers.some((b) => b.reason.includes("file does not compile; cannot verify"))).toBe(true);
+  });
+});
+
 describe("arm-pipe — `!{}` handler arms", () => {
   test("deletes the leading `|` and the space after it; separator, prefix and body as written", () => {
     const src = program([

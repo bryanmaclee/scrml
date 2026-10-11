@@ -32,6 +32,21 @@ const SRC = [
   "",
 ].join("\n");
 
+describe("fixIsSome — a file that does not compile is not verified vacuously (S462 review, s462-fix-rule-followups)", () => {
+  test("an error-severity diagnostic before the rewrite refuses the file: \"file does not compile; cannot verify\"", () => {
+    // `undeclaredThing` is E-SCOPE-001. impl#1 emits no artifacts for the file, so equal codes and
+    // equal (absent) artifacts would "verify" any rewrite at all.
+    const src = SRC.replace("    return \"\"\n", "    return undeclaredThing\n");
+    expect(src).not.toBe(SRC);
+    const r = fixIsSome(src, { filePath: "/tmp/fix-is-some-noncompiling/h.scrml" });
+    expect(r.changed).toBe(false);
+    expect(r.applied).toEqual([]);
+    expect(r.blockers.length).toBeGreaterThan(0);
+    expect(r.blockers.every((b) => b.reason.includes("file does not compile; cannot verify"))).toBe(true);
+    expect(r.blockers[0].reason).toContain("E-SCOPE-001");
+  });
+});
+
 describe("fixIsSome — `is some` → `is given`", () => {
   test("rewrites exactly the code sites, leaves comments / strings / prose", () => {
     const r = fixIsSome(SRC, { filePath: "/tmp/fix-is-some-a/h.scrml" });

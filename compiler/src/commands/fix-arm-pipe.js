@@ -51,6 +51,7 @@ import { parseEngineStateChildren } from "../engine-statechild-parser.ts";
 import { parseComponentBody } from "../component-expander.ts";
 import { tokenizeBlock, tokenizeError, tokenizeLogic } from "../tokenizer.ts";
 import { compileScrml } from "../api.js";
+import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
@@ -417,6 +418,7 @@ function verifyByCompile(filePath, before, after, auxSources) {
       writeFileSync(out, s);
       if (ap === self) target = out;
     }
+    mirrorSiblingDatabases(filePath, dirname(target));
     const run = (text) => {
       writeFileSync(target, text);
       const r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
@@ -428,7 +430,7 @@ function verifyByCompile(filePath, before, after, auxSources) {
         outputs.push([relative(dir, k), fields]);
       }
       outputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      return { codes, outputs: JSON.stringify(outputs) };
+      return { codes, outputs: JSON.stringify(outputs), errs: errorSeverityCodes(r) };
     };
     let a;
     let b;
@@ -436,11 +438,14 @@ function verifyByCompile(filePath, before, after, auxSources) {
       console.log = console.warn = console.error = () => {};
       process.stdout.write = process.stderr.write = () => true;
       a = run(before);
-      b = run(after);
+      // A file that does not compile emits nothing to compare: equal codes would verify any
+      // rewrite at all. Refuse it (fix-verify-shared.js).
+      if (a.errs.length === 0) b = run(after);
     } finally {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
+    if (a.errs.length > 0) return doesNotCompileReason(a.errs);
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
     if (a.outputs !== b.outputs) return "impl#1 emits different artifacts after the rewrite";

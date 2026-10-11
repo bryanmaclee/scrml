@@ -52,6 +52,24 @@
  *      resolved). For a subset holding markup guards, each changed group is cut from both sides
  *      and checked to be exactly that change (same presence test, one arm) and the rest compared
  *      as above — see "The markup-guard compare" below. The diagnostic codes must match all the same.
+ *      Only a markup guard whose body is MARKUP ONLY is rewritten (markupBodyIsPure): a statement
+ *      in the body — a declaration, an assignment, an `if`, a nested guard, an interpolation that
+ *      writes — re-runs on every read change in the guard's plain group but not in the arm selector,
+ *      so it is refused ("guard body has statements whose re-run frequency differs …").
+ *      ACCEPTED DIFFERENCES of a rewritten markup guard — the rewrite follows §7.4.2 ("the
+ *      interpolation site SHALL re-render whenever any referenced cell changes") as #1397
+ *      implements it, updating each markup binding in place where the guard re-creates its body:
+ *        · an input inside the guard keeps its text and focus when another read in the body
+ *          changes (the guard re-created the input, losing both);
+ *        · after a read in the body throws, the rewrite renders again on the next write (the
+ *          guard's group went blank for good — a runtime effect that throws loses its
+ *          subscriptions);
+ *        · an interpolation is re-evaluated when its own reads change, no longer also when a
+ *          sibling interpolation's read changes (visible only through a call with a side effect).
+ *      Executed in compiler/tests/browser/browser-fix-given-presence-markup-s462.browser.test.js.
+ *   3. A file whose original compile reports an error-severity diagnostic is refused ("file does
+ *      not compile; cannot verify", fix-verify-shared.js): impl#1 emits no artifacts for it, so
+ *      the compare would pass for any rewrite.
  *   When the whole file does not verify, each site is verified alone and the sites that verify
  *   alone are re-verified together; a site that does not is left as written with the reason.
  *   That is how a site impl#1 compiles differently today is refused: the rewrite would change
@@ -66,6 +84,7 @@ import { buildAST } from "../ast-builder.js";
 import { captureTrailingContentWarnings } from "../expression-parser.ts";
 import { compileScrml } from "../api.js";
 import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
+import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
@@ -307,6 +326,9 @@ function planSite(source, site) {
   }
   if (source[head.braceAt] !== "{") {
     return { reason: "the guard's body is not a `{ … }` block (E-SYNTAX-044: a guard body is a block; braces decide what the guard covers) — left for a human" };
+  }
+  if (isMarkupGuard(site) && !markupBodyIsPure(site.node.body)) {
+    return { reason: `${MARKUP_BODY_STATEMENTS} — left as written` };
   }
   const cond = head.names.map((n) => `${n} is given`).join(" && ");
   return {
@@ -551,6 +573,62 @@ function isMarkupGuard(site) {
   return (site.node.body ?? []).some((b) => b && typeof b === "object" && /markup|lift|html-fragment/.test(String(b.kind ?? "")));
 }
 
+export const MARKUP_BODY_STATEMENTS =
+  "guard body has statements whose re-run frequency differs between the plain group and the arm selector";
+
+/** Does this expression write (an assignment, `++` / `--`, `delete`) or `await`, or is it unparsed? */
+function exprWrites(expr) {
+  if (!expr || typeof expr !== "object") return false;
+  const seen = new WeakSet();
+  const stack = [expr];
+  while (stack.length) {
+    const n = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    if (!Array.isArray(n)) {
+      if (n.kind === "assign" || n.kind === "escape-hatch") return true;
+      if (n.kind === "unary" && ["++", "--", "delete", "await"].includes(n.op)) return true;
+    }
+    for (const k of Object.keys(n)) if (k !== "span" && n[k] && typeof n[k] === "object") stack.push(n[k]);
+  }
+  return false;
+}
+
+/**
+ * The body of a markup guard is markup only — html fragments, markup elements, a `lift` of markup,
+ * and `${ … }` interpolations that each hold one expression that writes nothing. Anything else (a
+ * declaration, an assignment, an `if`, a nested guard, an interpolation that writes) is a statement.
+ *
+ * Why it matters (S462 review of s462-fix-rule-followups, repro a1b): the guard's plain lift group
+ * re-runs its WHOLE body on every change of any read in it; the rewrite's arm selector re-runs a
+ * markup binding only when that binding's own reads change (§7.4.2, #1397 LIVE bindings). For pure
+ * markup that is the same DOM; for a statement in the body it is a different number of runs —
+ * `@hits = @hits.concat(…)` ran on every `@n` change before and does not after. The compare below
+ * cuts both group bodies, so it cannot see that; the body is checked here instead (fail closed: an
+ * unknown node kind is a statement).
+ */
+function markupBodyIsPure(body) {
+  const ok = (n) => {
+    if (!n || typeof n !== "object") return true;
+    switch (n.kind) {
+      case "html-fragment":
+      case "string-literal":
+      case "text":
+      case "comment":
+        return true;
+      case "markup":
+        return (n.children ?? []).every(ok);
+      case "lift-expr":
+        return n.expr?.kind === "markup" && ok(n.expr);
+      case "logic":
+        return (n.body ?? []).every((s) => s?.kind === "bare-expr" && s.exprNode && !exprWrites(s.exprNode));
+      default:
+        return false;
+    }
+  };
+  return (body ?? []).every(ok);
+}
+
 /**
  * Compile `before` and `after` with impl#1 at the SAME scratch path (the project beside it) and
  * compare. Returns null when they agree, else a reason. `markupSites` > 0: the subset rewrites
@@ -574,6 +652,7 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
       writeFileSync(out, s);
       if (ap === self) target = out;
     }
+    mirrorSiblingDatabases(filePath, dirname(target));
     const run = (text) => {
       writeFileSync(target, text);
       const r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
@@ -592,7 +671,7 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
       const byPath = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
       outputs.sort(byPath);
       raw.sort(byPath);
-      return { codes, outputs: JSON.stringify(outputs), raw };
+      return { codes, outputs: JSON.stringify(outputs), raw, errs: errorSeverityCodes(r) };
     };
     let a;
     let b;
@@ -600,11 +679,14 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
       console.log = console.warn = console.error = () => {};
       process.stdout.write = process.stderr.write = () => true;
       a = run(before);
-      b = run(after);
+      // A file that does not compile emits nothing to compare: equal codes would verify any
+      // rewrite at all. Refuse it (fix-verify-shared.js).
+      if (a.errs.length === 0) b = run(after);
     } finally {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
+    if (a.errs.length > 0) return doesNotCompileReason(a.errs);
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
     if (a.outputs === b.outputs) return null;

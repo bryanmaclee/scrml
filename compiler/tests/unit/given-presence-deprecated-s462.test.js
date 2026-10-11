@@ -19,7 +19,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
-import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs } from "../../src/commands/fix-given-presence.js";
+import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs, MARKUP_BODY_STATEMENTS } from "../../src/commands/fix-given-presence.js";
 import { fixS66, IMPL1_SAFE_RULES, S66_RULES } from "../../src/commands/fix-s66.js";
 
 let TMP;
@@ -275,6 +275,55 @@ describe("§C: scrml fix `given-presence`", () => {
     expect(r.output).toContain("${ if (@user is given) { <p>${@user.name}</p> } }");
     // Idempotent.
     expect(fixGivenPresence(r.output, { filePath: join(TMP, "c/cell-markup.scrml") }).changed).toBe(false);
+  });
+
+  describe("a markup guard whose body has statements is refused (S462 review, repro a1b)", () => {
+    // The guard's plain group re-runs its whole body on any read change; the arm selector re-runs a
+    // markup binding only on its own reads. A statement in the body would run a different number of
+    // times — a1b's `@hits = @hits.concat(…)` ran on every `@n` change before, and not after.
+    const PRE = `type User:struct = { name: string }
+<user>: User | not = { name: "ada" }
+<n> = 0
+<hits> = []
+`;
+    const shapes = {
+      "a1b (assignment + lift)": `\${ given @user :> { @hits = @hits.concat([@user.name]); lift <p class="who">\${@n}</p> } }`,
+      "a1 (assignment + markup)": `\${ given @user :> { @hits = @hits.concat([@user.name]); <p class="who">\${@n}</p> } }`,
+      "a3 (if-stmt)": `\${ given @user :> { if (@n > 1) { @hits = [] }; <p class="who">\${@user.name} \${@n}</p> } }`,
+      "an interpolation that writes": `\${ given @user :> { <p class="who">\${@user.name} \${@n = 2}</p> } }`,
+    };
+    for (const [label, guard] of Object.entries(shapes)) {
+      test(label, () => {
+        const src = `<program>\n${PRE}<main>\n  <p id="hits">\${@hits.length}</p>\n  <div id="guard">${guard}</div>\n</main>\n</program>\n`;
+        const r = fixGivenPresence(src, { filePath: join(TMP, `c/stmt-${label.split(" ")[0]}.scrml`) });
+        expect(r.changed).toBe(false);
+        expect(r.blockers.length).toBe(1);
+        expect(r.blockers[0].reason).toContain(MARKUP_BODY_STATEMENTS);
+      });
+    }
+  });
+
+  describe("a file that does not compile is not verified vacuously (S462 review, repros a3/a6/a8)", () => {
+    test("a markup guard with a pure body, in a file with an E- error elsewhere", () => {
+      // The read outside the guard is E-TYPE-046 (a member of a `T | not` cell, not narrowed).
+      const src = `<user>: { name: string } | not = { name: "ada" }
+<main>
+    <p id="out">\${@user.name}</p>
+    <div>\${ given @user :> { <p id="n">\${@user.name}</p> } }</div>
+</main>
+`;
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/noncompiling-markup.scrml") });
+      expect(r.changed).toBe(false);
+      expect(r.blockers.length).toBe(1);
+      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+      expect(r.blockers[0].reason).toContain("E-TYPE-046");
+    });
+    test("a logic guard in a file with an E- error", () => {
+      const src = LOGIC("    let x: string | not = \"a\"\n    given x :> { let _a = x }\n    let _b = undeclaredThing");
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/noncompiling-logic.scrml") });
+      expect(r.changed).toBe(false);
+      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+    });
   });
 
   describe("the markup-guard compare fails closed (compareMarkupClientJs)", () => {
