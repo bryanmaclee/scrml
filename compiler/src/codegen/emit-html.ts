@@ -13,6 +13,7 @@ import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
@@ -3917,7 +3918,14 @@ export function generateHtml(
       const _ifGuardAttr = attrs.find((a: any) => a.name === "if");
       const _ifGuardPushed = pushIfGuard(_ifGuardAttr?.value);
       markupParentStack.push(tag);
+      // §4.17 (S462 Q21) — a raw-content body is display text: `<` / `>` are written
+      // encoded (a balanced attribute-less nested <code>/<pre> stays an element).
+      const _rawContent = isRawContentElement(node);
       for (const child of children) {
+        if (_rawContent && child && child.kind === "text") {
+          parts.push(encodeRawContentBody(String(child.value ?? child.text ?? "")));
+          continue;
+        }
         emitNode(child);
       }
       markupParentStack.pop();

@@ -41,6 +41,7 @@ import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
@@ -339,6 +340,18 @@ function nodeToParts(
     // `:`-shorthand body → single expression as text content.
     if (node.closerForm === "shorthand" && typeof node.shorthandBodyRaw === "string") {
       parts.push(`_scrml_esc(${resolveRowRead(node.shorthandBodyRaw, iterVarName)})`);
+    } else if (isRawContentElement(node)) {
+      // §4.17 (S462 Q21) — a raw-content body is display text, written with `<` / `>`
+      // encoded (`&` kept: the author's entities still decode). Its `${` / `@` are
+      // literal characters, not interpolation, so they do not force the fallback.
+      for (const c of Array.isArray(node.children) ? node.children : []) {
+        if (c && c.kind === "text") {
+          const txt = String(c.value ?? c.text ?? "");
+          if (txt.trim()) parts.push(JSON.stringify(encodeRawContentBody(txt)));
+          continue;
+        }
+        for (const p of nodeToParts(c, iterVarName, false, null)) parts.push(p);
+      }
     } else {
       for (const p of childrenToParts(node.children ?? [], iterVarName)) parts.push(p);
     }

@@ -1,0 +1,25 @@
+{
+  "id": "raw-content-component-prop-displays-as-text",
+  "description": "A static string component prop substituted into a raw body (`<pre>${t}</pre>` in the component body) is encoded AFTER substitution: it renders as text and builds no element.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
+  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#shown img",
+        "count": 0
+      },
+      {
+        "selector": "#shown",
+        "text": "<img src=x onerror='window.pwned=5'>"
+      }
+    ]
+  }
+}

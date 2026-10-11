@@ -90,9 +90,9 @@ const VOID_ELEMENTS = new Set([
 // single raw text run terminated only by the matching close tag. Inside,
 // `${...}` / `<TagName>` / `?{}` / `#{}` / `!{}` / `^{}` / `_{...}` and any
 // other scrml-significant token are NOT recognized — they pass through as
-// literal text. HTML entity-escaping of `<` / `>` / `&` for display remains
-// author responsibility (parallel to plain-HTML rules — browsers don't
-// auto-encode inside `<pre>` either).
+// literal text. The body is DISPLAY TEXT (S462 Q21): codegen writes it with
+// `<` / `>` entity-encoded (`&` kept; a bare nested `<code>`/`<pre>` pair stays
+// an element) — raw-content-encode.ts. The splitter itself keeps the text verbatim.
 // ---------------------------------------------------------------------------
 
 const RAW_CONTENT_ELEMENTS = new Set([
@@ -3932,9 +3932,9 @@ export function splitBlocks(filePath, source) {
           // SPEC §4.17 — raw-content element. Inside `<pre>` / `<code>`, scrml
           // tokens (`${...}`, `<TagName>`, `?{}`, `#{}`, `!{}`, `^{}`, `_{...}`)
           // are NOT recognized; the entire body is a single text run terminated
-          // by the matching close tag. HTML entity-escaping of `<` / `>` / `&`
-          // for display remains author responsibility (parallel to plain-HTML
-          // rules — browsers don't auto-encode inside `<pre>` either).
+          // by the matching close tag. The text is kept verbatim here; codegen
+          // writes it as display text, `<` / `>` encoded (S462 Q21,
+          // raw-content-encode.ts).
           //
           // The `!isComp` guard ensures `<Pre>` / `<Code>` (component refs,
           // which lowercase to the same names) take the normal markup path,
@@ -3954,11 +3954,11 @@ export function splitBlocks(filePath, source) {
             step();
           }
           const contentEnd = pos;
-          // S462 (§4.17) — the raw body is copied VERBATIM into the served HTML,
-          // where the browser parses it as ordinary HTML: a literal `<script>` /
-          // `<style>` tag in it builds a live element. scrml does not admit those
-          // elements at any position, raw content included. The scan mirrors the
-          // HTML tokenizer the browser runs over this exact text (element-refusal.ts).
+          // S462 (§4.17) — scrml does not admit `<script>` / `<style>` at any
+          // position, raw content included: any `<script` / `<style` start-tag
+          // text in the body is refused (fail-closed, element-refusal.ts). Since
+          // S462 Q21 codegen encodes the body's `<` / `>`, so such text can no
+          // longer build an element; the refusal is kept as defence in depth.
           if (contentEnd > contentStart) {
             for (const hit of scanRawContentForRefusedTags(source.slice(contentStart, contentEnd))) {
               const hitStart = contentStart + hit.offset;

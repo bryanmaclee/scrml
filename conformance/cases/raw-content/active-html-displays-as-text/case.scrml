@@ -1,0 +1,7 @@
+<program>
+<pre id="onerror"><img src=x onerror="window.pwned=1"></pre>
+<pre id="svg"><svg onload="window.pwned=2"></svg></pre>
+<pre id="srcdoc1"><iframe srcdoc="&lt;script&gt;parent.pwned=3&lt;/script&gt;"></iframe></pre>
+<pre id="srcdoc2"><iframe srcdoc="&lt;img src=x onerror=parent.pwned=4&gt;"></iframe></pre>
+<pre id="link"><link rel="stylesheet" href="data:text/css,body{background:red}"></pre>
+</program>
