@@ -17,7 +17,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { encodeRawContentBody, isRawContentElement, rawContentDomLines } from "../../src/raw-content-encode.ts";
+import { encodeRawContentBody, isRawContentElement, rawContentDomLines, assertRawContentEncoded } from "../../src/raw-content-encode.ts";
 
 function compile(source) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-s462-q21-"));
@@ -94,6 +94,36 @@ describe("encodeRawContentBody — the one rule", () => {
     // nothing to encode or decode — a plain text node
     expect(rawContentDomLines(`let x = \${@y}`, "el", "t")).toEqual([`el.appendChild(_scrml_g.document.createTextNode("let x = \${@y}"));`]);
     expect(rawContentDomLines(`a &amp; b`, "el", "t")).toHaveLength(3);
+  });
+});
+
+describe("assertRawContentEncoded — the DOM sink's compile-time invariant", () => {
+  test("accepts encoded text and the four structural tags", () => {
+    for (const ok of [``, `a &lt; b`, `<code>x</code>`, `<pre><code>&lt;i&gt;</code></pre>`]) {
+      expect(assertRawContentEncoded(ok)).toBe(ok);
+    }
+  });
+  test("refuses any other < or >", () => {
+    for (const bad of [`<img src=x onerror=a()>`, `a < b`, `x>`, `<code class="x">y</code>`, `<CODE>x</CODE>`, `<code >x</code>`, `</script>`]) {
+      expect(() => assertRawContentEncoded(bad), bad).toThrow(/§4\.17 raw content/);
+    }
+  });
+  test("rawContentDomLines asserts on the string it emits (an encoder that leaks `<` stops the compile)", () => {
+    const leaky = (b) => b; // identity: leaves the author's tag text unencoded
+    expect(() => rawContentDomLines(`<img onerror=a()>`, "el", "t", "", leaky)).toThrow(/§4\.17 raw content/);
+    expect(() => rawContentDomLines(`<img onerror=a()>`, "el", "t")).not.toThrow();
+  });
+  test("fuzz: the real encoder never trips the assertion", () => {
+    const alphabet = ["<", ">", "/", "code", "pre", "CODE", "Pre", " ", "\n", "&", "lt;", "=", "\"", "x", "img", "onerror", "<code>", "</code>", "<pre>", "</pre>"];
+    let seed = 0x5462;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    for (let i = 0; i < 20000; i++) {
+      let s = "";
+      const len = 1 + rnd(24);
+      for (let j = 0; j < len; j++) s += alphabet[rnd(alphabet.length)];
+      expect(() => rawContentDomLines(s, "el", "t")).not.toThrow();
+      expect(() => assertRawContentEncoded(encodeRawContentBody(s))).not.toThrow();
+    }
   });
 });
 

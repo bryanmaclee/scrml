@@ -98,24 +98,56 @@ function encodeAngles(s: string): string {
 }
 
 /**
+ * Defence in depth (S462 review of 57d663d22): the invariant every encoded raw body holds.
+ * With the four structural tags `<code>` `</code>` `<pre>` `</pre>` removed, the string
+ * contains no `<` and no `>`, so it can build no element but those two. Checked at compile
+ * time on the exact string a DOM sink is about to hand to `innerHTML`. A violation is a
+ * compiler defect and stops the compile (an exception, never an emitted artifact).
+ * Returns `html` unchanged when the invariant holds.
+ */
+export function assertRawContentEncoded(html: string): string {
+  const rest = html.replace(/<\/?(?:code|pre)>/g, "");
+  const at = rest.search(/[<>]/);
+  if (at >= 0) {
+    throw new Error(
+      `internal compiler error (§4.17 raw content): an encoded raw body still holds ` +
+      `${JSON.stringify(rest[at])} outside the structural <code>/<pre> tags; refusing to emit it ` +
+      `as HTML. Near: ${JSON.stringify(rest.slice(Math.max(0, at - 20), at + 20))}`,
+    );
+  }
+  return html;
+}
+
+/**
  * The DOM-sink form: JS statements that append the raw body to `parentVar`. The encoded
  * body is parsed by an inert `<template>` (its content never runs scripts or loads
  * resources, and the encoded string holds no element but the structural `<code>` /
- * `<pre>`), then the parsed nodes are moved under `parentVar` — so entities display as
- * the characters they name, exactly as in the static HTML. A body with no `<`, `>` or `&`
- * is appended as a plain text node (identical result, no parse).
+ * `<pre>`, asserted at compile time by `assertRawContentEncoded`), then the parsed nodes
+ * are moved under `parentVar`, so entities display as the characters they name, exactly
+ * as in the static HTML. A body with no `<`, `>` or `&` is appended as a plain text node
+ * (identical result, no parse).
+ *
+ * `encode` exists only so a test can prove the assertion is on this path (it passes an
+ * encoder that leaves a `<`); every compiler caller uses the default.
  */
-export function rawContentDomLines(body: string, parentVar: string, tplVarName: string | (() => string), indent = ""): string[] {
+export function rawContentDomLines(
+  body: string,
+  parentVar: string,
+  tplVarName: string | (() => string),
+  indent = "",
+  encode: (body: string) => string = encodeRawContentBody,
+): string[] {
   // No `<`, `>` or `&`: nothing to encode and no entity to decode — a text node is the same.
   if (!/[<>&]/.test(body)) {
     return [`${indent}${parentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(body)}));`];
   }
+  const html = assertRawContentEncoded(encode(body));
   // The variable is named only when it is used (a name factory is not called otherwise, so the
   // caller's counter does not move for a body that needs no parse).
   const tplVar = typeof tplVarName === "function" ? tplVarName() : tplVarName;
   return [
     `${indent}const ${tplVar} = _scrml_g.document.createElement("template");`,
-    `${indent}${tplVar}.innerHTML = ${JSON.stringify(encodeRawContentBody(body))}; // §4.17 raw content: < and > encoded`,
+    `${indent}${tplVar}.innerHTML = ${JSON.stringify(html)}; // §4.17 raw content: < and > encoded`,
     `${indent}${parentVar}.appendChild(${tplVar}.content);`,
   ];
 }
