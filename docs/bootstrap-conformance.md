@@ -7,23 +7,23 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1710 of 1710 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1716 of 1716 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 176 | 10.3% |
+| PASS | 183 | 10.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 59 | 3.5% |
+| FAIL | 58 | 3.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 656 | 38.4% |
-| UNSUPPORTED | 819 | 47.9% |
+| NOT-TWINNED | 656 | 38.2% |
+| UNSUPPORTED | 819 | 47.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 235; of those, 176 hold (74.9%). Runtime half executed on the bootstrap for 63 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 241; of those, 183 hold (75.9%). Runtime half executed on the bootstrap for 63 case(s).
 
-- **Vacuous** passes: 11 of 176 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **165**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 59; the other 30 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 183 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **172**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 58; the other 30 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 578 · parse-reject 241.
@@ -100,7 +100,7 @@ NOT-TWINNED by reason (656 cases; a case counts once per distinct reason):
 | apply | 7 | · | · | · | · | · | 7 | · | · |
 | attr-executable-sink | 21 | 5 | · | · | · | 9 | 7 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
-| block-grammar | 7 | 3 | · | · | · | 1 | 3 | · | · |
+| block-grammar | 13 | 9 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
 | capability | 12 | 7 | · | · | · | · | 5 | · | · |
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
@@ -154,12 +154,12 @@ NOT-TWINNED by reason (656 cases; a case counts once per distinct reason):
 | server-fn | 25 | · | · | 7 | · | 8 | 10 | · | · |
 | sql | 20 | 1 | · | · | · | 9 | 10 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
-| style | 27 | · | · | 1 | · | 24 | 2 | · | · |
+| style | 27 | 1 | · | · | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (59)
+### FAIL (58)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -289,8 +289,6 @@ NOT-TWINNED by reason (656 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-ERROR-002, E-SCOPE-001, E-SQL-004
 - `server-fn/e-route-005-pos` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-ERROR-002, E-SQL-004
-- `style/style-001-style-block-pos` (codes; not in the bootstrap: E-STYLE-001)
-  - missing E-STYLE-001
 - `type-state-codes/e-type-any-forbidden-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `type-state-codes/e-type-any-forbidden-pos` (twin · codes; not in the bootstrap: E-TYPE-ANY-FORBIDDEN)
@@ -305,7 +303,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (176)
+### PASS / CODES-ONLY (183)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -322,6 +320,12 @@ none
 - `block-grammar/block-028-leading-equals-text-pos` — PASS · TWIN
 - `block-grammar/block-029-leading-equals-quote-prose-pos` — PASS · TWIN
 - `block-grammar/block-ctx-001-closed-raw-content-neg` — PASS · TWIN
+- `block-grammar/script-001-bound-src-pos` — PASS
+- `block-grammar/script-001-case-insensitive-pos` — PASS
+- `block-grammar/script-001-interp-body-pos` — PASS
+- `block-grammar/script-001-svg-namespace-pos` — PASS
+- `block-grammar/script-style-exact-name-neg` — PASS
+- `block-grammar/style-001-interp-body-pos` — PASS
 - `capability/all-tokens-valid` — PASS
 - `capability/arg-union-repeated-token` — PASS
 - `capability/argless-caps-empty-allowlist` — PASS
@@ -481,6 +485,7 @@ none
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
+- `style/style-001-style-block-pos` — PASS
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 

@@ -1,0 +1,4 @@
+<program>
+    let <u:string="/evil.js"/>
+    <script src=@u></script>
+</program>
