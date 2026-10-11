@@ -61,7 +61,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports, inheritStdlibReExports } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -2389,6 +2389,11 @@ function _compileScrmlImpl(options = {}) {
       }
     }
 
+    // S462 P0 — a user module's re-export of a stdlib name inherits the stdlib
+    // entry (isAsync, kind, …) now that the stdlib modules are seeded; MOD's
+    // buildExportRegistry ran before they were, so it could not resolve it.
+    inheritStdlibReExports(moduleResult.importGraph, moduleResult.exportRegistry);
+
     // S462 — §21.3 / §41.3.1: a `scrml:` import of a name the stdlib module does
     // not export is E-IMPORT-004, judged against the names this seed just read
     // (one reader). The hint scan of the other stdlib modules runs only when a
@@ -2935,8 +2940,10 @@ function _compileScrmlImpl(options = {}) {
     for (const exp of depGraphEntry.exports) {
       if (exp.name !== typeName) continue;
       if (!exp.reExportSource) continue;
-      // Recurse: chase the chain.
-      const found = resolveTypeThroughReExport(exp.reExportSource, typeName, visited);
+      // Recurse: chase the chain by the SOURCE-side name — `export { AuthError
+      // as AE } from "…"` exports `AE` here but `AuthError` there (S462 P0
+      // audit: the exported name found nothing, or an unrelated `AE`).
+      const found = resolveTypeThroughReExport(exp.reExportSource, exp.localName ?? typeName, visited);
       if (found) return found;
     }
 
@@ -3051,11 +3058,10 @@ function _compileScrmlImpl(options = {}) {
     if (!depGraphEntry || !depGraphEntry.exports) return null;
     for (const exp of depGraphEntry.exports) {
       if (exp.name !== fnName || !exp.reExportSource) continue;
-      // A RENAMED re-export (`export { yOf as g } from …`) is refused, not
-      // chased: chasing the exported name would find an unrelated `g` in the
-      // source file. No signature → the call's arguments stay unstamped.
-      if (typeof exp.localName === 'string' && exp.localName !== fnName) return null;
-      const found = resolveFnThroughReExport(exp.reExportSource, fnName, visited);
+      // A RENAMED re-export (`export { yOf as g } from …`) is chased by the
+      // SOURCE-side name (`yOf`): the exported name `g` would find nothing, or
+      // an unrelated `g`, in the source file (S462 P0 audit).
+      const found = resolveFnThroughReExport(exp.reExportSource, exp.localName ?? fnName, visited);
       if (found) return found;
     }
     return null;

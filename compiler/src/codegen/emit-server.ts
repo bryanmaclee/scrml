@@ -50,7 +50,7 @@ import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRela
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
@@ -1101,8 +1101,7 @@ function emitModuleValueExportLines(
       asyncFnNames,
       isStdlibAsync: (_veReg && _veReg.size > 0)
         ? (n: string): boolean => {
-            const src = _veCalleeMap.get(n);
-            return !!src && isPromiseReturningStdlibFn(n, src, _veReg);
+            return isPromiseReturningImportedCallee(n, _veCalleeMap, _veReg);
           }
         : null,
     };
@@ -4034,9 +4033,7 @@ export function generateServerJs(
   // text, so emit-expr's structured `syncCallSink` never records them).
   const _isAsyncStdlibName = (name: string): boolean => {
     if (!_asyncExportRegistry) return false;
-    const _src = _asyncCalleeMap.get(name);
-    if (!_src) return false;
-    return isPromiseReturningStdlibFn(name, _src, _asyncExportRegistry);
+    return isPromiseReturningImportedCallee(name, _asyncCalleeMap, _asyncExportRegistry);
   };
   // s440-sync-callback-async-helper — resolve every helper function declared INSIDE
   // a server fn against the SAME facts emit-expr uses here (peer server fns + the

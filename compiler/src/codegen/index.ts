@@ -975,13 +975,18 @@ function asyncImportedLocalsOf(
     const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue;
     const asyncNames = asyncExportNamesOf(srcFile, files, memo, exportRegistry);
-    if (asyncNames.size === 0) continue;
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
     // scrml libs export NAMED bindings only), so only the named arm binds an
     // async imported fn. Await-color each named local whose EXPORTED name is
-    // async in the resolved source module.
+    // async in the resolved source module — declared there, or (S462 P0) a
+    // re-export of a Promise-returning stdlib function (`export { verifyPassword
+    // as vp } from "scrml:auth"`; the registry entry carries `stdlibOrigin`).
     for (const spec of (imp.specifiers ?? [])) {
-      if (spec && asyncNames.has(spec.imported)) result.add(spec.local);
+      if (!spec || typeof spec.imported !== "string" || typeof spec.local !== "string") continue;
+      if (asyncNames.has(spec.imported) ||
+          (exportRegistry && isPromiseReturningStdlibFn(spec.imported, absSource, exportRegistry))) {
+        result.add(spec.local);
+      }
     }
   }
   return result;
