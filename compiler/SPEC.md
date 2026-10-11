@@ -48612,10 +48612,10 @@ U+0000 is read as U+FFFD; CRLF and CR+LF line ends read as LF.
 | Code | Severity | Fires |
 |---|---|---|
 | `W-MD-*` (the 20 codes of §67.3, plus `W-MD-DEPTH-LIMIT`, `W-MD-SCAN-LIMIT`) | Warning | on a static body, at the construct's position (offset, line, column in the body, mapped to the source by the compiler) |
-| `E-MD-INDENT-MIXED` | Error | §67.2 dedent: the removed prefixes differ |
-| `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent |
-| `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body |
-| `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together |
+| `E-MD-INDENT-MIXED` | Error | §67.2 dedent: the removed prefixes differ (Nominal — lands with the phase-2 impl) |
+| `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent (Nominal — lands with the phase-2 impl) |
+| `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body (Nominal — lands with the phase-2 impl) |
+| `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together (Nominal — lands with the phase-3 impl) |
 
 The W-MD codes are produced by `scrml:md` (data: `MdDoc.diags`) and surfaced by the compiler for a
 static body in phase 2; the E-MD codes are compiler checks, phase 2 / phase 3. Every message names the
