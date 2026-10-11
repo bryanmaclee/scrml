@@ -68,6 +68,14 @@
 - e0be779aa — multi-batch: the last batch returned the split's FIRST cell
   (returnVarName) and the client set it to `undefined` after batch 1.
 
+- 11e7540c1 — merge origin/main (Q20 #1401, Q21 #1402): code auto-merged;
+  generated-doc hunks → main's side, regenerated.
+- 47d9c233e — integration test hands handlers a duck-typed request
+  (happy-dom globals from an earlier file drop `Cookie`).
+- 719e49616 — merge origin/main (<md> phase 1 #1403): chunk set = +md
+  −auth −crypto (42); count pins + template interpolation resolved by hand.
+  Gates re-run on this tree: all green incl. browser-baseline --check PASS.
+
 ## Corpus differential (final, head = e0be779aa vs base a9aa81eff)
 2919 sources (samples, examples, conformance, stdlib, benchmarks,
 scrml-support gauntlet-r25, ../giti, ../flogence). 20 server functions changed
