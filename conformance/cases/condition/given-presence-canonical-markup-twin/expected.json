@@ -1,0 +1,18 @@
+{
+  "id": "condition-given-presence-canonical-markup-twin",
+  "description": "§42.4 / §63.5 — the canonical twin of condition/given-presence-deprecated-markup: the markup guard written as the `scrml fix` given-presence rewrite, `${ if (@user is given) { <p id=\"name\">${@user.name}</p> } }`. It renders \"ada\" while @user is present and re-renders the FRESH value when the present value changes (click #go: \"ada\" → \"bob\", @user stays present) — the SAME DOM and state as the deprecated form, with no W-GIVEN-PRESENCE-DEPRECATED. The pair is the §63.5 runtime-identity assertion for the markup form.",
+  "language-version": "1.0",
+  "spec": "§42.4",
+  "rationale": "§42.2.3 (S462) canonical replacement table: \"`${ given @u :> { <p>…</p> } }` | `${ if (@u is given) { <p>…</p> } }`\" — \"Each canonical form narrows what the deprecated form narrows\". §7.4.2: \"When `expr` references one or more reactive cells (`@x` access), the interpolation site SHALL re-render whenever any referenced cell changes\". Before #1397 the `if` form kept the stale \"ada\" (g-impl1-markup-if-branch-memo-stale-render-s462, resolved). Provenance: ruling:user-voice-scrml.md S462 \"a, go\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-GIVEN-PRESENCE-DEPRECATED"],
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "user": { "name": "bob" } },
+    "domAnchored": [
+      { "selector": "#name", "text": "bob" },
+      { "selector": "#name", "count": 1 }
+    ]
+  }
+}
