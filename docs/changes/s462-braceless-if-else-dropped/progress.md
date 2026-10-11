@@ -49,3 +49,27 @@
       browser-baseline PASS 48 (first try) · s34-census --check-new --base 37e50e881 PASS ·
       host-global-scan PASS · facts/state/spec-index/bootstrap-conformance/severity --check PASS ·
       snippet-gate PASS · corpus-compile-floor PASS · conflict-marker PASS · types-gate PASS.
+
+## Review round 1 (S239 verdict FIX on 113b123a2)
+- [x] merged origin/main 1c1e9eee5 (a3d9e33f8); FACTS + bootstrap-conformance regenerated, master-list = origin/main.
+- [x] MUST-FIX regression (if/else handler + template `${@n}`): fixed by option (b) at the root — the
+      STRUCTURAL template emitter (expression-parser records quasi source + parsed `${…}` exprs,
+      non-enumerable; emit-expr `emitTemplateLitStructured`). Client: templates whose source has `@`;
+      server: structural first, scanner fallback. S437 r5 bar executed (regex/comment quotes,
+      nested `\${`/`` \` `` escapes, multi-line, nested arrow templates): all equal base.
+      Closes carried HIGH g-client-template-interpolation-lowering-needs-a-structural-emitter:
+      5 xfail cases XPASS → marks removed; i81 F2 test updated (value attr now binds);
+      meta-type-registry-001 now compiles (its E-META-001 was this). (4b14e4fcb)
+- [x] handler reroute extended to ANY nested if-with-else (`{ if (@c) if (@d) a else b }`,
+      `{ while (…) if (@c) a else b }`); pins split so the bootstrap grades the nested one (PASS).
+- [x] value-position `for … else` → own message; for/lift control test narrowed (parse-only);
+      for/lift else-body drop filed HIGH (pre-existing; not small: no general for/lift emitter consumes it).
+- [x] gaps filed (see known-gaps); `o.else()` NOT reproduced (member `.else` / `?.else` / `.else()` in
+      if-arms, handlers and returns all compile and run identically to base).
+- [x] corpus differential round 2 (base archive 1c1e9eee5, head archive 4b14e4fcb, 2933 sources each,
+      ext giti/flogence/gauntlet-r25): 0 newly failing · 10 newly passing (s462 cases, the 5 ex-xfail
+      template cases, gauntlet-s20-meta/meta-type-registry-001) · 218 content diffs = 210 path-only + the
+      3 known handler restructures + s437-r5 value-attr (now bound) + floStyle path-only chunk hashes;
+      0 syntax delta. Server-template structural switch: byte-identical after path normalization.
+      flogence app.scrml W-AUTH-001 appeared/disappeared between captures — not reproducible
+      (14 on both sides compiled directly): capture noise under load.
