@@ -9,8 +9,15 @@
 // compiler/tests/unit/stdlib-shim-export-parity.test.js):
 //   - KvError                          — variant constructor object (mirrors enum)
 //   - createStore / createSessionStore / createCounter — see ../store.js
+//   - get / set / del / has / keys / clear / close / purgeExpired,
+//     increment / decrement / count / resetCount — the S462 free functions
+//     over a KvStore struct (see ../store.js)
 
-export { createStore, createSessionStore, createCounter } from "../store.js";
+export {
+  createStore, createSessionStore, createCounter,
+  get, set, del, has, keys, clear, close, purgeExpired,
+  increment, decrement, count, resetCount,
+} from "../store.js";
 
 // KvError — mirrors `export type KvError:enum = { ParseFailed(message: string) }`
 // in the compiler's enum shape (payload variant → { variant, data }).

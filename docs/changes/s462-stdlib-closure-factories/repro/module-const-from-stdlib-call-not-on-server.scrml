@@ -1,0 +1,12 @@
+<program>
+import { createRateLimiter } from 'scrml:auth'
+
+const plain = { max: 5 }
+const limiter = createRateLimiter({ windowMs: 60000, max: 5 })
+
+server function guarded(email) {
+    return plain.max + limiter.max
+}
+
+<p>${guarded("a@b.c")}</p>
+</program>

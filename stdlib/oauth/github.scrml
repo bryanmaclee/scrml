@@ -39,7 +39,7 @@ ${
      *   clientSecret,    // required (GitHub OAuth Apps are confidential clients)
      *   redirectUri,     // required — must match the registered callback URL
      *   scopes?,         // default: ["read:user","user:email"]
-     *   storage,         // required — put/get/del adapter
+     *   storage,         // required — an OAuthStore tag (e.g. memoryAdapter())
      *   allowSignup?,    // optional — "true" | "false" (string per docs)
      *   login?,          // optional — prefill username
      * }
