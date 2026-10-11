@@ -16583,9 +16583,14 @@ function annotateNodes(
           const variantCtxEnum = !(n as ASTNodeLike).typeAnnotation
             ? qualifiedVariantInitEnum((n as any).initExpr, typeRegistry, scopeChain) ?? undefined
             : undefined;
-          const vc = variantCtxEnum ? { variantCtxEnum } : {};
-          scopeChain.bind(atName, { kind: "reactive", resolvedType: tAsIs(), isServer: false, ...vc });
-          scopeChain.bind(cellName, { kind: "reactive", resolvedType: tAsIs(), isServer: false, ...vc });
+          scopeChain.bind(atName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
+          scopeChain.bind(cellName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
+          if (variantCtxEnum) {
+            for (const nm of [atName, cellName]) {
+              const entry = scopeChain.lookup(nm) as ScopeEntry | undefined;
+              if (entry) entry.variantCtxEnum = variantCtxEnum;
+            }
+          }
         }
       }
       // Recurse into container blocks that wrap top-level declarations.
