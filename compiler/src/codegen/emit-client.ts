@@ -102,6 +102,11 @@ const POST_EMIT_HELPER_CHUNK_GATES: ReadonlyArray<readonly [string, string]> = [
   // lifting over its payload binding. The driver's definition carries this
   // call-form token, so it gates exactly the files that emit the drivers.
   ["_scrml_lift_scoped_run(", "deep_reactive"],
+  // g-impl1-markup-if-branch-memo-stale-render-s462 — the drivers of a
+  // `${ if … }` lift group construct effects, and a LIVE arm's keyed list makes
+  // its first render through `_scrml_untracked` (both `deep_reactive`); the
+  // group driver's definition carries this token.
+  ["_scrml_lift_if_group(", "deep_reactive"],
   // g-arm-directive-binding-reads-arm-name — an arm-bound logic factory
   // (emit-event-wiring `armLogicFactoryName`) applies its binding under
   // `_scrml_effect`. The binding lives in a deferred arm body the pre-emit

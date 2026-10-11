@@ -1,0 +1,22 @@
+// §7.4.2 / §17.1 (S462) — a markup `${ if … }` whose taken arm does not change
+// still re-renders the reads inside that arm, and an `else if` / `else` chain
+// selects every arm (g-impl1-markup-if-branch-memo-stale-render-s462).
+<shown> = true
+<n> = 0
+<mode> = "a"
+
+<main>
+    <button id="inc" onclick={ @n = @n + 1 }>inc</button>
+    <button id="toB" onclick={ @mode = "b" }>b</button>
+    <button id="toC" onclick={ @mode = "c" }>c</button>
+    <div id="host">${ if (@shown) { lift <p id="n">${@n}</p> } }</div>
+    <div id="chain">${
+        if (@mode == "a") {
+            lift <p id="pa">a-${@n}</p>
+        } else if (@mode == "b") {
+            lift <p id="pb">b-${@n}</p>
+        } else {
+            lift <p id="pc">c-${@n}</p>
+        }
+    }</div>
+</main>
