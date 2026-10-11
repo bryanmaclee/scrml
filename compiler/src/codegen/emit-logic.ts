@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
@@ -5252,7 +5252,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
  */
 function _emitIfStmtWithOpts(node: any, opts: EmitLogicOpts): string {
   const lines: string[] = [];
-  const ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _makeExprCtx(opts));
+  const ifCond = emitConditionField(node.condExpr, node.condition ?? node.test ?? "true", _makeExprCtx(opts));
   lines.push(`if (${collectIfChainCond(node, ifCond)}) {`);
   // S415 — this is the tilde/continueBehavior route into if/else, and it bypasses
   // `emitIfStmt` entirely, so it needs the same per-limb block scoping: each limb is
@@ -5421,7 +5421,7 @@ function _emitWhileStmtWithTilde(node: any, opts: EmitLogicOpts): string {
     tildeCtx.mode = "array";
   }
 
-  const condition = emitExprField(node.condExpr, node.condition ?? "true", _makeExprCtx(opts));
+  const condition = emitConditionField(node.condExpr, node.condition ?? "true", _makeExprCtx(opts));
   lines.push(`while (${condition}) {`);
 
   const body: any[] = node.body ?? [];
@@ -5543,7 +5543,7 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
     // The nested else-if condition must inherit the SAME opts as the body
     // (`bodyOpts`) so a `<#id>` request ref / `@m[k]` map read / engine read in
     // the condition lowers correctly — `_makeExprCtx({})` dropped them all.
-    const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
+    const nestedCond = emitConditionField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
     const nestedConsequent: any[] = nestedIf.consequent ?? [];
     // E-LIFT-002: multiple lifts on same path in a value-lift arm
     refuseExtraArmLifts(nestedConsequent, lines);
@@ -5700,7 +5700,7 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
   const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
 
   // Emit the if condition
-  const condition = emitExprField(ifExpr.condExpr, (ifExpr.condition ?? "true").trim(), _makeExprCtx(opts));
+  const condition = emitConditionField(ifExpr.condExpr, (ifExpr.condition ?? "true").trim(), _makeExprCtx(opts));
 
   // E-LIFT-002: multiple lifts on same linear path in a value-lift arm
   const consequent: any[] = ifExpr.consequent ?? [];
