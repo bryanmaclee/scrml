@@ -1,0 +1,16 @@
+{
+  "id": "md-in-phrasing-refused",
+  "description": "An `<md>` whose parent is phrasing content (`<p>`) is E-MD-IN-PHRASING.",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "PA reading, s462-md-phase1 (§67.2 Placement)",
+  "rationale": "§67.2: an `<md>` whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …) is E-MD-IN-PHRASING — block content in a phrasing parent is reparented by the browser's HTML parser.",
+  "expect": {
+    "codes": [
+      "E-MD-IN-PHRASING"
+    ],
+    "severity": {
+      "E-MD-IN-PHRASING": "error"
+    }
+  }
+}

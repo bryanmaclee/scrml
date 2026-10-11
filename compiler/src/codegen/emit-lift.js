@@ -2086,6 +2086,12 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       if (!child) continue;
 
       if (child.kind === "text") {
+        // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: its plain text as a text
+        // node, never parsed and never interpolated (whitespace kept — a soft break is text).
+        if (typeof child._mdText === "string") {
+          if (child._mdText !== "") lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(child._mdText)}));`);
+          continue;
+        }
         const text = child.value ?? child.text ?? "";
         // §4.17 (S462 Q21) — a raw-content body is DISPLAY TEXT: never interpolated,
         // `<` / `>` encoded, parsed through an inert <template> so the author's entities

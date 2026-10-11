@@ -1,0 +1,14 @@
+<program>
+<rows> = [{ id: 1, name: "**a**" }, { id: 2, name: "b" }]
+<ul id="list">
+    <each in=@rows key=@.id>
+        <li>
+            <md>
+                **Row** ${@.name} wrapped
+                here
+            </md>
+        </li>
+    </each>
+</ul>
+<button id="add" onclick=${ @rows = [...@rows, { id: 3, name: "c" }] }>add</button>
+</program>

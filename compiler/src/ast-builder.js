@@ -114,6 +114,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
+import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement } from "./md-lower.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -1643,6 +1644,75 @@ function spliceAttrsIntoBodyRoot(bodyRootRaw, outerAttrSource) {
  * Mutates blocks in place (acceptable because they are freshly produced by
  * splitBlocks and not shared with anything else).
  */
+/**
+ * SPEC §67.2 / §67.4 (S462 md phase 2) — the AST node for one TEXT slot of a static `<md>`
+ * body, built only after `scrml:md` has placed the slot outside code. The slot's exact source
+ * `${…}` is read exactly as a `${…}` in a markup body is: block-split inside a synthetic
+ * `<span>` (so nested markup in the expression splits as it always does) and built with
+ * `buildBlock` — the ordinary reactive, text-only interpolation (§7.4.2). Every span is moved
+ * to the slot's real file position, so a diagnostic on the slot names the right line.
+ */
+function buildMdSlotNode(source, absStart, line, col, filePath, counter, errors) {
+  const PRE = "<span>";
+  const synth = PRE + source + "</span>";
+  let bs;
+  try { bs = _splitBlocksForP2Form1(filePath, synth); } catch { return null; }
+  const host = (bs && Array.isArray(bs.blocks) ? bs.blocks : []).find((b) => b && b.type === "markup" && b.name === "span");
+  if (!host) return null;
+  const local = (off) => {
+    const k = Math.max(0, Math.min(source.length, off - PRE.length));
+    const lead = source.slice(0, k);
+    const nl = lead.lastIndexOf("\n");
+    const lines = nl < 0 ? 0 : (lead.match(/\n/g) || []).length;
+    return { start: absStart + k, line: line + lines, col: nl < 0 ? col + k : k - nl };
+  };
+  const rebase = (b) => {
+    if (!b || typeof b !== "object") return;
+    if (b.span && typeof b.span.start === "number") {
+      const s = local(b.span.start);
+      b.span = { ...b.span, start: s.start, end: local(b.span.end).start, line: s.line, col: s.col };
+    }
+    for (const c of b.children ?? []) rebase(c);
+  };
+  for (const c of host.children ?? []) rebase(c);
+  for (const e of bs.errors ?? []) {
+    const sp = e && e.bsSpan;
+    const s = sp && typeof sp.start === "number" ? local(sp.start) : { start: absStart, line, col };
+    errors.push(new TABError(e.code, String(e.message ?? "").replace(/ \(line \d+, col \d+\)$/, ""),
+      { file: filePath, start: s.start, end: s.start + 1, line: s.line, col: s.col }));
+  }
+  const logic = (host.children ?? []).find((c) => c && c.type === "logic");
+  if (!logic) return null;
+  return buildBlock(logic, filePath, "markup", counter, errors);
+}
+
+/**
+ * SPEC §67.2 (S462 md phase 2) — a component body that holds an `<md>` keeps its markup AS
+ * WRITTEN. A component-def's `raw` is otherwise rebuilt from LOGIC tokens (whitespace joined,
+ * `#` runs and blank lines lost), which is harmless for markup but destroys markdown:
+ * indentation, blank lines and `#` are its structure. The enclosing logic block's `raw` IS the
+ * source text, so the expression's own extent (its first token's start to its last token's end)
+ * is sliced from it. The component expander keeps an `<md>` element opaque through its
+ * normalization (component-expander.ts `maskMdElements`).
+ * Returns null — the tokenized raw is used, as before — when there is no `<md>`, or when the
+ * slice is not the expression (a `<#name>` pre-pass moved the token offsets).
+ */
+function mdComponentVerbatimRaw(tokenizedRaw, firstTok, exprSpan, parentBlock) {
+  if (typeof tokenizedRaw !== "string" || !/<\s*m[dD]\b/.test(tokenizedRaw)) return null;
+  if (!parentBlock || typeof parentBlock.raw !== "string" || !parentBlock.span) return null;
+  const at = firstTok && firstTok.span && typeof firstTok.span.start === "number" ? firstTok.span.start : -1;
+  const end = exprSpan && typeof exprSpan.end === "number" ? exprSpan.end : -1;
+  if (at < 0 || end <= at) return null;
+  const base = parentBlock.span.start;
+  const slice = parentBlock.raw.slice(at - base, end - base);
+  if (!slice.startsWith("<") || !sourceHasMdElement(slice)) return null;
+  // the same non-whitespace characters as the tokenized text, `#` aside (the logic tokenizer
+  // drops `#` runs in markup text) — otherwise the offsets do not describe this expression
+  const sig = (t) => t.replace(/[\s#]/g, "");
+  if (sig(slice).length < sig(tokenizedRaw).length * 0.9) return null;
+  return slice;
+}
+
 function shiftBlockSpans(blocks, delta, lineDelta = 0) {
   for (const b of blocks) {
     if (b && b.span) {
@@ -15582,6 +15652,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
+        const _exprFirstTok = peek();
         const { expr, exprSource, span } = collectExpr();
         // Check if this is a component definition. Per SPEC §(component defs),
         // a component-def requires BOTH an uppercase-initial name AND markup RHS
@@ -15598,7 +15669,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             name,
             // S458 — the markup with its string literals AS WRITTEN (escapes kept); the
             // expander re-parses this text, so a cooked `'it\'s'` / `\d` would change it.
-            raw: exprSource ?? expr,
+            raw: mdComponentVerbatimRaw(exprSource ?? expr, _exprFirstTok, span, parentBlock) ?? (exprSource ?? expr),
             span: spanOf(startTok, peek()),
           });
         } else {
@@ -19233,7 +19304,15 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // recovers as `absent`, so in an `<each>` row / engine arm / `<match>` arm a
 // DISCARDED diagnostic would leave the attribute — a handler included —
 // silently missing.
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR"]);
+// The `<md>` codes (S462 md phase 2, SPEC §67.11) qualify too: they are decided only by the
+// TAB lowering (md-lower.ts) — nothing downstream re-reads an `<md>` body — so an `<md>` in an
+// `<each>` row would otherwise lose its errors and lints.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR",
+  "E-MD-INTERP-UNCLOSED", "E-MD-INDENT-MIXED", "E-MD-IN-PHRASING", "E-MD-URL-SCHEME", "E-MD-OF-BODY", "E-MD-OF-NOMINAL"]);
+/** A `W-MD-*` lint from the md reader (§67.3) — forwarded out of a discarded sub-build like the codes above. */
+function isForwardedMdLint(code) {
+  return typeof code === "string" && code.startsWith("W-MD-");
+}
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -19243,7 +19322,7 @@ const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-M
  */
 function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
   for (const err of subErrors) {
-    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || err.fromHandlerStatementList === true)) continue;
+    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || isForwardedMdLint(err.code) || err.fromHandlerStatementList === true)) continue;
     if (!deltaOffset || !err.tabSpan) {
       errors.push(err);
       continue;
@@ -19259,6 +19338,7 @@ function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
     }
     const rebased = new TABError(err.code, err.baseMessage, holder.span);
     rebased.baseMessage = err.baseMessage;
+    if (err.severity) rebased.severity = err.severity;
     if (err.fromHandlerStatementList === true) rebased.fromHandlerStatementList = true;
     errors.push(rebased);
   }
@@ -21537,6 +21617,22 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // S437 — §5.2.3 statement-list view of multi-statement handler values.
       attachHandlerStatementLists(attrs, block, filePath, counter, errors);
 
+      // SPEC §67 (S462 md phase 2) — a static `<md>`: its body is markdown, read at compile
+      // time by the ONE md reader (`scrml:md`) and lowered to the §67.6 closed element set as
+      // ordinary markup nodes (md-lower.ts). `<md of=…/>` (phase 3) is diagnosed there too.
+      // The tag is `md` / `mD` — lowercase-first, so never a component reference (the block
+      // splitter's rule: a component name is uppercase-first).
+      if (typeof block.name === "string" && /^m[dD]$/.test(block.name)) {
+        return lowerMdBlock(block, attrs, span, {
+          filePath,
+          counter,
+          errors,
+          makeError: (code, message, sp) => new TABError(code, message, sp),
+          buildSlotNode: (source, absStart, line, col) => buildMdSlotNode(source, absStart, line, col, filePath, counter, errors),
+          parseExpr: (text, absStart) => safeParseExprToNodeGlobal(text, filePath, absStart, errors),
+        });
+      }
+
       // ----------------------------------------------------------------
       // A1b B18 fire-site #1 — multi-statement event-handler validation
       // (E-MULTI-STATEMENT-HANDLER) per SPEC §5.2.3 + §34 row 14260.
@@ -21675,6 +21771,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const children = block.children.map(child =>
         buildBlock(child, filePath, "markup", counter, errors)
       ).filter(Boolean);
+      // SPEC §67.2 — E-MD-IN-PHRASING: an `<md>` (block output) directly inside phrasing content.
+      // (`isMdPhrasingParent` reads the tag syntactically: an uppercase-first component is never a parent.)
+      checkMdInPhrasing(block.name, children, { errors, makeError: (code, message, sp) => new TABError(code, message, sp) });
 
       // S159 — SPEC §4.14 HTML-element `:`-shorthand content-model rule
       // (S154 design ruling (a)). For a NON-VOID lowercase HTML element that
@@ -24064,6 +24163,10 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+
+  // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide: deduped against every
+  // author `id=` in the file and every earlier `<md>` heading.
+  assignMdHeadingIds(nodes);
 
   // §17.4a / §17.2: reject an `else` empty-state block on a `for` loop that has
   // no `lift` in its body (E-CTRL-010).

@@ -64,6 +64,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
+import { sourceHasMdElement } from "../md-lower.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
 // (called 2–3× per match block) does not re-walk the whole AST each time.
@@ -929,7 +930,10 @@ function buildMatchArms(
         // arm-body branch below.
         try {
           const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-          const synthResult = nativeParseFile(synthLabel, trimmed);
+          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
+          const synthResult = sourceHasMdElement(trimmed)
+            ? buildAST(splitBlocks(synthLabel, trimmed))
+            : nativeParseFile(synthLabel, trimmed);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
           }
@@ -988,7 +992,8 @@ function buildMatchArms(
         // that generateHtml renders as literal text + leaks `${@.}`). Cheap
         // pre-check on the raw text gates the heavier re-parse to the each case
         // only — every other arm body keeps the M6.3 native-parser route.
-        if (/<\s*each\b/.test(synthSrc)) {
+        // `<md>` (SPEC §67) takes the same live route: the native parser has no `<md>` production.
+        if (/<\s*each\b/.test(synthSrc) || sourceHasMdElement(synthSrc)) {
           const bsOutput = splitBlocks(synthLabel, synthSrc);
           const tabResult = buildAST(bsOutput);
           const tabNodes = tabResult?.ast?.nodes;

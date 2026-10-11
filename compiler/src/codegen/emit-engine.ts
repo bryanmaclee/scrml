@@ -2534,7 +2534,19 @@ function buildEngineArms(
         // match-arm `looksLikeMarkupStart` branch (emit-match.ts:805).
         body = [];
         try {
-          const synthResult = nativeParseFile(synthLabel, trimmed);
+          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { sourceHasMdElement } = require("../md-lower.ts") as { sourceHasMdElement: (s: string) => boolean };
+          let synthResult: any;
+          if (sourceHasMdElement(trimmed)) {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { splitBlocks } = require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => any };
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { buildAST } = require("../ast-builder.js") as { buildAST: (bs: any) => any };
+            synthResult = buildAST(splitBlocks(synthLabel, trimmed));
+          } else {
+            synthResult = nativeParseFile(synthLabel, trimmed);
+          }
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
           }

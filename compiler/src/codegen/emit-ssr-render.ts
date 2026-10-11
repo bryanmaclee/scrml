@@ -297,6 +297,9 @@ function nodeToParts(
   // non-empty literal must be plain text (interpolations are separate logic
   // nodes), so a stray `@`/`${` means an unhandled shape → fall back.
   if (node.kind === "text") {
+    // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: its plain text, HTML-escaped
+    // (never an interpolation; whitespace kept — a soft break is text).
+    if (typeof node._mdText === "string") return node._mdText === "" ? [] : [JSON.stringify(escapeHtmlText(node._mdText))];
     const txt = String(node.value ?? node.text ?? "");
     if (!txt.trim()) return [];
     if (txt.includes("${") || txt.includes("@")) {
@@ -346,6 +349,7 @@ function nodeToParts(
       // literal characters, not interpolation, so they do not force the fallback.
       for (const c of Array.isArray(node.children) ? node.children : []) {
         if (c && c.kind === "text") {
+          if (typeof c._mdText === "string") { if (c._mdText !== "") parts.push(JSON.stringify(escapeHtmlText(c._mdText))); continue; }
           const txt = String(c.value ?? c.text ?? "");
           if (txt.trim()) parts.push(JSON.stringify(encodeRawContentBody(txt)));
           continue;
