@@ -16,9 +16,6 @@
         "codes": [
           "emitted:E-DG-002=1",
           "emitted:E-MARKUP-001=1",
-          "emitted:E-MU-001=1",
-          "emitted:E-SCOPE-001=2",
-          "emitted:E-STMT-MISSING-SEMICOLON=1",
           "missing:E-LIFECYCLE-016"
         ]
       }

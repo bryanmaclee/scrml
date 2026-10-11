@@ -5415,6 +5415,150 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return i < tokens.length ? tokens[i++] : peek();
   }
 
+  // ---------------------------------------------------------------------------
+  // S462 (s462-given-body-text-as-code) — markup TEXT in a logic body is text.
+  //
+  // §4.18.1: a plain-markup element body (`<p>`, `<li>`, …) is a FREE-TEXT body —
+  // "In a free-text body a bare run is **display text**, literal by default, left
+  // only by the exit sequences of §4.18.1b" — and "Body modes nest. A plain-markup
+  // element opened *inside* a code-default body … opens a **free-text-mode** body".
+  //
+  // A markup element written at STATEMENT position in a logic body (`${ given @u :>
+  // { <p>${@u.name} - ${@n}</p> } }`, `${ if (c) { <p>…</p> } }`) reaches this parser
+  // as tokens, and each `${…}` inside it is a BLOCK_REF. The default statement path
+  // collects the opener up to the first BLOCK_REF as an `html-fragment`, the BLOCK_REF
+  // becomes a `logic` node — and, before this fix, the element's TEXT between two
+  // interpolations was parsed as the next STATEMENT: ` - ` lowered to `-;`
+  // (E-CODEGEN-INVALID-LOGIC), and `track(@n)` written as display text was CALLED.
+  //
+  // The fix: when a statement begins with a markup element that holds a BLOCK_REF,
+  // find the element's end (`scanMarkupElementEnd`) and, until the cursor reaches
+  // it, read every non-BLOCK_REF run as an `html-fragment` (`collectMarkupTextRun`)
+  // instead of as a statement. The tree keeps its `[html-fragment, logic, …]` shape
+  // (the implied-lift desugar recovers the element from SOURCE and now succeeds;
+  // logic context drops html-fragments, so nothing executes).
+  // ---------------------------------------------------------------------------
+  let _markupTextEnd = -1;
+
+  /**
+   * The token index just past the markup element that opens at token `start`
+   * (`<` followed by a tag name), or -1 when the element does not close cleanly
+   * within the token stream — the caller then keeps the pre-existing parse.
+   * Mirrors parseLiftTag's element grammar (explicit `</tag>` and inferred `</>`
+   * closers, `/>` self-close, HTML void elements) without its side effects.
+   * A nested opener counts only when the name is source-adjacent to its `<`
+   * (§4.18.1b exit (3): `<` FOLLOWED BY a letter), so text such as `5 < 7` or
+   * `a < b` stays text.
+   */
+  function scanMarkupElementEnd(start) {
+    const at = (k) => (k < tokens.length ? tokens[k] : null);
+    const isPunct = (t, text) => !!t && t.kind === "PUNCT" && t.text === text;
+    const isName = (t) => !!t && (t.kind === "IDENT" || t.kind === "KEYWORD");
+    const adjacent = (a, b) => !!(a && b && a.span && b.span && a.span.end === b.span.start);
+    const stack = [];
+    // Read one opener at `k` (`<` name …). Returns the index after it, or -1.
+    const readOpener = (k) => {
+      const name = at(k + 1).text;
+      k += 2;
+      while (k < tokens.length) {
+        const t = at(k);
+        if (!t || t.kind === "EOF") return -1;
+        if (isPunct(t, "/") && isPunct(at(k + 1), ">")) return k + 2;
+        if (isPunct(t, ">")) {
+          if (!HTML_VOID_ELEMENTS.has(String(name).toLowerCase())) stack.push(name);
+          return k + 1;
+        }
+        // A statement end inside an opener: not a well-formed element.
+        if (isPunct(t, ";") || isPunct(t, "}")) return -1;
+        k++;
+      }
+      return -1;
+    };
+    if (!(isPunct(at(start), "<") && isName(at(start + 1)))) return -1;
+    let k = readOpener(start);
+    // A `}` that closes a brace opened BEFORE the element ends the enclosing body:
+    // the element did not close inside it, so it is not a well-formed element here.
+    let braces = 0;
+    while (k !== -1 && stack.length > 0) {
+      const t = at(k);
+      if (!t || t.kind === "EOF") return -1;
+      if (isPunct(t, "{")) braces++;
+      if (isPunct(t, "}") && --braces < 0) return -1;
+      if (isPunct(t, "<") && isPunct(at(k + 1), "/")) {
+        if (isPunct(at(k + 2), ">")) { stack.pop(); k += 3; continue; }
+        if (isName(at(k + 2)) && at(k + 2).text === stack[stack.length - 1]) {
+          stack.pop();
+          k += 3;
+          if (isPunct(at(k), ">")) k++;
+          continue;
+        }
+        return -1; // a mismatched closer
+      }
+      if (isPunct(t, "<") && isName(at(k + 1)) && adjacent(t, at(k + 1))) {
+        k = readOpener(k);
+        continue;
+      }
+      k++;
+    }
+    return k;
+  }
+
+  /**
+   * At a statement-leading markup opener: when the element closes cleanly and
+   * holds at least one BLOCK_REF (an interpolation split it), arm the text-run
+   * reader for the element's extent. An element with no BLOCK_REF is collected
+   * whole by the default path, so it is left exactly as before.
+   */
+  function armMarkupTextRuns() {
+    if (_markupTextEnd > i) return;
+    const end = scanMarkupElementEnd(i);
+    if (end <= i) return;
+    for (let k = i; k < end; k++) {
+      if (tokens[k] && tokens[k].kind === "BLOCK_REF") { _markupTextEnd = end; return; }
+    }
+  }
+
+  /**
+   * Inside an armed markup element (`i < _markupTextEnd`), the run of tokens up to
+   * the next BLOCK_REF (or the element's end) is markup — display text, a nested
+   * tag, the closer — never a statement. Returns that run as an `html-fragment`
+   * node, or null when the cursor is not in such a run (a BLOCK_REF is next, or
+   * the element has ended).
+   */
+  function collectMarkupTextRun() {
+    if (_markupTextEnd < 0) return null;
+    if (i >= _markupTextEnd) { _markupTextEnd = -1; return null; }
+    const first = peek();
+    if (first.kind === "BLOCK_REF" || first.kind === "EOF") return null;
+    const from = i;
+    const parts = [];
+    const lines = [];
+    const spans = [];
+    let lastTok = first;
+    while (i < _markupTextEnd && peek().kind !== "BLOCK_REF" && peek().kind !== "EOF") {
+      const t = consume();
+      lastTok = t;
+      // A `//` comment in free text is a comment (§4.18.1b exit (2)), not text.
+      if (t.kind === "COMMENT") continue;
+      // A quoted run in text is text: keep its own delimiters (the token holds the interior).
+      const q = t.kind === "STRING" ? (t.isTemplate ? "`" : (t.delim ?? "\"")) : "";
+      parts.push(q + t.text + q);
+      lines.push(t.span?.line ?? 0);
+      spans.push(t.span ?? null);
+    }
+    if (i >= _markupTextEnd) _markupTextEnd = -1;
+    // §4.17 (S462) — a `<script>` / `<style>` opener in the run is refused exactly
+    // as in any other markup in a logic body.
+    refuseFragmentElementTokens(tokens.slice(from, i), filePath, errors);
+    return {
+      id: ++counter.next,
+      kind: "html-fragment",
+      content: joinWithNewlines(parts, lines, spans),
+      span: spanOf(first, lastTok),
+      _markupText: true,
+    };
+  }
+
   // Consume a failable ERROR-type annotation (the type after `!` / `! ->`) in
   // FULL — a generic (`! Map<…>`), paren/union (`! (A | B)`, `! A | B`), array
   // (`! T[]`, `! Map<…>[]`), or a nested combination. Returns the base type NAME
@@ -7091,6 +7235,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const declShape = scanStructuralDeclLookahead();
             if (declShape) break;
           }
+          // S462 (s462-given-body-text-as-code) — the same newline boundary for a
+          // markup ELEMENT on a later line (`let k = 1⏎<p>${a} - ${b}</p>`): it is a
+          // new statement, not a continuation of the value. Without this the
+          // element — its display text included — was collected into the previous
+          // statement's expression and its text read as code. The `<` must be
+          // source-adjacent to the tag name and the element must close cleanly
+          // (scanMarkupElementEnd), so a `<` comparison continuing onto a new line
+          // is not affected.
+          if (
+            lastEndsValue &&
+            tok.kind === "PUNCT" && tok.text === "<" &&
+            peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD") &&
+            tok.span && peek(1).span && tok.span.end === peek(1).span.start &&
+            scanMarkupElementEnd(i) > i
+          ) {
+            break;
+          }
         }
         // Phase A1a Step 11.0a — compound-body child boundary.
         // When collecting the RHS of a child state-decl inside a Variant C
@@ -8501,6 +8662,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
+      // S462 — inside a markup element begun at statement position, a run of
+      // tokens is that element's text / tags, not a statement (and a `}` or `;`
+      // in it is text, not the end of this body).
+      {
+        const textRun = collectMarkupTextRun();
+        if (textRun) { stmts.push(textRun); continue; }
+      }
       // Closing brace ends the body
       if (tok.kind === "PUNCT" && tok.text === "}") {
         consume();
@@ -13016,6 +13184,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     {
       const startTok = peek();
       const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
+      // S462 — a markup element at statement position: its text is text (collectMarkupTextRun).
+      if (tok.kind === "PUNCT" && tok.text === "<" && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) armMarkupTextRuns();
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // §19.5: `fallible()?` as a statement — propagate-expr with no binding
@@ -14232,6 +14402,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else if (_tildeActive) {
         _tildeActive = false;
       }
+    }
+
+    // S462 — inside a markup element begun at statement position, a run of
+    // tokens is that element's text / tags, not a statement (see
+    // collectMarkupTextRun).
+    {
+      const textRun = collectMarkupTextRun();
+      if (textRun) { nodes.push(textRun); continue; }
     }
 
     // Skip comments
@@ -17337,6 +17515,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     {
       const startTok = peek();
       const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
+      // S462 — a markup element at statement position: its text is text (collectMarkupTextRun).
+      if (tok.kind === "PUNCT" && tok.text === "<" && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) armMarkupTextRuns();
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // Check for `?` propagation suffix on bare expressions
