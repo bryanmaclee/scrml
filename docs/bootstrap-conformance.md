@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1749 of 1749 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1751 of 1751 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1749 of 1749 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 62 | 3.5% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 666 | 38.1% |
-| UNSUPPORTED | 836 | 47.8% |
+| NOT-TWINNED | 667 | 38.1% |
+| UNSUPPORTED | 837 | 47.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,15 +26,15 @@ Scope: **1749 of 1749 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 62; the other 34 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 582 · parse-reject 254.
+UNSUPPORTED by reason: bootstrap-unsupported 583 · parse-reject 254.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **772** — PASS 101 · FAIL 55 · UNSUPPORTED 616. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **773** — PASS 101 · FAIL 55 · UNSUPPORTED 617. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
 
 - 104 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 71 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -57,8 +57,8 @@ NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
 - 10 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 8 — rhs-decl: initializer not parsed by impl#1
+- 8 — rhs-decl: object literal needs a struct type (CTX)
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
-- 7 — rhs-decl: object literal needs a struct type (CTX)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
@@ -151,7 +151,7 @@ NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 79 | · | · | · | · | 18 | 61 | · | · |
+| server-db | 81 | · | · | · | · | 19 | 62 | · | · |
 | server-fn | 25 | · | · | 7 | · | 8 | 10 | · | · |
 | sql | 20 | 1 | · | · | · | 9 | 10 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -508,7 +508,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (836)
+### UNSUPPORTED (837)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1226,6 +1226,7 @@ none
 - `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-idempotency-store-missing-import-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
+- `server-db/cps-login-check-stays-server` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<program idempotency-store=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `server-db/event-after-await-e01-destructure-neg` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
@@ -1347,7 +1348,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (666)
+### NOT-TWINNED (667)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1928,6 +1929,7 @@ none
 - `refinement/union-shaped-member-reject-rt` — not mechanical: rhs-decl: type `number(>0) | date` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · rhs-decl: type `number(>0) | timestamp` has a space at its top le
 - `refinement/union-unjudgeable-member-pos` — not mechanical: rhs-decl: type `number(>0) | [string: number(>0)]` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - `route-region/cn10-keepalive-reentry` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `server-db/cps-batch-field-write-refused` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `server-db/server-fn-in-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `server-db/server-fn-in-sync-callback-pos` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `server-db/sql-aggregate-group-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)

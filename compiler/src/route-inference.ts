@@ -3730,7 +3730,11 @@ function isServerTriggerStatement(
     }
   }
 
-  if (node.kind === "let-decl" || node.kind === "const-decl") {
+  // S462 P0 — `lin` and `~` declarations are declarations too: `lin ticket =
+  // mintTicket(…)` calls a server function exactly as `const ticket = …` does.
+  // Before S462 only let/const were read here, so the `lin` landed on the client
+  // and the server statement that consumed `ticket` read a name it never had.
+  if (node.kind === "let-decl" || node.kind === "const-decl" || (node as any).kind === "lin-decl" || (node as any).kind === "tilde-decl") {
     // Phase 4d: ExprNode-first, string fallback
     const init = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : ((node as any).init ?? "");
 
@@ -5357,11 +5361,10 @@ export function runRI(input: RIInput): RIOutput {
         `\`${firstModule}\` and its implementation into the browser bundle, along with whatever ` +
         `secret is passed to it, so the compiler refuses instead. Fix: move the call into a ` +
         `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
-        `to a plain reactive cell that the markup reads. Do NOT just delete \`const\`: a plain ` +
+        `to a plain reactive cell that the markup reads. Deleting \`const\` does not help: a plain ` +
         `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
-        `client-side position, is NOT yet diagnosed, and compiles clean while shipping the ` +
-        `implementation to the browser — the shortest edit that silences this error is the one ` +
-        `that restores the leak. See §6.6.19, §12.2.`,
+        `client-side position and is refused too (E-STDLIB-CLIENT-CHUNK-MISSING — the module has ` +
+        `no client build). See §6.6.19, §12.2.`,
         (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span),
       );
       eDerived.severity = "error";

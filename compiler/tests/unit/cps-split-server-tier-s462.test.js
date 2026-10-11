@@ -102,6 +102,28 @@ function f(n: string) {
     expect(split.clientStmtIndices).toContain(3);
   });
 
+  test("a `lin` declaration that calls a server function is server-tier (and so is its consumer)", () => {
+    const split = splitOf(ri(`<program db="sqlite:./n1.db">
+<result> = ""
+<username> = ""
+function mint(u: string) {
+  ?{\`INSERT INTO t (u) VALUES (\${u})\`}.run()
+  return "tk"
+}
+function redeem(lin ticket: string) { return ticket }
+function login() {
+  lin ticket = mint(@username)
+  const message = redeem(ticket)
+  @result = message
+}
+<button onclick={ login() }>x</button>
+</program>
+`));
+    // Before S462 the `lin` was client-tier: the server statement `redeem(ticket)`
+    // read a `ticket` that only existed in the browser.
+    expect(split.serverStmtIndices).toEqual([0, 1, 2]);
+  });
+
   test("a parameter shadowing the import is not the import", () => {
     const split = splitOf(ri(`<program db="sqlite:./n1.db">
 <out> = ""
