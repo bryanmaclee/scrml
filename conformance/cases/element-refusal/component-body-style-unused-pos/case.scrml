@@ -1,0 +1,4 @@
+<program>
+${ const Card = <div><style>p { color: red }</style></div> }
+<p>page</p>
+</program>

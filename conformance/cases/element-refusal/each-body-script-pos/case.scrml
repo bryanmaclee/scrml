@@ -1,0 +1,8 @@
+<program>
+<items> = [1, 2]
+<ul>
+  <each in=@items as it>
+    <li><script>x</script></li>
+  </each>
+</ul>
+</program>

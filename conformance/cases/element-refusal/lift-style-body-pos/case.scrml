@@ -1,0 +1,5 @@
+<program>
+<css> = "body { color: red }"
+<p>page</p>
+${ lift <style>${@css}</style> }
+</program>

@@ -1,0 +1,8 @@
+<program>
+${ type Kind:enum = { A, B } }
+<k> = Kind.A
+<match for=Kind on=@k>
+  <A><script>x</script></>
+  <B><p>b</p></>
+</match>
+</program>

@@ -1,0 +1,19 @@
+{
+  "id": "lift-style-body-pos",
+  "description": "A lifted `<style>` whose body is a cell read is E-STYLE-001 (pre-S462 the cell data was applied as CSS).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built, decided on the parsed element, never on text.",
+  "expect": {
+    "codes": [
+      "E-STYLE-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-STYLE-001": "error"
+    },
+    "codeCounts": {
+      "E-STYLE-001": 1
+    }
+  }
+}

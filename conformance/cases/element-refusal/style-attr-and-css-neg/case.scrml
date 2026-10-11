@@ -1,0 +1,5 @@
+<program>
+#{ p { color: red; } }
+<p style="font-weight: bold">x</p>
+${ lift <p style="color: blue">y</p> }
+</program>

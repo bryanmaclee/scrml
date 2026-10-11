@@ -196,17 +196,33 @@ describe("E-SCRIPT-001 — must NOT fire", () => {
     );
   });
 
-  // Case 3. §4.17 raw-content elements — their bodies are a single text run and
-  // scrml tokens are not recognized inside.
-  test("<script> text inside <pre> (§4.17 raw-content)", () => {
+  // Case 3. §4.17 raw-content elements. S462 ruling: a raw body is copied
+  // VERBATIM into the served HTML and the BROWSER parses it, so a literal
+  // `<script>` tag there is a live element and IS refused (see the "raw content"
+  // describe block below). What stays silent is everything the browser does NOT
+  // turn into an element: the entity-escaped display form, an HTML comment, an
+  // attribute value, an end tag, and longer names.
+  test("entity-escaped &lt;script&gt; inside <pre> (the display form)", () => {
     expectNoScriptError(
-      `<program>\n<pre><script>alert(1)</script></pre>\n</program>`,
+      `<program>\n<pre>&lt;script&gt;alert(1)&lt;/script&gt;</pre>\n</program>`,
     );
   });
 
-  test("<script> text inside <code> (§4.17 raw-content)", () => {
+  test("<script> inside an HTML comment inside <code>", () => {
     expectNoScriptError(
-      `<program>\n<code><script>alert(1)</script></code>\n</program>`,
+      `<program>\n<code><!-- <script>alert(1)</script> --></code>\n</program>`,
+    );
+  });
+
+  test("<script> inside an attribute value inside <pre>", () => {
+    expectNoScriptError(
+      `<program>\n<pre><a title="<script>alert(1)</script>">x</a></pre>\n</program>`,
+    );
+  });
+
+  test("a lone </script> end tag and <scripts> / <script-x> inside <pre>", () => {
+    expectNoScriptError(
+      `<program>\n<pre></script> <scripts> <script-x> <noscript></pre>\n</program>`,
     );
   });
 

@@ -12,6 +12,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
+import { refuseElementLowering } from "./refused-lowering-errors.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
@@ -1279,6 +1280,23 @@ function containsClosingTag(s) {
 }
 
 /**
+ * S462 — the logic tokenizer splits a hyphenated tag name (`<style-x>`, `<my-el>`)
+ * into `style - x`, so the token-joined text the string-path parsers read is spaced.
+ * A `-` cannot begin an attribute, so a ` - part` run directly after the name is the
+ * rest of the NAME. Pre-S462 these parsers cut the name at the first part:
+ * `lift <style-x>` built a real `<style>` element (and `<my-el>` a `<my>`).
+ * Returns the joined name and the index after it.
+ */
+function joinSpacedHyphenName(s, tag, end) {
+  let m;
+  while ((m = /^\s*-\s*([A-Za-z0-9]+)/.exec(s.slice(end))) !== null) {
+    tag += "-" + m[1];
+    end += m[0].length;
+  }
+  return [tag, end];
+}
+
+/**
  * Split a content string containing multiple tokenizer-spaced tags into segments.
  * Each segment is { type: "text"|"open-tag"|"close-tag", ... }.
  *
@@ -1312,7 +1330,8 @@ function splitTagSegments(s) {
         while (j < s.length && /\s/.test(s[j])) j++;
         let tagStart = j;
         while (j < s.length && /[A-Za-z0-9-]/.test(s[j])) j++;
-        const tag = s.slice(tagStart, j);
+        let tag = s.slice(tagStart, j);
+        [tag, j] = joinSpacedHyphenName(s, tag, j);
         // Skip to >
         while (j < s.length && s[j] !== '>') j++;
         if (j < s.length) j++; // consume >
@@ -1324,7 +1343,8 @@ function splitTagSegments(s) {
         // Opening tag: `< tagname attrs >`
         let tagStart = j;
         while (j < s.length && /[A-Za-z0-9-]/.test(s[j])) j++;
-        const tag = s.slice(tagStart, j);
+        let tag = s.slice(tagStart, j);
+        [tag, j] = joinSpacedHyphenName(s, tag, j);
 
         // Read attributes until >
         const attrsStart = j;
@@ -1657,6 +1677,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   const isVoid = VOID_ELEMENTS.has(tag);
 
   const elVar = genVar(`lift_el`);
+  // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built.
+  if (refuseElementLowering(tag, node)) {
+    lines.push(`const ${elVar} = _scrml_g.document.createComment("");`);
+    return elVar;
+  }
   lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
   // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
@@ -2307,7 +2332,8 @@ function parseTagExprString(expr) {
   const tagStart = i;
   while (i < s.length && /[A-Za-z0-9-]/.test(s[i])) i++;
   if (i === tagStart) return null; // No tag name
-  const tag = s.slice(tagStart, i);
+  let tag = s.slice(tagStart, i);
+  [tag, i] = joinSpacedHyphenName(s, tag, i);
 
   // Read attributes — everything up to (but not including) the first unquoted >
   const attrsStart = i;
@@ -2362,6 +2388,11 @@ function emitCreateElementFromExprString(expr) {
   const isVoid = VOID_ELEMENTS.has(tag);
   const lines = [];
   const elVar = genVar(`lift_el`);
+
+  // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built.
+  if (refuseElementLowering(tag, null)) {
+    return { lines: [`const ${elVar} = _scrml_g.document.createComment("");`], varName: elVar };
+  }
 
   lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
 
@@ -3328,7 +3359,11 @@ export function emitConsolidatedLift(body, opts = {}) {
   function pushElement(tag, attrsStr) {
     pendingAttrName = null;
     const elVar = genVar(`lift_el`);
-    lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
+    // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built. The
+    // placeholder is an attribute-less element nobody can run (`template` content is inert).
+    const refused = refuseElementLowering(tag, null);
+    if (refused) attrsStr = "";
+    lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(refused ? "template" : tag)});`);
     // S457 — kept on the element-stack entry so a BLOCK_REF-split value (`to = ${x}`) can ask
     // whether it is an SVG animation value writing a URL attribute (`attributeName="href"`).
     let elementAttrs = [];

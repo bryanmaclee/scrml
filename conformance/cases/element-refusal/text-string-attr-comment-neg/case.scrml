@@ -1,0 +1,7 @@
+<program>
+<div title="<script>">x</div>
+<p>a &lt;script&gt; tag</p>
+${ const t = "<style>" }
+// a <script> in a comment
+<p>${t}</p>
+</program>

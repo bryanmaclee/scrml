@@ -50,6 +50,7 @@ import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForC
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
+import { collectRefusedElements, refusedElementMessage } from "./element-refusal.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
@@ -1453,10 +1454,36 @@ function parseComponentDef(
   const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
   const normalizedBody = nb ?? "";
 
+  // §4.17 (S462) — scrml does not admit `<script>` / `<style>` at any position, a
+  // component body included. The body is raw text until this re-parse, so this is
+  // where its element nodes first exist; the structural check runs over them for
+  // USED and UNUSED defs alike and reports each refused element as itself, at its
+  // own source position (never as a "malformed body" E-COMPONENT-021). The node is
+  // kept (neutralized) — codegen's backstop refuses any copy that reaches it.
+  // The re-parse itself may already have refused the element (the native parser /
+  // the block splitter skip it and report E-SCRIPT-001 / E-STYLE-001 without leaving
+  // a node); those reports are kept too, mapped the same way, one per position.
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const seen = new Set<string>();
+    const report = (code: string, tag: string, start: number | undefined, end: number | undefined): void => {
+      const at = bodyDiagnosticSourceSpan(defSpan, normalizedBody, start, end);
+      const key = `${code}@${(at as { start?: number }).start ?? 0}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      ceErrors.push(makeCEError(code, `${code}: ${refusedElementMessage(code, tag, `in component \`${name}\``)}`, at));
+    };
+    for (const site of collectRefusedElements(nodes)) report(site.code, site.tag, site.span?.start, site.span?.end);
+    for (const e of allParseErrors) {
+      if (e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001") continue;
+      report(e.code, e.code === "E-STYLE-001" ? "style" : "script", e.span?.start, e.span?.end);
+    }
+  }
+
   // S459 L2 — an attribute-level refusal (E-ATTR-001: a single-quoted value, which is not
   // an attribute-string delimiter) is reported under its OWN code, exactly as outside a
   // component; the attribute recovered as `absent`, so the body is not "malformed".
-  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001");
+  const parseErrors = allParseErrors.filter((e) => e.code !== "E-ATTR-001" && e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001");
   for (const e of allParseErrors) {
     if (e.code !== "E-ATTR-001") continue;
     const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };

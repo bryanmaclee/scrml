@@ -1,0 +1,6 @@
+<program>
+<pre>&lt;script&gt;x&lt;/script&gt;</pre>
+<code><!-- <script> --></code>
+<pre><a title="<style>">x</a></pre>
+<pre></script></pre>
+</program>

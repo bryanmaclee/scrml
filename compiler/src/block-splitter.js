@@ -56,6 +56,7 @@
 // whether a brace inside a brace-delimited context is string-literal content
 // (braceIsQuotedStringContent). The block tree is still built by this scan.
 import { tokenizeLogic } from "./tokenizer.ts";
+import { refusedElementCode, scanRawContentForRefusedTags } from "./element-refusal.ts";
 // S441 — the body-top display-text literal scanner predicates, shared with the
 // native markup trampoline (see the `bodyTopLiteralEnd` state below).
 import { bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose } from "../native-parser/body-top-prose.js";
@@ -3663,58 +3664,63 @@ export function splitBlocks(filePath, source) {
         step(); // consume '<'
         const tagName = readIdent();
 
-        // E-STYLE-001: <style> blocks are not supported in scrml.
-        // Record the error, scan past the entire <style>...</style> block to recover,
-        // and continue. This avoids a cascade of parse errors from the style body.
-        if (tagName.toLowerCase() === "style") {
-          errors.push(new BSError(
-            "E-STYLE-001",
-            `<style> blocks are not supported in scrml. Use #{} for CSS.\n` +
-            `  Hint: Run \`scrml compile --convert-legacy-css\` to auto-convert.`,
-            { start: curPos, end: pos, line: curLine, col: curCol }
-          ));
-          // Scan to the matching </style> close tag (case-insensitive), or EOF.
-          while (pos < len) {
-            if (source[pos] === "<" && source.slice(pos, pos + 8).toLowerCase() === "</style>") {
-              advance(8);
-              break;
-            }
-            step();
-          }
-          inDoubleQuote = false;
-          inSingleQuote = false;
-          continue;
-        }
-
-        // E-SCRIPT-001: <script> elements are not supported in scrml.
-        // SPEC §4.17 / §23 — scrml does not admit `<script>` AT ALL. JS lives in
-        // logic-context `${...}`; genuine foreign code has the `_{...}` escape
-        // hatch (§23). Recovery mirrors E-STYLE-001 exactly: record the error,
-        // scan past the entire <script>...</script> body, and continue — so a
-        // brace-heavy JS body does not cascade into a storm of parse errors.
+        // E-STYLE-001 / E-SCRIPT-001 — SPEC §4.17: scrml does not admit `<style>`
+        // or `<script>` AT ALL (CSS lives in `#{...}`; scrml logic lives in
+        // `${...}`; genuine foreign JS has the `_{...}` foreign-code block, §23).
         //
-        // Exact `===` compare (never a prefix match) so `<noscript>` is
-        // untouched: readIdent() accumulates the FULL `[A-Za-z0-9_-]+` ident,
-        // yielding "noscript", which is not equal to "script".
+        // Exact compare on the FULL tag name (case-insensitive), never a prefix:
+        // readIdent() accumulates the whole `[A-Za-z0-9_-]+` ident, so `<noscript>`
+        // yields "noscript", `<style-x>` yields "style-x" — neither is refused.
+        //
+        // Recovery: record the error, scan past the entire element body to the
+        // matching close tag (case-insensitive) or EOF, and continue — so a
+        // brace-heavy JS / CSS body does not cascade into a storm of parse errors.
+        //
+        // S462 — the skipped element is ALSO left in the block tree as a bodiless,
+        // attribute-less marker element (`refusedElement`). The builder re-splits
+        // some regions from text and discards that sub-split's errors (an `<each>`
+        // body, a `<match>` arm, an engine state-child body); pre-S462 the element
+        // simply vanished there. The marker becomes an element node, and the
+        // builder's structural check over every element node (element-refusal.ts)
+        // refuses it wherever it landed. At this top-level position the builder
+        // recognizes the marker as already reported here (same code, same start).
         //
         // This check is SOURCE-side only. The emitter's own
         // `<script src="scrml-runtime.<hash>.js">` / `<page>.client.js` tags are
         // produced downstream of the block splitter and never pass through here.
-        if (tagName.toLowerCase() === "script") {
+        const refusedCode = refusedElementCode(tagName);
+        if (refusedCode !== null) {
+          const refusedLower = tagName.toLowerCase();
           errors.push(new BSError(
-            "E-SCRIPT-001",
-            `<script> elements are not supported in scrml. Use \${...} for scrml logic.\n` +
-            `  Hint: for genuine foreign JS, use the \`_{...}\` foreign-code block (SPEC §23).`,
+            refusedCode,
+            refusedLower === "style"
+              ? `<style> blocks are not supported in scrml. Use #{} for CSS.\n` +
+                `  Hint: Run \`scrml compile --convert-legacy-css\` to auto-convert.`
+              : `<script> elements are not supported in scrml. Use \${...} for scrml logic.\n` +
+                `  Hint: for genuine foreign JS, use the \`_{...}\` foreign-code block (SPEC §23).`,
             { start: curPos, end: pos, line: curLine, col: curCol }
           ));
-          // Scan to the matching </script> close tag (case-insensitive), or EOF.
+          // Scan to the matching close tag (case-insensitive), or EOF.
+          const refusedClose = `</${refusedLower}>`;
           while (pos < len) {
-            if (source[pos] === "<" && source.slice(pos, pos + 9).toLowerCase() === "</script>") {
-              advance(9);
+            if (source[pos] === "<" && source.slice(pos, pos + refusedClose.length).toLowerCase() === refusedClose) {
+              advance(refusedClose.length);
               break;
             }
             step();
           }
+          targetChildren().push({
+            type: "markup",
+            raw: `<${tagName}/>`,
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            children: [],
+            name: tagName,
+            closerForm: "self-closing",
+            isComponent: false,
+            openerHadSpaceAfterLt: false,
+            refusedElement: refusedCode,
+          });
           inDoubleQuote = false;
           inSingleQuote = false;
           continue;
@@ -3948,6 +3954,31 @@ export function splitBlocks(filePath, source) {
             step();
           }
           const contentEnd = pos;
+          // S462 (§4.17) — the raw body is copied VERBATIM into the served HTML,
+          // where the browser parses it as ordinary HTML: a literal `<script>` /
+          // `<style>` tag in it builds a live element. scrml does not admit those
+          // elements at any position, raw content included. The scan mirrors the
+          // HTML tokenizer the browser runs over this exact text (element-refusal.ts).
+          if (contentEnd > contentStart) {
+            for (const hit of scanRawContentForRefusedTags(source.slice(contentStart, contentEnd))) {
+              const hitStart = contentStart + hit.offset;
+              // line/col of the hit, counted from the opener (whose line/col is known).
+              const lead = source.slice(curPos, hitStart);
+              const nl = lead.lastIndexOf("\n");
+              const hitLine = curLine + (lead.match(/\n/g)?.length ?? 0);
+              const hitCol = nl < 0 ? curCol + lead.length : lead.length - nl;
+              const where = `inside <${tagName}> raw content, which the browser parses as live HTML`;
+              errors.push(new BSError(
+                hit.code,
+                hit.code === "E-STYLE-001"
+                  ? `<${hit.tag}> blocks are not supported in scrml (${where}). Use #{} for CSS.\n` +
+                    `  Hint: to DISPLAY the tag as text, entity-escape it: &lt;${hit.tag}&gt;.`
+                  : `<${hit.tag}> elements are not supported in scrml (${where}). Use \${...} for scrml logic.\n` +
+                    `  Hint: to DISPLAY the tag as text, entity-escape it: &lt;${hit.tag}&gt;.`,
+                { start: hitStart, end: hitStart + 1 + hit.tag.length, line: hitLine, col: hitCol }
+              ));
+            }
+          }
           const children = [];
           if (contentEnd > contentStart) {
             children.push({

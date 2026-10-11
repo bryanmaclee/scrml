@@ -1547,6 +1547,8 @@ function _compileScrmlImpl(options = {}) {
   const _attrInterpExecutableSeen = new Set();
   /** S457 — `sqlBodyKey`s of program-body `?{}` refusals already reported (see collectErrors). */
   const _sqlProgramStatementSeen = new Set();
+  // §4.17 (S462) — `${file}|${code}` of every pre-codegen `<script>`/`<style>` refusal.
+  const _refusedElementFilesSeen = new Set();
   function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
@@ -1613,6 +1615,24 @@ function _compileScrmlImpl(options = {}) {
         // refused AGAIN at its codegen lowering (the authority — sql-one-statement-guard.ts): one
         // report per body, the stage's (it carries the exact `?{` span). A body only the lowering
         // reads (the stage's raw-text reader missed it) is reported by the lowering.
+        // §4.17 (S462) — `<script>` / `<style>` are refused before codegen (BS / TAB / CE);
+        // codegen's backstop (refuseElementLowering) refuses again any copy it is asked to
+        // build. Its report is dropped when an earlier stage already refused the same code
+        // in the same file — the compile fails either way, and a copy (a component body
+        // re-parsed from text) cannot share the original's span. A backstop report with
+        // no earlier refusal in its file is kept: that element reached codegen unrefused.
+        // A copy's span names a synthetic file (`app.scrml#Card` — a component body;
+        // `<match:7:A>` — a match arm re-parsed in codegen): the `#…` suffix is dropped,
+        // and a name that is no input file at all is matched against any file.
+        if (enriched.code === "E-SCRIPT-001" || enriched.code === "E-STYLE-001") {
+          const rawFile = String(enriched.filePath ?? (enriched.span && enriched.span.file) ?? "").replace(/#.*$/, "");
+          const refusalKey = `${sourceByFile.has(rawFile) ? rawFile : "*"}|${enriched.code}`;
+          if (stageName === "CG" && _refusedElementFilesSeen.has(refusalKey)) continue;
+          if (stageName !== "CG") {
+            _refusedElementFilesSeen.add(`${rawFile}|${enriched.code}`);
+            _refusedElementFilesSeen.add(`*|${enriched.code}`);
+          }
+        }
         if (typeof e.sqlBodyKey === "string") {
           if (stageName === "CG" && _sqlProgramStatementSeen.has(e.sqlBodyKey)) continue;
           _sqlProgramStatementSeen.add(e.sqlBodyKey);

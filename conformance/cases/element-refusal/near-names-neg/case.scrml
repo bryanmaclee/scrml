@@ -1,0 +1,5 @@
+<program>
+<noscript>enable js</noscript>
+${ lift <noscript>n</noscript> }
+${ lift <style-x>n</style-x> }
+</program>

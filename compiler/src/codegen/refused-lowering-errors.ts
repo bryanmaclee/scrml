@@ -33,6 +33,7 @@
  */
 
 import { CGError } from "./errors.ts";
+import { refusedElementCode, refusedElementMessage } from "../element-refusal.ts";
 
 let _errors: CGError[] = [];
 let _seenByAnchor: WeakMap<object, Set<string>> = new WeakMap();
@@ -74,4 +75,29 @@ export function drainRefusedLowerings(): CGError[] {
   const out = _errors;
   _errors = [];
   return out;
+}
+
+/**
+ * §4.17 (S462) — the codegen backstop for `<script>` / `<style>`. scrml does not admit those
+ * elements at any position; the block splitter, the AST builder's structural check over every
+ * element node and component expansion refuse them before codegen. Every site that turns an
+ * element into output (a `createElement` call, an HTML open tag, an SSR row template) still asks
+ * here first: a refused element is never emitted — the caller emits an inert placeholder — and the
+ * refusal is recorded, so an element that reached codegen by a path no earlier check covered fails
+ * the compile instead of running. (api.js drops this report when an earlier stage already refused
+ * the same code in the same file: the compile fails either way.)
+ *
+ * Returns true when the tag is refused (the caller MUST NOT emit the element).
+ */
+export function refuseElementLowering(tag: unknown, anchor?: { span?: unknown } | null): boolean {
+  const code = refusedElementCode(tag);
+  if (code === null) return false;
+  const span = (anchor && typeof anchor === "object" && anchor.span && typeof anchor.span === "object")
+    ? anchor.span as object
+    : { start: 0, end: 0, line: 1, col: 1 };
+  recordRefusedLowering(
+    new CGError(code, `${code}: ${refusedElementMessage(code, String(tag), "codegen backstop: this element reached emission")}`, span, "error"),
+    anchor ?? null,
+  );
+  return true;
 }
