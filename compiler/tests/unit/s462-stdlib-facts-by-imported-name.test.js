@@ -121,7 +121,7 @@ describe("§2 server emit awaits an aliased async stdlib callee", () => {
     expect(codes).toEqual([]);
     const js = out("app.scrml").serverJs ?? "";
     expect(js).toMatch(/const ok = await vp\(pass, row\.pw\)/);
-    expect(js).toMatch(/if \(!await vp\(/);
+    expect(js).toMatch(/if \(!_scrml_assert_settled\(await vp\(/);
     expect(js).toMatch(/String\(await vp\(/);
     expect(js).toMatch(/await hp\(pass\)/);
     expect(js).not.toMatch(/[^t] vp\(pass/); // never bare
@@ -221,7 +221,7 @@ describe("§4 a local re-export of a stdlib async function stays async", () => {
         return "ACCEPTED"`),
     });
     expect(codes).toEqual([]);
-    expect(out("app.scrml").serverJs ?? "").toMatch(/if \(!await vp\(/);
+    expect(out("app.scrml").serverJs ?? "").toMatch(/if \(!_scrml_assert_settled\(await vp\(/);
   });
 
   test("a USER-declared function re-exported the same way does not classify as a stdlib Promise", () => {
@@ -320,10 +320,10 @@ describe("§7 (F1) an optional call is awaited in every emit shape, exactly once
     expect(codes).toEqual([]);
     const js = out("app.scrml").serverJs ?? "";
     expect(js).toMatch(/const ok = await vp\?\.\(pass, row\.pw\)/);
-    expect(js).toMatch(/if \(!await vp\?\.\(/);
+    expect(js).toMatch(/if \(!_scrml_assert_settled\(await vp\?\.\(/);
     expect(js).toMatch(/\(await hashPassword\?\.\(pass\)\)\.length/);
     expect(js).toMatch(/String\(await vp\?\.\(/);
-    expect(js).toMatch(/const t = await vp\?\.\(/);
+    expect(js).toMatch(/const t = _scrml_assert_settled\(await vp\?\.\(/);
     expect(js).toMatch(/\$\{await hashPassword\?\.\(pass\)\}/);
     expect(js).not.toMatch(/[^t] (vp|hashPassword)\?\.\(/); // never bare
     expect(js).not.toMatch(/\bawait\s+\(?\s*await\b/);

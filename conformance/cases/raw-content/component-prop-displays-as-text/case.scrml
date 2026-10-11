@@ -1,0 +1,4 @@
+<program>
+${ const Box = <div props={ t: string }><pre id="shown">${t}</pre></div> }
+<Box t="<img src=x onerror='window.pwned=5'>"/>
+</program>

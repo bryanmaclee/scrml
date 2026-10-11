@@ -1,0 +1,29 @@
+{
+  "id": "raw-content-entity-display-unchanged",
+  "description": "`&` is not encoded: an author entity (`&lt;b&gt;`) still displays as the character it names (`<b>`), and builds no element.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
+  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#e b",
+        "count": 0
+      },
+      {
+        "selector": "#e > code",
+        "count": 1
+      },
+      {
+        "selector": "#e",
+        "text": "<b>bold?</b> a && b"
+      }
+    ]
+  }
+}

@@ -59,7 +59,7 @@ import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
 // builtins (no codegen), so this is cycle-free.
-import { isPromiseReturningImportedCallee } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee, isStdlibImportedCallee } from "../module-resolver.js";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -1724,6 +1724,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
     return `${srcmapMark(node.span, bare)}(_scrml_written["${bare}"] = true, ${node.op}_scrml_body["${bare}"])`;
   }
   let arg = emitExpr(node.argument, ctx);
+  // §13.2 server Promise trap (S462 Q20) — `!` tests its operand.
+  if (node.op === "!") arg = trapBooleanOperand(node.argument, arg, ctx);
   if (node.prefix) {
     // g-unary-of-additive-arg (HIGH) — a prefix unary applied to a LOOSER-binding
     // argument must re-wrap it in grouping parens. Acorn discards the source
@@ -2135,6 +2137,71 @@ export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean
   const registry = ctx.asyncExportRegistry ?? _serverAsyncClassifier?.exportRegistry ?? null;
   if (!calleeMap || !registry) return false;
   return isPromiseReturningImportedCallee(name, calleeMap, registry);
+}
+
+/**
+ * §13.2 server Promise trap (S462 Q20, ruling "q20 yes.") — the fail-CLOSED
+ * backstop under the auto-await classifier.
+ *
+ * In SERVER code, a boolean-test position whose operand is a direct call to a
+ * `scrml:` standard-library import — an `if` / `while` / `do-while` / C-style
+ * `for` condition, the operand of `!`, an operand of `&&` / `||`, a ternary
+ * condition — is emitted as `_scrml_assert_settled(<operand>)`. The helper
+ * (`SERVER_ASSERT_SETTLED_HELPER`, emit-server) returns a settled value
+ * unchanged and THROWS on a Promise, so the route answers the fixed 500 of its
+ * error path. Every Promise is truthy: without the trap a classifier miss (S462:
+ * an aliased import, a sync-declared async shim, an optional call) passes the
+ * test for every input — the accept-all-passwords bypass.
+ *
+ * The operand test is STRUCTURAL and deliberately NOT gated on the export being
+ * async: a call the classifier wrongly believes sync is exactly the call to
+ * catch. Identity is by the IMPORTED name (aliases, user re-exports of a stdlib
+ * name — `isStdlibImportedCallee`), and a callee shadowed by a local binding is
+ * not the import. Stated limit (with the ruling): a result stored in a variable
+ * and tested later is not covered.
+ *
+ * Active only while `generateServerJs` emits (it installs the file's import map
+ * here and injects the helper on use), and only under `mode === "server"`, so no
+ * client bundle — and no other emitter that happens to run in server mode — ever
+ * references the helper.
+ */
+let _serverPromiseTrap:
+  | { calleeMap: Map<string, string>; exportRegistry: Map<string, Map<string, object>> | null }
+  | null = null;
+
+/** Install (or clear) the file-scoped server Promise trap. Returns the previous value. */
+export function setServerPromiseTrap(t: typeof _serverPromiseTrap): typeof _serverPromiseTrap {
+  const prev = _serverPromiseTrap;
+  _serverPromiseTrap = t;
+  return prev;
+}
+
+/** The server Promise trap's runtime helper name (emit-server injects it on use). */
+export const ASSERT_SETTLED_FN = "_scrml_assert_settled";
+
+/** Is `node` a boolean-test operand the server Promise trap wraps? */
+function isServerPromiseTrapOperand(node: ExprNode | null | undefined, ctx: EmitExprContext): boolean {
+  if (!_serverPromiseTrap || ctx.mode !== "server" || !node || node.kind !== "call") return false;
+  const callee = (node as CallExpr).callee as { kind?: string; name?: unknown };
+  if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return false;
+  if (ctx.declaredNames != null && ctx.declaredNames.has(callee.name)) return false;
+  const calleeMap = ctx.asyncCalleeMap ?? _serverPromiseTrap.calleeMap;
+  const registry = ctx.asyncExportRegistry ?? _serverPromiseTrap.exportRegistry;
+  return isStdlibImportedCallee(callee.name, calleeMap, registry);
+}
+
+/** Wrap an emitted boolean-test operand in the server Promise trap when it qualifies. */
+function trapBooleanOperand(node: ExprNode | null | undefined, emitted: string, ctx: EmitExprContext): string {
+  return isServerPromiseTrapOperand(node, ctx) ? `${ASSERT_SETTLED_FN}(${emitted})` : emitted;
+}
+
+/**
+ * `emitExprField` for a statement CONDITION (`if` / `while` / `do-while` / C-style
+ * `for`): the condition is a boolean-test position, so a direct `scrml:` stdlib
+ * call there is trapped (S462 Q20).
+ */
+export function emitConditionField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
+  return trapBooleanOperand(exprNode, emitExprField(exprNode, fallbackStr, ctx), ctx);
 }
 
 /**
@@ -2613,8 +2680,15 @@ function unaryArgNeedsParens(arg: ExprNode): boolean {
 }
 
 function emitBinary(node: BinaryExpr, ctx: EmitExprContext): string {
-  const left = emitExpr(node.left, ctx);
-  const right = emitExpr(node.right, ctx);
+  let left = emitExpr(node.left, ctx);
+  let right = emitExpr(node.right, ctx);
+  // §13.2 server Promise trap (S462 Q20) — `&&` / `||` test their operands. The
+  // right operand is wrapped too: in a condition it is tested, and anywhere else
+  // an un-awaited stdlib Promise flowing out of `&&` / `||` is the same bug.
+  if (node.op === "&&" || node.op === "||") {
+    left = trapBooleanOperand(node.left, left, ctx);
+    right = trapBooleanOperand(node.right, right, ctx);
+  }
 
   switch (node.op) {
     // §45 structural equality — compiles to deep comparison helper.
@@ -2862,7 +2936,8 @@ function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
   // callback prop substituted into `onGo ? onGo() : 0` emitted `() => f() ? … : 0`, which
   // parses as an arrow returning the conditional).
   const ck = node.condition.kind;
-  const condRaw = emitExpr(node.condition, ctx);
+  // §13.2 server Promise trap (S462 Q20) — the condition is a boolean test.
+  const condRaw = trapBooleanOperand(node.condition, emitExpr(node.condition, ctx), ctx);
   const cond = (ck === "lambda" || ck === "assign" || ck === "ternary") ? `(${condRaw})` : condRaw;
   const cons = emitExpr(node.consequent, ctx);
   const alt = emitExpr(node.alternate, ctx);

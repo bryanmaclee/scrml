@@ -1949,6 +1949,10 @@ function realPathOrNearest(abs) {
   }
 }
 
+/** TEST SEAM state — see `__testOnlyForceAwaitClassifierMiss` (end of file). */
+/** @type {Set<string> | null} */
+let _awaitClassifierMissForTests = null;
+
 /**
  * Decide whether a callee name resolves to a stdlib `Promise<T>`-returning
  * function export. The auto-await classifier (§13.2.1) consults this helper
@@ -1978,6 +1982,7 @@ function realPathOrNearest(abs) {
  */
 export function isPromiseReturningStdlibFn(functionName, sourceModule, exportRegistry) {
   if (!functionName || !sourceModule || !exportRegistry) return false;
+  if (_awaitClassifierMissForTests !== null && _awaitClassifierMissForTests.has(functionName)) return false;
   const fileExports = exportRegistry.get(sourceModule);
   if (!fileExports) return false;
   const entry = fileExports.get(functionName);
@@ -2031,4 +2036,52 @@ export function isPromiseReturningImportedCallee(localName, calleeMap, exportReg
   const sourceModule = calleeMap.get(localName);
   if (!sourceModule) return false;
   return isPromiseReturningStdlibFn(importedNameOf(localName, calleeMap), sourceModule, exportRegistry);
+}
+
+/**
+ * §13.2 server Promise trap (S462 Q20) — does the callee `localName`, resolved
+ * through the file's imports (`calleeMap`, a `buildCalleeImportMap` result),
+ * name ANY `scrml:` standard-library export? Unlike
+ * `isPromiseReturningImportedCallee` this does NOT ask whether the export is
+ * async: the trap exists to catch an await-classifier MISS, so it must not
+ * depend on the classifier's own facts. A name imported straight from a stdlib
+ * module qualifies by the module's path alone (no registry needed); a name
+ * imported from a user module that re-exports a stdlib name qualifies by the
+ * `stdlibOrigin` that `inheritStdlibReExports` stamps on the registry entry
+ * (aliases and re-export chains are followed exactly as the classifier
+ * follows them — lookup by the IMPORTED name).
+ *
+ * @param {string} localName
+ * @param {Map<string, string> & { importedNames?: Map<string, string> }} calleeMap
+ * @param {Map<string, Map<string, object>> | null} exportRegistry
+ * @returns {boolean}
+ */
+export function isStdlibImportedCallee(localName, calleeMap, exportRegistry) {
+  if (!localName || !calleeMap) return false;
+  const sourceModule = calleeMap.get(localName);
+  if (!sourceModule) return false;
+  if (isStdlibFilePath(sourceModule)) return true;
+  const entry = exportRegistry && exportRegistry.get(sourceModule)?.get(importedNameOf(localName, calleeMap));
+  return !!entry && typeof entry.stdlibOrigin === "string" && isStdlibFilePath(entry.stdlibOrigin);
+}
+
+// ---------------------------------------------------------------------------
+// TEST SEAM — never set by the compiler, the CLI, or any config.
+// ---------------------------------------------------------------------------
+
+/**
+ * TEST SEAM ONLY (S462 Q20). Forces the §13.2 auto-await classifier to MISS the
+ * named stdlib exports (by EXPORT name): `isPromiseReturningStdlibFn` answers
+ * false for them, so the compiler emits their calls un-awaited — the exact
+ * failure the server Promise trap must catch. Nothing in the compiler, CLI or
+ * configuration calls this; only tests do, and they MUST restore the previous
+ * value (returned) in a `finally`. Pass `null` to clear.
+ *
+ * @param {Iterable<string> | null} names
+ * @returns {Set<string> | null} the previous value
+ */
+export function __testOnlyForceAwaitClassifierMiss(names) {
+  const prev = _awaitClassifierMissForTests;
+  _awaitClassifierMissForTests = names ? new Set(names) : null;
+  return prev;
 }

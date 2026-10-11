@@ -1,0 +1,29 @@
+{
+  "id": "raw-content-bare-angle-displays",
+  "description": "A bare `<` / `>` in a raw body displays as typed (`a < b`).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
+  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#c",
+        "text": "a < b && c > d"
+      },
+      {
+        "selector": "#p",
+        "text": "x<y ? y>z : 0"
+      },
+      {
+        "selector": "#p *",
+        "count": 0
+      }
+    ]
+  }
+}

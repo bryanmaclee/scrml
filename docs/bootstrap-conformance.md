@@ -7,36 +7,36 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1751 of 1751 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1759 of 1759 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 185 | 10.6% |
+| PASS | 186 | 10.6% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 62 | 3.5% |
+| FAIL | 65 | 3.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 667 | 38.1% |
-| UNSUPPORTED | 837 | 47.8% |
+| NOT-TWINNED | 668 | 38.0% |
+| UNSUPPORTED | 840 | 47.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 247; of those, 185 hold (74.9%). Runtime half executed on the bootstrap for 63 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 251; of those, 186 hold (74.1%). Runtime half executed on the bootstrap for 65 case(s).
 
-- **Vacuous** passes: 11 of 185 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **174**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 62; the other 34 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 186 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **175**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 65; the other 37 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 583 · parse-reject 254.
+UNSUPPORTED by reason: bootstrap-unsupported 584 · parse-reject 256.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **773** — PASS 101 · FAIL 55 · UNSUPPORTED 617. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **775** — PASS 101 · FAIL 56 · UNSUPPORTED 618. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
 
-- 104 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 105 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 71 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 66 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 57 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
@@ -91,6 +91,7 @@ NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
 - 1 — program-wrap: the restructured file does not parse to one top-level `…` (malformed source) — not restructured, no `…` unwrapped
 - 1 — rhs-decl: opener attribute `…` has no mechanical §66 spelling
 - 1 — unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-046) — not restructured, no `…` unwrapped
+- 1 — unwrap-logic: impl#1 reads the restructured file differently (+W-INTERP-IN-RAW-CONTENT) — not restructured, no `…` unwrapped
 
 ### Per area (case directory)
 
@@ -146,6 +147,7 @@ NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 81 | · | · | · | · | 45 | 36 | · | · |
+| raw-content | 8 | 1 | · | 3 | · | 1 | 3 | · | · |
 | reactive | 114 | 25 | · | 3 | · | 65 | 21 | · | · |
 | refinement | 57 | · | · | · | · | 25 | 32 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
@@ -160,7 +162,7 @@ NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (62)
+### FAIL (65)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -283,6 +285,12 @@ NOT-TWINNED by reason (667 cases; a case counts once per distinct reason):
   - missing E-PARSEVARIANT-TYPE-NOT-ENUM
 - `parse-variant/single-field-payload-bind` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `raw-content/active-html-displays-as-text` (runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `raw-content/each-row-raw-body-displays-as-text` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `raw-content/entity-display-unchanged` (runtime)
+  - domAnchored: selector #e: text expected "<b>bold?</b> a && b", got "&lt;b&gt;bold?&lt;/b&gt; a &amp;&amp; b"
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
   - missing E-DG-002
   - severity: E-DG-002 did not fire (expected warning)
@@ -320,7 +328,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (185)
+### PASS / CODES-ONLY (186)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -478,6 +486,7 @@ none
 - `persist/key-required-neg` — PASS
 - `persist/prepaint-without-persist-neg` — PASS
 - `persist/storage-unknown-neg` — PASS
+- `raw-content/pre-code-wrapper-stays-element` — PASS
 - `reactive/counter-increment` — PASS · TWIN
 - `reactive/decl-needs-initializer-neg` — PASS · TWIN
 - `reactive/dg-002-no-readers-neg` — PASS · TWIN · VACUOUS
@@ -508,7 +517,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (837)
+### UNSUPPORTED (840)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1139,6 +1148,9 @@ none
 - `protect/sse-yield-strip` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `raw-content/bare-angle-displays` — parse-reject: E-PARSE-TAG: unexpected `?` in the tag `<y`
+- `raw-content/match-arm-raw-body-displays-as-text` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `raw-content/nested-code-with-attribute-is-text` — parse-reject: E-PARSE-CLOSER: `</pre>` closes `<code>`
 - `reactive/debounce-on-server` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
 - `reactive/debounce-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
 - `reactive/debounce-valid-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
@@ -1348,7 +1360,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (667)
+### NOT-TWINNED (668)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1838,6 +1850,7 @@ none
 - `protect/strip-client-visible-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `protect/symbol-description-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `protect/upper-table-row-strip` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `raw-content/component-prop-displays-as-text` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · unwrap-logic: impl#1 reads the restructured file differently (+W-INTERP-IN-RAW-CONTENT) — not restructured, no `${}` unwrapped
 - `reactive/array-reassign-reactive` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `reactive/cell-ambiguous-member-render-neg` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<uname>` sha
 - `reactive/cell-ambiguous-member-render-pos` — not mechanical: render-by-tag: markup tag `<uname>` shares a cell's name — render-by-tag (→ `<*uname/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: compound cell with child declar
