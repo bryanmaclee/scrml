@@ -22,5 +22,14 @@
 - [x] Bootstrap: NOT implemented — recorded precisely in g-bootstrap-raw-content-not-fail-closed-s462
       (needs a raw-HTML node through ANodeK/View/HNode, ~35 exhaustive match sites).
       bootstrap-conformance.md regenerated.
-- [ ] Corpus emit differential (12 repos) + innerText comparison
-- [ ] Gates
+- [x] Corpus emit differential (base a9aa81eff git-archive vs head, in-process compile, 12 repos):
+      4,841 .scrml scanned, 271 hold `<pre`/`<code`; outcome (error codes) identical 271/271;
+      artifacts identical 270/271; the 1 difference is the expected `.Idle :> "idle"` ->
+      `:&gt;` (displayed text identical, happy-dom). A first run showed 4 giti files differing by
+      local-id renumbering only; fixed (1f96570ba). Chromium innerText of every pre/code on 6
+      corpus pages (5 scrml-site pages, giti history; 301 elements): identical base vs head.
+- [x] Gates: pre-commit 34844/0; integration+lsp+commands 5657/0/10 skip; browser-baseline PASS;
+      root-level 2239/0; e2e-render-map 259/0; s34-census --check-new PASS; host-global-scan
+      --check 0 violations; facts / spec-index / state / bootstrap-conformance /
+      gen-bootstrap-severity --check current; snippet-gate 128/0; corpus-compile-floor PASS;
+      types-gate unchanged; conflict-marker PASS. self-host-v2 not touched (slices not run).
