@@ -79,17 +79,31 @@ async function build(src, tag) {
   };
 }
 
+/**
+ * A POST to a route the way the generated client makes it (double-submit CSRF).
+ * Duck-typed, like the conformance adapter's: a happy-dom `Request` (if any earlier
+ * test file in this process registered happy-dom's globals) silently drops the
+ * forbidden `Cookie` header, which would 403 every call for a reason unrelated to
+ * what is under test.
+ */
+function postRequest(path, body) {
+  const headers = { "content-type": "application/json", "x-csrf-token": "t0k", cookie: "scrml_csrf=t0k" };
+  const text = JSON.stringify(body);
+  return {
+    url: `http://localhost${path}`,
+    method: "POST",
+    headers: { get: (k) => headers[String(k).toLowerCase()] ?? null },
+    json: async () => JSON.parse(text),
+    text: async () => text,
+  };
+}
+
 /** POST a server route the way the generated client does (double-submit CSRF). */
 async function callRoute(serverPath, fnName, body) {
   const mod = await import(`file://${serverPath}?v=${Date.now()}-${Math.random()}`);
   const route = mod.routes.find((r) => r.path.includes(`_${fnName}_`));
   if (!route) throw new Error(`no route for ${fnName}: ${mod.routes.map((r) => r.path).join(", ")}`);
-  const req = new Request(`http://localhost${route.path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-CSRF-Token": "t0k", Cookie: "scrml_csrf=t0k" },
-    body: JSON.stringify(body),
-  });
-  const resp = await route.handler(req);
+  const resp = await route.handler(postRequest(route.path, body));
   const raw = await resp.text();
   return { status: resp.status, raw, json: JSON.parse(raw) };
 }
@@ -361,14 +375,7 @@ function checkout(id: number) {
     db.exec("INSERT INTO totals (t) VALUES (41)");
     db.close();
     const mod = await import(`file://${b.serverPath}?v=${Date.now()}-${Math.random()}`);
-    const post = async (route, body) => {
-      const resp = await route.handler(new Request(`http://localhost${route.path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t0k", Cookie: "scrml_csrf=t0k" },
-        body: JSON.stringify(body),
-      }));
-      return resp.json();
-    };
+    const post = async (route, body) => (await route.handler(postRequest(route.path, body))).json();
     const r0 = mod.routes.find((r) => r.path.endsWith("__batch_0"));
     const r1 = mod.routes.find((r) => r.path.endsWith("__batch_1"));
     expect(await post(r0, { id: 1 })).toBe(42);
