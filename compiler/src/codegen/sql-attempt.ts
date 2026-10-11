@@ -99,6 +99,74 @@ export function sqlQueryExprShape(node: ExprNode | null | undefined): SqlQueryEx
   return { raw: cur.raw, chain };
 }
 
+/** A `?{}` query found as the leftmost operand of a handled expression. */
+export interface SqlQueryHead {
+  /** The query (its raw source and SQL chain). */
+  shape: SqlQueryExprShape;
+  /** The sub-node of the expression that IS the query (`sql-ref` + SQL chain). */
+  query: ExprNode;
+}
+
+/**
+ * §19.8.3 / §44.3 (S465, s462 fix round 1) — the `?{}` query a handled
+ * expression starts from: the expression itself when it is exactly a query
+ * (`?{…}.get()`), or the query that is its LEFTMOST operand
+ * (`?{…}.get().name`, `?{…}.all().length`, `?{…}.get() is not`,
+ * `?{…}.all().map(f)`), reached through the operand that JS evaluates FIRST —
+ * a member / index object, a callee, a binary operator's left side, a ternary's
+ * condition, a cast, a non-update unary's argument. Returns null when the
+ * expression does not start from a query.
+ *
+ * SPEC §44.3: "the `?{}` is a failable expression in every context" — a tail
+ * (`.name`, `.length`, …) applies to the query's SUCCESS value; it does not stop
+ * the query from being the thing a `!{}` handles. So a handler on
+ * `?{…}.get().name` handles the query's failure exactly as a handler on
+ * `?{…}.get()` does (attempt-wrapped, E-TYPE-080 against `SqlError`), and on
+ * success the tail runs on the row.
+ */
+export function sqlQueryHeadOfExpr(node: ExprNode | null | undefined): SqlQueryHead | null {
+  let cur: ExprNode | null | undefined = node;
+  for (let steps = 0; cur && steps < 10000; steps++) {
+    const shape = sqlQueryExprShape(cur);
+    if (shape) return { shape, query: cur };
+    switch (cur.kind) {
+      case "member": cur = cur.object; break;
+      case "index": cur = cur.object; break;
+      case "call": cur = cur.callee; break;
+      case "binary": cur = cur.left; break;
+      case "ternary": cur = cur.condition; break;
+      case "cast": cur = cur.expression; break;
+      case "unary":
+        if (cur.op === "++" || cur.op === "--" || cur.op === "delete") return null;
+        cur = cur.argument;
+        break;
+      default: return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * The expression `node` with its leftmost query (`head.query`, found by
+ * `sqlQueryHeadOfExpr`) replaced by `replacement` — the spine nodes down to the
+ * query are shallow-copied, nothing else is touched. Used to apply a handled
+ * query's tail to the query's success value (bound to a temporary).
+ */
+export function replaceSqlQueryHead(node: ExprNode, query: ExprNode, replacement: ExprNode): ExprNode {
+  if (node === query) return replacement;
+  const n = node as any;
+  switch (node.kind) {
+    case "member":
+    case "index": return { ...n, object: replaceSqlQueryHead(n.object, query, replacement) };
+    case "call": return { ...n, callee: replaceSqlQueryHead(n.callee, query, replacement) };
+    case "binary": return { ...n, left: replaceSqlQueryHead(n.left, query, replacement) };
+    case "ternary": return { ...n, condition: replaceSqlQueryHead(n.condition, query, replacement) };
+    case "cast": return { ...n, expression: replaceSqlQueryHead(n.expression, query, replacement) };
+    case "unary": return { ...n, argument: replaceSqlQueryHead(n.argument, query, replacement) };
+    default: return node;
+  }
+}
+
 /**
  * §19.8.3 (S455) — the `?{}` query that a STATEMENT-level `!{}` handler guards.
  *
@@ -113,7 +181,7 @@ export function sqlQueryExprShape(node: ExprNode | null | undefined): SqlQueryEx
  * client/server split, protect, batching).
  *
  * Returns the guarded statement's query node (a structured `sql` node) — or
- * `"expr"` for an expression-position query that is the WHOLE operand
+ * `"expr"` for an expression-position query that is the whole operand or its leftmost operand
  * (`const r = (?{…}.get()) !{…}`) — or null when the guard does not handle a
  * `?{}` (a guarded CALL, which keeps its own semantics).
  */
@@ -123,7 +191,9 @@ export function handledSqlOfGuardedNode(guardedNode: unknown): Record<string, un
   if (g.kind === "sql") return g;
   if (g.sqlNode && typeof g.sqlNode === "object" && g.sqlNode.kind === "sql") return g.sqlNode;
   if (g.kind === "lift-expr" && g.expr && g.expr.kind === "sql" && g.expr.node && g.expr.node.kind === "sql") return g.expr.node;
-  if (sqlQueryExprShape((g.initExpr ?? g.exprNode) as ExprNode | undefined) !== null) return "expr";
+  // S465 — also a query that is the LEFTMOST operand (`const n = ?{…}.get().name !{…}`):
+  // the tail applies to the success value; the query is still what is handled.
+  if (sqlQueryHeadOfExpr((g.initExpr ?? g.exprNode) as ExprNode | undefined) !== null) return "expr";
   return null;
 }
 

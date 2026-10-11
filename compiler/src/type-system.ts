@@ -78,7 +78,7 @@ import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprN
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
-import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -16722,7 +16722,8 @@ function annotateNodes(
 
   /** The error enum's variant names for a handled operand, or null when unknown. */
   function _operandErrorVariants(operand: ExprNode): { typeName: string; variants: readonly string[] } | null {
-    if (sqlQueryExprShape(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
+    // S465 — also a query that is the operand's leftmost operand (`?{…}.get().name !{…}`).
+    if (sqlQueryHeadOfExpr(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
     if (operand.kind === "call" && operand.callee.kind === "ident") {
       const typeName = fnErrorTypes.get(operand.callee.name);
       if (!typeName) return null;

@@ -335,3 +335,130 @@ describe("S462 P0 — a server cell initialized by `?{…}` + a tail (§8.11 / �
     expect(merged).toEqual({ firstName: "ada", count: 2 });
   }, TIMEOUT);
 });
+
+describe("S465 fix round 1 — a `!{}` handler on a tailed `?{}` handles the QUERY (§19.8.3 / §44.3)", () => {
+  // §44.3: "the `?{}` is a failable expression in every context". A tail
+  // (`.name`, `.length`) applies to the query's SUCCESS value; the query itself
+  // is still attempt-wrapped, so a query that fails to run reaches the handler's
+  // arms as a SqlError variant. After f6f00bb3c the tailed site went through the
+  // expression path and the handler was silently dropped: the failure THREW out of
+  // the route (`SQLiteError: integer overflow`) and a partial handler compiled.
+  // `abs(-9223372036854775808)` makes SQLite fail the query at run time.
+  const FAIL = "AND abs(-9223372036854775808) > 0";
+  const HFNS = `
+      function constQf(id) {
+        const n = ?{\`SELECT name, pw FROM users WHERE id = \${id} ${FAIL}\`}.get().name !{
+          .QueryFailed(e) :> { return "qf" }
+          .ConstraintViolation(e) :> { return "cv" }
+          .ConnectionLost(e) :> { return "cl" }
+          .BatchPrepareFailed(e) :> { return "bp" }
+        }
+        return n
+      }
+      function letWild(id) {
+        let n = ?{\`SELECT name, pw FROM users WHERE id = \${id} ${FAIL}\`}.all().length !{
+          _ :> { return "let-caught" }
+        }
+        return n
+      }
+      function returnWild(id) {
+        return ?{\`SELECT name, pw FROM users WHERE id = \${id} ${FAIL}\`}.get().name !{
+          _ :> { return "return-caught" }
+        }
+      }
+      function reassignWild(id) {
+        let n = 0
+        n = ?{\`SELECT name, pw FROM users WHERE id = \${id} ${FAIL}\`}.all().length !{
+          _ :> { return "reassign-caught" }
+        }
+        return n
+      }
+      function constOk(id) {
+        const n = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get().name !{
+          _ :> { return "unexpected" }
+        }
+        return n
+      }
+      function letOk() {
+        let n = ?{\`SELECT name, pw FROM users\`}.all().length !{ _ :> { return -1 } }
+        return n
+      }
+      function returnOk(id) {
+        return ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get()?.name !{ _ :> { return "unexpected" } }
+      }
+      function reassignOk() {
+        let n = 0
+        n = ?{\`SELECT name, pw FROM users\`}.all().map(u => u.name) !{ _ :> { return [] } }
+        return n
+      }
+`;
+  const HCALLED = ["constQf", "letWild", "returnWild", "reassignWild", "constOk", "letOk", "returnOk", "reassignOk"];
+  let a;
+  beforeAll(async () => { a = await serveApp(app(`tables="users"`, HFNS, HCALLED)); }, TIMEOUT);
+  const ok = (body) => ({ status: 200, body });
+
+  test("const: a failing query reaches the `.QueryFailed` arm", async () => {
+    expect(await a.post("constQf", { id: 1 })).toEqual(ok(JSON.stringify("qf")));
+  }, TIMEOUT);
+  test("let: a failing query reaches the `_` arm", async () => {
+    expect(await a.post("letWild", { id: 1 })).toEqual(ok(JSON.stringify("let-caught")));
+  }, TIMEOUT);
+  test("return: a failing query reaches the `_` arm", async () => {
+    expect(await a.post("returnWild", { id: 1 })).toEqual(ok(JSON.stringify("return-caught")));
+  }, TIMEOUT);
+  test("reassign: a failing query reaches the `_` arm", async () => {
+    expect(await a.post("reassignWild", { id: 1 })).toEqual(ok(JSON.stringify("reassign-caught")));
+  }, TIMEOUT);
+  test("on success the tail applies to the query's value — never the row", async () => {
+    const c = await a.post("constOk", { id: 1 });
+    expect(c).toEqual(ok(JSON.stringify("ada")));
+    expect(c.body).not.toContain(SECRET);
+    expect(await a.post("letOk", {})).toEqual(ok("2"));
+    expect(await a.post("returnOk", { id: 2 })).toEqual(ok(JSON.stringify("bob")));
+    expect(await a.post("returnOk", { id: 99 })).toEqual(ok("null"));
+    const r = await a.post("reassignOk", {});
+    expect(r).toEqual(ok(JSON.stringify(["ada", "bob"])));
+    expect(r.body).not.toContain(SECRET);
+  }, TIMEOUT);
+  test("every handled query is evaluated through `_scrml_sql_attempt`", () => {
+    expect((a.serverJs.match(/await _scrml_sql_attempt\(/g) ?? []).length).toBeGreaterThanOrEqual(HCALLED.length);
+  });
+
+  const PARTIAL = `!{
+          .QueryFailed(e) :> { return "qf" }
+        }`;
+  for (const [form, body] of [
+    ["const", `const n = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get().name ${PARTIAL}
+        return n`],
+    ["let", `let n = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.all().length ${PARTIAL}
+        return n`],
+    ["return", `return ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get().name ${PARTIAL}`],
+    ["reassign", `let n = 0
+        n = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.all().length ${PARTIAL}
+        return n`],
+  ]) {
+    test(`${form}: a partial handler on a tailed query is E-TYPE-080 (exhaustive against SqlError)`, () => {
+      const src = app(`tables="users"`, `
+      function f(id) {
+        ${body}
+      }
+`, ["f"]);
+      const { result } = compileApp(src);
+      const e080 = (result.errors ?? []).find((e) => e.code === "E-TYPE-080");
+      expect(e080).toBeTruthy();
+      expect(e080.message).toContain("SqlError");
+      expect(e080.message).toContain("ConstraintViolation");
+    });
+  }
+  test("a bogus variant arm on a tailed query is E-TYPE-080 too", () => {
+    const src = app(`tables="users"`, `
+      function f(id) {
+        const n = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get().name !{
+          .Nonsense(e) :> { return "x" }
+        }
+        return n
+      }
+`, ["f"]);
+    expect((compileApp(src).result.errors ?? []).map((e) => e.code)).toContain("E-TYPE-080");
+  });
+});

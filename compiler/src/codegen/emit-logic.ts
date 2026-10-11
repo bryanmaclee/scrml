@@ -24,7 +24,7 @@ import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrit
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
-import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -1259,6 +1259,33 @@ export function emitSqlQueryShape(shape: SqlQueryExprShape, ctx: EmitExprContext
   // emitSqlDriverCall: only the driver call runs inside `_scrml_sql_attempt`.
   const stmt = emitLogicNode(_sqlNodeFromShape(shape), { ...opts, boundary: "server", sqlAttempt: attempt });
   return `(${stmt.replace(/;\s*$/, "")})`;
+}
+
+/**
+ * §19.8.3 / §44.3 (S465, s462 fix round 1) — lower the operand of a `!{}`
+ * handler whose operand STARTS FROM a `?{}` query (sql-attempt.ts
+ * `sqlQueryHeadOfExpr`). Returns null when it does not.
+ *
+ * The query is evaluated through `_scrml_sql_attempt` (a failure becomes a
+ * `SqlError` envelope for the handler's arms) exactly as without a tail. When
+ * the operand is MORE than the query (`?{…}.get().name`, `?{…}.all().length`),
+ * the query's value is bound first (`pre`) and the rest of the expression — the
+ * tail — runs on it only when the query succeeded; a failure envelope passes
+ * through untouched to the arms:
+ *
+ *   const _scrml_query_3 = (await _scrml_sql_attempt(…));
+ *   let _scrml_result_2 = (_scrml_query_3 && _scrml_query_3.__scrml_error) ? _scrml_query_3 : _scrml_query_3.name;
+ */
+function _emitHandledSqlOperand(expr: ExprNode | null | undefined, opts: EmitLogicOpts): { pre: string | null; init: string } | null {
+  const head = sqlQueryHeadOfExpr(expr);
+  if (!head || !expr) return null;
+  const ctx = _makeExprCtx(opts);
+  const attempt = emitSqlQueryShape(head.shape, ctx, true);
+  if (head.query === expr) return { pre: null, init: attempt };
+  const q = genVar("query");
+  const valueRef = { kind: "ident", name: q, span: (head.query as { span?: unknown }).span } as unknown as ExprNode;
+  const tail = emitExpr(replaceSqlQueryHead(expr, head.query, valueRef), ctx);
+  return { pre: `const ${q} = ${attempt};`, init: `(${q} && ${q}.__scrml_error) ? ${q} : ${tail}` };
 }
 
 /**
@@ -4122,6 +4149,9 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       let yieldsResult = false;
       // S454 — the guarded value is a handled `?{}` evaluated through `_scrml_sql_attempt`.
       let handlesSql = false;
+      // S465 — a handled query with a tail (`?{…}.get().name !{…}`): the statement
+      // that binds the attempted query's value before the tail runs on it.
+      let handledSqlPre: string | null = null;
       // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
       // reactive assignment `@cell = call() !{...}`. In that shape emitLogicNode
       // lowers the guardedNode to the EAGER `_scrml_reactive_set("cell", call())`
@@ -4192,17 +4222,26 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           if (guardedNode.kind === "return-stmt") returnsResult = true;
         } else if (guardedNode.kind === "let-decl" && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
-          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `let r = (?{…}.get()) !{…}`
+          // §19.8.3 — `let r = (?{…}.get()) !{…}`; S465 — also `let n = ?{…}.get().name !{…}`.
+          const _hq = opts.boundary === "server" ? _emitHandledSqlOperand(guardedNode.initExpr, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
+          } else {
+            initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
           }
         } else if ((guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
-          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `const r = (?{…}.get()) !{…}`
+          // §19.8.3 — `const r = (?{…}.get()) !{…}`; S465 — also `const n = ?{…}.get().name !{…}`
+          // and the reassignment `n = ?{…}.all().length !{…}` (a tilde-decl).
+          const _hq = opts.boundary === "server" ? _emitHandledSqlOperand(guardedNode.initExpr, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
+          } else {
+            initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
           }
           // §19.4.3 (S454) — `x = f() !{…}` on an already-declared `x` is an
           // ASSIGNMENT: the guarded value lands in the existing binding. It used
@@ -4233,12 +4272,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           // the function returned `undefined`).
           if (guardedNode.kind === "return-stmt" && initExpr) returnsResult = true;
           // §19.8.3 (S454) — the operand is an expression-position `?{}` query.
-          if (
-            initExpr && opts.boundary === "server" &&
-            (guardedNode.kind === "return-stmt" || guardedNode.kind === "bare-expr") &&
-            sqlQueryExprShape(guardedNode.exprNode) !== null
-          ) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.exprNode)!, _makeExprCtx(opts), true);
+          // S465 — also a query that is the operand's leftmost operand (`return ?{…}.get().name !{…}`).
+          const _hq = initExpr && opts.boundary === "server" &&
+            (guardedNode.kind === "return-stmt" || guardedNode.kind === "bare-expr")
+            ? _emitHandledSqlOperand(guardedNode.exprNode, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
           }
           // D3 — a reactive assignment `@cell = call()` lowers to a state-decl
@@ -4290,6 +4330,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // level `_autoAwait` remains the source of truth for the peer-call form (init
       // has no `await`), so only skip when the emitted init already carries it.
       const _initHasAwait = /^\s*await\b/.test(initExpr);
+      if (handledSqlPre) lines.push(handledSqlPre);
       lines.push(`let ${resultVar} = ${_autoAwait && !_initHasAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
 
