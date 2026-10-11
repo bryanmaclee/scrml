@@ -59,6 +59,28 @@
   returns the full row incl. the hash. Measured on this worktree (SQL lowering
   untouched by this dispatch).
 
-## Next
-- commit; gates; corpus emit differential (samples/examples/conformance/
-  gauntlet-r25 + ../giti ../flogence read-only).
+## Commits
+- 36446dfc8 — A + B + C + tests + conformance.
+- 46df8bc52 — `lin`/`~` decl tiering (found by the corpus diff: examples/
+  19-lin-token `login`); §6.6.19 message + SPEC rewrite (the SPEC's own
+  "SHALL be rewritten" clause); regenerated SPEC-INDEX / FACTS / bootstrap-
+  conformance / TYPES-BASELINE.
+- e0be779aa — multi-batch: the last batch returned the split's FIRST cell
+  (returnVarName) and the client set it to `undefined` after batch 1.
+
+## Corpus differential (final, head = e0be779aa vs base a9aa81eff)
+2919 sources (samples, examples, conformance, stdlib, benchmarks,
+scrml-support gauntlet-r25, ../giti, ../flogence). 20 server functions changed
+in 7 sources; 0 in giti (28 server fns), flogence (243), gauntlet-r25,
+benchmarks; examples: 1 (19-lin-token `login`, broken on base, now correct).
+Newly refused real programs: 0. Harness note: stdlib/ rows differ only
+because stdlib exemptions key on the compiler's own stdlib path.
+
+## Gates
+pre-commit ×3 green; types-gate (re-recorded rename); host-global-scan;
+facts (regen); spec-index (regen); s34-census --check-new; bootstrap-
+conformance (regen; FAIL 55→55); severity; snippet-gate 128/128; corpus-
+compile-floor; lsp+commands 723/0; root-level 2239/0; e2e-render-map 259/0;
+browser tier 48 failures == baseline name set (script refused twice with
+PARSER DISAGREES 48 vs 47 — the documented flake; verified by direct
+name-set comparison).
