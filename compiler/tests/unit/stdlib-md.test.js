@@ -67,6 +67,10 @@ describe("scrml:md §A blocks — fenced code", () => {
     expect(h("```c++ extra words\nx\n```")).toBe('<pre><code class="language-c++">x\n</code></pre>');
     expect(h('```"><script>\nx\n```')).toBe("<pre><code>x\n</code></pre>");
     expect(h("```\nx\n```")).toBe("<pre><code>x\n</code></pre>");
+    // backslash escapes in the info string resolve first (CommonMark #24)
+    expect(h("``` foo\\+bar\nx\n```")).toBe('<pre><code class="language-foo+bar">x\n</code></pre>');
+    // a word outside the closed class is dropped (CommonMark #144 would keep `;`)
+    expect(h("````;\n````")).toBe("<pre><code></code></pre>");
   });
   test("A9: the closing fence is at least as long as the opener; a shorter one is content", () => {
     expect(h("````\n```\nx\n````")).toBe("<pre><code>```\nx\n</code></pre>");
@@ -132,6 +136,16 @@ describe("scrml:md §A blocks — lists", () => {
     expect(h("para\n1. x")).toBe("<p>para</p><ol><li>x</li></ol>");
     expect(h("para\n2. x")).toBe("<p>para\n2. x</p>");
     expect(h("para\n-")).toBe("<p>para\n-</p>");
+  });
+  test("A25a: a blank line after a nested list, before more item content, makes the OUTER list loose (review MED-1)", () => {
+    expect(h("- a\n  - b\n\n  c")).toBe("<ul><li><p>a</p><ul><li>b</li></ul><p>c</p></li></ul>");
+    expect(h("- - x\n\n  c")).toBe("<ul><li><ul><li>x</li></ul><p>c</p></li></ul>");
+    expect(h("1. a\n   1. b\n\n   c")).toBe("<ol><li><p>a</p><ol><li>b</li></ol><p>c</p></li></ol>");
+    expect(h("- a\n  - b\n\n  c\n- d")).toBe("<ul><li><p>a</p><ul><li>b</li></ul><p>c</p></li><li><p>d</p></li></ul>");
+  });
+  test("A25b: an empty item followed by a blank line is empty; the indented block after it is not its content (CommonMark #280)", () => {
+    expect(h("-\n\n  foo")).toBe("<ul><li></li></ul><p>foo</p>");
+    expect(h("-\n\n- b")).toBe("<ul><li></li><li><p>b</p></li></ul>");
   });
   test("A25: list item content keeps its relative indentation", () => {
     expect(h("- a\n\n      deep")).toBe("<ul><li><p>a</p><p>deep</p></li></ul>");
@@ -314,6 +328,21 @@ describe("scrml:md §C OUT — each dropped construct is text and reports its co
     ["a | b\n--- | ---\n1 | 2", "<p>a | b\n--- | ---\n1 | 2</p>", ["W-MD-TABLE-PIPES"]],
     ["> a\nb", "<blockquote><p>a</p></blockquote><p>b</p>", ["W-MD-LAZY-CONTINUATION"]],
     ["- a\nb", "<ul><li>a</li></ul><p>b</p>", ["W-MD-LAZY-CONTINUATION"]],
+    // review L3 — CommonMark reads these as structure; scrml-md reads text and says so
+    ["*\tx", "<p>*\tx</p>", ["W-MD-BULLET-MARKER"]],
+    ["+\tx", "<p>+\tx</p>", ["W-MD-BULLET-MARKER"]],
+    ["a\n-", "<p>a\n-</p>", ["W-MD-SETEXT"]],
+    ["a\n--", "<p>a\n--</p>", ["W-MD-SETEXT"]],
+    ["- a\n  -\n\n  c", "<ul><li><p>a\n-</p><p>c</p></li></ul>", ["W-MD-SETEXT"]],
+    ["- ---", "<p>- ---</p>", ["W-MD-THEMATIC-BREAK"]],
+    ["[a](/f&ouml; \"t\")", '<p><a href="/f&amp;ouml;" title="t">a</a></p>', ["W-MD-ENTITY"]],
+    ["[a](/u \"&quot;x\")", '<p><a href="/u" title="&amp;quot;x">a</a></p>', ["W-MD-ENTITY"]],
+    ["``` f&ouml;\nx\n```", "<pre><code>x\n</code></pre>", ["W-MD-ENTITY"]],
+    ['<div id="foo"\n*hi*', "<p>&lt;div id=&quot;foo&quot;\n<em>hi</em></p>", ["W-MD-RAW-HTML"]],
+    ["<div class\nfoo", "<p>&lt;div class\nfoo</p>", ["W-MD-RAW-HTML"]],
+    ["[Foo*bar\\]]:my_(url) 'x'", "<p>[Foo*bar]]:my_(url) 'x'</p>", ["W-MD-REFERENCE-LINK"]],
+    ["[\nfoo\n]: /url\nbar", "<p>[\nfoo\n]: /url\nbar</p>", ["W-MD-REFERENCE-LINK"]],
+    ["| a |\n| - |\nbar", "<table><thead><tr><th>a</th></tr></thead></table><p>bar</p>", ["W-MD-TABLE-PIPES"]],
   ];
   for (const [src, want, wantCodes] of cases) {
     test(`C: ${JSON.stringify(src)} → ${wantCodes[0]}`, () => {
@@ -468,9 +497,11 @@ describe("scrml:md §D hostile — look-alikes are text", () => {
     expect(link.data.dest).toEqual([md.MdSeg.Lit("jav&#x61;script:1")]);
     expect(link.data.title).toEqual([md.MdSeg.Lit("&quot;")]);
   });
-  test("D8: U+0000 becomes U+FFFD; CRLF line ends read as LF", () => {
+  test("D8: U+0000 becomes U+FFFD; CRLF and a lone CR are line ends", () => {
     expect(h("a\u0000b")).toBe("<p>a\uFFFDb</p>");
     expect(h("a\r\nb\r\n\r\n# c")).toBe("<p>a\nb</p><h1>c</h1>");
+    expect(h("a\rb\r\r# c")).toBe("<p>a\nb</p><h1>c</h1>");
+    expect(parse("ok\r<b>").diags.map((d) => [d.line, d.col])).toEqual([[2, 1]]);
   });
   test("D9: fuzzed input never throws, stays in the closed set and is deterministic", () => {
     const alphabet = ["*", "_", "~", "`", "[", "]", "(", ")", "!", "<", ">", "&", ";", "#", "-", "|", ":", "\\", "\n", "\n\n", " ", "  ", "a", "b", "1.", "- ", "> ", '"', "'", "http://", "x"];
@@ -572,12 +603,80 @@ describe("scrml:md §F dedent", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §H — parseSlots: text-only `${…}` atoms (§67.4; the reader's half of phase 2)
+// ---------------------------------------------------------------------------
+
+const S = "￼";
+/** Build reader input from pieces: a string is literal text, `{ src }` is a slot. */
+function withSlots(...pieces) {
+  let text = "";
+  const slots = [];
+  for (const p of pieces) {
+    if (typeof p === "string") text += p;
+    else { slots.push({ offset: text.length, source: p.src }); text += S; }
+  }
+  return { text, slots };
+}
+const hs = (...pieces) => { const { text, slots } = withSlots(...pieces); return html(md.parseSlots(text, slots)); };
+
+describe("scrml:md §H parseSlots — a slot is text, never structure", () => {
+  test("H1: a slot is an inline atom; `**${x}**` is strong around it", () => {
+    expect(hs("Welcome, **", { src: "${@user.name}" }, "**.")).toBe("<p>Welcome, <strong>{slot0}</strong>.</p>");
+  });
+  test("H2: a slot counts as a letter for flanking (an author-typed U+FFFC does not)", () => {
+    expect(hs("a*", { src: "${x}" }, "*b")).toBe("<p>a<em>{slot0}</em>b</p>");
+    expect(h("a*" + S + "*b")).toBe("<p>a*" + S + "*b</p>");
+  });
+  test("H3: a slot at a line start never makes a heading, a list item or a quote", () => {
+    expect(hs({ src: "${h}" }, " title\n", { src: "${m}" }, " item")).toBe("<p>{slot0} title\n{slot1} item</p>");
+  });
+  test("H4: inside a code span a slot is its exact source text, never parsed (review MED-2)", () => {
+    expect(hs("run `", { src: "${HOME:-/tmp}" }, "` now")).toBe("<p>run <code>${HOME:-/tmp}</code> now</p>");
+  });
+  test("H5: inside a fence — body and info string — a slot is its exact source text", () => {
+    expect(hs("```sh\necho ", { src: "${HOME:-/tmp}" }, "\n```")).toBe('<pre><code class="language-sh">echo ${HOME:-/tmp}\n</code></pre>');
+    expect(hs("```", { src: "${lang}" }, "\nx\n```")).toBe("<pre><code>x\n</code></pre>");
+  });
+  test("H6: a slot in a destination makes it data-led: MdSeg.Slot between the literal pieces", () => {
+    const { text, slots } = withSlots("[queue](/users/", { src: "${@id}" }, "/queue \"for ", { src: "${@n}" }, "\")");
+    const link = md.parseSlots(text, slots).blocks[0].data.children[0];
+    expect(link.data.dest).toEqual([md.MdSeg.Lit("/users/"), md.MdSeg.Slot(0), md.MdSeg.Lit("/queue")]);
+    expect(link.data.title).toEqual([md.MdSeg.Lit("for "), md.MdSeg.Slot(1)]);
+  });
+  test("H7: an image's alt keeps its slots", () => {
+    const { text, slots } = withSlots("![photo of ", { src: "${@who}" }, "](/p.png)");
+    expect(md.parseSlots(text, slots).blocks[0].data.children[0].data.alt).toEqual([md.MdSeg.Lit("photo of "), md.MdSeg.Slot(0)]);
+  });
+  test("H8: `Slot(i)` is the caller's index, whatever the order of the list", () => {
+    const text = S + " and " + S;
+    const doc = md.parseSlots(text, [{ offset: 6, source: "${b}" }, { offset: 0, source: "${a}" }]);
+    expect(html(doc)).toBe("<p>{slot1} and {slot0}</p>");
+  });
+  test("H9: a slot contributes nothing to a heading slug; an offset that is not U+FFFC is ignored", () => {
+    const { text, slots } = withSlots("# Hi ", { src: "${x}" });
+    expect(headingSlugs(md.parseSlots(text, slots), [])).toEqual(["hi-"]);
+    expect(html(md.parseSlots("plain", [{ offset: 1, source: "${x}" }]))).toBe("<p>plain</p>");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §G — headingSlugs
 // ---------------------------------------------------------------------------
 
 describe("scrml:md §G headingSlugs", () => {
-  test("G1: lower case; letters and digits kept; spaces and `-` become `-`; the rest dropped", () => {
-    expect(headingSlugs(parse("# Filing a Bug!\n## Step 2: *Triage*\n### Café & co"), [])).toEqual(["filing-a-bug", "step-2-triage", "caf--co"]);
+  test("G1: lower case; Unicode letters, marks, digits and `_` kept; spaces and `-` become `-`; the rest dropped", () => {
+    expect(headingSlugs(parse("# Filing a Bug!\n## Step 2: *Triage*\n### Café & co\n## snake_case"), [])).toEqual(["filing-a-bug", "step-2-triage", "café--co", "snake_case"]);
+  });
+  test("G1b: non-Latin headings keep their letters (no section-N for CJK, Cyrillic, Devanagari)", () => {
+    expect(headingSlugs(parse("# 快速入门\n# Привет мир\n# नमस्ते"), [])).toEqual(["快速入门", "привет-мир", "नमस्ते"]);
+  });
+  test("G5: 2,000 same-named headings get distinct ids in linear time", () => {
+    const doc = parse("# Same\n".repeat(2000));
+    const t0 = performance.now();
+    const ids = headingSlugs(doc, ["same-3"]);
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(new Set(ids).size).toBe(2000);
+    expect(ids.slice(0, 5)).toEqual(["same", "same-1", "same-2", "same-4", "same-5"]);
   });
   test("G2: duplicates get -1, -2 in document order; taken ids are avoided; nested headings count", () => {
     expect(headingSlugs(parse("# A\n## A\n> # A\n- # A"), ["a-1"])).toEqual(["a", "a-2", "a-3", "a-4"]);

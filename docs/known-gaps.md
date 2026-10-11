@@ -32,9 +32,15 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
 | MED | 594 | 6 |
-| LOW | 351 | 0 |
+| LOW | 352 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-stdlib-client-chunks-not-minified-md-s462 — stdlib client chunks ship unminified; the `stdlib-md` chunk (the scrml:md reader, §67.7) is 87 KB raw / 22.5 KB gzip as shipped, 32 KB / 11 KB gzip minified — `NEW S462; LOW; open (phase-3 item)`
+
+<!-- @gap id=g-stdlib-client-chunks-not-minified-md-s462 sev=LOW status=open locus=compiler/src/runtime-template.js(_loadStdlibChunk inlines each shim verbatim) prov=review:S239-s462-md-phase1(L6) -->
+
+`_loadStdlibChunk` copies each `compiler/runtime/stdlib/<name>.js` shim into the runtime as written, comments and all. For the hand-written shims that costs little; `md.js` is impl#1's library-mode compile of `stdlib/md/index.scrml` (§67.8), long and heavily commented, so its client chunk is 87,240 B raw / 22,565 B gzip, against 32,301 B / 11,044 B gzip after `bun build --minify` (measured S462 on the md phase-1 review-fix head). The chunk ships only on a page whose client code imports `scrml:md` (and, in phase 3, on pages using `<md of=…/>`), so no page pays it today. Fix direction (phase 3, before `of=` ships): minify stdlib chunks in the client runtime build — a change to `_loadStdlibChunk` that touches EVERY stdlib chunk, so it needs its own review and a size/behaviour check across all of them; not done in phase 1 by direction of the review. The reader's own size (the inlined `_scrml_structural_eq`, `==` lowered to calls) is a separate impl#1 codegen cost.
 
 ### g-server-block-arrow-body-raw-tokens-bypass-trap-s462 — an `if` inside a block-bodied arrow in a server function (`const g = () => { if (verifyPassword(…)) … }`) is emitted as re-joined raw tokens, so neither the §13.2 server Promise trap nor the await classifier sees it — `NEW S462; MED; open (pre-existing on BASE)`
 

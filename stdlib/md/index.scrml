@@ -97,12 +97,61 @@ ${
     //             (a tab on one line, spaces on another) — E-MD-INDENT-MIXED
     export type MdDedent:struct = { text: string, indent: int, dropFirst: boolean, mixed: boolean }
 
+    // A text-only slot handed to `parseSlots` (§67.4): the input offset of its
+    // U+FFFC, and the exact source text of its `${…}` (restored inside code).
+    export type MdSlot:struct = { offset: int, source: string }
+
     // ---------------------------------------------------------------------------
     // Internal shapes
     // ---------------------------------------------------------------------------
 
     // One input line: its text, and the input offset of text[0].
     type Line:struct = { text: string, offset: int }
+
+    // The text-only slots of a static body (§67.4), ascending by offset: where
+    // each `${…}` sits in the reader's input (as one U+FFFC) and its exact
+    // source text, which is put back verbatim when the slot lands in code.
+    //   ids  the caller's index of each slot (what `Slot(i)` carries)
+    type Slots:struct = { offs: int[], srcs: string[], ids: int[] }
+
+    const SLOT_CHAR = "￼"
+
+    // The index of the slot at input offset `off`, or -1. A U+FFFC the author
+    // typed is not in the list, so it is an ordinary character.
+    fn slotIndex(sl: Slots, off: int) -> int {
+        let lo = 0
+        let hi: int = sl.offs.length - 1
+        while (lo <= hi) {
+            const mid: int = Math.floor((lo + hi) / 2)
+            const v: int = sl.offs[mid]
+            if (v == off) {
+                return mid
+            }
+            if (v < off) {
+                lo = mid + 1
+            } else {
+                hi = mid - 1
+            }
+        }
+        return -1
+    }
+
+    // `text`, whose character k sits at input offset `at` + k, with every slot
+    // put back as its exact source text (a slot inside code is inert, §67.4).
+    fn restoreSlots(text: string, at: int, sl: Slots) -> string {
+        if (sl.offs.length == 0 || text.indexOf(SLOT_CHAR) < 0) {
+            return text
+        }
+        let out = ""
+        let k = 0
+        while (k < text.length) {
+            const c: string = text[k]
+            const si: int = c == SLOT_CHAR ? slotIndex(sl, at + k) : -1
+            out = out + (si >= 0 ? sl.srcs[si] : c)
+            k = k + 1
+        }
+        return out
+    }
 
     // A diagnostic before line/column are known.
     type Note:struct = { code: string, offset: int }
@@ -121,7 +170,9 @@ ${
     //   altTitle   a '…' or (…) title was seen (W-MD-LINK-TITLE)
     //   angleDest  a <…> destination was seen (W-MD-LINK-DESTINATION)
     //   overBudget the scan stopped on the budget (W-MD-SCAN-LIMIT)
-    type Tail:struct = { ok: boolean, dest: string, title: string, end: int, used: int,
+    //   destA/destB  the destination's text range; titleA/titleB the title's
+    //                (inside the quotes; titleA -1 when there is none)
+    type Tail:struct = { ok: boolean, destA: int, destB: int, titleA: int, titleB: int, end: int, used: int,
                          altTitle: boolean, angleDest: boolean, overBudget: boolean }
 
     // ---------------------------------------------------------------------------
@@ -341,7 +392,7 @@ ${
     // A second spelling of a list marker: `* `, `+ ` (W-MD-BULLET-MARKER) or
     // `N) ` (W-MD-ORDERED-MARKER). Returns the code, or "".
     fn altMarker(t: string) -> string {
-        if ((t.startsWith("* ") || t.startsWith("+ ") || t == "*" || t == "+") && !isAltRule(t)) {
+        if (/^[*+]([ \t]|$)/.test(t) && !isAltRule(t)) {
             return "W-MD-BULLET-MARKER"
         }
         let n = 0
@@ -538,7 +589,7 @@ ${
 
     // Read the lines of one container into blocks. `depth` is the container
     // nesting (0 at the top); quotes and lists are recognised below MAX_DEPTH.
-    fn parseBlocks(lines: Line[], depth: int) -> Blocks {
+    fn parseBlocks(lines: Line[], depth: int, sl: Slots) -> Blocks {
         let blocks: MdBlock[] = []
         let gaps: boolean[] = []
         let notes: Note[] = []
@@ -563,7 +614,14 @@ ${
                 // ---- fenced code ----
                 const fl = fenceLen(t)
                 if (fl > 0) {
-                    const info: string = t.substring(fl).trim()
+                    // the info string: slots put back (inert), escapes resolved,
+                    // character references reported (never decoded)
+                    const rawInfo: string = restoreSlots(t.substring(fl), lead.offset + fl, sl)
+                    const ent: int = entityIndex(rawInfo)
+                    if (ent >= 0) {
+                        notes.push(note("W-MD-ENTITY", lead.offset + fl + ent))
+                    }
+                    const info: string = unescape(rawInfo.trim())
                     const word: string = info.split(/[ \t]/)[0]
                     const lang: string = /^[A-Za-z0-9_+-]+$/.test(word) ? word : ""
                     let body: string[] = []
@@ -576,7 +634,8 @@ ${
                             closed = true
                             break
                         }
-                        body.push(stripCols(lines[j], ind).text)
+                        const cl: Line = stripCols(lines[j], ind)
+                        body.push(restoreSlots(cl.text, cl.offset, sl))
                         j = j + 1
                     }
                     const text: string = body.length == 0 ? "" : body.join("\n") + "\n"
@@ -603,7 +662,7 @@ ${
                     if (e < content.length && (e == 0 || isSpaceOrTab(content[e - 1]))) {
                         notes.push(note("W-MD-HEADING-CLOSE", lead.offset + k + e))
                     }
-                    const inl = parseInlines([{ text: content, offset: lead.offset + k }])
+                    const inl = parseInlines([{ text: content, offset: lead.offset + k }], sl, false)
                     for (const x of inl.notes) {
                         notes.push(x)
                     }
@@ -631,7 +690,7 @@ ${
                     for (const d of delims) {
                         align.push(alignOf(d.text))
                     }
-                    const hr = cellsRow(head, head.length)
+                    const hr = cellsRow(head, head.length, sl)
                     for (const x of hr.notes) {
                         notes.push(x)
                     }
@@ -642,12 +701,18 @@ ${
                         if (isBlank(rs) || indentOf(rs) > 3 || !isPipeRow(rs.trim())) {
                             break
                         }
-                        const r = cellsRow(rowCells(stripLead(lines[j])), head.length)
+                        const r = cellsRow(rowCells(stripLead(lines[j])), head.length, sl)
                         for (const x of r.notes) {
                             notes.push(x)
                         }
                         rows.push(r.row)
                         j = j + 1
+                    }
+                    // GFM would read a following plain line as one more row; in
+                    // scrml-md a row has both pipes, so the line is a paragraph
+                    if (j < n && !isBlank(lines[j].text) && !interrupts(lines, j, depth)
+                        && !otherStart(lines[j].text)) {
+                        notes.push(note("W-MD-TABLE-PIPES", stripLead(lines[j]).offset))
                     }
                     blocks.push(MdBlock.Table(align, hr.row, rows))
                     gaps.push(gap)
@@ -659,7 +724,7 @@ ${
                 // ---- containers: quote, list ----
                 if (depth < MAX_DEPTH && !isAltRule(t)) {
                     if (t.startsWith(">")) {
-                        const q = readQuote(lines, i, depth)
+                        const q = readQuote(lines, i, depth, sl)
                         for (const x of q.notes) {
                             notes.push(x)
                         }
@@ -670,7 +735,7 @@ ${
                         continue
                     }
                     if (markerWidth(t) > 0) {
-                        const l = readList(lines, i, depth)
+                        const l = readList(lines, i, depth, sl)
                         for (const x of l.notes) {
                             notes.push(x)
                         }
@@ -687,7 +752,7 @@ ${
             }
 
             // ---- paragraph (and every OUT construct, read as text) ----
-            const p = readParagraph(lines, i, depth)
+            const p = readParagraph(lines, i, depth, sl)
             for (const x of p.notes) {
                 notes.push(x)
             }
@@ -699,19 +764,33 @@ ${
         return { blocks: blocks, gaps: gaps, notes: notes }
     }
 
+    // Does `t` start a CommonMark link reference definition (`[label]: …`) or
+    // footnote definition (`[^label]: …`)? The label may hold `\]` escapes and
+    // line ends (no blank line — the caller passes one paragraph). Returns the
+    // code to report, or "".
+    fn defKind(t: string) -> string {
+        if (/^\[\^(?:\\[\s\S]|[^\]\\])+\]:/.test(t)) {
+            return "W-MD-FOOTNOTE"
+        }
+        if (/^\[(?:\\[\s\S]|[^\]\\])+\]:/.test(t)) {
+            return "W-MD-REFERENCE-LINK"
+        }
+        return ""
+    }
+
     type Read:struct = { block: MdBlock, next: int, notes: Note[] }
     type RowRead:struct = { row: MdRow, notes: Note[] }
 
     // A table row of exactly `width` cells: extra cells dropped, missing cells
     // empty. `\|` in a cell is a literal `|`.
-    fn cellsRow(cells: Line[], width: int) -> RowRead {
+    fn cellsRow(cells: Line[], width: int, sl: Slots) -> RowRead {
         let out: MdCell[] = []
         let notes: Note[] = []
         let k = 0
         while (k < width) {
             if (k < cells.length) {
-                const c: string = cells[k]
-                const inl = parseInlines([{ text: c.text.split("\\|").join("|"), offset: c.offset }])
+                const c: Line = cells[k]
+                const inl = parseInlines([c], sl, true)
                 for (const x of inl.notes) {
                     notes.push(x)
                 }
@@ -728,7 +807,7 @@ ${
     // starts another block. OUT constructs that look like blocks (indented code,
     // `~~~`, `***`, `* item`, setext underlines, reference definitions, raw HTML
     // lines) are paragraph text here, each with its W-MD note.
-    fn readParagraph(lines: Line[], i: int, depth: int) -> Read {
+    fn readParagraph(lines: Line[], i: int, depth: int, sl: Slots) -> Read {
         let notes: Note[] = []
         let parts: Line[] = []
         let deepNoted = false
@@ -754,8 +833,15 @@ ${
                     notes.push(note("W-MD-INDENTED-CODE", lead.offset))
                 }
             } else {
-                if (j > i && isEqualsLine(t)) {
+                // a setext underline: `=` of any length, or one or two `-`
+                // (three or more `-` is a rule and ended the paragraph above)
+                if (j > i && (isEqualsLine(t) || /^-{1,2}[ \t]*$/.test(t))) {
                     notes.push(note("W-MD-SETEXT", lead.offset))
+                }
+                // an HTML block start (CommonMark 4.6): `<tag` / `</tag` at the
+                // start of a line, closed or not
+                if (/^<\/?[A-Za-z][A-Za-z0-9-]*([ \t]|\/?>|$)/.test(t) || /^<(!--|\?|![A-Za-z]|!\[CDATA\[)/.test(t)) {
+                    notes.push(note("W-MD-RAW-HTML", lead.offset))
                 }
                 if (isTildeFence(t)) {
                     notes.push(note("W-MD-FENCE-TILDE", lead.offset))
@@ -774,19 +860,29 @@ ${
                     notes.push(note("W-MD-DEPTH-LIMIT", lead.offset))
                     deepNoted = true
                 }
-                if (/^\[\^[^\]]+\]:/.test(t)) {
-                    notes.push(note("W-MD-FOOTNOTE", lead.offset))
-                } else if (/^\[[^\]]+\]:/.test(t)) {
-                    notes.push(note("W-MD-REFERENCE-LINK", lead.offset))
+                const def: string = defKind(t)
+                if (def != "") {
+                    notes.push(note(def, lead.offset))
                 }
             }
             parts.push(lead)
             j = j + 1
         }
+        // a definition whose label runs over several lines (`[\nfoo\n]: /url`)
+        if (parts.length > 1) {
+            let joined = ""
+            for (const pt of parts) {
+                joined = joined + (joined == "" ? "" : "\n") + pt.text
+            }
+            const def: string = defKind(joined)
+            if (def != "") {
+                notes.push(note(def, parts[0].offset))
+            }
+        }
         // the last line's trailing whitespace is not content (CommonMark 4.8)
         const last: Line = parts[parts.length - 1]
         parts[parts.length - 1] = { text: trimEnd(last.text), offset: last.offset }
-        const inl = parseInlines(parts)
+        const inl = parseInlines(parts, sl, false)
         for (const x of inl.notes) {
             notes.push(x)
         }
@@ -796,7 +892,7 @@ ${
     // A block quote starting at lines[i]: consecutive lines that begin with `>`.
     // A non-blank line without `>` ends it (no lazy continuation); when it would
     // have continued the quote's paragraph in CommonMark it is W-MD-LAZY-CONTINUATION.
-    fn readQuote(lines: Line[], i: int, depth: int) -> Read {
+    fn readQuote(lines: Line[], i: int, depth: int, sl: Slots) -> Read {
         let inner: Line[] = []
         let notes: Note[] = []
         let j: int = i
@@ -822,7 +918,7 @@ ${
             && paragraphEndsWith(inner, depth + 1)) {
             notes.push(note("W-MD-LAZY-CONTINUATION", stripLead(lines[j]).offset))
         }
-        const r = parseBlocks(inner, depth + 1)
+        const r = parseBlocks(inner, depth + 1, sl)
         for (const x of r.notes) {
             notes.push(x)
         }
@@ -846,7 +942,7 @@ ${
     // follow each other, blank lines allowed between them. An item's content is
     // indented to the column after its marker (1–4 spaces; 5+ means 1). A list is
     // loose when a blank line separates two items or two blocks of one item.
-    fn readList(lines: Line[], i: int, depth: int) -> Read {
+    fn readList(lines: Line[], i: int, depth: int, sl: Slots) -> Read {
         let notes: Note[] = []
         let items: MdItem[] = []
         let loose = false
@@ -875,7 +971,11 @@ ${
             let body: Line[] = [isBlank(after) ? { text: "", offset: firstLine.offset } : firstLine]
             const contentCol: int = markerCol + width
             let k: int = j + 1
-            while (k < n) {
+            // an item that starts empty may begin with at most one blank line:
+            // an empty marker line followed by a blank line is an empty item
+            // (CommonMark 5.2, example 280)
+            const emptyThenBlank: boolean = isBlank(after) && k < n && isBlank(lines[k].text)
+            while (k < n && !emptyThenBlank) {
                 const s: string = lines[k].text
                 if (isBlank(s)) {
                     body.push({ text: "", offset: lines[k].offset })
@@ -895,7 +995,13 @@ ${
                 body = body.slice(0, body.length - 1)
                 blanksAfter = blanksAfter + 1
             }
-            const r = parseBlocks(body, depth + 1)
+            if (emptyThenBlank) {
+                while (k < n && isBlank(lines[k].text)) {
+                    k = k + 1
+                    blanksAfter = blanksAfter + 1
+                }
+            }
+            const r = parseBlocks(body, depth + 1, sl)
             for (const x of r.notes) {
                 notes.push(x)
             }
@@ -924,7 +1030,9 @@ ${
                     continue
                 }
             }
-            j = k
+            // the list ends: its last item's trailing blank lines belong to the
+            // enclosing container, which needs them to judge ITS looseness
+            j = k - blanksAfter
             break
         }
         return { block: MdBlock.List(ordered, start, !loose, items), next: j, notes: notes }
@@ -1246,9 +1354,10 @@ ${
     // Flanking (CommonMark 6.2): the run [p, p+len) of `ch` in `s`.
     type Flank:struct = { open: boolean, close: boolean }
 
-    fn flanking(s: string, p: int, len: int, ch: string) -> Flank {
-        const before: string = p > 0 ? s[p - 1] : ""
-        const after: string = p + len < s.length ? s[p + len] : ""
+    // A slot next to the run counts as one letter (§67.4), whatever its value.
+    fn flanking(s: string, p: int, len: int, ch: string, slotBefore: boolean, slotAfter: boolean) -> Flank {
+        const before: string = slotBefore ? "a" : (p > 0 ? s[p - 1] : "")
+        const after: string = slotAfter ? "a" : (p + len < s.length ? s[p + len] : "")
         const left: boolean = !isWs(after) && (!isPunct(after) || isWs(before) || isPunct(before))
         const right: boolean = !isWs(before) && (!isPunct(before) || isWs(after) || isPunct(after))
         if (ch == "_") {
@@ -1274,7 +1383,7 @@ ${
     }
 
     fn failTail(used: int, altTitle: boolean, angle: boolean, over: boolean) -> Tail {
-        return { ok: false, dest: "", title: "", end: 0, used: used, altTitle: altTitle, angleDest: angle, overBudget: over }
+        return { ok: false, destA: 0, destB: 0, titleA: -1, titleB: -1, end: 0, used: used, altTitle: altTitle, angleDest: angle, overBudget: over }
     }
 
     // The inline-link tail at s[q] == "(": `(dest)` or `(dest "title")`.
@@ -1321,11 +1430,12 @@ ${
         if (depth != 0) {
             return failTail(used, false, false, false)
         }
-        const dest = unescape(s.substring(ds, i))
+        const de: int = i
         while (i < s.length && (isSpaceOrTab(s[i]) || s[i] == "\n")) {
             i = i + 1
         }
-        let title = ""
+        let ta = -1
+        let tb = -1
         if (i < s.length && s[i] == "\"" && i > ds) {
             const ts: int = i + 1
             i = i + 1
@@ -1342,7 +1452,8 @@ ${
             if (i >= s.length) {
                 return failTail(used, false, false, false)
             }
-            title = unescape(s.substring(ts, i))
+            ta = ts
+            tb = i
             i = i + 1
             while (i < s.length && (isSpaceOrTab(s[i]) || s[i] == "\n")) {
                 i = i + 1
@@ -1353,14 +1464,103 @@ ${
         if (i >= s.length || s[i] != ")") {
             return failTail(used, false, false, false)
         }
-        return { ok: true, dest: dest, title: title, end: i + 1, used: used, altTitle: false, angleDest: false, overBudget: false }
+        return { ok: true, destA: ds, destB: de, titleA: ta, titleB: tb, end: i + 1, used: used, altTitle: false, angleDest: false, overBudget: false }
     }
 
-    fn segsOf(s: string) -> MdSeg[] {
-        if (s == "") {
-            return []
+    // Is text[i] a slot? (An author-typed U+FFFC is not.)
+    fn isSlotChar(text: string, i: int, starts: int[], offs: int[], sl: Slots) -> boolean {
+        if (i < 0 || i >= text.length || text[i] != SLOT_CHAR) {
+            return false
         }
-        return [MdSeg.Lit(s)]
+        return slotIndex(sl, posOf(starts, offs, i)) >= 0
+    }
+
+    // The attribute-valued string text[a..b): literal pieces with backslash
+    // escapes resolved, and each slot as `MdSeg.Slot` (a data-led value, §67.4).
+    fn segsRange(text: string, a: int, b: int, starts: int[], offs: int[], sl: Slots) -> MdSeg[] {
+        let out: MdSeg[] = []
+        let piece = ""
+        let k: int = a
+        while (k < b) {
+            const si: int = text[k] == SLOT_CHAR ? slotIndex(sl, posOf(starts, offs, k)) : -1
+            if (si >= 0) {
+                if (piece != "") {
+                    out.push(MdSeg.Lit(unescape(piece)))
+                    piece = ""
+                }
+                out.push(MdSeg.Slot(sl.ids[si]))
+            } else {
+                piece = piece + text[k]
+            }
+            k = k + 1
+        }
+        if (piece != "") {
+            out.push(MdSeg.Lit(unescape(piece)))
+        }
+        return out
+    }
+
+    // The content of a code span text[a..b) (CommonMark 6.1): line ends read as
+    // spaces; a slot is put back as its exact source text (inert in code,
+    // §67.4); in a table cell, `\|` is a literal `|` (GFM).
+    fn codeText(text: string, a: int, b: int, starts: int[], offs: int[], sl: Slots, cell: boolean) -> string {
+        let out = ""
+        let k: int = a
+        while (k < b) {
+            const c: string = text[k]
+            if (c == "\n") {
+                out = out + " "
+            } else if (cell && c == "\\" && k + 1 < b && text[k + 1] == "|") {
+                out = out + "|"
+                k = k + 1
+            } else if (c == SLOT_CHAR && slotIndex(sl, posOf(starts, offs, k)) >= 0) {
+                out = out + sl.srcs[slotIndex(sl, posOf(starts, offs, k))]
+            } else {
+                out = out + c
+            }
+            k = k + 1
+        }
+        return out
+    }
+
+    // The plain text of inline nodes as an attribute value (an image's alt),
+    // slots kept as slots.
+    fn plainSegs(nodes: MdInline[]) -> MdSeg[] {
+        let out: MdSeg[] = []
+        let piece = ""
+        for (const each of nodes) {
+            for (const g of nestedSegs(each)) {
+                if (g is .Slot) {
+                    if (piece != "") {
+                        out.push(MdSeg.Lit(piece))
+                        piece = ""
+                    }
+                    out.push(g)
+                } else {
+                    piece = piece + litText(g)
+                }
+            }
+        }
+        if (piece != "") {
+            out.push(MdSeg.Lit(piece))
+        }
+        return out
+    }
+
+    // One inline node (not a slot) as plain-text pieces.
+    fn nestedSegs(n: MdInline) -> MdSeg[] {
+        return match n {
+            .Text(text: t) :> [MdSeg.Lit(t)]
+            .Slot(index: k) :> [MdSeg.Slot(k)]
+            .Code(text: t) :> [MdSeg.Lit(t)]
+            .Em(children: cs) :> plainSegs(cs)
+            .Strong(children: cs) :> plainSegs(cs)
+            .Del(children: cs) :> plainSegs(cs)
+            .Link(dest: d, title: ti, children: cs) :> plainSegs(cs)
+            .Image(src: sr, alt: a, title: ti) :> a
+            .SoftBreak :> [MdSeg.Lit(" ")]
+            .HardBreak :> [MdSeg.Lit(" ")]
+        }
     }
 
     // The plain text of inline nodes (an image's alt text, a heading's slug).
@@ -1447,9 +1647,18 @@ ${
         return i < s.length && s[i] == ">"
     }
 
+    // The index of the first HTML character reference in `s`, or -1.
+    fn entityIndex(s: string) -> int {
+        const m: asIs = /&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.exec(s)
+        if (m is not) {
+            return -1
+        }
+        return m.index
+    }
+
     // An HTML character reference at s[p] == "&".
     fn entityLen(s: string, p: int) -> int {
-        const m = /^&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.exec(s.substring(p, p + 40))
+        const m: asIs = /^&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.exec(s.substring(p, p + 40))
         if (m is not) {
             return 0
         }
@@ -1458,7 +1667,7 @@ ${
 
     // The inline content of one block. `parts` are its lines (leading whitespace
     // already removed); they are joined with "\n" and read as one text.
-    fn parseInlines(parts: Line[]) -> Inlines {
+    fn parseInlines(parts: Line[], sl: Slots, cell: boolean) -> Inlines {
         // the text, and for each text index the input offset (per line)
         let text = ""
         let starts: int[] = []
@@ -1490,8 +1699,10 @@ ${
         const n = text.length
         while (p < n) {
             const c: string = text[p]
+            // a text-only slot (§67.4): one atom, never a delimiter or a marker
+            const slotAt: int = c == SLOT_CHAR ? slotIndex(sl, posOf(starts, offs, p)) : -1
             // anything that is not plain text flushes the buffer first
-            const special: boolean = c == "\n" || c == "\\" || c == "`" || c == "*" || c == "_" || c == "~"
+            const special: boolean = slotAt >= 0 || c == "\n" || c == "\\" || c == "`" || c == "*" || c == "_" || c == "~"
                 || c == "[" || c == "]" || (c == "!" && p + 1 < n && text[p + 1] == "[") || c == "<" || c == "&"
             if (!special) {
                 if (buf == "") {
@@ -1550,6 +1761,12 @@ ${
             ar = addText(ar, buf)
             at = padAt(at, ar, bufAt)
             buf = ""
+            if (slotAt >= 0) {
+                ar = addItem(ar, K_NODE, "", MdInline.Slot(sl.ids[slotAt]), 0)
+                at = padAt(at, ar, p)
+                p = p + 1
+                continue
+            }
             if (c == "\n") {
                 // a soft break; trailing spaces before it are not content
                 let k: int = ar.tail
@@ -1582,7 +1799,7 @@ ${
                     continue
                 }
                 const cp: int = runs.pos[close]
-                let code = text.substring(p + len, cp).split("\n").join(" ")
+                let code = codeText(text, p + len, cp, starts, offs, sl, cell)
                 if (code.length >= 2 && code.startsWith(" ") && code.endsWith(" ") && code.trim() != "") {
                     code = code.substring(1, code.length - 1)
                 }
@@ -1603,7 +1820,7 @@ ${
                     p = p + len
                     continue
                 }
-                const f = flanking(text, p, len, c)
+                const f = flanking(text, p, len, c, isSlotChar(text, p - 1, starts, offs, sl), isSlotChar(text, p + len, starts, offs, sl))
                 ar = addDelim(ar, c, len, f.open, f.close)
                 at = padAt(at, ar, p)
                 p = p + len
@@ -1673,9 +1890,22 @@ ${
                     p = p + 1
                     continue
                 }
+                const dest: MdSeg[] = segsRange(text, tail.destA, tail.destB, starts, offs, sl)
+                const title: MdSeg[] = tail.titleA < 0 ? [] : segsRange(text, tail.titleA, tail.titleB, starts, offs, sl)
+                // character references in a destination or title are not decoded
+                const de: int = entityIndex(text.substring(tail.destA, tail.destB))
+                if (de >= 0) {
+                    ar = addNote(ar, "W-MD-ENTITY", posOf(starts, offs, tail.destA + de))
+                }
+                if (tail.titleA >= 0) {
+                    const te: int = entityIndex(text.substring(tail.titleA, tail.titleB))
+                    if (te >= 0) {
+                        ar = addNote(ar, "W-MD-ENTITY", posOf(starts, offs, tail.titleA + te))
+                    }
+                }
                 const node: MdInline = image
-                    ? MdInline.Image(segsOf(tail.dest), segsOf(plainText(inner.nodes)), segsOf(tail.title))
-                    : MdInline.Link(segsOf(tail.dest), segsOf(tail.title), inner.nodes)
+                    ? MdInline.Image(dest, plainSegs(inner.nodes), title)
+                    : MdInline.Link(dest, title, inner.nodes)
                 ar = replaceRange(ar, opener, ar.tail, node, inner.dep + 1)
                 at = padAt(at, ar, openAt)
                 if (!image) {
@@ -1849,30 +2079,65 @@ ${
     // Read scrml-md. `src` is markdown text (a dedented static body, or data for
     // `<md of=…/>`). Every input is accepted: what is not scrml-md is text.
     export fn parse(src: string) -> MdDoc {
+        return parseSlots(src, [])
+    }
+
+    // Read a STATIC body that holds text-only slots (§67.4, phase 2's entry).
+    // `src` carries one U+FFFC at each slot's offset; `slots` gives each slot's
+    // offset and the exact source text of its `${…}`. A slot becomes
+    // `MdInline.Slot(i)` / `MdSeg.Slot(i)` (i = its index in `slots`); inside a
+    // code span or fence it is put back as its source text. An entry whose
+    // offset does not hold U+FFFC is ignored.
+    export fn parseSlots(src: string, slots: MdSlot[]) -> MdDoc {
         // U+0000 is replaced by U+FFFD (CommonMark 2.3); lengths are unchanged
-        const clean = src.split("\u0000").join("�")
+        const clean: string = src.split("\u0000").join("�")
+        let order: int[] = []
+        let k = 0
+        while (k < slots.length) {
+            const o: int = slots[k].offset
+            if (o >= 0 && o < clean.length && clean[o] == SLOT_CHAR) {
+                order.push(k)
+            }
+            k = k + 1
+        }
+        order.sort((a, b) => slots[a].offset - slots[b].offset)
+        let offs: int[] = []
+        let srcs: string[] = []
+        let ids: int[] = []
+        for (const x of order) {
+            offs.push(slots[x].offset)
+            srcs.push(slots[x].source)
+            ids.push(x)
+        }
+        const sl: Slots = { offs: offs, srcs: srcs, ids: ids }
+        // lines: a line ends at LF, CRLF or a lone CR (CommonMark 2.1)
         let lines: Line[] = []
         let lineStarts: int[] = []
-        let off = 0
-        for (const raw of clean.split("\n")) {
-            const text: string = raw.endsWith("\r") ? raw.substring(0, raw.length - 1) : raw
-            lines.push({ text: text, offset: off })
-            lineStarts.push(off)
-            off = off + raw.length + 1
+        let start = 0
+        let i = 0
+        while (i <= clean.length) {
+            if (i == clean.length || clean[i] == "\n" || clean[i] == "\r") {
+                lines.push({ text: clean.substring(start, i), offset: start })
+                lineStarts.push(start)
+                if (i < clean.length && clean[i] == "\r" && i + 1 < clean.length && clean[i + 1] == "\n") {
+                    i = i + 1
+                }
+                start = i + 1
+            }
+            i = i + 1
         }
-        const r = parseBlocks(lines, 0)
+        const r = parseBlocks(lines, 0, sl)
         // order by position; one diagnostic per (code, offset)
         let sorted: Note[] = r.notes.slice()
         sorted.sort((a, b) => a.offset - b.offset)
         let diags: MdDiag[] = []
-        let lastCode = ""
-        let lastOff = -1
+        const seen: asIs = new Set()
         for (const x of sorted) {
-            if (x.code == lastCode && x.offset == lastOff) {
+            const key: string = x.code + "@" + String(x.offset)
+            if (seen.has(key)) {
                 continue
             }
-            lastCode = x.code
-            lastOff = x.offset
+            seen.add(key)
             const ln = lineIndex(lineStarts, x.offset)
             diags.push({ code: x.code, message: messageFor(x.code), offset: x.offset,
                          line: ln + 1, col: x.offset - lineStarts[ln] + 1 })
@@ -1963,16 +2228,17 @@ ${
         return { text: out.join("\n"), indent: min, dropFirst: dropFirst, mixed: mixed }
     }
 
-    // The heading slug of `text` (§67.6): lower case; ASCII letters and digits
-    // kept; a space or `-` becomes `-`; every other character dropped; "section"
-    // when nothing is left.
+    // The heading slug of `text` (§67.6), GitHub-style: lower-cased where the
+    // case maps; Unicode letters, marks, digits and connector punctuation (`_`)
+    // kept; a space becomes `-` and `-` stays; every other character dropped;
+    // "section" when nothing is left.
     fn slugify(text: string) -> string {
         let out = ""
         for (const c of text.toLowerCase()) {
-            if ((c >= "a" && c <= "z") || (c >= "0" && c <= "9")) {
-                out = out + c
-            } else if (c == " " || c == "-") {
+            if (c == " " || c == "-") {
                 out = out + "-"
+            } else if (/^[\p{L}\p{M}\p{N}\p{Pc}]$/u.test(c)) {
+                out = out + c
             }
         }
         return out == "" ? "section" : out
@@ -1981,18 +2247,23 @@ ${
     // The ids for the headings of a STATIC `<md>` body, in document order (nested
     // headings included). A slug already in `taken`, or produced earlier, gets the
     // first free `-1`, `-2`, … suffix. Data-sourced md gets no ids (§67.6).
+    // Linear: a set of the ids in use, and for each base the next suffix to try.
     export fn headingSlugs(doc: MdDoc, taken: string[]) -> string[] {
-        let used: string[] = taken.slice()
+        const used: asIs = new Set(taken)
+        const nextSuffix: asIs = new Map()
         let out: string[] = []
         for (const t of headingTexts(doc.blocks)) {
-            const base = slugify(t)
+            const base: string = slugify(t)
             let s: string = base
-            let k = 1
-            while (used.includes(s)) {
+            let k: int = nextSuffix.has(base) ? nextSuffix.get(base) : 1
+            while (used.has(s)) {
                 s = base + "-" + String(k)
                 k = k + 1
             }
-            used.push(s)
+            if (s != base) {
+                nextSuffix.set(base, k)
+            }
+            used.add(s)
             out.push(s)
         }
         return out

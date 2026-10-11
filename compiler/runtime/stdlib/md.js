@@ -3,7 +3,7 @@
 // This file is impl#1's library-mode compile of stdlib/md/index.scrml (the one md reader,
 // SPEC §67.8), written by scripts/gen-md-shim.ts. Edit the scrml source and regenerate:
 //   bun scripts/gen-md-shim.ts
-// source-sha256: e6cb138d1c0b9aa22f6589d47b4fcb7cc95584b9eef22bedbd419d2550a73b83
+// source-sha256: f8f6c97e86bfeca6fa7504b78fff2e0e16b737ab21c5ed852254aadbe45021d5
 // Generated library module — scrml compiler output
 // ES module: import { name } from './this-file.js'
 const _scrml_g = globalThis; // the host-global alias (SPEC §47.1.1); a shim is copied alone into _scrml/
@@ -88,11 +88,31 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     //             (a tab on one line, spaces on another) — E-MD-INDENT-MIXED
     
 
+    // A text-only slot handed to `parseSlots` (§67.4): the input offset of its
+    // U+FFFC, and the exact source text of its `${…}` (restored inside code).
+    
+
     // ---------------------------------------------------------------------------
     // Internal shapes
     // ---------------------------------------------------------------------------
 
     // One input line: its text, and the input offset of text[0].
+    
+
+    // The text-only slots of a static body (§67.4), ascending by offset: where
+    // each `${…}` sits in the reader's input (as one U+FFFC) and its exact
+    // source text, which is put back verbatim when the slot lands in code.
+    //   ids  the caller's index of each slot (what `Slot(i)` carries)
+    
+
+    const SLOT_CHAR = "￼"
+
+    // The index of the slot at input offset `off`, or -1. A U+FFFC the author
+    // typed is not in the list, so it is an ordinary character.
+    
+
+    // `text`, whose character k sits at input offset `at` + k, with every slot
+    // put back as its exact source text (a slot inside code is inert, §67.4).
     
 
     // A diagnostic before line/column are known.
@@ -112,6 +132,8 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     //   altTitle   a '…' or (…) title was seen (W-MD-LINK-TITLE)
     //   angleDest  a <…> destination was seen (W-MD-LINK-DESTINATION)
     //   overBudget the scan stopped on the budget (W-MD-SCAN-LIMIT)
+    //   destA/destB  the destination's text range; titleA/titleB the title's
+    //                (inside the quotes; titleA -1 when there is none)
     
 
     // ---------------------------------------------------------------------------
@@ -248,6 +270,12 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // nesting (0 at the top); quotes and lists are recognised below MAX_DEPTH.
     
 
+    // Does `t` start a CommonMark link reference definition (`[label]: …`) or
+    // footnote definition (`[^label]: …`)? The label may hold `\]` escapes and
+    // line ends (no blank line — the caller passes one paragraph). Returns the
+    // code to report, or "".
+    
+
     
     
 
@@ -334,6 +362,7 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // Flanking (CommonMark 6.2): the run [p, p+len) of `ch` in `s`.
     
 
+    // A slot next to the run counts as one letter (§67.4), whatever its value.
     
 
     // Resolve backslash escapes in a link destination or title.
@@ -347,6 +376,23 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // are examined.
     
 
+    // Is text[i] a slot? (An author-typed U+FFFC is not.)
+    
+
+    // The attribute-valued string text[a..b): literal pieces with backslash
+    // escapes resolved, and each slot as `MdSeg.Slot` (a data-led value, §67.4).
+    
+
+    // The content of a code span text[a..b) (CommonMark 6.1): line ends read as
+    // spaces; a slot is put back as its exact source text (inert in code,
+    // §67.4); in a table cell, `\|` is a literal `|` (GFM).
+    
+
+    // The plain text of inline nodes as an attribute value (an image's alt),
+    // slots kept as slots.
+    
+
+    // One inline node (not a slot) as plain-text pieces.
     
 
     // The plain text of inline nodes (an image's alt text, a heading's slug).
@@ -364,6 +410,9 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // whitespace, `/` or `>`, closed by a `>` before the next `<` (CommonMark
     // 6.6, read generously: this only decides whether to report; the text is
     // literal either way). The scan stops at the next `<`, so it is linear.
+    
+
+    // The index of the first HTML character reference in `s`, or -1.
     
 
     // An HTML character reference at s[p] == "&".
@@ -432,6 +481,14 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // `<md of=…/>`). Every input is accepted: what is not scrml-md is text.
     
 
+    // Read a STATIC body that holds text-only slots (§67.4, phase 2's entry).
+    // `src` carries one U+FFFC at each slot's offset; `slots` gives each slot's
+    // offset and the exact source text of its `${…}`. A slot becomes
+    // `MdInline.Slot(i)` / `MdSeg.Slot(i)` (i = its index in `slots`); inside a
+    // code span or fence it is put back as its source text. An entry whose
+    // offset does not hold U+FFFC is ignored.
+    
+
     
 
     // The §67.2 dedent rule for a static `<md>` body (the text between `<md>` and
@@ -446,14 +503,50 @@ export const MdBlock = _scrml_g.Object.freeze({ Paragraph: function(children) { 
     // (E-MD-INDENT-MIXED).
     
 
-    // The heading slug of `text` (§67.6): lower case; ASCII letters and digits
-    // kept; a space or `-` becomes `-`; every other character dropped; "section"
-    // when nothing is left.
+    // The heading slug of `text` (§67.6), GitHub-style: lower-cased where the
+    // case maps; Unicode letters, marks, digits and connector punctuation (`_`)
+    // kept; a space becomes `-` and `-` stays; every other character dropped;
+    // "section" when nothing is left.
     
 
     // The ids for the headings of a STATIC `<md>` body, in document order (nested
     // headings included). A slug already in `taken`, or produced earlier, gets the
     // first free `-1`, `-2`, … suffix. Data-sourced md gets no ids (§67.6).
+    // Linear: a set of the ids in use, and for each base the next suffix to try.
+
+function slotIndex(sl, off) {
+  let lo = 0;
+  let hi = sl.offs.length - 1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const v = sl.offs[mid];
+    if (_scrml_structural_eq(v, off)) {
+    return mid;
+  }
+    if (v < off) {
+    lo = mid + 1;
+  }
+  else {
+    hi = mid - 1;
+  }
+  }
+  return -1;
+}
+
+function restoreSlots(text, at, sl) {
+  if ((sl.offs.length === 0) || text.indexOf(SLOT_CHAR) < 0) {
+    return text;
+  }
+  let out = "";
+  let k = 0;
+  while (k < text.length) {
+    const c = text[k];
+    const si = _scrml_structural_eq(c, SLOT_CHAR) ? slotIndex(sl, at + k) : -1;
+    out = out + (si >= 0 ? sl.srcs[si] : c);
+    k = k + 1;
+  }
+  return out;
+}
 
 function isSpaceOrTab(c) {
   return _scrml_structural_eq(c, " ") || _scrml_structural_eq(c, "\t");
@@ -654,7 +747,7 @@ function isOrderedMarker(t) {
 }
 
 function altMarker(t) {
-  if ((t.startsWith("* ") || t.startsWith("+ ") || _scrml_structural_eq(t, "*") || _scrml_structural_eq(t, "+")) && !isAltRule(t)) {
+  if (/^[*+]([ \t]|$)/.test(t) && !isAltRule(t)) {
     return "W-MD-BULLET-MARKER";
   }
   let n = 0;
@@ -825,7 +918,7 @@ function otherStart(s) {
   return !_scrml_structural_eq(altMarker(t), "") || isAltRule(t) || isTildeFence(t);
 }
 
-function parseBlocks(lines, depth) {
+function parseBlocks(lines, depth, sl) {
   let blocks = [];
   let gaps = [];
   let notes = [];
@@ -848,7 +941,12 @@ function parseBlocks(lines, depth) {
     if (ind <= 3) {
     const fl = fenceLen(t);
     if (fl > 0) {
-    const info = t.substring(fl).trim();
+    const rawInfo = restoreSlots(t.substring(fl), lead.offset + fl, sl);
+    const ent = entityIndex(rawInfo);
+    if (ent >= 0) {
+    notes.push(note("W-MD-ENTITY", lead.offset + fl + ent));
+  }
+    const info = unescape(rawInfo.trim());
     const word = info.split(/[ \t]/)[0];
     const lang = /^[A-Za-z0-9_+-]+$/.test(word) ? word : "";
     let body = [];
@@ -861,7 +959,8 @@ function parseBlocks(lines, depth) {
     closed = true;
     break;
   }
-    body.push(stripCols(lines[j], ind).text);
+    const cl = stripCols(lines[j], ind);
+    body.push(restoreSlots(cl.text, cl.offset, sl));
     j = j + 1;
   }
     const text = (body.length === 0) ? "" : body.join("\n") + "\n";
@@ -885,7 +984,7 @@ function parseBlocks(lines, depth) {
     if (e < content.length && (_scrml_structural_eq(e, 0) || isSpaceOrTab(content[e - 1]))) {
     notes.push(note("W-MD-HEADING-CLOSE", lead.offset + k + e));
   }
-    const inl = parseInlines([{text: content, offset: lead.offset + k}]);
+    const inl = parseInlines([{text: content, offset: lead.offset + k}], sl, false);
     for (const x of inl.notes) {
     notes.push(x);
   }
@@ -909,7 +1008,7 @@ function parseBlocks(lines, depth) {
     for (const d of delims) {
     align.push(alignOf(d.text));
   }
-    const hr = cellsRow(head, head.length);
+    const hr = cellsRow(head, head.length, sl);
     for (const x of hr.notes) {
     notes.push(x);
   }
@@ -920,12 +1019,15 @@ function parseBlocks(lines, depth) {
     if (isBlank(rs) || indentOf(rs) > 3 || !isPipeRow(rs.trim())) {
     break;
   }
-    const r = cellsRow(rowCells(stripLead(lines[j])), head.length);
+    const r = cellsRow(rowCells(stripLead(lines[j])), head.length, sl);
     for (const x of r.notes) {
     notes.push(x);
   }
     rows.push(r.row);
     j = j + 1;
+  }
+    if (j < n && !isBlank(lines[j].text) && !interrupts(lines, j, depth) && !otherStart(lines[j].text)) {
+    notes.push(note("W-MD-TABLE-PIPES", stripLead(lines[j]).offset));
   }
     blocks.push(MdBlock.Table(align, hr.row, rows));
     gaps.push(gap);
@@ -935,7 +1037,7 @@ function parseBlocks(lines, depth) {
   }
     if (depth < MAX_DEPTH && !isAltRule(t)) {
     if (t.startsWith(">")) {
-    const q = readQuote(lines, i, depth);
+    const q = readQuote(lines, i, depth, sl);
     for (const x of q.notes) {
     notes.push(x);
   }
@@ -946,7 +1048,7 @@ function parseBlocks(lines, depth) {
     continue;
   }
     if (markerWidth(t) > 0) {
-    const l = readList(lines, i, depth);
+    const l = readList(lines, i, depth, sl);
     for (const x of l.notes) {
     notes.push(x);
   }
@@ -964,7 +1066,7 @@ function parseBlocks(lines, depth) {
   }
   }
   }
-    const p = readParagraph(lines, i, depth);
+    const p = readParagraph(lines, i, depth, sl);
     for (const x of p.notes) {
     notes.push(x);
   }
@@ -976,14 +1078,24 @@ function parseBlocks(lines, depth) {
   return {blocks: blocks, gaps: gaps, notes: notes};
 }
 
-function cellsRow(cells, width) {
+function defKind(t) {
+  if (/^\[\^(?:\\[\s\S]|[^\]\\])+\]:/.test(t)) {
+    return "W-MD-FOOTNOTE";
+  }
+  if (/^\[(?:\\[\s\S]|[^\]\\])+\]:/.test(t)) {
+    return "W-MD-REFERENCE-LINK";
+  }
+  return "";
+}
+
+function cellsRow(cells, width, sl) {
   let out = [];
   let notes = [];
   let k = 0;
   while (k < width) {
     if (k < cells.length) {
     const c = cells[k];
-    const inl = parseInlines([{text: c.text.split("\\|").join("|"), offset: c.offset}]);
+    const inl = parseInlines([c], sl, true);
     for (const x of inl.notes) {
     notes.push(x);
   }
@@ -997,7 +1109,7 @@ function cellsRow(cells, width) {
   return {row: {cells: out}, notes: notes};
 }
 
-function readParagraph(lines, i, depth) {
+function readParagraph(lines, i, depth, sl) {
   let notes = [];
   let parts = [];
   let deepNoted = false;
@@ -1024,8 +1136,11 @@ function readParagraph(lines, i, depth) {
   }
   }
   else {
-    if (j > i && isEqualsLine(t)) {
+    if (j > i && (isEqualsLine(t) || /^-{1,2}[ \t]*$/.test(t))) {
     notes.push(note("W-MD-SETEXT", lead.offset));
+  }
+    if (/^<\/?[A-Za-z][A-Za-z0-9-]*([ \t]|\/?>|$)/.test(t) || /^<(!--|\?|![A-Za-z]|!\[CDATA\[)/.test(t)) {
+    notes.push(note("W-MD-RAW-HTML", lead.offset));
   }
     if (isTildeFence(t)) {
     notes.push(note("W-MD-FENCE-TILDE", lead.offset));
@@ -1044,28 +1159,34 @@ function readParagraph(lines, i, depth) {
     notes.push(note("W-MD-DEPTH-LIMIT", lead.offset));
     deepNoted = true;
   }
-    if (/^\[\^[^\]]+\]:/.test(t)) {
-    notes.push(note("W-MD-FOOTNOTE", lead.offset));
-  }
-  else {
-    if (/^\[[^\]]+\]:/.test(t)) {
-    notes.push(note("W-MD-REFERENCE-LINK", lead.offset));
-  }
+    const def = defKind(t);
+    if (!_scrml_structural_eq(def, "")) {
+    notes.push(note(def, lead.offset));
   }
   }
     parts.push(lead);
     j = j + 1;
   }
+  if (parts.length > 1) {
+    let joined = "";
+    for (const pt of parts) {
+    joined = joined + (_scrml_structural_eq(joined, "") ? "" : "\n") + pt.text;
+  }
+    const def = defKind(joined);
+    if (!_scrml_structural_eq(def, "")) {
+    notes.push(note(def, parts[0].offset));
+  }
+  }
   const last = parts[parts.length - 1];
   parts[parts.length - 1] = {text: trimEnd(last.text), offset: last.offset};
-  const inl = parseInlines(parts);
+  const inl = parseInlines(parts, sl, false);
   for (const x of inl.notes) {
     notes.push(x);
   }
   return {block: MdBlock.Paragraph(inl.nodes), next: j, notes: notes};
 }
 
-function readQuote(lines, i, depth) {
+function readQuote(lines, i, depth, sl) {
   let inner = [];
   let notes = [];
   let j = i;
@@ -1089,7 +1210,7 @@ function readQuote(lines, i, depth) {
   if (j < n && !isBlank(lines[j].text) && inner.length > 0 && !isBlank(inner[inner.length - 1].text) && !interrupts(lines, j, depth) && !otherStart(lines[j].text) && indentOf(lines[j].text) <= 3 && paragraphEndsWith(inner, depth + 1)) {
     notes.push(note("W-MD-LAZY-CONTINUATION", stripLead(lines[j]).offset));
   }
-  const r = parseBlocks(inner, depth + 1);
+  const r = parseBlocks(inner, depth + 1, sl);
   for (const x of r.notes) {
     notes.push(x);
   }
@@ -1107,7 +1228,7 @@ function paragraphEndsWith(lines, depth) {
   return true;
 }
 
-function readList(lines, i, depth) {
+function readList(lines, i, depth, sl) {
   let notes = [];
   let items = [];
   let loose = false;
@@ -1139,7 +1260,8 @@ function readList(lines, i, depth) {
     let body = [isBlank(after) ? {text: "", offset: firstLine.offset} : firstLine];
     const contentCol = markerCol + width;
     let k = j + 1;
-    while (k < n) {
+    const emptyThenBlank = isBlank(after) && k < n && isBlank(lines[k].text);
+    while (k < n && !emptyThenBlank) {
     const s = lines[k].text;
     if (isBlank(s)) {
     body.push({text: "", offset: lines[k].offset});
@@ -1158,7 +1280,13 @@ function readList(lines, i, depth) {
     body = body.slice(0, body.length - 1);
     blanksAfter = blanksAfter + 1;
   }
-    const r = parseBlocks(body, depth + 1);
+    if (emptyThenBlank) {
+    while (k < n && isBlank(lines[k].text)) {
+    k = k + 1;
+    blanksAfter = blanksAfter + 1;
+  }
+  }
+    const r = parseBlocks(body, depth + 1, sl);
     for (const x of r.notes) {
     notes.push(x);
   }
@@ -1183,7 +1311,7 @@ function readList(lines, i, depth) {
     continue;
   }
   }
-    j = k;
+    j = k - blanksAfter;
     break;
   }
   return {block: MdBlock.List(ordered, start, !loose, items), next: j, notes: notes};
@@ -1457,9 +1585,9 @@ function processEmphasis(ar0, bottom, at, starts, offs) {
   return ar;
 }
 
-function flanking(s, p, len, ch) {
-  const before = p > 0 ? s[p - 1] : "";
-  const after = p + len < s.length ? s[p + len] : "";
+function flanking(s, p, len, ch, slotBefore, slotAfter) {
+  const before = slotBefore ? "a" : p > 0 ? s[p - 1] : "";
+  const after = slotAfter ? "a" : p + len < s.length ? s[p + len] : "";
   const left = !isWs(after) && (!isPunct(after) || isWs(before) || isPunct(before));
   const right = !isWs(before) && (!isPunct(before) || isWs(after) || isPunct(after));
   if (_scrml_structural_eq(ch, "_")) {
@@ -1484,7 +1612,7 @@ function unescape(s) {
 }
 
 function failTail(used, altTitle, angle, over) {
-  return {ok: false, dest: "", title: "", end: 0, used: used, altTitle: altTitle, angleDest: angle, overBudget: over};
+  return {ok: false, destA: 0, destB: 0, titleA: -1, titleB: -1, end: 0, used: used, altTitle: altTitle, angleDest: angle, overBudget: over};
 }
 
 function scanTail(s, q, budget) {
@@ -1533,11 +1661,12 @@ function scanTail(s, q, budget) {
   if (!_scrml_structural_eq(depth, 0)) {
     return failTail(used, false, false, false);
   }
-  const dest = unescape(s.substring(ds, i));
+  const de = i;
   while (i < s.length && (isSpaceOrTab(s[i]) || _scrml_structural_eq(s[i], "\n"))) {
     i = i + 1;
   }
-  let title = "";
+  let ta = -1;
+  let tb = -1;
   if (i < s.length && _scrml_structural_eq(s[i], "\"") && i > ds) {
     const ts = i + 1;
     i = i + 1;
@@ -1554,7 +1683,8 @@ function scanTail(s, q, budget) {
     if (i >= s.length) {
     return failTail(used, false, false, false);
   }
-    title = unescape(s.substring(ts, i));
+    ta = ts;
+    tb = i;
     i = i + 1;
     while (i < s.length && (isSpaceOrTab(s[i]) || _scrml_structural_eq(s[i], "\n"))) {
     i = i + 1;
@@ -1568,62 +1698,153 @@ function scanTail(s, q, budget) {
   if (i >= s.length || !_scrml_structural_eq(s[i], ")")) {
     return failTail(used, false, false, false);
   }
-  return {ok: true, dest: dest, title: title, end: i + 1, used: used, altTitle: false, angleDest: false, overBudget: false};
+  return {ok: true, destA: ds, destB: de, titleA: ta, titleB: tb, end: i + 1, used: used, altTitle: false, angleDest: false, overBudget: false};
 }
 
-function segsOf(s) {
-  if (_scrml_structural_eq(s, "")) {
-    return [];
+function isSlotChar(text, i, starts, offs, sl) {
+  if (i < 0 || i >= text.length || !_scrml_structural_eq(text[i], SLOT_CHAR)) {
+    return false;
   }
-  return [MdSeg.Lit(s)];
+  return slotIndex(sl, posOf(starts, offs, i)) >= 0;
+}
+
+function segsRange(text, a, b, starts, offs, sl) {
+  let out = [];
+  let piece = "";
+  let k = a;
+  while (k < b) {
+    const si = _scrml_structural_eq(text[k], SLOT_CHAR) ? slotIndex(sl, posOf(starts, offs, k)) : -1;
+    if (si >= 0) {
+    if (!_scrml_structural_eq(piece, "")) {
+    out.push(MdSeg.Lit(unescape(piece)));
+    piece = "";
+  }
+    out.push(MdSeg.Slot(sl.ids[si]));
+  }
+  else {
+    piece = piece + text[k];
+  }
+    k = k + 1;
+  }
+  if (!_scrml_structural_eq(piece, "")) {
+    out.push(MdSeg.Lit(unescape(piece)));
+  }
+  return out;
+}
+
+function codeText(text, a, b, starts, offs, sl, cell) {
+  let out = "";
+  let k = a;
+  while (k < b) {
+    const c = text[k];
+    if (_scrml_structural_eq(c, "\n")) {
+    out = out + " ";
+  }
+  else {
+    if (cell && _scrml_structural_eq(c, "\\") && k + 1 < b && _scrml_structural_eq(text[k + 1], "|")) {
+    out = out + "|";
+    k = k + 1;
+  }
+  else {
+    if (_scrml_structural_eq(c, SLOT_CHAR) && slotIndex(sl, posOf(starts, offs, k)) >= 0) {
+    out = out + sl.srcs[slotIndex(sl, posOf(starts, offs, k))];
+  }
+  else {
+    out = out + c;
+  }
+  }
+  }
+    k = k + 1;
+  }
+  return out;
+}
+
+function plainSegs(nodes) {
+  let out = [];
+  let piece = "";
+  for (const each of nodes) {
+    for (const g of nestedSegs(each)) {
+    if ((function(__v){return (typeof __v === "object" && __v !== null && typeof __v.variant === "string" ? __v.variant : __v) === "Slot";})(g)) {
+    if (!_scrml_structural_eq(piece, "")) {
+    out.push(MdSeg.Lit(piece));
+    piece = "";
+  }
+    out.push(g);
+  }
+  else {
+    piece = piece + litText(g);
+  }
+  }
+  }
+  if (!_scrml_structural_eq(piece, "")) {
+    out.push(MdSeg.Lit(piece));
+  }
+  return out;
+}
+
+function nestedSegs(n) {
+  return (function() {
+    const _scrml_match_12 = n;
+    const _scrml_tag_13 = (_scrml_match_12 != null && typeof _scrml_match_12 === "object") ? _scrml_match_12.variant : _scrml_match_12;
+    if (_scrml_tag_13 === "Text") { const t = _scrml_match_12.data.text; return [ MdSeg.Lit ( t ) ]; }
+    else if (_scrml_tag_13 === "Slot") { const k = _scrml_match_12.data.index; return [ MdSeg.Slot ( k ) ]; }
+    else if (_scrml_tag_13 === "Code") { const t = _scrml_match_12.data.text; return [ MdSeg.Lit ( t ) ]; }
+    else if (_scrml_tag_13 === "Em") { const cs = _scrml_match_12.data.children; return plainSegs ( cs ); }
+    else if (_scrml_tag_13 === "Strong") { const cs = _scrml_match_12.data.children; return plainSegs ( cs ); }
+    else if (_scrml_tag_13 === "Del") { const cs = _scrml_match_12.data.children; return plainSegs ( cs ); }
+    else if (_scrml_tag_13 === "Link") { const d = _scrml_match_12.data.dest; const ti = _scrml_match_12.data.title; const cs = _scrml_match_12.data.children; return plainSegs ( cs ); }
+    else if (_scrml_tag_13 === "Image") { const sr = _scrml_match_12.data.src; const a = _scrml_match_12.data.alt; const ti = _scrml_match_12.data.title; return a; }
+    else if (_scrml_tag_13 === "SoftBreak") return [ MdSeg.Lit ( " " ) ];
+    else if (_scrml_tag_13 === "HardBreak") return [ MdSeg.Lit ( " " ) ];
+  })();
 }
 
 function plainText(nodes) {
   let out = "";
   for (const each of nodes) {
     const n = each;
-    let _scrml_tilde_12 = null;
-  const _scrml_match_13 = n;
-  const _scrml_tag_14 = (_scrml_match_13 != null && typeof _scrml_match_13 === "object") ? _scrml_match_13.variant : _scrml_match_13;
-  if (_scrml_tag_14 === "Text") {
-    const t = _scrml_match_13.data.text;
-    _scrml_tilde_12 = t;
+    let _scrml_tilde_14 = null;
+  const _scrml_match_15 = n;
+  const _scrml_tag_16 = (_scrml_match_15 != null && typeof _scrml_match_15 === "object") ? _scrml_match_15.variant : _scrml_match_15;
+  if (_scrml_tag_16 === "Text") {
+    const t = _scrml_match_15.data.text;
+    _scrml_tilde_14 = t;
   }
-  else if (_scrml_tag_14 === "Slot") {
-    const k = _scrml_match_13.data.index;
-    _scrml_tilde_12 = "";
+  else if (_scrml_tag_16 === "Slot") {
+    const k = _scrml_match_15.data.index;
+    _scrml_tilde_14 = "";
   }
-  else if (_scrml_tag_14 === "Code") {
-    const t = _scrml_match_13.data.text;
-    _scrml_tilde_12 = t;
+  else if (_scrml_tag_16 === "Code") {
+    const t = _scrml_match_15.data.text;
+    _scrml_tilde_14 = t;
   }
-  else if (_scrml_tag_14 === "Em") {
-    const cs = _scrml_match_13.data.children;
-    _scrml_tilde_12 = plainText ( cs );
+  else if (_scrml_tag_16 === "Em") {
+    const cs = _scrml_match_15.data.children;
+    _scrml_tilde_14 = plainText ( cs );
   }
-  else if (_scrml_tag_14 === "Strong") {
-    const cs = _scrml_match_13.data.children;
-    _scrml_tilde_12 = plainText ( cs );
+  else if (_scrml_tag_16 === "Strong") {
+    const cs = _scrml_match_15.data.children;
+    _scrml_tilde_14 = plainText ( cs );
   }
-  else if (_scrml_tag_14 === "Del") {
-    const cs = _scrml_match_13.data.children;
-    _scrml_tilde_12 = plainText ( cs );
+  else if (_scrml_tag_16 === "Del") {
+    const cs = _scrml_match_15.data.children;
+    _scrml_tilde_14 = plainText ( cs );
   }
-  else if (_scrml_tag_14 === "Link") {
-    const d = _scrml_match_13.data.dest; const ti = _scrml_match_13.data.title; const cs = _scrml_match_13.data.children;
-    _scrml_tilde_12 = plainText ( cs );
+  else if (_scrml_tag_16 === "Link") {
+    const d = _scrml_match_15.data.dest; const ti = _scrml_match_15.data.title; const cs = _scrml_match_15.data.children;
+    _scrml_tilde_14 = plainText ( cs );
   }
-  else if (_scrml_tag_14 === "Image") {
-    const sr = _scrml_match_13.data.src; const a = _scrml_match_13.data.alt; const ti = _scrml_match_13.data.title;
-    _scrml_tilde_12 = segsText ( a );
+  else if (_scrml_tag_16 === "Image") {
+    const sr = _scrml_match_15.data.src; const a = _scrml_match_15.data.alt; const ti = _scrml_match_15.data.title;
+    _scrml_tilde_14 = segsText ( a );
   }
-  else if (_scrml_tag_14 === "SoftBreak") {
-    _scrml_tilde_12 = " ";
+  else if (_scrml_tag_16 === "SoftBreak") {
+    _scrml_tilde_14 = " ";
   }
-  else if (_scrml_tag_14 === "HardBreak") {
-    _scrml_tilde_12 = " ";
+  else if (_scrml_tag_16 === "HardBreak") {
+    _scrml_tilde_14 = " ";
   }
-  const piece = _scrml_tilde_12;
+  const piece = _scrml_tilde_14;
     out = out + piece;
   }
   return out;
@@ -1641,16 +1862,16 @@ function segsText(segs) {
 
 function litText(g) {
   return (function() {
-    const _scrml_match_15 = g;
-    const _scrml_tag_16 = (_scrml_match_15 != null && typeof _scrml_match_15 === "object") ? _scrml_match_15.variant : _scrml_match_15;
-    if (_scrml_tag_16 === "Lit") { const t = _scrml_match_15.data.text; return t; }
-    else if (_scrml_tag_16 === "Slot") { const k = _scrml_match_15.data.index; return ""; }
+    const _scrml_match_17 = g;
+    const _scrml_tag_18 = (_scrml_match_17 != null && typeof _scrml_match_17 === "object") ? _scrml_match_17.variant : _scrml_match_17;
+    if (_scrml_tag_18 === "Lit") { const t = _scrml_match_17.data.text; return t; }
+    else if (_scrml_tag_18 === "Slot") { const k = _scrml_match_17.data.index; return ""; }
   })();
 }
 
 function isAutolinkAt(s, p) {
   let i = p + 1;
-  let _scrml_tilde_17 = [];
+  let _scrml_tilde_19 = [];
   while (i < s.length && !_scrml_structural_eq(s[i], ">") && !_scrml_structural_eq(s[i], "<") && s[i].charCodeAt(0) > 32) {
     i = i + 1;
   }
@@ -1688,6 +1909,14 @@ function isRawHtmlAt(s, p) {
   return i < s.length && _scrml_structural_eq(s[i], ">");
 }
 
+function entityIndex(s) {
+  const m = /&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.exec(s);
+  if ((m === null || m === undefined)) {
+    return -1;
+  }
+  return m.index;
+}
+
 function entityLen(s, p) {
   const m = /^&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});/.exec(s.substring(p, p + 40));
   if ((m === null || m === undefined)) {
@@ -1696,17 +1925,17 @@ function entityLen(s, p) {
   return m[0].length;
 }
 
-function parseInlines(parts) {
+function parseInlines(parts, sl, cell) {
   let text = "";
   let starts = [];
   let offs = [];
-  let _scrml_tilde_18 = [];
+  let _scrml_tilde_20 = [];
   for (const pt of parts) {
     if (starts.length > 0) {
       text = text + "\n";
     }
-    let _scrml_tilde_19 = starts.push(text.length);
-    let _scrml_tilde_20 = offs.push(pt.offset);
+    let _scrml_tilde_21 = starts.push(text.length);
+    let _scrml_tilde_22 = offs.push(pt.offset);
     text = text + pt.text;
   }
   let ar = newArena();
@@ -1726,7 +1955,8 @@ function parseInlines(parts) {
   const n = text.length;
   while (p < n) {
     const c = text[p];
-    const special = _scrml_structural_eq(c, "\n") || _scrml_structural_eq(c, "\\") || _scrml_structural_eq(c, "`") || _scrml_structural_eq(c, "*") || _scrml_structural_eq(c, "_") || _scrml_structural_eq(c, "~") || _scrml_structural_eq(c, "[") || _scrml_structural_eq(c, "]") || _scrml_structural_eq(c, "!") && p + 1 < n && _scrml_structural_eq(text[p + 1], "[") || _scrml_structural_eq(c, "<") || _scrml_structural_eq(c, "&");
+    const slotAt = _scrml_structural_eq(c, SLOT_CHAR) ? slotIndex(sl, posOf(starts, offs, p)) : -1;
+    const special = slotAt >= 0 || _scrml_structural_eq(c, "\n") || _scrml_structural_eq(c, "\\") || _scrml_structural_eq(c, "`") || _scrml_structural_eq(c, "*") || _scrml_structural_eq(c, "_") || _scrml_structural_eq(c, "~") || _scrml_structural_eq(c, "[") || _scrml_structural_eq(c, "]") || _scrml_structural_eq(c, "!") && p + 1 < n && _scrml_structural_eq(text[p + 1], "[") || _scrml_structural_eq(c, "<") || _scrml_structural_eq(c, "&");
     if (!special) {
       if (_scrml_structural_eq(buf, "")) {
         bufAt = p;
@@ -1787,6 +2017,12 @@ function parseInlines(parts) {
     ar = addText(ar, buf);
     at = padAt(at, ar, bufAt);
     buf = "";
+    if (slotAt >= 0) {
+      ar = addItem(ar, K_NODE, "", MdInline.Slot(sl.ids[slotAt]), 0);
+      at = padAt(at, ar, p);
+      p = p + 1;
+      continue;
+    }
     if (_scrml_structural_eq(c, "\n")) {
       let k = ar.tail;
       if (k >= 0 && _scrml_structural_eq(ar.kind[k], K_TEXT)) {
@@ -1795,7 +2031,7 @@ function parseInlines(parts) {
         if (full.length - trimmed.length >= 2) {
           ar = addNote(ar, "W-MD-HARD-BREAK-SPACES", posOf(starts, offs, p));
         }
-        let _scrml_tilde_21 = ar.txt[k] = trimmed;
+        let _scrml_tilde_23 = ar.txt[k] = trimmed;
       }
       ar = addItem(ar, K_NODE, "", MdInline.SoftBreak, 0);
       at = padAt(at, ar, p);
@@ -1816,7 +2052,7 @@ function parseInlines(parts) {
         continue;
       }
       const cp = runs.pos[close];
-      let code = text.substring(p + len, cp).split("\n").join(" ");
+      let code = codeText(text, p + len, cp, starts, offs, sl, cell);
       if (code.length >= 2 && code.startsWith(" ") && code.endsWith(" ") && !_scrml_structural_eq(code.trim(), "")) {
         code = code.substring(1, code.length - 1);
       }
@@ -1837,7 +2073,7 @@ function parseInlines(parts) {
         p = p + len;
         continue;
       }
-      const f = flanking(text, p, len, c);
+      const f = flanking(text, p, len, c, isSlotChar(text, p - 1, starts, offs, sl), isSlotChar(text, p + len, starts, offs, sl));
       ar = addDelim(ar, c, len, f.open, f.close);
       at = padAt(at, ar, p);
       p = p + len;
@@ -1855,11 +2091,11 @@ function parseInlines(parts) {
       }
       ar = addItem(ar, K_OPEN, opensImage ? "![" : "[", MdInline.SoftBreak, 0);
       at = padAt(at, ar, p);
-      let _scrml_tilde_22 = brItem.push(ar.tail);
-      let _scrml_tilde_23 = brImage.push(opensImage);
-      let _scrml_tilde_24 = brActive.push(true);
-      let _scrml_tilde_25 = brDelim.push(ar.dlast);
-      let _scrml_tilde_26 = brAt.push(p);
+      let _scrml_tilde_24 = brItem.push(ar.tail);
+      let _scrml_tilde_25 = brImage.push(opensImage);
+      let _scrml_tilde_26 = brActive.push(true);
+      let _scrml_tilde_27 = brDelim.push(ar.dlast);
+      let _scrml_tilde_28 = brAt.push(p);
       p = p + width;
       continue;
     }
@@ -1875,11 +2111,11 @@ function parseInlines(parts) {
     const active = brActive[top];
     const bottom = brDelim[top];
     const openAt = brAt[top];
-    let _scrml_tilde_27 = brItem.pop();
-    let _scrml_tilde_28 = brImage.pop();
-    let _scrml_tilde_29 = brActive.pop();
-    let _scrml_tilde_30 = brDelim.pop();
-    let _scrml_tilde_31 = brAt.pop();
+    let _scrml_tilde_29 = brItem.pop();
+    let _scrml_tilde_30 = brImage.pop();
+    let _scrml_tilde_31 = brActive.pop();
+    let _scrml_tilde_32 = brDelim.pop();
+    let _scrml_tilde_33 = brAt.pop();
     let tail = failTail(0, false, false, false);
     if (active && p + 1 < n && _scrml_structural_eq(text[p + 1], "(")) {
       if (budget > 0) {
@@ -1888,7 +2124,7 @@ function parseInlines(parts) {
       }
       if (tail.overBudget || budget <= 0) {
         if (!overNoted) {
-          let _scrml_tilde_32 = ar.notes.push(note("W-MD-SCAN-LIMIT", posOf(starts, offs, p)));
+          let _scrml_tilde_34 = ar.notes.push(note("W-MD-SCAN-LIMIT", posOf(starts, offs, p)));
           overNoted = true;
         }
       }
@@ -1903,14 +2139,26 @@ function parseInlines(parts) {
         p = p + 1;
         continue;
       }
-      const node = image ? MdInline.Image(segsOf(tail.dest), segsOf(plainText(inner.nodes)), segsOf(tail.title)) : MdInline.Link(segsOf(tail.dest), segsOf(tail.title), inner.nodes);
+      const dest = segsRange(text, tail.destA, tail.destB, starts, offs, sl);
+      const title = tail.titleA < 0 ? [] : segsRange(text, tail.titleA, tail.titleB, starts, offs, sl);
+      const de = entityIndex(text.substring(tail.destA, tail.destB));
+      if (de >= 0) {
+        ar = addNote(ar, "W-MD-ENTITY", posOf(starts, offs, tail.destA + de));
+      }
+      if (tail.titleA >= 0) {
+        const te = entityIndex(text.substring(tail.titleA, tail.titleB));
+        if (te >= 0) {
+          ar = addNote(ar, "W-MD-ENTITY", posOf(starts, offs, tail.titleA + te));
+        }
+      }
+      const node = image ? MdInline.Image(dest, plainSegs(inner.nodes), title) : MdInline.Link(dest, title, inner.nodes);
       ar = replaceRange(ar, opener, ar.tail, node, inner.dep + 1);
       at = padAt(at, ar, openAt);
       if (!image) {
         let b = 0;
         while (b < brActive.length) {
           if (!brImage[b]) {
-            let _scrml_tilde_33 = brActive[b] = false;
+            let _scrml_tilde_35 = brActive[b] = false;
           }
           b = b + 1;
         }
@@ -2039,28 +2287,56 @@ function messageFor(code) {
 }
 
 export function parse(src) {
+  return parseSlots(src, []);
+}
+
+export function parseSlots(src, slots) {
   const clean = src.split("\u0000").join("�");
+  let order = [];
+  let k = 0;
+  while (k < slots.length) {
+    const o = slots[k].offset;
+    if (o >= 0 && o < clean.length && _scrml_structural_eq(clean[o], SLOT_CHAR)) {
+    order.push(k);
+  }
+    k = k + 1;
+  }
+  order.sort((a, b) => slots[a].offset - slots[b].offset);
+  let offs = [];
+  let srcs = [];
+  let ids = [];
+  for (const x of order) {
+    offs.push(slots[x].offset);
+    srcs.push(slots[x].source);
+    ids.push(x);
+  }
+  const sl = {offs: offs, srcs: srcs, ids: ids};
   let lines = [];
   let lineStarts = [];
-  let off = 0;
-  for (const raw of clean.split("\n")) {
-    const text = raw.endsWith("\r") ? raw.substring(0, raw.length - 1) : raw;
-    lines.push({text: text, offset: off});
-    lineStarts.push(off);
-    off = off + raw.length + 1;
+  let start = 0;
+  let i = 0;
+  while (i <= clean.length) {
+    if (_scrml_structural_eq(i, clean.length) || _scrml_structural_eq(clean[i], "\n") || _scrml_structural_eq(clean[i], "\r")) {
+    lines.push({text: clean.substring(start, i), offset: start});
+    lineStarts.push(start);
+    if (i < clean.length && _scrml_structural_eq(clean[i], "\r") && i + 1 < clean.length && _scrml_structural_eq(clean[i + 1], "\n")) {
+    i = i + 1;
   }
-  const r = parseBlocks(lines, 0);
+    start = i + 1;
+  }
+    i = i + 1;
+  }
+  const r = parseBlocks(lines, 0, sl);
   let sorted = r.notes.slice();
   sorted.sort((a, b) => a.offset - b.offset);
   let diags = [];
-  let lastCode = "";
-  let lastOff = -1;
+  const seen = new Set();
   for (const x of sorted) {
-    if (_scrml_structural_eq(x.code, lastCode) && _scrml_structural_eq(x.offset, lastOff)) {
+    const key = x.code + "@" + String(x.offset);
+    if (seen.has(key)) {
     continue;
   }
-    lastCode = x.code;
-    lastOff = x.offset;
+    seen.add(key);
     const ln = lineIndex(lineStarts, x.offset);
     diags.push({code: x.code, message: messageFor(x.code), offset: x.offset, line: ln + 1, col: x.offset - lineStarts[ln] + 1});
   }
@@ -2145,12 +2421,12 @@ export function dedent(body) {
 function slugify(text) {
   let out = "";
   for (const c of text.toLowerCase()) {
-    if (c >= "a" && c <= "z" || c >= "0" && c <= "9") {
-    out = out + c;
-  }
-  else {
     if (_scrml_structural_eq(c, " ") || _scrml_structural_eq(c, "-")) {
     out = out + "-";
+  }
+  else {
+    if (/^[\p{L}\p{M}\p{N}\p{Pc}]$/u.test(c)) {
+    out = out + c;
   }
   }
   }
@@ -2158,17 +2434,21 @@ function slugify(text) {
 }
 
 export function headingSlugs(doc, taken) {
-  let used = taken.slice();
+  const used = new Set(taken);
+  const nextSuffix = new Map();
   let out = [];
   for (const t of headingTexts(doc.blocks)) {
     const base = slugify(t);
     let s = base;
-    let k = 1;
-    while (used.includes(s)) {
+    let k = nextSuffix.has(base) ? nextSuffix.get(base) : 1;
+    while (used.has(s)) {
     s = base + "-" + String(k);
     k = k + 1;
   }
-    used.push(s);
+    if (!_scrml_structural_eq(s, base)) {
+    nextSuffix.set(base, k);
+  }
+    used.add(s);
     out.push(s);
   }
   return out;
@@ -2178,37 +2458,37 @@ function headingTexts(blocks) {
   let out = [];
   for (const each of blocks) {
     const b = each;
-    let _scrml_tilde_34 = null;
-  const _scrml_match_35 = b;
-  const _scrml_tag_36 = (_scrml_match_35 != null && typeof _scrml_match_35 === "object") ? _scrml_match_35.variant : _scrml_match_35;
-  if (_scrml_tag_36 === "Heading") {
-    const l = _scrml_match_35.data.level; const cs = _scrml_match_35.data.children;
-    _scrml_tilde_34 = [ plainText ( cs ) ];
+    let _scrml_tilde_36 = null;
+  const _scrml_match_37 = b;
+  const _scrml_tag_38 = (_scrml_match_37 != null && typeof _scrml_match_37 === "object") ? _scrml_match_37.variant : _scrml_match_37;
+  if (_scrml_tag_38 === "Heading") {
+    const l = _scrml_match_37.data.level; const cs = _scrml_match_37.data.children;
+    _scrml_tilde_36 = [ plainText ( cs ) ];
   }
-  else if (_scrml_tag_36 === "Quote") {
-    const bs = _scrml_match_35.data.children;
-    _scrml_tilde_34 = headingTexts ( bs );
+  else if (_scrml_tag_38 === "Quote") {
+    const bs = _scrml_match_37.data.children;
+    _scrml_tilde_36 = headingTexts ( bs );
   }
-  else if (_scrml_tag_36 === "List") {
-    const o = _scrml_match_35.data.ordered; const s = _scrml_match_35.data.start; const t = _scrml_match_35.data.tight; const its = _scrml_match_35.data.items;
-    _scrml_tilde_34 = itemHeadingTexts ( its );
+  else if (_scrml_tag_38 === "List") {
+    const o = _scrml_match_37.data.ordered; const s = _scrml_match_37.data.start; const t = _scrml_match_37.data.tight; const its = _scrml_match_37.data.items;
+    _scrml_tilde_36 = itemHeadingTexts ( its );
   }
-  else if (_scrml_tag_36 === "Paragraph") {
-    const cs = _scrml_match_35.data.children;
-    _scrml_tilde_34 = [ ];
+  else if (_scrml_tag_38 === "Paragraph") {
+    const cs = _scrml_match_37.data.children;
+    _scrml_tilde_36 = [ ];
   }
-  else if (_scrml_tag_36 === "CodeBlock") {
-    const l = _scrml_match_35.data.lang; const t = _scrml_match_35.data.text;
-    _scrml_tilde_34 = [ ];
+  else if (_scrml_tag_38 === "CodeBlock") {
+    const l = _scrml_match_37.data.lang; const t = _scrml_match_37.data.text;
+    _scrml_tilde_36 = [ ];
   }
-  else if (_scrml_tag_36 === "Rule") {
-    _scrml_tilde_34 = [ ];
+  else if (_scrml_tag_38 === "Rule") {
+    _scrml_tilde_36 = [ ];
   }
-  else if (_scrml_tag_36 === "Table") {
-    const a = _scrml_match_35.data.align; const h = _scrml_match_35.data.head; const rs = _scrml_match_35.data.rows;
-    _scrml_tilde_34 = [ ];
+  else if (_scrml_tag_38 === "Table") {
+    const a = _scrml_match_37.data.align; const h = _scrml_match_37.data.head; const rs = _scrml_match_37.data.rows;
+    _scrml_tilde_36 = [ ];
   }
-  const inner = _scrml_tilde_34;
+  const inner = _scrml_tilde_36;
     for (const t of inner) {
     out.push(t);
   }
