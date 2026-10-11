@@ -360,6 +360,26 @@ describe("§67.11 — diagnostics", () => {
     expect(compile(P(`<x> = "a"\n<div><md of=@x/></div>`)).codes).toContain("E-MD-OF-NOMINAL");
   });
 
+  test("E-MD-IN-LOGIC-NOMINAL: an <md> in lift markup or a markup value is refused by name, once", () => {
+    const lifted = compile(P(`<items> = ["a"]
+<ul>
+\${
+    for (const it of @items) {
+        lift <li><md>
+            **x**
+        </md></li>
+    }
+}
+</ul>`));
+    expect(lifted.codes.filter((c) => c === "E-MD-IN-LOGIC-NOMINAL").length).toBe(1);
+    expect(lifted.codes).not.toContain("E-MARKUP-001");
+    const value = compile(P(`<on> = true
+<div>\${ @on ? <div><md>
+    **yes**
+</md></div> : <p>no</p> }</div>`));
+    expect(value.codes.filter((c) => c === "E-MD-IN-LOGIC-NOMINAL").length).toBe(1);
+  });
+
   test("W-ATTR-001 for an attribute §67.2 does not admit; class/id/style reach the host", () => {
     const r = compile(P(`<div><md class="c" style="color:red" title="t">x</md></div>`));
     expect(r.allCodes).toContain("W-ATTR-001");

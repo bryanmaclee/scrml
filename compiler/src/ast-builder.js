@@ -114,7 +114,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
-import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement } from "./md-lower.ts";
+import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement, refuseUnreadMdElements } from "./md-lower.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -19308,7 +19308,7 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // TAB lowering (md-lower.ts) — nothing downstream re-reads an `<md>` body — so an `<md>` in an
 // `<each>` row would otherwise lose its errors and lints.
 const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR",
-  "E-MD-INTERP-UNCLOSED", "E-MD-INDENT-MIXED", "E-MD-IN-PHRASING", "E-MD-URL-SCHEME", "E-MD-OF-BODY", "E-MD-OF-NOMINAL"]);
+  "E-MD-INTERP-UNCLOSED", "E-MD-INDENT-MIXED", "E-MD-IN-PHRASING", "E-MD-URL-SCHEME", "E-MD-OF-BODY", "E-MD-OF-NOMINAL", "E-MD-IN-LOGIC-NOMINAL"]);
 /** A `W-MD-*` lint from the md reader (§67.3) — forwarded out of a discarded sub-build like the codes above. */
 function isForwardedMdLint(code) {
   return typeof code === "string" && code.startsWith("W-MD-");
@@ -24000,6 +24000,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     if (result && typeof result === "object") {
       result.legacyIsSomeSites = [...sink.values()].sort((a, b) => a.start - b.start);
       refuseScriptStyleElements(result, bsOutput);
+      // SPEC §67 (S462 md phase 2) — an `<md>` built outside a markup body (lift / markup value).
+      if (result.ast && Array.isArray(result.errors)) refuseUnreadMdElements(result.ast, result.filePath, result.errors, (code, message, sp) => new TABError(code, message, sp));
     }
     return result;
   } finally {

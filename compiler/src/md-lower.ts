@@ -80,6 +80,55 @@ export function sourceHasMdElement(source: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// E-MD-IN-LOGIC-NOMINAL — an `<md>` the lowering never saw
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `<md>` written in a markup body is lowered to its host `div` while the AST is built, so a
+ * markup node still TAGGED `md` after the build was built somewhere else: `lift` markup or a markup
+ * value in an expression, both parsed from logic tokens, which lose the lines markdown is made of.
+ * Such an element would render its markdown source as text inside an unknown `<md>` element, at
+ * exit 0. It is refused by name instead (fail closed), once per element, with the positions where
+ * a static `<md>` works. Walks every object reachable from `root`, as the §4.17 element refusal
+ * does (element-refusal.ts), so a markup value nested in any expression is seen.
+ */
+export function refuseUnreadMdElements(root: unknown, filePath: string, errors: any[], makeError: MdLowerCtx["makeError"]): void {
+  const seen = new Set<object>();
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n as object)) continue;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (let i = n.length - 1; i >= 0; i--) stack.push(n[i]); continue; }
+    const obj = n as { [k: string]: any };
+    if (obj.kind === "markup" && typeof obj.tag === "string" && /^m[dD]$/.test(obj.tag)) {
+      if (obj._mdRefused === true) continue; // already reported by a nested build (a `<match>` arm)
+      obj._mdRefused = true;
+      const sp = (obj.refusalSpan ?? obj.span) as Span | undefined;
+      const msg =
+        "E-MD-IN-LOGIC-NOMINAL: this `<md>` is inside `lift` markup or a markup value in an expression, " +
+        "where impl#1 does not read markdown yet (SPEC §67.2 — the markup there is parsed from logic tokens, " +
+        "which lose the lines markdown is made of). A static `<md>` works in a markup body: a page or element " +
+        "body, a component body, an `<each>` row, a `<match>` arm, an `if=` element. Move the `<md>` there " +
+        "(an `<each>` replaces a `for … lift` loop; an `if=` / `else` pair replaces a `? :` markup value).";
+      const err = makeError("E-MD-IN-LOGIC-NOMINAL", msg, sp && typeof sp.start === "number"
+        ? { file: sp.file ?? filePath, start: sp.start, end: sp.end, line: sp.line, col: sp.col }
+        : { file: filePath, start: 0, end: 0, line: 1, col: 1 });
+      err.baseMessage = msg;
+      errors.push(err);
+      // the element renders nothing (the error is fatal; no markdown source reaches a page)
+      obj.children = [];
+      continue;
+    }
+    for (const k of Object.keys(obj)) {
+      if (k === "span" || k === "parent") continue;
+      const v = obj[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // E-MD-IN-PHRASING (§67.2) — an element whose content model is phrasing content.
 // ---------------------------------------------------------------------------
 

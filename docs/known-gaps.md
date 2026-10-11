@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 598 | 6 |
+| MED | 599 | 6 |
 | LOW | 356 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -57,6 +57,19 @@ parse), 2 NOT-TWINNED. What the bootstrap owes, in order: (1) the `<md>` body pr
 URLs through the bootstrap's §5.2 rule 3 guard); (5) E-MD-URL-SCHEME, E-MD-INTERP-UNCLOSED,
 E-MD-INDENT-MIXED, E-MD-IN-PHRASING, E-MD-OF-BODY and the W-MD surfacing with source positions;
 (6) page-wide heading ids. `<md of=…/>` (phase 3) is owed by both implementations.
+
+### g-md-in-logic-markup-s462 — impl#1 does not read an `<md>` inside `lift` markup or a markup value in an expression (`${ @on ? <div><md>…</md></div> : … }`, `for (…) { lift <li><md>…</md></li> }`); it refuses it with E-MD-IN-LOGIC-NOMINAL — `NEW S462; MED; open (Nominal position)`
+
+<!-- @gap id=g-md-in-logic-markup-s462 sev=MED status=open locus=compiler/src/ast-builder.js(parseLiftTag / the markup-value expression parser build markup from LOGIC tokens — whitespace joined, so the markdown's lines are gone),compiler/src/md-lower.ts(refuseUnreadMdElements — the refusal) prov=agent:s462-md-phase2 -->
+
+Before the refusal (found while testing this phase), a markup value holding an `<md>` compiled at exit 0
+and rendered `<md>**yes**</md>` — the markdown source as text inside an unknown element; a `lift` one
+reported a misleading E-MARKUP-001 ("not a known HTML element"). Both are now E-MD-IN-LOGIC-NOMINAL,
+which names the markup-body positions where a static `<md>` works. Fix direction: when lift / markup-
+value markup holds an `<md>`, take the element's VERBATIM source from the enclosing logic block's
+`raw` (as `mdComponentVerbatimRaw` does for a `const C = <…>` component) and build it through the
+block splitter + `lowerMdBlock`; the slots then resolve in the lift's scope. A component definition
+is not affected (its `<md>` is read).
 
 ### g-md-in-phrasing-through-wrapper-s462 — E-MD-IN-PHRASING is checked against the `<md>`'s direct parent element only: an `<md>` that reaches a phrasing parent through a component root, an `<each>` / `<match>` wrapper or an `if=` chain (`<p><each in=@xs><md>…</md></each></p>`) is not refused, and the browser reparents its blocks — `NEW S462; LOW; open`
 

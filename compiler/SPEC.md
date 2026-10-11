@@ -26905,6 +26905,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MD-IN-PHRASING | §67.2, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `checkMdInPhrasing`, called for every element's children by the ast-builder.) An `<md>` element whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …): its block output would be reparented by the HTML parser. | Error |
 | E-MD-URL-SCHEME | §67.6, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`, judged by the §5.2 reader `compiler/src/runtime-url-guard.js`.) A literal link destination or image source in a static `<md>` body whose scheme §5.2 rule 2's test does not admit (`javascript:`, `data:text/html`, `data:image/svg+xml`, …), or a data-led one whose literal text before its first `${…}` already commits to such a scheme. | Error |
 | E-MD-OF-BODY | §67.7, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`.) An `<md of=…>` that also has a body. | Error |
+| E-MD-IN-LOGIC-NOMINAL | §67.2, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `refuseUnreadMdElements`, called from `buildAST`; retired when impl#1 reads an `<md>` in logic markup.) An `<md>` inside `lift` markup or a markup value in an expression (`const x = <div><md>…</md></div>`): impl#1 parses that markup from logic tokens, which lose the markdown's lines, so the element is refused by name — never rendered as an unknown element — and the message names the markup-body positions where a static `<md>` works. (A component definition `const C = <… props=…>` is a markup body here: its `<md>` is read.) | Error |
 | E-MD-OF-NOMINAL | §67.7, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`; retired when phase 3 builds `of=`.) `<md of=expr/>` is specified (§67.7) but not built in impl#1 yet; the element is refused rather than rendered as an empty host. | Error |
 | E-MD-INTERP-UNCLOSED | §67.2, §67.11 | (S462 review fix MED-2; phase 2 — the extent is taken by `compiler/src/block-splitter.js` `scanMdSlots`, the error emitted at `compiler/src/md-lower.ts` `lowerMdBlock`.) A `${` in a static `<md>` body with no balanced closing `}` before `</md>`. The splitter takes `${…}` extents without parsing them (§67.2), so an unclosed one has no extent; the message names `<pre>` as the way to show a literal `${` that does not close. | Error |
 
@@ -48404,6 +48405,11 @@ a third, orthogonal one. **An `<md>` body is a fourth production.**
   > three leading spaces). The deep-dive's own §6f example expects the content at column 0. The closer's
   > line can only lower the minimum when it is LEFT of the content — the harmful case — so it is not
   > counted. Candidate question #1 in `docs/changes/s462-md-phase1/progress.md`.
+- **Where impl#1 reads it (S462 phase 2).** A static `<md>` is read in every markup body: a page or
+  element body, a component body (including a `const C = <…>` component definition), an `<each>` row,
+  a `<match>` arm and an `if=` gate. Inside `lift` markup or a markup value in an expression, impl#1
+  refuses it with `E-MD-IN-LOGIC-NOMINAL` (known gap `g-md-in-logic-markup-s462`) *(PA reading,
+  s462-md-phase2: that markup is parsed from logic tokens, which lose the lines markdown is made of)*.
 - **Placement.** `<md>` produces block content inside its host element (§67.6). An `<md>` whose parent
   is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, `em`, `strong`, `code`, any other
   element whose content model is phrasing) is `E-MD-IN-PHRASING` *(PA reading, s462-md-phase1: block
@@ -48717,6 +48723,7 @@ as LF.
 | `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
 | `E-MD-OF-NOMINAL` | Error | §67.7: `<md of=…/>` before phase 3 is built (impl#1's honest not-yet diagnostic) — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`); retired when phase 3 lands |
 | `E-MD-INTERP-UNCLOSED` | Error | §67.2: a `${` with no balanced `}` before `</md>`; the message names `<pre>` — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-IN-LOGIC-NOMINAL` | Error | an `<md>` inside `lift` markup or a markup value in an expression — impl#1's honest not-yet diagnostic for a position phase 2 does not read (emitted at `compiler/src/md-lower.ts`); retired when that position is built |
 
 The W-MD codes are produced by `scrml:md` (data: `MdDoc.diags`) and surfaced by the compiler for a
 static body (phase 2, `compiler/src/md-lower.ts`); the E-MD codes are compiler checks (phase 2). Every message names the
