@@ -18,7 +18,7 @@ import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from 
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
-import { emitExpr, emitExprField, setServerAsyncClassifier, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, setServerAsyncClassifier, setServerPromiseTrap, ASSERT_SETTLED_FN, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
   resolveUnitSessionAttr,
@@ -110,6 +110,28 @@ export const SERVER_STRUCTURAL_EQ_HELPER =
 // boundary) so a hoisted helper sits above every reference. Shared by the
 // post-emit helper-inline scans (structural-eq / wire / log). Mirrors the
 // in-place `headerEndIdx` logic the route-handler path uses.
+/**
+ * §13.2 server Promise trap (S462 Q20, ruling "q20 yes.") — the runtime half.
+ * The compiler awaits every Promise-returning `scrml:` call; if one ever reaches
+ * a boolean test un-awaited (an await-classifier miss), the test would pass for
+ * every input, because a Promise is truthy. This turns that into a thrown
+ * internal error, which the route's error path answers with its fixed 500 —
+ * never a pass, and never a detail on the wire. A settled value passes through
+ * unchanged. Injected into a server module IFF the module references it.
+ */
+export const SERVER_ASSERT_SETTLED_HELPER: string = [
+  "",
+  "// --- §13.2 (S462 Q20): a standard-library result is tested only once it has settled (compiler-generated) ---",
+  "// A Promise reaching a boolean test means a call the compiler should have awaited was not.",
+  "// A Promise is truthy, so the test would pass for every input: fail the request instead.",
+  "function _scrml_assert_settled(value) {",
+  "  if (value != null && typeof value.then === \"function\") {",
+  "    throw new _scrml_g.Error(\"scrml: an asynchronous standard-library result was tested before it settled\");",
+  "  }",
+  "  return value;",
+  "}",
+].join("\n");
+
 function injectAfterHeader(emitted: string, helper: string): string {
   const headerEndIdx = emitted.indexOf("\n\n");
   if (headerEndIdx === -1) return helper + emitted;
@@ -1649,8 +1671,22 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
 /**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
+ *
+ * §13.2 server Promise trap (S462 Q20) — the trap is active ONLY for the
+ * duration of this call: the impl installs the file's import map
+ * (`setServerPromiseTrap`) and this wrapper restores the previous state on every
+ * exit, so no later emitter (client, library, tool) ever sees it.
  */
-export function generateServerJs(
+export function generateServerJs(...args: Parameters<typeof generateServerJsImpl>): string {
+  const prevTrap = setServerPromiseTrap(null);
+  try {
+    return generateServerJsImpl(...args);
+  } finally {
+    setServerPromiseTrap(prevTrap);
+  }
+}
+
+function generateServerJsImpl(
   ctxOrFileAST: CompileContext | any,
   routeMapLegacy?: any,
   errorsLegacy?: CGError[],
@@ -1765,6 +1801,12 @@ export function generateServerJs(
   const _asyncFileAstForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
   const _asyncCalleeMap = buildCalleeImportMap(_asyncFileAstForImports);
   const _asyncExportRegistry = ctxForCache?.exportRegistry ?? exportRegistryLegacy ?? null;
+  // §13.2 server Promise trap (S462 Q20) — every boolean-test position whose
+  // operand is a direct `scrml:` stdlib call is wrapped in `_scrml_assert_settled`
+  // (emit-expr `trapBooleanOperand`); the helper is injected below on use. Keyed on
+  // the import map alone (plus the registry for user re-exports of stdlib names),
+  // never on the await classifier it backstops.
+  setServerPromiseTrap({ calleeMap: _asyncCalleeMap, exportRegistry: _asyncExportRegistry });
   // Issue #26 Finding-2 (S239 adversarial review) — FAIL-CLOSED sink for
   // async-stdlib calls emit-expr lowers in a NON-awaitable position (a sync
   // `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a
@@ -6936,6 +6978,13 @@ export function generateServerJs(
   // call; a module with no handled query is byte-unchanged.
   if (finalEmitted.includes(`${SQL_ATTEMPT_FN}(`)) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_SQL_ATTEMPT_HELPER);
+  }
+
+  // §13.2 server Promise trap (S462 Q20) — inject the settle assertion IFF a
+  // boolean test of a `scrml:` stdlib call was wrapped. Gated purely on the
+  // emitted call; a module with no such test is byte-unchanged.
+  if (finalEmitted.includes(`${ASSERT_SETTLED_FN}(`)) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_ASSERT_SETTLED_HELPER);
   }
 
   // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL
