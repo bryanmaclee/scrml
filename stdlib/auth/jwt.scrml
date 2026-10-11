@@ -231,7 +231,7 @@ ${
      *   })
      *   if (res.valid) { @currentUser = res.payload }
      */
-    export function verifyJwtJwks(token, jwksUrl, opts) {
+    export async function verifyJwtJwks(token, jwksUrl, opts) {
         const options = opts is given ? opts : {}
         const clockTolerance = options.clockToleranceSec is given ? options.clockToleranceSec : 60
         const ttl = options.ttl is given ? options.ttl : 3600

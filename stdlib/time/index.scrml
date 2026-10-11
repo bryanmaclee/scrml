@@ -335,11 +335,12 @@ ${
 
     /**
      * Sleep for a specified number of milliseconds.
-     * Returns a Promise — use with await in server functions.
+     * Promise-returning (declared `async`): the compiler awaits every call, so
+     * the next statement runs after the delay (§13.2).
      *
-     * Example: await sleep(500)
+     * Example: sleep(500)
      */
-    export function sleep(ms) {
+    export async function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms))
     }
 
@@ -530,9 +531,12 @@ ${
         assertTruthy(typeof db.cancel == "function")
         assertTruthy(typeof db.flush == "function")
 
-        // sleep returns a Promise
-        const p = sleep(0)
-        assertTruthy(typeof p.then == "function")
+        // sleep is Promise-returning: the call is awaited, so the delay has
+        // elapsed by the next statement (S462 — it was declared sync, so a
+        // bare `sleep(ms)` never waited)
+        const sleptFrom = Date.now()
+        sleep(5)
+        assertTruthy(Date.now() - sleptFrom >= 4)
 
         // -- S57 Tier 2 additions ---------------------------------------------
 

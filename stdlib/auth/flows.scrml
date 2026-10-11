@@ -160,7 +160,7 @@ ${
      * @param sendEmail — REQUIRED function (to, { subject, link, token }) that
      *                    delivers the link (missing → refused, see flowOptions)
      */
-    export function requestMagicLink(email, opts, sendEmail) {
+    export async function requestMagicLink(email, opts, sendEmail) {
         return requestTokenFlow(email, opts, sendEmail, "magic-link", 900)
     }
     export function verifyMagicLink(token, opts) {
@@ -170,7 +170,7 @@ ${
     /**
      * Email-verification. Namespace the store as "email-verify". Longer TTL (24h).
      */
-    export function requestEmailVerification(email, opts, sendEmail) {
+    export async function requestEmailVerification(email, opts, sendEmail) {
         return requestTokenFlow(email, opts, sendEmail, "email-verify", 86400)
     }
     export function verifyEmail(token, opts) {
@@ -181,7 +181,7 @@ ${
      * Password-reset. Namespace the store as "pwreset". The caller updates the
      * hash after a valid verify — or use resetPassword to compose the steps.
      */
-    export function requestPasswordReset(email, opts, sendEmail) {
+    export async function requestPasswordReset(email, opts, sendEmail) {
         return requestTokenFlow(email, opts, sendEmail, "pwreset", 3600)
     }
     export function verifyResetToken(token, opts) {
@@ -206,7 +206,7 @@ ${
      *
      * @param updateHash — function (email, hash) that persists the new hash
      */
-    export function resetPassword(token, newPassword, opts, updateHash) {
+    export async function resetPassword(token, newPassword, opts, updateHash) {
         const signature = "resetPassword(token, newPassword, { store }, updateHash)"
         const options = flowOptions("resetPassword", signature, opts, "updateHash")
         // A present-but-not-a-function updateHash is a call-shape error; an
