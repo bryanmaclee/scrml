@@ -1,0 +1,24 @@
+{
+  "id": "reactive-narrowing-sync-callback-keeps-pos",
+  "description": "S462 Q12 twin — a lambda passed directly to a built-in that calls it synchronously and does not retain it (`.map` on a known array) keeps the narrowing. Compiles clean; clicking renders the mapped text.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"a\", Q12): \"EXCEPT a lambda passed directly to a built-in known to call it synchronously and not retain it\"",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-TYPE-046"
+    ],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "xa"
+      }
+    ]
+  }
+}

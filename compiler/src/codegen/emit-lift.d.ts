@@ -38,6 +38,10 @@ export declare function liftScopeNamesCopy(): Set<string>;
 
 export declare function pushLiftNonKeyed(): void;
 export declare function popLiftNonKeyed(): void;
+export declare function pushLiftLive(armNames?: Set<string>): void;
+export declare function liftInitialRenderCall(renderFn: string, iterableJs?: string): string;
+export declare function liftArmDeclaredNames(root: object): Set<string>;
+export declare function popLiftLive(): void;
 export declare function liftNonKeyedActive(): boolean;
 
 /** Restore every emit-lift module stack / counter to its initial value (head of every runCG). */

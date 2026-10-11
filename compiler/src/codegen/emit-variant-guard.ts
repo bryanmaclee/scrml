@@ -92,6 +92,7 @@
  * @see docs/changes/phase-a10-engine-state-child-body-render/PHASE-0-SURVEY.md
  */
 
+import { guardDetachedListener } from "./detached-listener.ts";
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
 import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
@@ -1096,7 +1097,7 @@ function emitArmWireFunction(
       lines.push(`      ${DS}.push(function() { ${EL}[${prop}] = null; });`);
     } else {
       // An element listener, exactly like a row's own per-item handler.
-      lines.push(`      const ${H} = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      const ${H} = ${guardDetachedListener(`${factory}(${armParams.join(", ")})`)};`);
       lines.push(`      ${EL}.addEventListener(${JSON.stringify(domEvent)}, ${H});`);
       lines.push(`      ${DS}.push(function() { ${EL}.removeEventListener(${JSON.stringify(domEvent)}, ${H}); });`);
     }
@@ -1319,7 +1320,7 @@ function emitArmWireFunction(
     const dataAttr = `data-scrml-bind-${eventName}`;
     lines.push(`  {`);
     lines.push(`    const ${EL} = ${R}.querySelector('[${dataAttr}=${JSON.stringify(placeholderId)}]');`);
-    lines.push(`    const ${H} = ${handlerExpr};`);
+    lines.push(`    const ${H} = ${guardDetachedListener(handlerExpr)};`);
     lines.push(`    if (${EL}) {`);
     lines.push(`      ${EL}.addEventListener(${JSON.stringify(domEvent)}, ${H});`);
     lines.push(`      ${DS}.push(function() { ${EL}.removeEventListener(${JSON.stringify(domEvent)}, ${H}); });`);

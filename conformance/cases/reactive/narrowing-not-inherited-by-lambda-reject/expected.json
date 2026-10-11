@@ -1,0 +1,15 @@
+{
+  "id": "reactive-narrowing-not-inherited-by-lambda-reject",
+  "description": "S462 Q12 — a lambda created inside a narrowed scope may run later, so it does not inherit the narrowing of a reactive cell; the bare `@user.name` inside it is E-TYPE-046.",
+  "language-version": "1.0",
+  "spec": "§42.3.5",
+  "rationale": "§42.3.5 (ruling:user-voice-scrml.md S462 \"a\", Q12): \"a lambda / function expression created inside a narrowed scope does NOT inherit the narrowing of reactive cells — it re-tests\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-046"
+    ],
+    "severity": {
+      "E-TYPE-046": "error"
+    }
+  }
+}

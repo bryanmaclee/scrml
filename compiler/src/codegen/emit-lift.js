@@ -1,5 +1,6 @@
 // s441 — §13.2 for per-element event handlers (see colorActiveHandler).
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
+import { guardDetachedListener } from "./detached-listener.ts";
 import { PHP_RENDER } from "../placeholder-nonce.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
@@ -101,6 +102,143 @@ export function pushLiftNonKeyed() { _scrml_lift_non_keyed_depth++; }
 export function popLiftNonKeyed() { _scrml_lift_non_keyed_depth--; }
 export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 
+// g-impl1-markup-if-branch-memo-stale-render-s462 — LIVE mode. Active while the
+// arm bodies of a `${ if … }` lift group are emitted (emit-reactive-wiring.ts
+// emitIfChainForArms). Such an arm renders inside its own effect
+// (`_scrml_lift_arm_run`), which re-renders the arm when a value the arm
+// reads directly changes. A markup binding must not make it re-render: that
+// would replace every element of the arm — an input loses its typed text and
+// focus — whenever any interpolation in the arm changes. So in LIVE mode each
+// markup binding that reads reactive state (a text interpolation, an attribute
+// value, a `bind:` initial value, an `if=` display toggle) is wired the way
+// top-level markup is: a stable node, updated in place by its own
+// `_scrml_effect`, whose reads the arm's effect does not see. The arm run owns
+// those effects and disposes them with the arm. Inside a reconciled per-item
+// factory the reconcile ctx's live-keyed effects take precedence, unchanged.
+//
+// A binding's own effect re-evaluates its expression LATER, when a cell it reads
+// changes — so it may only read values the arm's render cannot have left behind.
+// ANY name the chain's arms declare can hold such a value: a `let` reassigned
+// after the lift, a running total, a `const` object mutated in place (`bump(o)`,
+// `Object.assign(o, …)`), a `const` alias of an array pushed to later, a loop
+// binder aliasing an element mutated later, a closure over a `let` — the effect
+// would read the FINAL state (`let total … lift <p>${total + @n}</p>` showed
+// 7|7|7 for 2|4|7). Proving a local unchanged needs alias and escape analysis,
+// so the rule is the conservative one: a binding gets its own effect ONLY when
+// its expression reads no name declared inside the chain (liftArmDeclaredNames);
+// cells, file-scope names and globals are fine. Every other binding stays as it
+// is, and the arm's effect re-renders it with the values of a fresh render.
+// A stack, so nested pushes compose (the innermost set governs).
+const _scrml_lift_live_stack = [];
+export function pushLiftLive(armNames) { _scrml_lift_live_stack.push(armNames ?? new Set()); }
+export function popLiftLive() { _scrml_lift_live_stack.pop(); }
+const _LIFT_LIVE_READ_RE = /_scrml_(?:reactive|derived)_get\(/;
+
+/**
+ * Do the free identifiers of the emitted JS `js` include any of `names`? Parsed
+ * with acorn: a member's property name and an object key are not references.
+ * Compiler-generated names (`_scrml_…`) are never arm locals. Unparseable text
+ * answers yes — the binding then stays as it is, which is always correct.
+ */
+function _jsReadsAnyName(js, names) {
+  if (!names || names.size === 0) return false;
+  let ast;
+  try {
+    ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "script", allowReturnOutsideFunction: true });
+  } catch {
+    return true;
+  }
+  let hit = false;
+  const walk = (node, parent, key) => {
+    if (hit || !node || typeof node.type !== "string") return;
+    if (node.type === "Identifier") {
+      const isProp = parent && (
+        (parent.type === "MemberExpression" && key === "property" && !parent.computed) ||
+        (parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand)
+      );
+      if (!isProp && !node.name.startsWith("_scrml_") && names.has(node.name)) hit = true;
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      const v = node[k];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") walk(c, node, k); }
+      else if (v && typeof v.type === "string") walk(v, node, k);
+    }
+  };
+  walk(ast, null, null);
+  return hit;
+}
+
+function _liftLiveActive() {
+  return _scrml_lift_live_stack.length > 0 && !currentLiftReconcileCtx();
+}
+function _liftLiveArmNames() {
+  return _scrml_lift_live_stack[_scrml_lift_live_stack.length - 1];
+}
+
+/**
+ * The first render call of a keyed list (`_scrml_render_list_N`). Its static
+ * effect keeps the list reconciled; in LIVE mode the first call must not ALSO
+ * subscribe the enclosing arm to the collection, or every change to the list
+ * would re-render the whole arm instead of reconciling it in place — unless the
+ * collection expression (`iterableJs`) reads a name the arm declares, which the
+ * static effect could read in a later state; then the arm keeps the read.
+ */
+export function liftInitialRenderCall(renderFn, iterableJs) {
+  if (!_liftLiveActive() || _jsReadsAnyName(String(iterableJs ?? ""), _liftLiveArmNames())) return `${renderFn}();`;
+  return `_scrml_untracked(${renderFn});`;
+}
+/** True when LIVE mode is active (outside a reconcile ctx), `js` reads a cell and no arm-declared name. */
+function liftLiveWraps(js) {
+  return _liftLiveActive() && _LIFT_LIVE_READ_RE.test(js) && !_jsReadsAnyName(js, _liftLiveArmNames());
+}
+
+/**
+ * Every name an arm-selector `if` chain declares anywhere inside it — `let`,
+ * `const`, `lin`, keywordless declarations, loop binders (C-style counters
+ * included), destructured names, function names and parameters, lambda
+ * parameters. A LIVE binding may read none of them (see LIVE mode above).
+ */
+export function liftArmDeclaredNames(root) {
+  const out = new Set();
+  const add = (name) => {
+    if (typeof name === "string") { if (name) out.add(name); return; }
+    if (isDestructurePattern(name)) for (const b of _iterDestructureBindNames(name)) out.add(b);
+    else if (name && typeof name === "object" && typeof name.name === "string" && name.name) out.add(name.name);
+  };
+  const visit = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    switch (n.kind) {
+      case "let-decl":
+      case "const-decl":
+      case "lin-decl":
+      case "tilde-decl":
+        add(n.name);
+        break;
+      case "for-stmt": {
+        add(n.variable);
+        const it = typeof n.iterable === "string" ? n.iterable : "";
+        const m = it.match(/^\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)/);
+        if (m) add(m[1]);
+        break;
+      }
+      case "function-decl":
+      case "lambda":
+        add(n.name);
+        for (const prm of Array.isArray(n.params) ? n.params : []) add(prm);
+        break;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+  return out;
+}
+
 /**
  * s430-emit-state-leak — restore every emit-lift module stack / counter to its
  * initial value. Called once at the head of every `runCG`: each is balanced by
@@ -111,6 +249,7 @@ export function resetLiftModuleState() {
   _scrml_lift_reconcile_ctx_stack.length = 0;
   _scrml_lift_scope_names_stack.length = 0;
   _scrml_lift_non_keyed_depth = 0;
+  _scrml_lift_live_stack.length = 0;
   _scrml_lift_request_ids_stack.length = 0;
 }
 
@@ -514,9 +653,28 @@ function maybeWrapLiftPerItemEffect(bodyLines) {
 function pushLiftAttrSet(lines, setStmt) {
   if (currentLiftReconcileCtx()) {
     for (const l of maybeWrapLiftPerItemEffect([setStmt])) lines.push(l);
+  } else if (liftLiveWraps(setStmt)) {
+    lines.push(`_scrml_effect(function() { ${setStmt} });`);
   } else {
     lines.push(setStmt);
   }
+}
+
+// LIFT-2 (S88) two-way `bind:*` wiring inside a lift template: the initial DOM
+// value from the cell, the input event writing the cell, and the reverse sync.
+// In LIVE mode the initial value and the reverse sync are one `_scrml_effect`, so
+// the read is the binding's own (the arm effect does not re-render the arm while
+// the user types) and the arm run disposes the sync with the arm.
+function pushLiftBind(lines, elVar, flavor, eventName, varJSON) {
+  const initStmt = `${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`;
+  if (liftLiveWraps(initStmt)) {
+    lines.push(`_scrml_effect(function() { ${initStmt} });`);
+    lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+    return;
+  }
+  lines.push(initStmt);
+  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
+  lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
 }
 
 // S293 — a per-item `if=` conditional-display toggle whose predicate reads the
@@ -1246,9 +1404,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       // form may include leading whitespace). Strip the @-prefix.
       const varRef = attr.value.trim().replace(/^@/, "");
       const varJSON = JSON.stringify(varRef);
-      lines.push(`${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`);
-      lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
-      lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
+      pushLiftBind(lines, elVar, flavor, eventName, varJSON);
     } else if (attr.name === "if") {
       // LIFT-3 fix (S88) — conditional display toggle inside lift template,
       // parity with top-level if= attribute conditional rendering.
@@ -1270,6 +1426,11 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       if (tryEmitLiftIfReactive(lines, elVar, exprJS, attr.value)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
+      if (liftLiveWraps(exprJS)) {
+        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
+        lines.push(`_scrml_effect(${updaterVar});`);
+        continue;
+      }
       lines.push(`${updaterVar}();`);
       // Extract @-prefixed reactive var names from the raw expression. Strip
       // any dotted-path tail so `@form.field` subscribes to the compound root
@@ -1326,7 +1487,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
       if (engineLoweredAttr !== null) {
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -1380,13 +1541,13 @@ function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
         // the LIVE item; null → emit the arrow directly (byte-identical to pre-fix).
         const _shadowH = maybeWrapLiftCallableHandler(handlerExpr);
         if (_shadowH !== null) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadowH}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`${_shadowH}`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         } else {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${handlerExpr}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`${handlerExpr}`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         }
       } else {
         // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
@@ -1470,7 +1631,7 @@ function emitSetContent(elVar, parts) {
   // S213 ss15 items 3+4 (Seam 3) — when the template reads a `<request>`
   // deep-reactive object, wrap the textContent write in `_scrml_effect` so it
   // re-renders on fetch-resolve (mirrors the bare-expr interpolation path).
-  if (liftExprReadsRequestState(tpl)) {
+  if (liftExprReadsRequestState(tpl) || liftLiveWraps(tpl)) {
     const tnVar = genVar('lift_tn');
     return [
       `const ${tnVar} = _scrml_g.document.createTextNode("");`,
@@ -1535,9 +1696,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           // Dotted compound — defer to existing setAttribute path (no fix in v1).
           lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, _scrml_reactive_get(${varJSON}));`);
         } else {
-          lines.push(`${elVar}.${flavor} = _scrml_reactive_get(${varJSON});`);
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function() { _scrml_reactive_set(${varJSON}, ${elVar}.${flavor}); });`);
-          lines.push(`_scrml_reactive_subscribe(${varJSON}, function() { ${elVar}.${flavor} = _scrml_reactive_get(${varJSON}); });`);
+          pushLiftBind(lines, elVar, flavor, eventName, varJSON);
         }
         continue;
       }
@@ -1593,6 +1752,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       if (tryEmitLiftIfReactive(lines, elVar, exprJS, rawText)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
+      if (liftLiveWraps(exprJS)) {
+        // LIVE mode — the toggle is its own effect (see liftLiveWraps).
+        lines.push(`_scrml_effect(${updaterVar});`);
+        continue;
+      }
       lines.push(`${updaterVar}();`);
       // Subscribe to each @-prefixed reactive var in the raw expression. The
       // for-loop iterable identifier is captured by the per-item factory
@@ -1684,12 +1848,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // §5.2 rule 3 (S457) — guard a URL attribute whose literal prefix commits to no scheme.
         // S457 — an SVG animation value (`to="${it.url}"` animating `href`) likewise.
         if (quotedUrlAttrNeedsGuard(tag, name, sv, attrs)) tpl = wrapUrlGuard(elVar, name, tpl, urlGuardTarget(tag, name, attrs));
-        const _setStmt = `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`;
-        if (currentLiftReconcileCtx()) {
-          for (const _l of maybeWrapLiftPerItemEffect([_setStmt])) lines.push(_l);
-        } else {
-          lines.push(_setStmt);
-        }
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val.value)});`);
       }
@@ -1705,7 +1864,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
         // does not read the item (the iter-scope scan gates it out → stays plain);
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(_scrml_event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(_scrml_event);`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
       } else {
         // §5.2 (S457) — a srcdoc / an event attribute this path does not wire (`onClick=it.f`)
         // is never written from data.
@@ -1745,12 +1904,12 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredCall !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
@@ -1796,7 +1955,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           });
           // S446 (S439 #4) — await a server-call cell write in place so the next
           // statement sees the resolved value (js-async-analysis ColorOpts).
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, { ...activeHandlerStatementListColor(val.handlerBlock.stmts), boundaryId: `on${eventName} lift row` }))});`);
           continue;
         }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /
@@ -1810,7 +1969,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredExpr !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1863,13 +2022,13 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           // Returns null (→ emit the arrow directly, byte-identical) when no wrap applies.
           const _shadow = maybeWrapLiftCallableHandler(rewritten);
           if (_shadow !== null) {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadow}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`${_shadow}`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
           } else {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${rewritten}`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`${rewritten}`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
           }
         } else {
           // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` })});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span, { boundaryId: `on${eventName} lift row` }))});`);
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
@@ -1959,7 +2118,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
                 for (const l of maybeWrapLiftPerItemEffect([`${_tn}.textContent = _scrml_g.String((${_rw}) ?? "");`])) lines.push(l);
-              } else if (liftExprReadsRequestState(_rw)) {
+              } else if (liftExprReadsRequestState(_rw) || liftLiveWraps(_rw)) {
                 const _tn = genVar('lift_tn');
                 lines.push(`const ${_tn} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${_tn});`);
@@ -2033,7 +2192,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
                 lines.push(`const ${tnVar} = _scrml_g.document.createTextNode("");`);
                 lines.push(`${elVar}.appendChild(${tnVar});`);
                 for (const l of maybeWrapLiftPerItemEffect([`${tnVar}.textContent = _scrml_g.String((${rewritten}) ?? "");`])) lines.push(l);
-              } else if (liftExprReadsRequestState(rewritten)) {
+              } else if (liftExprReadsRequestState(rewritten) || liftLiveWraps(rewritten)) {
                 // S213 ss15 items 3+4 (Seam 3) — the interpolation reads a
                 // `<request>` deep-reactive object; wrap the text-node write in
                 // `_scrml_effect` so it re-renders when the fetch resolves
@@ -2945,7 +3104,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
       lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     }
     lines.push(`}`);
-    lines.push(`${renderFn}();`);
+    lines.push(liftInitialRenderCall(renderFn, rewrittenIterable));
     // Item-dependent inner lists use a DYNAMIC effect: their deps (the current
     // outer item's collection) CHANGE across runs, so first-run-only tracking
     // (_scrml_effect_static) would keep subscribing to the create-time item and
@@ -3337,7 +3496,7 @@ export function emitConsolidatedLift(body, opts = {}) {
                 if (liftEventName(attrName) !== null) {
                   const eventName = liftEventName(attrName);
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` })});`);
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${guardDetachedListener(colorActiveHandler(`function(_scrml_event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span, { boundaryId: `on${eventName} lift row` }))});`);
                 } else {
                   const _bv = `_scrml_g.String(${rewritten} ?? "")`;
                   // §5.2 rule 3 (S457) — a BLOCK_REF-split `href=${expr}`: guard the URL write.

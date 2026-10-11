@@ -283,7 +283,7 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
     // listener signature) but does NOT forward it into `fn`. The pre-S96
     // LIFT-4 fix auto-threaded `event` per tutorial §1.5; tutorials are not
     // normative (pa.md Rule 4). Reverted to spec shape.
-    expect(js).toMatch(/function\(_scrml_event\)\s*\{\s*_scrml_handleKey_\d+\s*\(\s*\)/);
+    expect(js).toMatch(/function\(_scrml_event\)\s*\{\s*(?:if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return;\s*)?_scrml_handleKey_\d+\s*\(\s*\)/); // (S462 r6: a direct listener first returns when detached)
     // The pre-S96 spec-divergent form (event auto-threaded) must not reappear.
     expect(js).not.toMatch(/_scrml_handleKey_\d+\s*\(\s*event\s*\)/);
   });

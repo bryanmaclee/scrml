@@ -250,7 +250,8 @@ for (const pos of Object.keys(POSITIONS)) {
         const app = mount(program(pos, handler));
         expect(app.errs).toEqual([]);
         expect(app.clientJs).not.toMatch(/async function\(_scrml_event\)/);
-        expect(app.clientJs).toMatch(/function\(_scrml_event\) \{ \(async \(\) =>/);
+        // (S462 round 6: a DIRECT listener — <each> / lift row — first returns when its element is detached.)
+        expect(app.clientJs).toMatch(/function\(_scrml_event\) \{ (?:if \(_scrml_event\?\.currentTarget\?\.isConnected === false\) return; )?\(async \(\) =>/);
         expect(app.clientJs).toContain('.catch(_scrml_async_err => _scrml_error_boundary_log("x", _scrml_async_err))');
       });
     }

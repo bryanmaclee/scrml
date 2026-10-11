@@ -800,6 +800,37 @@ function _scrml_render_value(el, v) {
   }
 }
 
+/**
+ * S462 round 7 (R7-1) / round 8 (N8-1) — the order of a write's effects. The render-gate
+ * effects a write to 'name' triggers (on the cell, then on every derived node it dirtied)
+ * run FIRST, from a snapshot taken at the start of the write — before the cell's
+ * subscribers ('when … changes') — so a gate's subtree is unmounted before any user effect
+ * of the same write runs. The REST runs after the subscribers, from the effect sets as they
+ * stand then (exactly what the pre-S462 single pass read, so an effect a subscriber
+ * registers still runs), EXCEPT effects created during the gate pass: those were born
+ * inside a gate's mount, have just run their initial pass, and must not run a second time
+ * for this write (N8-1). Every effect carries a creation sequence number for this.
+ */
+let _scrml_effect_seq = 0;
+
+// gate = true: run the write's render-gate effects; false: run the rest, skipping
+// effects born (created) in the sequence window (b0, b1] — the gate pass.
+function _scrml_write_fx(name, dirtied, gate, b0, b1) {
+  // The effect machinery is tree-shaken out of a runtime whose app creates no effect.
+  if (typeof _scrml_prop_subscribers === "undefined") return;
+  const propMap = _scrml_prop_subscribers.get(_scrml_state);
+  if (!propMap) return;
+  for (const prop of [name].concat(dirtied || [])) {
+    const set = propMap.get(prop);
+    if (!set) continue;
+    for (const effect of [...set]) {
+      if ((effect._scrml_gate === true) !== gate) continue;
+      if (!gate && effect._scrml_born > b0 && effect._scrml_born <= b1) continue;
+      try { effect(); } catch(e) { console.error("scrml effect error:", e); }
+    }
+  }
+}
+
 function _scrml_reactive_set(name, value) {
   const __t_set_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
   // S79 / §6.13 — when a reactivity rule is registered for the cell, route
@@ -820,6 +851,9 @@ function _scrml_reactive_set(name, value) {
         const __oldValue_def = _scrml_state[name];
         _scrml_state[name] = value;
         const dirtied = _scrml_propagate_dirty(name);
+        const __born0_def = _scrml_effect_seq;
+        _scrml_write_fx(name, dirtied, true);
+        const __born1_def = _scrml_effect_seq;
         if (_scrml_subscribers[name]) {
           const __t_sub = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
           for (const fn of _scrml_subscribers[name]) {
@@ -839,10 +873,7 @@ function _scrml_reactive_set(name, value) {
             __SCRML_PERF.notify_value_indexed.count++;
           }
         }
-        if (typeof _scrml_trigger === "function") _scrml_trigger(_scrml_state, name);
-        if (dirtied && dirtied.length > 0 && typeof _scrml_trigger === "function") {
-          for (const derived of dirtied) _scrml_trigger(_scrml_state, derived);
-        }
+        _scrml_write_fx(name, dirtied, false, __born0_def, __born1_def);
       }
     } finally {
       _scrml_reactivity_bypass[name] = false;
@@ -862,6 +893,11 @@ function _scrml_reactive_set(name, value) {
   // §6.6.3 Phase 2: eagerly propagate dirty flags to all downstream derived nodes
   // before subscribers fire and before this call returns. Synchronous, no re-evaluation.
   const dirtied = _scrml_propagate_dirty(name);
+  // S462 round 7 (R7-1) / round 8 — the write's render-gate effects first (see
+  // '_scrml_write_fx'); effects born during that pass are then skipped.
+  const __born0 = _scrml_effect_seq;
+  _scrml_write_fx(name, dirtied, true);
+  const __born1 = _scrml_effect_seq;
   if (_scrml_subscribers[name]) {
     const __t_sub = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
     for (const fn of _scrml_subscribers[name]) {
@@ -885,15 +921,10 @@ function _scrml_reactive_set(name, value) {
       __SCRML_PERF.notify_value_indexed.count++;
     }
   }
-  // Bridge with _scrml_effect auto-tracking: fire effects tracking _scrml_state[name]
-  if (typeof _scrml_trigger === "function") _scrml_trigger(_scrml_state, name);
-  // Also trigger effects for derived nodes that were dirtied — they need to
-  // re-evaluate and update any DOM bindings that read them.
-  if (dirtied && dirtied.length > 0 && typeof _scrml_trigger === "function") {
-    for (const derived of dirtied) {
-      _scrml_trigger(_scrml_state, derived);
-    }
-  }
+  // Bridge with _scrml_effect auto-tracking: fire the rest of the write's effects (those
+  // tracking _scrml_state[name], then those of the derived nodes it dirtied, which
+  // re-evaluate and update any DOM bindings that read them).
+  _scrml_write_fx(name, dirtied, false, __born0, __born1);
   if (__SCRML_PERF) {
     __SCRML_PERF.reactive_set.ms += __SCRML_PERF_NOW() - __t_set_top;
     __SCRML_PERF.reactive_set.count++;
@@ -4547,20 +4578,29 @@ function _scrml_trigger(target, prop) {
   if (!propMap) return;
   const effects = propMap.get(prop);
   if (!effects) return;
+  // S462 round 7 (R7-1) — RENDER-GATE effects (an 'if=' / 'else-if=' / 'else' controller,
+  // an '<each>' reconcile, a per-row 'if=' swap; created with 'gate' = true) run BEFORE
+  // every other effect a write triggers, whatever the subscription order, and
+  // '_scrml_reactive_set' runs them before the cell's subscribers ('when … changes'):
+  // the conventional render-before-user-effect order. So user code triggered by the write
+  // that ends a gate's condition never sees the gated subtree still mounted (§42.3.5).
+  // (A cell write goes through '_scrml_write_fx'; this is a nested-property write.)
+  // One snapshot of the set, gates first.
+  const ordered = [...effects].sort((x, y) => (y._scrml_gate === true) - (x._scrml_gate === true));
   // Copy to avoid mutation during iteration.
   // Each effect is wrapped in try/catch so that a throwing effect (e.g. a
   // derived expression that evaluates null.property) does not halt the
   // trigger loop or propagate up to the reactive-set caller — Bug K.
   if (__SCRML_PERF) {
     const __t_eff = __SCRML_PERF_NOW();
-    for (const effect of [...effects]) {
+    for (const effect of ordered) {
       try { effect(); } catch(e) { console.error("scrml effect error:", e); }
     }
     __SCRML_PERF.effect_scheduling.ms += __SCRML_PERF_NOW() - __t_eff;
     __SCRML_PERF.effect_scheduling.count++;
     return;
   }
-  for (const effect of [...effects]) {
+  for (const effect of ordered) {
     try { effect(); } catch(e) { console.error("scrml effect error:", e); }
   }
 }
@@ -4699,7 +4739,7 @@ function _scrml_region_track(el, dispose) {
  * @param {function} fn — the effect function
  * @returns {function} dispose — call to stop the effect and clean up subscriptions
  */
-function _scrml_effect(fn) {
+function _scrml_effect(fn, gate) {
   let disposed = false;
   let cleanupEntries = []; // Array of { target, prop } for subscriber removal
 
@@ -4750,6 +4790,10 @@ function _scrml_effect(fn) {
     }
   }
 
+  // S462 round 7 — a render-gate effect runs first on a write (see '_scrml_trigger').
+  if (gate === true) effectFn._scrml_gate = true;
+  effectFn._scrml_born = ++_scrml_effect_seq;
+
   // Initial run
   effectFn();
 
@@ -4773,7 +4817,7 @@ function _scrml_effect(fn) {
  * Use for effects that always read the same reactive properties (e.g. list reconcile).
  * DO NOT use for effects with conditional deps.
  */
-function _scrml_effect_static(fn) {
+function _scrml_effect_static(fn, gate) {
   let disposed = false;
   let cleanupEntries = [];
   let hasRun = false;
@@ -4809,6 +4853,10 @@ function _scrml_effect_static(fn) {
     }
     hasRun = true;
   }
+
+  // S462 round 7 — a render-gate effect runs first on a write (see '_scrml_trigger').
+  if (gate === true) effectFn._scrml_gate = true;
+  effectFn._scrml_born = ++_scrml_effect_seq;
 
   effectFn();
 

@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
@@ -514,6 +514,70 @@ function _asyncAwaitBodyOpts(opts: any): {
 // ---------------------------------------------------------------------------
 
 /**
+ * g-impl1-markup-if-branch-memo-stale-render-s462 — the condition collector for
+ * a markup `${ if … }` lift group.
+ *
+ * emit-reactive-wiring renders such a group as two effects: one that evaluates
+ * the chain's conditions and picks an arm, and one that renders the picked arm
+ * (see `emitLiftGroup`). It needs each arm's condition exactly as the if
+ * emitter lowers it, and the chain's code with every condition replaced by an
+ * arm-index test. Rather than re-implement the lowering, it activates a
+ * collector around the ordinary emission of the group's one `if-stmt`: when the
+ * emitter reaches a node the collector targets, it records the lowered
+ * condition and brackets it in the emitted text with two comment markers unique
+ * to the collector. The caller then derives both texts from the one emission —
+ * markers stripped (byte-identical to the uncollected emission) and markers +
+ * condition replaced by the arm test — so nothing is emitted twice.
+ *
+ * Only the chain is targeted, by node identity: the root `if-stmt`, then each
+ * `else if` (an `else` whose body is exactly one `if-stmt`). An `if` nested in
+ * an arm body is a different node and is emitted unchanged.
+ */
+export interface IfChainCollector {
+  /** Unique id; the markers are `/*scrml-arm-<id>-<i>*\/`. */
+  id: string;
+  /** The node whose condition is collected next; null once the chain ends. */
+  target: any;
+  /** Lowered condition of arm i, in chain order. */
+  conds: string[];
+  /** True when the chain ends in a plain `else` (an arm with no condition). */
+  hasElse: boolean;
+}
+
+const _ifChainCollectors: IfChainCollector[] = [];
+
+export function pushIfChainCollector(c: IfChainCollector): void { _ifChainCollectors.push(c); }
+export function popIfChainCollector(): void { _ifChainCollectors.pop(); }
+
+/** The opening marker of arm `i` of collector `c`. */
+export function ifChainArmOpen(c: IfChainCollector, i: number): string { return `/*scrml-arm-${c.id}-${i}*/`; }
+/** The closing marker of arm `i` of collector `c`. */
+export function ifChainArmClose(c: IfChainCollector, i: number): string { return `/*scrml-arm-end-${c.id}-${i}*/`; }
+
+/**
+ * Called by an if emitter with the node it is emitting and its lowered
+ * condition. Returns the text to place between `if (` and `)`: the condition
+ * itself, or — when the innermost collector targets this node — the condition
+ * bracketed by that collector's markers. Advances the collector to the node's
+ * `else if`, or records a plain `else`.
+ */
+export function collectIfChainCond(node: any, cond: string): string {
+  const c = _ifChainCollectors.length > 0 ? _ifChainCollectors[_ifChainCollectors.length - 1] : null;
+  if (!c || c.target !== node) return cond;
+  const i = c.conds.length;
+  c.conds.push(cond);
+  const alt = node.alternate;
+  const altList: any[] = alt == null ? [] : (Array.isArray(alt) ? alt : [alt]);
+  if (altList.length === 1 && altList[0] && altList[0].kind === "if-stmt") {
+    c.target = altList[0];
+  } else {
+    c.target = null;
+    c.hasElse = altList.length > 0;
+  }
+  return `${ifChainArmOpen(c, i)}${cond}${ifChainArmClose(c, i)}`;
+}
+
+/**
  * Emit an if statement.
  */
 export function emitIfStmt(node: any, opts: IfOpts = {}): string {
@@ -542,7 +606,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     // S454 — an expression-position `?{}` / `!{}` in the condition lowers with these options.
     logicOpts: opts };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
-  lines.push(`if (${_ifCond}) {`);
+  lines.push(`if (${collectIfChainCond(node, _ifCond)}) {`);
 
   const consequent: any[] = node.consequent ?? node.body ?? [];
 
@@ -916,7 +980,7 @@ function _emitForStmtInner(
     // absence is null; runtime stores may yield either).
     lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
     lines.push(`}`);
-    lines.push(`${renderFn}();`);
+    lines.push(liftInitialRenderCall(renderFn, rewrittenIterable));
     lines.push(`_scrml_effect_static(${renderFn});`);
     return lines.join("\n");
   }

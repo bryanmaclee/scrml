@@ -27,3 +27,4 @@ Gates (ALL incl. CI-only): pre-commit · conformance · browser tier as ci.yml �
 2026-10-10T13:42:50-06:00 merged origin/main bbe74c1df (#1390,#1392): only generated sections conflicted (gap-counts, FACTS) — regenerated; master-list from main; prototype stdlib 0.
 2026-10-10T14:05:27-06:00 merged origin/main 801419299 (#1394): dropped own duplicate erase mechanism for #1394's; kv.js shim re-exports S462 fns; parity+import-004 tests green; new gap g-type-only-submodule-import-fires-client-chunk-missing-s462; prototype stdlib 0.
 2026-10-10T16:01:02-06:00 merged origin/main 62c72e19d (#1395): known-gaps — both appended ## sections kept (ours, then §S462-stmt-match-leave), gap counts + FACTS regenerated, master-list from main; prototype stdlib 0.
+2026-10-10T19:25:17-06:00 merged origin/main 6e58dd9eb (#1396,#1397): generated-only conflicts, regenerated; master-list from main; prototype stdlib 0.

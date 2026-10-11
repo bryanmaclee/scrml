@@ -1,0 +1,19 @@
+{
+  "id": "control-flow-markup-if-presence-arm-reads-rerender-pos",
+  "description": "`${ if (@user is given) { lift <p id=name>${@user.name}</p> } }` over a reactive `T | not` cell renders while the cell is present and re-renders when the present value changes (click #rename: \"ada\" → \"bob\"). Pre-fix (impl#1) #name stayed \"ada\": the group's effect returned early while the condition's truthiness was unchanged, skipping the arm's read of `@user.name`.",
+  "language-version": "1.0",
+  "spec": "§7.4.2",
+  "rationale": "§7.4.2: \"When `expr` references one or more reactive cells (`@x` access), the interpolation site SHALL re-render whenever any referenced cell changes — the standard reactive subscription contract\". §17.1: \"`if=` is sugar over `${ if(expr) { lift <element>...</element> } }`.\" Gap: g-impl1-markup-if-branch-memo-stale-render-s462.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [
+      { "click": "#rename" }
+    ],
+    "state": { "user": { "name": "bob" } },
+    "domAnchored": [
+      { "selector": "#name", "text": "bob" },
+      { "selector": "#name", "count": 1 }
+    ]
+  }
+}

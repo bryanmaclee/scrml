@@ -1,0 +1,15 @@
+<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "a" }
+<out> = ""
+${
+    function show() {
+        if (@user is given) {
+            const xs = ["x"].map((w) => w + @user.name)
+            @out = xs.join(",")
+        }
+    }
+}
+<button id="b" onclick=show()>go</button>
+<p id="o">${@out}</p>
+</program>

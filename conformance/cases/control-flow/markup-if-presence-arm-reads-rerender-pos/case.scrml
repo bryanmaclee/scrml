@@ -1,0 +1,11 @@
+// §7.4.2 / §42.2.2a (S462) — the canonical presence guard in markup,
+// `${ if (@user is given) { … } }`, re-renders a read of the tested cell while
+// the cell stays present (g-impl1-markup-if-branch-memo-stale-render-s462). The
+// soft-deprecated spelling of the same guard is pinned by
+// condition/given-presence-deprecated-markup.
+<user>: { name: string } | not = { name: "ada" }
+
+<main>
+    <button id="rename" onclick={ @user = { name: "bob" } }>rename</button>
+    <div id="who">${ if (@user is given) { lift <p id="name">${@user.name}</p> } }</div>
+</main>

@@ -392,7 +392,9 @@ describe("§8: lift-path <#id> request refs route + reactive (items 3+4)", () =>
     const result = compile(liftBareIfFx);
     expect(result.errors).toEqual([]);
     const js = clientJs(result, liftBareIfFx);
-    expect(js).toMatch(/if \(_scrml_request_feed\.loading\)/);
+    // S462 (g-impl1-markup-if-branch-memo-stale-render-s462): a `${ if … }` lift
+    // group evaluates its condition in the group's arm selector, not in an `if (…)`.
+    expect(js).toMatch(/function _scrml_lift_arm_of_\d+\(\) \{ return \(_scrml_request_feed\.loading\) \? 0 : -1; \}/);
     expect(js).not.toMatch(/_scrml_input_state_registry\.get\("feed"\)/);
   });
 
