@@ -198,7 +198,8 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
   // mount slot because it receives the node directly from emit-html's walk)
   // — the dispatcher + render fns were silently never emitted. Match
   // block-form Phase 5 integration gap; see docs/changes/match-block-form-scoping/.
-  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST);
+  // Top level: not inside an each (every reader tests `typeof === "string"`).
+  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST, null);
   return found;
 }
 

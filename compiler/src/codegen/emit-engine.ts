@@ -925,13 +925,18 @@ function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null 
   return null;
 }
 
-/** A message-arm body's statement list (block body: braces stripped). */
-function parseMessageArmBody(arm: MessageArmEntryShape): any[] | null {
+/** A message-arm body's source text (block body: surrounding braces stripped). */
+function messageArmInnerSource(arm: MessageArmEntryShape): string {
   let inner = (arm.bodyRaw || "").trim();
   if (arm.isBlockBody && inner.startsWith("{") && inner.endsWith("}")) {
     inner = inner.slice(1, -1).trim();
   }
-  return parseEngineSynthLogicBody(inner, "__msg_arm__.scrml");
+  return inner;
+}
+
+/** A message-arm body's statement list. */
+function parseMessageArmBody(arm: MessageArmEntryShape): any[] | null {
+  return parseEngineSynthLogicBody(messageArmInnerSource(arm), "__msg_arm__.scrml");
 }
 
 /** The opener `effect=` body's statement list. */
@@ -1039,7 +1044,7 @@ function emitMessageArmBodyFn(
     // Defensive: re-parse failed. Fall back to the single-expression rewrite of
     // the whole (bare) body as the target — a malformed multi-statement body
     // surfaces a loud downstream JS parse error rather than silently dropping.
-    bodyLines.push(`return ${rewriteHookExprText(inner)};`);
+    bodyLines.push(`return ${rewriteHookExprText(messageArmInnerSource(arm))};`);
   }
 
   const indented = bodyLines.map((l) => `    ${l}`).join("\n");
