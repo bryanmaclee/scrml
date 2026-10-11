@@ -63,7 +63,10 @@
  *          a component use (its definition may interpolate a call) are refused — "guard body
  *          evaluates a call or a component at render time …". An interpolation must be cell /
  *          field / index reads, literals and operators. Handler attributes (`onclick=…`) are not
- *          checked: a handler does not run at render time.
+ *          checked: a handler does not run at render time. "Handler" is the compiler's own reading,
+ *          isExecutableEventHandlerAttrName (attr-injection-sink.ts): `one=` / `online=` /
+ *          `onboarding=` are plain attributes and ARE checked.
+ *      A rewrite whose own compile reports an error (incl. the emitted-JS parse gate) is refused.
  *      ACCEPTED DIFFERENCES of a rewritten markup guard — the rewrite follows §7.4.2 ("the
  *      interpolation site SHALL re-render whenever any referenced cell changes") as #1397
  *      implements it, updating each markup binding in place where the guard re-creates its body:
@@ -90,6 +93,7 @@ import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { captureTrailingContentWarnings, parseExprToNode } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
+import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { compileScrml } from "../api.js";
 import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
 import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
@@ -654,7 +658,10 @@ function matchBrace(text, open) {
   return -1;
 }
 
-const isHandlerAttr = (name) => typeof name === "string" && /^on[a-z]/i.test(name);
+// The COMPILER's own reading of "an event-handler attribute" (attr-injection-sink.ts) — one reader,
+// not a local regex (S462 delta review #3, repros h1/h3: `one=` / `online=` are NOT handlers; they
+// are plain attributes rendered at render time, NON_EVENT_ON_WORDS).
+const isHandlerAttr = (name) => isExecutableEventHandlerAttrName(name);
 
 /**
  * Check the raw text of an html-fragment (impl#1 keeps the tags of a guard body as text). Returns
@@ -710,7 +717,13 @@ function fragmentIsPure(text, filePath, holes = []) {
       while (j < n && /\s/.test(text[j])) j++;
       if (j >= n) return false;
       if (text[j] === ">") { j++; break; }
-      if (text[j] === "/" && text[j + 1] === ">") { j += 2; break; }
+      // A self-closing end — `/>`, or `/ >` as impl#1 re-spaces fragment text (`<input value=@m/>`).
+      if (text[j] === "/") {
+        let k = j + 1;
+        while (k < n && /\s/.test(text[k])) k++;
+        if (text[k] === ">") { j = k + 1; break; }
+        return false;
+      }
       const am = /^[^\s=>\/]+/.exec(text.slice(j));
       if (!am) return false;
       const name = am[0];
@@ -754,7 +767,7 @@ function fragmentIsPure(text, filePath, holes = []) {
           const d = text[k];
           if (d === "(") depth++;
           else if (d === ")") depth--;
-          else if (depth === 0 && (/\s/.test(d) || d === ">" || (d === "/" && text[k + 1] === ">"))) break;
+          else if (depth === 0 && (/\s/.test(d) || d === ">" || (d === "/" && /^\/\s*>/.test(text.slice(k, k + 8))))) break;
           k++;
         }
         if (depth !== 0) return false;
@@ -955,6 +968,9 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
     }
     if (a.errs.length > 0) return doesNotCompileReason(a.errs);
     if (after === null) return null; // originalCompileRefusal: the original compiles
+    // The rewrite must compile too — including the emitted-JS parse gate, which `codes` does not
+    // carry on a `write: false` compile (S462 delta review #3).
+    if (b.errs.length > 0) return `the rewrite does not compile (impl#1 reports ${b.errs.join(", ")} after the rewrite)`;
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
     if (a.outputs === b.outputs) return null;

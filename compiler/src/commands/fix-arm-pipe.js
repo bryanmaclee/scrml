@@ -446,6 +446,8 @@ function verifyByCompile(filePath, before, after, auxSources) {
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
     if (a.errs.length > 0) return doesNotCompileReason(a.errs);
+    // The rewrite must compile too (incl. the emitted-JS parse gate `codes` does not carry here).
+    if (b.errs.length > 0) return `the rewrite does not compile (impl#1 reports ${b.errs.join(", ")} after the rewrite)`;
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
     if (a.outputs !== b.outputs) return "impl#1 emits different artifacts after the rewrite";

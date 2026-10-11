@@ -119,3 +119,14 @@
   - snippet-gate: 128/0. corpus-compile-floor: PASS.
   - all-rules corpus dry-run on the merged head: identical to the pre-merge round-2 run
     (3298 applied, 1010 blockers).
+
+## S239 delta re-review #3 (FIX on 27b2e9443)
+- Two readers disagreed: the rule's local `/^on[a-z]/i` treated `one=` / `online=` as handlers (h1, h3:
+  #hits 7 → 3). The rule now calls the compiler's isExecutableEventHandlerAttrName
+  (attr-injection-sink.ts, NON_EVENT_ON_WORDS). h1/h3 refused; h2 (`onward=`) still rewritten.
+- Self-closing void elements (`<input value=@m/>`, `<input oninput=track(@n)/>`) are read: the fragment
+  scanner accepts `/>` and impl#1's re-spaced `/ >` (cheap text fix; attributes are still read from the
+  fragment text, which is what impl#1 keeps for a guard body's top-level tags).
+- The verify now refuses a rewrite whose own compile reports an error (b.errs, incl. the emitted-JS
+  gate) — given-presence, is-some, arm-pipe. No natural corpus case triggers it; not separately tested.
+- All-rules corpus dry-run: identical to round 2 (3298 applied / 1010 blockers).

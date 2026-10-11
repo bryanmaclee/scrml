@@ -328,6 +328,10 @@ function track(v) { @hits = @hits.concat([v]); return v }
       "t6 (an attribute interpolation inside html-fragment text)": ["", `\${ given @user :> { <p class="who" title="\${track(@n)}">\${@m}</p> } }`],
       "t2 (a component whose definition interpolates a call)": [`\${ const Cnt = <div class="cnt" props={ v: int }>\${track(v)}</div> }\n`, `\${ given @user :> { <div><Cnt v=@n/><span>\${@m}</span></div> } }`],
       "a non-handler attribute value that calls": ["", `\${ given @user :> { lift <p class="who" data-x=track(@n)>\${@m}</p> } }`],
+      // S462 delta review #3: `one` / `online` begin with `on` but are NOT handlers (the compiler's
+      // isExecutableEventHandlerAttrName — NON_EVENT_ON_WORDS); they render at render time.
+      "h1 (`one=\"${track(@n)}\"` is not a handler)": ["", `\${ given @user :> { <p class="who" one="\${track(@n)}">\${@m}</p> } }`],
+      "h3 (`online=\"x${track(@n)}\"` is not a handler)": ["", `\${ given @user :> { <p class="who" online="x\${track(@n)}">\${@m}</p> } }`],
     };
     for (const [label, [decl, guard]] of Object.entries(shapes)) {
       test(label, () => {
@@ -343,6 +347,20 @@ function track(v) { @hits = @hits.concat([v]); return v }
       const guard = `\${ given @user :> { <p class="who"><button onclick=track(@n)>a</button><button onclick=\${track(@n)}>b</button>\${@m}</p> } }`;
       const src = PRE + "\n" + POST.replace("GUARD", guard);
       const r = fixGivenPresence(src, { filePath: join(TMP, "c/call-handlers.scrml") });
+      expect(r.blockers).toEqual([]);
+      expect(r.applied.length).toBe(1);
+    });
+
+    test("h2 — `onward=${track(@n)}` IS a handler (the compiler's predicate), so it is rewritten", () => {
+      const guard = `\${ given @user :> { <p class="who" onward=\${track(@n)}>\${@m}</p> } }`;
+      const r = fixGivenPresence(PRE + "\n" + POST.replace("GUARD", guard), { filePath: join(TMP, "c/call-h2.scrml") });
+      expect(r.blockers).toEqual([]);
+      expect(r.applied.length).toBe(1);
+    });
+
+    test("self-closing void elements are read (`<input value=@m/>`, `<input oninput=track(@n)/>`)", () => {
+      const guard = `\${ given @user :> { <div><input value=@m/><input oninput=track(@n)/><span>\${@m}</span></div> } }`;
+      const r = fixGivenPresence(PRE + "\n" + POST.replace("GUARD", guard), { filePath: join(TMP, "c/call-void.scrml") });
       expect(r.blockers).toEqual([]);
       expect(r.applied.length).toBe(1);
     });
