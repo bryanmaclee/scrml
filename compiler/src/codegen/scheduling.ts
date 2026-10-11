@@ -7,7 +7,7 @@ import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { isServerOnlyNode } from "./collect.ts";
-import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { resolveModulePath, isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
 
 /** A loosely-typed AST node from the pipeline. */
@@ -36,18 +36,31 @@ interface DepGraph {
  *   - a host-JS global (Math, fetch, etc.),
  *   - a higher-order parameter (not statically resolvable per §13.2.1).
  */
-export type CalleeImportMap = Map<string, string>;
+export type CalleeImportMap = Map<string, string> & {
+  /**
+   * S462 P0 — LOCAL binding name → the name the source module EXPORTS
+   * (`import { verifyPassword as vp }` → `vp` ↦ `verifyPassword`). Stdlib facts
+   * are keyed by the export name; read it through `importedNameOf` /
+   * `isPromiseReturningImportedCallee` (module-resolver.js), never by the alias.
+   */
+  importedNames?: Map<string, string>;
+};
 
 /**
  * Build a per-file `name → sourceModuleAbsPath` map from the importing
  * FileAST's imports array. Each named-import specifier produces one entry
  * keyed by the LOCAL binding name (after `as` rename) so call-site lookups
- * use the symbol actually visible at the use-site.
+ * use the symbol actually visible at the use-site. The map also carries
+ * `importedNames` (local → exported name): a stdlib fact about the callee is
+ * looked up by the EXPORTED name (S462 P0 — an `as`-alias of `verifyPassword`
+ * was looked up as `vp`, found nothing, and was left un-awaited).
  *
  * Exported for unit testing.
  */
 export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
   const out: CalleeImportMap = new Map();
+  const importedNames = new Map<string, string>();
+  out.importedNames = importedNames;
   if (!fileAST) return out;
   // Cleanup 8 (S239) — the `.imports` normalization folded in here (was hand-rolled
   // at 5 call sites): the TABResult wrapper hoists imports to `.ast.imports`, so
@@ -68,11 +81,17 @@ export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): Calle
     if (Array.isArray(node.specifiers) && node.specifiers.length > 0) {
       for (const s of node.specifiers) {
         const local = typeof s.local === "string" ? s.local : (typeof s.imported === "string" ? s.imported : null);
-        if (local) out.set(local, absSource);
+        if (local) {
+          out.set(local, absSource);
+          importedNames.set(local, typeof s.imported === "string" && s.imported.length > 0 ? s.imported : local);
+        }
       }
     } else if (Array.isArray(node.names)) {
       for (const n of node.names) {
-        if (typeof n === "string" && n.length > 0) out.set(n, absSource);
+        if (typeof n === "string" && n.length > 0) {
+          out.set(n, absSource);
+          importedNames.set(n, n);
+        }
       }
     }
   }
@@ -150,8 +169,7 @@ export function hasServerCallees(
     for (const callee of callees) {
       if (serverFnNames.has(callee)) return true;
       if (hasStdlibClassifier) {
-        const sourceModule = calleeMap!.get(callee);
-        if (sourceModule && isPromiseReturningStdlibFn(callee, sourceModule, exportRegistry!)) {
+        if (isPromiseReturningImportedCallee(callee, calleeMap!, exportRegistry!)) {
           return true;
         }
       }
@@ -318,9 +336,7 @@ export function isPromiseReturningCallExpr(
   if (callees.length === 0) return false;
 
   for (const callee of callees) {
-    const sourceModule = calleeMap.get(callee);
-    if (!sourceModule) continue;
-    if (isPromiseReturningStdlibFn(callee, sourceModule, exportRegistry)) {
+    if (isPromiseReturningImportedCallee(callee, calleeMap, exportRegistry)) {
       return true;
     }
   }
@@ -1079,8 +1095,8 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     if (route.boundary === "server" && route.functionName) _candidateNames.add(route.functionName as string);
   }
   if (calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0) {
-    for (const [localName, sourceModule] of calleeMap) {
-      if (isPromiseReturningStdlibFn(localName, sourceModule, exportRegistry)) _candidateNames.add(localName);
+    for (const localName of calleeMap.keys()) {
+      if (isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry)) _candidateNames.add(localName);
     }
   }
   const _isPromiseCallee: (name: string) => boolean = (n) => _candidateNames.has(n);

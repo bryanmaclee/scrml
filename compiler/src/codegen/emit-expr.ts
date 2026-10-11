@@ -59,7 +59,7 @@ import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
 // builtins (no codegen), so this is cycle-free.
-import { isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -2104,9 +2104,7 @@ export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean
   const calleeMap = ctx.asyncCalleeMap ?? _serverAsyncClassifier?.calleeMap ?? null;
   const registry = ctx.asyncExportRegistry ?? _serverAsyncClassifier?.exportRegistry ?? null;
   if (!calleeMap || !registry) return false;
-  const sourceModule = calleeMap.get(name);
-  if (!sourceModule) return false;
-  return isPromiseReturningStdlibFn(name, sourceModule, registry);
+  return isPromiseReturningImportedCallee(name, calleeMap, registry);
 }
 
 /**

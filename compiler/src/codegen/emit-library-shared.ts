@@ -17,7 +17,7 @@ import { emitFnShortcutBody } from "./emit-logic.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
-import { isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
@@ -200,8 +200,7 @@ export function computeAsyncFnNames(
   const callsStdlibPromise = (callees: Set<string>): boolean => {
     if (!hasStdlibClassifier) return false;
     for (const callee of callees) {
-      const src = calleeMap!.get(callee);
-      if (src && isPromiseReturningStdlibFn(callee, src, exportRegistry!)) return true;
+      if (isPromiseReturningImportedCallee(callee, calleeMap!, exportRegistry!)) return true;
     }
     return false;
   };
@@ -273,8 +272,7 @@ export function computeNestedAsyncFnHolders(
   const isAsyncCallee = (name: string): boolean => {
     if (ownAsyncFnNames.has(name)) return true;
     if (hasStdlibClassifier) {
-      const src = calleeMap!.get(name);
-      if (src && isPromiseReturningStdlibFn(name, src, exportRegistry!)) return true;
+      if (isPromiseReturningImportedCallee(name, calleeMap!, exportRegistry!)) return true;
     }
     return false;
   };
@@ -422,8 +420,7 @@ export function stdlibAsyncPredicate(
 ): ((name: string) => boolean) | null {
   if (!calleeMap || !exportRegistry || exportRegistry.size === 0) return null;
   return (name: string): boolean => {
-    const src = calleeMap.get(name);
-    return !!src && isPromiseReturningStdlibFn(name, src, exportRegistry);
+    return isPromiseReturningImportedCallee(name, calleeMap, exportRegistry);
   };
 }
 
@@ -746,8 +743,7 @@ export function collectAliasedAsyncCalls(
   const isAsyncName = (name: string): boolean => {
     if (asyncFnNames.has(name)) return true;
     if (hasStdlibClassifier) {
-      const src = calleeMap!.get(name);
-      if (src && isPromiseReturningStdlibFn(name, src, exportRegistry!)) return true;
+      if (isPromiseReturningImportedCallee(name, calleeMap!, exportRegistry!)) return true;
     }
     return false;
   };
@@ -901,8 +897,7 @@ export function collectNonAwaitableAsyncCalls(
     serverFnNames: serverFnNames ?? null,
     isStdlibAsync: hasStdlibClassifier
       ? (name: string): boolean => {
-          const src = calleeMap!.get(name);
-          return !!src && isPromiseReturningStdlibFn(name, src, exportRegistry!);
+          return isPromiseReturningImportedCallee(name, calleeMap!, exportRegistry!);
         }
       : null,
   };
