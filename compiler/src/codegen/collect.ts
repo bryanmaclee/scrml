@@ -1,4 +1,5 @@
-import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { handledSqlGuardInner, patternCQueryOfInit } from "./sql-attempt.ts";
+import type { ExprNode } from "../types/ast.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { liveSqlInterpolationExprs, sqlHasLiveInterpolation } from "./sql-lex.ts";
 import { tokenizeSQL } from "../tokenizer.ts";
@@ -1026,37 +1027,31 @@ export type ServerVarLoadKind = "sql-load" | "param-bearing" | "none";
  * load: the `/__serverLoad/<var>` route evaluates the WHOLE initializer
  * server-side and serves its value (the tail applies to the query's value —
  * §8.3 / §44.3 make it ordinary code over `Row | not` / `Row[]`). Returns the
- * SQL bodies of the queries the initializer evaluates, in source order, or null
- * when the declaration carries a structured `sqlNode` or its initializer holds
- * no query.
+ * SQL body of that query (a one-element list), or null when the declaration
+ * carries a structured `sqlNode`, or its initializer is not the Pattern C shape
+ * (S465 round 2: the query leftmost, the tail closed — `patternCQueryOfInit`).
  */
 export function serverVarDeclExprQueries(decl: Node): string[] | null {
   const d = decl as any;
   if (d.sqlNode && d.sqlNode.kind === "sql") return null;
   const init = d.initExpr;
   if (!init || typeof init !== "object") return null;
-  const raws: string[] = [];
-  const seen = new Set<unknown>();
-  const visit = (v: unknown): void => {
-    if (!v || typeof v !== "object" || seen.has(v)) return;
-    seen.add(v);
-    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
-    const o = v as Record<string, unknown>;
-    if (o.kind === "sql-ref" && typeof o.raw === "string" && o.raw.startsWith("?{")) { raws.push(o.raw); return; }
-    for (const [k, x] of Object.entries(o)) if (k !== "span") visit(x);
-  };
-  visit(init);
-  if (raws.length === 0) return null;
-  return raws.map((raw) => {
-    const toks = tokenizeSQL(raw.slice(2, -1), 0, 1, 1);
-    return toks[0] && toks[0].kind === "SQL_RAW" ? toks[0].text : "";
-  });
+  // S465 (s462 fix round 2) — ONLY the shape §52.6.5 names: the query is the
+  // initializer's leftmost operand and the tail is closed over a server-safe set
+  // (sql-attempt.ts `patternCQueryOfInit`). `wrap(?{…}.get())`, a tail reading a
+  // `@cell` / `@currentUser` / a file-scope function, or a second query is not a
+  // Pattern C load — it keeps the callable-loader path it had before (the route
+  // would run code whose names exist only on the client: a ReferenceError).
+  const head = patternCQueryOfInit(init as ExprNode);
+  if (!head) return null;
+  const toks = tokenizeSQL(head.shape.raw.slice(2, -1), 0, 1, 1);
+  return [toks[0] && toks[0].kind === "SQL_RAW" ? toks[0].text : ""];
 }
 
 /**
  * The SQL text a §52.6.5 Pattern C `<x server>` declaration's mount load runs —
- * the structured `sqlNode`'s query, or (S465) every query its initializer
- * expression evaluates, one per line — or null when the declaration is not a
+ * the structured `sqlNode`'s query, or (S465) the leftmost query of a
+ * closed-tail initializer expression — or null when the declaration is not a
  * Pattern C load. The ONE reader the load classification
  * (`serverVarDeclLoadKind`), the row-scope predicate and the W-AUTH-004 check
  * share, so the bare and the tailed form classify identically.

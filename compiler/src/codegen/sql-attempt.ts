@@ -24,6 +24,7 @@
  */
 
 import type { ExprNode } from "../types/ast.ts";
+import { guardCallArmsRaw } from "../expression-parser.ts";
 
 /** The runtime helper's name. Its presence in an emitted module triggers injection. */
 export const SQL_ATTEMPT_FN = "_scrml_sql_attempt";
@@ -165,6 +166,138 @@ export function replaceSqlQueryHead(node: ExprNode, query: ExprNode, replacement
     case "unary": return { ...n, argument: replaceSqlQueryHead(n.argument, query, replacement) };
     default: return node;
   }
+}
+
+/** The `sql-ref` at the bottom of a query node (`?{…}` under its SQL chain). */
+function sqlRefOfQuery(query: ExprNode): ExprNode {
+  let cur: ExprNode = query;
+  while (cur.kind === "call" && cur.callee && cur.callee.kind === "member") cur = cur.callee.object;
+  return cur;
+}
+
+/**
+ * S465 (s462 fix round 2) — every `?{}` query (`sql-ref`) that evaluating `node`
+ * runs, in source order: not one inside a nested function (a lambda / an
+ * escape-hatch function — its own body, run when it is called) and not one in
+ * the operand of a nested expression-position `!{}` (that handler covers it).
+ */
+export function sqlRefsOfExpr(node: ExprNode | null | undefined): ExprNode[] {
+  const out: ExprNode[] = [];
+  const seen = new Set<unknown>();
+  const visit = (v: unknown): void => {
+    if (!v || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+    const o = v as Record<string, unknown>;
+    if (o.kind === "sql-ref") {
+      if (typeof o.raw === "string" && o.raw.startsWith("?{")) out.push(o as unknown as ExprNode);
+      return;
+    }
+    if (o.kind === "lambda" || o.kind === "escape-hatch") return;
+    if (o.kind === "call" && guardCallArmsRaw(o as unknown as ExprNode) !== null) return;
+    for (const [k, x] of Object.entries(o)) if (k !== "span") visit(x);
+  };
+  visit(node);
+  return out;
+}
+
+/**
+ * §19.8.3 item 1 (S465, s462 fix round 2) — the queries a `!{}` handler on
+ * `operand` does NOT cover. §19.8.3: "A `!{}` handler on the query — written
+ * after the terminator (`.get()`, `.all()`, `.run()`)" handles THAT query; a
+ * handler covers the one query that is its operand or its operand's leftmost
+ * operand (`sqlQueryHeadOfExpr` — the tail runs on the success value). Any other
+ * query the operand evaluates — one that is not leftmost (`"x" + ?{…}.get().name`,
+ * `wrap(?{…}.get())`) or a second one (`?{A}.get().name + ?{B}.get().name`,
+ * `?{A}.get() ?? ?{B}.get()`) — is not handled by it. Empty when the handler
+ * covers every query (or the operand holds none).
+ */
+export function sqlQueriesNotCoveredByHandler(operand: ExprNode | null | undefined): ExprNode[] {
+  const refs = sqlRefsOfExpr(operand);
+  if (refs.length === 0) return refs;
+  const head = sqlQueryHeadOfExpr(operand);
+  const headRef = head ? sqlRefOfQuery(head.query) : null;
+  return refs.filter((r) => r !== headRef);
+}
+
+/**
+ * The global names a §52.6.5 Pattern C tail may read: the pure, server-defined
+ * built-in namespaces and value names. Everything else a tail names must be
+ * bound inside the tail (an arrow parameter).
+ */
+const PATTERN_C_SERVER_SAFE_GLOBALS: ReadonlySet<string> = new Set([
+  "Math", "JSON", "Object", "Array", "Number", "String", "Boolean",
+  "undefined", "NaN", "Infinity",
+]);
+
+/**
+ * §52.6.5 Pattern C (S465, s462 fix round 2) — the query a `<x server>`
+ * initializer EXPRESSION loads as the cell's mount load, or null when the
+ * initializer is not that shape. SPEC §52.6.5: "When the RHS of a `<var server>`
+ * declaration is an inline `?{}` query, that `?{}` IS the cell's mount load. The
+ * compiler emits a `/__serverLoad/<var>` route that runs the query
+ * server-side". The route runs the whole initializer server-side, where only the
+ * server scope exists; so the initializer qualifies only when
+ *   - the query is its LEFTMOST operand (`?{…}.get().name`, `?{…}.all().length`,
+ *     `?{…}.all().map(u => u.name)`) — the RHS starts as the query; and
+ *   - its tail is CLOSED over a known-server-safe set: literals, the parameters
+ *     of arrow functions written in the tail (plain names — a destructured or
+ *     defaulted parameter is not accepted), property names, and the pure built-in
+ *     namespaces above. It reads no `@cell` (a client cell, `@currentUser` —
+ *     classified here from the tree, never from text), no other query, no
+ *     file-scope name (a client or server function, a `const`), and it does not
+ *     assign, construct, or run a statement body.
+ * Every other initializer that holds a query is NOT Pattern C: it stays on the
+ * path it took before (the callable loader) — `wrap(?{…}.get())`,
+ * `?{…}.all().filter(u => u.id == @sel)`, `?{…}.all().map(u => fmt(u))`.
+ */
+export function patternCQueryOfInit(init: ExprNode | null | undefined): SqlQueryHead | null {
+  const head = sqlQueryHeadOfExpr(init);
+  if (!head) return null;
+  const headRef = sqlRefOfQuery(head.query);
+  const isPlainName = (s: unknown): boolean => typeof s === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s);
+  const closed = (n: unknown, bound: ReadonlySet<string>): boolean => {
+    if (!n || typeof n !== "object") return false;
+    const e = n as Record<string, any>;
+    switch (e.kind) {
+      case "sql-ref": return n === headRef;
+      case "lit": return true;
+      case "ident": {
+        const name = String(e.name ?? "");
+        if (name.startsWith("@")) return false;
+        return bound.has(name) || PATTERN_C_SERVER_SAFE_GLOBALS.has(name);
+      }
+      case "member": return closed(e.object, bound);
+      case "index": return closed(e.object, bound) && closed(e.index, bound);
+      case "call":
+        return closed(e.callee, bound) && (e.args as unknown[]).every((a) => closed(a, bound));
+      case "binary": return closed(e.left, bound) && closed(e.right, bound);
+      case "unary":
+        if (e.op === "++" || e.op === "--" || e.op === "delete" || e.op === "await") return false;
+        return closed(e.argument, bound);
+      case "ternary": return closed(e.condition, bound) && closed(e.consequent, bound) && closed(e.alternate, bound);
+      case "cast": return closed(e.expression, bound);
+      case "spread": return closed(e.argument, bound);
+      case "array": return (e.elements as unknown[]).every((x) => x === null || closed(x, bound));
+      case "object":
+        return (e.props as Array<Record<string, any>>).every((p) => {
+          if (p.kind === "shorthand") return bound.has(p.name) || PATTERN_C_SERVER_SAFE_GLOBALS.has(p.name);
+          if (p.kind === "spread") return closed(p.argument, bound);
+          return (!p.computed || closed(p.key, bound)) && closed(p.value, bound);
+        });
+      case "lambda": {
+        if (e.isAsync || !e.body || e.body.kind !== "expr") return false;
+        const inner = new Set(bound);
+        for (const p of e.params as Array<Record<string, any>>) {
+          if (!isPlainName(p.name) || p.boundNames || p.defaultValue) return false;
+          inner.add(p.name);
+        }
+        return closed(e.body.value, inner);
+      }
+      default: return false;
+    }
+  };
+  return closed(init, new Set()) ? head : null;
 }
 
 /**

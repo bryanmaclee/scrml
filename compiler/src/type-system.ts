@@ -78,7 +78,7 @@ import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprN
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
-import { sqlQueryExprShape, sqlQueryHeadOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, sqlQueriesNotCoveredByHandler, sqlRefsOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -13761,6 +13761,16 @@ function annotateNodes(
         if (!errorTypeName && guardedNode && _guardedNodeHandlesSql(guardedNode)) {
           _checkHandlerExhaustive("SqlError", SQL_ERROR_EXHAUSTIVE_VARIANTS, errorArms.map((a) => String(a.pattern ?? "")), n.span as Span);
         }
+        // §19.8.3 item 1 (S465, s462 fix round 2) — the handler covers the query it
+        // is ON: the guarded operand itself or its leftmost operand. A query the
+        // operand evaluates elsewhere (not leftmost, or a second one) is not
+        // handled by it — refused, never compiled clean and unhandled.
+        if (!errorTypeName && guardedNode) {
+          const _g = guardedNode as Record<string, unknown>;
+          if (!(_g.sqlNode && typeof _g.sqlNode === "object") && _g.kind !== "sql") {
+            _checkHandlerCoversQueries((_g.initExpr ?? _g.exprNode) as ExprNode | undefined, n.span as Span);
+          }
+        }
 
         // S28 — scope-check each arm's handler body with arm.binding pushed
         // as a local. Pre-S28 handler bodies bypassed the scope walker entirely
@@ -16717,6 +16727,34 @@ function annotateNodes(
     ));
   }
 
+  /**
+   * §19.8.3 (S465, s462 fix round 2) — E-ERROR-002 for each `?{}` a `!{}`
+   * handler's operand evaluates but the handler does not cover. §19.8.3: "an
+   * unhandled `?{}` SHALL be a compile error, **E-ERROR-002**", and item 1 — "A
+   * `!{}` handler on the query — written after the terminator (`.get()`,
+   * `.all()`, `.run()`)" — handles THAT query: the operand itself, or its
+   * leftmost operand (the tail runs on the success value). A query that is not
+   * leftmost (`"x" + ?{…}.get().name !{…}`) or a second query
+   * (`?{A}.get().name + ?{B}.get().name !{…}`, `?{A}.get() ?? ?{B}.get() !{…}`)
+   * would otherwise run with no handler: its driver failure escaped the
+   * handler the source wrote (an unhandled throw), compiled clean.
+   */
+  function _checkHandlerCoversQueries(operand: ExprNode | null | undefined, span: Span): void {
+    const uncovered = sqlQueriesNotCoveredByHandler(operand);
+    if (uncovered.length === 0) return;
+    const raw = String((uncovered[0] as { raw?: string }).raw ?? "?{…}");
+    const shown = raw.length > 60 ? raw.slice(0, 57) + "…}" : raw;
+    errors.push(new TSError(
+      "E-ERROR-002",
+      `E-ERROR-002: The \`?{}\` query \`${shown}\`${uncovered.length > 1 ? ` (and ${uncovered.length - 1} more)` : ""} is not handled. ` +
+      `A \`!{}\` handler handles the ONE query it is written on — the query that starts the handled expression ` +
+      `(\`?{…}.get().name !{…}\`), §19.8.3 — and this query is ${sqlRefsOfExpr(operand).length > 1 ? "one of several in the handled expression" : "not the expression's leftmost operand"}. ` +
+      `Handle each query at its own site — bind it first (\`const row = ?{…}.get() !{ … }\`) and compute from the binding — ` +
+      `or move the queries into a \`!\` function (§19.8.3).`,
+      span,
+    ));
+  }
+
   /** The error enum's variant names for a handled operand, or null when unknown. */
   function _operandErrorVariants(operand: ExprNode): { typeName: string; variants: readonly string[] } | null {
     // S465 — also a query that is the operand's leftmost operand (`?{…}.get().name !{…}`).
@@ -16749,6 +16787,12 @@ function annotateNodes(
         const arms = known ? parseGuardArmsFromRaw(raw, filePath) : null;
         if (known && arms) {
           _checkHandlerExhaustive(known.typeName, known.variants, arms.map((a) => String(a.pattern ?? "")), (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
+        }
+        // S465 (s462 fix round 2) — unless the operand is a call to a `!` function
+        // (the handler's subject is that call), every query it evaluates must be
+        // the one the handler is on (§19.8.3 item 1).
+        if (!known || known.typeName === "SqlError") {
+          _checkHandlerCoversQueries(operand, (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
         }
       }
       // A `match` on a `?{}` query (§19.8.3 form 2): `::Ok` plus every SqlError

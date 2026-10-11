@@ -387,12 +387,14 @@ ${body}
     noQueryOnClient(a);
     expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": JSON.stringify("ada") });
   }, TIMEOUT);
-  test("ONE cell where the query is not the leftmost operand (`\"x\" + ?{…}.get().name`)", async () => {
-    const a = await serveApp(program(`  <c server> = "x" + ?{\`SELECT * FROM users WHERE id = 1\`}.get().name
+  // S465 fix round 2 — a query that is NOT the leftmost operand is not §52.6.5
+  // Pattern C (see the round-2 block below); one such cell fails closed (E-CG-006),
+  // as it did before round 1.
+  test("ONE cell where the query is not the leftmost operand (`\"x\" + ?{…}.get().name`) is refused", () => {
+    const { result } = compileApp(program(`  <c server> = "x" + ?{\`SELECT * FROM users WHERE id = 1\`}.get().name
   <p>\${@c}</p>`));
-    noQueryOnClient(a);
-    expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": JSON.stringify("xada") });
-  }, TIMEOUT);
+    expect((result.errors ?? []).map((e) => e.code)).toContain("E-CG-006");
+  });
   test("ONE cell in a `${}` inside `<db>`", async () => {
     const a = await serveApp(program(`  <db src="./app.db" tables="users">
   \${
@@ -573,4 +575,203 @@ describe("S465 fix round 1 — a `!{}` handler on a tailed `?{}` handles the QUE
 `, ["f"]);
     expect((compileApp(src).result.errors ?? []).map((e) => e.code)).toContain("E-TYPE-080");
   });
+});
+
+describe("S465 fix round 2 — §52.6.5 Pattern C is ONLY a leftmost query with a closed tail", () => {
+  // SPEC §52.6.5: "When the RHS of a `<var server>` declaration is an inline `?{}`
+  // query, that `?{}` IS the cell's mount load. The compiler emits a
+  // `/__serverLoad/<var>` route that runs the query server-side". Round 1 treated
+  // ANY `?{}` anywhere in the initializer as that load and ran the WHOLE
+  // initializer in the route and the SSR compose, where client-scope names do not
+  // exist: `wrap(?{…}.get())`, a tail reading `@sel` / `@first` / `@currentUser`, a
+  // tail calling a file-scope function → ReferenceError, page down. Now: Pattern C
+  // only when the query is the leftmost operand AND the tail reads nothing outside
+  // literals / its own arrow params / pure built-ins; every other shape keeps the
+  // path it had before round 1 (≥2 callable cells → `/__mountHydrate`; ONE →
+  // fail-closed E-CG-006).
+  const loadBodies = async (a) => {
+    const bodies = {};
+    for (const route of a.mod.routes) {
+      if (!/__mountHydrate|__serverLoad/.test(route.path)) continue;
+      const res = await route.handler(new Request(`http://localhost${route.path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+        body: "{}",
+      }));
+      bodies[route.path] = await res.text();
+    }
+    return bodies;
+  };
+  const ssrSeed = async (a) => {
+    const res = await a.mod.fetch(new Request("http://localhost/app"));
+    const html = await res.text();
+    const m = html.match(/__scrml_ssr_state">([^<]*)</);
+    return { status: res.status, seed: m ? JSON.parse(m[1]) : null };
+  };
+  const program = (body, attrs = `auth="none" db="./app.db"`) => `<program ${attrs}>
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT, owner INTEGER)\`}
+  </schema>
+${body}
+</program>
+`;
+  const codesOf = (src) => (compileApp(src).result.errors ?? []).map((e) => e.code);
+
+  // Each probe shape that round 1 compiled clean into a route that threw.
+  const REFUSED = [
+    ["pc-notleft-srv: ONE cell `wrap(?{…}.get())`, wrap a server function", `  \${
+    server function wrap(r) { return r ? r.name : "none" }
+  }
+  <nm server> = wrap(?{\`SELECT name, pw FROM users WHERE id = 1\`}.get())
+  <p>\${@nm}</p>`],
+    ["pc-notleft: ONE cell `wrap(?{…}.get())`, wrap a client function", `  \${
+    function wrap(r) { return r ? r.name : "none" }
+  }
+  <nm server> = wrap(?{\`SELECT name, pw FROM users WHERE id = 1\`}.get())
+  <p>\${@nm}</p>`],
+    ["pc-clientcell: a tail reading a client cell (`.filter(u => u.id == @sel)`)", `  <sel> = 2
+  <picked server> = ?{\`SELECT id, name FROM users\`}.all().filter(u => u.id == @sel).map(u => u.name)
+  <p>\${@picked}</p>`],
+    ["pc-two-cell: the same next to a closed-tail cell", `  <sel> = 2
+  <picked server> = ?{\`SELECT id, name FROM users\`}.all().filter(u => u.id == @sel).map(u => u.name)
+  <cnt server> = ?{\`SELECT id FROM users\`}.all().length
+  <p>\${@picked} \${@cnt}</p>`],
+    ["pc-cell2cell: a tail reading another server cell", `  <first server> = ?{\`SELECT id FROM users WHERE id = 1\`}.get()
+  <others server> = ?{\`SELECT id, name FROM users\`}.all().filter(u => u.id != @first.id).length
+  <p>\${@others}</p>`],
+    ["pc-fncall: a tail calling a file-scope function (`.map(u => fmt(u))`)", `  \${
+    function fmt(u) { return u.name.toUpperCase() }
+  }
+  <names server> = ?{\`SELECT id, name FROM users\`}.all().map(u => fmt(u))
+  <p>\${@names}</p>`],
+    ["pc-const: a tail reading a file-scope const", `  \${
+    const LIMIT = 1
+  }
+  <top server> = ?{\`SELECT id, name FROM users\`}.all().slice(0, LIMIT)
+  <p>\${@top.length}</p>`],
+    ["pp-destr: a destructured arrow parameter in the tail", `  <c server> = ?{\`SELECT * FROM users\`}.all().map(({ pw }) => pw)
+  <p>\${@c}</p>`],
+  ];
+  for (const [name, body] of REFUSED) {
+    test(`${name} — not Pattern C; ONE such cell fails closed (E-CG-006), never a route that throws`, () => {
+      expect(codesOf(program(body))).toContain("E-CG-006");
+    });
+  }
+  for (const auth of ["none", "optional", "required"]) {
+    test(`pc-cu-${auth}: a tail reading @currentUser (auth="${auth}") is classified from the tree — refused`, () => {
+      const src = `<program db="sqlite:./app.db"${auth === "none" ? "" : ` auth="${auth}"`}>
+<db src="sqlite:./app.db" tables="users">
+  \${
+    <mine server> = ?{\`SELECT id, name, owner FROM users\`}.all().filter(u => u.owner == @currentUser.id)
+  }
+  <main><ul><each in=@mine key=@.id><li : @.name></each></ul></main>
+</db>
+</program>
+`;
+      expect(codesOf(src)).toContain("E-CG-006");
+    });
+  }
+
+  test("pc-two-wrap: TWO `wrap(?{…}.get())` cells load through /__mountHydrate (the pre-round-1 path) — route AND SSR serve the value", async () => {
+    const a = await serveApp(program(`  \${
+    server function wrap(r) { return r ? r.name : "none" }
+  }
+  <nm server> = wrap(?{\`SELECT name, pw FROM users WHERE id = 1\`}.get())
+  <nm2 server> = wrap(?{\`SELECT name, pw FROM users WHERE id = 2\`}.get())
+  <p>\${@nm} \${@nm2}</p>`));
+    expect(a.mod.routes.some((r) => /__serverLoad\/nm/.test(r.path))).toBe(false);
+    const bodies = await loadBodies(a);
+    expect(bodies).toEqual({ "/__mountHydrate": JSON.stringify({ nm: "ada", nm2: "bob" }) });
+    const { status, seed } = await ssrSeed(a);
+    expect(status).toBe(200);
+    expect(seed).toEqual({ nm: "ada", nm2: "bob" });
+    expect(a.clientJs.includes("SELECT")).toBe(false);
+  }, TIMEOUT);
+
+  test("pc-two-plainfn: TWO `label(?{…}.get())` cells keep the pre-round-1 /__mountHydrate shape (no /__serverLoad route)", () => {
+    // The coalesced loader's own handling of a CLIENT function is a pre-existing,
+    // SQL-independent defect (g-mounthydrate-client-scope-loader-s465); this pins
+    // only that round 2 restored the base shape rather than a Pattern C route.
+    const { outDir, result } = compileApp(program(`  \${
+    function label(r) { return r ? r.name : "none" }
+  }
+  <a server> = label(?{\`SELECT name FROM users WHERE id = 1\`}.get())
+  <b server> = label(?{\`SELECT name FROM users WHERE id = 2\`}.get())
+  <p>\${@a} \${@b}</p>`));
+    expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+    const serverJs = readFileSync(join(outDir, "app.server.js"), "utf8");
+    expect(serverJs.includes("/__mountHydrate")).toBe(true);
+    expect(serverJs.includes("/__serverLoad/a")).toBe(false);
+    expect(serverJs.includes("/__serverLoad/b")).toBe(false);
+  });
+
+  // Controls: a closed tail stays Pattern C, route AND SSR.
+  for (const [name, init, value] of [
+    ["arrow param + built-in member", "?{`SELECT id, name FROM users ORDER BY id`}.all().map(u => u.name.toUpperCase())", ["ADA", "BOB"]],
+    ["filter with a literal + length", "?{`SELECT id, name FROM users`}.all().filter(u => u.id > 1).length", 1],
+    ["pure built-in namespace", "?{`SELECT id, name FROM users ORDER BY id`}.all().map(u => JSON.stringify(u.name))", ["\"ada\"", "\"bob\""]],
+  ]) {
+    test(`closed tail (${name}) is Pattern C — /__serverLoad and the SSR seed serve the value`, async () => {
+      const a = await serveApp(program(`  <c server> = ${init}
+  <p>\${@c}</p>`));
+      expect(await loadBodies(a)).toEqual({ "/__serverLoad/c": JSON.stringify(value) });
+      const { status, seed } = await ssrSeed(a);
+      expect(status).toBe(200);
+      expect(seed).toEqual({ c: value });
+    }, TIMEOUT);
+  }
+});
+
+describe("S465 fix round 2 — a `!{}` handler covers ONLY the query it is on (§19.8.3 item 1)", () => {
+  // §19.8.3: "an unhandled `?{}` SHALL be a compile error, E-ERROR-002"; item 1:
+  // "A `!{}` handler on the query — written after the terminator". Round 1 made a
+  // handler cover the LEFTMOST query of its operand; a query elsewhere in the
+  // operand compiled clean and its driver failure escaped the handler.
+  const FAIL = "AND abs(-9223372036854775808) > 0";
+  const FULL = `!{
+          .QueryFailed(e) :> { return "qf" }
+          .ConstraintViolation(e) :> { return "cv" }
+          .ConnectionLost(e) :> { return "cl" }
+          .BatchPrepareFailed(e) :> { return "bp" }
+        }`;
+  const Q = (extra = "") => `?{\`SELECT name, pw FROM users WHERE id = \${id} ${extra}\`}`;
+  for (const [name, expr] of [
+    ["h-notleft: `\"x\" + ?{…}.get().name`", `"x" + ${Q(FAIL)}.get().name`],
+    ["h-nested2: `?{OK}.get().name + ?{FAIL}.get().name`", `${Q()}.get().name + ${Q(FAIL)}.get().name`],
+    ["h-nested1: `?{FAIL}.get().name + ?{OK}.get().name`", `${Q(FAIL)}.get().name + ${Q()}.get().name`],
+    ["h-nullish-q: `?{NOROW}.get() ?? ?{FAIL}.get()`", `${Q("+ 100")}.get() ?? ${Q(FAIL)}.get()`],
+  ]) {
+    test(`${name} with an exhaustive handler is E-ERROR-002 (the uncovered query)`, () => {
+      const src = app(`tables="users"`, `
+      function f(id) {
+        const n = ${expr} ${FULL}
+        return n
+      }
+`, ["f"]);
+      const errs = compileApp(src).result.errors ?? [];
+      const e = errs.find((x) => x.code === "E-ERROR-002");
+      expect(e).toBeTruthy();
+      expect(e.message).toContain("§19.8.3");
+    });
+  }
+  test("h-notleft-partial: the uncovered query is E-ERROR-002 even when the arms are partial", () => {
+    const src = app(`tables="users"`, `
+      function f(id) {
+        const n = "x" + ${Q(FAIL)}.get().name !{
+          .QueryFailed(e) :> { return "qf" }
+        }
+        return n
+      }
+`, ["f"]);
+    expect((compileApp(src).result.errors ?? []).map((e) => e.code)).toContain("E-ERROR-002");
+  });
+  test("control: the single leftmost query with a tail is still handled (round 1) — the failure reaches the arm", async () => {
+    const a = await serveApp(app(`tables="users"`, `
+      function f(id) {
+        const n = ${Q(FAIL)}.get().name ${FULL}
+        return n
+      }
+`, ["f"]));
+    expect(await a.post("f", { id: 1 })).toEqual({ status: 200, body: JSON.stringify("qf") });
+  }, TIMEOUT);
 });
