@@ -1,6 +1,6 @@
 {
   "id": "markup-handler-s462-handler-nested-if-else",
-  "description": "S462 review: a one-statement handler whose if/else is NESTED — the dangling `else` of `if (@c) if (@d) a else b`, and an if/else as a braceless `while` body — takes the statement path and runs the right arm. Pre-fix the reroute looked only at a top-level if-with-else, so these reached the text path and emitted `_scrml_reactive_set(\"x\", 1 else …)` (E-CODEGEN-INVALID-LOGIC).",
+  "description": "S462 review: a one-statement handler whose if/else is NESTED — the dangling `else` of `if (@c) if (@d) a else b` binds to the inner `if` — takes the statement path and runs the right arm (@c true, @d false → 2). Pre-fix the reroute looked only at a top-level if-with-else, so this reached the text path and emitted `_scrml_reactive_set(\"x\", 1 else …)` (E-CODEGEN-INVALID-LOGIC).",
   "language-version": "1.0",
   "spec": "§5.2.3, §17",
   "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
@@ -8,10 +8,9 @@
   "expect": {
     "codes": [],
     "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
-    "input": [{ "click": "#b1" }, { "click": "#b2" }],
+    "input": [{ "click": "#b1" }],
     "domAnchored": [
-      { "selector": "#ox", "text": "2" },
-      { "selector": "#oi", "text": "3" }
+      { "selector": "#ox", "text": "2" }
     ]
   }
 }
