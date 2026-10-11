@@ -1,0 +1,29 @@
+{
+  "id": "control-flow-s462-braceless-else-if-chain-dangling",
+  "description": "A one-line braceless `else if` chain keeps every arm and its structure, and a dangling `else` binds to the NEAREST `if` (S462). Pre-fix the chain's middle `if` became an unconditional sibling and the final `else` vanished, and `if (a) if (b) x else y` lost `y`.",
+  "language-version": "1.0",
+  "spec": "§17, §50.2.1",
+  "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
+  "rationale": "§17.6.1 standard if-statement semantics: an `else` belongs to the nearest unmatched `if`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "r": "onetwomany/aba"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "onetwomany/aba"
+      }
+    ]
+  }
+}

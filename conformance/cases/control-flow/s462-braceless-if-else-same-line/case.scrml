@@ -1,0 +1,14 @@
+<r> = ""
+${
+    function pick(c) {
+        const a = []
+        if (c) a.push("yes") else a.push("no")
+        return a.join(",")
+    }
+    function go() {
+        if (@r == "") @r = pick(false) else @r = "ran-twice"
+        @r = @r + "|" + pick(true)
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@r}</p>
