@@ -1,0 +1,8 @@
+<program>
+<rows> = ["r1"]
+<ul>
+  <each in=@rows as=r>
+    <li><pre class="a"><img src=x onerror="window.pwned=6"></pre><pre class="b"><code>&lt;i&gt; a < b</code></pre></li>
+  </each>
+</ul>
+</program>

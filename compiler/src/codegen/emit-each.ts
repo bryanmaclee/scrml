@@ -45,7 +45,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering, refuseElementLowering } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -64,6 +64,7 @@ import {
   resolveImportedMarkupLocalNames,
 } from "../markup-return-scan.js";
 import { nsId } from "./chunk-namespace.ts";
+import { rawContentDomLines, isRawContentElement } from "../raw-content-encode.ts";
 
 // ---------------------------------------------------------------------------
 // Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
@@ -1309,8 +1310,12 @@ function renderTemplateChildToJs(
     // `_scrml_each_item.id` and corrupt the §4.17 verbatim literal into the
     // nonsense `${_scrml_each_item.id}` (GITI-030). Top-level `<code>` already
     // ships the body verbatim; this keeps the per-item path parity-correct.
+    // §4.17 (S462 Q21) — and as DISPLAY TEXT: `<` / `>` encoded, parsed through an inert
+    // <template> so the author's entities (`&lt;b&gt;`) still display as the characters
+    // they name and a balanced bare nested <code>/<pre> stays an element. (A text node
+    // would show `&lt;b&gt;` literally and the nested wrapper as text.)
     if (parentIsRawContent) {
-      lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(txt)}));`);
+      for (const l of rawContentDomLines(txt, fragmentVar, `_scrml_raw_${nextLocalId()}`, indent)) lines.push(l);
       return;
     }
     // GITI-033 — a lifted-markup TEXT child can carry `${...}` interpolations
@@ -1379,8 +1384,10 @@ function renderTemplateChildToJs(
     }
 
     const elVar = `_scrml_el_${nextLocalId()}`;
-    // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built.
-    if (refuseElementLowering(tagName, child as { span?: unknown })) {
+    // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built, nor a
+    // raw-content body holding their start-tag text (pre-Q21 this path asked only the
+    // element rule, so such a body in an `<each>` re-parsed at codegen was a silent accept).
+    if (refuseElementLowering(tagName, child as { span?: unknown }) || refuseRawContentLowering(child as any)) {
       lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createComment(""));`);
       return;
     }
@@ -1535,7 +1542,7 @@ function renderTemplateChildToJs(
       // a single text run and no further markup descent), so descendants of a
       // non-raw element correctly recurse with the flag cleared.
       const childIsRawContent =
-        RAW_CONTENT_ELEMENT_NAMES.has(tagName.toLowerCase());
+        RAW_CONTENT_ELEMENT_NAMES.has(tagName.toLowerCase()) && isRawContentElement(child);
       const innerFragVar = `_scrml_frag_${nextLocalId()}`;
       lines.push(`${indent}const ${innerFragVar} = _scrml_g.document.createDocumentFragment();`);
       for (const grand of (child as any).children) {

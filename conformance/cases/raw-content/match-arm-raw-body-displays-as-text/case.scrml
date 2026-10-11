@@ -1,0 +1,8 @@
+<program>
+${ type K:enum = { A, B } }
+<k> = K.A
+<match for=K on=@k>
+  <A><pre id="m"><img src=x onerror="window.pwned=7"></pre></>
+  <B><p>b</p></>
+</match>
+</program>
