@@ -45,3 +45,48 @@
   --check in a base tree: same single new name) → environmental; facts (regenerated, +2 test files);
   spec-index, host-global-scan, s34-census --check-new --base 1c1e9eee5, state, conflict-marker, types-gate,
   snippet-gate 128/128, corpus-compile-floor, bootstrap-conformance, severity, delta-lint: PASS.
+
+## Fix round 1 (S239 review of f8309fd6)
+
+- 2026-10-11 r1: worktree reset to f8309fd6; brief archived as BRIEF-fix-round-1.md. Governing text, SPEC §13.2
+  (SPEC.md:10284): "An **async-colored function** is one the compiler emits `async`: a server function, a
+  Promise-returning standard-library function, or any function that (transitively) calls one. … It MAY be called
+  directly (the compiler awaits the call), and it MAY be passed as the first argument of an awaited collection
+  method (`.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`, `.flatMap` — the
+  compiler lowers the call to a combinator that awaits every invocation)."
+- 2026-10-11 r1: REPRODUCED all four findings on f8309fd6 (reviewer probes c3/c5/c7/c9/c10/c11).
+- 2026-10-11 r1 F1+F2 root: where structure is lost — the AST builder keeps a literal / alternation / §18.19 product
+  arm with a `{ … }` body as RAW TEXT (no `match-arm-block` form for `"a" :> {`, `1 | 2 :> {`, `(a, b) :> {`), and
+  every inline arm's result is a string (`_matchArmInlineToMatchArm` drops `resultExpr`). Four match routes
+  (stmt inline, decl inline A/B, value IIFE C/D, multi-scrutinee stmt/decl/IIFE) then re-lowered that text via
+  `rewriteBlockBody` / `rewriteServerExpr` (`emitExprField(null, text)`), which never ask the await classifier.
+  `!{}` handler arms (`emitArmBody`) lowered in a hard-coded CLIENT ctx (`_makeExprCtx({})`, `rewriteBlockBody`).
+  Fix (NEW codegen/arm-structure.ts): on the SERVER the arm text is parsed with the compiler's own parsers
+  (`armBodyStatementsFromText` → statements; `parseExprToNode`, refusing escape hatches / lost trailing content)
+  and emitted through the normal emitters: `structureServerArm` turns a raw block arm into `structuredBody` in
+  every arm collector (so it takes the existing structured route); `emitArmValue` emits arm values from the tree;
+  the value-IIFE and decl block-arm raw paths share the structured-route bodies (`structuredIifeArmInner`,
+  `_emitStructuredArmToVar`, factored out unchanged); the decl route's structured tail now uses `stmt.exprNode`;
+  `emitArmBody` lowers server handler arms from the tree in the guarded expression's own server ctx. Client
+  emission of arm text is unchanged (client mode returns null from both parsers).
+- Other server raw-text positions checked: block-bodied arrow in a server fn (g-server-block-arrow-body-raw-tokens-
+  bypass-trap-s462) — fails CLOSED (E-ASYNC-STDLIB-IN-SYNC-CALLBACK, probe c12, imported + stdlib); `when … changes` /
+  worker `when message` bodies (`rewriteBlockBody` server mode) are SYNC wrappers (no await legal) — unchanged;
+  `if`-as-expression arms already structured (probe: correct on base).
+- 2026-10-11 r1 F3: the CPS continuation now lowers with the async facts of an ASYNC client fn body
+  (`_cpsAsyncOpts`: clientAsyncBody + peer-await set + stdlib classifier + server-fn names + the fail-closed sink;
+  the client async-set computation moved above Step 2 unchanged). Found while doing it: the facts were dropped one
+  hop into every control-flow CONDITION ctx (if / while / do-while / for ×3) and nested body — so
+  `if ([p].some(x => check(x, h)))` was a truthy Promise in ORDINARY async client fns too (pre-existing; executed
+  probe c7b) and the structural backstop (which assumes the combinator lowering) stayed silent. NEW
+  `hostAsyncFacts(opts)` travels wherever `clientAsyncBody` was forwarded and into each condition ctx.
+- 2026-10-11 r1 F4: `asyncStdlibSyncCallbackError` takes an optional `userModule`; emit-server passes the importing
+  file-relative module of a callee that is async because it is a USER `.scrml` export. Code unchanged.
+- Out of scope (recorded): same-file server fn called from another server fn's match arm → `ReferenceError: peer is
+  not defined` (c3 mPeer; pre-existing) — gap filed below.
+- Tests: NEW integration/s465-await-arm-bodies.test.js (66): 15 server shapes × {imported `check`, direct
+  `verifyPassword`} × {wrong → REJECTED, right → WELCOME} executed vs bun:sqlite, a raw-token scan, 4 happy-dom
+  CPS/client combinator cases × 2, the F4 message. On f8309fd6: every wrong-password / false / scan / message test
+  FAILS (32), handlerStmt does not compile there (E-CODEGEN-INVALID-LOGIC `_scrml_result = if ( … )`).
+- Gate (pre-commit full, 32969): 10 fail — dev-db-no-side-file ×5, tenant-floor-project-set ×3 (24/24 alone),
+  promote-safety read-only, headless-serve-bind-host — all on the known env list.

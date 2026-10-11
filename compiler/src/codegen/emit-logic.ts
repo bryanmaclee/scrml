@@ -5,7 +5,8 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, type MatchArm } from "./emit-control-flow.ts";
+import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -826,6 +827,21 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   // reactive assignments (@var = expr) are emitted as _scrml_reactive_set() calls
   // rather than _scrml_reactive_get() on the left side of =.
   // When machineBindings is provided, machine-bound assignments emit transition guards (§51.5).
+  // S465 (SPEC §13.2) — on the SERVER a handler arm body is lowered from its
+  // parsed tree, in the guarded expression's own (server) context, so a call to a
+  // Promise-returning import is awaited by the classifier like anywhere else. The
+  // text lowerings below run in a CLIENT context (`_makeExprCtx({})`,
+  // `rewriteBlockBody`) and never await: `!{ _ :> check(pass, h) }` bound a
+  // pending — always truthy — Promise.
+  if (opts?.boundary === "server") {
+    const stmts = serverArmBlockStatements(handler, "server");
+    if (stmts) return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
+    const node = serverArmExprNode(handler, "server", arm.handlerExpr);
+    if (node) {
+      const code = emitExpr(node, _makeExprCtx(opts)).trim();
+      return code.endsWith(";") ? code : code + ";";
+    }
+  }
   if (handler.startsWith("{") && handler.endsWith("}")) {
     const inner = handler.slice(1, -1).trim();
     if (!inner) return "";
@@ -3426,7 +3442,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         // (still `.length` off a pending Promise, still silent). The five
         // emit-control-flow forwarding sites were the SYMPTOM; this hop is where
         // the flag was actually dropped.
-        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
+        ...hostAsyncFacts(opts),
         // #284 — thread the indirect-peer alias set so an aliased peer call
         // (`if (check(rows))` where `const check = isAllowed`) inside an if
         // condition/body awaits (else an always-truthy Promise → auth bypass).
@@ -3476,7 +3492,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         serverFnNames: opts.serverFnNames,
         // F4 (S239 round 2) ROOT — host-async flag travels with serverFnNames
         // (see the if-stmt dispatch above for the full reasoning).
-        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
+        ...hostAsyncFacts(opts),
         // #284 — indirect-peer alias set (see if-stmt dispatch above).
         serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs,
         syncPeerCalls: opts.syncPeerCalls,
@@ -3511,12 +3527,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -6166,6 +6182,44 @@ export function emitPropagateArm(operand: string, opts: EmitLogicOpts): { lines:
 }
 
 /**
+ * §18.5 — the lines of a STRUCTURED arm body in a local-decl `match` (route A):
+ * its statements against a per-arm declared-name set, with a value tail assigned
+ * to `tildeVar`. Shared by the `structuredBody` arm path and (S465) a server
+ * block arm parsed from text (`_emitBlockArmValueFromString`), so both lower
+ * identically. Each line is indented two spaces.
+ */
+function _emitStructuredArmToVar(_body: any[], tildeVar: string, opts: EmitLogicOpts, bodyOpts: EmitLogicOpts): string[] {
+  const bodyCode: string[] = [];
+  const _tailIdx = _body.length - 1;
+  const armDeclaredNames = new Set<string>(opts.declaredNames ?? []);
+  const armOpts: EmitLogicOpts = { ...bodyOpts, declaredNames: armDeclaredNames };
+  for (let _i = 0; _i < _body.length; _i++) {
+    const stmt = _body[_i];
+    // §18.5 block-arm value: the block's result is its LAST expression. A
+    // bare tail expression (`{ … "green" }`) must ASSIGN to the active
+    // result var — the shared bare-expr handler (under an active
+    // tildeContext) instead minted a FRESH `let _scrml_tilde_N = …`, so the
+    // outer result var stayed null (silent-wrong). `lift`-form value arms
+    // (`{ lift x }`) already assign to the result var via tildeContext and
+    // are left untouched; only the bare-tail-expr case is redirected. A
+    // non-value tail (assignment/decl → §18.5 void) also falls through.
+    const _exprText = stmt && stmt.kind === "bare-expr"
+      ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
+      : "";
+    if (_i === _tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(_exprText)) {
+      const rhs = _awaitMatchArmServerCalls(emitArmValue(_exprText, _makeExprCtx(opts), stmt.exprNode), opts);
+      bodyCode.push(`  ${tildeVar} = ${rhs};`);
+      continue;
+    }
+    const code = emitLogicNode(stmt, armOpts);
+    if (code) {
+      for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
+    }
+  }
+  return bodyCode;
+}
+
+/**
  * §18.5 block-arm value lowering (raw-string arm path). Given a block-body arm
  * result STRING already confirmed a block via `_matchArmResultIsBlockBody`,
  * emit its leading statements followed by an assignment of its tail expression
@@ -6177,6 +6231,14 @@ function _emitBlockArmValueFromString(result: string, tildeVar: string, opts: Em
   const inner = result.trim().slice(1, -1).trim();
   const lines: string[] = [];
   if (!inner) return `  // §18.5 empty block arm — result is void`;
+  // S465 (SPEC §13.2) — a SERVER block arm is lowered from its parsed statements
+  // through the structured arm path (statement emitter → await classifier), not
+  // re-lowered from its token text (`rewriteBlockBody`, which never awaits).
+  const srvStmts = serverArmBlockStatements(result, opts.boundary === "server" ? "server" : "client");
+  if (srvStmts) {
+    const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: { var: tildeVar, mode: "single" } };
+    return _emitStructuredArmToVar(srvStmts, tildeVar, opts, bodyOpts).join("\n");
+  }
   const plan = planBlockArmLift(inner);
   // Each leading segment is emitted through the established block-body statement
   // emitter one at a time (segments are already top-level-`;`-split, so each is
@@ -6225,7 +6287,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       if (_matchArmResultIsBlockBody(t)) {
         return _emitBlockArmValueFromString(t, resultVar, opts).split("\n").map((l) => l.trim()).filter(Boolean);
       }
-      return [`${resultVar} = ${_awaitMatchArmServerCalls(emitExprField(null, t, _makeExprCtx(opts)), opts)};`];
+      return [`${resultVar} = ${_awaitMatchArmServerCalls(emitArmValue(t, _makeExprCtx(opts)), opts)};`];
     });
     return [`let ${resultVar} = null;`, dispatch, `${keyword} ${name} = ${resultVar};`].join("\n");
   }
@@ -6319,6 +6381,13 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     }
   }
 
+  // S465 (SPEC §13.2) — a server arm whose `{ … }` body arrived as text is parsed
+  // to statements so it takes the structured route below (see structureServerArm).
+  {
+    const _mode = opts.boundary === "server" ? "server" : "client";
+    for (let _k = 0; _k < arms.length; _k++) arms[_k] = structureServerArm(arms[_k], _mode);
+  }
+
   // S22 §1a slice 2: normalize tagged-object variants the same way as emitMatchExpr.
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare; the `::Ok` arm is recognized only via the
@@ -6346,7 +6415,6 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     if (arm.structuredBody) {
       const bodyCode: string[] = [];
       const _body = arm.structuredBody as any[];
-      const _tailIdx = _body.length - 1;
       // §18.5 — the arm's block body is a SCOPE, and the statements in it must be
       // emitted against a shared, accumulating declared-name set. The sibling
       // structuredBody path (emit-control-flow.ts:2321) gets this for free because
@@ -6370,31 +6438,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // and is PER-ARM (so a name declared in one arm does not leak into a sibling
       // arm, which would turn that sibling's fresh declaration into an assignment
       // to an unbound name).
-      const armDeclaredNames = new Set<string>(opts.declaredNames ?? []);
-      const armOpts: EmitLogicOpts = { ...bodyOpts, declaredNames: armDeclaredNames };
-      for (let _i = 0; _i < _body.length; _i++) {
-        const stmt = _body[_i];
-        // §18.5 block-arm value: the block's result is its LAST expression. A
-        // bare tail expression (`{ … "green" }`) must ASSIGN to the active
-        // result var — the shared bare-expr handler (under an active
-        // tildeContext) instead minted a FRESH `let _scrml_tilde_N = …`, so the
-        // outer result var stayed null (silent-wrong). `lift`-form value arms
-        // (`{ lift x }`) already assign to the result var via tildeContext and
-        // are left untouched; only the bare-tail-expr case is redirected. A
-        // non-value tail (assignment/decl → §18.5 void) also falls through.
-        const _exprText = stmt && stmt.kind === "bare-expr"
-          ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
-          : "";
-        if (_i === _tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(_exprText)) {
-          const rhs = _awaitMatchArmServerCalls(emitExprField(null, _exprText, _makeExprCtx(opts)), opts);
-          bodyCode.push(`  ${tildeVar} = ${rhs};`);
-          continue;
-        }
-        const code = emitLogicNode(stmt, armOpts);
-        if (code) {
-          for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
-        }
-      }
+      bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
       if (arm.kind === "wildcard") {
         lines.push(`else {`);
       } else if (arm.kind === "not") {
@@ -6459,7 +6503,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // declared position type (`const e: Expr = match …`), never a by-name guess.
       const _armCtx = _makeExprCtx(opts);
       const rhs = _awaitMatchArmServerCalls(
-        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitExprField(null, a.result, _armCtx), opts);
+        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitArmValue(a.result, _armCtx), opts);
       return `  ${tildeVar} = ${rhs};`;
     };
 

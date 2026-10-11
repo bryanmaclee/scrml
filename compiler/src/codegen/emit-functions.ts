@@ -1177,6 +1177,79 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     serverFnBatchStubs.set(name, _batchStubNames);
   }
 
+  // S465 (fix round 1) — the client async facts are computed BEFORE Step 2 so the
+  // CPS wrapper's client continuation (below) lowers with the SAME facts an async
+  // client fn body gets (Step 3): its statements are client code running in an
+  // async function, so a Promise-returning call is awaited by `emitExpr` and a
+  // `.filter` / `.some` callback reaching one takes the async-combinator lowering
+  // (or the fail-closed sync-callback refusal), exactly as in Step 3.
+  const { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames } =
+    computeClientAsyncSets(ctx, fnNodes, _calleeMap, _exportRegistry);
+  // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
+  // auto-await surface owns. `computeAsyncFnNames` returns exactly
+  // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
+  //
+  //   (a) LOCAL client fn names — the GITI-037 same-file fixpoint. Awaited HERE;
+  //       nothing else knows about them.
+  //   (b) a `scrml:` VENDOR async import (`safeCallAsync`, `scrml:http`'s `get`, …).
+  //       OWNED by the stdlib auto-await classifier — `isPromiseReturningStdlibFn`,
+  //       consulted by the statement-level `injectPromiseAwait` (scheduling.ts) and
+  //       the guarded-expr `_autoAwait` (emit-logic.ts). EXCLUDED here: awaiting a
+  //       `safeCallAsync(...) !{}` on both surfaces yields `await await …`.
+  //   (c) a USER `.scrml` module's inferred-async export (`asyncExportNamesOf`
+  //       reached it through a `./lib.scrml` import). Awaited HERE — see below.
+  //
+  // The (b) exclusion predicate is the SAME classifier those surfaces use, so
+  // "owned elsewhere" and "skipped here" cannot drift: they are one predicate.
+  //
+  // (c) IS THE HOLE THIS CLOSES. It was previously lumped with (b) on the claim
+  // that every imported name is covered by the stdlib classifier or the `!{}`
+  // auto-await. Both halves are false for a user `.scrml` export:
+  // `isPromiseReturningCallExpr` classifies server fns + stdlib `isAsync` exports
+  // ONLY (the Q5 `<repo>/stdlib/` carve-out gates `isPromiseReturningStdlibFn`),
+  // and the guarded-expr `_autoAwait` DELEGATES to that same predicate rather than
+  // being an independent surface. So a cross-module `const r = fetchStatus(u)`
+  // emitted BARE and handed back a Promise (`r.status` → `undefined`, SILENT), and
+  // a `fetchStatus(u) !{}` wired its `__scrml_error` arm against a Promise (always
+  // falsy → the recovery arm was dead code). Same-module callers were already
+  // correct via (a), which is why the hole read as closed.
+  const _localFnNames = new Set<string>(
+    _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
+  );
+  // (b) — is this cross-import name already owned by the stdlib auto-await
+  // classifier? Resolves the local binding to its source module and asks the ONE
+  // stdlib-async predicate. A user `.scrml` source fails the `<repo>/stdlib/`
+  // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
+  const _stdlibOwnedImport = (n: string): boolean => {
+    if (!_exportRegistry || _exportRegistry.size === 0) return false;
+    return !!_calleeMap && isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
+  };
+  const _clientPeerAwaitNames = new Set<string>(
+    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
+  );
+  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the markup
+  // interpolation emitter (emit-event-wiring.ts) lowers `<p>${ fetchStatus(@url) }</p>`
+  // on a SEPARATE path that never received this peer-await set, so a cross-module
+  // inferred-async CLIENT import consumed in markup value position emitted bare and
+  // rendered `undefined` (a field read off a Promise). Stash the set on ctx here;
+  // emitFunctions runs before emitEventWiring on the same ctx (emit-client.ts).
+  (ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames = _clientPeerAwaitNames;
+  // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
+  // non-awaitable position (sync callback / param default). Drained after the loop.
+  const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
+  // S465 (fix round 1) — the async facts a CPS continuation lowers with: those of
+  // an ASYNC client fn body (Step 3's `fnOpts` for `_fnIsAsync`), since the wrapper
+  // is always `async`. `emitExpr` then awaits a Promise-returning call itself and
+  // gives a sync-callback position (`[p].filter(p => check(p, h))`) the
+  // async-combinator lowering or records it into the fail-closed sink.
+  const _cpsAsyncOpts: Record<string, unknown> = {
+    clientAsyncBody: true,
+    ...(_clientPeerAwaitNames.size > 0 ? { clientAsyncFnNames: _clientPeerAwaitNames, syncPeerCalls: _clientSyncPeerCalls } : {}),
+    ...(_calleeMap ? { asyncCalleeMap: _calleeMap } : {}),
+    ...(_exportRegistry ? { asyncExportRegistry: _exportRegistry } : {}),
+    ...(_serverFnNames.size > 0 ? { serverFnNames: _serverFnNames } : {}),
+  };
+
   // -------------------------------------------------------------------------
   // Step 2: Generate CPS client wrappers for server functions with cpsSplit
   // -------------------------------------------------------------------------
@@ -1228,6 +1301,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         cpsOptsBase: {
           declaredNames: new Set<string>(),
           insideFunctionBody: true,
+          ..._cpsAsyncOpts,
           // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
           deferAsync: true,
           // Bug 61 / GH #262 — synth-cell keys for expression-position
@@ -1282,6 +1356,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsOpts: any = {
       declaredNames: new Set<string>(),
       insideFunctionBody: true,
+      ..._cpsAsyncOpts,
       // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
       deferAsync: true,
       // Bug 61 / GH #262 — synth-cell keys for expression-position
@@ -1422,60 +1497,6 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       _readOnlyServerFnNames.add(fn.name as string);
     }
   }
-  const { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames } =
-    computeClientAsyncSets(ctx, fnNodes, _calleeMap, _exportRegistry);
-  // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
-  // auto-await surface owns. `computeAsyncFnNames` returns exactly
-  // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
-  //
-  //   (a) LOCAL client fn names — the GITI-037 same-file fixpoint. Awaited HERE;
-  //       nothing else knows about them.
-  //   (b) a `scrml:` VENDOR async import (`safeCallAsync`, `scrml:http`'s `get`, …).
-  //       OWNED by the stdlib auto-await classifier — `isPromiseReturningStdlibFn`,
-  //       consulted by the statement-level `injectPromiseAwait` (scheduling.ts) and
-  //       the guarded-expr `_autoAwait` (emit-logic.ts). EXCLUDED here: awaiting a
-  //       `safeCallAsync(...) !{}` on both surfaces yields `await await …`.
-  //   (c) a USER `.scrml` module's inferred-async export (`asyncExportNamesOf`
-  //       reached it through a `./lib.scrml` import). Awaited HERE — see below.
-  //
-  // The (b) exclusion predicate is the SAME classifier those surfaces use, so
-  // "owned elsewhere" and "skipped here" cannot drift: they are one predicate.
-  //
-  // (c) IS THE HOLE THIS CLOSES. It was previously lumped with (b) on the claim
-  // that every imported name is covered by the stdlib classifier or the `!{}`
-  // auto-await. Both halves are false for a user `.scrml` export:
-  // `isPromiseReturningCallExpr` classifies server fns + stdlib `isAsync` exports
-  // ONLY (the Q5 `<repo>/stdlib/` carve-out gates `isPromiseReturningStdlibFn`),
-  // and the guarded-expr `_autoAwait` DELEGATES to that same predicate rather than
-  // being an independent surface. So a cross-module `const r = fetchStatus(u)`
-  // emitted BARE and handed back a Promise (`r.status` → `undefined`, SILENT), and
-  // a `fetchStatus(u) !{}` wired its `__scrml_error` arm against a Promise (always
-  // falsy → the recovery arm was dead code). Same-module callers were already
-  // correct via (a), which is why the hole read as closed.
-  const _localFnNames = new Set<string>(
-    _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
-  );
-  // (b) — is this cross-import name already owned by the stdlib auto-await
-  // classifier? Resolves the local binding to its source module and asks the ONE
-  // stdlib-async predicate. A user `.scrml` source fails the `<repo>/stdlib/`
-  // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
-  const _stdlibOwnedImport = (n: string): boolean => {
-    if (!_exportRegistry || _exportRegistry.size === 0) return false;
-    return !!_calleeMap && isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
-  };
-  const _clientPeerAwaitNames = new Set<string>(
-    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
-  );
-  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the markup
-  // interpolation emitter (emit-event-wiring.ts) lowers `<p>${ fetchStatus(@url) }</p>`
-  // on a SEPARATE path that never received this peer-await set, so a cross-module
-  // inferred-async CLIENT import consumed in markup value position emitted bare and
-  // rendered `undefined` (a field read off a Promise). Stash the set on ctx here;
-  // emitFunctions runs before emitEventWiring on the same ctx (emit-client.ts).
-  (ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames = _clientPeerAwaitNames;
-  // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
-  // non-awaitable position (sync callback / param default). Drained after the loop.
-  const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
 
   // s441 (S440 F4) — every async-colored fn a client body uses as a VALUE.
   const _clientEscapes: AsyncEscapeSite[] = [];

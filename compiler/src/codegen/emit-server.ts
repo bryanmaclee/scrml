@@ -50,7 +50,7 @@ import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRela
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { isPromiseReturningImportedCallee } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
@@ -4072,8 +4072,20 @@ function generateServerJsImpl(
   // Cleanup 7 (S239) — delegate to the SHARED single-wording builder
   // (emit-library-shared.asyncStdlibSyncCallbackError) so the route-handler,
   // ss1, library, and client paths all emit one identical message.
+  // S465 — a callee that is async because it is an async export of a USER `.scrml`
+  // module (the server map's `asyncImportedLocals`), not a `scrml:` export: the
+  // message names that module (the code stays E-ASYNC-STDLIB-IN-SYNC-CALLBACK).
+  const _userAsyncModuleOf = (name: string): string | null => {
+    if (!_asyncCalleeMap || !_asyncCalleeMap.asyncImportedLocals?.has(name)) return null;
+    if (_asyncExportRegistry && isPromiseReturningStdlibImportedCallee(name, _asyncCalleeMap, _asyncExportRegistry)) return null;
+    const mod = _asyncCalleeMap.get(name) ?? null;
+    if (!mod || !filePath || !mod.startsWith("/")) return mod;
+    const rel = _pathRelative(_pathDirname(filePath), mod);
+    return rel.startsWith(".") ? rel : `./${rel}`;
+  };
   const _diagAsyncStdlibSyncCb = (calleeName: string, span: any, via?: string | null): void => {
-    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null));
+    const _asyncName = via && via !== calleeName ? via : calleeName;
+    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null, _userAsyncModuleOf(_asyncName)));
   };
   // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
   // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's

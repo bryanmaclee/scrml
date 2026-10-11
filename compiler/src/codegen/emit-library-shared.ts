@@ -322,10 +322,20 @@ export function asyncStdlibSyncCallbackError(
   span: unknown,
   filePath?: string | null,
   via?: string | null,
+  userModule?: string | null,
 ): CGError {
   const sp = diagnosticSpan(span, filePath);
   const viaNote = via && via !== calleeName
     ? ` (\`${calleeName}\` is a nested helper that the compiler emits async because it calls \`${via}(…)\`.)`
+    : "";
+  // S465 — the code is shared by every async import (the refusal is the same), but
+  // the callee may be an async export of a USER `.scrml` module rather than a
+  // standard-library function: name that module so the message does not send the
+  // reader looking for a `scrml:` import that is not there.
+  const asyncName = via && via !== calleeName ? via : calleeName;
+  const moduleNote = userModule
+    ? ` (\`${asyncName}\` is an async function exported by the user module \`${userModule}\` — ` +
+      `not a standard-library function; this code covers every async import.)`
     : "";
   return new CGError(
     "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
@@ -340,7 +350,7 @@ export function asyncStdlibSyncCallbackError(
       `function (a \`for\` loop over the collection, or a \`const r = ${calleeName}(…)\` binding) ` +
       `rather than inside the value-consuming callback. (Fire-and-forget scheduler callbacks — ` +
       `\`setTimeout\`/\`setInterval\`/… — DISCARD the return and are handled automatically; this ` +
-      `error is only for positions whose value is actually consumed.)` + viaNote,
+      `error is only for positions whose value is actually consumed.)` + viaNote + moduleNote,
     sp,
     "error",
   );

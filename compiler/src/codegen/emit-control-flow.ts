@@ -7,6 +7,7 @@ import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWi
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
+import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
@@ -467,6 +468,30 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 // ---------------------------------------------------------------------------
 
 /**
+ * S465 (fix round 1) — the client async FACTS that travel WITH the host-async flag
+ * (`clientAsyncBody`): the transitively-async peer set and the stdlib classifier
+ * inputs. The flag alone told `emitExpr` "await is legal here" but not WHICH
+ * callees are async, so one hop into an `if` / `while` / `for` condition or body
+ * a Promise-returning peer import was not recognised: `if ([p].some(x =>
+ * check(x, h)))` tested a pending (truthy) Promise instead of taking the
+ * async-combinator lowering a top-level statement of the same body gets, and the
+ * structural backstop (which assumes that lowering) stayed silent. Spread
+ * wherever the flag is forwarded and into every condition / header ctx. Empty
+ * outside an async client host, so server and sync emission are unchanged.
+ */
+export function hostAsyncFacts(opts: any): {
+  clientAsyncBody?: true; clientAsyncFnNames?: Set<string>; asyncCalleeMap?: any; asyncExportRegistry?: any;
+} {
+  if (!opts || opts.clientAsyncBody !== true) return {};
+  return {
+    clientAsyncBody: true,
+    ...(opts.clientAsyncFnNames ? { clientAsyncFnNames: opts.clientAsyncFnNames } : {}),
+    ...(opts.asyncCalleeMap ? { asyncCalleeMap: opts.asyncCalleeMap } : {}),
+    ...(opts.asyncExportRegistry ? { asyncExportRegistry: opts.asyncExportRegistry } : {}),
+  };
+}
+
+/**
  * Build the async auto-await opts to spread into a control-flow STATEMENT
  * body's `emitLogicBody` call (if/else/for/while/do-while). When the enclosing
  * scheduled function threaded `asyncRouteMap` (the sole gate — asyncFilePath /
@@ -505,7 +530,7 @@ function _asyncAwaitBodyOpts(opts: any): {
     // silent. Safe here because the emitted HOST for an if/for/while body IS the
     // enclosing async function (unlike the match arm, which interposes its own
     // IIFE — see the F1 fix at the match lowering).
-    ...(opts.clientAsyncBody ? { clientAsyncBody: true } : {}),
+    ...hostAsyncFacts(opts),
   };
 }
 
@@ -595,7 +620,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
 
 function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
   const lines: string[] = [];
-  const _ifExprCtx: EmitExprContext = { mode: opts.boundary === "server" ? "server" : "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null, serverFnNames: opts.serverFnNames ?? null, serverFnPeerAliasNames: opts.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts.syncPeerCalls ?? null,
+  const _ifExprCtx: EmitExprContext = { mode: opts.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null, serverFnNames: opts.serverFnNames ?? null, serverFnPeerAliasNames: opts.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts.syncPeerCalls ?? null,
     // ss52 — NON-REACTIVE LOCAL map/set names so a condition `if (s.has(k))` /
     // `if (m.size > 0)` on a pure-fn local lowers.
     localMapVarNames: opts.localMapVarNames ?? null, localSetVarNames: opts.localSetVarNames ?? null, localOrderedMapVarNames: opts.localOrderedMapVarNames ?? null,
@@ -650,7 +675,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     ...(opts.serverFnNames ? { serverFnNames: opts.serverFnNames } : {}),
     // U1 FIX ROUND (F4) — the host-async flag must travel WITH serverFnNames, or
     // U1's gate fails inside the branch body and the await is silently skipped.
-    ...(opts.clientAsyncBody ? { clientAsyncBody: true } : {}),
+    ...hostAsyncFacts(opts),
     // #284 — indirect-peer alias set into the if/else body.
     ...(opts.serverFnPeerAliasNames ? { serverFnPeerAliasNames: opts.serverFnPeerAliasNames } : {}), ...(opts.serverFnPeerDispatchObjs ? { serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs } : {}),
     ...(opts.syncPeerCalls ? { syncPeerCalls: opts.syncPeerCalls } : {}),
@@ -798,14 +823,14 @@ function _emitForStmtInner(
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
-      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
       const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitConditionField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -986,7 +1011,7 @@ function _emitForStmtInner(
   }
 
   // Non-reactive path — plain for loop
-  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
   // s427 round 3 (F1) — a RENDERING loop whose body writes its own binder: the
   // binder is the body's own binding (so the write assigns it, not an outer
@@ -1011,7 +1036,7 @@ function _emitForStmtInner(
         lines.push(`  ${liftCode}`);
       }
     } else {
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 — host-async flag even without asyncRouteMap (engine effect= bodies) */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 — host-async flag even without asyncRouteMap (engine effect= bodies) */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
     }
@@ -1311,7 +1336,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   if (subst.hits !== 1 || loopBodyHasSqlSite(rewrittenBody)) return null;
   const handled = subst.handledHits === 1;
 
-  const _ctx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+  const _ctx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   iterable = emitExprField(node.iterExpr, iterable, _ctx);
 
   // §8.10.6 — chunk size. Default 32766 matches SQLite 3.32+
@@ -1382,7 +1407,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   const _hoistHeadKw = forHeadKeyword(node);
   const _hoistNames = loopBodyDeclaredNames(opts?.declaredNames, node, false);
   lines.push(`for (${_hoistHeadKw} ${loopVar} of ${itemsVar}) {`);
-  for (const code of emitLogicBody(rewrittenBody, { /* S415 */ declaredNames: blockScopedDeclaredNames(_hoistNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(rewrittenBody, { /* S415 */ declaredNames: blockScopedDeclaredNames(_hoistNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -1408,11 +1433,11 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
   // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitConditionField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -1430,11 +1455,11 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
   const condition = emitConditionField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);
@@ -2813,6 +2838,71 @@ function emitMultiScrutineeMatch(
 }
 
 /**
+ * The `{ … }` interior of a STRUCTURED arm in the value IIFE (`emitMatchExpr`):
+ * its statements, with the §18.5 value tail `return`ed. Shared by the
+ * `structuredBody` arm path and (S465) a server block arm parsed from text in
+ * `emitIifeBlockArmBody`, so the two lower identically.
+ */
+function structuredIifeArmInner(structuredBody: any[], opts: any, _matchCtx: EmitExprContext): string {
+  let structuredInner: string;
+  // g-library-fn-match-else-arm-object-literal: an object-literal block-form arm
+  // (`else :> { x: 0 }`, `else :> { x }` shorthand, `else :> {}`) lowers as a
+  // VALUE — parity with the inline `1 :> { x: 0 }` path (#664), which routes the
+  // SAME object-vs-block classifier through emitIifeBlockArmBody. Checked BEFORE
+  // emitLogicBody so an object arm skips statement emission entirely (no discarded
+  // work, and no genVar side effects that would perturb the emitted differential).
+  // Returns null for a genuine statement block, which then takes the §18.5 tail
+  // path below unchanged.
+  const _objArm = _objectLiteralArmFromStructuredBody(structuredBody);
+  if (_objArm !== null) {
+    structuredInner = `return ${_awaitMatchArmServerCalls(emitArmValue(_objArm, _matchCtx), opts ?? {})};`;
+  } else {
+    const bodyLines = emitLogicBody(structuredBody, opts).filter(Boolean);
+    // §18.5 — a block arm is `{ statement* expression? }` whose result is its
+    // TAIL expression. This AST-node (structuredBody) path and the raw-string
+    // path (emit-logic.ts `planBlockArmLift`) MUST make the same §18.5 tail
+    // decision, so the value-vs-void call is DELEGATED to the ONE shared rule,
+    // `_blockTailIsValueExpr` — there is no second, independent value/void
+    // predicate (the repo's standing disagreeing-near-duplicate-predicate
+    // hazard; a member/index-assignment tail formerly LIFTED in the raw path
+    // and voided here). The node-kind gate here does only what a STRING cannot:
+    // admit exactly a value-capable `bare-expr` tail (every other node kind —
+    // decl / return / control-flow / `lift` / `fail` / an assignment-STATEMENT
+    // node — can never be a value tail → §18.5 void) and screen the lone `~`
+    // orphan (which emits nothing). For that `bare-expr`, the tail's `exprNode`
+    // is stringified via `emitStringFromTree` and handed to the shared rule, so
+    // its escape-hatch check and its (space-normalized) assignment-expr check
+    // are the SAME rule both paths run. A value tail is `return`ed so the IIFE
+    // evaluates to it; any other tail leaves the IIFE falling through →
+    // `undefined` = §18.5 void. Auto-await (§13.2) via the shared
+    // `_awaitMatchArmServerCalls`, mirroring the raw-string path.
+    const _lastNode: any = structuredBody.length > 0
+      ? structuredBody[structuredBody.length - 1] : null;
+    const _tailIsBareExpr = bodyLines.length > 0
+      && !!_lastNode && _lastNode.kind === "bare-expr"
+      && !!_lastNode.exprNode
+      && !(_lastNode.exprNode.kind === "ident" && _lastNode.exprNode.name === "~");
+    // Derive the tail's source string the SAME way the sibling structuredBody
+    // path (emit-logic.ts `emitMatchExprToTilde`, ~:4735) does — prefer the
+    // node's retained `expr` text, else round-trip its `exprNode` through
+    // `emitStringFromTree` — so both feed byte-identical input to the one
+    // shared classifier.
+    const _tailStr = _tailIsBareExpr
+      ? (_lastNode.expr ?? (() => { try { return emitStringFromTree(_lastNode.exprNode); } catch { return ""; } })())
+      : "";
+    const _tailIsValue = _tailIsBareExpr && _blockTailIsValueExpr(_tailStr);
+    if (_tailIsValue) {
+      const _tailExpr = bodyLines[bodyLines.length - 1].trim().replace(/;+\s*$/, "");
+      const _tailRhs = _awaitMatchArmServerCalls(_tailExpr, opts ?? {});
+      structuredInner = [...bodyLines.slice(0, -1), `return ${_tailRhs};`].join(" ");
+    } else {
+      structuredInner = bodyLines.join("; ");
+    }
+  }
+  return structuredInner;
+}
+
+/**
  * §18.5 block-arm value lift for the value-returning IIFE match paths
  * (single-scrutinee `emitMatchExpr` arm bodies + multi-scrutinee
  * `emitMultiArmBody`). A block arm is `{ statement* expression? }`: run the
@@ -2865,8 +2955,18 @@ function emitIifeBlockArmBody(
   // no-op when no server call / async scope is present. Only a genuine
   // `{ statement* expression? }` block reaches the tail-lift below.
   if (!_matchArmResultIsBlockBody(result)) {
-    const objRhs = _awaitMatchArmServerCalls(emitExprField(null, result, matchCtx), opts ?? {});
+    const objRhs = _awaitMatchArmServerCalls(emitArmValue(result, matchCtx), opts ?? {});
     return `{ ${prelude}return ${objRhs}; }`;
+  }
+  // S465 (SPEC §13.2) — a SERVER block arm is lowered from its parsed statements
+  // through the same structured path a `structuredBody` arm takes (a §18.19
+  // product arm reaches here as text; see `structureServerArm`).
+  const _srvStmts = serverArmBlockStatements(result, matchMode);
+  if (_srvStmts) {
+    const structuredInner = structuredIifeArmInner(_srvStmts, opts ?? { boundary: "server" }, matchCtx);
+    return structuredInner
+      ? `{ ${prelude}${structuredInner} }`
+      : (prelude ? `{ ${prelude.trimEnd()} }` : `{}`);
   }
   // Empty-inner fallthrough guard → §18.5 void. NB: an empty OBJECT `{}` / `{ }`
   // never reaches here — it is an `object` node, intercepted by the return-position
@@ -2890,7 +2990,7 @@ function emitIifeBlockArmBody(
     .filter(Boolean)
     .map((s) => `${s};`)
     .join(" ");
-  const rhs = _awaitMatchArmServerCalls(emitExprField(null, plan.tail, matchCtx), opts ?? {});
+  const rhs = _awaitMatchArmServerCalls(emitArmValue(plan.tail, matchCtx), opts ?? {});
   return `{ ${prelude}${leadCode ? `${leadCode} ` : ""}return ${rhs}; }`;
 }
 
@@ -2921,7 +3021,7 @@ function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprConte
     // §18.5 — lift the block's tail expression (was silently dropped pre-fix).
     return emitIifeBlockArmBody(trimmed, prelude, null, ctx.mode, ctx, opts);
   }
-  return `{ ${prelude}return ${emitExprField(null, trimmed, ctx)}; }`;
+  return `{ ${prelude}return ${emitArmValue(trimmed, ctx)}; }`;
 }
 
 export function emitMatchExpr(node: any, opts?: any): string {
@@ -3049,61 +3149,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // bare `_scrml_reactive_set` and bypasses the rule= contract guard +
     // engine timer/history bookkeeping.
     if (arm.structuredBody) {
-      let structuredInner: string;
-      // g-library-fn-match-else-arm-object-literal: an object-literal block-form arm
-      // (`else :> { x: 0 }`, `else :> { x }` shorthand, `else :> {}`) lowers as a
-      // VALUE — parity with the inline `1 :> { x: 0 }` path (#664), which routes the
-      // SAME object-vs-block classifier through emitIifeBlockArmBody. Checked BEFORE
-      // emitLogicBody so an object arm skips statement emission entirely (no discarded
-      // work, and no genVar side effects that would perturb the emitted differential).
-      // Returns null for a genuine statement block, which then takes the §18.5 tail
-      // path below unchanged.
-      const _objArm = _objectLiteralArmFromStructuredBody(arm.structuredBody);
-      if (_objArm !== null) {
-        structuredInner = `return ${_awaitMatchArmServerCalls(emitExprField(null, _objArm, _matchCtx), opts ?? {})};`;
-      } else {
-        const bodyLines = emitLogicBody(arm.structuredBody, opts).filter(Boolean);
-        // §18.5 — a block arm is `{ statement* expression? }` whose result is its
-        // TAIL expression. This AST-node (structuredBody) path and the raw-string
-        // path (emit-logic.ts `planBlockArmLift`) MUST make the same §18.5 tail
-        // decision, so the value-vs-void call is DELEGATED to the ONE shared rule,
-        // `_blockTailIsValueExpr` — there is no second, independent value/void
-        // predicate (the repo's standing disagreeing-near-duplicate-predicate
-        // hazard; a member/index-assignment tail formerly LIFTED in the raw path
-        // and voided here). The node-kind gate here does only what a STRING cannot:
-        // admit exactly a value-capable `bare-expr` tail (every other node kind —
-        // decl / return / control-flow / `lift` / `fail` / an assignment-STATEMENT
-        // node — can never be a value tail → §18.5 void) and screen the lone `~`
-        // orphan (which emits nothing). For that `bare-expr`, the tail's `exprNode`
-        // is stringified via `emitStringFromTree` and handed to the shared rule, so
-        // its escape-hatch check and its (space-normalized) assignment-expr check
-        // are the SAME rule both paths run. A value tail is `return`ed so the IIFE
-        // evaluates to it; any other tail leaves the IIFE falling through →
-        // `undefined` = §18.5 void. Auto-await (§13.2) via the shared
-        // `_awaitMatchArmServerCalls`, mirroring the raw-string path.
-        const _lastNode: any = arm.structuredBody.length > 0
-          ? arm.structuredBody[arm.structuredBody.length - 1] : null;
-        const _tailIsBareExpr = bodyLines.length > 0
-          && !!_lastNode && _lastNode.kind === "bare-expr"
-          && !!_lastNode.exprNode
-          && !(_lastNode.exprNode.kind === "ident" && _lastNode.exprNode.name === "~");
-        // Derive the tail's source string the SAME way the sibling structuredBody
-        // path (emit-logic.ts `emitMatchExprToTilde`, ~:4735) does — prefer the
-        // node's retained `expr` text, else round-trip its `exprNode` through
-        // `emitStringFromTree` — so both feed byte-identical input to the one
-        // shared classifier.
-        const _tailStr = _tailIsBareExpr
-          ? (_lastNode.expr ?? (() => { try { return emitStringFromTree(_lastNode.exprNode); } catch { return ""; } })())
-          : "";
-        const _tailIsValue = _tailIsBareExpr && _blockTailIsValueExpr(_tailStr);
-        if (_tailIsValue) {
-          const _tailExpr = bodyLines[bodyLines.length - 1].trim().replace(/;+\s*$/, "");
-          const _tailRhs = _awaitMatchArmServerCalls(_tailExpr, opts ?? {});
-          structuredInner = [...bodyLines.slice(0, -1), `return ${_tailRhs};`].join(" ");
-        } else {
-          structuredInner = bodyLines.join("; ");
-        }
-      }
+      const structuredInner = structuredIifeArmInner(arm.structuredBody, opts, _matchCtx);
       const structuredEmit = structuredInner
         ? `{ ${bindingPrelude}${structuredInner} }`
         : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
@@ -3167,8 +3213,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`
-            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))};`);
+            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`
+            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -3178,7 +3224,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitArmValue(arm.result, _matchCtx))}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -3389,7 +3435,7 @@ function stmtArmBodyLines(
     // An object-literal block-form arm (`else :> { x: 0 }`) is a VALUE: evaluate it.
     const objArm = _objectLiteralArmFromStructuredBody(arm.structuredBody);
     if (objArm !== null) {
-      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitExprField(null, objArm, matchCtx), opts ?? {}));
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitArmValue(objArm, matchCtx), opts ?? {}));
       return s ? [s] : [];
     }
     // The arm is a JS block: a name it declares is scoped to it, so it gets its own
@@ -3413,7 +3459,7 @@ function stmtArmBodyLines(
   if (isBlockBody) {
     if (!_matchArmResultIsBlockBody(result)) {
       // `1 :> { x: 1 }` — an object literal, a value.
-      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitExprField(null, result, matchCtx), opts ?? {}));
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitArmValue(result, matchCtx), opts ?? {}));
       return s ? [s] : [];
     }
     const inner = trimmed.slice(1, -1).trim();
@@ -3433,7 +3479,7 @@ function stmtArmBodyLines(
   if (leave) return [emitLogicNode(leave, opts ?? (matchMode === "server" ? { boundary: "server" } : { boundary: "client" }))];
   const inlineEngineWrite = engineBindings ? detectInlineEngineWrite(result, engineBindings) : null;
   if (inlineEngineWrite) return inlineEngineWrite.guardLines;
-  const valueExpr = emitTypedArmResultCtor(result, matchNode, matchCtx) ?? emitExprField(null, result, matchCtx);
+  const valueExpr = emitTypedArmResultCtor(result, matchNode, matchCtx) ?? emitArmValue(result, matchCtx);
   const s = asExpressionStatement(valueExpr);
   return s ? [s] : [];
 }
@@ -3470,7 +3516,7 @@ function emitMultiScrutineeMatchStmt(
     ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
     : [];
   const armBody = armBodyOverride ?? ((resultStr: string): string[] =>
-    stmtArmBodyLines({ kind: "wildcard", test: null, binding: null, result: resultStr }, node, engineCtx, null, matchMode, matchCtx, opts));
+    stmtArmBodyLines(structureServerArm({ kind: "wildcard", test: null, binding: null, result: resultStr }, matchMode), node, engineCtx, null, matchMode, matchCtx, opts));
 
   let conditionIndex = 0;
   for (const child of (node.body ?? []) as any[]) {
@@ -3658,7 +3704,31 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
       }
     }
   }
-  return arms;
+  const mode = opts?.boundary === "server" ? "server" : "client";
+  return arms.map((a) => structureServerArm(a, mode));
+}
+
+/**
+ * S465 (SPEC §13.2) — a SERVER arm whose `{ … }` body arrived as TEXT (a literal /
+ * alternation arm the AST builder keeps raw: `"a" :> { … }`, `1 :> { … }`) is
+ * PARSED into its statement nodes, so every route lowers it through the
+ * structured `structuredBody` path (statement emitter → await classifier) instead
+ * of the token rewriter (`rewriteBlockBody`), which never awaits. Client arms and
+ * bodies the parser rejects are returned unchanged. See `arm-structure.ts`.
+ */
+export function structureServerArm(arm: MatchArm, mode: "client" | "server"): MatchArm {
+  if (arm.structuredBody || arm.failExpr || arm.propagateOperand) return arm;
+  const stmts = serverArmBlockStatements(arm.result ?? "", mode);
+  return stmts ? { ...arm, result: "", structuredBody: stmts } : arm;
+}
+
+/**
+ * S465 (SPEC §13.2) — an arm VALUE carried as text. On the server it is emitted
+ * from its parsed tree (`emitExpr`, which awaits a Promise-returning import);
+ * the client keeps the text lowering. See `arm-structure.ts`.
+ */
+export function emitArmValue(text: string, ctx: EmitExprContext, node?: any): string {
+  return emitExprField(serverArmExprNode(text, ctx.mode, node), text, ctx);
 }
 
 /**
