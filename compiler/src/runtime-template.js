@@ -120,9 +120,11 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
  * client chunks, but the inliner's handling of their sibling-shim imports is
  * still exercised by loading them through this function directly.
  */
-export function _loadStdlibChunk(name) {
+export function _loadStdlibChunk(name, onlyMembers = null) {
   const shimPath = join(__runtime_template_dir, "../runtime/stdlib", `${name}.js`);
-  const source = readFileSync(shimPath, "utf8");
+  const source = onlyMembers
+    ? _filterShimToMembers(readFileSync(shimPath, "utf8"), onlyMembers)
+    : readFileSync(shimPath, "utf8");
   const exportedNames = [];
   const fnRe = /^export\s+(async\s+)?function\s+([A-Za-z_$][\w$]*)/gm;
   let m;
@@ -160,6 +162,67 @@ export function _loadStdlibChunk(name) {
     `  return { ${exportedNames.join(", ")} };\n` +
     `})();\n`
   );
+}
+
+/**
+ * S462 P0 fix round 1 (M1) — the members of an escalation-server-only module that
+ * may still ship to a browser, because the shim labels them `[browser-safe]`:
+ * they reach only Web-platform APIs (`crypto.getRandomValues`, `crypto.subtle`,
+ * `crypto.randomUUID`) and handle no stored credential. The client chunk for the
+ * module carries THESE members and nothing else; a client use of any other member
+ * is E-STDLIB-CLIENT-CHUNK-MISSING (emit-client.ts reads this same table).
+ * `scrml:auth` has no entry: it stays fully server-only.
+ */
+export const STDLIB_CLIENT_CHUNK_MEMBERS = Object.freeze({
+  // compiler/runtime/stdlib/crypto.js header: generateToken / generateUUID / hmac /
+  // safeCompare are [browser-safe]; hash / verifyHash are server-only (Bun.password,
+  // Bun.CryptoHasher).
+  crypto: Object.freeze(["generateToken", "generateUUID", "hmac", "safeCompare"]),
+});
+
+/**
+ * Keep only the top-level declarations of a shim that a partial client chunk may
+ * carry: the exports named in `members`, plus any non-exported top-level helper
+ * they reference (transitively). Everything else — the server-only exports and
+ * the code only they use — is cut out, so it never reaches the browser bundle.
+ * Top-level `import` statements are kept (the sibling inliner handles them).
+ */
+function _filterShimToMembers(source, members) {
+  // Top-level statements, split at column-0 boundaries: every shim statement
+  // starts at column 0 (`export function`, `export const`, `function`, `const`,
+  // `import`, a comment); continuation lines are indented or a closing `}`.
+  const lines = source.split("\n");
+  const chunks = [];
+  let cur = [];
+  const flush = () => { if (cur.length) chunks.push(cur.join("\n")); cur = []; };
+  for (const line of lines) {
+    const startsTop = /^(export\s+)?(async\s+)?(function\*?|const|let|var|class|import)\b/.test(line);
+    if (startsTop) flush();
+    cur.push(line);
+  }
+  flush();
+  const declName = (text) => {
+    const m = /^(?:export\s+)?(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/.exec(text);
+    return m ? m[1] : null;
+  };
+  const keep = new Set(members);
+  // Pull in non-exported helpers the kept declarations reference, to a fixpoint.
+  for (let changed = true; changed;) {
+    changed = false;
+    const keptText = chunks.filter((c) => keep.has(declName(c))).join("\n");
+    for (const c of chunks) {
+      const n = declName(c);
+      if (!n || keep.has(n) || /^export\b/.test(c)) continue;
+      if (new RegExp(`(?<![\\w$.])${n}(?![\\w$])`).test(keptText)) { keep.add(n); changed = true; }
+    }
+  }
+  return chunks
+    .filter((c) => {
+      const n = declName(c);
+      if (n) return keep.has(n);
+      return /^import\b/.test(c) || !/\S/.test(c) || /^\s*\/\//.test(c);
+    })
+    .join("\n");
 }
 
 // Match a single top-level `import { ... } from "<spec>";` statement.
@@ -550,8 +613,9 @@ function _indent(text) {
 // and note that the absence of a chunk is now a COMPILE-TIME diagnostic
 // (`E-STDLIB-CLIENT-CHUNK-MISSING`) rather than a silent load-time TypeError.
 //
-// `auth` and `crypto` are escalation-server-only by the criterion and, since
-// S462, carry NO chunk either. They used to (S95 Bug 18), and the S462 P0 showed
+// `auth` is escalation-server-only by the criterion and, since S462, carries NO
+// chunk (`crypto` carries a partial one — its [browser-safe] members only; see
+// STDLIB_CLIENT_CHUNK_MEMBERS). They used to (S95 Bug 18), and the S462 P0 showed
 // what that bought: a CPS split that left `verifyPassword` on the client shipped
 // the whole `scrml:auth` implementation (argon2id via Bun.password) into the
 // browser and ran the password check there — on an un-awaited Promise, so every
@@ -559,6 +623,11 @@ function _indent(text) {
 // the bundle is the compile-time E-STDLIB-CLIENT-CHUNK-MISSING, not a page that
 // quietly authenticates everyone.
 const _STDLIB_COMPILER_CHUNK = _loadStdlibChunk("compiler");
+// S462 P0 fix round 1 (M1) — `scrml:crypto` ships a PARTIAL client chunk: only the
+// members its shim labels [browser-safe] (STDLIB_CLIENT_CHUNK_MEMBERS.crypto). Its
+// server-only members (hash / verifyHash — Bun.password, Bun.CryptoHasher) are cut
+// out of the chunk text entirely, and a client use of one is refused.
+const _STDLIB_CRYPTO_CHUNK   = _loadStdlibChunk("crypto", STDLIB_CLIENT_CHUNK_MEMBERS.crypto);
 const _STDLIB_DATA_CHUNK     = _loadStdlibChunk("data");
 const _STDLIB_FORMAT_CHUNK   = _loadStdlibChunk("format");
 const _STDLIB_HOST_CHUNK     = _loadStdlibChunk("host");
@@ -7546,7 +7615,7 @@ ${URL_GUARD_RUNTIME_SOURCE}
 // compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
 // 'meta' chunk (CHUNK_DEPENDENCIES).
 ${META_EMIT_GATE_RUNTIME_SOURCE}
-${_STDLIB_COMPILER_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_MD_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
+${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_MD_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
  * g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,

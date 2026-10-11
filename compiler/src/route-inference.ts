@@ -423,6 +423,12 @@ interface CPSResult {
    * the deferred body would run before the function's final exit).
    */
   deferServerIndices?: number[];
+  /**
+   * S462 P0 fix round 1 — statements the placement rule had to move to the
+   * server (they read / sit between server-originated values) but which need the
+   * browser. Each is an E-RI-002 at the call site in runRI.
+   */
+  placementRefusals?: Array<{ index: number; value: string; why: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -3199,29 +3205,134 @@ export function analyzeCPSEligibility(
   // browser. It runs on the server instead, and the batch sends back only the cell
   // values it computes (§19.9.9.7). Fixpoint: a statement pulled onto the server
   // may declare locals of its own.
+  //
+  // S462 P0 fix round 1 — the placement rule, fail-closed. A SERVER-ORIGINATED
+  // value is a cell a server statement wrote, a local a server statement
+  // declared, or anything derived from them. Three pulls, to a fixpoint:
+  //
+  //   (a) A statement that READS a server-originated value (produced by an
+  //       EARLIER server statement) is server-tier — `const hash = @out.pw`,
+  //       `if (!check(pass, @out.pw))`, `@msg = row.name`. Left on the client it
+  //       either reads a name the client never had, or forces the raw value
+  //       (the row, the hash) across the wire so the client can run the logic.
+  //   (b) A statement that CALLS a server-placed function is server-tier at the
+  //       call site (`if (!check(…))`): the callee is awaited in-process, and its
+  //       arguments never take a trip through the browser.
+  //   (c) NO SERVER VALUE MAY ROUND-TRIP THROUGH THE CLIENT. When a later server
+  //       statement consumes a value an earlier server statement produced, every
+  //       client statement between them joins the server batch (a cell write's
+  //       value comes back in the cell envelope, §19.9.9.7), so both run in ONE
+  //       request — before this, `@busy = true` between them split the function
+  //       into two requests and the second one TRUSTED the value the client sent
+  //       back (forging `{"row":{"role":"admin"}}` ran a DELETE). Likewise a
+  //       client local a server statement reads moves to the server with it.
+  //
+  // A statement that must stay on the client (a browser global, a `lift`,
+  // markup) yet would have to move is REFUSED (E-RI-002 via `placementRefusals`),
+  // never relocated and never fed a client-carried server value. Statements
+  // BEFORE the first server statement are never pulled by (a) / (c), so the
+  // spinner (`@busy = true` ahead of the query) still renders before the request.
+  const placementRefusals: Array<{ index: number; value: string; why: string }> = [];
+  const refusedIdx = new Set<number>();
+  const serverFnNames = new Set<string>();
+  for (const [name, entries] of functionIndex) {
+    if (entries.some((e) => resolvedServerFnIds.has(e.fnNodeId))) serverFnNames.add(name);
+  }
+  const isServerIdx = (i: number) => serverIndices.includes(i) || reactiveServerIndices.includes(i);
+  const pull = (i: number): void => {
+    const ri = reactiveIndices.indexOf(i);
+    if (ri >= 0) reactiveIndices.splice(ri, 1);
+    const node = (handledSqlGuardInner(body[i]) ?? body[i]) as LogicStatement;
+    if ((node as any).kind === "defer-stmt") {
+      serverIndices.push(i);
+      deferServerIndices.push(i);
+    } else if (node.kind === "state-decl") {
+      reactiveServerIndices.push(i);
+    } else {
+      serverIndices.push(i);
+    }
+  };
+  // `refuseIfClientOnly` — false when the statement may simply STAY in the browser
+  // if it needs it: it reads a server-written CELL (the client holds that cell's
+  // value anyway, and nothing carries it back to a later request — rule (c)
+  // refuses that), or it calls a server function (an ordinary client → server
+  // call through the fetch stub). True when staying is impossible: it reads a
+  // server LOCAL the browser never has, or it sits between a producer and a
+  // consumer of a server value (rule (c)).
+  const tryPull = (i: number, value: string, because: string, refuseIfClientOnly = true): boolean => {
+    if (isServerIdx(i) || mixedIndices.includes(i) || refusedIdx.has(i)) return false;
+    const why = clientOnlyReason(body[i]);
+    if (why !== null) {
+      if (!refuseIfClientOnly) return false;
+      refusedIdx.add(i);
+      placementRefusals.push({ index: i, value, why: `${because}, but ${why}` });
+      return false;
+    }
+    pull(i);
+    return true;
+  };
   for (let changed = true; changed;) {
     changed = false;
-    const serverSet = new Set<number>([...serverIndices, ...reactiveServerIndices]);
-    const serverLocals = new Set<string>();
-    for (const si of serverSet) for (const n of topLevelDeclaredLocals(body[si])) serverLocals.add(n);
-    if (serverLocals.size === 0) break;
+    // What each server statement produces, keyed by the EARLIEST producer.
+    const producedLocal = new Map<string, number>();
+    const producedCell = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of topLevelDeclaredLocals(body[p])) if (!producedLocal.has(n)) producedLocal.set(n, p);
+      for (const c of cellsWrittenBy(body[p])) if (!producedCell.has(c)) producedCell.set(c, p);
+    }
+    const before = (m: Map<string, number>, i: number): Set<string> => {
+      const s = new Set<string>();
+      for (const [n, p] of m) if (p < i) s.add(n);
+      return s;
+    };
     for (let i = 0; i < body.length; i++) {
-      if (serverSet.has(i) || mixedIndices.includes(i)) continue;
       const stmt = body[i];
       if (!stmt || typeof stmt !== "object") continue;
-      if (!statementReadsAnyLocal(stmt, serverLocals)) continue;
-      const ri = reactiveIndices.indexOf(i);
-      if (ri >= 0) reactiveIndices.splice(ri, 1);
-      const node = (handledSqlGuardInner(stmt) ?? stmt) as LogicStatement;
-      if ((node as any).kind === "defer-stmt") {
-        serverIndices.push(i);
-        deferServerIndices.push(i);
-      } else if (node.kind === "state-decl") {
-        reactiveServerIndices.push(i);
-      } else {
-        serverIndices.push(i);
+      const locs = before(producedLocal, i);
+      const cells = before(producedCell, i);
+      if (!isServerIdx(i)) {
+        // (a) reads a server-originated value / (b) calls a server function.
+        const cell = statementReadsAnyCell(stmt, cells);
+        const local = cell === null ? [...locs].find((n) => statementReadsAnyLocal(stmt, new Set([n]))) ?? null : null;
+        const callee = cell === null && local === null ? statementCallsAny(stmt, serverFnNames) : null;
+        // A `return` that only reads server-written CELLS stays client: the client
+        // already holds those cells' values (the batch hands them back), and the
+        // function's own return value is produced on the client side of the split.
+        const isReturn = (handledSqlGuardInner(stmt) ?? stmt as any).kind === "return-stmt";
+        if (
+          cell !== null && isReturn &&
+          ![...locs].some((n) => statementReadsAnyLocal(stmt, new Set([n]))) &&
+          statementCallsAny(stmt, serverFnNames) === null
+        ) continue;
+        if (cell !== null) changed = tryPull(i, `@${cell}`, `it reads \`@${cell}\`, which the server half computed`, false) || changed;
+        else if (local !== null) changed = tryPull(i, local, `it reads \`${local}\`, which the server half computed`) || changed;
+        else if (callee !== null) changed = tryPull(i, `${callee}(…)`, `it calls \`${callee}\`, which runs on the server`, false) || changed;
+        continue;
       }
-      changed = true;
+      // (c) A server statement consuming a value an earlier server statement produced:
+      // every client statement in between joins the server batch.
+      let from = -1;
+      let value = "";
+      const cell = statementReadsAnyCell(stmt, cells);
+      if (cell !== null) { from = producedCell.get(cell)!; value = `@${cell}`; }
+      else {
+        for (const n of locs) {
+          if (statementReadsAnyLocal(stmt, new Set([n]))) { from = producedLocal.get(n)!; value = n; break; }
+        }
+      }
+      if (from >= 0) {
+        for (let k = from + 1; k < i; k++) {
+          changed = tryPull(k, value, `it sits between the server work that produces \`${value}\` and the server work that uses it (the value would have to cross the browser to reach the second request)`) || changed;
+        }
+      }
+      // A client-declared local the server statement reads moves to the server with it.
+      for (let k = 0; k < i; k++) {
+        if (isServerIdx(k)) continue;
+        const declared = topLevelDeclaredLocals(body[k]);
+        const used = declared.find((n) => statementReadsAnyLocal(stmt, new Set([n])));
+        if (used !== undefined) changed = tryPull(k, used, `the server half reads the local \`${used}\` it declares`) || changed;
+      }
     }
   }
   // Source order is load-bearing below (`returnVarName` is the FIRST reactive-server cell).
@@ -3272,6 +3383,7 @@ export function analyzeCPSEligibility(
     pureServerIndices: [...serverIndices].sort((a, b) => a - b),
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
+    placementRefusals,
   };
 }
 
@@ -3301,6 +3413,135 @@ function topLevelDeclaredLocals(stmt: unknown): string[] {
   return out;
 }
 
+/**
+ * S462 P0 fix round 1 — the cells a statement WRITES, at any depth (`@x = …`
+ * declarations / assignments / `++`, a field or array mutation of `@x`). Nested
+ * function bodies included: over-approximate (a write that may happen counts).
+ */
+function cellsWrittenBy(stmt: unknown): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const isCell = (t: any): boolean =>
+    !!t && t.kind === "ident" && typeof t.name === "string" && t.name.length > 1 && t.name.startsWith("@") &&
+    t.name !== "@session" && t.name !== "@currentUser";
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "state-decl" && typeof o.name === "string") out.add(o.name);
+    if ((o.kind === "reactive-nested-assign" || o.kind === "reactive-array-mutation" || o.kind === "reactive-explicit-set") && typeof o.target === "string") out.add(o.target);
+    if (o.kind === "assign" && isCell(o.target)) out.add(o.target.name.slice(1));
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && isCell(o.argument)) out.add(o.argument.name.slice(1));
+    if (o.kind === "bare-expr" && typeof o.expr === "string") {
+      for (const m of o.expr.matchAll(/(?<![\w$@])@([A-Za-z_$][\w$]*)\s*(?:\*\*|<<|>>>?|\?\?|&&|\|\||[-+*/%&|^])?=(?!=)/g)) out.add(m[1]);
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(stmt);
+  return out;
+}
+
+/**
+ * S462 P0 fix round 1 — does `stmt` READ any of `cells` (bare names, no `@`)? An
+ * `@x` identifier anywhere except as the plain target of `@x = …`, or `@x` in raw
+ * text (SQL query text, unparsed expression text). Over-approximates.
+ */
+function statementReadsAnyCell(stmt: unknown, cells: Set<string>): string | null {
+  if (cells.size === 0) return null;
+  const re = new RegExp(`@(${[...cells].map(escapeRegex).join("|")})(?![\\w$])`);
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown, plainTarget: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, null); return; }
+    const o = n as any;
+    if (o.kind === "ident" && typeof o.name === "string" && o.name.startsWith("@") && o !== plainTarget) {
+      if (cells.has(o.name.slice(1))) { hit = o.name.slice(1); return; }
+    }
+    const target = o.kind === "assign" && o.op === "=" ? o.target : null;
+    for (const k of Object.keys(o)) {
+      if (k === "span" || k === "kind" || k === "name") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        // A raw `@x = …` assignment text is a write, not a read — strip plain writes first.
+        const text = v.replace(/(?<![\w$@])@[A-Za-z_$][\w$]*\s*=(?!=)/g, "");
+        const m = re.exec(text);
+        if (m) { hit = m[1]; return; }
+      } else walk(v, target);
+    }
+  };
+  walk(stmt, null);
+  return hit;
+}
+
+/** Host globals that exist only in a browser. A statement that touches one cannot run on the server. */
+const CLIENT_ONLY_ROOTS = new Set([
+  "document", "window", "localStorage", "sessionStorage", "navigator", "location", "history",
+  "alert", "confirm", "prompt", "requestAnimationFrame", "cancelAnimationFrame",
+]);
+
+/**
+ * S462 P0 fix round 1 — can this statement run in a server batch instead of the
+ * browser? Pure computation and cell writes can (their cell values come back in
+ * the batch's cell envelope). A statement that needs the client cannot: a browser
+ * global, a `lift`, markup. Returns the reason it cannot, or null.
+ */
+function clientOnlyReason(stmt: unknown): string | null {
+  const seen = new WeakSet<object>();
+  let why: string | null = null;
+  const walk = (n: unknown): void => {
+    if (why || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "lift-expr") { why = "it lifts markup"; return; }
+    if (o.kind === "markup" || o.kind === "html-element") { why = "it builds markup"; return; }
+    if (o.kind === "ident" && typeof o.name === "string" && CLIENT_ONLY_ROOTS.has(o.name)) { why = `it uses the browser global \`${o.name}\``; return; }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string" && (k === "expr" || k === "init" || k === "condition" || k === "iterable" || k === "raw")) {
+        const m = /(?<![\w$.@])(document|window|localStorage|sessionStorage|navigator|location|history|alert|confirm|prompt|requestAnimationFrame|cancelAnimationFrame)(?![\w$])/.exec(v);
+        if (m) { why = `it uses the browser global \`${m[1]}\``; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return why;
+}
+
+/**
+ * S462 P0 fix round 1 — does `stmt` call (anywhere, incl. an `if` / `while` /
+ * `match` head) a function in `serverFnNames`? Such a call is server work: the
+ * call site runs on the server and the callee is awaited in-process.
+ */
+function statementCallsAny(stmt: unknown, names: Set<string>): string | null {
+  if (names.size === 0) return null;
+  const re = new RegExp(`(?<![\\w$.@])(${[...names].map(escapeRegex).join("|")})\\s*\\(`);
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "function-decl" || o.kind === "lambda") return; // a closure is called later, not here
+    if (o.kind === "call" && o.callee && o.callee.kind === "ident" && names.has(o.callee.name)) { hit = o.callee.name; return; }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string" && (k === "expr" || k === "init" || k === "condition" || k === "iterable" || k === "header" || k === "result")) {
+        const m = re.exec(v);
+        if (m) { hit = m[1]; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return hit;
+}
+
 /** S462 P0 — does `stmt` read any of `names` (identifier nodes, or raw expression text)? Over-approximates. */
 function statementReadsAnyLocal(stmt: unknown, names: Set<string>): boolean {
   if (names.size === 0) return false;
@@ -3318,7 +3559,14 @@ function statementReadsAnyLocal(stmt: unknown, names: Set<string>): boolean {
     for (const k of Object.keys(o)) {
       if (NOT_READ.has(k)) continue;
       const v = o[k];
-      if (typeof v === "string") { if (re.test(v)) return true; }
+      if (typeof v === "string") {
+        // SQL text: only its `${…}` interpolations are expressions — a column named
+        // like a local (`SELECT name …`) is not a read of it.
+        const text = o.kind === "sql" && (k === "query" || k === "body")
+          ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ")
+          : v;
+        if (re.test(text)) return true;
+      }
       else if (walk(v)) return true;
     }
     return false;
@@ -5363,8 +5611,8 @@ export function runRI(input: RIInput): RIOutput {
         `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
         `to a plain reactive cell that the markup reads. Deleting \`const\` does not help: a plain ` +
         `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
-        `client-side position and is refused too (E-STDLIB-CLIENT-CHUNK-MISSING — the module has ` +
-        `no client build). See §6.6.19, §12.2.`,
+        `client-side position and is refused too (E-STDLIB-CLIENT-CHUNK-MISSING — there is no ` +
+        `client build of that member). See §6.6.19, §12.2.`,
         (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span),
       );
       eDerived.severity = "error";
@@ -6707,6 +6955,24 @@ export function runRI(input: RIInput): RIOutput {
               perFilePrintShadowed.get(record.filePath) ?? new Set<string>(),
             ),
           );
+
+          // S462 P0 fix round 1 — a statement the placement rule had to move to the
+          // server half but which needs the browser. Refused, never relocated and
+          // never fed a server value carried through the client.
+          for (const _r of cpsResult?.placementRefusals ?? []) {
+            const _fnName = record.fnNode.name ?? "<anonymous>";
+            const _node = body[_r.index] as any;
+            errors.push(new RIError(
+              "E-RI-002",
+              `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+              `statement has to run in its server half — ${_r.why}. Running it in the browser would mean ` +
+              `sending \`${_r.value}\` to the browser and trusting whatever comes back in a later request, ` +
+              `so the compiler refuses instead. Fix: keep the server work and the logic that uses ` +
+              `\`${_r.value}\` together, and do the browser-only work in a separate function that runs ` +
+              `after this one returns (or before it starts).`,
+              (_node && _node.span) ?? record.fnNode.span,
+            ));
+          }
 
           if (cpsResult && cpsResult.eligible) {
             // §19.16.5 (S430 P3) — E-DEFER-SERVER-IN-SPLIT, both limbs. The

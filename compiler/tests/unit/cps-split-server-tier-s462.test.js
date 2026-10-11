@@ -139,6 +139,77 @@ function f(vp: string) {
   });
 });
 
+describe("S462 P0 fix round 1 — the placement rule", () => {
+  const prog = (fn, cells = "<row> = {}\n<busy> = false\n<n> = 0\n<rows> = []\n") => `<program db="sqlite:./n1.db">
+${cells}${fn}
+<button onclick={ f(1) }>x</button>
+</program>
+`;
+  const errorsOf = (r) => (r.errors ?? []).filter((e) => e.code === "E-RI-002");
+
+  test("(c) a client write between the producer and the consumer of a server value joins the batch — one batch", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  @busy = true
+  if (@row.role == "admin") { ?{\`DELETE FROM secrets\`}.run() }
+}`));
+    const split = splitOf(r);
+    expect(split.serverStmtIndices).toEqual([0, 1, 2]);
+    expect((split.serverBatches ?? []).length).toBeLessThanOrEqual(1);
+    expect(errorsOf(r)).toEqual([]);
+  });
+
+  test("a client write BEFORE the first server statement stays client (the spinner)", () => {
+    const split = splitOf(ri(prog(`function f(id: number) {
+  @busy = true
+  @rows = ?{\`SELECT name FROM users\`}.all()
+  @busy = false
+}`)));
+    expect(split.serverStmtIndices).toEqual([1]);
+    expect(split.clientStmtIndices).toEqual(expect.arrayContaining([0, 2]));
+  });
+
+  test("a browser-only statement that only READS a server-written cell stays client — no refusal", () => {
+    const r = ri(prog(`function f(id: number) {
+  @rows = ?{\`SELECT name FROM users\`}.all()
+  localStorage.setItem("n", @rows.length)
+}`));
+    expect(splitOf(r).serverStmtIndices).toEqual([0]);
+    expect(errorsOf(r)).toEqual([]);
+  });
+
+  test("a browser-only statement that reads a server LOCAL is refused (E-RI-002)", () => {
+    const r = ri(prog(`function f(id: number) {
+  const row = ?{\`SELECT name FROM users WHERE rowid = \${id}\`}.get()
+  localStorage.setItem("n", row.name)
+  @n = 1
+}`));
+    const e = errorsOf(r);
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("`row`");
+    expect(e[0].message).toContain("`localStorage`");
+  });
+
+  test("a browser-only statement between a producer and a consumer is refused (E-RI-002)", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  localStorage.setItem("checking", "1")
+  if (@row.role == "admin") { ?{\`DELETE FROM secrets\`}.run() }
+}`));
+    const e = errorsOf(r);
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("`@row`");
+  });
+
+  test("a client local the server reads moves to the server with it", () => {
+    const split = splitOf(ri(prog(`function f(id: number) {
+  const y = @n + 1
+  @rows = ?{\`SELECT name FROM users WHERE rowid = \${y}\`}.all()
+}`)));
+    expect(split.serverStmtIndices).toEqual([0, 1]);
+  });
+});
+
 describe("S462 — planBatchCellReturn", () => {
   const SRC = (body) => `<program db="sqlite:./n1.db">
 <a> = 0

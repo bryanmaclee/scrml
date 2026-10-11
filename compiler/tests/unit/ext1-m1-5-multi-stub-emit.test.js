@@ -395,13 +395,17 @@ describe("M1.5 cross-batch parameter forwarding", () => {
     { indices: [2], monotonicity: "monotone" },
   ];
 
-  test("F19: batch 1's server handler destructures the forwarded cell", () => {
-    const { serverJs } = makeMultiBatchHandler("loadFwd", fwdBody(), batches, {
+  test("F19: batch 1's server handler does NOT take a prior batch's result from the request (S462 P0)", () => {
+    const { serverJs, clientJs } = makeMultiBatchHandler("loadFwd", fwdBody(), batches, {
       returnVarName: "rows",
     });
-    // Batch 0's return cell `token` is forwarded — batch 1's handler reads it
-    // from the request body.
-    expect(serverJs).toContain('const token = _scrml_body["token"];');
+    // S462 P0 fix round 1 — cross-batch forwarding is GONE. Batch 0's `token`
+    // used to ride back to batch 1 through the client as a request field, and
+    // batch 1 trusted it: a forged value ran whatever batch 1 decided on it.
+    // Route inference now keeps any consumer of a server value in the batch
+    // that produced it (or refuses), so no batch is handed one.
+    expect(serverJs).not.toContain('const token = _scrml_body["token"];');
+    expect(clientJs).not.toMatch(/_scrml_fetch_loadFwd_batch_1[A-Za-z0-9_]*\(token\)/);
   });
 
   test("F20: batch 1's client wrapper binds the forwarded cell locally", () => {

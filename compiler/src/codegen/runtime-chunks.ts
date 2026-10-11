@@ -130,7 +130,7 @@
  *                 set. Elided when no chunks emit vendor-require calls.
  */
 
-import { SCRML_RUNTIME } from "../runtime-template.js";
+import { SCRML_RUNTIME, STDLIB_CLIENT_CHUNK_MEMBERS } from "../runtime-template.js";
 
 // ---------------------------------------------------------------------------
 // Chunk ordering — must match the order chunks appear in SCRML_RUNTIME.
@@ -207,14 +207,19 @@ export const RUNTIME_CHUNK_ORDER = [
   //   redis   — (a) `import { redis } from "bun"` (BARE specifier); network-bound.
   //   store   — (a) bun:sqlite wrapper; client-side use is meaningless.
   //   auth    — (a) Bun.password (argon2id); (b) handles passwords and tokens.
-  //   crypto  — (a) Bun.CryptoHasher / Bun.password.
   //
-  // `auth` and `crypto` carried a chunk until S462 (S95 Bug 18). The S462 P0
-  // showed the cost: a CPS split that left `verifyPassword` on the client
-  // shipped the module into the browser and ran the password check there,
-  // un-awaited — every password accepted. They are gone; a surviving client
-  // reference is now E-STDLIB-CLIENT-CHUNK-MISSING at compile time.
+  // `auth` carried a chunk until S462 (S95 Bug 18). The S462 P0 showed the cost:
+  // a CPS split that left `verifyPassword` on the client shipped the module into
+  // the browser and ran the password check there, un-awaited — every password
+  // accepted. It is gone; a surviving client reference is
+  // E-STDLIB-CLIENT-CHUNK-MISSING at compile time.
+  //
+  // `crypto` is escalation-server-only (Bun.CryptoHasher / Bun.password) but its
+  // shim labels four members [browser-safe] (Web-platform crypto only). Its chunk
+  // is PARTIAL — those members and nothing else (runtime-template.js
+  // STDLIB_CLIENT_CHUNK_MEMBERS); a client use of `hash` / `verifyHash` is refused.
   'stdlib-compiler',
+  'stdlib-crypto',
   'stdlib-data',
   'stdlib-format',
   'stdlib-host',
@@ -357,6 +362,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // preceding IIFE (or, for the FIRST stdlib, with the engine chunk's last
   // function), so the boundary is at a syntactically clean position.
   "stdlib-compiler": "--- chunk: stdlib-compiler ---",
+  "stdlib-crypto":   "--- chunk: stdlib-crypto ---",
   "stdlib-data":     "--- chunk: stdlib-data ---",
   "stdlib-format":   "--- chunk: stdlib-format ---",
   "stdlib-host":     "--- chunk: stdlib-host ---",
@@ -416,6 +422,17 @@ export const STDLIB_CLIENT_CHUNK_MODULES: ReadonlySet<string> = new Set(
  */
 export function hasStdlibClientChunk(moduleName: string): boolean {
   return STDLIB_CLIENT_CHUNK_MODULES.has(moduleName);
+}
+
+/**
+ * S462 P0 fix round 1 (M1) — the members a client chunk carries when it is
+ * PARTIAL (only some of the module's exports are browser-safe), or null when the
+ * chunk carries the whole module. Read from the same table runtime-template.js
+ * builds the chunk from, so the gate and the shipped chunk cannot disagree.
+ */
+export function stdlibClientChunkMembers(moduleName: string): ReadonlySet<string> | null {
+  const list = (STDLIB_CLIENT_CHUNK_MEMBERS as Record<string, readonly string[]>)[moduleName];
+  return list ? new Set(list) : null;
 }
 
 // ---------------------------------------------------------------------------

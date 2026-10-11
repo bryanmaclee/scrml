@@ -4817,23 +4817,12 @@ function generateServerJsImpl(
       // and for the single-handler case.
       fwdResultNames: string[];
     };
-    // Compute each batch's return cell — the scrml `state-decl` name of its
-    // LAST server statement (the value the batch sends back, and forwards to
-    // later batches). The function's final `returnVarName` is the last batch's
-    // return; earlier batches return their own last `state-decl` name.
-    // S462 — every batch of a multi-batch split, the last included, returns its
-    // OWN last statement's cell (cps-cell-writes.ts multiBatchReturnCell — the
-    // client plan in emit-functions.ts uses the same rule). The last batch used
-    // to return `returnVarName`, which usually lives in an earlier batch.
-    function batchReturnCell(serverIndices: number[], _isLast: boolean): string | null {
-      return multiBatchReturnCell(fnNode.body ?? [], serverIndices);
-    }
     const _emitBatches: EmitBatch[] = [];
     if (_isMultiBatch) {
-      // Multi-batch CPS route — one handler per batch. A batch is forwarded
-      // every prior batch's return cell (admissible cross-batch parameter
-      // forwarding, M1.3 — the value rides as a request-body field).
-      const _fwdSoFar: string[] = [];
+      // Multi-batch CPS route — one handler per batch. S462 P0 fix round 1: no
+      // batch is forwarded a prior batch's result through the client (that value
+      // came back as trusted input); route inference keeps every consumer of a
+      // server value in the batch that produced it, or refuses.
       for (let _bi = 0; _bi < _serverBatches.length; _bi++) {
         const _b = _serverBatches[_bi];
         const _bIndices: number[] = Array.isArray(_b.indices)
@@ -4845,11 +4834,9 @@ function generateServerJsImpl(
           batchIndex: _bi,
           batchRouteName: `${routeName}__batch_${_bi}`,
           batchPath: `${path}__batch_${_bi}`,
-          fwdResultNames: [..._fwdSoFar],
+          // S462 P0 fix round 1 — never forwarded through the client (see emit-functions.ts).
+          fwdResultNames: [],
         });
-        // Forward this batch's return cell (if any) to every later batch.
-        const _ret = batchReturnCell(_bIndices, _bi === _serverBatches.length - 1);
-        if (_ret && !_fwdSoFar.includes(_ret)) _fwdSoFar.push(_ret);
       }
     } else {
       // Single handler — non-CPS route, or a single-batch CPS route.

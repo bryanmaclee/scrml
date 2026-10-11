@@ -6,7 +6,7 @@ import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } fro
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, stdlibClientChunkMembers } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
@@ -4355,10 +4355,26 @@ export function generateClientJs(ctx: CompileContext): string {
         if (!seen.has(m[1])) seen.set(m[1], []);
       }
 
-      for (const [mod, names] of seen) {
-        if (hasStdlibClientChunk(mod)) continue;
+      for (const [mod, allNames] of seen) {
+        // S462 P0 fix round 1 (M1) — a PARTIAL chunk (scrml:crypto) carries only its
+        // [browser-safe] members; a client read of any other member resolves to
+        // `undefined` in the browser, so it is refused here like a missing chunk.
+        let names = allNames;
+        let partial = false;
+        if (hasStdlibClientChunk(mod)) {
+          const allowed = stdlibClientChunkMembers(mod);
+          if (allowed === null) continue;
+          names = allNames.filter((n) => !allowed.has(n));
+          if (names.length === 0) continue;
+          partial = true;
+        }
         const serverOnly = isEscalationServerOnlyModule(`scrml:${mod}`);
-        const why = mod.includes("/")
+        const why = partial
+          ? `\`scrml:${mod}\` ships to the browser only its browser-safe members `
+            + `(${[...(stdlibClientChunkMembers(mod) ?? [])].map((n) => `\`${n}\``).join(", ")}); the rest reach a `
+            + `host API that does not exist in a browser (§12.2 Trigger 3). Move this use into a server `
+            + `function — a use reached only from server code does not fire this error.`
+          : mod.includes("/")
           ? `Submodule specifiers have no client registry entry — the emitted read `
             + `\`_scrml_stdlib.${mod}\` parses as a division, not a member access. Import from `
             + `the root module \`scrml:${mod.split("/")[0]}\` instead.`
@@ -4380,10 +4396,14 @@ export function generateClientJs(ctx: CompileContext): string {
         const col = impSpan?.col ?? impSpan?.column ?? impSpan?.startCol ?? 1;
         const err = new CGError(
           "E-STDLIB-CLIENT-CHUNK-MISSING",
-          `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
-          + `in the browser. A client bundle is a classic script, so the import lowers to `
-          + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
-          + `throw at load and the whole page would be dead on arrival. ${why}`,
+          partial
+            ? `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
+              + `in the browser: the client chunk for \`scrml:${mod}\` does not carry ${names.length === 1 ? "that member" : "those members"}, `
+              + `so the call would fail at run time. ${why}`
+            : `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
+              + `in the browser. A client bundle is a classic script, so the import lowers to `
+              + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
+              + `throw at load and the whole page would be dead on arrival. ${why}`,
           { file: filePath, start: impSpan?.start ?? 0, end: impSpan?.end ?? 0, line, col },
         );
         // The compile formatter reads TOP-LEVEL `filePath` / `line` / `column`

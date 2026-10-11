@@ -315,7 +315,6 @@ function buildClientBatchPlan(
     }];
   }
   const plan: ClientBatch[] = [];
-  const fwdSoFar: string[] = [];
   for (let bi = 0; bi < batches.length; bi++) {
     const b = batches[bi];
     const indices = Array.isArray(b.indices)
@@ -329,9 +328,13 @@ function buildClientBatchPlan(
       indices,
       monotonicity: b.monotonicity,
       returnCell,
-      fwdResultNames: [...fwdSoFar],
+      // S462 P0 fix round 1 — NOTHING is forwarded from one batch to the next
+      // through the client: a value an earlier batch produced would come back
+      // as client-supplied input the later batch trusts (a forged
+      // `{"row":{"role":"admin"}}` ran a DELETE). Route inference keeps every
+      // consumer of a server value in the producing batch (or refuses).
+      fwdResultNames: [],
     });
-    if (returnCell && !fwdSoFar.includes(returnCell)) fwdSoFar.push(returnCell);
   }
   return plan;
 }
@@ -937,17 +940,42 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // (§20.5 / §52) resolved server-side (`_scrml_currentUser`), NEVER from the
     // request body. They are not `state-decl`s, so `allStateCellNames` already
     // excludes them — the client can never spoof identity via this marshal.
-    const _marshalReads = _cps
-      ? collectServerCellReads(_fnBody, allStateCellNames)
-      : [];
+    //
+    // S462 P0 fix round 1 — PER BATCH: a batch's request carries only the cells
+    // ITS OWN statements read. A cell only the client half reads never crosses,
+    // and a later batch is never handed a cell an earlier batch produced (route
+    // inference keeps such a consumer in the producing batch).
+    const _batchesForMarshal: ClientBatch[] = _cps ? buildClientBatchPlan(_cps, _fnBody) : [];
+    const _marshalByBatch = new Map<number, Array<{ name: string; span: unknown }>>();
+    for (const _b of _batchesForMarshal) {
+      // §6.6.9 / §19.9.9.7 (S451 R7): the marshal set is the cells the batch reads
+      // BEFORE (or without) writing them. A cell a top-level declaration of the
+      // batch has already written is read as the batch's own value, so the
+      // client's copy is not sent.
+      const _list: Array<{ name: string; span: unknown }> = [];
+      const _written = new Set<string>();
+      for (const _i of _b.indices) {
+        const _stmt = _fnBody[_i];
+        for (const _mr of collectServerCellReads([_stmt], allStateCellNames)) {
+          if (!_written.has(_mr.name) && !_list.some((x) => x.name === _mr.name)) _list.push(_mr);
+        }
+        const _decl = (handledSqlGuardInner(_stmt) ?? _stmt) as ASTNode;
+        if (_decl && _decl.kind === "state-decl" && typeof _decl.name === "string") _written.add(_decl.name as string);
+      }
+      _marshalByBatch.set(_b.batchIndex, _list);
+    }
+    const _marshalReads: Array<{ name: string; span: unknown }> = [];
+    for (const _list of _marshalByBatch.values()) {
+      for (const _mr of _list) if (!_marshalReads.some((x) => x.name === _mr.name)) _marshalReads.push(_mr);
+    }
     // Emit the marshal key-lines for one `_scrml_body` builder at `indent`,
     // SKIPPING any name already sent as a declared param (`currentParams`) — no
     // duplicate key. Getter mirrors emit-expr.ts client mode: derived →
     // `_scrml_derived_get`, plain reactive / §52 → `_scrml_reactive_get`.
-    const _emitMarshalBodyLines = (indent: string, currentParams: string[]): string[] => {
+    const _emitMarshalBodyLines = (indent: string, currentParams: string[], batchIndex: number): string[] => {
       const _pset = new Set(currentParams);
       const _out: string[] = [];
-      for (const _mr of _marshalReads) {
+      for (const _mr of _marshalByBatch.get(batchIndex) ?? []) {
         if (_pset.has(_mr.name)) continue;
         const _getter = allStateCells.get(_mr.name) === true ? "_scrml_derived_get" : "_scrml_reactive_get";
         _out.push(`${indent}${JSON.stringify(_mr.name)}: ${_getter}(${JSON.stringify(_mr.name)}),`);
@@ -1030,7 +1058,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       }
       // §6.6.9 CPS free-client-cell marshal — the client-held cells the server
       // reads via `_scrml_body["<cell>"]`, so the round-trip's inputs cross the wire.
-      for (const _ml of _emitMarshalBodyLines("    ", paramNames)) lines.push(_ml);
+      for (const _ml of _emitMarshalBodyLines("    ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`  });`);
       if (emitIdempotencyKey) {
         // _scrml_fetch_with_csrf_retry's signature is (path, method, body);
@@ -1089,7 +1117,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`      ${JSON.stringify(p)}: ${p},`);
       }
       // §6.6.9 CPS free-client-cell marshal (see the csrf-retry branch above).
-      for (const _ml of _emitMarshalBodyLines("      ", paramNames)) lines.push(_ml);
+      for (const _ml of _emitMarshalBodyLines("      ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`    }),`);
       lines.push(`  });`);
     }

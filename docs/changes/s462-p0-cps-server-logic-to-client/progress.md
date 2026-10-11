@@ -92,3 +92,70 @@ compile-floor; lsp+commands 723/0; root-level 2239/0; e2e-render-map 259/0;
 browser tier 48 failures == baseline name set (script refused twice with
 PARSER DISAGREES 48 vs 47 — the documented flake; verified by direct
 name-set comparison).
+
+## FIX ROUND 1 (resumed)
+
+You are a dispatched dev agent on the scrml repo (impl#1, compiler/src). PA session S462. P0 SECURITY. You are CONTINUING a crashed agent's fix round (its context overflowed). Its committed work is on the LOCAL branch `worktree-agent-aaf433dac5f8224df` (HEAD a466175f9, which already merges main 1c1e9eee5). Its UNCOMMITTED round-1 work-in-progress is saved as a patch: /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/ded336eb-40b5-403c-94d8-1f930fdf45e5/scratchpad/cps-round1-wip.patch (17 files, +934/-91).
+
+FIRST:
+1. In your worktree, run `git merge --ff-only worktree-agent-aaf433dac5f8224df` (or a plain merge if you're not on its base), then `git fetch origin && git merge origin/main`.
+2. `git apply` the patch. If hunks conflict, resolve them, and say so.
+3. Read docs/changes/s462-p0-cps-server-logic-to-client/{BRIEF,progress}.md for the original design: the per-statement server probe, the `__scrml_cells` batch return, E-RI-002 / E-CG-006, and the removed auth/crypto chunks.
+4. Append this prompt verbatim to that progress.md as "FIX ROUND 1 (resumed)".
+5. Commit the applied WIP immediately as a checkpoint, so the work isn't lost again. If the pre-commit hook fails because the WIP is incomplete, do NOT bypass it; instead keep the patch file as the anchor and continue.
+
+Commit rules:
+- Commit incrementally.
+- Never use --no-verify, and never disable hooks.
+- Gate each commit on free memory above 6GB and load average below 15, foreground, timeout 600000.
+- Use your own scratch subdir.
+
+CONTEXT DISCIPLINE: the previous agent died from context overflow. Keep tool outputs small:
+- run tests with `--bail` and with filtered output (`| tail -30`);
+- grep instead of reading whole files;
+- don't print large diffs.
+
+The last thing it was doing: a types-gate regression in `compiler/src/runtime-template.d.ts`, whose export list must match runtime-template.js.
+
+THE ROUND-1 TASK. These are the S239 review findings on 533609165. Reproduce each with real routes (bun:sqlite + happy-dom; seed bob with an argon2 hash).
+
+H1 HIGH (also on base): a check through a helper is a full bypass. `function check(p,h){ return vp(p,h) }` plus `if (!check(pass, @out.pw))` in a server function shows WELCOME bob for a wrong password. `check` escalates to its own route; the login route returns the whole row; the client posts the hash; the un-awaited Promise passes the check.
+
+H2 HIGH: `const hash = @out.pw` (or destructuring `const {pw,name} = @out`), then `vp(pass, hash)`. This produces 2 batches: the row with the hash goes to the client and comes back, and batch 1 returns 500.
+
+H3 HIGH (also on base): cross-batch trust. With `@row = ?{SELECT name, role…}.get(); @busy = true; if (@row.role == "admin") { ?{DELETE FROM secrets}.run() … }`, a forged `{"row":{"role":"admin"}}` makes the DELETE run.
+
+H4 MED: `const rows = ?{…}.all(); @out = "REJECTED"; for (const u of rows) { if (vp(pass, u.pw)) … }` used to be E-RI-002. It now compiles, batch 1 500s, and the correct password renders REJECTED.
+
+RULE TO IMPLEMENT (fail-closed):
+(1) Any statement that reads a cell its own function's server batch wrote, or a local derived from one (transitively, through locals and destructuring), is server-tier. A call to a function that itself escalates is server-tier at the call site, so the result is computed and awaited on the server. This closes H1 and H2.
+(2) A server-originated value (a server-written cell, a server local, or anything derived from them) must NEVER round-trip through the client into a later batch as trusted input.
+   - Cell writes like `@busy = true` can be computed on the server and returned in `__scrml_cells`, so they don't by themselves force a split.
+   - Statements BEFORE the first server statement stay client-side. This is the spinner pattern: `@busy = true` must render before the request.
+   - If a later batch would need a server-originated value, merge by moving intervening pure-computation or cell-write statements to the server.
+   - If they genuinely need the client (DOM, client-only APIs, lift), REFUSE with E-RI-002. The message must name the value that would cross.
+   This closes H3 and H4.
+(3) Execute the spinner, optimistic-update and form-submit shapes, and verify their UX semantics are kept.
+
+M1: restore a crypto client chunk limited to the functions the shim labels [browser-safe] (generateUUID, hash, safeCompare, generateToken, hmac — read the labels). Keep auth fully server-only. Non-browser-safe crypto used on the client stays E-STDLIB-CLIENT-CHUNK-MISSING. Corpus impact must stay 0.
+
+known-gaps:
+- F3 (Trigger 3 through a local re-export): mark resolved if (1) closes it; otherwise add an entry.
+- Add a LOW entry: `@out = "kept " + ?{…}.get().n` → E-CODEGEN-INVALID-LOGIC (already on base, fails closed).
+- SQL chain truncation is being fixed on another branch. Don't touch it.
+
+TESTS: every H-shape as an end-to-end route test that fails on base or on 533609165. Required outcomes:
+- a wrong password gives REJECTED, and the correct one gives WELCOME;
+- no hash appears in any request or response body, in either direction;
+- the forged H3 cell does NOT run the DELETE.
+
+GATES:
+- pre-commit, tracking tiers (after pretest), browser-baseline --check (re-run on PARSER DISAGREES), `s34-census --check-new`, host-global-scan, facts / spec-index / bootstrap-conformance / severity --check, types-gate --check, snippet-gate, corpus-compile-floor;
+- a corpus differential including ../giti and ../flogence (read-only). Report every newly refused site.
+
+Resolve generated-doc conflicts by hunk, then regenerate. Restore master-list.md from origin/main. Write only inside your worktree.
+
+REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly refused sites, and the gates table. Do NOT push.
+
+### Resume log
+- [resume] ff to a466175f9; origin/main already merged (1c1e9eee5); WIP patch applied cleanly (no conflicts).

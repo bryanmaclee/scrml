@@ -60,6 +60,8 @@ async function build(src, tag) {
   const db = new Database(resolve(dir, "n1.db"), { create: true });
   db.exec("CREATE TABLE users (name TEXT, pw TEXT, kind TEXT)");
   db.exec("CREATE TABLE totals (t INTEGER)");
+  db.exec("CREATE TABLE secrets (s TEXT)");
+  db.exec("INSERT INTO secrets (s) VALUES ('keep-me')");
   db.query("INSERT INTO users (name, pw, kind) VALUES ('bob', ?, 'admin'), ('amy', 'x', 'user')").run(HASH);
   db.close();
   const input = resolve(dir, `${name}.scrml`);
@@ -397,5 +399,172 @@ function pick() {
     expect(ri.length).toBeGreaterThan(0);
     expect(ri[0].message).toContain("assigns to a field of the cell");
     expect(ri[0].message).toContain("@u");
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+// ===========================================================================
+// S462 P0 fix round 1 — the review's H-shapes. Each put the auth decision or the
+// hash on the client (or trusted a server value carried back by the client) on
+// 533609165; H1 and H3 also on base a9aa81eff.
+// ===========================================================================
+
+/** POST every route of `fnName` (a split may have several) with `body`; the parsed results. */
+async function callAllRoutes(serverPath, fnName, body) {
+  const mod = await import(`file://${serverPath}?v=${Date.now()}-${Math.random()}`);
+  const routes = mod.routes.filter((r) => r.path.includes(`_${fnName}_`));
+  const out = [];
+  for (const route of routes) {
+    const resp = await route.handler(postRequest(route.path, body));
+    out.push({ path: route.path, status: resp.status, raw: await resp.text() });
+  }
+  return out;
+}
+
+const H_LOGIN = (fn) => `<program db="sqlite:./n1.db">
+<out> = ""
+\${ import { verifyPassword as vp } from "scrml:auth" }
+${fn}
+<button onclick={ login("x") }>l</button>
+<p>\${@out}</p>
+</program>
+`;
+
+const H_SHAPES = {
+  "H1 — the check goes through a helper (`server function`)": H_LOGIN(`function check(p, h) { return vp(p, h) }
+server function login(pass: string) {
+  @out = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.get()
+  if (!check(pass, @out.pw)) { @out = "REJECTED" } else { @out = "WELCOME " + @out.name }
+}`),
+  "H2a — the hash goes through a local": H_LOGIN(`function login(pass: string) {
+  @out = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.get()
+  const hash = @out.pw
+  if (!vp(pass, hash)) { @out = "REJECTED" } else { @out = "WELCOME " + @out.name }
+}`),
+  "H2b — the hash goes through a destructure": H_LOGIN(`function login(pass: string) {
+  @out = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.get()
+  const { pw, name } = @out
+  if (!vp(pass, pw)) { @out = "REJECTED" } else { @out = "WELCOME " + name }
+}`),
+  "H4 — a loop over the rows after a cell write": H_LOGIN(`function login(pass: string) {
+  const rows = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.all()
+  @out = "REJECTED"
+  for (const u of rows) {
+    if (vp(pass, u.pw)) { @out = "WELCOME " + u.name }
+  }
+}`),
+};
+
+describe("S462 P0 fix round 1 — the auth decision and the hash stay on the server (H1, H2, H4)", () => {
+  for (const [label, SRC] of Object.entries(H_SHAPES)) {
+    test(`${label}: wrong → REJECTED, right → WELCOME bob, one request, no hash in any body`, async () => {
+      const b = await build(SRC, "h-shape");
+      expect(b.errors.map((e) => e.code)).toEqual([]);
+      for (const [pass, want] of [["wrong-password", "REJECTED"], [RIGHT, "WELCOME bob"]]) {
+        const results = await callAllRoutes(b.serverPath, "login", { pass });
+        // ONE request does the whole job: no second batch the client feeds.
+        expect(results.length).toBe(1);
+        const [r] = results;
+        expect(r.status).toBe(200);
+        expect(r.raw).not.toContain("argon2");
+        expect(r.raw).not.toContain('"pw"');
+        expect(JSON.parse(r.raw)).toEqual({ __scrml_cells: { out: want } });
+      }
+      // The client half never sees the row's hash field, nor calls the check itself
+      // (`check` keeps its own route for other callers; login's wrapper must not use it).
+      expect(b.clientJs).not.toMatch(/\.pw\b/);
+      const wrapper = (b.clientJs.match(/async function _scrml_cps_login_\d+\([\s\S]*?\n}\n/) ?? [""])[0];
+      expect(wrapper).toContain("__scrml_cells");
+      expect(wrapper).not.toMatch(/_scrml_fetch_check_\d+\(/);
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
+});
+
+describe("S462 P0 fix round 1 — H3: a server value never comes back from the client as trusted input", () => {
+  const H3 = `<program db="sqlite:./n1.db">
+<row> = { name: "", role: "" }
+<busy> = false
+<msg> = ""
+function purge(id: number) {
+  @row = ?{\`SELECT name, kind AS role FROM users WHERE rowid = \${id}\`}.get()
+  @busy = true
+  if (@row.role == "admin") {
+    ?{\`DELETE FROM secrets\`}.run()
+    @msg = "purged"
+  }
+}
+<button onclick={ purge(2) }>p</button>
+<p>\${@msg} \${@busy}</p>
+</program>
+`;
+  test("a forged `row` cell in ANY purge request does not run the DELETE; the real admin path still does", async () => {
+    const b = await build(H3, "h3");
+    expect(b.errors.map((e) => e.code)).toEqual([]);
+    const secrets = () => {
+      const db = new Database(resolve(b.dir, "n1.db"));
+      const n = db.query("SELECT count(*) AS n FROM secrets").get().n;
+      db.close();
+      return n;
+    };
+    // amy (rowid 2) is a "user". The attacker claims she is an admin.
+    const forged = await callAllRoutes(b.serverPath, "purge", { id: 2, row: { name: "amy", role: "admin" } });
+    expect(forged.length).toBe(1);
+    expect(secrets()).toBe(1);
+    expect(JSON.parse(forged[0].raw).__scrml_cells.msg).toBeUndefined();
+    // bob (rowid 1) really is an admin: the server reads that itself.
+    const real = await callAllRoutes(b.serverPath, "purge", { id: 1 });
+    expect(JSON.parse(real[0].raw).__scrml_cells.msg).toBe("purged");
+    expect(secrets()).toBe(0);
+    // The request never carries `row` (the batch writes it before it reads it).
+    expect(b.clientJs).not.toMatch(/"row":\s*_scrml(?:_cs)?_reactive_get\("row"\)/);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("a statement that must stay in the browser yet sits between the producer and the consumer is REFUSED (E-RI-002)", async () => {
+    const b = await build(`<program db="sqlite:./n1.db">
+<row> = { name: "", role: "" }
+<msg> = ""
+function purge(id: number) {
+  @row = ?{\`SELECT name, kind AS role FROM users WHERE rowid = \${id}\`}.get()
+  localStorage.setItem("checking", "1")
+  if (@row.role == "admin") {
+    ?{\`DELETE FROM secrets\`}.run()
+    @msg = "purged"
+  }
+}
+<button onclick={ purge(2) }>p</button>
+<p>\${@msg}</p>
+</program>
+`, "h3-refuse");
+    // The browser-only statement sits between the server work that produces `@row`
+    // and the server work that uses it: it can neither join the server batch nor
+    // let `@row` round-trip through the browser.
+    const ri = b.errors.filter((e) => e.code === "E-RI-002");
+    expect(ri.length).toBe(1);
+    expect(ri[0].message).toContain("`@row`");
+    expect(ri[0].message).toContain("`localStorage`");
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("S462 P0 fix round 1 (M1) — scrml:crypto ships only its browser-safe members to the client", () => {
+  test("a browser-safe member compiles on the client; the shipped chunk has no host API", async () => {
+    const b = await build(`<program>
+\${ import { generateUUID, safeCompare } from "scrml:crypto" }
+<id> = generateUUID()
+<same> = safeCompare("a", "a")
+<p>\${@id} \${@same}</p>
+</program>
+`, "m1-safe");
+    expect(b.errors.map((e) => e.code)).toEqual([]);
+    expect(b.runtime).toContain("chunk: stdlib-crypto");
+    expect(b.runtime).not.toMatch(/Bun\.(password|CryptoHasher)/);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("a server-only member on the client is refused (E-STDLIB-CLIENT-CHUNK-MISSING)", async () => {
+    const b = await build(`<program>
+\${ import { hash } from "scrml:crypto" }
+<h> = hash("sha256", "x")
+<p>\${@h}</p>
+</program>
+`, "m1-unsafe");
+    expect(b.errors.map((e) => e.code)).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
   }, EXECUTED_DB_TIMEOUT_MS);
 });
