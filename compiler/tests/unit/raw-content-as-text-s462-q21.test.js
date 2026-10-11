@@ -184,6 +184,18 @@ describe("the <script> / <style> refusal in a raw body is KEPT (defence in depth
   test("a literal <script> start tag in <pre> is still E-SCRIPT-001", () => {
     expect(compile(P(`<pre><script>window.pwned=1</script></pre>`)).codes).toEqual(["E-SCRIPT-001"]);
   });
+  test("a <match> arm holding an <each> row with <pre><script> is refused (was a silent accept)", () => {
+    // g-match-arm-each-raw-body-script-silently-accepted-s462 — the arm's <each> is re-split at
+    // codegen with the sub-split's errors discarded; emit-each now asks the raw-content backstop.
+    const { codes, clientJs } = compile(P([
+      `\${ type K:enum = { A, B } }`, `<k> = K.A`, `<items> = [1]`,
+      `<match for=K on=@k>`,
+      `  <A><ul><each in=@items as it><li><pre><script>window.pwned=1</script></pre></li></each></ul></>`,
+      `  <B><p>b</p></>`, `</match>`,
+    ].join("\n")));
+    expect(codes).toEqual(["E-SCRIPT-001"]);
+    expect(clientJs).not.toContain("window.pwned");
+  });
   test("its entity-escaped display form is silent and displays as <script>", () => {
     const { codes, html } = compile(P(`<pre>&lt;script&gt;x&lt;/script&gt;</pre>`));
     expect(codes).toEqual([]);
