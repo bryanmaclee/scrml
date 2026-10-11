@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
-| MED | 587 | 6 |
+| HIGH | 248 | 5 |
+| MED | 588 | 6 |
 | LOW | 345 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -103,9 +103,9 @@ Filed from the O46 deep-dive (`scrml-support/docs/deep-dives/attribute-spread-o4
 - Nit for the X / O46 forwarding build: the case-variant `ON…=(…)` refusal lives in `analyze.scrml` `attrCaseDiags`, which returns early for a component USE — when forwarded attributes land on a use, re-check this path (a forwarded `ONCLICK=(…)` must not bypass it).
 - Still open on the bootstrap, all FAIL-CLOSED (refused, never written): the attribute expression form `attr=${…}` does not parse (E-PARSE-TRAILING); a quoted `${…}` in any other attribute is the reactive-template refusal (E-BOOTSTRAP-UNSUPPORTED) — so a scheme-led quoted URL is refused under that code, not E-ATTR-INTERP-EXECUTABLE (the literal-prefix scheme judgment lands with §5.5.3 reactive templates, and must read impl#1's `_scrml_read_url_scheme`, not a scrml re-implementation).
 
-### g-bootstrap-admits-script-style-elements-s462 — the BOOTSTRAP accepts `<script>` and `<style>` elements: `<script>${@code}</script>` runs data as JavaScript, `<script src=@u>` / SVG `<script href=@u>` load a data-chosen script, `<style>${@css}</style>` injects CSS — impl#1 refuses both (E-SCRIPT-001 / E-STYLE-001) — `NEW S462; HIGH; open`
+### g-bootstrap-admits-script-style-elements-s462 — the BOOTSTRAP accepts `<script>` and `<style>` elements: `<script>${@code}</script>` runs data as JavaScript, `<script src=@u>` / SVG `<script href=@u>` load a data-chosen script, `<style>${@css}</style>` injects CSS — impl#1 refuses both (E-SCRIPT-001 / E-STYLE-001) — `NEW S462; HIGH; RESOLVED S462 (s462-bootstrap-script-style-refusal)`
 
-<!-- @gap id=g-bootstrap-admits-script-style-elements-s462 sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml)+compiler/self-host-v2/parse.scrml(element opener) prov=review:s462-bootstrap-sink-guards-S239(Chromium, reproduced on base 980cb3001 AND head d76bcbf4f) -->
+<!-- @gap id=g-bootstrap-admits-script-style-elements-s462 sev=HIGH status=resolved resolved-by=s462-bootstrap-script-style-refusal locus=compiler/self-host-v2/analyze.scrml(resolveHtml)+compiler/self-host-v2/parse.scrml(element opener) prov=review:s462-bootstrap-sink-guards-S239(Chromium, reproduced on base 980cb3001 AND head d76bcbf4f) -->
 
 Reviewer-reproduced in Chromium on the bootstrap's own artifact, base and head (the s462 sink-guards change does not touch it — it covers §5.2 ATTRIBUTE sinks only, [[g-bootstrap-no-s5-2-sink-floor-s462]]):
 - `<program> let <code:string="window.pwned='SCRIPT'"/> <script id="sc">${@code}</script> </program>` — `window.pwned` is set;
@@ -114,6 +114,24 @@ Reviewer-reproduced in Chromium on the bootstrap's own artifact, base and head (
 - `<style>${@css}</style>` — CSS injection; Chromium fetched an attacker `url()`.
 
 SPEC §4.17: "`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the **block-splitter level**: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` (scrml logic lives in logic-context `${...}`; genuine foreign JS has the `_{...}` foreign-code block, §23). … The match on the tag name is **exact**, not a prefix — `<noscript>` is an ordinary element and is unaffected." §34 rows E-SCRIPT-001 (§4.17) / E-STYLE-001 (§9), both Error. impl#1 emits both at `compiler/src/block-splitter.js`. The bootstrap has neither code. Fix (separate change): refuse both elements by exact local name, in every namespace (`<svg><script>` is a script — the §5.2.x emit allow-list's own reading), with the recovery the SPEC names.
+
+**RESOLVED S462** (s462-bootstrap-script-style-refusal): the bootstrap now refuses both elements with impl#1's codes, at the parse stage (impl#1 refuses at its block splitter, the same stage). `compiler/self-host-v2/parse.scrml` `scriptStyleAt` / `refuseScriptStyle`, mirroring `compiler/src/block-splitter.js` (markup-opener path):
+- The name is read with impl#1's ident set (`[A-Za-z0-9_-]` — so `<script.x>` / `<script$x>` are `script`), compared case-insensitively and exactly (`<noscript>`, `<scripts>`, `<style-x>` stay ordinary elements); a `<*script>` reference is not an element (impl#1 reads no name after `*`).
+- Checked at EVERY opener position: a markup child (any namespace — `<svg><script>`), a program-body / file-level item, a `renders` element, a declaration-body child, and the misplaced `renders` inside an opener. A declaration named `style` / `script` is the element too, as in impl#1 (it was E-DECL-ILLEGAL-FIELD-NAME on the bootstrap).
+- Recovery is impl#1's: the opener's attributes and the body are skipped whole, up to the matching `</script>` / `</style>` (name case-insensitive, `>` right after it) or to the end of the file — so a bound `src=@u` or a `${@code}` body is never read and a brace-heavy body cascades into nothing.
+- Every reproduction above now reports E-SCRIPT-001 / E-STYLE-001 (Error, from `severity.scrml`, regenerated) and no artifact. Conformance (both implementations PASS): `block-grammar/{script-001-interp-body-pos, script-001-bound-src-pos, script-001-svg-namespace-pos, script-001-case-insensitive-pos, style-001-interp-body-pos, script-style-exact-name-neg}` (new); `style/style-001-style-block-pos` FAIL → PASS on the bootstrap. Bootstrap tests: `slice-m4/script-style.test.js`.
+- Corpus: run through the bootstrap's parser, 8 of 3,640 tracked `.scrml` files are newly refused (8 sites, all `E-STYLE-001`: the `style-001-style-block-pos` case + 7 legacy `samples/` with a `<style>` block). impl#1 reports the same code on every one of those files (0 disagreements). Every other textual `<script`/`<style` hit in the corpus sits in a comment or string, and both implementations leave it alone.
+- Divergence found while building this (impl#1, filed separately): impl#1 does NOT refuse a `<script>` / `<style>` in an `<each>` body or in markup inside a `${ … }` logic block. It drops the element silently (no diagnostic, nothing emitted). The bootstrap refuses both, as §4.17 says ("does not admit those elements at all"). See [[g-impl1-script-style-silently-dropped-in-each-and-logic-markup-s462]].
+
+### g-impl1-script-style-silently-dropped-in-each-and-logic-markup-s462 — impl#1 does not refuse a `<script>` / `<style>` inside an `<each>` body or in markup inside a `${ … }` logic block: no E-SCRIPT-001 / E-STYLE-001; the element is silently dropped — `NEW S462; MED; open`
+
+<!-- @gap id=g-impl1-script-style-silently-dropped-in-each-and-logic-markup-s462 sev=MED status=open locus=compiler/src/block-splitter.js(the E-SCRIPT-001/E-STYLE-001 check sits on the markup-opener path only; <each> bodies and logic-context markup do not reach it) prov=empirical:s462-bootstrap-script-style-refusal -->
+
+Reproduced on `origin/main` `6e58dd9eb` with `bun compiler/src/cli.js compile`:
+- `<program> <rows> = [1,2] <ul><each in=@rows as r><li><script>window.pwned=1</script></li></each></ul> </program>` compiles with no error. The `<each>` row renderer builds the `<li>` and leaves out the `<script>`.
+- `<program> <p>${ <script>window.pwned=1</script> }</p> <p>${ <style>body{color:red}</style> }</p> </program>` compiles with no error. Both `<p>`s are emitted empty, and `client.js` contains no code for either element.
+
+Nothing runs and no sink opens, so this is fail-safe. But the author's element disappears with no diagnostic, which is the silent-drop class (`feedback_dont_soft_classify_bugs`). §4.17 says "scrml does not admit those elements at all", so these positions must be refused too, with E-SCRIPT-001 / E-STYLE-001. The bootstrap already refuses every opener position it parses (s462-bootstrap-script-style-refusal). It has no markup-in-logic, so that shape is refused there as a parse error.
 
 ### g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 — in the BOOTSTRAP, a braced value on a non-handler attribute (`srcdoc={@doc}`, `href={@bad}`) silently lowers to `""`, and a lowercase quoted handler `onclick="alert(1)"` lowers to an empty listener — fail-safe but silent — `NEW S462; LOW; open`
 

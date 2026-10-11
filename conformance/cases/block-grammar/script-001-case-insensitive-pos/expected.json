@@ -1,0 +1,22 @@
+{
+  "id": "script-001-case-insensitive-pos",
+  "description": "`<SCRIPT>` and `<Style>` (any case) fire E-SCRIPT-001 / E-STYLE-001; a mixed-case closer ends the skipped body, so the markup after it is unaffected (§4.17).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 (companion considerations): \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the block-splitter level: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` … The match on the tag name is exact, not a prefix — `<noscript>` is an ordinary element and is unaffected.\" HTML tag names are case-insensitive, so an upper-case `<SCRIPT>` is the same executable element; §4.17's recovery scans past \"the matching close tag (case-insensitive)\".",
+  "expect": {
+    "codes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SCRIPT-001": "error",
+      "E-STYLE-001": "error"
+    },
+    "codeCounts": {
+      "E-SCRIPT-001": 1,
+      "E-STYLE-001": 1
+    }
+  }
+}

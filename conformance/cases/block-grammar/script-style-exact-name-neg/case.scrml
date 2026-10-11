@@ -1,0 +1,6 @@
+<program>
+    <noscript>enable scripts</noscript>
+    <scripts>a</scripts>
+    <style-x>b</style-x>
+    <p style="color: red">c</p>
+</program>

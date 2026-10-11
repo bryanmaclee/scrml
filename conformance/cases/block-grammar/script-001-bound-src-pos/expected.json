@@ -1,0 +1,19 @@
+{
+  "id": "script-001-bound-src-pos",
+  "description": "`<script src=@u>` — a data-chosen script URL — fires E-SCRIPT-001 (§4.17). S462 reproduction: on the bootstrap the page loaded the cell's script.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 (companion considerations): \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the block-splitter level: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` … The match on the tag name is exact, not a prefix — `<noscript>` is an ordinary element and is unaffected.\" An empty body does not make the element admissible: it is the element that scrml does not admit.",
+  "expect": {
+    "codes": [
+      "E-SCRIPT-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SCRIPT-001": "error"
+    },
+    "codeCounts": {
+      "E-SCRIPT-001": 1
+    }
+  }
+}
