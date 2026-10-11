@@ -9,11 +9,30 @@
  * Coverage:
  *   H1-H3   isOk()
  *   H4-H8   isError()
- *   H9-H13  withBaseUrl() URL resolution
+ *   H9-H13  withBaseUrl() URL resolution (real shim; S462 client struct)
  *   H14-H20 request logic via mock fetch
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+// S462: the client surface (withBaseUrl / withAuth / withDefaults + the
+// client-first request shape) is tested against the REAL shim, with fetch
+// stubbed — the clients are config structs, not objects of functions.
+import * as http from "../../runtime/stdlib/http.js";
+
+// Capture every fetch the real shim makes; answer 200 JSON.
+let fetchCalls = [];
+let realFetch;
+function stubFetch() {
+    realFetch = globalThis.fetch;
+    fetchCalls = [];
+    globalThis.fetch = async (url, init) => {
+        fetchCalls.push({ url: String(url), init });
+        return new Response(JSON.stringify({ ok: true }), {
+            status: 200, headers: { "content-type": "application/json" },
+        });
+    };
+}
+function restoreFetch() { globalThis.fetch = realFetch; }
 
 function isOk(response) {
     return response && response.ok === true
@@ -21,23 +40,6 @@ function isOk(response) {
 
 function isError(response) {
     return response && response.status >= 400
-}
-
-function withBaseUrl(baseUrl) {
-    function resolveUrl(path) {
-        if (path.startsWith("http://") || path.startsWith("https://")) return path
-        const base = baseUrl.replace(/\/$/, "")
-        const p = path.startsWith("/") ? path : "/" + path
-        return base + p
-    }
-    return {
-        _resolveUrl: resolveUrl,
-        get:   (path, opts) => ({ method: "GET", url: resolveUrl(path), opts }),
-        post:  (path, body, opts) => ({ method: "POST", url: resolveUrl(path), body, opts }),
-        put:   (path, body, opts) => ({ method: "PUT", url: resolveUrl(path), body, opts }),
-        del:   (path, opts) => ({ method: "DELETE", url: resolveUrl(path), opts }),
-        patch: (path, body, opts) => ({ method: "PATCH", url: resolveUrl(path), body, opts }),
-    }
 }
 
 async function makeRequest(url, options, mockFetch) {
@@ -100,30 +102,47 @@ describe("scrml:http — isError()", () => {
     test("H8: false for 301", () => { expect(isError({ ok: false, status: 301 })).toBe(false) })
 })
 
-describe("scrml:http — withBaseUrl()", () => {
-    test("H9: has all 5 methods", () => {
-        const c = withBaseUrl("https://api.example.com")
-        expect(typeof c.get).toBe("function")
-        expect(typeof c.post).toBe("function")
-        expect(typeof c.put).toBe("function")
-        expect(typeof c.del).toBe("function")
-        expect(typeof c.patch).toBe("function")
+describe("scrml:http — withBaseUrl() (real shim, S462 config struct)", () => {
+    beforeEach(stubFetch)
+    afterEach(restoreFetch)
+    test("H9: a client is a struct with no function-valued fields", () => {
+        const c = http.withBaseUrl("https://api.example.com")
+        expect(c).toEqual({ baseUrl: "https://api.example.com", defaults: {}, authorization: null })
+        for (const v of Object.values(c)) expect(typeof v).not.toBe("function")
     })
-    test("H10: resolves relative path", () => {
-        expect(withBaseUrl("https://api.example.com")._resolveUrl("/users/42"))
-            .toBe("https://api.example.com/users/42")
+    test("H10: resolves relative path", async () => {
+        await http.get(http.withBaseUrl("https://api.example.com"), "/users/42")
+        expect(fetchCalls[0].url).toBe("https://api.example.com/users/42")
+        expect(fetchCalls[0].init.method).toBe("GET")
     })
-    test("H11: preserves absolute URL", () => {
-        expect(withBaseUrl("https://api.example.com")._resolveUrl("https://other.com/p"))
-            .toBe("https://other.com/p")
+    test("H11: preserves absolute URL", async () => {
+        await http.get(http.withBaseUrl("https://api.example.com"), "https://other.com/p")
+        expect(fetchCalls[0].url).toBe("https://other.com/p")
     })
-    test("H12: trailing slash stripped from base", () => {
-        expect(withBaseUrl("https://api.example.com/")._resolveUrl("/users"))
-            .toBe("https://api.example.com/users")
+    test("H12: trailing slash stripped from base", async () => {
+        await http.del(http.withBaseUrl("https://api.example.com/"), "/users")
+        expect(fetchCalls[0].url).toBe("https://api.example.com/users")
+        expect(fetchCalls[0].init.method).toBe("DELETE")
     })
-    test("H13: path without leading slash gets one", () => {
-        expect(withBaseUrl("https://api.example.com")._resolveUrl("users"))
-            .toBe("https://api.example.com/users")
+    test("H13: path without leading slash gets one; body methods shift one slot", async () => {
+        const c = http.withBaseUrl("https://api.example.com")
+        await http.post(c, "users", { name: "A" }, { headers: { "X-T": "1" } })
+        expect(fetchCalls[0].url).toBe("https://api.example.com/users")
+        expect(fetchCalls[0].init.method).toBe("POST")
+        expect(fetchCalls[0].init.body).toBe(JSON.stringify({ name: "A" }))
+        expect(fetchCalls[0].init.headers["X-T"]).toBe("1")
+        await http.put(c, "/u/1", { a: 1 })
+        await http.patch(c, "/u/1", { b: 2 })
+        expect(fetchCalls.map(f => f.init.method)).toEqual(["POST", "PUT", "PATCH"])
+    })
+    test("H13b: the URL-first form is unchanged", async () => {
+        const r = await http.post("https://x.test/a", { n: 1 }, { headers: { "X-Q": "q" } })
+        expect(r.ok).toBe(true)
+        expect(fetchCalls[0].url).toBe("https://x.test/a")
+        expect(fetchCalls[0].init.body).toBe(JSON.stringify({ n: 1 }))
+        expect(fetchCalls[0].init.headers["X-Q"]).toBe("q")
+        await http.get("https://x.test/b", { headers: { "X-R": "r" } })
+        expect(fetchCalls[1].init.headers["X-R"]).toBe("r")
     })
 })
 
@@ -180,72 +199,9 @@ describe("scrml:http — request logic (mock fetch)", () => {
 
 // --- S57 Tier 3 middleware extensions ----------------------------------------
 
-const restClient = {
-    get:   (url, opts) => Promise.resolve({ url, opts: opts || {}, method: "GET" }),
-    post:  (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "POST" }),
-    put:   (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "PUT" }),
-    del:   (url, opts) => Promise.resolve({ url, opts: opts || {}, method: "DELETE" }),
-    patch: (url, body, opts) => Promise.resolve({ url, body, opts: opts || {}, method: "PATCH" }),
-};
-
-function withAuth(token, scheme, wrapped) {
-    const sch = scheme || "Bearer"
-    const inner = wrapped || restClient
-    function mergeOpts(opts) {
-        const o = opts || {}
-        const headers = Object.assign({}, o.headers || {}, { Authorization: `${sch} ${token}` })
-        return Object.assign({}, o, { headers })
-    }
-    return {
-        get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
-        post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-        put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-        del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
-        patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
-    }
-}
-
-function withDefaults(defaults, wrapped) {
-    const d = defaults || {}
-    const inner = wrapped || restClient
-    function mergeOpts(opts) {
-        const o = opts || {}
-        const merged = Object.assign({}, d, o)
-        if (d.headers || o.headers) {
-            merged.headers = Object.assign({}, d.headers || {}, o.headers || {})
-        }
-        return merged
-    }
-    return {
-        get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
-        post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-        put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-        del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
-        patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
-    }
-}
-
-async function retry(fn, opts) {
-    const o = opts || {}
-    const maxRetries = o.maxRetries !== undefined ? o.maxRetries : 3
-    const baseDelay  = o.baseDelay  !== undefined ? o.baseDelay  : 200
-    const factor     = o.factor     !== undefined ? o.factor     : 2
-    const jitter     = o.jitter     !== undefined ? o.jitter     : 0.2
-    const shouldRetry = o.shouldRetry || (() => true)
-    let lastErr = null
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try { return await fn(); } catch (err) {
-            lastErr = err
-            if (attempt === maxRetries) break
-            if (!shouldRetry(err)) break
-            const base = baseDelay * Math.pow(factor, attempt)
-            const jitterAmt = base * jitter * (Math.random() * 2 - 1)
-            const delay = Math.max(0, base + jitterAmt)
-            await new Promise(r => setTimeout(r, delay))
-        }
-    }
-    throw lastErr
-}
+// S462: retry is tested against the REAL shim — shouldRetry is a positional
+// argument, not an options field.
+const retry = http.retry
 
 function multipart(fields) {
     const fd = new FormData()
@@ -260,49 +216,101 @@ function multipart(fields) {
     return fd
 }
 
-describe("scrml:http — withAuth (Tier 3)", () => {
-    test("HM1: adds Bearer auth header by default", async () => {
-        const c = withAuth("token-xyz")
-        const res = await c.get("/x")
-        expect(res.opts.headers.Authorization).toBe("Bearer token-xyz")
+describe("scrml:http — client isolation + target detection (S462 fix round 1)", () => {
+    beforeEach(stubFetch)
+    afterEach(restoreFetch)
+    test("H14: two clients never share defaults; a client is deeply frozen", async () => {
+        const one = http.withBaseUrl("https://one.test")
+        expect(Object.isFrozen(one)).toBe(true)
+        expect(Object.isFrozen(one.defaults)).toBe(true)
+        expect(() => { one.defaults.headers = { Leak: "yes" } }).toThrow()
+        await http.get(http.withBaseUrl("https://two.test"), "/p")
+        expect(fetchCalls[0].init.headers.Leak).toBeUndefined()
     })
-    test("HM2: custom scheme", async () => {
-        const c = withAuth("creds", "Basic")
-        const res = await c.get("/x")
-        expect(res.opts.headers.Authorization).toBe("Basic creds")
+    test("H15: a wrapper owns a COPY of the wrapped client's defaults (headers too)", () => {
+        const inner = http.withDefaults({ headers: { "X-A": "1" } })
+        const outer = http.withAuth("t", "Bearer", inner)
+        expect(outer.defaults).not.toBe(inner.defaults)
+        expect(outer.defaults.headers).not.toBe(inner.defaults.headers)
+        expect(Object.isFrozen(outer.defaults.headers)).toBe(true)
+        expect(outer.defaults).toEqual(inner.defaults)
     })
-    test("HM3: preserves user-set headers", async () => {
-        const c = withAuth("t")
-        const res = await c.get("/x", { headers: { "X-Trace": "abc" } })
-        expect(res.opts.headers["X-Trace"]).toBe("abc")
-        expect(res.opts.headers.Authorization).toBe("Bearer t")
+    test("H16: a hand-built client with defaults: null is still a client (keeps its auth)", async () => {
+        await http.get({ baseUrl: "https://h.test", defaults: null, authorization: "Bearer z" }, "/x")
+        expect(fetchCalls[0].url).toBe("https://h.test/x")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Bearer z")
     })
-    test("HM4: composes with another wrapped client", async () => {
-        const inner = withDefaults({ timeout: 5000 })
-        const auth = withAuth("t", "Bearer", inner)
-        const res = await auth.get("/x")
-        expect(res.opts.headers.Authorization).toBe("Bearer t")
-        expect(res.opts.timeout).toBe(5000)
+    test("H17: URL / Request objects keep the pre-S462 URL-first behaviour", async () => {
+        await http.get(new URL("https://u.test/a"))
+        expect(fetchCalls[0].url).toBe("https://u.test/a")
+    })
+    test("H18: any other non-string target is refused, never fetch(\"[object Object]\")", async () => {
+        await expect(http.get({ defaults: {} }, "/x")).rejects.toThrow(/first argument must be a URL/)
+        await expect(http.post(42, {})).rejects.toThrow(/first argument must be a URL/)
+        await expect(http.del(null)).rejects.toThrow(/first argument must be a URL/)
+        expect(fetchCalls.length).toBe(0)
     })
 })
 
-describe("scrml:http — withDefaults (Tier 3)", () => {
-    test("HM5: injects timeout default", async () => {
-        const c = withDefaults({ timeout: 30000 })
-        const res = await c.get("/x")
-        expect(res.opts.timeout).toBe(30000)
+describe("scrml:http — withAuth (Tier 3, real shim)", () => {
+    beforeEach(stubFetch)
+    afterEach(restoreFetch)
+    test("HM1: adds Bearer auth header by default", async () => {
+        await http.get(http.withAuth("token-xyz"), "https://x.test/x")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Bearer token-xyz")
+    })
+    test("HM2: custom scheme", async () => {
+        await http.get(http.withAuth("creds", "Basic"), "https://x.test/x")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Basic creds")
+    })
+    test("HM3: preserves user-set headers; the client credential beats a per-call one", async () => {
+        await http.get(http.withAuth("t"), "https://x.test/x", { headers: { "X-Trace": "abc", Authorization: "spoof" } })
+        expect(fetchCalls[0].init.headers["X-Trace"]).toBe("abc")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Bearer t")
+    })
+    test("HM4: composes with another wrapped client", async () => {
+        const inner = http.withDefaults({ timeout: 5000 }, http.withBaseUrl("https://api.test"))
+        const auth = http.withAuth("t", "Bearer", inner)
+        expect(auth).toEqual({ baseUrl: "https://api.test", defaults: { timeout: 5000 }, authorization: "Bearer t" })
+        await http.get(auth, "/x")
+        expect(fetchCalls[0].url).toBe("https://api.test/x")
+        expect(fetchCalls[0].init.headers.Authorization).toBe("Bearer t")
+    })
+    test("HM4b: re-wrapping replaces the credential (outermost withAuth wins)", () => {
+        const a = http.withAuth("old")
+        expect(http.withAuth("new", "Bearer", a).authorization).toBe("Bearer new")
+        expect(a.authorization).toBe("Bearer old") // the wrapped client is not mutated
+    })
+})
+
+describe("scrml:http — withDefaults (Tier 3, real shim)", () => {
+    test("HM5: injects timeout default", () => {
+        const c = http.withDefaults({ timeout: 30000 })
+        expect(c.defaults.timeout).toBe(30000)
     })
     test("HM6: per-call options override defaults", async () => {
-        const c = withDefaults({ timeout: 30000 })
-        const res = await c.get("/x", { timeout: 1000 })
-        expect(res.opts.timeout).toBe(1000)
+        stubFetch()
+        try {
+            // timeout is not observable on fetch; retry count is — a per-call
+            // retry: 0 overrides a default retry: 5 (one fetch, no retries).
+            const c = http.withDefaults({ retry: 5, retryDelay: 1, headers: { "X-D": "d" } })
+            await http.get(c, "https://x.test/x", { retry: 0 })
+            expect(fetchCalls.length).toBe(1)
+            expect(fetchCalls[0].init.headers["X-D"]).toBe("d")
+        } finally { restoreFetch() }
     })
-    test("HM7: headers merge by key", async () => {
-        const c = withDefaults({ headers: { "X-A": "1", "X-B": "2" } })
-        const res = await c.get("/x", { headers: { "X-B": "override", "X-C": "3" } })
-        expect(res.opts.headers["X-A"]).toBe("1")
-        expect(res.opts.headers["X-B"]).toBe("override")
-        expect(res.opts.headers["X-C"]).toBe("3")
+    test("HM7: headers merge by key (call over defaults; outer defaults over inner)", async () => {
+        stubFetch()
+        try {
+            const inner = http.withDefaults({ headers: { "X-A": "inner", "X-Z": "z" } })
+            const c = http.withDefaults({ headers: { "X-A": "1", "X-B": "2" } }, inner)
+            await http.get(c, "https://x.test/x", { headers: { "X-B": "override", "X-C": "3" } })
+            const h = fetchCalls[0].init.headers
+            expect(h["X-A"]).toBe("1")
+            expect(h["X-B"]).toBe("override")
+            expect(h["X-C"]).toBe("3")
+            expect(h["X-Z"]).toBe("z")
+        } finally { restoreFetch() }
     })
 })
 
@@ -323,10 +331,42 @@ describe("scrml:http — retry (Tier 3)", () => {
         try {
             await retry(
                 async () => { calls++; throw new Error("nope") },
-                { maxRetries: 5, baseDelay: 1, jitter: 0, shouldRetry: () => false }
+                { maxRetries: 5, baseDelay: 1, jitter: 0 },
+                () => false
             )
         } catch(e) {}
         expect(calls).toBe(1)
+    })
+    test("HM10b: shouldRetry receives the error; true keeps retrying", async () => {
+        const seen = []
+        let calls = 0
+        await expect(retry(
+            async () => { calls++; throw new Error("e" + calls) },
+            { maxRetries: 2, baseDelay: 1, jitter: 0 },
+            (err) => { seen.push(err.message); return true }
+        )).rejects.toThrow("e3")
+        expect(calls).toBe(3)
+        expect(seen).toEqual(["e1", "e2"])
+    })
+    test("HM10c: a legacy opts.shouldRetry is refused, not silently ignored (S462)", async () => {
+        let calls = 0
+        await expect(retry(
+            async () => { calls++; return 1 },
+            { maxRetries: 2, shouldRetry: () => false }
+        )).rejects.toThrow(/third argument/)
+        expect(calls).toBe(0)
+    })
+    test("HM10e: a non-function positional shouldRetry is refused (never silently ignored)", async () => {
+        let calls = 0
+        for (const bad of [true, "no", 0, {}]) {
+            await expect(retry(async () => { calls++; return 1 }, { maxRetries: 1 }, bad))
+                .rejects.toThrow(/shouldRetry must be a function/)
+        }
+        expect(calls).toBe(0)
+    })
+    test("HM10d: opts stays data — no function-valued field is needed", async () => {
+        expect(await retry(async () => 7, { maxRetries: 0 })).toBe(7)
+        expect(await retry(async () => 8)).toBe(8)
     })
 })
 

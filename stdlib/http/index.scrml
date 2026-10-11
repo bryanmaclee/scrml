@@ -22,8 +22,19 @@ ${
     // IMPORTANT: Intended for server-classified function bodies. fetch is
     // available server-side in Bun. Do not call from client-side reactive code.
     //
+    // Clients (S462): `withBaseUrl` / `withAuth` / `withDefaults` return an
+    // HttpClient — a plain config STRUCT, not an object of functions (a function
+    // is never stored in a value, §14.3). Pass the client as the FIRST argument
+    // of the same request functions:
+    //   get(url, opts)              get(client, path, opts)
+    //   post(url, body, opts)       post(client, path, body, opts)
+    //   put / del / patch           — same two shapes
+    //
     // Usage:
     //   ${ import { get, post, withBaseUrl, isOk } from 'scrml:http' }
+    //
+    //   const api = withAuth(token, "Bearer", withBaseUrl("https://api.example.com"))
+    //   const res = get(api, "/users/42")
     // ---------------------------------------------------------------------------
 
     // De-leak the retry-jitter through scrml:random — the sanctioned
@@ -94,41 +105,150 @@ ${
         throw lastError
     }
 
+    // -- Clients (S462) --------------------------------------------------------
+    // An HttpClient is DATA: a base URL, default request options, and an
+    // Authorization header value. The request functions read it; it holds no
+    // functions of its own.
+    //
+    //   baseUrl       — prefix for relative paths ("" = none)
+    //   defaults      — options merged under every call's options
+    //                   ({ headers?, timeout?, retry?, retryDelay? })
+    //   authorization — full Authorization header value, or `not`
+
+    export type HttpClient:struct = {
+        baseUrl: string,
+        defaults: asIs,
+        authorization: string | not
+    }
+
+    const _NO_CLIENT = Object.freeze({ baseUrl: "", defaults: Object.freeze({}), authorization: not })
+
+    // Build a client that OWNS its defaults: a fresh copy (headers included),
+    // frozen all the way down. Two clients never share a mutable `defaults`,
+    // and a wrapper never aliases the wrapped client's, so a write to one
+    // client's headers cannot leak into another client's requests.
+    function _makeClient(baseUrl, defaults, authorization) {
+        const own = _mergeOptions(defaults, not)
+        if (own.headers) Object.freeze(own.headers)
+        return Object.freeze({
+            baseUrl: baseUrl || "",
+            defaults: Object.freeze(own),
+            authorization: authorization
+        })
+    }
+
+    // A request target is either a URL or an HttpClient. A client is an
+    // object that HAS a `baseUrl` field (whatever its `defaults` hold).
+    function _isClient(target) {
+        return target is given && typeof target == "object" && Object.hasOwn(target, "baseUrl")
+    }
+
+    // The URL-first form keeps the pre-S462 behaviour for what fetch accepts
+    // as its input — a string, a URL object, or a Request. Anything else is
+    // refused rather than stringified into fetch("[object Object]").
+    function _assertUrlTarget(target, fnName) {
+        if (typeof target == "string") return
+        if (target instanceof URL || target instanceof Request) return
+        throw new TypeError(`[scrml:http] ${fnName}: the first argument must be a URL (string, URL or Request) or an HttpClient from withBaseUrl / withAuth / withDefaults`)
+    }
+
+    // Resolve a path against the client's base URL. Absolute URLs pass through.
+    function _clientUrl(client, path) {
+        if (!client.baseUrl) return path
+        if (path.startsWith("http://") || path.startsWith("https://")) return path
+        const base = client.baseUrl.replace(/\/$/, "")
+        const p = path.startsWith("/") ? path : "/" + path
+        return base + p
+    }
+
+    // Merge two option objects: `over` wins key by key; headers merge by key.
+    function _mergeOptions(under, over) {
+        const u = under || {}
+        const o = over || {}
+        const merged = Object.assign({}, u, o)
+        if (u.headers || o.headers) {
+            merged.headers = Object.assign({}, u.headers || {}, o.headers || {})
+        }
+        return merged
+    }
+
+    // The options a client contributes to one call: its defaults under the
+    // call's own options, then its Authorization header over both (a client's
+    // credential is not overridden by a per-call header).
+    function _clientOptions(client, options) {
+        const merged = _mergeOptions(client.defaults, options)
+        if (client.authorization is given) {
+            merged.headers = Object.assign({}, merged.headers || {}, { Authorization: client.authorization })
+        }
+        return merged
+    }
+
     /**
      * Perform a GET request.
-     * Example: const res = await get("/api/users")
+     *   get(url, options?)
+     *   get(client, path, options?)
+     * Example: const res = get("/api/users")
+     *          const res = get(api, "/users/42")
      */
-    export async function get(url, options) {
-        return _request(url, { ...options, method: "GET" })
+    export async function get(target, pathOrOptions, options) {
+        if (_isClient(target)) {
+            return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "GET" })
+        }
+        _assertUrlTarget(target, "get")
+        return _request(target, { ...pathOrOptions, method: "GET" })
     }
 
     /**
      * Perform a POST request. Object body is JSON-serialized automatically.
-     * Example: const res = await post("/api/users", { name: "Alice" })
+     *   post(url, body, options?)
+     *   post(client, path, body, options?)
+     * Example: const res = post("/api/users", { name: "Alice" })
      */
-    export async function post(url, body, options) {
-        return _request(url, { ...options, method: "POST", body })
+    export async function post(target, a, b, c) {
+        if (_isClient(target)) {
+            return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "POST", body: b })
+        }
+        _assertUrlTarget(target, "post")
+        return _request(target, { ...b, method: "POST", body: a })
     }
 
     /**
      * Perform a PUT request.
+     *   put(url, body, options?)
+     *   put(client, path, body, options?)
      */
-    export async function put(url, body, options) {
-        return _request(url, { ...options, method: "PUT", body })
+    export async function put(target, a, b, c) {
+        if (_isClient(target)) {
+            return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PUT", body: b })
+        }
+        _assertUrlTarget(target, "put")
+        return _request(target, { ...b, method: "PUT", body: a })
     }
 
     /**
      * Perform a DELETE request. Named `del` — `delete` is a reserved keyword.
+     *   del(url, options?)
+     *   del(client, path, options?)
      */
-    export async function del(url, options) {
-        return _request(url, { ...options, method: "DELETE" })
+    export async function del(target, pathOrOptions, options) {
+        if (_isClient(target)) {
+            return _request(_clientUrl(target, pathOrOptions), { ..._clientOptions(target, options), method: "DELETE" })
+        }
+        _assertUrlTarget(target, "del")
+        return _request(target, { ...pathOrOptions, method: "DELETE" })
     }
 
     /**
      * Perform a PATCH request.
+     *   patch(url, body, options?)
+     *   patch(client, path, body, options?)
      */
-    export async function patch(url, body, options) {
-        return _request(url, { ...options, method: "PATCH", body })
+    export async function patch(target, a, b, c) {
+        if (_isClient(target)) {
+            return _request(_clientUrl(target, a), { ..._clientOptions(target, c), method: "PATCH", body: b })
+        }
+        _assertUrlTarget(target, "patch")
+        return _request(target, { ...b, method: "PATCH", body: a })
     }
 
     /**
@@ -138,22 +258,14 @@ ${
      *
      * Example:
      *   const api = withBaseUrl("https://api.example.com")
-     *   const user = await api.get("/users/42")
+     *   const user = get(api, "/users/42")
+     *
+     * @param baseUrl — the URL prefix
+     * @param wrapped — optional existing client whose defaults + auth are kept
      */
-    export function withBaseUrl(baseUrl) {
-        function resolveUrl(path) {
-            if (path.startsWith("http://") || path.startsWith("https://")) return path
-            const base = baseUrl.replace(/\/$/, "")
-            const p = path.startsWith("/") ? path : "/" + path
-            return base + p
-        }
-        return {
-            get:   (path, opts) => get(resolveUrl(path), opts),
-            post:  (path, body, opts) => post(resolveUrl(path), body, opts),
-            put:   (path, body, opts) => put(resolveUrl(path), body, opts),
-            del:   (path, opts) => del(resolveUrl(path), opts),
-            patch: (path, body, opts) => patch(resolveUrl(path), body, opts),
-        }
+    export function withBaseUrl(baseUrl, wrapped) {
+        const base = wrapped is given ? wrapped : _NO_CLIENT
+        return _makeClient(baseUrl, base.defaults, base.authorization)
     }
 
     /**
@@ -170,14 +282,15 @@ ${
         return response && response.status >= 400
     }
 
-    // -- Middleware composition (S57 Tier 3) ---------------------------------
-    // The factory pattern from withBaseUrl, generalized: each `with...`
-    // returns a {get, post, put, del, patch} client. They compose by
-    // wrapping each other.
+    // -- Client composition (S57 Tier 3; config structs since S462) -----------
+    // Each `with...` returns a NEW HttpClient built from an optional `wrapped`
+    // client, so they compose by nesting:
+    //   withAuth(token, "Bearer", withDefaults({ timeout: 30000 }, withBaseUrl(url)))
 
     /**
-     * Create a client that automatically adds an Authorization header
-     * to every request.
+     * Create a client that adds an Authorization header to every request.
+     * The header beats a per-call `headers.Authorization`; wrapping a client
+     * that already has one REPLACES it (the outermost withAuth wins).
      *
      * Examples:
      *   const api = withAuth("my-jwt-token")              // → "Bearer my-jwt-token"
@@ -186,55 +299,30 @@ ${
      *
      * @param token   — token string (will be prefixed with the scheme)
      * @param scheme  — auth scheme ("Bearer" default; "Basic", "Token", etc.)
-     * @param wrapped — optional existing client to wrap (default: top-level get/post/...)
+     * @param wrapped — optional existing client whose base URL + defaults are kept
      */
     export function withAuth(token, scheme, wrapped) {
         const sch = scheme || "Bearer"
-        const inner = wrapped || { get, post, put, del, patch }
-        function mergeOpts(opts) {
-            const o = opts || {}
-            const headers = Object.assign({}, o.headers || {}, { Authorization: `${sch} ${token}` })
-            return Object.assign({}, o, { headers })
-        }
-        return {
-            get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
-            post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-            put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-            del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
-            patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
-        }
+        const base = wrapped is given ? wrapped : _NO_CLIENT
+        return _makeClient(base.baseUrl, base.defaults, `${sch} ${token}`)
     }
 
     /**
      * Create a client that injects default options (headers, timeout, retry,
-     * retryDelay) into every request. Per-call options override the defaults.
+     * retryDelay) into every request. Per-call options override the defaults;
+     * headers merge by key. Wrapping a client merges these defaults OVER its
+     * own.
      *
      * Example:
      *   const api = withDefaults({ timeout: 30000, retry: 3, retryDelay: 500 })
-     *   await api.get("/slow-endpoint")  // gets the 30s timeout + 3 retries
+     *   get(api, "/slow-endpoint")  // gets the 30s timeout + 3 retries
      *
      * @param defaults — option object merged into every call's opts
-     * @param wrapped  — optional existing client to wrap
+     * @param wrapped  — optional existing client whose base URL + auth are kept
      */
     export function withDefaults(defaults, wrapped) {
-        const d = defaults || {}
-        const inner = wrapped || { get, post, put, del, patch }
-        function mergeOpts(opts) {
-            const o = opts || {}
-            const merged = Object.assign({}, d, o)
-            // Headers should merge by key, not replace wholesale
-            if (d.headers || o.headers) {
-                merged.headers = Object.assign({}, d.headers || {}, o.headers || {})
-            }
-            return merged
-        }
-        return {
-            get:   (url, opts)       => inner.get(url, mergeOpts(opts)),
-            post:  (url, body, opts) => inner.post(url, body, mergeOpts(opts)),
-            put:   (url, body, opts) => inner.put(url, body, mergeOpts(opts)),
-            del:   (url, opts)       => inner.del(url, mergeOpts(opts)),
-            patch: (url, body, opts) => inner.patch(url, body, mergeOpts(opts)),
-        }
+        const base = wrapped is given ? wrapped : _NO_CLIENT
+        return _makeClient(base.baseUrl, _mergeOptions(base.defaults, defaults), base.authorization)
     }
 
     /**
@@ -246,22 +334,33 @@ ${
      *
      * Backoff: delay = baseDelay * (factor ^ attempt) ± jitter%.
      *
-     * @param fn   — async function to execute (called with no args)
-     * @param opts — { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2,
-     *                shouldRetry: (err) => boolean }
+     * @param fn          — async function to execute (called with no args)
+     * @param opts        — data only: { maxRetries: 3, baseDelay: 200, factor: 2, jitter: 0.2 }
+     * @param shouldRetry — optional function (err) → boolean; false stops retrying.
+     *                      A positional argument, not an options field (S462: a
+     *                      function is passed, never stored in a value). An
+     *                      `opts.shouldRetry` is refused rather than ignored.
+     *
+     * Example:
+     *   retry(() => syncOrder(id), { maxRetries: 5 }, (err) => err.name != "AuthError")
      * @returns the resolved value of fn, or rethrows the last error after exhaustion
      *
      * safeCallAsync-gap: await fn() is an async-throwing call. synchronous
      * safeCall cannot catch async throws. This try/catch is retained until
      * safeCallAsync is available. Tracked as Phase 3a partial.
      */
-    export async function retry(fn, opts) {
+    export async function retry(fn, opts, shouldRetry) {
         const o = opts || {}
+        if (o.shouldRetry is given) {
+            throw new Error("[scrml:http] retry: shouldRetry is the third argument — retry(fn, opts, shouldRetry) — not an opts field")
+        }
+        if (shouldRetry is given && typeof shouldRetry != "function") {
+            throw new TypeError("[scrml:http] retry: shouldRetry must be a function (err) => boolean — retry(fn, opts, shouldRetry)")
+        }
         const maxRetries = o.maxRetries is given ? o.maxRetries : 3
         const baseDelay  = o.baseDelay  is given ? o.baseDelay  : 200
         const factor     = o.factor     is given ? o.factor     : 2
         const jitter     = o.jitter     is given ? o.jitter     : 0.2
-        const shouldRetry = o.shouldRetry || (() => true)
 
         let lastErr = not
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -270,7 +369,7 @@ ${
             } catch (err) {
                 lastErr = err
                 if (attempt == maxRetries) break
-                if (!shouldRetry(err)) break
+                if (shouldRetry is given && !shouldRetry(err)) break
                 const base = baseDelay * Math.pow(factor, attempt)
                 const jitterAmt = base * jitter * (random() * 2 - 1)
                 const delay = Math.max(0, base + jitterAmt)
@@ -324,7 +423,7 @@ ${
     }
 
     ~{
-        import { assertTruthy, assertFalsy } from 'scrml:test'
+        import { assertEqual, assertTruthy, assertFalsy } from 'scrml:test'
 
         assertTruthy(isOk({ ok: true, status: 200 }))
         assertFalsy(isOk({ ok: false, status: 404 }))
@@ -333,23 +432,30 @@ ${
         assertTruthy(isError({ ok: false, status: 500 }))
         assertFalsy(isError({ ok: true, status: 200 }))
 
-        const client = withBaseUrl("https://api.example.com")
-        assertTruthy(typeof client.get == "function")
-        assertTruthy(typeof client.post == "function")
-        assertTruthy(typeof client.put == "function")
-        assertTruthy(typeof client.del == "function")
-        assertTruthy(typeof client.patch == "function")
+        // -- Clients are config structs (S462) --------------------------------
+        const client = withBaseUrl("https://api.example.com/")
+        assertEqual(client.baseUrl, "https://api.example.com/")
+        assertTruthy(_isClient(client))
+        assertFalsy(_isClient("https://api.example.com"))
+        assertEqual(_clientUrl(client, "/users/42"), "https://api.example.com/users/42")
+        assertEqual(_clientUrl(client, "users"), "https://api.example.com/users")
+        assertEqual(_clientUrl(client, "https://other.com/p"), "https://other.com/p")
 
-        // -- S57 Tier 3 middleware --------------------------------------------
-
-        // withAuth — exposes the same client surface
+        // withAuth — sets the Authorization header value; outermost wins
         const auth = withAuth("token-xyz")
-        assertTruthy(typeof auth.get == "function")
-        assertTruthy(typeof auth.post == "function")
+        assertEqual(auth.authorization, "Bearer token-xyz")
+        assertEqual(withAuth("new", "Bearer", auth).authorization, "Bearer new")
+        const authOpts = _clientOptions(auth, { headers: { Authorization: "x", "X-A": "1" } })
+        assertEqual(authOpts.headers.Authorization, "Bearer token-xyz")
+        assertEqual(authOpts.headers["X-A"], "1")
 
-        // withDefaults — exposes the same client surface
-        const defaults = withDefaults({ timeout: 5000 })
-        assertTruthy(typeof defaults.get == "function")
+        // withDefaults — per-call options override; headers merge by key
+        const defaults = withDefaults({ timeout: 5000, headers: { "X-A": "1" } }, client)
+        assertEqual(defaults.baseUrl, "https://api.example.com/")
+        const callOpts = _clientOptions(defaults, { timeout: 100, headers: { "X-B": "2" } })
+        assertEqual(callOpts.timeout, 100)
+        assertEqual(callOpts.headers["X-A"], "1")
+        assertEqual(callOpts.headers["X-B"], "2")
 
         // multipart returns a FormData
         const fd = multipart({ name: "alice", count: 3 })
