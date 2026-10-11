@@ -1315,7 +1315,7 @@ function renderTemplateChildToJs(
     // they name and a balanced bare nested <code>/<pre> stays an element. (A text node
     // would show `&lt;b&gt;` literally and the nested wrapper as text.)
     if (parentIsRawContent) {
-      for (const l of rawContentDomLines(txt, fragmentVar, `_scrml_raw_${nextLocalId()}`, indent)) lines.push(l);
+      for (const l of rawContentDomLines(txt, fragmentVar, () => `_scrml_raw_${nextLocalId()}`, indent)) lines.push(l);
       return;
     }
     // GITI-033 — a lifted-markup TEXT child can carry `${...}` interpolations

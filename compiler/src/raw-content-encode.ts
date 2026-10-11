@@ -105,11 +105,14 @@ function encodeAngles(s: string): string {
  * the characters they name, exactly as in the static HTML. A body with no `<`, `>` or `&`
  * is appended as a plain text node (identical result, no parse).
  */
-export function rawContentDomLines(body: string, parentVar: string, tplVar: string, indent = ""): string[] {
+export function rawContentDomLines(body: string, parentVar: string, tplVarName: string | (() => string), indent = ""): string[] {
   // No `<`, `>` or `&`: nothing to encode and no entity to decode — a text node is the same.
   if (!/[<>&]/.test(body)) {
     return [`${indent}${parentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(body)}));`];
   }
+  // The variable is named only when it is used (a name factory is not called otherwise, so the
+  // caller's counter does not move for a body that needs no parse).
+  const tplVar = typeof tplVarName === "function" ? tplVarName() : tplVarName;
   return [
     `${indent}const ${tplVar} = _scrml_g.document.createElement("template");`,
     `${indent}${tplVar}.innerHTML = ${JSON.stringify(encodeRawContentBody(body))}; // §4.17 raw content: < and > encoded`,

@@ -2091,7 +2091,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // `<` / `>` encoded, parsed through an inert <template> so the author's entities
         // display as the characters they name and a bare nested <code>/<pre> stays an element.
         if (isRawContentElement(node)) {
-          if (text !== "") for (const l of rawContentDomLines(text, elVar, genVar("lift_raw"))) lines.push(l);
+          if (text !== "") for (const l of rawContentDomLines(text, elVar, () => genVar("lift_raw"))) lines.push(l);
           continue;
         }
         // g-emit-lift-markup-text-interp-not-lowered (ss20 items 4+5): a markup
