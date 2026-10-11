@@ -24,7 +24,16 @@
  *       variant is a constructor whose parameters are the payload field names in
  *       order, and `variants` lists the variant names in declaration order;
  *   §5  the type checker's built-in ParseError (type-system.ts BUILTIN_TYPES) is
- *       the same enum stdlib/data/parse.scrml declares (drift guard).
+ *       the same enum stdlib/data/parse.scrml declares (drift guard);
+ *   §6  (S462 P0) every exported FUNCTION has the same async-ness in both: the
+ *       `.scrml` declaration is `async` exactly when the shim function is an
+ *       AsyncFunction, and a sync shim function never hands back a Promise (no
+ *       `new Promise` / `.then(` / `Promise.` and no call to an async function of
+ *       its own shim or a shim it imports). The compiler awaits a stdlib call
+ *       only when the `.scrml` side says `async` (§13.2); a shim that returns a
+ *       Promise behind a sync declaration leaks it un-awaited, and a Promise is
+ *       truthy — `if (verifyJwtJwks(garbage, url).valid)` … read `.valid` off a
+ *       Promise, and `if (hmac(k, m) == sig)` compared a Promise.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -112,6 +121,42 @@ function exportKinds(absPath, depth = 0) {
   return out;
 }
 
+/** Async-ness of every exported FUNCTION, re-exports chased: name → { isAsync, file }. */
+function exportedFnAsync(absPath, depth = 0) {
+  const ast = parse(absPath);
+  const out = new Map();
+  for (const exp of ast.exports || []) {
+    if (!exp.exportedName) continue;
+    for (const name of exp.exportedName.split(",").map((s) => s.trim()).filter(Boolean)) {
+      if (exp.exportKind === "re-export" && exp.reExportSource && depth < 8) {
+        const local = Array.isArray(exp.renames)
+          ? (exp.renames.find((r) => r && r.exported === name)?.local ?? name)
+          : name;
+        const hit = exportedFnAsync(resolve(dirname(absPath), exp.reExportSource), depth + 1).get(local);
+        if (hit) out.set(name, hit);
+      } else if (exp.exportKind === "function" || exp.exportKind === "fn") {
+        out.set(name, { isAsync: !!exp.isAsync, file: absPath });
+      }
+    }
+  }
+  return out;
+}
+
+/** Names of the async functions a shim file declares, and those of the relative shims it imports. */
+function shimAsyncNames(shimPath, seen = new Set()) {
+  const out = new Set();
+  if (seen.has(shimPath) || !existsSync(shimPath)) return out;
+  seen.add(shimPath);
+  const text = readFileSync(shimPath, "utf8");
+  for (const m of text.matchAll(/async\s+function\s*\*?\s*([A-Za-z_$][\w$]*)/g)) out.add(m[1]);
+  for (const m of text.matchAll(/from\s*["'](\.{1,2}\/[^"']+\.js)["']/g)) {
+    for (const n of shimAsyncNames(resolve(dirname(shimPath), m[1]), seen)) out.add(n);
+  }
+  return out;
+}
+
+const escapeRe = (s) => s.replace(/[$]/g, "\\$");
+
 const modules = listStdlibModules();
 
 describe("stdlib shim export parity (.scrml export list vs runtime shim)", () => {
@@ -138,6 +183,34 @@ describe("stdlib shim export parity (.scrml export list vs runtime shim)", () =>
       const shimOnly = [...shimNames].filter((n) => !kinds.has(n) && !allowed.has(n));
       expect(shimOnly).toEqual([]);
     });
+
+    const fnAsync = exportedFnAsync(absPath);
+    if (fnAsync.size > 0) {
+      test(`${specifier}: §6 every exported function has the same async-ness in the .scrml and the shim`, async () => {
+        const mod = await import(shimPath);
+        const asyncHere = shimAsyncNames(shimPath);
+        const mismatches = [];
+        for (const [name, { isAsync }] of fnAsync) {
+          const f = mod[name];
+          if (typeof f !== "function") continue; // §2 reports a missing export
+          const shimAsync = f.constructor.name === "AsyncFunction";
+          if (shimAsync !== isAsync) {
+            mismatches.push(`${name}: .scrml ${isAsync ? "async" : "sync"}, shim ${shimAsync ? "async" : "sync"}`);
+            continue;
+          }
+          if (shimAsync) continue;
+          const body = Function.prototype.toString.call(f);
+          const promiseText = /new\s+Promise\b|\.then\s*\(|\bPromise\s*\./.test(body);
+          const callsAsync = [...asyncHere].filter(
+            (n) => n !== name && new RegExp(`(?<![\\w$.])${escapeRe(n)}\\s*\\(`).test(body),
+          );
+          if (promiseText || callsAsync.length > 0) {
+            mismatches.push(`${name}: declared sync but its shim body ${promiseText ? "builds a Promise" : `calls async ${callsAsync.join(", ")}`}`);
+          }
+        }
+        expect(mismatches).toEqual([]);
+      });
+    }
 
     const enums = declaredEnums(absPath);
     if (enums.size > 0) {

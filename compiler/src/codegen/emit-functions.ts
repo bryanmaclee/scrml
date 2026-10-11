@@ -15,7 +15,7 @@ import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // The ONE stdlib-async predicate (Q5 `<repo>/stdlib/` carve-out + `isAsync`). Used
 // to subtract the vendor-async imports the stdlib auto-await classifier already
 // owns from the client peer-await set — see `_stdlibOwnedImport` below.
-import { isPromiseReturningStdlibFn } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { returnTypeAllowsAbsence } from "./wire-format.ts";
 import type { CompileContext } from "./context.ts";
 
@@ -609,8 +609,7 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
     serverFnNames,
     isStdlibAsync: (calleeMap && exportRegistry && exportRegistry.size > 0)
       ? (n: string): boolean => {
-          const src = calleeMap.get(n);
-          return !!src && isPromiseReturningStdlibFn(n, src, exportRegistry);
+          return isPromiseReturningImportedCallee(n, calleeMap, exportRegistry);
         }
       : null,
   };
@@ -1419,8 +1418,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
   const _stdlibOwnedImport = (n: string): boolean => {
     if (!_exportRegistry || _exportRegistry.size === 0) return false;
-    const src = _calleeMap?.get(n);
-    return !!src && isPromiseReturningStdlibFn(n, src, _exportRegistry);
+    return !!_calleeMap && isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
   };
   const _clientPeerAwaitNames = new Set<string>(
     [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
@@ -1452,8 +1450,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       serverFnNames: _serverFnNames,
       isStdlibAsync: (_calleeMap && _exportRegistry && _exportRegistry.size > 0)
         ? (n: string): boolean => {
-            const src = _calleeMap.get(n);
-            return !!src && isPromiseReturningStdlibFn(n, src, _exportRegistry);
+            return isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
           }
         : null,
     };

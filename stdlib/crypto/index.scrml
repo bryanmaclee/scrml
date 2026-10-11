@@ -132,7 +132,7 @@ ${
      * Example: const sig = hmac(secret, payload)
      *          const valid = hmac(secret, payload) == incomingSig
      */
-    export function hmac(secret, payload) {
+    export async function hmac(secret, payload) {
         const encoder = new TextEncoder()
         const keyData = encoder.encode(secret)
         const msgData = encoder.encode(typeof payload == "string" ? payload : JSON.stringify(payload))
