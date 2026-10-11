@@ -218,7 +218,7 @@ export function throttle(fn, limit) {
   return throttled;
 }
 
-export function sleep(ms) {
+export async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

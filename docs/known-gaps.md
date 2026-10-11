@@ -30,11 +30,47 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
-| MED | 589 | 6 |
-| LOW | 347 | 0 |
+| HIGH | 250 | 5 |
+| MED | 591 | 6 |
+| LOW | 350 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-server-fn-value-arg-helper-not-emitted-s462 — a named helper function passed as a VALUE (not called) from a server function is not emitted into the server bundle: the documented `requestMagicLink(email, { store }, sendEmail)` pattern compiles clean and throws `ReferenceError: sendEmail is not defined` on every request — `NEW S462; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-server-fn-value-arg-helper-not-emitted-s462 sev=HIGH status=open locus=compiler/src/route-inference.ts(placement — a value reference is not a call edge)+compiler/src/codegen/emit-server.ts(peer/helper emission) prov=dispatch:s462-p0-unawaited-async-stdlib -->
+
+Reproduced on base d6820a607 and on the s462-p0 branch: a server function (it has `?{}`) that calls `requestMagicLink(email, { store: store, baseUrl: "…" }, noop)` / `resetPassword(token, pw, { store: store }, noop)`, where `noop` is a plain `function noop(to, msg) { return }` in the same `${ }` block. The compile has no error and the server bundle names `noop` at the call but never defines it (it is client-placed: no server trigger, and a reference that is not a call is not an edge that places it). The route returns 500. `stdlib/auth/flows.scrml`'s own docs show this shape (`sendEmail`, `storeHash` as named functions), so every adopter following them hits it. An inline lambda works (the tests use one). Related but distinct: G-INDIRECT-CALLEE-NEVER-SERVER-PLACED-SERVER-REFERENCEERROR (RESOLVED S303) resolved ALIASES and dispatch tables that are later CALLED; this is a function handed to a callee as an argument. Fix direction: treat a reference to a same-file function in a server-placed body as an edge that emits the helper into the server bundle (a pure helper, or an in-process peer if it is itself server-placed), or refuse the compile; never a clean exit with a dangling name.
+
+### g-local-stdlib-reexport-no-server-emit-s462 — a local `.scrml` module that only re-exports stdlib names (`export { verifyPassword as vp } from "scrml:auth"`) emits no server-side re-export, so an importer's server bundle fails to link; only `W-SERVER-IMPORT-UNEMITTED` warns — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-local-stdlib-reexport-no-server-emit-s462 sev=MED status=open locus=compiler/src/codegen(re-export emission for .server.js)+compiler/src/api.js(W-SERVER-IMPORT-UNEMITTED) prov=review:s462-p0-unawaited-async-stdlib(S239 F2) -->
+
+Found during s462-p0 (S1 re-exports), confirmed by its S239 review. The importer's `app.server.js` has `import { vp } from "./lib.server.js"`; `lib.server.js` is either not emitted (the file has no server content) or emitted without the name, and the bundle fails at load. It fails closed (no route runs), but the compile exits 0 with a warning only. s462-p0 made async-ness follow such re-exports (`inheritStdlibReExports`) and accepted multi-hop chains through a stdlib re-export (a false E-IMPORT-004 before), so more programs now reach this emission gap. Related: g-stdlib-reexport-runtime-unresolved-s462 (the re-exporting module's own `.js` keeps the raw `scrml:` specifier). Fix direction: until the server re-export is emitted (route the `scrml:` re-export through the stdlib bundle + specifier rewrite + struct erasure), make `W-SERVER-IMPORT-UNEMITTED` an ERROR for this case, so the program is refused instead of shipping a bundle that cannot link.
+
+### g-trigger3-no-follow-local-reexport-s462 — §12.2 Trigger 3 does not follow a local re-export: a client function calling `vp` imported from a `.scrml` that re-exports `scrml:auth`'s `verifyPassword` stays client-side and throws at click time, with no diagnostic — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-trigger3-no-follow-local-reexport-s462 sev=MED status=open locus=compiler/src/route-inference.ts(buildPerFileEscalationServerOnlyBindings — keyed on the import's own specifier) prov=review:s462-p0-unawaited-async-stdlib(S239 F3) -->
+
+`buildPerFileEscalationServerOnlyBindings` maps a local binding to its import's specifier and escalates only when that specifier is a server-only `scrml:` module, so `import { vp } from "./lib.scrml"` never escalates. The client bundle reads `_scrml_modules["lib.client.js"].vp`, which is `undefined` (lib.client.js registers nothing), so the call throws a TypeError on click. No secret ships (the client module is empty), but a server-only capability silently became a client crash. Fix direction: resolve the binding through local re-exports to its terminal module (the registry now carries `stdlibOrigin` for exactly this) and escalate on the terminal stdlib module.
+
+### g-export-star-misses-stdlib-chain-name-s462 — `export *` from a local module does not forward a name that module re-exports from a stdlib chain, so importing it through the star is a false E-IMPORT-004 (§21.4: `export *` exports every name m exports, "including names m itself re-exports") — `NEW S462; LOW; open`
+
+<!-- @gap id=g-export-star-misses-stdlib-chain-name-s462 sev=LOW status=open locus=compiler/src/module-resolver.js(exportedNamesOf / resolveExportedBinding — resolution stops at the graph boundary) prov=review:s462-p0-unawaited-async-stdlib(S239 F4) -->
+
+`b.scrml`: `export * from "./a.scrml"`; `a.scrml`: `export { verifyPassword as vp } from "scrml:auth"`; `import { vp } from "./b.scrml"` → E-IMPORT-004. `resolveExportedBinding` resolves inside the compile graph only; a stdlib module is not a graph node, so a name whose chain leaves the graph is not counted by the star. s462-p0 fixed the NAMED-re-export form (`namedReExportLeavesGraph` in `validateReExports`) and made the registry forward stdlib-origin names through a local `export *` (`inheritStdlibReExports`), but the import-side name check through a star still fails. Fix direction: let the star's name set include a name whose named-re-export chain leaves the graph into a module the stdlib check judges (the same rule as `namedReExportLeavesGraph`).
+
+### g-shim-async-parity-heuristic-gaps-s462 — the stdlib shim async-parity check (stdlib-shim-export-parity §6) misses Promise-returning shapes: transitive sync helpers, aliased async imports inside a shim, async arrow functions, and a direct `fetch(…)` return — `NEW S462; LOW; open`
+
+<!-- @gap id=g-shim-async-parity-heuristic-gaps-s462 sev=LOW status=open locus=compiler/tests/unit/stdlib-shim-export-parity.test.js(§6 shimAsyncNames / body text scan) prov=review:s462-p0-unawaited-async-stdlib(S239 F5) -->
+
+§6 flags a sync-declared export whose shim function is an AsyncFunction, or whose own body text builds a Promise or calls an `async function NAME` declared in its shim (or a relative shim it imports). It does not see: a sync helper that itself returns an async helper's Promise (one hop away), an async function imported under an alias (`import { get as g }`), `const f = async () => …`, or `return fetch(…)`. Today's stdlib has none of these (the s462-p0 scan found exactly 7 mismatches and §6 catches all 7), so this is a regression-guard gap, not a live bypass. Fix direction: decide async-ness by the shim's ES module AST (follow helper returns and import aliases), or require every Promise-returning shim export to be declared `async function` and check only that.
+
+### g-stdlib-selfcompile-async-exports-emitted-sync-s462 — compiling `stdlib/auth/jwt.scrml` / `flows.scrml` on its own emits the functions s462 declared `async` without `async` (client-placed, their stdlib calls unawaited) — `NEW S462; LOW (NIT); open`
+
+<!-- @gap id=g-stdlib-selfcompile-async-exports-emitted-sync-s462 sev=LOW status=open locus=compiler/src/route-inference.ts+compiler/src/codegen(stdlib carve-out `async function` placement) prov=review:s462-p0-unawaited-async-stdlib(S239 F6) -->
+
+Adopters never run this output: a `scrml:` import resolves to the hand-written JS shim, not to the compiled `.scrml`. When the stdlib `.scrml` file is itself the compile input, its `export async function` declarations (verifyJwtJwks, resetPassword, the request* flows; signJwt etc. were already so) are placed on the client and emitted without `async`. Corpus differential: on base `requestMagicLink` / `resetPassword` were server-placed in `flows.server.js`; now they are in `flows.client.js`. Matters if the stdlib is ever compiled from its `.scrml` (self-host). Fix direction: an `async function` in a stdlib file emits `async` and keeps its placement.
 
 ### g-stdlib-type-erase-reads-emitted-text-s462 — `eraseStdlibTypeOnlyImports` re-reads the EMITTED text, so a multi-line template literal in a server function that contains the line `import { TableSort } from "scrml:data"` is rewritten inside the string — `NEW S462; LOW; open`
 

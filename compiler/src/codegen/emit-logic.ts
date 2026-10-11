@@ -3873,7 +3873,8 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           // a stdlib async callee (ctx-threaded OR the file-scoped classifier).
           let _refsAsyncStdlib = false;
           if (!_refsPeer) {
-            const _callRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+            // `f(` and the optional call `f?.(` (S462 P0 F1).
+            const _callRe = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\?\.\s*)?\(/g;
             let _cm: RegExpExecArray | null;
             while ((_cm = _callRe.exec(p)) !== null) {
               if (isStdlibAsyncCallee(_cm[1], _sqlExprCtx)) {

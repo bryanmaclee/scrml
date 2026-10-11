@@ -1157,6 +1157,70 @@ export function isReExportedByAnother(graph, filePath) {
   return false;
 }
 
+/**
+ * S462 P0 — a user `.scrml` module that re-exports a stdlib name
+ * (`export { verifyPassword as vp } from "scrml:auth"`, or a chain of local
+ * re-exports ending in one) carries the stdlib export's facts under its own
+ * name. `buildExportRegistry` runs before the stdlib modules are seeded
+ * (STDLIB-EXPORT-SEED), so its pass 2 finds no source entry for such a
+ * re-export and leaves it an opaque `kind: "re-export"` with no `isAsync` —
+ * and the importer's `vp(…)` call was left un-awaited (a truthy Promise). This
+ * pass runs AFTER the seed: it copies the terminal stdlib entry
+ * (kind / category / isAsync / typeKind / …) onto each such re-export
+ * entry, follows local chains to a fixed point, and stamps `stdlibOrigin` — the
+ * stdlib file that declares the name — which `isPromiseReturningStdlibFn`'s Q5
+ * carve-out accepts in place of a stdlib `sourceModule`.
+ *
+ * A star re-export of a local module (`export * from "./lib.scrml"`) picks up the
+ * stdlib-origin names that module re-exports, unless this module already exports
+ * the name. `export * from "scrml:…"` stays unexpanded (§21.4).
+ *
+ * @param {Map<string, object>} graph — `buildImportGraph(...).graph`
+ * @param {Map<string, Map<string, object>>} registry — the export registry, stdlib modules seeded
+ */
+export function inheritStdlibReExports(graph, registry) {
+  if (!graph || !registry) return;
+  const MAX_ITERATIONS = graph.size + 2;
+  for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
+    let changed = false;
+    for (const [filePath, entry] of graph) {
+      if (!entry || !Array.isArray(entry.exports)) continue;
+      const names = registry.get(filePath);
+      if (!names) continue;
+      for (const exp of entry.exports) {
+        if (!exp || !exp.reExportSource) continue;
+        const sourceNames = registry.get(exp.reExportSource);
+        if (!sourceNames) continue;
+        const sourceIsStdlib = isStdlibFilePath(exp.reExportSource);
+        if (exp.isReExportAll) {
+          // A stdlib `export *` stays unexpanded (§21.4); a local one forwards the
+          // stdlib-origin names its source module carries.
+          if (sourceIsStdlib) continue;
+          for (const [n, src] of sourceNames) {
+            if (n === "default" || typeof src.stdlibOrigin !== "string" || names.has(n)) continue;
+            names.set(n, { ...src });
+            changed = true;
+          }
+          continue;
+        }
+        const target = sourceNames.get(exp.localName ?? exp.name);
+        if (!target || target.kind === "re-export") continue;
+        const origin = sourceIsStdlib ? exp.reExportSource : target.stdlibOrigin;
+        if (typeof origin !== "string") continue;
+        const mine = names.get(exp.name);
+        if (mine && mine.stdlibOrigin === origin && mine.kind === target.kind && !!mine.isAsync === !!target.isAsync) continue;
+        // The terminal entry's facts, under this module's name, plus where the
+        // name is declared.
+        const next = { ...target, stdlibOrigin: origin };
+        if (mine && mine.returnsMarkup) next.returnsMarkup = true;
+        names.set(exp.name, next);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Import validation (E-IMPORT-004)
 // ---------------------------------------------------------------------------
@@ -1506,6 +1570,35 @@ function mayComeFromUnresolvedReExport(graph, filePath, name, _seen = new Set())
 }
 
 /**
+ * S462 P0 — does `name`, as exported by `filePath`, resolve through an explicit
+ * named re-export whose source module is NOT in the compile graph (a stdlib
+ * `scrml:` module, a vendor module)? `resolveExportedBinding` resolves inside the
+ * graph only, so a chain `export { checkPw as vp } from "./inner.scrml"` where
+ * inner.scrml does `export { verifyPassword as checkPw } from "scrml:auth"` found
+ * no terminal and was a false E-IMPORT-004. The out-of-graph link is judged where
+ * it is written (`validateStdlibImports` checks a named `scrml:` re-export).
+ * Follows named re-exports and in-graph `export *`.
+ */
+function namedReExportLeavesGraph(graph, filePath, name, _seen = new Set()) {
+  const key = toPosix(filePath) + "\u0000" + name;
+  if (_seen.has(key)) return false;
+  _seen.add(key);
+  const entry = graph?.get?.(filePath);
+  if (!entry || !Array.isArray(entry.exports)) return false;
+  for (const exp of entry.exports) {
+    if (exp.isReExportAll || exp.name !== name || !exp.reExportSource) continue;
+    if (!graph.has(exp.reExportSource)) return true;
+    return namedReExportLeavesGraph(graph, exp.reExportSource, exp.localName ?? name, _seen);
+  }
+  if (entry.exports.some((e) => !e.isReExportAll && e.name === name)) return false;
+  for (const exp of entry.exports) {
+    if (!exp.isReExportAll || !exp.reExportSource || !graph.has(exp.reExportSource)) continue;
+    if (namedReExportLeavesGraph(graph, exp.reExportSource, name, _seen)) return true;
+  }
+  return false;
+}
+
+/**
  * S458 (re-review N2) — the specifiers of every `export *` reachable from `filePath`
  * (through in-graph stars) whose source module is NOT in the compile graph — a stdlib
  * (`scrml:…`) or vendor module. Such a star is never expanded, so a name it might carry
@@ -1583,6 +1676,9 @@ export function validateReExports(graph, cycleFiles = new Set()) {
       // S458 N1 — supplied (if at all) by a re-export whose file is missing: that
       // re-export's E-IMPORT-006 is the error.
       if (mayComeFromUnresolvedReExport(graph, exp.reExportSource, imported)) continue;
+      // S462 P0 — a chain that leaves the graph through a named stdlib / vendor
+      // re-export is judged at that link, not here.
+      if (namedReExportLeavesGraph(graph, exp.reExportSource, imported)) continue;
       const clause = `export { ${imported === exp.name ? imported : `${imported} as ${exp.name}`} } from "${spec}"`;
       const unexpanded = unexpandedStarSpecifiers(graph, exp.reExportSource);
       const err = new ModuleError(
@@ -1882,13 +1978,57 @@ function realPathOrNearest(abs) {
  */
 export function isPromiseReturningStdlibFn(functionName, sourceModule, exportRegistry) {
   if (!functionName || !sourceModule || !exportRegistry) return false;
-  // Q5 carve-out: source module must be under <repo>/stdlib/.
-  if (!isStdlibFilePath(sourceModule)) return false;
   const fileExports = exportRegistry.get(sourceModule);
   if (!fileExports) return false;
   const entry = fileExports.get(functionName);
   if (!entry) return false;
+  // Q5 carve-out: the function must be DECLARED under <repo>/stdlib/. The
+  // source module itself is usually the stdlib file; a user `.scrml` module
+  // that re-exports a stdlib async function (`export { verifyPassword as vp }
+  // from "scrml:auth"`) carries the terminal stdlib path as `stdlibOrigin`
+  // (set by `inheritStdlibReExports`), so the Promise follows the re-export
+  // (S462 P0) while a user-declared `async` export still never classifies.
+  if (!isStdlibFilePath(sourceModule) &&
+      !(typeof entry.stdlibOrigin === "string" && isStdlibFilePath(entry.stdlibOrigin))) return false;
   // The function must be exported as `function` or `fn` AND carry isAsync.
   if (entry.kind !== "function" && entry.kind !== "fn") return false;
   return entry.isAsync === true;
+}
+
+/**
+ * The name the SOURCE module exports for a callee that a file imports under
+ * `localName`. `import { verifyPassword as vp } from "scrml:auth"` binds the
+ * local `vp` to the export `verifyPassword`; every stdlib fact (async-ness,
+ * server-only-ness, …) is keyed by the EXPORT name, never the local alias.
+ * `calleeMap` is a `buildCalleeImportMap` result: it carries the local→imported
+ * table as `importedNames`. A map without the table (a hand-built test map)
+ * resolves a name to itself.
+ *
+ * @param {string} localName
+ * @param {Map<string, string> & { importedNames?: Map<string, string> }} calleeMap
+ * @returns {string}
+ */
+export function importedNameOf(localName, calleeMap) {
+  const t = calleeMap && calleeMap.importedNames;
+  return (t && typeof t.get === "function" && t.get(localName)) || localName;
+}
+
+/**
+ * §13.2 auto-await classifier, from a call site: does the callee `localName`,
+ * resolved through the file's imports (`calleeMap`, a `buildCalleeImportMap`
+ * result), name a Promise-returning stdlib function? The lookup is by the
+ * IMPORTED name, so an `as`-alias is classified exactly like the original
+ * (S462 P0 — `import { verifyPassword as vp }` left `vp(...)` un-awaited: a
+ * truthy Promise accepted every password).
+ *
+ * @param {string} localName
+ * @param {Map<string, string> & { importedNames?: Map<string, string> }} calleeMap
+ * @param {Map<string, Map<string, object>>} exportRegistry
+ * @returns {boolean}
+ */
+export function isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry) {
+  if (!localName || !calleeMap || !exportRegistry) return false;
+  const sourceModule = calleeMap.get(localName);
+  if (!sourceModule) return false;
+  return isPromiseReturningStdlibFn(importedNameOf(localName, calleeMap), sourceModule, exportRegistry);
 }

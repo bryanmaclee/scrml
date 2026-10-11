@@ -711,21 +711,21 @@ function _verifyTokenFlow(token, options, expectedPurpose) {
   return result;
 }
 
-export function requestMagicLink(email, options, sendEmail) {
+export async function requestMagicLink(email, options, sendEmail) {
   return _requestTokenFlow(email, options, sendEmail, "magic-link", 900);
 }
 export function verifyMagicLink(token, options) {
   return _verifyTokenFlow(token, options, "magic-link");
 }
 
-export function requestEmailVerification(email, options, sendEmail) {
+export async function requestEmailVerification(email, options, sendEmail) {
   return _requestTokenFlow(email, options, sendEmail, "email-verify", 86400);
 }
 export function verifyEmail(token, options) {
   return _verifyTokenFlow(token, options, "email-verify");
 }
 
-export function requestPasswordReset(email, options, sendEmail) {
+export async function requestPasswordReset(email, options, sendEmail) {
   return _requestTokenFlow(email, options, sendEmail, "pwreset", 3600);
 }
 export function verifyResetToken(token, options) {
