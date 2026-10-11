@@ -44,10 +44,10 @@ impl#1 implements §67 phase 2 (change-id `s462-md-phase2`): `compiler/src/block
 text-mode production — the body ends at the first `</md>`; `${…}` extents taken, not parsed, by
 `scanMdSlots`), `compiler/src/md-lower.ts` (slots → U+FFFC, the reader's `dedent`, `parseSlots`, W-MD
 position mapping, lowering to the §67.6 closed set, heading ids, every `E-MD-*`). Measured with
-`bun scripts/bootstrap-conformance.ts --filter md/` on the 14 `conformance/cases/md/*` cases: 7 FAIL
+`bun scripts/bootstrap-conformance.ts --filter md/` on the 15 `conformance/cases/md/*` cases: 7 FAIL
 (`heading-ids-page-wide`, `in-phrasing-refused`, `indent-mixed`, `of-body-refused`, `second-spelling-strict`,
 `static-tree`, `url-scheme-literal-refused` — the `<md>` renders as a plain element, the codes never
-fire), 5 UNSUPPORTED (the bootstrap's free-text body parses `${…}` as logic: `${HOME:-/tmp}` is
+fire), 6 UNSUPPORTED (the bootstrap's free-text body parses `${…}` as logic: `${HOME:-/tmp}` is
 E-PARSE-EXPECTED, an unclosed `${` E-PARSE-EXPR, and the §66 twins of the slot cases reject at
 parse), 2 NOT-TWINNED. What the bootstrap owes, in order: (1) the `<md>` body production in
 `lex.scrml`/`parse.scrml` — exits `${` and `</md>` only, the slot extent by token-depth WITHOUT parsing
