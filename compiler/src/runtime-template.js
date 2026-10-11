@@ -115,8 +115,12 @@ export const META_EMIT_GATE_RUNTIME_SOURCE =
  *
  * Const-named export support: a shim may export non-function bindings via
  * `export const Name = ...`. The loader collects both forms.
+ *
+ * Exported for the inliner tests (S462): `auth` / `crypto` no longer ship as
+ * client chunks, but the inliner's handling of their sibling-shim imports is
+ * still exercised by loading them through this function directly.
  */
-function _loadStdlibChunk(name) {
+export function _loadStdlibChunk(name) {
   const shimPath = join(__runtime_template_dir, "../runtime/stdlib", `${name}.js`);
   const source = readFileSync(shimPath, "utf8");
   const exportedNames = [];
@@ -546,14 +550,15 @@ function _indent(text) {
 // and note that the absence of a chunk is now a COMPILE-TIME diagnostic
 // (`E-STDLIB-CLIENT-CHUNK-MISSING`) rather than a silent load-time TypeError.
 //
-// `auth` and `crypto` are escalation-server-only by the criterion yet carry a
-// chunk. That is PRE-EXISTING (S95 Bug 18) and deliberately left alone here:
-// removing a chunk is a behaviour REMOVAL, out of scope for this dispatch.
-// The shim loader strips their external `bun` imports, so a client-side call
-// ReferenceErrors loudly at the CALL rather than killing the page at load.
-const _STDLIB_AUTH_CHUNK     = _loadStdlibChunk("auth");
+// `auth` and `crypto` are escalation-server-only by the criterion and, since
+// S462, carry NO chunk either. They used to (S95 Bug 18), and the S462 P0 showed
+// what that bought: a CPS split that left `verifyPassword` on the client shipped
+// the whole `scrml:auth` implementation (argon2id via Bun.password) into the
+// browser and ran the password check there — on an un-awaited Promise, so every
+// password was accepted. With no chunk, a client reference that survives into
+// the bundle is the compile-time E-STDLIB-CLIENT-CHUNK-MISSING, not a page that
+// quietly authenticates everyone.
 const _STDLIB_COMPILER_CHUNK = _loadStdlibChunk("compiler");
-const _STDLIB_CRYPTO_CHUNK   = _loadStdlibChunk("crypto");
 const _STDLIB_DATA_CHUNK     = _loadStdlibChunk("data");
 const _STDLIB_FORMAT_CHUNK   = _loadStdlibChunk("format");
 const _STDLIB_HOST_CHUNK     = _loadStdlibChunk("host");
@@ -7540,7 +7545,7 @@ ${URL_GUARD_RUNTIME_SOURCE}
 // compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
 // 'meta' chunk (CHUNK_DEPENDENCIES).
 ${META_EMIT_GATE_RUNTIME_SOURCE}
-${_STDLIB_AUTH_CHUNK}${_STDLIB_COMPILER_CHUNK}${_STDLIB_CRYPTO_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
+${_STDLIB_COMPILER_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
  * g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,

@@ -149,8 +149,8 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 43 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 13 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457 + 'refine' added by §53 S458 2a-fix + 'metaemit' added by §22.4.1 S458 'a' + 'machine' split out of the always-included 'core' chunk by S461)", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(43);
+  test("RUNTIME_CHUNK_ORDER has 41 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 11 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry, −'stdlib-auth' −'stdlib-crypto' at S462 P0 (escalation-server-only, §12.2 Trigger 3) — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457 + 'refine' added by §53 S458 2a-fix + 'metaemit' added by §22.4.1 S458 'a' + 'machine' split out of the always-included 'core' chunk by S461)", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(41);
   });
 
   // S368 — the stdlib slice of the order is the CLIENT CONTRACT: a client-side
@@ -161,9 +161,7 @@ describe("C10 §C10.0 — Chunk wiring", () => {
   test("the stdlib client-chunk set is exactly the client-safe modules", () => {
     const stdlibChunks = RUNTIME_CHUNK_ORDER.filter((n) => n.startsWith("stdlib-"));
     expect([...stdlibChunks].sort()).toEqual([
-      "stdlib-auth",
       "stdlib-compiler",
-      "stdlib-crypto",
       "stdlib-data",
       "stdlib-format",
       "stdlib-host",
@@ -179,10 +177,11 @@ describe("C10 §C10.0 — Chunk wiring", () => {
 
   // The escalation-server-only modules (§12.2 Trigger 3) MUST NOT get a client
   // chunk — their shims reach Bun.*/process.*/node:* or handle a credential, so
-  // an inlined browser copy could not work. `auth`/`crypto` are the deliberate
-  // pre-existing exceptions (S95 Bug 18); see runtime-chunks.ts for why.
+  // an inlined browser copy could not work. `auth`/`crypto` were exceptions
+  // until S462 (S95 Bug 18); the S462 P0 removed them — a mis-split password
+  // check ran in the browser on the shipped `scrml:auth`.
   test("host-reaching / credential-handling modules have NO client chunk", () => {
-    for (const mod of ["cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"]) {
+    for (const mod of ["auth", "crypto", "cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"]) {
       expect(RUNTIME_CHUNK_ORDER).not.toContain(`stdlib-${mod}`);
     }
   });

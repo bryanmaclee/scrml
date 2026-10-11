@@ -1794,10 +1794,12 @@ describe("§20 — CPS transformation: server/client boundary splitting", () => 
     expect(route.cpsSplit.clientStmtIndices).toEqual([0, 2, 3]); // reactive assignments
   });
 
-  test("mixed statement (bare-expr with @var AND server resource) — CPS NOT eligible, E-RI-002 fires", () => {
-    // A bare-expr that both assigns @reactive AND accesses a server-only resource:
-    // CPS cannot split a single expression. E-RI-002 fires for all server-escalated
-    // functions where CPS is not eligible, regardless of the escalation reason.
+  test("mixed statement (bare-expr with @var AND server resource) — runs in the server half, no E-RI-002 (S462)", () => {
+    // A bare-expr that both assigns @reactive AND accesses a server-only resource.
+    // Before S462 this was "truly unsplittable" (E-RI-002): a server batch had no
+    // way to hand a cell write back. Since S462 a batch returns the final value of
+    // each cell it writes (§19.9.9.7, codegen/cps-cell-writes.ts), so the statement
+    // runs on the server — exactly as its `state-decl` spelling always did.
     const fn = makeFunctionDecl({
       name: "mixedFn",
       body: [
@@ -1808,12 +1810,10 @@ describe("§20 — CPS transformation: server/client boundary splitting", () => 
     const fileAST = makeFileAST("/test/app.scrml", [fn]);
     const { routeMap, errors } = runRIClean([fileAST]);
 
-    // E-RI-002 fires: CPS is not eligible for this single mixed expression.
-    const riErrors = errors.filter(e => e.code === "E-RI-002");
-    expect(riErrors).toHaveLength(1);
-
+    expect(errors.filter(e => e.code === "E-RI-002")).toHaveLength(0);
     const route = getRoute(routeMap, "/test/app.scrml", 50);
-    expect(route.cpsSplit).toBeNull();
+    expect(route.cpsSplit).not.toBeNull();
+    expect(route.cpsSplit.serverStmtIndices).toEqual([0]);
   });
 
   test("client-only function with reactive assignments — no cpsSplit, no E-RI-002", () => {
@@ -2622,7 +2622,7 @@ describe("§23 — session object escalates to server (BUG-R13-003)", () => {
     expect(route.escalationReasons.some(r => r.resourceType === "session")).toBe(true);
   });
 
-  test("session + reactive var produces E-RI-002 (CPS cannot split session access + reactive assign)", () => {
+  test("session + reactive var: the statement runs in the server half, no E-RI-002 (S462)", () => {
     const fn = makeFunctionDecl({
       name: "initSession",
       body: [
@@ -2631,11 +2631,14 @@ describe("§23 — session object escalates to server (BUG-R13-003)", () => {
       spanStart: 10,
     });
     const fileAST = makeFileAST("/test/app.scrml", [fn]);
-    const { errors } = runRIClean([fileAST]);
-    // session access causes server escalation; bare-expr mixes reactive assign + server resource.
-    // CPS cannot split a single bare-expr; E-RI-002 fires.
-    const ri002 = errors.filter(e => e.code === "E-RI-002");
-    expect(ri002).toHaveLength(1);
+    const { routeMap, errors } = runRIClean([fileAST]);
+    // session access causes server escalation; the bare-expr mixes a reactive
+    // assign with a server resource. Before S462 that was unsplittable (E-RI-002);
+    // since S462 the server half carries the cell's final value back (§19.9.9.7).
+    expect(errors.filter(e => e.code === "E-RI-002")).toHaveLength(0);
+    const route = getRoute(routeMap, "/test/app.scrml", 10);
+    expect(route.cpsSplit).not.toBeNull();
+    expect(route.cpsSplit.serverStmtIndices).toEqual([0]);
   });
 });
 

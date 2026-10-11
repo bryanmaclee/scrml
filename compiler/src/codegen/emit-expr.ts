@@ -326,6 +326,14 @@ function effectiveRequestIdsFromCtx(ctx: EmitExprContext): Set<string> | undefin
 export interface EmitExprContext {
   /** Client mode emits reactive_get; server mode emits _scrml_body["..."]. */
   mode: "client" | "server";
+  /**
+   * S462 P0 (§19.9.9.7) — server mode, inside a CPS batch that returns its cell
+   * writes ("cells" mode, codegen/cps-cell-writes.ts): a write to `@x` also
+   * records `x` in the batch's `_scrml_written` register, so the batch hands back
+   * exactly the cells it wrote. The write itself still lands in `_scrml_body["x"]`,
+   * which is what a later read in the same batch sees.
+   */
+  serverCellWrites?: boolean;
   /** Derived reactive names — emits _scrml_derived_get instead of _scrml_reactive_get. */
   derivedNames?: Set<string> | null;
   /**
@@ -1007,6 +1015,17 @@ export function rawReferencesRegisteredRequest(raw: string, requestIds: Set<stri
  */
 export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
   if (exprNode) return emitExpr(exprNode, ctx);
+  // S462 (§19.9.9.7) — in a CPS "cells" server batch a raw-text expression that
+  // writes a cell (a match arm's `@role = "ADMIN"`) must record the write, which
+  // only the structured path does. Parse it and emit structurally; text the
+  // parser cannot take falls through to the string rewrite, and the batch's
+  // fail-closed backstop (emit-server.ts emitCpsCellsBatchBody) refuses any
+  // unrecorded write that path produces.
+  if (ctx.mode === "server" && ctx.serverCellWrites && /@[A-Za-z_$]/.test(fallbackStr)) {
+    let parsed: ExprNode | null = null;
+    try { parsed = parseExprToNode(fallbackStr, "<cps-cells-arm>", 0) as ExprNode | null; } catch { parsed = null; }
+    if (parsed && (parsed as { kind?: string }).kind !== "escape-hatch") return emitExpr(parsed, ctx);
+  }
   if (ctx.mode === "server") return rewriteServerExpr(fallbackStr, undefined, ctx.errors);
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — collapse §55 synth-surface reads in the RAW-STRING statement fallback to the
@@ -1683,6 +1702,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
         // Postfix on a member expression IS valid JS, so emit as-is.
         // §6.6.9 (S449 review F4) — never the request body for an ambient `@session`.
         if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr update", node.span)}${node.op}`;
+        // S462 (§19.9.9.7) — a CPS "cells" batch records the write for the response.
+        if (ctx.serverCellWrites) return `${_m}(_scrml_written["${bare}"] = true, _scrml_body["${bare}"]${node.op})`;
         return `${_m}_scrml_body["${bare}"]${node.op}`;
       }
       const sign = node.op === "++" ? "+" : "-";
@@ -1691,6 +1712,16 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
         : `_scrml_reactive_get("${bare}")`;
       return `${_m}_scrml_reactive_set("${bare}", ${getter} ${sign} 1)`;
     }
+  }
+  // S462 (§19.9.9.7) — prefix `++@x` / `--@x` in a CPS "cells" server batch:
+  // record the write for the response, keep the prefix value.
+  if (
+    node.prefix && (node.op === "++" || node.op === "--") && ctx.mode === "server" && ctx.serverCellWrites &&
+    node.argument.kind === "ident" && typeof node.argument.name === "string" && node.argument.name.startsWith("@") &&
+    !isServerAmbientSession(node.argument.name.slice(1))
+  ) {
+    const bare = node.argument.name.slice(1);
+    return `${srcmapMark(node.span, bare)}(_scrml_written["${bare}"] = true, ${node.op}_scrml_body["${bare}"])`;
   }
   let arg = emitExpr(node.argument, ctx);
   if (node.prefix) {
@@ -2735,6 +2766,10 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
       // the request body (fail-closed backstop, server-session-guard.ts).
       if (isServerAmbientSession(bare)) {
         return `${srcmapMark(node.span, bare)}${refuseServerAmbientSession("emit-expr assignment", node.span)} ${node.op} ${value}`;
+      }
+      // S462 (§19.9.9.7) — a CPS "cells" batch records the write for the response.
+      if (ctx.serverCellWrites) {
+        return `${srcmapMark(node.span, bare)}(_scrml_written["${bare}"] = true, _scrml_body["${bare}"] ${node.op} ${value})`;
       }
       return `${srcmapMark(node.span, bare)}_scrml_body["${bare}"] ${node.op} ${value}`;
     }

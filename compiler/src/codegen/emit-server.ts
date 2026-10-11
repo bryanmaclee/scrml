@@ -15,6 +15,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
+import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -728,6 +729,130 @@ function cpsNeedsIdempotencyDedup(
  * per-batch verdict (Stage 5.5 not run) — defensive; in the normal pipeline
  * analyzeMonotonicity always populates `batch.monotonicity`.
  */
+/**
+ * S462 P0 (§19.9.9.7) — the body of a CPS server batch in "cells" mode
+ * (codegen/cps-cell-writes.ts): every statement of the batch runs here, each
+ * cell write is recorded in `_scrml_written`, and the batch returns ONLY the
+ * final values of the cells it wrote — never the rows it read to compute them.
+ *
+ * The batch keeps each cell it writes in its OWN local (`_scrml_cell_<name>`,
+ * cpsCellLocal), seeded from the value the client marshalled (§6.6.9) so a read
+ * before the batch's first write still sees the client's value. The statements
+ * are lowered with the ordinary server-mode `_scrml_body["x"]` cell references,
+ * and the references to the batch's written cells are then pointed at the locals.
+ * Writing into the request body (or any object seeded from it) instead would make
+ * the batch's values part of the REQUEST — the §14.8.9 flow analysis (rightly)
+ * treats the object `_scrml_req.json()` returns as the request's, so a protected
+ * row written there would reach everything the request reaches. A local is only
+ * ever rebound.
+ *
+ * Returns the lines, or the CGError when the emitted body writes a cell this
+ * mode did not record (fail closed: an unrecorded write would be silently
+ * dropped on its way to the client).
+ */
+function emitCpsCellsBatchBody(
+  fnName: string,
+  body: any[],
+  serverIndices: number[],
+  cells: string[],
+  opts: Record<string, unknown>,
+  indent: string,
+  span: unknown,
+): { lines: string[]; error: CGError | null } {
+  const out: string[] = [];
+  const cellOpts = { ...opts, serverCellWrites: true };
+  const bodyStart = out.length;
+  for (const idx of [...serverIndices].sort((a, b) => a - b)) {
+    if (idx >= body.length) continue;
+    const raw = body[idx];
+    if (!raw) continue;
+    // S455 (§19.8.3) — `@c = ?{…} !{…}`: run the handled query (its arms are pure
+    // values, route inference guarantees it) into a local, then write the cell.
+    const inner = handledSqlGuardInner(raw);
+    if (inner && inner.kind === "state-decl" && typeof inner.name === "string") {
+      const tmp = genVar(`cps_${inner.name}`);
+      const guardCode = serverRewriteEmitted(emitLogicNode({
+        ...raw,
+        guardedNode: { kind: "const-decl", name: tmp, init: inner.init ?? "", initExpr: inner.initExpr, sqlNode: inner.sqlNode, span: inner.span },
+      }, cellOpts as any));
+      if (guardCode) for (const l of indentBodyLines(guardCode, indent)) out.push(l);
+      for (const l of indentBodyLines(cpsCellWriteStatement(inner.name, tmp), indent)) out.push(l);
+      continue;
+    }
+    const code = serverRewriteEmitted(emitLogicNode(raw, cellOpts as any));
+    if (code) for (const l of indentBodyLines(code, indent)) out.push(l);
+  }
+  // Fail-closed backstop: every write of a cell slot in this batch must be a
+  // recorded one. A lowering path that built its own expression context (and so
+  // lost `serverCellWrites`) would write `_scrml_body["x"]` without recording it,
+  // and the client would never see the value.
+  const emitted = out.slice(bodyStart).join("\n");
+  // A client-store write lowered into the server module: there is no reactive
+  // store there, so it would throw at request time and drop the value.
+  const clientSet = /_scrml_(?:cs_)?reactive_set\(\s*"([^"]+)"/.exec(emitted);
+  if (clientSet) {
+    return {
+      lines: out,
+      error: new CGError(
+        "E-CG-006",
+        `E-CG-006: the server half of \`${fnName}\` lowered a write of the cell \`@${clientSet[1]}\` to the ` +
+        `client's reactive store, which does not exist on the server (§19.9.9.7). Refusing to emit it. ` +
+        `Assign the cell as its own statement (\`@${clientSet[1]} = …\`).`,
+        (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+      ),
+    };
+  }
+  const writeRe = /_scrml_body\["([^"]+)"\]\s*(?:\+\+|--|(?:[-+*/%&|^]|\*\*|<<|>>>?|\?\?|&&|\|\|)?=(?!=))|(?:\+\+|--)_scrml_body\["([^"]+)"\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = writeRe.exec(emitted)) !== null) {
+    const cell = m[1] ?? m[2];
+    // The recorded forms put the mark right before the write: `(_scrml_written["x"]
+    // = true, _scrml_body["x"] = v)` or `_scrml_written["x"] = true;\n<indent>_scrml_body["x"] = v`.
+    const before = emitted.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, " ");
+    const mark = `_scrml_written["${cell}"] = true`;
+    if (!(before.endsWith(`${mark}, `) || before.endsWith(`${mark}, (`) || before.endsWith(`${mark}; `) || before.endsWith(`${mark},`) || before.endsWith(`${mark};`))) {
+      return {
+        lines: out,
+        error: new CGError(
+          "E-CG-006",
+          `E-CG-006: the server half of \`${fnName}\` writes the cell \`@${cell}\` on a path the compiler ` +
+          `does not carry back to the client (§19.9.9.7). Refusing to emit a server batch that would drop ` +
+          `the write. Assign the cell as its own statement (\`@${cell} = …\`).`,
+          (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+        ),
+      };
+    }
+  }
+  // Every recorded write must be of a cell this batch hands back — a mark for a
+  // cell the plan did not list would be recorded and then never returned.
+  const cellSet = new Set(cells);
+  const markRe = /_scrml_written\["([^"]+)"\] = true/g;
+  while ((m = markRe.exec(emitted)) !== null) {
+    if (!cellSet.has(m[1])) {
+      return {
+        lines: out,
+        error: new CGError(
+          "E-CG-006",
+          `E-CG-006: the server half of \`${fnName}\` writes the cell \`@${m[1]}\` in a form the compiler did ` +
+          `not plan to carry back to the client (§19.9.9.7). Refusing to emit a server batch that would drop ` +
+          `the write. Assign the cell as its own statement (\`@${m[1]} = …\`).`,
+          (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+        ),
+      };
+    }
+  }
+  // Point the batch's written cells at its own object (see the doc comment).
+  const retarget = (line: string): string => {
+    let s = line;
+    for (const c of cells) s = s.split(`_scrml_body[${JSON.stringify(c)}]`).join(cpsCellLocal(c));
+    return s;
+  };
+  return {
+    lines: [...cpsCellsPrologue(indent, cells), ...out.map(retarget), ...cpsCellsEpilogue(indent, cells)],
+    error: null,
+  };
+}
+
 function cpsBatchMonotonicity(
   cpsSplit: { monotonicity?: string; serverBatches?: Array<{ monotonicity?: string }> } | null | undefined,
   batchIndex: number,
@@ -4737,6 +4862,11 @@ export function generateServerJs(
         : (_isMultiBatch
             ? { serverStmtIndices: _batch.serverIndices ?? [], returnVarName: _batchReturnVar }
             : _cpsSplit);
+      // S462 P0 (§19.9.9.7) — how THIS batch returns its cell writes. The client
+      // wrapper (emit-functions.ts) asks the same question with the same inputs.
+      const _cellPlan = cpsSplit
+        ? planBatchCellReturn(_batchBody, cpsSplit.serverStmtIndices, cpsSplit.returnVarName ?? null)
+        : null;
 
     const handlerName = genVar(`handler_${name}`);
     // §20.5 (S265, i29e) — mark where this handler's body begins so the
@@ -4969,7 +5099,12 @@ export function generateServerJs(
       // loop — for a multi-batch route it carries THIS batch's index set; for
       // the single-handler case it is `route.cpsSplit` verbatim.
 
-      if (cpsSplit) {
+      if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
+        // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOpts, "    ", fnNode.span);
+        if (_cells.error) errors.push(_cells.error);
+        for (const l of _cells.lines) lines.push(l);
+      } else if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const _rawStmt = body[idx];
@@ -5298,7 +5433,12 @@ export function generateServerJs(
       // and the author-body loop below.
       const _authorBodyStartNonCsrf = lines.length;
 
-      if (cpsSplit) {
+      if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
+        // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOptsNonCsrf, _bodyIndentNonCsrf, fnNode.span);
+        if (_cells.error) errors.push(_cells.error);
+        for (const l of _cells.lines) lines.push(l);
+      } else if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const _rawStmt = body[idx];

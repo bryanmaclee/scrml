@@ -206,14 +206,15 @@ export const RUNTIME_CHUNK_ORDER = [
   //   process — (a) process.{argv,cwd,env,exit,platform,memoryUsage}.
   //   redis   — (a) `import { redis } from "bun"` (BARE specifier); network-bound.
   //   store   — (a) bun:sqlite wrapper; client-side use is meaningless.
+  //   auth    — (a) Bun.password (argon2id); (b) handles passwords and tokens.
+  //   crypto  — (a) Bun.CryptoHasher / Bun.password.
   //
-  // `auth` and `crypto` are escalation-server-only by the criterion yet carry a
-  // chunk. PRE-EXISTING (S95 Bug 18), left alone deliberately: removing a chunk
-  // is a behaviour removal, out of scope for the S368 dispatch that added the
-  // rest of this list.
-  'stdlib-auth',
+  // `auth` and `crypto` carried a chunk until S462 (S95 Bug 18). The S462 P0
+  // showed the cost: a CPS split that left `verifyPassword` on the client
+  // shipped the module into the browser and ran the password check there,
+  // un-awaited — every password accepted. They are gone; a surviving client
+  // reference is now E-STDLIB-CLIENT-CHUNK-MISSING at compile time.
   'stdlib-compiler',
-  'stdlib-crypto',
   'stdlib-data',
   'stdlib-format',
   'stdlib-host',
@@ -354,9 +355,7 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // once. The previous chunk's content ends with the closing `}` of the
   // preceding IIFE (or, for the FIRST stdlib, with the engine chunk's last
   // function), so the boundary is at a syntactically clean position.
-  "stdlib-auth":     "--- chunk: stdlib-auth ---",
   "stdlib-compiler": "--- chunk: stdlib-compiler ---",
-  "stdlib-crypto":   "--- chunk: stdlib-crypto ---",
   "stdlib-data":     "--- chunk: stdlib-data ---",
   "stdlib-format":   "--- chunk: stdlib-format ---",
   "stdlib-host":     "--- chunk: stdlib-host ---",

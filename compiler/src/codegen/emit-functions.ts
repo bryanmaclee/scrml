@@ -4,6 +4,7 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { planBatchCellReturn, cpsCellsApplyLines } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
@@ -453,6 +454,23 @@ function emitMultiBatchWrapper(opts: {
       lines.push(`        data: { message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)}, batch: ${owningBatch} },`);
       lines.push(`      };`);
       lines.push(`    }`);
+      // S462 P0 (§19.9.9.7) — a batch in "cells" mode returns the final value of
+      // each cell it wrote; apply them, then bind the forwarded cell (if any) from
+      // the store so a later batch receives its current value.
+      const _batchCellPlan = planBatchCellReturn(body, plan.indices, plan.returnCell);
+      if (_batchCellPlan.mode === "cells") {
+        for (const l of cpsCellsApplyLines(resultVar, _batchCellPlan.cells, "    ")) lines.push(l);
+        if (plan.returnCell) {
+          const _cur = `_scrml_reactive_get(${JSON.stringify(plan.returnCell)})`;
+          if (!boundCells.has(plan.returnCell)) {
+            lines.push(`    let ${plan.returnCell} = ${_cur};`);
+            boundCells.add(plan.returnCell);
+          } else {
+            lines.push(`    ${plan.returnCell} = ${_cur};`);
+          }
+        }
+        continue;
+      }
       // If the batch produces a scrml cell, publish it reactively and bind it
       // by name so later batches / client statements can read it. The local
       // binding uses `let` and is DECLARED once per cell name; a later batch
@@ -489,18 +507,12 @@ function emitMultiBatchWrapper(opts: {
       ));
       continue;
     }
-    // The reactive assignment that receives a batch result is already emitted
-    // as part of that batch's await block (the `returnCell` publish above) —
-    // skip a duplicate emission here.
-    // S455 — a handled `@c = ?{…} !{…}` is the same cell write one level down.
-    const _cellStmt = (handledSqlGuardInner(stmt) ?? stmt) as ASTNode;
-    if (
-      _cellStmt.kind === "state-decl" &&
-      typeof _cellStmt.name === "string" &&
-      batchPlan.some((b) => b.returnCell === _cellStmt.name)
-    ) {
-      continue;
-    }
+    // A client statement is emitted as written. S462: a client-side write to a
+    // cell that some batch also returns (`@msg = "start"` before the batch that
+    // writes `@msg`) used to be SKIPPED here as a presumed duplicate — but the
+    // statement that receives a batch result is a server statement of that batch
+    // (handled above), so the only writes reaching this point are genuine client
+    // writes, and skipping them dropped them.
     const code = emitLogicNode(stmt, cpsOptsBase);
     if (code) {
       for (const line of code.split("\n")) lines.push(`    ${line}`);
@@ -1264,11 +1276,25 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // §19.16.5 — the wrapper body's defer stack (opened at the top of the walk).
     const deferStack = openCpsDeferStack(lines, "    ", body);
     const walkOpts: any = deferStack ? { ...cpsOpts, deferStack: deferStack.ctx, deferAsync: true } : cpsOpts;
+    // S462 P0 (§19.9.9.7) — how the server batch returns its cell writes; the
+    // server handler (emit-server.ts) asks the same question with the same inputs.
+    const _cellPlan = planBatchCellReturn(body, cpsSplit.serverStmtIndices, cpsSplit.returnVarName ?? null);
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt) continue;
 
-      if (cpsSplit.serverStmtIndices.includes(i)) {
+      if (cpsSplit.serverStmtIndices.includes(i) && _cellPlan.mode === "cells") {
+        // The batch ran every server statement and returned the FINAL value of
+        // each cell it wrote (never the rows it read); apply them here.
+        if (!serverCallEmitted && stubName) {
+          lines.push(`    const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+          lines.push(`    if (_scrml_server_result && typeof _scrml_server_result === 'object' && _scrml_server_result.__scrml_error) {`);
+          lines.push(`      return _scrml_server_result;`);
+          lines.push(`    }`);
+          for (const l of cpsCellsApplyLines("_scrml_server_result", _cellPlan.cells, "    ")) lines.push(l);
+          serverCallEmitted = true;
+        }
+      } else if (cpsSplit.serverStmtIndices.includes(i)) {
         // This is a server statement — replace with a call to the server stub.
         if (!serverCallEmitted && stubName) {
           if (cpsSplit.returnVarName) {
@@ -1315,16 +1341,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           ));
           continue;
         }
-        // If this is the reactive assignment that receives the server result,
-        // rewrite it to use the server result variable.
-        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
-          lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
-        } else {
-          const code = emitLogicNode(stmt, cpsOpts);
-          if (code) {
-            for (const line of code.split("\n")) {
-              lines.push(`    ${line}`);
-            }
+        // A client statement is emitted as written — including a client-side
+        // write to the SAME cell the server batch returns (`@msg = "start"` before
+        // `@msg = row.name`). S462: this branch used to rewrite such a write to
+        // `_scrml_reactive_set(<cell>, _scrml_server_result)`, which, ahead of the
+        // server call, read `_scrml_server_result` before its declaration (a
+        // TDZ ReferenceError). The statement that receives the server result is
+        // a server statement and never reaches this branch.
+        const code = emitLogicNode(stmt, cpsOpts);
+        if (code) {
+          for (const line of code.split("\n")) {
+            lines.push(`    ${line}`);
           }
         }
       }

@@ -93,6 +93,7 @@ import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-sess
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { planBatchCellReturn, splitBatchesWithReturnCells } from "./codegen/cps-cell-writes.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -2138,12 +2139,45 @@ export function walkBodyForTriggers(
  * Per §12.7: "RI walks the parsed function body for assignment expressions where the
  * left-hand side is an AT_IDENT token in assignment position."
  */
+/** S462 P0 — does an ExprNode tree assign / `++` / `--` a `@cell`? */
+function exprTreeWritesCell(root: unknown): boolean {
+  const seen = new WeakSet<object>();
+  // `@session` / `@currentUser` are ambient identity, not cells (§6.6.9).
+  const isCell = (t: any): boolean =>
+    !!t && t.kind === "ident" && typeof t.name === "string" && t.name.length > 1 && t.name.startsWith("@") &&
+    t.name !== "@session" && t.name !== "@currentUser";
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "assign" && isCell(o.target)) return true;
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && isCell(o.argument)) return true;
+    for (const k of Object.keys(o)) if (k !== "span" && walk(o[k])) return true;
+    return false;
+  };
+  return walk(root);
+}
+
 function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
   function visitNode(node: LogicStatement): LogicStatement | null {
     if (!node || typeof node !== "object") return null;
 
     // state-decl is the canonical AT_IDENT assignment form.
     if (node.kind === "state-decl") {
+      return node;
+    }
+
+    // S462 P0 — the in-place cell mutation statements are cell writes too
+    // (`@o.a = 2`, `@list.push(x)`, an explicit set). Before S462 they were not
+    // seen here, so a server function writing a cell ONLY this way was neither
+    // split nor refused: the write was lowered into the server module, which
+    // has no reactive store.
+    if (
+      node.kind === "reactive-nested-assign" ||
+      node.kind === "reactive-array-mutation" ||
+      node.kind === "reactive-explicit-set"
+    ) {
       return node;
     }
 
@@ -2154,12 +2188,33 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
       if (/\B@[A-Za-z_$][A-Za-z0-9_$]*\s*=[^=]/.test(expr)) {
         return node;
       }
+      // S462 P0 — compound assignment (`@n += 1`, `@s ??= x`) and `++` / `--`
+      // on a cell are writes as well; the plain-`=` pattern above missed them.
+      // The ambient identity singletons `@session` / `@currentUser` are not
+      // cells (§6.6.9) — their server-side use has its own code
+      // (E-SESSION-AMBIENT-SERVER), so they are not counted here.
+      const CELL = "@(?!(?:session|currentUser)\\b)[A-Za-z_$][A-Za-z0-9_$]*";
+      if (
+        new RegExp(`\\B${CELL}\\s*(?:\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\||[-+*/%&|^])=`).test(expr) ||
+        new RegExp(`\\B${CELL}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${CELL}`).test(expr)
+      ) {
+        return node;
+      }
       return null;
     }
 
     // Do not recurse into nested function bodies.
     if (node.kind === "function-decl") {
       return null;
+    }
+
+    // S462 P0 — a cell write carried in an ExprNode-valued field: a match arm's
+    // `"admin" :> @role = "ADMIN"` (`match-arm-inline.resultExpr`), an assignment
+    // inside a declaration's initializer or a statement head. The array walk
+    // below never reaches these single-object fields.
+    for (const key of ["resultExpr", "valueExpr", "initExpr", "condExpr", "iterExpr", "headerExpr"]) {
+      const v = (node as any)[key];
+      if (v && typeof v === "object" && exprTreeWritesCell(v)) return node;
     }
 
     // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement
@@ -3053,6 +3108,12 @@ export function analyzeCPSEligibility(
   importedServerNamespaces: Set<string> = new Set(),
   /** S455 — the function's plain parameter names (what a handled `?{}`'s arm may read on the server). */
   fnParamNames: ReadonlySet<string> = new Set(),
+  /**
+   * S462 P0 — `buildCpsStatementServerProbe`: the escalation walker applied to
+   * one statement. A statement it flags is server-tier whatever the narrower
+   * `isServerTriggerStatement` says. Defaults to "never" for external callers.
+   */
+  stmtServerProbe: (stmt: unknown) => boolean = () => false,
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
 
@@ -3076,6 +3137,10 @@ export function analyzeCPSEligibility(
     const node = (_handledInner ?? stmt) as LogicStatement;
 
     const isReactive = isReactiveStatement(node);
+    // S462 P0 — server-tier when EITHER reader says so (see
+    // `buildCpsStatementServerProbe`): the escalation walker is the one that
+    // decided the function is server-placed, so it must also decide which of
+    // its statements stay there.
     const isServer = isServerTriggerStatement(
       node,
       protectedFields,
@@ -3085,7 +3150,7 @@ export function analyzeCPSEligibility(
       resolvedServerFnIds,
       importedServerFnNames,
       importedServerNamespaces,
-    );
+    ) || stmtServerProbe(node);
 
     // Special case: state-decl with server function call OR server-only
     // resource in init — CPS-eligible.
@@ -3093,7 +3158,8 @@ export function analyzeCPSEligibility(
       isReactive &&
       node.kind === "state-decl" &&
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
-        hasServerOnlyResourceInInit(node, importedServerNamespaces));
+        hasServerOnlyResourceInInit(node, importedServerNamespaces) ||
+        stmtServerProbe(node));
 
     if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt, fnParamNames)) {
       mixedIndices.push(i);
@@ -3106,8 +3172,12 @@ export function analyzeCPSEligibility(
     } else if (isReactiveServer) {
       reactiveServerIndices.push(i);
     } else if (isReactive && isServer) {
-      // bare-expr with both @var= and server resource — truly unsplittable
-      mixedIndices.push(i);
+      // S462 P0 — a cell write and server work in one statement (`@n += vp(…)`).
+      // A server batch now carries its cell writes back to the client
+      // (§19.9.9.7, the cell envelope — codegen/cps-cell-writes.ts), so the
+      // statement runs on the server like any other server-tier statement.
+      // (Before S462 this was "truly unsplittable" and refused the function.)
+      serverIndices.push(i);
     } else if (isReactive) {
       reactiveIndices.push(i);
     } else if (isServer) {
@@ -3120,7 +3190,54 @@ export function analyzeCPSEligibility(
   // 1. There are NO mixed (unsplittable) statements
   // 2. There is at least one reactive statement (pure reactive or reactive-server)
   // 3. There is at least one server-side element (server statement or reactive-server)
-  const hasReactive = reactiveIndices.length > 0 || reactiveServerIndices.length > 0;
+  // S462 P0 — DATA MINIMISATION BY PLACEMENT. A statement that reads a local
+  // declared by a server-tier statement consumes server data: `const row =
+  // ?{…}.get(); if (row is not) { fail … }; @msg = row.name`. Left on the client it
+  // reads a name the client never had (ReferenceError — before S462 the shape was
+  // refused only because the `const` was mis-tiered client too), and the only way to
+  // make it work client-side is to ship `row` — the raw query result — to the
+  // browser. It runs on the server instead, and the batch sends back only the cell
+  // values it computes (§19.9.9.7). Fixpoint: a statement pulled onto the server
+  // may declare locals of its own.
+  for (let changed = true; changed;) {
+    changed = false;
+    const serverSet = new Set<number>([...serverIndices, ...reactiveServerIndices]);
+    const serverLocals = new Set<string>();
+    for (const si of serverSet) for (const n of topLevelDeclaredLocals(body[si])) serverLocals.add(n);
+    if (serverLocals.size === 0) break;
+    for (let i = 0; i < body.length; i++) {
+      if (serverSet.has(i) || mixedIndices.includes(i)) continue;
+      const stmt = body[i];
+      if (!stmt || typeof stmt !== "object") continue;
+      if (!statementReadsAnyLocal(stmt, serverLocals)) continue;
+      const ri = reactiveIndices.indexOf(i);
+      if (ri >= 0) reactiveIndices.splice(ri, 1);
+      const node = (handledSqlGuardInner(stmt) ?? stmt) as LogicStatement;
+      if ((node as any).kind === "defer-stmt") {
+        serverIndices.push(i);
+        deferServerIndices.push(i);
+      } else if (node.kind === "state-decl") {
+        reactiveServerIndices.push(i);
+      } else {
+        serverIndices.push(i);
+      }
+      changed = true;
+    }
+  }
+  // Source order is load-bearing below (`returnVarName` is the FIRST reactive-server cell).
+  serverIndices.sort((a, b) => a - b);
+  reactiveServerIndices.sort((a, b) => a - b);
+
+  // S462 P0 — a cell write NESTED in a server-tier statement (`if (vp(…)) { @ok =
+  // true }`) is a reactive write too: the server batch carries it back in the cell
+  // envelope (§19.9.9.7). Before S462 such a function had no top-level reactive
+  // statement, fell out here, and was refused (E-RI-002) — or, when another
+  // top-level write existed, the nested write lowered to `_scrml_reactive_set`
+  // inside the server module, which has no such function.
+  const hasNestedServerWrite = serverIndices.some(
+    (i) => findReactiveAssignment([body[i] as LogicStatement]) !== null,
+  );
+  const hasReactive = reactiveIndices.length > 0 || reactiveServerIndices.length > 0 || hasNestedServerWrite;
   const hasServer = serverIndices.length > 0 || reactiveServerIndices.length > 0;
 
   if (!hasReactive || !hasServer) return null;
@@ -3156,6 +3273,57 @@ export function analyzeCPSEligibility(
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
   };
+}
+
+/**
+ * S462 P0 — the plain (non-cell) names a TOP-LEVEL body statement declares:
+ * `let` / `const` / `~` / `lin` declarations (destructured names included) and a
+ * nested `function` declaration's name. Block-nested declarations are scoped to
+ * their block and never reach a sibling statement, so they are not collected.
+ */
+function topLevelDeclaredLocals(stmt: unknown): string[] {
+  const s = (handledSqlGuardInner(stmt) ?? stmt) as any;
+  if (!s || typeof s !== "object") return [];
+  if (s.kind === "function-decl") return typeof s.name === "string" ? [s.name] : [];
+  if (s.kind !== "let-decl" && s.kind !== "const-decl" && s.kind !== "tilde-decl" && s.kind !== "lin-decl") return [];
+  if (typeof s.name === "string" && s.name.length > 0) return [s.name];
+  const out: string[] = [];
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (typeof o.name === "string" && o.name && !o.name.startsWith("@")) out.push(o.name);
+    for (const k of Object.keys(o)) if (k !== "span" && k !== "initExpr" && k !== "init" && k !== "sqlNode") walk(o[k]);
+  };
+  walk(s.pattern ?? s.names ?? s.destructure ?? null);
+  return out;
+}
+
+/** S462 P0 — does `stmt` read any of `names` (identifier nodes, or raw expression text)? Over-approximates. */
+function statementReadsAnyLocal(stmt: unknown, names: Set<string>): boolean {
+  if (names.size === 0) return false;
+  const re = new RegExp(`(?<![\\w$.@])(?:${[...names].map(escapeRegex).join("|")})(?![\\w$])`);
+  // Keys that hold a declared name, a discriminant or an operator — not a read.
+  const NOT_READ = new Set(["kind", "name", "op", "litType", "variable", "span", "id", "shape", "constBinder", "structuralForm", "method"]);
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "lit") return false;
+    if (o.kind === "ident" && typeof o.name === "string") return names.has(o.name);
+    for (const k of Object.keys(o)) {
+      if (NOT_READ.has(k)) continue;
+      const v = o[k];
+      if (typeof v === "string") { if (re.test(v)) return true; }
+      else if (walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(stmt);
 }
 
 /**
@@ -3854,6 +4022,66 @@ function collectServerOnlyBindingModules(
 
   for (const mod of scanForServerOnlyBindingRefs(body, live).values()) found.add(mod);
   return found;
+}
+
+/**
+ * S462 P0 — the CPS split's per-STATEMENT server probe: does this one statement
+ * touch a server-only resource?
+ *
+ * WHY THIS EXISTS. The CPS tier classifier (`isServerTriggerStatement`) is a
+ * SECOND, narrower reader of the same question the escalation walker answers
+ * for the whole function, and the two drifted apart. It keyed server-only
+ * imports on the IMPORTED name (so `verifyPassword as vp` never matched `vp`)
+ * and never looked inside a control-flow HEAD (`if (!vp(...))`, `for (r of
+ * ?{…}.all())`). Measured on a9aa81eff: the function escalated (its body
+ * reaches `scrml:auth` and `?{}`), the split put the `if` on the CLIENT, the
+ * server returned the raw row — password hash included — and the browser ran
+ * `!vp(...)` on an un-awaited Promise: "WELCOME" for a wrong password.
+ *
+ * THE FIX IS ONE READER, NOT A WIDER SECOND ONE. A statement is server-tier when
+ * the escalation walker (`walkBodyForTriggers`, §12.2 Triggers 1/2) or the
+ * Trigger-3 binding scan (`scanForServerOnlyBindingRefs`, by LOCAL name, at any
+ * depth, by reference) would escalate a function made of that statement alone.
+ * Whatever escalates the function therefore also places the statement — by
+ * construction, not by keeping two lists in step.
+ *
+ * Shadowing mirrors `collectServerOnlyBindingModules`: a parameter or body-level
+ * local named after an import is not the import.
+ */
+export function buildCpsStatementServerProbe(
+  fnNode: FunctionDeclNode,
+  bindings: Map<string, string> | undefined,
+  protectedFields: Set<string>,
+  stateBlockIdByField: Map<string, string>,
+  filePath: string,
+  importedServerNamespaces: Set<string>,
+  printBuiltinsShadowed: Set<string>,
+): (stmt: unknown) => boolean {
+  const live = new Map<string, string>();
+  if (bindings && bindings.size > 0) {
+    const body: LogicStatement[] = Array.isArray(fnNode.body) ? fnNode.body : [];
+    const shadowed = new Set<string>();
+    for (const p of (fnNode.params ?? []) as unknown[]) {
+      if (typeof p === "string") shadowed.add(p);
+      else if (p && typeof p === "object" && typeof (p as any).name === "string") shadowed.add((p as any).name);
+    }
+    for (const n of collectLocalNames(body)) shadowed.add(n);
+    for (const [local, mod] of bindings) if (!shadowed.has(local)) live.set(local, mod);
+  }
+  return (stmt: unknown): boolean => {
+    if (!stmt || typeof stmt !== "object") return false;
+    const { triggers } = walkBodyForTriggers(
+      [stmt as LogicStatement],
+      protectedFields,
+      stateBlockIdByField,
+      filePath,
+      true, // E-ROUTE-001 is the function walk's to report, not this probe's
+      importedServerNamespaces,
+      printBuiltinsShadowed,
+    );
+    if (triggers.some((t) => t.kind === "server-only-resource" || t.kind === "protected-field-access")) return true;
+    return live.size > 0 && scanForServerOnlyBindingRefs(stmt, live).size > 0;
+  };
 }
 
 /**
@@ -4817,6 +5045,9 @@ export function runRI(input: RIInput): RIOutput {
   // server-only module). Consumed in the per-function scan below to build the
   // `server-only-import` direct trigger.
   const perFileEscalationServerOnlyBindings = buildPerFileEscalationServerOnlyBindings(files);
+  // S462 — each file's print()/println() shadow set (§20.7.5), filled by Step 3 and
+  // read again by the CPS per-statement server probe (Step 6).
+  const perFilePrintShadowed = new Map<string, Set<string>>();
 
   // ------------------------------------------------------------------
   // Step 2d: Bug-5 follow-on to C18 (§38.4) — per-file channel-cell
@@ -4888,6 +5119,7 @@ export function runRI(input: RIInput): RIOutput {
     // §20.7.5 — per-file print/println shadow set (a top-level `function print`
     // wins over the builtin, so its calls must NOT server-escalate).
     const filePrintShadowed = new Set(filePrintBuiltinsShadowed(fileAST));
+    perFilePrintShadowed.set(filePath, filePrintShadowed); // S462 — the CPS statement probe reuses it
 
     for (const fnNode of fnNodes) {
       const fnNodeId = makeFunctionNodeId(filePath, fnNode);
@@ -6462,6 +6694,15 @@ export function runRI(input: RIInput): RIOutput {
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
             plainParamNames(record.fnNode),
+            buildCpsStatementServerProbe(
+              record.fnNode,
+              perFileEscalationServerOnlyBindings.get(record.filePath),
+              allProtectedFields,
+              stateBlockIdByField,
+              record.filePath,
+              perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
+              perFilePrintShadowed.get(record.filePath) ?? new Set<string>(),
+            ),
           );
 
           if (cpsResult && cpsResult.eligible) {
@@ -6557,6 +6798,35 @@ export function runRI(input: RIInput): RIOutput {
               // client-wrapper emit can sequence client statements between
               // the per-batch awaits.
               cpsSplit.topoOrder = _plan.topoOrder;
+            }
+
+            // S462 P0 (§19.9.9.7) — a cell write the server half of the split
+            // cannot carry back to the client is REFUSED here, never relocated to
+            // the client (where the server-only work it depends on would follow
+            // it) and never lowered into a server module that has no reactive
+            // store. A server batch hands back each cell's final value; a write
+            // into a cell's value in place, inside a closure, or a `return` from
+            // inside the batch has no such value to hand back.
+            if (cpsSplit) {
+              const _fnName = record.fnNode.name ?? "<anonymous>";
+              const _reported = new Set<unknown>();
+              for (const _b of splitBatchesWithReturnCells(body, cpsSplit)) {
+                const _cellPlan = planBatchCellReturn(body, _b.indices, _b.returnCell);
+                for (const _u of _cellPlan.unsupported) {
+                  if (_reported.has(_u.span)) continue;
+                  _reported.add(_u.span);
+                  const _cellText = _u.cell ? ` (\`@${_u.cell}\`)` : "";
+                  errors.push(new RIError(
+                    "E-RI-002",
+                    `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+                    `statement runs in its server half because it is part of the server work. It ${_u.what}${_cellText}. ` +
+                    `The server half hands a cell back to the client only as the cell's final value (§19.9.9.7), ` +
+                    `so it cannot carry this write — and moving the statement to the client would move the ` +
+                    `server-only work with it. Fix: ${_u.fix}.`,
+                    (_u.span as Span) ?? record.fnNode.span,
+                  ));
+                }
+              }
             }
           } else {
             // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped

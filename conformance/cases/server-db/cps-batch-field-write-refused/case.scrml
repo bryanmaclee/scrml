@@ -1,0 +1,18 @@
+<program db="./app.db">
+    <schema>
+        users {
+            id: integer primary key
+            name: text
+        }
+    </schema>
+    <u> = { name: "" }
+    // The write reads `row`, the query's result, so it belongs to the server half
+    // of the split — and the server half hands a cell back only as its final value.
+    // A write INTO the cell's value (`@u.name = …`) has no such value to hand back.
+    function pick() {
+        const row = ?{`SELECT name FROM users WHERE id = 1`}.get()
+        @u.name = row.name
+    }
+    <button id="b" onclick=pick()>pick</button>
+    <p id="n">${@u.name}</p>
+</program>
