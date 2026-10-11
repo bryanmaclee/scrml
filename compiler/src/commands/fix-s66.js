@@ -26,7 +26,7 @@
  *                   (fix-is-some.js) locates the sites from impl#1's token streams (the sites
  *                   W-IS-SOME-DEPRECATED fires on) and verifies each file (identical artifacts).
  *   client-server-call  §19.9.10 (S451; S454 F8): an UNHANDLED client call of a server function
- *                   not declared `!` → `f(…) !{ .Transport(_) :> { return } }` (an event-handler value
+ *                   not declared `!` → `f(…) !{ .Transport(_) :> return }` (an event-handler value
  *                   braced). Chained third; its own module (fix-client-server-call.js) locates the
  *                   calls from impl#1's Route Inference + AST and gates each file (re-parse, same
  *                   codes); a site it cannot rewrite is listed. It reports an INFO (`infos`) at each
