@@ -105,3 +105,17 @@
   222b2a72e → this round: applied 3299 → 3298, blockers 1010 → 1010. The only removed rewrite is the
   error-handler-in-inline-handler arm above. Four other blockers changed wording only, adding
   E-CODEGEN-INVALID-LOGIC to the reported codes.
+- Round 2 code commit a62bb31ae (pre-commit 34746 tests / 0 fail). The first attempt failed the
+  P3-FOLLOW isComponent-routing lint; component detection now goes through isUserComponentMarkup.
+- Merged origin/main f2284b72e (#1399) as 002a9e762. The FACTS conflict was resolved by regen.
+  - The first merge-commit attempt failed one dev-server integration test with a 30 s timeout under
+    load (dev-db-no-side-file). It passes alone, 26/0, and the retry passed pre-commit.
+- Gates after the merge:
+  - browser-baseline --check: PASS, 48 asserted, on the re-run. The first run was the known
+    "PARSER DISAGREES" flake.
+  - integration+lsp+commands: 5658/0. top-level: 2239/0. e2e-render-map: 259/0.
+  - s34-census --check-new: PASS. host-global-scan --check: 0 violations.
+  - facts, spec-index, severity and bootstrap-conformance --check: current.
+  - snippet-gate: 128/0. corpus-compile-floor: PASS.
+  - all-rules corpus dry-run on the merged head: identical to the pre-merge round-2 run
+    (3298 applied, 1010 blockers).
