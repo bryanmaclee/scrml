@@ -201,6 +201,50 @@ ${cells}${fn}
     expect(e[0].message).toContain("`@row`");
   });
 
+  test("(d) a browser statement that derives a value from a server value, read by later server work, is refused", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  @busy = localStorage.getItem(@row.role) == "x"
+  const z = @busy
+  if (z) { ?{\`DELETE FROM secrets\`}.run() }
+}`));
+    const e = errorsOf(r);
+    expect(e.length).toBe(1);
+    // Blames the browser statement (line 2 of the body), names the server value and the derived one.
+    expect(e[0].message).toContain("`@row`");
+    expect(e[0].message).toContain("`localStorage`");
+    expect(e[0].message).toMatch(/later server work reads `(z|@busy)`/);
+  });
+
+  test("(d) a browser statement deriving from a server value with NO later server reader is not refused", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  @busy = localStorage.getItem(@row.role) == "x"
+}`));
+    expect(errorsOf(r)).toEqual([]);
+  });
+
+  test("allow-list: a statement naming a global not known to behave the same on the server is not moved — refused", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  @n = setTimeout(() => {}, 0)
+  if (@row.role == "admin") { ?{\`DELETE FROM secrets\`}.run() }
+}`));
+    const e = errorsOf(r);
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("`setTimeout`");
+  });
+
+  test("allow-list: pure computation over locals, params, cells and isomorphic globals still moves — one batch", () => {
+    const r = ri(prog(`function f(id: number) {
+  @row = ?{\`SELECT role FROM users WHERE rowid = \${id}\`}.get()
+  @n = Math.max(id, JSON.stringify(@row).length, [1, 2].map((v) => v * 2)[0])
+  if (@row.role == "admin" && @n > 0) { ?{\`DELETE FROM secrets\`}.run() }
+}`));
+    expect(errorsOf(r)).toEqual([]);
+    expect(splitOf(r).serverStmtIndices).toEqual([0, 1, 2]);
+  });
+
   test("a client local the server reads moves to the server with it", () => {
     const split = splitOf(ri(prog(`function f(id: number) {
   const y = @n + 1

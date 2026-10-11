@@ -89,6 +89,7 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { fileBoundNamesOf } from "./codegen/emit-library-shared.ts";
 import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
@@ -3120,8 +3121,18 @@ export function analyzeCPSEligibility(
    * `isServerTriggerStatement` says. Defaults to "never" for external callers.
    */
   stmtServerProbe: (stmt: unknown) => boolean = () => false,
+  /**
+   * S462 P0 fix round 1 — the names the file declares or imports
+   * (`fileKnownNamesOf`). With it, a statement the placement rule would move into
+   * a server batch must name only known names (the allow-list half of
+   * `clientOnlyReason`). Null (external callers) keeps the deny-list only.
+   */
+  fileKnownNames: ReadonlySet<string> | null = null,
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
+  const movableKnown: ReadonlySet<string> | null = fileKnownNames === null
+    ? null
+    : new Set<string>([...fileKnownNames, ...functionOwnNames(body, fnParamNames)]);
 
   const serverIndices: number[] = [];
   const reactiveIndices: number[] = [];
@@ -3261,7 +3272,7 @@ export function analyzeCPSEligibility(
   // consumer of a server value (rule (c)).
   const tryPull = (i: number, value: string, because: string, refuseIfClientOnly = true): boolean => {
     if (isServerIdx(i) || mixedIndices.includes(i) || refusedIdx.has(i)) return false;
-    const why = clientOnlyReason(body[i]);
+    const why = clientOnlyReason(body[i], movableKnown);
     if (why !== null) {
       if (!refuseIfClientOnly) return false;
       refusedIdx.add(i);
@@ -3335,6 +3346,73 @@ export function analyzeCPSEligibility(
       }
     }
   }
+  // (d) DERIVED THROUGH THE BROWSER. A statement that stays in the browser (it
+  // needs the client) yet reads a server-originated value makes everything it
+  // writes or declares server-originated too: `@x = localStorage.getItem(@row.role)`
+  // derives `@x` from `@row`. A LATER server statement that reads such a value
+  // would trust what the client sends back for it — the round trip rule (c)
+  // forbids — so the browser statement is REFUSED (E-RI-002). Transitive through
+  // further browser statements. Fail-closed: a later server rewrite of the value
+  // does not clear it.
+  {
+    const srvCell = new Map<string, number>();
+    const srvLocal = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of topLevelDeclaredLocals(body[p])) if (!srvLocal.has(n)) srvLocal.set(n, p);
+      for (const c of cellsWrittenBy(body[p])) if (!srvCell.has(c)) srvCell.set(c, p);
+    }
+    // name (`@cell` or local) → the browser statement that derived it, and the server value it came from.
+    const tainted = new Map<string, { at: number; from: string; blame: number }>();
+    const readOf = (stmt: unknown, i: number): string | null => {
+      const cells = new Set<string>();
+      const locals = new Set<string>();
+      for (const [c, p] of srvCell) if (p < i) cells.add(c);
+      for (const [n, p] of srvLocal) if (p < i) locals.add(n);
+      for (const [n, t] of tainted) {
+        if (t.at >= i) continue;
+        if (n.startsWith("@")) cells.add(n.slice(1)); else locals.add(n);
+      }
+      const c = statementReadsAnyCell(stmt, cells);
+      if (c !== null) return `@${c}`;
+      for (const n of locals) if (statementReadsAnyLocal(stmt, new Set([n]))) return n;
+      return null;
+    };
+    const origin = (name: string): string => tainted.get(name)?.from ?? name;
+    for (let i = 0; i < body.length; i++) {
+      const stmt = body[i];
+      if (!stmt || typeof stmt !== "object" || refusedIdx.has(i)) continue;
+      if (!isServerIdx(i)) {
+        const read = readOf(stmt, i);
+        if (read === null) continue;
+        const t = { at: i, from: origin(read), blame: tainted.get(read)?.blame ?? i };
+        for (const c of cellsWrittenBy(stmt)) tainted.set(`@${c}`, t);
+        for (const n of topLevelDeclaredLocals(stmt)) tainted.set(n, t);
+        continue;
+      }
+      let read: string | null = null;
+      for (const [n, tt] of tainted) {
+        if (tt.at >= i) continue;
+        const hit = n.startsWith("@")
+          ? statementReadsAnyCell(stmt, new Set([n.slice(1)])) !== null
+          : statementReadsAnyLocal(stmt, new Set([n]));
+        if (hit) { read = n; break; }
+      }
+      if (read === null) continue;
+      const t = tainted.get(read)!;
+      if (refusedIdx.has(t.blame)) continue;
+      refusedIdx.add(t.blame);
+      const why = clientOnlyReason(body[t.blame], movableKnown) ?? "it has to run in the browser";
+      placementRefusals.push({
+        index: t.blame,
+        value: t.from,
+        why:
+          `it reads \`${t.from}\`, which the server half computed, and later server work reads \`${read}\`, ` +
+          `which is derived from it here (the value would have to cross the browser to reach the second request), but ${why}`,
+      });
+    }
+  }
+
   // Source order is load-bearing below (`returnVarName` is the FIRST reactive-server cell).
   serverIndices.sort((a, b) => a - b);
   reactiveServerIndices.sort((a, b) => a - b);
@@ -3488,7 +3566,159 @@ const CLIENT_ONLY_ROOTS = new Set([
  * the batch's cell envelope). A statement that needs the client cannot: a browser
  * global, a `lift`, markup. Returns the reason it cannot, or null.
  */
-function clientOnlyReason(stmt: unknown): string | null {
+function clientOnlyReason(stmt: unknown, known: ReadonlySet<string> | null = null): string | null {
+  const denied = clientOnlyDeniedReason(stmt);
+  if (denied !== null || known === null) return denied;
+  const unknown = serverUnknownName(stmt, known);
+  return unknown === null
+    ? null
+    : `it uses \`${unknown}\`, which is not one of the function's own names, a name the file declares or imports, ` +
+      `or a global known to behave the same on the server (moving it would change what it does)`;
+}
+
+/**
+ * S462 P0 fix round 1 — the ALLOW-LIST half of `clientOnlyReason` (fail-closed).
+ * A statement the placement rule moves into a server batch may only name: cells,
+ * the function's own parameters and locals, names the file declares or imports,
+ * and the globals below (computation that behaves identically on either side). Any
+ * other free name — `setTimeout`, `fetch`, `console`, a host global this list does
+ * not know — could mean something different, or nothing, on the server, so the
+ * statement is not moved; it is refused instead (E-RI-002), never relocated.
+ */
+const SERVER_MOVABLE_GLOBALS = new Set([
+  "Math", "JSON", "String", "Number", "Boolean", "Array", "Object", "Date", "RegExp", "Map", "Set",
+  "WeakMap", "WeakSet", "Symbol", "BigInt", "Intl", "Error", "TypeError", "RangeError",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "decodeURIComponent",
+  "encodeURI", "decodeURI", "structuredClone", "Infinity", "NaN", "undefined",
+]);
+/** Words that lex as identifiers in raw expression text but are not names. */
+const RAW_NON_NAMES = new Set([
+  "true", "false", "null", "undefined", "this", "new", "typeof", "instanceof", "in", "of", "void",
+  "delete", "await", "async", "function", "return", "if", "else", "const", "let", "var", "for",
+  "while", "do", "break", "continue", "switch", "case", "default", "throw", "try", "catch",
+  "finally", "yield", "class", "extends", "super", "is", "not", "some", "and", "or", "match",
+  "fail", "lift", "with", "as",
+]);
+/** String fields that carry expression text, keyed to the tree field that supersedes them. */
+const RAW_EXPR_KEYS: Record<string, string | null> = {
+  expr: "exprNode", init: "initExpr", iterable: "iterExpr", condition: "condExpr",
+  raw: null, bodyRaw: null,
+};
+
+function rawTextUnknownName(raw: string, known: ReadonlySet<string>): string | null {
+  const text = blankLiteralTextInSource(raw) ?? raw;
+  const local = new Set<string>();
+  const addIds = (s: string) => { for (const m of s.matchAll(/[A-Za-z_$][\w$]*/g)) local.add(m[0]); };
+  for (const m of text.matchAll(/\(([^()]*)\)\s*=>/g)) addIds(m[1]);
+  for (const m of text.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) local.add(m[1]);
+  for (const m of text.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) local.add(m[1]);
+  for (const m of text.matchAll(/\b(?:const|let|var)\s*([[{][^=]*)=/g)) addIds(m[1]);
+  for (const m of text.matchAll(/\bfunction\s*([A-Za-z_$][\w$]*)?\s*\(([^()]*)\)/g)) { if (m[1]) local.add(m[1]); addIds(m[2]); }
+  for (const m of text.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][\w$]*)/g)) local.add(m[1]);
+  // A name read: not after `.` / `@` / `#`, and not an object-literal key (`k :`).
+  for (const m of text.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*:(?!:))/g)) {
+    const n = m[1];
+    if (RAW_NON_NAMES.has(n) || local.has(n) || known.has(n) || SERVER_MOVABLE_GLOBALS.has(n)) continue;
+    return n;
+  }
+  return null;
+}
+
+function serverUnknownName(stmt: unknown, known: ReadonlySet<string>): string | null {
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "ident" && typeof o.name === "string") {
+      const nm = o.name;
+      if (!nm.startsWith("@") && !known.has(nm) && !SERVER_MOVABLE_GLOBALS.has(nm) && !RAW_NON_NAMES.has(nm)) hit = nm;
+      return;
+    }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        if (!(k in RAW_EXPR_KEYS)) continue;
+        const tree = RAW_EXPR_KEYS[k];
+        if (tree !== null && o[tree] && typeof o[tree] === "object") continue;
+        if (k === "raw" && o.kind !== "escape-hatch") continue;
+        const u = rawTextUnknownName(v, known);
+        if (u !== null) { hit = u; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return hit;
+}
+
+/**
+ * S462 P0 fix round 1 — every name a function may legitimately read besides cells
+ * and globals: its parameters and every name it declares at any depth (locals,
+ * destructured names, loop variables, nested functions and their parameters,
+ * lambda parameters, match bindings). Over-collected on purpose — an extra name
+ * only lets a statement move, and the deny-list half still applies.
+ */
+function functionOwnNames(body: unknown, params: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>(params);
+  const addIds = (s: string) => { for (const m of s.matchAll(/[A-Za-z_$][\w$]*/g)) out.add(m[0]); };
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind !== "ident") {
+      for (const k of ["name", "bindName", "variable", "binding", "indexVariable", "errorName", "catchParam"]) {
+        const v = o[k];
+        if (typeof v === "string" && !v.startsWith("@")) addIds(v);
+      }
+      if (Array.isArray(o.params)) {
+        for (const p of o.params) {
+          if (typeof p === "string") addIds(p.split(":")[0]);
+          else if (p && typeof p.name === "string") addIds(p.name);
+        }
+      }
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(body);
+  return out;
+}
+
+/**
+ * S462 P0 fix round 1 — the names a FILE declares or imports (`fileBoundNamesOf`)
+ * plus every declaration's name at any depth (types, enums, machines, …).
+ */
+export function fileKnownNamesOf(fileAST: unknown): Set<string> {
+  const out = fileBoundNamesOf(fileAST);
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (typeof o.kind === "string" && (o.kind.endsWith("-decl") || o.kind === "import") && typeof o.name === "string") {
+      const m = o.name.match(/^[A-Za-z_$][\w$]*/);
+      if (m) out.add(m[0]);
+    }
+    for (const k of ["names", "specifiers", "imports"]) {
+      const v = o[k];
+      if (Array.isArray(v)) for (const s of v) {
+        if (typeof s === "string") out.add(s);
+        else if (s && typeof s === "object") for (const f of ["local", "alias", "name"]) if (typeof s[f] === "string") out.add(s[f]);
+      }
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  const f = fileAST as { nodes?: unknown; ast?: { nodes?: unknown } };
+  walk(f.nodes ?? f.ast?.nodes ?? []);
+  return out;
+}
+
+function clientOnlyDeniedReason(stmt: unknown): string | null {
   const seen = new WeakSet<object>();
   let why: string | null = null;
   const walk = (n: unknown): void => {
@@ -5300,6 +5530,10 @@ export function runRI(input: RIInput): RIOutput {
   // S462 — each file's print()/println() shadow set (§20.7.5), filled by Step 3 and
   // read again by the CPS per-statement server probe (Step 6).
   const perFilePrintShadowed = new Map<string, Set<string>>();
+  // S462 P0 fix round 1 — each file's declared/imported names: the allow-list for a
+  // statement the CPS placement rule moves into a server batch (`clientOnlyReason`).
+  const perFileKnownNames = new Map<string, Set<string>>();
+  for (const fileAST of files) perFileKnownNames.set(fileAST.filePath, fileKnownNamesOf(fileAST));
 
   // ------------------------------------------------------------------
   // Step 2d: Bug-5 follow-on to C18 (§38.4) — per-file channel-cell
@@ -6954,6 +7188,7 @@ export function runRI(input: RIInput): RIOutput {
               perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
               perFilePrintShadowed.get(record.filePath) ?? new Set<string>(),
             ),
+            perFileKnownNames.get(record.filePath) ?? new Set<string>(),
           );
 
           // S462 P0 fix round 1 — a statement the placement rule had to move to the
