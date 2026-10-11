@@ -30,4 +30,14 @@
       Syntax: 0 failing both sides. ⇒ NO pre-existing corpus site changed behaviour: zero
       previously-miscompiled sites in the measured corpus. Line census agrees: zero same-line
       non-`;` braceless if…else sites outside the new s462 cases (comment/`<code>` text only).
-- [ ] gates
+- [x] merged origin/main 2f78ff59b (a2f571def): known-gaps + FACTS conflicts resolved by hunk
+      (both entry sets kept), gap counts + FACTS regenerated, master-list.md = origin/main.
+- [x] adversarial pass found two more sites of the same drop on base, fixed + pinned (fd8f3b01f):
+      `for (…) { if (c) lift x else lift 0 }` ran the else-lift UNCONDITIONALLY; the markup
+      value-form `${ if (@c) "yes" else "no" }` rendered "" for false.
+- [x] gates (merge head a2f571def unless noted): pre-commit 34886 pass/0 fail/58 skip (and the hook
+      on fd8f3b01f) · tracking tiers (after pretest) 5681/0/10 skip · browser-baseline --check
+      PASS 48 (two PARSER DISAGREES interleave flakes, re-run) · s34-census --check-new --base
+      2f78ff59b PASS · host-global-scan --check PASS · facts / spec-index / bootstrap-conformance /
+      severity --check PASS · snippet-gate PASS · corpus-compile-floor PASS · types-gate PASS ·
+      delta-lint PASS · conflict-marker-gate PASS.
