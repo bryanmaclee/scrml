@@ -31,3 +31,17 @@
   dev prints 127.0.0.1 / no ::1 twin), promote-safety read-only (runs as root), expr-node-corpus-invariant ×2
   (ALSO FAILS ON BASE 1c1e9eee5: 5 s timeouts), tenant-floor-project-set ×3 + conf-MARKUP-001 (pass alone on
   head — load flakes, 2 sibling suites on the box).
+- Corpus differential head vs origin/main 1c1e9eee5 (each side compiles ITS OWN tree; per-file standalone; 2806
+  files: samples, examples, conformance, stdlib, scrml-support gauntlet-r25 (4); ../giti and ../flogence are NOT
+  cloned in this container — skipped): newly refused 0, code-set changes 0, emit changes 1:
+  examples/19-lin-token.client.js — CPS continuation `const ticket = _scrml_fetch_mintTicket_12(…)` →
+  `const ticket = await _scrml_fetch_mintTicket_12(…)` (a same-file server fn in the wrapper continuation; was a
+  Promise). No server artifact in the corpus changed (no corpus program calls an imported async helper from
+  server code); the server shapes are pinned by the executed integration test.
+- Gates (head 8d4fad12c): pre-commit full (32970): 13 fail, all environmental/pre-existing (see above);
+  root-level 2239/0; e2e-render-map 259/0; self-host-v2 slices 2274/0; lsp+commands 713/11 — all 11 are
+  `scrml dev`/`serve` bind/watch tests (no ::1 / host display in this container); browser-baseline --check:
+  1 NEW name (each-alias-in-lifted-markup nested <each>, passes alone) — IDENTICAL on base 1c1e9eee5 (ran
+  --check in a base tree: same single new name) → environmental; facts (regenerated, +2 test files);
+  spec-index, host-global-scan, s34-census --check-new --base 1c1e9eee5, state, conflict-marker, types-gate,
+  snippet-gate 128/128, corpus-compile-floor, bootstrap-conformance, severity, delta-lint: PASS.
