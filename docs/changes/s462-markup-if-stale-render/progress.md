@@ -91,3 +91,11 @@ priority there. Once render gates run first, the microtask-deferred error report
       the chain keeps rendering — and nothing is hidden.
 - [x] Item 4 — an arm started during a write's gate pass renders that write's state; its bindings
       (born in the gate pass, skipped for that write) track the next write (test).
+- [x] Gates on 8d5c5c3cf (+ FACTS regen 524257e3d): pre-commit 34609/0 · tiers 5630/0/10 skip ·
+      browser-baseline PASS (48) · s34-census PASS (base 3d5fab91c) · host-global-scan 0 · facts ·
+      state · spec-index · bootstrap-conformance · severity · snippet-gate 128/0 ·
+      corpus-compile-floor · types-gate unchanged.
+- [x] Emit-differential base 3d5fab91c vs head: 0 compile/diagnostic/syntax deltas; 181 artifact
+      diffs = 165 project-root-path only + 16 real: the same 7 chain-group files, plus 9 files with
+      a mount-deferred / nested lift group whose `own` wrapper now passes the gate flag (4 lines
+      each; no gated effect goes through those wrappers in any of the 9 today).
