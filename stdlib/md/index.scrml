@@ -1022,7 +1022,9 @@ ${
             // the next item, if the next line is a marker of the same kind
             if (k < n && indentOf(lines[k].text) <= 3) {
                 const nt: string = stripLead(lines[k]).text
-                if (markerWidth(nt) > 0 && isOrderedMarker(nt) == ordered) {
+                // `- ---` is a CommonMark thematic break, not an item: it ends the list
+                // and is read as text with W-MD-THEMATIC-BREAK
+                if (markerWidth(nt) > 0 && !isAltRule(nt) && isOrderedMarker(nt) == ordered) {
                     if (blanksAfter > 0) {
                         loose = true
                     }

@@ -12,7 +12,8 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { isRawContentElement, rawContentDomLines } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
@@ -1677,8 +1678,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   const isVoid = VOID_ELEMENTS.has(tag);
 
   const elVar = genVar(`lift_el`);
-  // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built.
-  if (refuseElementLowering(tag, node)) {
+  // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built, nor a
+  // raw-content body holding their start-tag text.
+  if (refuseElementLowering(tag, node) || refuseRawContentLowering(node)) {
     lines.push(`const ${elVar} = _scrml_g.document.createComment("");`);
     return elVar;
   }
@@ -2085,6 +2087,13 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
 
       if (child.kind === "text") {
         const text = child.value ?? child.text ?? "";
+        // §4.17 (S462 Q21) — a raw-content body is DISPLAY TEXT: never interpolated,
+        // `<` / `>` encoded, parsed through an inert <template> so the author's entities
+        // display as the characters they name and a bare nested <code>/<pre> stays an element.
+        if (isRawContentElement(node)) {
+          if (text !== "") for (const l of rawContentDomLines(text, elVar, () => genVar("lift_raw"))) lines.push(l);
+          continue;
+        }
         // g-emit-lift-markup-text-interp-not-lowered (ss20 items 4+5): a markup
         // TEXT child whose value carries an un-split `${...}` interpolation. The
         // top-level emit-expr "markup-value" salvage path (ternary arms / bare

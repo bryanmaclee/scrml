@@ -335,6 +335,8 @@ describe("scrml:md §C OUT — each dropped construct is text and reports its co
     ["a\n--", "<p>a\n--</p>", ["W-MD-SETEXT"]],
     ["- a\n  -\n\n  c", "<ul><li><p>a\n-</p><p>c</p></li></ul>", ["W-MD-SETEXT"]],
     ["- ---", "<p>- ---</p>", ["W-MD-THEMATIC-BREAK"]],
+    ["- a\n- ---", "<ul><li>a</li></ul><p>- ---</p>", ["W-MD-THEMATIC-BREAK"]],
+    ["- a\n- - -\n- b", "<ul><li>a</li></ul><p>- - -</p><ul><li>b</li></ul>", ["W-MD-THEMATIC-BREAK"]],
     ["[a](/f&ouml; \"t\")", '<p><a href="/f&amp;ouml;" title="t">a</a></p>', ["W-MD-ENTITY"]],
     ["[a](/u \"&quot;x\")", '<p><a href="/u" title="&amp;quot;x">a</a></p>', ["W-MD-ENTITY"]],
     ["``` f&ouml;\nx\n```", "<pre><code>x\n</code></pre>", ["W-MD-ENTITY"]],

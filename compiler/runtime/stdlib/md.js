@@ -3,7 +3,7 @@
 // This file is impl#1's library-mode compile of stdlib/md/index.scrml (the one md reader,
 // SPEC §67.8), written by scripts/gen-md-shim.ts. Edit the scrml source and regenerate:
 //   bun scripts/gen-md-shim.ts
-// source-sha256: f8f6c97e86bfeca6fa7504b78fff2e0e16b737ab21c5ed852254aadbe45021d5
+// source-sha256: 6339c73c828dce6144fdb40958ea2e098ca67d6acd53ba861e3fddb34dcb0054
 // Generated library module — scrml compiler output
 // ES module: import { name } from './this-file.js'
 const _scrml_g = globalThis; // the host-global alias (SPEC §47.1.1); a shim is copied alone into _scrml/
@@ -1303,7 +1303,7 @@ function readList(lines, i, depth, sl) {
   }
     if (k < n && indentOf(lines[k].text) <= 3) {
     const nt = stripLead(lines[k]).text;
-    if (markerWidth(nt) > 0 && _scrml_structural_eq(isOrderedMarker(nt), ordered)) {
+    if (markerWidth(nt) > 0 && !isAltRule(nt) && _scrml_structural_eq(isOrderedMarker(nt), ordered)) {
     if (blanksAfter > 0) {
     loose = true;
   }

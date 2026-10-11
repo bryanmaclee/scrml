@@ -1,0 +1,25 @@
+{
+  "id": "raw-content-pre-code-wrapper-stays-element",
+  "description": "The bare `<pre><code>…</code></pre>` wrapper (326 corpus bodies) still renders a `<code>` element inside the `<pre>`.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
+  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#w > code",
+        "count": 1
+      },
+      {
+        "selector": "#w > code",
+        "text": "let x = 1"
+      }
+    ]
+  }
+}
