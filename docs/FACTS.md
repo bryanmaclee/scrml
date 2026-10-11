@@ -21,11 +21,11 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | fact | value |
 |---|---|
 | compiler version | `0.8.0` |
-| live compiler source (`compiler/src`) | 323,207 lines across 284 files |
-| test files | 1,696 |
-| specification lines (`compiler/SPEC.md`) | 48,220 |
+| live compiler source (`compiler/src`) | 323,210 lines across 284 files |
+| test files | 1,698 |
+| specification lines (`compiler/SPEC.md`) | 48,631 |
 | conformance cases | 1749 |
-| standard-library modules | 21 |
+| standard-library modules | 22 |
 | CLI verbs | 13 |
 | LSP capabilities | 7 |
 | editor integrations | 2 |
@@ -36,7 +36,7 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 ## Detail
 
 <!-- @generated:facts-lists START (do not edit — `bun scripts/facts.ts --write`) -->
-**Standard-library modules** (21) — `auth` · `compiler` · `cron` · `crypto` · `data` · `format` · `fs` · `host` · `http` · `math` · `mcp` · `oauth` · `path` · `process` · `random` · `redis` · `regex` · `router` · `store` · `test` · `time`
+**Standard-library modules** (22) — `auth` · `compiler` · `cron` · `crypto` · `data` · `format` · `fs` · `host` · `http` · `math` · `mcp` · `md` · `oauth` · `path` · `process` · `random` · `redis` · `regex` · `router` · `store` · `test` · `time`
 
 **CLI verbs** (13) — `build` · `compile` · `db-migrate` · `dev` · `fix` · `fix-given-presence` · `generate` · `init` · `introspect` · `migrate` · `promote` · `semdiff` · `serve`
 

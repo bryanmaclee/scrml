@@ -109,6 +109,7 @@
 64. [Standalone Tool Target — `<program kind="tool">`](#64-standalone-tool-target--program-kindtool)
 65. [The scrml-native CSS Model](#65-the-scrml-native-css-model--predictable-cascade-free-styling)
 66. [Declarations, Instances, and Value Contracts](#66-declarations-instances-and-value-contracts)
+67. [The `<md>` Element — Markdown as Declared Prose](#67-the-md-element--markdown-as-declared-prose)
 
 ---
 
@@ -1213,6 +1214,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 | `<onchange>` (§38.13, **Nominal**) | §38.13.3 | (none — arms only) | bare-body (per-variant arms over the synthesized `RowChange`; REUSE §18.0.1 arm + §51.0.B.1 payload binding); each arm body is a **code-default body** (§4.18). Valid ONLY inside a `watches=` `<channel>` body; classification + `attribute-registry.js` wiring land with the §38.13 impl |
 | `<theme>` (§65, **Nominal**) | §65.3.2 / §65.6 | `for=@cell` (binds the variant set to an ordinary reactive cell, §65.6) | bare-body of `name = value;` token bindings + optional `.Variant { … }` variant re-bind blocks over the shared base + optional `@media (...)` auto-bind sugar (§65.6) |
 | `<defaults>` (§65, **Nominal**) | §65.3.3 | (none) | bare-body of **bare-element** rules only (`a { … }`, `body { … }`); a `.class`/`#id`/combinator selector → `E-DEFAULTS-MISUSE` |
+| `<md>` (S462, **Nominal** — phase 2 / phase 3) | §67 | `class=`, `id=`, `style=` (to the host element); `of=expr` (§67.7, phase 3 — then self-closing) | an **md body** — the fourth text-mode production (§67.2): markdown text whose only exits are a text-only `${…}` and `</md>` |
 
 **Normative statements:**
 
@@ -1220,7 +1222,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 - These element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
 - (S111 — quoted-text model.) The state-child bodies of `<engine>` and the arm bodies of `<match>` are **code-default bodies** (§4.18.1) — a bare run in those bodies is code; display text is a `"..."` display-text literal (§4.18.3). The `<errors>` override-template body and any plain-markup element body are free-text bodies. The `<page>` body is a distinct **third** body-mode — `default-logic` (§40.8) — neither code-default nor free-text; the §4.18 split does not classify it. The body-mode of a structural element's body is fixed by the element kind per §4.18.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
-- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `onMount` (S449), `render`, `page`, `endpoint`, `onchange`, `theme`, or `defaults` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `onMount` (S449), `render`, `page`, `endpoint`, `onchange`, `theme`, `defaults`, or `md` (S462, §67) is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
 - (S449, **Nominal / spec-ahead**.) `<onMount>` is registered here as a scrml-defined element (§6.7.1a — ruling:user-voice-scrml.md S449 item 2, 2-2 = (M), 2a). Like `<each>` and `<match>` it is NOT locus-restricted to a parent structural element: it is grammatical as a child of any element scope, where `<effect>` (§6.7.4) is. The block-splitter classification of the `<onMount` opener and its `attribute-registry.js` row land with the bootstrap's `<onMount>` (`g-bootstrap-onmount-owed`); impl#1 does not register it (frozen).
 - These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children); `<page>` is grammatical only as a child of `<program>` in multi-page apps. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R). (`<endpoint>`, like `<match>`/`<each>`, is a top-level declaration — grammatical at program scope where a route declaration goes, NOT locus-restricted to a parent structural element; it is absent from this owning-locus restriction.)
 - `<page>` SHALL NOT carry a `route=` attribute. Routing in scrml is filesystem-inferred (per Pillar 3 — compiler owns the wiring; cross-ref §47.9.2 path-preserve emission); a `route=` attr on `<page>` is `E-PAGE-ROUTE-ATTR-FORBIDDEN` (doubly forbidden: it both regresses against filesystem inference AND collides with the existing nested-program `route=` per §4.12.2). The allowed attribute set on `<page>` is exactly the five PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` — and any other attribute fires `E-PAGE-INVALID-ATTR` with guidance toward the markup-element alternative or moving the attribute to `<program>` (app-wide concerns).
@@ -1238,6 +1240,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 - `<page>` shape, per-route attribute semantics, multi-page-app placement: §40 (v0.3 Wave 1).
 - `<endpoint>` shape, `path=`/`method=`/`accepts=` attributes, the per-variant arm form, exhaustiveness, the decode + envelope: §61 (S219; the typed-inbound mirror of §60 `<api>`).
 - `<theme>` / `<defaults>` shape, token/variant body-forms, `<defaults>` bare-element rule form, program-scope placement, lowering to §25 custom properties: §65 (the scrml-native CSS model; **Nominal**).
+- `<md>` body production, dedent, dialect, text-only `${…}`, closed output set, `of=`: §67 (S462; reader `scrml:md` landed, element **Nominal** — phase 2 static, phase 3 `of=`). Like `<match>` / `<each>`, `<md>` is grammatical anywhere markup goes, except in a phrasing parent (`E-MD-IN-PHRASING`, §67.2). *(Provenance: ruling:user-voice-scrml.md S462 Q21 "I like a. … can scrml add a firstclass <md>" + `<md>` F1–F4.)*
 
 ### 4.16 M7 — multi-close shorthand `<///>` is NOT a part of scrml (negative-space)
 
@@ -1418,6 +1421,11 @@ position as the `<program>` / `<page>` `default-logic` body.
 An active sequence is active **to the recognizer, at scan time, unconditionally** — never a convention a downstream
 stage chooses to honour. *(Note: this does not extend §4.18 to §4.17. `<pre>`/`<code>` raw content is a third,
 orthogonal production — zero active sequences, not two, its only exit its own matching close tag, matched by name.)*
+
+*(S462.)* An `<md>` body is a **fourth** production (§67.2): markdown text with exactly two active sequences — a
+text-only `${…}` (§67.4) and the closing tag `</md>`. The principle above holds for it unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S462 `<md>` F1 *"a"* (text-only `${…}`) + Q21 *"I like a."* (what you
+> type is what is shown) · implemented by §67.2.
 
 #### 4.18.1b The free-text production's exit grammar
 
@@ -1830,6 +1838,7 @@ An event-handler attribute additionally admits the `${…}` expression form (§5
   - *Element scope.* An attribute the HTML standard makes URL-valued only on particular elements is covered only there: `action` (`form`), `archive` / `codebase` (`object`, `applet`), `background` (`body`, `table`, `thead`, `tbody`, `tfoot`, `tr`, `td`, `th`), `cite` (`blockquote`, `q`, `del`, `ins`), `classid` / `data` (`object`), `dynsrc` / `lowsrc` (`img`), `formaction` (`button`, `input`), `icon` (`command`, `menuitem`), `imagesrcset` (`link`), `longdesc` (`img`, `iframe`, `frame`), `manifest` (`html`), `ping` (`a`, `area`), `poster` (`video`), `profile` (`head`), `srcset` (`img`, `source`), `usemap` (`img`, `object`, `input`); `href`, `src`, `itemid`, `itemtype`, `xlink:href` and `xml:base` are covered on every element. Tags compare case-insensitively. A component's prop is not an element attribute and is never judged (`<Chart data=@rows/>`); the attribute the expanded component writes onto an element is.
   - *The test.* The value is first converted to a string exactly as the attribute write would convert it. The scheme is read with rule 2's scheme test (leading C0 controls and spaces ignored; ASCII tab, LF and CR removed; the run before the first `:` when it matches `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )` and no `/`, `?` or `#` precedes it; case-insensitive), applied to the final string — a `\` or `&` there is an ordinary character, not an unprovable scheme. Admitted: a value with no scheme (a relative URL, `//host` included, and the empty string); the schemes `http`, `https`, `ftp`, `mailto`, `tel`, `sms`; and, on an image-source attribute (`src`, `srcset`, `imagesrcset`, `poster`), a `data:` URL naming a complete raster image media type from rule 2's list. `srcset` / `imagesrcset` SHALL judge every candidate URL (read as the HTML srcset parser reads them — a `data:` URL keeps its commas); `ping` judges every space-separated URL. The safe sets and the scheme test SHALL be the ones rule 2 uses — one definition, not a second list.
   - *Blocked.* Any other value SHALL be written as `about:blank` instead, and the write SHALL report once to scrml's logging surface (§19.6.8 B5) naming the attribute and the element. The report SHALL NOT contain the blocked value (it is data, and may be sensitive).
+  - *`<md>` (S462).* The `a href` and `img src` that an `<md>` builds (§67.6) are URL-valued attribute writes under these rules: a literal destination in a static body is judged by rule 2's test at compile time (an unadmitted scheme is `E-MD-URL-SCHEME`, §67.6); a destination holding a `${…}` atom (§67.4) and every `<md of=…/>` destination (§67.7) is a covered write of this rule. The same test and safe sets — one definition. *(Provenance: ruling:user-voice-scrml.md S462 `<md>` F2 "yes a." — "same §5.2 URL guard as static `<md>`".)*
   > **Provenance:** ruling:user-voice-scrml.md S457 "a now with c discussed for later" (option (c), a `url` refinement type, was then dropped — S457 "ok we can drop c": this runtime guard is the permanent floor) · supersedes: §5.2 rule 2's sentence *"A value whose literal prefix commits to no scheme (`href="${url}"`) is not covered by this rule; the scheme there comes from the data."* (the data-supplied case is now guarded at runtime) · The safe set is the PA reading recorded with the ruling ("one set, one reader"). The element scope is the PA's S457 addendum to the dispatch (a component prop or a non-URL use of `data` / `icon` / `cite` / `action` / `background` / `profile` must not be rewritten); rule 2's compile-time refusal stays element-insensitive. **Direction of change: semantics-changed** — only for a covered write whose value carries a non-admitted scheme (`javascript:`, `vbscript:`, `data:text/html`, …), which now becomes `about:blank` plus a log line; every admitted value is written unchanged, and every proven-safe or non-URL write is byte-identical in the emitted program.
 - `attr=name` SHALL resolve `name` as an identifier in the current scope at the point of use. The compiler SHALL emit code that passes the runtime value of `name` as the attribute value.
 - `attr=fn()` on an event attribute (e.g., `onclick`, `onsubmit`, `onchange`) SHALL wire `fn` as an event listener for that event: when the event fires, `fn` is called with the arguments in the parentheses, as-is. The native event object is NOT passed to `fn`, and the handler value does not bind the name `event` (see "Handler values do not bind `event`" below). To access the event object, write the listener as a function that takes it: `onclick=${(e) => fn(e, arg)}`.
@@ -25149,6 +25158,10 @@ The `:where()` wrapping inside the `:not()` keeps the opt-out condition at speci
 - Custom theme overrides for prose (e.g., adopter-provided body / heading color schemes) — cross-ref §26.5 SPEC-ISSUE-012.
 - Per-element prose modifiers (`prose-headings:`, `prose-a:`, etc.) — Tailwind v3 plugin extension; deferred to future revision.
 
+*(S462 cross-reference.)* The `<md>` element (§67) emits exactly the element set §26.6.1 styles (`p`, `a`,
+`strong`, `em`, `code`, `pre`, lists, headings, `blockquote`, `hr`, `img`, tables, plus `del`), so
+`<md class="prose">` styles its output with no further rule (§67.10).
+
 ### 26.7 Composing Utilities — Inline-Fallback `var()` Model (S191)
 
 Some Tailwind utility families do NOT map to a single CSS declaration; they **compose** several independent contributions into ONE CSS property. The first such family is **ring / ring-offset / shadow**, which all contribute to a single `box-shadow`. If each member emitted its own single-property `box-shadow:` declaration, two members on one element (`ring-2 shadow-lg`) would collide — CSS class-order last-write-wins, and one obliterates the other. This is incorrect: the author asked for a ring AND a shadow.
@@ -26843,6 +26856,32 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENDPOINT-NOT-EXHAUSTIVE | §61.4, §61.9 | (S219 W3 — wired by the `<endpoint>` typer, `endpoint-primitive-2026-06-25`.) An `<endpoint>` declaration (SPEC §61.4) whose per-variant arms are NOT exhaustive against the `accepts=` enum — an `accepts=` enum variant has no matching arm. This is the inbound-honesty guarantee (§61.1): because scrml owns the inbound decode (§61.3) the unhandled-variant hole is visible, so it is loud — adding a variant to the `accepts=` enum without its arm fails the build rather than silently 404/500-ing the new method at runtime (the serve-side dual of §60.3). Reuses the §18.0.1 / §51 exhaustiveness machinery (`checkEnumExhaustiveness`); a wildcard `<_>` arm satisfies exhaustiveness. Fires once per `<endpoint>` decl, naming the missing variant(s), anchored at the opener span. Emitted by `checkEndpointDeclarations` in `compiler/src/type-system.ts`. (A dead/duplicate arm reuses the §18.0.1 arm-validity diagnostics — `E-MATCH-SUBSET-DEAD-ARM` / `E-TYPE-023` — NOT an `E-ENDPOINT-*` code.) Resolution: add an arm for each missing variant, or add a wildcard `<_>` arm. Partitions into `result.errors`. | Error |
 | E-ENDPOINT-ACCEPTS-NOT-ENUM | §61.3, §61.9 | (S219 W3 — wired by the `<endpoint>` typer, `endpoint-primitive-2026-06-25`.) An `<endpoint>` declaration (SPEC §61.3) whose `accepts=` attribute resolves to a CONCRETE non-`:enum` type (a struct / primitive / refinement). Per §61.3 `accepts=` SHALL resolve to a `:enum` type — the request body decodes into it via `parseVariant` (§41.13), a tagged-variant decoder that cannot decode against a non-enum, so there is nothing to dispatch. Unlike the §60.5 RESPONSE half's `W-API-RESPONSE-NOT-VARIANT` (an Info-lint — the wire body is still raw-passable into `.data`), a non-enum INBOUND `accepts=` is a HARD Error: there is no recoverable raw path. Fires once per `<endpoint>` decl when `accepts=` RESOLVES to a concrete non-enum; an UNDECLARED `accepts=` ref instead reuses `E-TYPE-UNKNOWN-NAME` (the §14.1.2 machinery — no double-report), and `asIs` is the sanctioned untyped escape hatch. Emitted by `checkEndpointDeclarations` in `compiler/src/type-system.ts`. Resolution: declare an `:enum` accepts type, or use `handle()` for a raw inbound shape. Partitions into `result.errors`. | Error |
 | E-ENDPOINT-MULTI-STATEMENT-ARM | §61.10, §61.9 | (ss34 W4-followup — wired by the `<endpoint>` codegen, `g-endpoint-multi-statement-arm-diagnostic-2026-06-26`.) An `<endpoint>` arm (SPEC §61.2) has a BARE body (`<Variant>…</>`) containing TWO OR MORE statements. Per §61.10 a multi-statement bare body is a future wave — NOT yet lowered: an arm body is emitted as a single value-expression the compiler envelopes as the JSON response (§61.5), so a 2+-statement body has no parsable single-expression lowering. W4 detects this BEFORE wrapping the arm as `await (<expr>)` (the lowered expr does not parse as one JS expression consuming the whole string — reusing the §2.2.1 emit-gate acorn via `isSingleJsExpression`) and fires this clean, adopter-actionable diagnostic INSTEAD of letting the malformed `await (…)` trip the generic `E-CODEGEN-INVALID-LOGIC` gate with a cryptic "compiler defect" message. The three SUPPORTED forms are unaffected: the `:`-shorthand single-expression arm, the single-expression bare body (a value-expression that legitimately spans multiple source lines is still ONE expression), and the self-closing no-op arm (→ 204). The wildcard `<_>` arm with a multi-statement body fires identically (same envelope path). Fires once per offending arm, anchored at the arm's `<endpoint>` decl span, naming the variant. Emitted by `emitEndpointArmEnvelope` in `compiler/src/codegen/emit-server.ts`. Resolution: reduce the arm to a single expression, or extract the logic into a server function and call it from the arm (e.g. `<Variant : computeResult(...)>`). Partitions into `result.errors`. | Error |
+| W-MD-RAW-HTML | §67.3, §67.11 | (S462 `<md>` phase 1 — produced as data by the reader `stdlib/md/index.scrml`; the compiler's surfacing for a static `<md>` body is Nominal and lands with the phase-2 impl.) Raw HTML in an `<md>` body — a tag, closing tag, comment, declaration or CDATA start. It is shown as text (Q21: what you type is what is shown). The message names the markdown spelling (`**bold**`, `*emphasis*`) or closing `</md>` to write the element. | Warning |
+| W-MD-ENTITY | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A character reference (`&copy;`, `&#97;`, `&#x61;`) in an `<md>` body. It is not decoded — shown as typed; type the character itself. | Warning |
+| W-MD-AUTOLINK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An angle autolink (`<https://…>`, `<a@b.c>`) in an `<md>` body: shown as text; write `[text](url)`. | Warning |
+| W-MD-REFERENCE-LINK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A reference link (`[t][r]`, `[t][]`) or a link reference definition (`[r]: url`): shown as text; write the link inline, `[text](url)`. | Warning |
+| W-MD-FOOTNOTE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A footnote reference `[^n]` or definition `[^n]: …`: shown as text; write the note inline or as a list. | Warning |
+| W-MD-TASK-LIST | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A task-list item (`- [ ] x`, `- [x] x`): a plain list item whose text starts `[ ]`; no form control is ever built (§67.6). | Warning |
+| W-MD-SETEXT | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A setext underline under a paragraph: `===` stays paragraph text, `---` is a thematic break. Write `# Title` / `## Title`. | Warning |
+| W-MD-INDENTED-CODE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A paragraph that starts indented 4+ columns (a CommonMark indented code block): read as paragraph text; write a backtick fence. | Warning |
+| W-MD-EMPHASIS-UNDERSCORE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) `_`/`__` delimiters that CommonMark would match as emphasis: the underscores stay text; write `*em*` / `**strong**`. Intraword `_` (`snake_case`) is never reported. | Warning |
+| W-MD-STRIKETHROUGH | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A matched single-tilde pair `~x~`: text; write `~~x~~`. | Warning |
+| W-MD-BULLET-MARKER | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A `*` or `+` list marker: the line is paragraph text; write `- item`. | Warning |
+| W-MD-ORDERED-MARKER | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An `N)` list marker: paragraph text; write `1. item`. | Warning |
+| W-MD-THEMATIC-BREAK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) `***`, `___` or a spaced break (`- - -`): paragraph text; write `---`. | Warning |
+| W-MD-FENCE-TILDE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A `~~~` fence line: paragraph text; write a backtick fence. | Warning |
+| W-MD-HEADING-CLOSE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A closing `#` sequence on an ATX heading: the `#`s are heading text; write the heading with no trailing `#`. | Warning |
+| W-MD-HARD-BREAK-SPACES | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) Two or more trailing spaces before a line end: a soft break; end the line with `\` for a hard break. | Warning |
+| W-MD-LINK-TITLE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A link title in single quotes or parentheses: the link is text; write the title in double quotes. | Warning |
+| W-MD-LINK-DESTINATION | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An angle-bracketed link destination `[t](<u>)`: the link is text; write the destination bare, a space as `%20`. | Warning |
+| W-MD-TABLE-PIPES | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A GFM table written without a row's leading or trailing `\|`: paragraph text; write every row as `\| a \| b \|`. | Warning |
+| W-MD-LAZY-CONTINUATION | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An unprefixed line that CommonMark would read as a lazy continuation of a quote's or list item's paragraph: it starts a new paragraph after the container; prefix it with `>` or indent it to the content column. | Warning |
+| W-MD-DEPTH-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) Nesting past 32 levels (quotes / lists / inline) or a 33rd open link bracket: the deeper markers are text. | Warning |
+| W-MD-SCAN-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) The block's link-tail scan budget (4 × length + 1024) is used up: the remaining brackets are text. | Warning |
+| E-MD-INDENT-MIXED | §67.2, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl. The rule is computed by `dedent` in `stdlib/md/index.scrml` as its `mixed` field.) The leading whitespace removed from the counted lines of a static `<md>` body is not the same characters on every line (a tab on one, spaces on another). | Error |
+| E-MD-IN-PHRASING | §67.2, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) An `<md>` element whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …): its block output would be reparented by the HTML parser. | Error |
+| E-MD-URL-SCHEME | §67.6, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) A literal link destination or image source in a static `<md>` body whose scheme §5.2 rule 2's test does not admit (`javascript:`, `data:text/html`, `data:image/svg+xml`, …). | Error |
+| E-MD-OF-BODY | §67.7, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-3 impl.) An `<md of=…>` that also has a body. | Error |
 
 ---
 
@@ -45629,7 +45668,7 @@ Deferred Tier-3 open questions (per the DD §Rulings):
 
 - **OQ-3 — token unification with the Tailwind scale.** Should `<theme>` tokens and Tailwind's design-token scale (`blue-500`, `space-4`) be *one* space (a `<theme>` token extends/overrides the Tailwind scale; `bg-[brand]` resolves a theme token)? PA lean: yes, a Wave-3 integration. **OPEN.**
 - **OQ-5 — `@keyframes` / `@font-face` / counter namespacing.** Globally-named at-rules inside a component collide globally (last-wins), un-scopable by `@scope`. Auto-namespace (component-owned, `Card__spin`; PA lean) or `E-STYLE-KEYFRAMES-COLLISION` on leak? **OPEN** (the one place scrml might have to name-mangle — animation names have no `@scope` remedy).
-- **OQ-6 — a content-treatment primitive for un-owned subtrees.** A blessed `prose`-shaped primitive as the explicit home for un-owned-subtree (slotted/projected/markdown) descendant styling, or is §26.6 `prose` + "make a component" enough? The `E-STYLE-VALUE-DESCENDANT` message routes here. **OPEN.**
+- **OQ-6 — a content-treatment primitive for un-owned subtrees.** A blessed `prose`-shaped primitive as the explicit home for un-owned-subtree (slotted/projected/markdown) descendant styling, or is §26.6 `prose` + "make a component" enough? The `E-STYLE-VALUE-DESCENDANT` message routes here. **OPEN.** *(S462 annotation: `<md>` (§67) is the most common producer of un-owned subtrees; its output is plain elements with no `data-scrml`, so §26.6 `prose` and an enclosing component's scoped `#{}` both reach it today (§67.10). No `<md>` rule depends on OQ-6, and `<md>` adds no styling primitive; OQ-6 stays open and independent. Provenance: ruling:user-voice-scrml.md S462 `<md>` F1–F4 rule nothing on styling; the deep-dive §6h finding.)*
 - **OQ-7 — `@apply` (§26.8) vs style-value, long-term.** Both compose reusable treatments (`@apply` composes *utilities*; a style-value composes *declarations + tokens*). Keep both, or does a style-value + an "apply-utilities-into-a-style-value" form subsume `@apply`? **OPEN.**
 - **OQ-8 — global program-level `#{}` disposition.** No donut → unbounded element set → only the soft `W-STYLE-CONFLICT-POSSIBLE` (§65.2.4). Accept the weaker guarantee for the global escape hatch, or discourage/deprecate raw global *selector* `#{}` in favor of `<defaults>` + `<theme>`? **OPEN.** (R3 (§65.2.4) file-bounds the *diagnostic*; this OQ is the broader disposition.)
 - **OQ-9 — shorthand ↔ longhand "same property" overlap (§65.11 dry-run).** §65.2.4 says "two rules that both set `P`," but `* { margin }` vs `.x { margin-bottom }` and `.btn { border }` vs `.btn-op { border-color }` are a shorthand + longhand that *partially* overlap. Does "same property" include shorthand/longhand? If yes, the checker needs a shorthand-expansion table (`background` → `background-color`, …); if no, they silently co-apply (a predictability hole). The dry-run flagged 14 such pairs (mostly on the reset/BEM classes R1+R2 already cover). PA lean: yes, expand (a Wave-2 detail). **OPEN.**
@@ -48218,3 +48257,375 @@ lifecycle, §66.21) · §65.3.2 / §65.6 (`<theme>` — T3, §66.17). dpa-053 (b
 and not specified here. The bootstrap codegen design for §66 (instance-keyed state, per-instance effect scopes and
 disposal, the lazy shared instance, `as=` aliases, lexical self-resolution, keyed instances in `<each>`, value
 semantics and the transition axis) is dpa-051.
+
+## 67. The `<md>` Element — Markdown as Declared Prose
+
+**Added S462.** A scrml-defined element whose body is markdown: an author gets the effect of `**bold**`,
+`*emphasis*`, links, lists, headings, code and tables without writing `<b>` or any other HTML tag. The
+body is a fourth text-mode production (§67.2), read by one reader written in scrml (`scrml:md`, §67.8),
+and lowered to a closed set of elements whose content is only text (§67.6).
+
+**Status.** The rules below are NORMATIVE. Build state:
+- **Phase 1 — LANDED:** this section and the reader `stdlib/md/index.scrml` (`scrml:md`; its runtime
+  shim `compiler/runtime/stdlib/md.js` is GENERATED from it by `scripts/gen-md-shim.ts`, §67.8). The
+  reader implements §67.3, §67.5, §67.9, the §67.2 dedent rule and the §67.6 heading slugs, and returns
+  the §67.11 W-MD diagnostics as data.
+- **Phase 2 — Nominal / spec-ahead:** the static `<md>` body (§67.2, §67.4) — the block-splitter
+  production, the compile-time call into `scrml:md`, the lowering to §67.6 elements, the compiler
+  surfacing of W-MD codes and the four `E-MD-*` errors. impl#1 gains this hook per ruling F4 (below).
+- **Phase 3 — Nominal / spec-ahead:** `<md of=expr/>` (§67.7).
+
+**Scope.** Language-wide: a new element any markup body may contain, and a new body production.
+
+> **Provenance (the five rulings this section implements; every normative statement below cites one):**
+> - ruling:user-voice-scrml.md S462 Q21 — *"I like a. but it gives me an idea can scrml add a firstclass
+>   <md> for so that an author can have **the affect** without <b>"* ("affect" ~> "effect"). (a) = raw
+>   `<pre>`/`<code>` bodies render as TEXT: what you type is what is shown. The `<md>` idea in the same
+>   message was banked, then designed in `scrml-support/docs/deep-dives/md-element-2026-10-11.md`.
+> - ruling:user-voice-scrml.md S462 `<md>` F1 — *"a"*: `${…}` inside `<md>` is TEXT-ONLY.
+> - ruling:user-voice-scrml.md S462 `<md>` F2 — *"yes a."*: `<md of=@x/>` is part of `<md>`; designed now,
+>   built second.
+> - ruling:user-voice-scrml.md S462 `<md>` F3 — *"a works. one way to do it with lints to guide"*: the
+>   small sharp dialect plus W-MD lints.
+> - ruling:user-voice-scrml.md S462 `<md>` F4 — *"a"*: one md reader, written in scrml (`scrml:md`), used
+>   by BOTH compilers.
+>
+> Rules the rulings did not settle are marked **(PA reading, s462-md-phase1)** where they appear; each is
+> listed for confirmation in `docs/changes/s462-md-phase1/progress.md`.
+
+### 67.1 Overview
+
+```scrml
+<page>
+    <article class="prose prose-slate">
+        <md>
+            ## Filing a good bug report
+
+            Before you file, **search the board**. Duplicates get closed.
+
+            - Say what you *expected* and what *happened*.
+            - Paste the exact error. Wrap it in `backticks`.
+            - Read the [triage guide](/docs/triage) first.
+        </md>
+    </article>
+</page>
+```
+
+renders as plain elements — `h2`, `p`, `strong`, `ul`, `li`, `em`, `code`, `a` — inside one host
+element. `<md>` is one way to **declare prose** (S441: *"prose should be declared as such"*); it is a
+markup element, so it is legal wherever markup is, including directly in a `<program>` / `<page>` body.
+
+Two forms:
+
+| Form | Body | Read | Ids | Built |
+|---|---|---|---|---|
+| `<md> … </md>` | literal markdown, `${…}` text-only (§67.4) | at compile time | auto slugs (§67.6) | phase 2 |
+| `<md of=expr/>` | none — the markdown is the value of `expr` | at run time (and on the server for first paint) | none | phase 3 |
+
+Both forms read with the same reader, produce the same element set and judge URLs with the same §5.2
+test (ruling F2: *"same closed element/attribute set, same §5.2 URL guard as static `<md>`"*).
+
+### 67.2 The static body — the fourth text-mode production
+
+§4.18.1 defines two text-mode productions (free-text, code-default); §4.18.1a names raw content (§4.17)
+a third, orthogonal one. **An `<md>` body is a fourth production.**
+
+- After the `<md>` opener's `>`, the block splitter SHALL scan the body as one text run with **exactly
+  two exits**: `${` (a text-only interpolation, §67.4, whose extent is the §4.18.1b token-depth extent)
+  and the closing tag `</md>`. No other sequence is active: `<tag>`, `</tag>`, `</>`, `<!--`, `//`,
+  `#{`, `?{`, `!{`, `^{`, `~{` and `_{` are markdown text. *(ruling S462 Q21 — what you type is what is
+  shown — and F1; the exit set mirrors §4.17's "only exit its own matching close tag" plus the one
+  interpolation F1 admits.)*
+- The closing tag is `</md>` (ASCII case-insensitive, as §4.17). Consequently a literal `</md>` cannot
+  appear in an `<md>` body, not even in a code span; a document about `<md>` shows it with `<pre>`.
+- End of file before `</md>` is `E-CTX-001` against the opener, recovered as §4.17 does.
+- **Dedent.** Markdown is indentation-sensitive and scrml source is indented, so the body is dedented
+  before it is read *(PA reading, s462-md-phase1 — see the note below)*:
+  1. If the rest of the opener's line is blank, it is dropped. If it holds content (`<md>Saved **3**
+     issues.</md>`, or `<md># Title` followed by more lines), that first line is kept exactly as
+     written and does not count in step 3.
+  2. If the closer's line holds only whitespace before `</md>`, it is dropped and does not count.
+  3. Every remaining line that is not blank counts. The **minimum** leading whitespace over the counted
+     lines, measured in characters, is removed from each of them. Blank lines become empty.
+  4. The removed prefixes SHALL be the same characters on every counted line. A body where they
+     differ (a tab on one line, spaces on another) is `E-MD-INDENT-MIXED`.
+  The relative indentation that remains is what markdown sees. Because the dialect has no indented
+  code block (§67.3), indentation never silently turns prose into code.
+  > **Note — the closer's line does not count.** The deep-dive (§6f) proposed the Java text-block rule,
+  > counting the closer's line. In the canonical layout `<md>` and `</md>` sit at one column and the
+  > content one level to the right; counting the closer leaves every content line indented one level, so
+  > `## Title` is not a heading and `- item` is not a list (ATX headings and list markers allow at most
+  > three leading spaces). The deep-dive's own §6f example expects the content at column 0. The closer's
+  > line can only lower the minimum when it is LEFT of the content — the harmful case — so it is not
+  > counted. Candidate question #1 in `docs/changes/s462-md-phase1/progress.md`.
+- **Placement.** `<md>` produces block content inside its host element (§67.6). An `<md>` whose parent
+  is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, `em`, `strong`, `code`, any other
+  element whose content model is phrasing) is `E-MD-IN-PHRASING` *(PA reading, s462-md-phase1: block
+  content in a phrasing parent is reparented by the browser's HTML parser, so the emitted tree would
+  not be the tree scrml built)*.
+- **Attributes.** A static `<md>` accepts `class=`, `id=` and `style=`, which go to the host element and
+  never into the markdown; any other attribute is `W-ATTR-001` (§4.15).
+
+### 67.3 The dialect — scrml-md
+
+scrml-md is **CommonMark 0.31.2 core plus the GFM tables and strikethrough extensions, with ONE
+spelling for each construct.** *(ruling S462 F3 — "a works. one way to do it with lints to guide".)*
+Each construct below is read exactly as CommonMark (or GFM, for tables and strikethrough) reads it,
+except where this section says otherwise.
+
+**IN — the construct and its one spelling:**
+
+| Construct | scrml-md spelling | Notes |
+|---|---|---|
+| paragraph | lines of text; a blank line ends it | leading whitespace of a line and trailing whitespace of the last line are not content |
+| heading | `#` … `######`, a space, the text | 0–3 leading spaces; no closing `#` sequence |
+| emphasis | `*text*` | CommonMark 6.2 flanking and "rule of 3" |
+| strong | `**text**` | |
+| strikethrough | `~~text~~` | opener and closer the same length (GFM) |
+| inline code | `` `code` `` (any backtick-run length) | content literal; one space each side stripped when both present |
+| fenced code | three or more backticks, an optional info string, the code, a closing run at least as long | the info string's first word is kept only if it matches `[A-Za-z0-9_+-]+`; an info string holding a backtick is not a fence |
+| link | `[text](destination)` / `[text](destination "title")` | destination bare: no spaces, balanced parentheses (≤ 32 deep), `\` escapes |
+| image | `![alt](source)` / `![alt](source "title")` | the alt is the plain text of the bracket content |
+| bullet list | `- item` | content column = after the marker and 1–4 spaces (5+ → 1) |
+| ordered list | `1. item` (1–9 digits, `.`) | the list starts at the first number |
+| quote | `> text` on every line | the space after `>` is optional |
+| thematic break | `---` (three or more `-`, nothing else) | |
+| table | `\| a \| b \|` header, `\| --- \| :-: \|` delimiter row, `\| … \|` rows | every row starts and ends with `\|`; `:` sets alignment; `\|` is a literal pipe in a cell |
+| hard line break | a `\` at the end of the line | |
+| escape | `\` before ASCII punctuation | |
+
+A list is **loose** (its item paragraphs are `p` elements) when a blank line separates two items or two
+blocks of one item, and **tight** otherwise (CommonMark 5.3). A bullet item interrupts a paragraph; an
+ordered item interrupts a paragraph only when it is `1.`, and an empty item never does (CommonMark 5.2).
+
+**OUT — read as TEXT, reported with a W-MD code that names the scrml-md spelling** (§67.11):
+
+| Construct | What the reader does | Code |
+|---|---|---|
+| raw HTML (tags, comments, declarations) | text — `<b>` is shown as `<b>` | `W-MD-RAW-HTML` |
+| character references (`&copy;`, `&#97;`) | text, not decoded | `W-MD-ENTITY` |
+| angle autolinks (`<https://…>`, `<a@b.c>`) | text | `W-MD-AUTOLINK` |
+| reference links and definitions (`[t][r]`, `[t][]`, `[r]: url`) | text | `W-MD-REFERENCE-LINK` |
+| footnotes (`[^n]`, `[^n]: …`) | text | `W-MD-FOOTNOTE` |
+| task-list items (`- [ ] x`, `- [x] x`) | a list item whose text starts `[ ]` | `W-MD-TASK-LIST` |
+| setext headings (`===` / `---` underline) | `===` is paragraph text; `---` is a thematic break | `W-MD-SETEXT` |
+| indented code blocks | paragraph text | `W-MD-INDENTED-CODE` |
+
+**Second spellings of an IN construct — also text, also reported** *(ruling F3, "one way to do it";
+the per-spelling codes are a PA reading, s462-md-phase1)*:
+
+| Second spelling | Code | Write instead |
+|---|---|---|
+| `_em_`, `__strong__` | `W-MD-EMPHASIS-UNDERSCORE` | `*em*`, `**strong**` |
+| `~one~` | `W-MD-STRIKETHROUGH` | `~~del~~` |
+| `* item`, `+ item` | `W-MD-BULLET-MARKER` | `- item` |
+| `1) item` | `W-MD-ORDERED-MARKER` | `1. item` |
+| `***`, `___`, `- - -` | `W-MD-THEMATIC-BREAK` | `---` |
+| `~~~` fence | `W-MD-FENCE-TILDE` | a backtick fence |
+| `## Title ##` | `W-MD-HEADING-CLOSE` (the `##` is heading text) | `## Title` |
+| two trailing spaces | `W-MD-HARD-BREAK-SPACES` (a soft break) | a trailing `\` |
+| `[t](u 'x')`, `[t](u (x))` | `W-MD-LINK-TITLE` | `[t](u "x")` |
+| `[t](<u v>)` | `W-MD-LINK-DESTINATION` | `[t](u%20v)` |
+| a table row without its outer pipes | `W-MD-TABLE-PIPES` | `\| a \| b \|` |
+| lazy continuation (an unprefixed line continuing a quote's or list item's paragraph) | `W-MD-LAZY-CONTINUATION` (the line starts a new paragraph after the container) | `>` on every line / indent to the content column |
+
+`_` between word characters was never emphasis (`snake_case_word`) and is not reported. A bare URL
+(`https://x.y`) is plain text: GFM's extended autolinks are not part of the dialect and nothing is
+reported. Smart punctuation, math and front matter are not part of the dialect.
+
+The dialect is FAIL-SAFE in one direction: any input is accepted, and whatever is not scrml-md is
+shown as text. A W-MD code is a lint (Warning) on a static body (§67.11); markdown from data reports
+nothing (§67.7).
+
+### 67.4 Interpolation in a static body — text-only (F1)
+
+An `${expr}` inside a static `<md>` body is a **text-only atom**: its value is inserted as text and SHALL
+NEVER create markdown structure. *(ruling S462 F1 — "a": "an interpolated value inside `<md>` is
+inserted as plain text and can NEVER create markdown structure (same contract as `?{}` SQL bound
+parameters — data is never code)".)*
+
+- **Structure is read from the literal text only.** The reader sees each atom as ONE letter-class
+  character (U+FFFC in the reader's input, at offsets the compiler marks as atoms; an author-typed
+  U+FFFC is an ordinary character). An atom is never a delimiter, a marker or a line start: `**${x}**`
+  is strong around the value; `${x}` at the start of a line never makes a heading or a list item,
+  whatever the value holds. A value containing `\n# Heading` or `[a](https://evil)` renders as that text
+  inside the node where the atom sits.
+- **Where an atom is admitted:**
+  - inline text — in a paragraph, a heading, a list item, a quote, a table cell — and link text;
+  - an image's alt text and a link or image title (attribute values: the atom's text is the value);
+  - a link destination or image source. A destination holding an atom is **data-led**: it is written
+    through §5.2 rule 3 at run time (an unadmitted scheme becomes `about:blank`, logged once without
+    the value), exactly as a non-literal `href=` is. When the literal text before the first atom
+    already proves a relative URL or an admitted scheme (`[queue](/users/${id}/queue)`,
+    `[mail](mailto:${addr})`), §5.2 rule 2's compile-time test admits it and the value cannot change
+    the scheme.
+- **Where an atom is inert** — inside a code span and inside a fenced code block (its body and its
+  info string): `${` is shown literally there, as in raw content (§4.17). *(PA reading, s462-md-phase1,
+  following the deep-dive §6g and Q21.)*
+- A value that folds to a compile-time constant is still text-only: whether an atom is markdown never
+  depends on whether it folds. *(PA reading, s462-md-phase1; deep-dive §9 Q1.)*
+- An atom renders exactly as `${expr}` renders in a markup body (§7.4.2): its string value as a text
+  node; `not` renders nothing; reactive when `expr` reads a cell (only that text node, or that attribute,
+  re-renders — the structure never changes).
+- An atom in a heading contributes nothing to that heading's slug (§67.6).
+
+Markdown FROM data — where the value IS markdown — is the separate explicit form `<md of=…/>` (§67.7),
+never `${…}`.
+
+### 67.5 The reader's tree
+
+The reader (`scrml:md`, §67.8) turns a string into a tree. It never produces HTML text.
+
+```scrml
+type MdSeg:enum    = { Lit(text: string), Slot(index: int) }
+type MdInline:enum = { Text(text: string), Slot(index: int), Code(text: string),
+                       Em(children: MdInline[]), Strong(children: MdInline[]), Del(children: MdInline[]),
+                       Link(dest: MdSeg[], title: MdSeg[], children: MdInline[]),
+                       Image(src: MdSeg[], alt: MdSeg[], title: MdSeg[]),
+                       SoftBreak, HardBreak }
+type MdAlign:enum  = { Default, Left, Center, Right }
+type MdBlock:enum  = { Paragraph(children: MdInline[]), Heading(level: int, children: MdInline[]),
+                       CodeBlock(lang: string, text: string), Quote(children: MdBlock[]),
+                       List(ordered: boolean, start: int, tight: boolean, items: MdItem[]), Rule,
+                       Table(align: MdAlign[], head: MdRow, rows: MdRow[]) }
+type MdDoc:struct  = { blocks: MdBlock[], diags: MdDiag[] }
+```
+
+`Slot` (an inline atom) and `MdSeg.Slot` (an atom inside an attribute value) carry the index of the
+`${…}` they stand for; an `MdSeg[]` holding a `Slot` is data-led (§67.4). Every node kind maps to
+exactly one row of §67.6; there is no other kind. Exported API: `parse(src) -> MdDoc`,
+`dedent(body) -> MdDedent` (§67.2), `headingSlugs(doc, taken) -> string[]` (§67.6).
+
+### 67.6 Output — a closed element set; content is only text
+
+**Rule MD-SAFE.** An `<md>` — static or `of=` — SHALL produce only the elements of the table below,
+each with only its listed attributes. Content reaches the DOM only as (i) a text node or (ii) the value
+of a listed attribute. No stage SHALL produce markup text from md content for an HTML parser to read.
+*(ruling S462 F2 — "same closed element/attribute set … user markdown can produce `**bold**` /
+`[link](https://…)` but never a script, handler, or `javascript:` link"; Q21 — nothing in the body can
+execute; the deep-dive §7 rule MD-SAFE.)*
+
+| Element | Attributes | Source of each value |
+|---|---|---|
+| host `div` | `class`, `id`, `style` | the author's attributes on `<md>` only |
+| `p` `em` `strong` `del` `blockquote` `ul` `li` `hr` `br` `pre` `table` `thead` `tbody` `tr` | none | — |
+| `ol` | `start` | the first item's number, written only when it is not 1 |
+| `th` `td` | `style` | one of three constants, `text-align:left` / `center` / `right`, from the delimiter row |
+| `h1`–`h6` | `id` | static `<md>` only — the slug below; never from data |
+| `code` | `class` | `language-` + the fence's first info word (`[A-Za-z0-9_+-]+`), else absent |
+| `a` | `href`, `title` | `href` judged as below; `title` is text |
+| `img` | `src`, `alt`, `title` | `src` judged as below; `alt` is always written (empty when there is none) |
+
+- **Text.** A static `<md>` is emitted as HTML with every text character and attribute value
+  HTML-escaped (`<` `>` `&` `"`), so the browser's one parse is unambiguous. `<md of=…/>` builds the
+  same elements with element-creation and text/attribute writes, never from an HTML string.
+- **URLs.** `a href` and `img src` are URL-valued attributes of §5.2 and are judged by its ONE scheme
+  test and safe sets — rule 2's at compile time for a literal destination, rule 3's at run time for a
+  data-led one and for every `of=` destination. A blocked value is written as `about:blank` and reported
+  once without the value (rule 3). The reader decodes no character reference (§67.3), so the string
+  judged is the string written.
+- **A literal destination with an unadmitted scheme** in a static body (`[x](javascript:…)`,
+  `![x](data:image/svg+xml,…)`) is `E-MD-URL-SCHEME` *(PA reading, s462-md-phase1, following the
+  deep-dive §6d: stricter than §5.2's static-string rule — an author's `href="javascript:…"` is admitted
+  as written, but md bodies are pasted prose, and the error can only refuse too much)*.
+- **Heading ids.** In a static `<md>` every heading gets an `id`: the heading's plain text lower-cased,
+  ASCII letters and digits kept, each space and `-` written as `-`, every other character dropped, and
+  `section` when nothing is left; a slug already used on the page (by another heading or an author
+  `id=`) gets the first free `-1`, `-2`, … suffix, in document order. (`scrml:md`'s `headingSlugs`
+  implements the rule; the compiler passes the page's taken ids.) `<md of=…/>` gives headings **no id**
+  *(ruling F2 — "No auto heading ids for data-sourced md (user-chosen ids can clobber DOM globals)")*.
+- **No form controls, no `name`, no handlers, no `style` from content, no frames, scripts, styles or
+  embeds** exist in the set; a construct that would need one (a task-list checkbox) is OUT (§67.3).
+
+### 67.7 `<md of=expr/>` — markdown from data (build phase 3)
+
+*(ruling S462 F2 — "yes a.": "markdown supplied as DATA renders via the explicit `<md of=@x/>` form —
+same closed element/attribute set, same §5.2 URL guard as static `<md>` … Needs a runtime md parser …
+shipped only on pages that use `of=`. No auto heading ids … Build order: static `<md>` first, `of=`
+second; both designed together (one dialect, one safety model)." **Nominal / spec-ahead.**)*
+
+- `<md of=expr/>` is self-closing; `class=`, `id=`, `style=` go to the host as in §67.2. An `of=` `<md>`
+  with a body is `E-MD-OF-BODY` *(PA reading)*.
+- `expr` is a `string` or `string | not`. `not` renders an empty host *(PA reading, s462-md-phase1:
+  §7.4.2 "`${not}` renders NOTHING")*.
+- The value is read with the same reader and the same dialect as a static body, with no dedent (data is
+  not indented source) and no atoms (the whole value is data). The result is built from the §67.6 set
+  with the §67.6 URL judgment (rule 3 on every destination), and **no heading ids**.
+- When `expr` reads a reactive cell, the host's children are rebuilt when the cell changes; the host
+  element itself is kept.
+- W-MD codes are not reported for data (it is not the author's source); the text simply shows.
+- A server-rendered first paint (§52.8) reads the value with the same reader on the server and writes the
+  same elements; the client's build of the same value SHALL be the same tree.
+- The reader ships as the `stdlib-md` runtime chunk, only on pages that use `of=` (or import `scrml:md`
+  from client code). *(Measured at phase 1, impl#1 codegen: 77 KB raw / 20 KB gzip — above the
+  deep-dive's 3–6 KB estimate; a phase-3 size target is open.)*
+
+What `of=` does not cover: content injection through data (a comment can still SAY "click here" with an
+`https` link — moderation is the application's); image tracking pixels (the image host sees the
+reader's address).
+
+### 67.8 One reader (F4)
+
+*(ruling S462 F4 — "a": "the markdown parser is written ONCE as a scrml module (`scrml:md`). impl#1
+compiles it like any stdlib module and uses it (1) at build time to lower static `<md>` to elements and
+(2) as the runtime parser shipped for `<md of=…/>`; the bootstrap uses the same module. One reader —
+build-time and runtime cannot disagree".)*
+
+- `stdlib/md/index.scrml` is the ONLY md reader. No implementation SHALL carry a second one: the
+  compile-time lowering of a static body (both compilers), the `of=` runtime and the server first paint
+  all call `scrml:md`.
+- impl#1's runtime shim for `scrml:md` (`compiler/runtime/stdlib/md.js`) is GENERATED from the scrml
+  source by `scripts/gen-md-shim.ts` (impl#1's library-mode compile, §21.5) and stamps the source's
+  sha-256; it is never edited by hand. (Every other stdlib shim is a hand-written mirror; for `scrml:md`
+  a hand-written mirror would be a second reader.)
+
+### 67.9 Bounds
+
+The reader SHALL accept any string and SHALL read it in time linear in its length. The bounds are part
+of the dialect, so every implementation reads a hostile input to the same tree:
+
+- **Nesting** — at most 32 levels of quotes and lists, and at most 32 levels of inline nesting
+  (emphasis, strong, strikethrough, links, images). A deeper marker or delimiter is text.
+- **Brackets** — at most 32 link/image openers open at once; a further `[` is text.
+- **Link tails** — the characters examined while reading inline-link destinations and titles in one
+  block total at most 4 × the block's length + 1024; past that budget the remaining brackets are text.
+- `W-MD-DEPTH-LIMIT` / `W-MD-SCAN-LIMIT` report a bound that was reached (static bodies only).
+
+U+0000 is read as U+FFFD; CRLF and CR+LF line ends read as LF.
+
+### 67.10 Styling
+
+`<md>` output is plain elements, so the existing primitives style it; `<md>` adds no styling primitive.
+
+- **§26.6 `prose`** styles exactly the §67.6 set: `<md class="prose prose-slate">`.
+- **Component scope (§25.6).** The host and every element under it carry no `data-scrml`, so the
+  enclosing component's `@scope ([data-scrml="Name"]) to ([data-scrml])` reaches them: a component's
+  `#{ h2 { … } code { … } }` styles the md output inside it.
+- A descendant selector in a style-value (`<md style=#{ h2 { … } }>`) stays `E-STYLE-VALUE-DESCENDANT`
+  (§65.4); that rule is unchanged.
+- **OQ-6** (§65.12) stays open and independent: `<md>` is the most common producer of un-owned subtrees,
+  and `prose` plus component scope cover it today; whether a scrml-native (non-Tailwind) content
+  treatment should exist does not depend on any `<md>` rule.
+
+### 67.11 Diagnostics
+
+| Code | Severity | Fires |
+|---|---|---|
+| `W-MD-*` (the 20 codes of §67.3, plus `W-MD-DEPTH-LIMIT`, `W-MD-SCAN-LIMIT`) | Warning | on a static body, at the construct's position (offset, line, column in the body, mapped to the source by the compiler) |
+| `E-MD-INDENT-MIXED` | Error | §67.2 dedent: the removed prefixes differ |
+| `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent |
+| `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body |
+| `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together |
+
+The W-MD codes are produced by `scrml:md` (data: `MdDoc.diags`) and surfaced by the compiler for a
+static body in phase 2; the E-MD codes are compiler checks, phase 2 / phase 3. Every message names the
+scrml-md spelling to write instead.
+
+### 67.12 Cross-references
+
+§4.15 (the `<md>` registry row) · §4.17 (raw content — the third production; Q21) · §4.18.1 / §4.18.1a /
+§4.18.1b (the text-mode productions; the `${` extent) · §5.2 rules 2 and 3 (the URL test, the runtime
+guard) · §7.4.2 (how a `${…}` value renders) · §21.5 (library mode — the generated shim) · §22.12 (the
+`meta.emit` HTML-string gate; `<md>` never goes through it) · §25.6 / §26.6 / §65.4 / §65.12 OQ-6
+(styling) · §34 (the codes) · §41 (stdlib modules) · §52.8 (server first paint) · §66 (declarations —
+`<md>` is an element, not a declaration).
