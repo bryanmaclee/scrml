@@ -105,7 +105,8 @@ export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): Calle
  */
 export function extractCalleeNames(expr: string): string[] {
   const names: string[] = [];
-  const re = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  // `f(` and the optional call `f?.(` (S462 P0 F1 — an optional call is a call).
+  const re = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\?\.\s*)?\(/g;
   let m;
   while ((m = re.exec(expr)) !== null) {
     names.push(m[1]);
@@ -568,6 +569,8 @@ function collectAwaitSites(
     );
   };
 
+  // The parent of each ChainExpression visited (an optional call's site, above).
+  const chainParentOf = new WeakMap<object, any>();
   const visit = (node: any, awaitLegal: boolean, parent: any, insideSink: boolean): void => {
     if (!node || typeof node !== "object") return;
     if (_isFnNode(node)) {
@@ -590,14 +593,24 @@ function collectAwaitSites(
       for (const s of (node.body || [])) visit(s, false, node, insideSink);
       return;
     }
+    if (node.type === "ChainExpression") chainParentOf.set(node, parent);
     if (node.type === "CallExpression") {
       const callee = node.callee;
       const isNameCall = callee && callee.type === "Identifier" && isPromiseCallee(callee.name);
       const isMemberCall = !!isPromiseMemberCall && callee && callee.type === "MemberExpression" && isPromiseMemberCall(callee);
       if (awaitLegal && (isNameCall || isMemberCall)) {
-        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
-        if (!alreadyAwaited && !isSkippedReactiveValue(node, parent, insideSink)) {
-          sites.push({ start: node.start - P, end: node.end - P, wrap: needsWrap(node, parent) });
+        // S462 P0 F1 — an OPTIONAL call (`f?.(x)`) is a call. acorn wraps the
+        // chain it ends in a ChainExpression; when the call IS that chain, the
+        // site is the chain and "already awaited" / the wrap are judged against
+        // the chain's own parent (else `await f?.(x)` read as un-awaited and got
+        // a second `await`). A call deeper in a chain (`f?.(x).y`) has a member
+        // parent and is wrapped like any receiver: `(await f?.(x)).y`.
+        const atChain = !!parent && parent.type === "ChainExpression";
+        const siteNode = atChain ? parent : node;
+        const siteParent = atChain ? chainParentOf.get(parent) : parent;
+        const alreadyAwaited = !!siteParent && siteParent.type === "AwaitExpression";
+        if (!alreadyAwaited && !isSkippedReactiveValue(siteNode, siteParent, insideSink)) {
+          sites.push({ start: siteNode.start - P, end: siteNode.end - P, wrap: needsWrap(siteNode, siteParent) });
         }
       }
       // "sink" mode — arguments of a sink-family call become emit-client-owned.

@@ -2026,7 +2026,6 @@ function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   const _aliasPeer = ctx.serverFnPeerAliasNames != null && ctx.serverFnPeerAliasNames.has(_nm);
   return (
     ctx.mode === "server" &&
-    !call.optional &&
     (_directPeer || _aliasPeer) &&
     ctx.peerAwaitable !== false
   );
@@ -2197,9 +2196,10 @@ function recordAsyncSyncCallSite(
 function isAwaitedStdlibAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (node.kind !== "call") return false;
   const call = node as CallExpr;
+  // An optional call is awaited like a plain one (S462 P0 F1), so it is
+  // paren-wrapped as a receiver like one.
   return (
     ctx.mode === "server" &&
-    !call.optional &&
     call.callee.kind === "ident" &&
     typeof (call.callee as { name?: unknown }).name === "string" &&
     !(ctx.declaredNames != null && ctx.declaredNames.has((call.callee as { name: string }).name)) &&
@@ -2220,7 +2220,6 @@ function isAwaitedClientAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean
   const call = node as CallExpr;
   return (
     ctx.mode === "client" &&
-    !call.optional &&
     call.callee.kind === "ident" &&
     typeof (call.callee as { name?: unknown }).name === "string" &&
     ctx.clientAsyncFnNames != null &&
@@ -3879,7 +3878,6 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // server-mode emission; a local of the same name shadows the peer.
   if (
     ctx.mode === "server" &&
-    !node.optional &&
     node.callee.kind === "ident" &&
     typeof node.callee.name === "string" &&
     (
@@ -3905,11 +3903,14 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // BOTH the lowering and the diagnostic (no second classifier to drift).
     // (`isAwaitedPeerCall` mirrors this exact condition + `peerAwaitable !==
     // false` so emitReceiver can wrap an await form used as a receiver.)
+    // S462 P0 F1 — an optional call (`isOk?.(x)`) is awaited like `isOk(x)`;
+    // it used to be emitted bare (a truthy Promise in `if (!isOk?.(x))`).
+    const _open = node.optional ? "?.(" : "(";
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
-      return `${callee}(${args})`;
+      return `${callee}${_open}${args})`;
     }
-    return `await ${callee}(${args})`;
+    return `await ${callee}${_open}${args})`;
   }
 
   // #284 dispatch-table await — a DIRECT dispatch call `t[k](...)` / `t.k(...)`
@@ -3955,18 +3956,18 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // exit 0, no diagnostic. That is the gap-per-position machine dpa-020 names.
   if (
     ctx.mode === "client" &&
-    !node.optional &&
     node.callee.kind === "ident" &&
     typeof node.callee.name === "string" &&
     ctx.clientAsyncFnNames != null &&
     ctx.clientAsyncFnNames.has(node.callee.name) &&
     !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
   ) {
+    const _open = node.optional ? "?.(" : "("; // S462 P0 F1 — optional call awaited too
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
-      return `${callee}(${args})`;
+      return `${callee}${_open}${args})`;
     }
-    return `await ${callee}(${args})`;
+    return `await ${callee}${_open}${args})`;
   }
 
   // U1 (dpa-020) — THE CLIENT SERVER-FN CALL. The sibling of the three await
@@ -4051,12 +4052,17 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // separately by emit-logic's `_autoAwait` (idempotency-guarded).
   if (
     (ctx.mode === "server" || (ctx.mode === "client" && ctx.clientAsyncBody === true)) &&
-    !node.optional &&
     node.callee.kind === "ident" &&
     typeof node.callee.name === "string" &&
     !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)) &&
     isStdlibAsyncCallee(node.callee.name, ctx)
   ) {
+    // S462 P0 F1 — an OPTIONAL call (`verifyPassword?.(pw, h)`) is a call: it
+    // returns the same Promise, so it is awaited exactly like `f(…)`. It used to
+    // be excluded here (`!node.optional`) and fell through to the bare generic
+    // path — `if (verifyPassword?.("wrong", h))` accepted every password. The
+    // callee is an import binding (never nullish), so `?.` only re-spells the call.
+    const _open = node.optional ? "?.(" : "(";
     if (ctx.peerAwaitable === false) {
       // The SERVER sink is drained by emit-server → E-ASYNC-STDLIB-IN-SYNC-CALLBACK;
       // the CLIENT non-awaitable case is caught by emit-functions's structural
@@ -4070,9 +4076,9 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       if (ctx.mode === "server") {
         _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       }
-      return `${callee}(${args})`;
+      return `${callee}${_open}${args})`;
     }
-    return `await ${callee}(${args})`;
+    return `await ${callee}${_open}${args})`;
   }
 
   // navigate() → §20.1–20.3 / §20.8 navigation lowering.

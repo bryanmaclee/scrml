@@ -21,6 +21,12 @@
  * off a Promise and a forged token was ACCEPTED. Fix: declared `async`; the
  * shim parity test (stdlib-shim-export-parity §6) now pins async-ness.
  *
+ * F1 (review of the fix) — an OPTIONAL call was never awaited, aliased or not:
+ * `if (verifyPassword?.("wrong", h))` held a Promise and accepted the password.
+ * Same for an optional call of a sibling server function (`pwMatches?.(…)`).
+ * The emitter's await branches and the emitted-JS await injector now treat
+ * `f?.(…)` as a call.
+ *
  * SPEC §13.2: "An async-colored function is one the compiler emits async: a
  * server function, a Promise-returning standard-library function, or any
  * function that (transitively) calls one. … It MAY be called directly (the
@@ -46,7 +52,7 @@ const APP = `<program auth="none" db="./app.db">
   </schema>
   <db src="./app.db" tables="users">
     \${
-      import { verifyPassword as vp, verifyJwtJwks, resetPassword, requestMagicLink, requestEmailVerification, requestPasswordReset } from "scrml:auth"
+      import { verifyPassword as vp, verifyPassword, verifyJwtJwks, resetPassword, requestMagicLink, requestEmailVerification, requestPasswordReset } from "scrml:auth"
       import { get as httpGet } from "scrml:http"
       import { hmac } from "scrml:crypto"
       import { createStore } from "scrml:store"
@@ -56,6 +62,29 @@ const APP = `<program auth="none" db="./app.db">
         if (row is not) { return "NOUSER" }
         const ok = vp(pass, row.pw)
         if (!ok) { return "REJECTED" }
+        return "ACCEPTED"
+      }
+      function loginOpt(name, pass) {
+        const row = ?{\`SELECT pw FROM users WHERE name = \${name}\`}.get() !{ _ :> not }
+        if (row is not) { return "NOUSER" }
+        if (verifyPassword?.(pass, row.pw)) { return "ACCEPTED" }
+        return "REJECTED"
+      }
+      function loginOptAlias(name, pass) {
+        const row = ?{\`SELECT pw FROM users WHERE name = \${name}\`}.get() !{ _ :> not }
+        if (row is not) { return "NOUSER" }
+        const ok = vp?.(pass, row.pw)
+        if (!ok) { return "REJECTED" }
+        return "ACCEPTED"
+      }
+      function pwMatches(name, pass) {
+        const row = ?{\`SELECT pw FROM users WHERE name = \${name}\`}.get() !{ _ :> not }
+        if (row is not) { return false }
+        return verifyPassword(pass, row.pw)
+      }
+      function loginPeerOpt(name, pass) {
+        const n = ?{\`SELECT COUNT(*) AS n FROM users\`}.get() !{ _ :> not }
+        if (!pwMatches?.(name, pass)) { return "REJECTED" }
         return "ACCEPTED"
       }
       function fetchStatus(url) {
@@ -90,6 +119,9 @@ const APP = `<program auth="none" db="./app.db">
   <out> = ""
   <button onclick={ @out = login("ada", "x") !{ .Transport(_) :> { return } } }>a</button>
   <button onclick={ @out = fetchStatus("u") !{ .Transport(_) :> { return } } }>b</button>
+  <button onclick={ @out = loginOpt("ada", "x") !{ .Transport(_) :> { return } } }>g</button>
+  <button onclick={ @out = loginOptAlias("ada", "x") !{ .Transport(_) :> { return } } }>h</button>
+  <button onclick={ @out = loginPeerOpt("ada", "x") !{ .Transport(_) :> { return } } }>i</button>
   <button onclick={ @out = checkJwt("t", "u") !{ .Transport(_) :> { return } } }>c</button>
   <button onclick={ @out = sign("k", "m") !{ .Transport(_) :> { return } } }>d</button>
   <button onclick={ @out = reqFlows("e", "p") !{ .Transport(_) :> { return } } }>e</button>
@@ -176,6 +208,17 @@ describe("S1 — an aliased async stdlib import is awaited", () => {
   test("`get as httpGet`: the result has `.status`", async () => {
     expect(await call("fetchStatus", { url: `${base}/teapot` })).toEqual({ status: 418, rows: 1 });
   }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("F1 — an OPTIONAL call (`f?.(…)`) is awaited like `f(…)`", () => {
+  for (const fn of ["loginOpt", "loginOptAlias", "loginPeerOpt"]) {
+    test(`${fn}: a WRONG password is rejected`, async () => {
+      expect(await call(fn, { name: "ada", pass: "wrong-password" })).toBe("REJECTED");
+    }, EXECUTED_DB_TIMEOUT_MS);
+    test(`${fn}: the right password is accepted`, async () => {
+      expect(await call(fn, { name: "ada", pass: "right-password" })).toBe("ACCEPTED");
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
 });
 
 describe("S2 — stdlib functions declared sync but Promise-returning are awaited", () => {

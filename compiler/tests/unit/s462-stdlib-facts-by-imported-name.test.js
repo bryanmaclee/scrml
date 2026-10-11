@@ -23,6 +23,7 @@
  *   §6 a RENAMED local re-export of a type / function (`export { Color as Hue,
  *      paint as tint } from "./errs.scrml"`) resolves through the source-side
  *      name (it used to chase `Hue` / `tint` in errs.scrml and find nothing).
+ *   §7 (F1) an optional call (`f?.(…)`) is awaited like `f(…)`, once.
  *
  * SPEC §13.2: "An async-colored function is one the compiler emits async: a
  * server function, a Promise-returning standard-library function, or any
@@ -299,5 +300,69 @@ describe("§6 a renamed local re-export of a type / function resolves through th
       "app.scrml": app("function bad() { return tint(.Blue) }").replace("</program>", "<button onclick=bad()>x</button>\n</program>"),
     });
     expect(codes).toContain("E-TYPE-063");
+  });
+});
+
+describe("§7 (F1) an optional call is awaited in every emit shape, exactly once", () => {
+  test("server: decl, predicate, receiver, nested arg, ternary, SQL interpolation", () => {
+    const { out, codes } = compile({
+      "app.scrml": serverApp(
+        `import { verifyPassword as vp, hashPassword } from "scrml:auth"`,
+        `        const ok = vp?.(pass, row.pw)
+        if (!vp?.(pass, row.pw)) { return "REJECTED" }
+        const n = hashPassword?.(pass).length
+        const s = String(vp?.(pass, row.pw))
+        const t = vp?.(pass, row.pw) ? "Y" : "N"
+        ?{\`UPDATE users SET pw = \${hashPassword?.(pass)} WHERE name = \${name}\`}.run()
+        return s + n + t + ok`,
+      ),
+    });
+    expect(codes).toEqual([]);
+    const js = out("app.scrml").serverJs ?? "";
+    expect(js).toMatch(/const ok = await vp\?\.\(pass, row\.pw\)/);
+    expect(js).toMatch(/if \(!await vp\?\.\(/);
+    expect(js).toMatch(/\(await hashPassword\?\.\(pass\)\)\.length/);
+    expect(js).toMatch(/String\(await vp\?\.\(/);
+    expect(js).toMatch(/const t = await vp\?\.\(/);
+    expect(js).toMatch(/\$\{await hashPassword\?\.\(pass\)\}/);
+    expect(js).not.toMatch(/[^t] (vp|hashPassword)\?\.\(/); // never bare
+    expect(js).not.toMatch(/\bawait\s+\(?\s*await\b/);
+  });
+
+  test("server: an optional call of a sibling server function is awaited", () => {
+    const { out, codes } = compile({
+      "app.scrml": serverApp(
+        ``,
+        `        if (!other?.(name)) { return "REJECTED" }
+        return "ACCEPTED"
+      }
+      function other(name) {
+        const r = ?{\`SELECT pw FROM users WHERE name = \${name}\`}.get() !{ _ :> not }
+        return r`,
+      ),
+    });
+    expect(codes).toEqual([]);
+    expect(out("app.scrml").serverJs ?? "").toMatch(/if \(!await other\?\.\(name\)\)/);
+  });
+
+  test("client: an optional call of an async stdlib export is awaited once", () => {
+    const { out, codes } = compile({
+      "app.scrml": `<program>
+  \${
+    import { sleep as nap } from "scrml:time"
+    function wait() {
+      nap?.(5)
+      @done = true
+    }
+  }
+  <done> = false
+  <button onclick=wait()>go</button>
+</program>
+`,
+    });
+    expect(codes).toEqual([]);
+    const js = out("app.scrml").clientJs ?? "";
+    expect(js).toMatch(/await nap\?\.\(5\)/);
+    expect(js).not.toMatch(/await\s+await/);
   });
 });
