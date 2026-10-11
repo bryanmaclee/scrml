@@ -127,6 +127,32 @@ describe("Chromium — static <md>", () => {
     await page.close();
   });
 
+  test("dog-food: a published-draft article (samples/md-article-browser-language.scrml) renders as its markdown", async () => {
+    if (!ready()) { console.warn(`[md-chromium] skipped: ${launchError}`); return; }
+    const { readFileSync } = await import("fs");
+    const sample = readFileSync(resolve(import.meta.dir, "../../../samples/md-article-browser-language.scrml"), "utf8");
+    const { errors, url } = build(sample);
+    expect(errors).toEqual([]);
+    const { page, dialogs } = await open(url);
+    const r = await page.evaluate(`(() => {
+      const host = document.querySelector("article > div");
+      const n = (s) => host.querySelectorAll(s).length;
+      return {
+        counts: [n("p"), n("em"), n("strong"), n("h2"), n("h3"), n("code"), n("blockquote"), n("ul"), n("li"), n("a")],
+        sql: [...host.querySelectorAll("code")].map((c) => c.textContent).find((t) => t.includes("SELECT")),
+        input: [...host.querySelectorAll("code")].map((c) => c.textContent).includes("<input>"),
+        outside: host.querySelectorAll("*:not(p):not(em):not(strong):not(h2):not(h3):not(code):not(blockquote):not(ul):not(li):not(a)").length,
+      };
+    })()`);
+    // the same element counts CommonMark (marked) gives this text
+    expect(r.counts).toEqual([27, 5, 4, 5, 6, 35, 2, 1, 3, 3]);
+    expect(r.sql).toBe("?{SELECT * FROM users WHERE id = ${@id}}.get()");
+    expect(r.input).toBe(true);
+    expect(r.outside).toBe(0);
+    expect(dialogs).toEqual([]);
+    await page.close();
+  });
+
   test("hostile slot values are text; a data-led javascript: href is about:blank and runs nothing", async () => {
     if (!ready()) { console.warn(`[md-chromium] skipped: ${launchError}`); return; }
     const LT = "String.fromCharCode(60)";
