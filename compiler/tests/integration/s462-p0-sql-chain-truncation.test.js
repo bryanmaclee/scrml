@@ -149,7 +149,7 @@ async function serveApp(src) {
     }));
     return { status: res.status, body: await res.text() };
   };
-  return { post, serverJs, clientJs };
+  return { post, serverJs, clientJs, mod };
 }
 
 describe("S462 P0 — the chain after `?{}` applies to the query's value (no protect=)", () => {
@@ -286,4 +286,38 @@ describe("S462 P0 — protect= with the chain applied (§14.8.9)", () => {
     const { result } = compileApp(src);
     expect((result.errors ?? []).map((e) => e.code)).toContain("E-PROTECT-006");
   });
+});
+
+describe("S462 P0 — a server cell initialized by `?{…}` + a tail (§8.11 / §52.6.5)", () => {
+  // Base: `<firstName server> = ?{…}.get().name` built the structured load route
+  // from the query alone — `/__serverLoad/firstName` served the WHOLE ROW
+  // (`{"name":"ada","pw":"HASH-…"}`) and `/__serverLoad/count` every row.
+  const CELLS = `<program auth="none" db="./app.db">
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT)\`}
+  </schema>
+  <firstName server> = ?{\`SELECT name, pw FROM users WHERE id = 1\`}.get().name
+  <count server> = ?{\`SELECT name, pw FROM users\`}.all().length
+  <p>\${@firstName} \${@count}</p>
+</program>
+`;
+  let a;
+  beforeAll(async () => { a = await serveApp(CELLS); }, TIMEOUT);
+
+  test("every load route serves only the cells' values — never a row, never the hash", async () => {
+    const bodies = {};
+    for (const route of a.mod.routes) {
+      if (!/__mountHydrate|__serverLoad/.test(route.path)) continue;
+      const res = await route.handler(new Request(`http://localhost${route.path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+        body: "{}",
+      }));
+      bodies[route.path] = await res.text();
+    }
+    expect(Object.keys(bodies).length).toBeGreaterThan(0);
+    for (const body of Object.values(bodies)) expect(body).not.toContain(SECRET);
+    const merged = Object.values(bodies).map((b) => JSON.parse(b)).reduce((m, v) => ({ ...m, ...v }), {});
+    expect(merged).toEqual({ firstName: "ada", count: 2 });
+  }, TIMEOUT);
 });
