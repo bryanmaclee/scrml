@@ -31,10 +31,40 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
-| MED | 592 | 6 |
-| LOW | 351 | 0 |
+| MED | 594 | 6 |
+| LOW | 353 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-braceless-if-same-line-else-dropped-s462 — a braceless `if (c) a else b` with the `else` on the SAME line silently dropped the else branch (client, server and library mode) — `NEW S462; HIGH; RESOLVED S462`
+
+<!-- @gap id=g-braceless-if-same-line-else-dropped-s462 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(collectExpr / collectLiftExpr — a depth-0 `else` now ends the expression; rejectDanglingElse widened; attachHandlerStatementList routes a single-line if/else handler to the statement path) prov=dispatch:s462-braceless-if-else-dropped -->
+
+Reported by the md phase-1 dev. `if (c) a.push(1) else a.push(2)` emitted `if (c) { a.push(1); }` at exit 0: the braceless consequent's `collectExpr` broke at a statement keyword or a newline but not at a same-line `else`, so it collected `a.push(1) else a.push(2)` as one bare expression and acorn kept `a.push(1)`. Same root: a one-line `else if` chain lost its structure (the middle `if` became an unconditional sibling, the final `else` vanished), the dangling-else nesting `if (a) if (b) x else y` lost `y`, and an `else` after a non-`if` statement (`foo() else bar()`, `x = 1 else 2`, `return 1 else 2`) compiled with the `else` dropped. The S437 fix (#1106) had covered only the `;`- and newline-separated spellings. Fixed S462: the `else` ends the expression, `parseOneIfStmt` takes it (dangling else binds to the nearest `if`), and an `else` nothing can claim is E-STMT-UNEXPECTED-TOKEN. Corpus: zero pre-existing same-line sites in examples / samples / conformance / stdlib / benchmarks / giti / flogence / gauntlet-r25 (the emit differential in `docs/changes/s462-braceless-if-else-dropped/progress.md`). Pins: `compiler/tests/unit/braceless-if-else-not-dropped.test.js` (26, executes both branches; 18 fail on base) + `conformance/cases/control-flow/s462-*` (3; all fail on base).
+
+### g-spec-if-stmt-grammar-omits-braceless-body-s462 — SPEC §50.2.1 `if-stmt-logic` requires a `block` body and never defines `else-clause`; both implementations accept a braceless body and ~3,200 corpus sites use one — `NEW S462; MED; open (ruling owed)`
+
+<!-- @gap id=g-spec-if-stmt-grammar-omits-braceless-body-s462 sev=MED status=open locus=compiler/SPEC.md(§50.2.1 if-stmt-logic, §49.2.1 loop-body, §17.6.1) prov=dispatch:s462-braceless-if-else-dropped -->
+
+The only grammar for a bare `if` statement is §50.2.1 `if-stmt-logic ::= 'if' '(' condition-expr ')' block else-clause?` — `block` is required and `else-clause` is not defined anywhere; §49.2.1 likewise gives `loop-body ::= '{' loop-statement* '}'`. §17.6.1 defers a bare `if` to "standard if-statement semantics". Yet SPEC prose presumes braceless bodies compile (§49.2.3 "a block body, a braceless body, or the next statement"; §34 E-CONDITION-HEAD-UNPARENTHESIZED "Does NOT fire: … any braceless body (#933)"), impl#1 implements them (`parseOneIfStmt` braceless limb; #933 while/for; #1106 S437 braceless else), and the bootstrap implements them (`parse.scrml` `parseBlockOrStmt`: "`if (c) stmt` without braces is one statement in a block of its own"). Heuristic census at S462: **3,225** braceless `if` bodies in **189** `.scrml` files (stdlib 242, examples 190, conformance 64, samples 26, docs 36, giti 43, flogence 249, gauntlet-r25 12, compiler/self-host-v2 2,363). Ruling owed — recommendation: ratify the shipped form, `if-stmt-logic ::= 'if' '(' condition-expr ')' if-body ('else' (if-stmt-logic | if-body))?`, `if-body ::= block | statement`, with the dangling-else rule (an `else` binds to the nearest unmatched `if`) and the same `statement` alternative on `loop-body`. Refusing braceless bodies instead would be newly-rejecting over that whole population.
+
+### g-bootstrap-semicolon-braceless-else-rejected-s462 — the bootstrap refuses `if (c) a; else b` (E-SCOPE-001 "`else` is not declared"), which impl#1 accepts since S437 — `NEW S462; MED; open`
+
+<!-- @gap id=g-bootstrap-semicolon-braceless-else-rejected-s462 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseIf — the braceless then-body's terminating `;` is consumed as a statement end, so `isWord(t, "else")` never sees the `else`) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+
+Probed S462 through `slice-m2/lowered.js` `frontEnd`: `if (c) @r = "a" else @r = "b"` → no diagnostics (the else is kept — the bootstrap's recursive-descent expression parser stops at `else` naturally); `if (c) @r = "a"; else @r = "b"` → E-SCOPE-001 "`else` is not declared". impl#1 accepts the `;` spelling (#1106, pinned by `control-flow/s437-braceless-else-in-failable-arm`, which `docs/bootstrap-conformance.md` lists as a bootstrap FAIL with exactly this E-SCOPE-001). Fix direction: in `parseIf`, after a braceless then-body, look past one `;` (and comments) for an `else`, braceless consequent only — as impl#1's `parseOneIfStmt` does.
+
+### g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 — the bootstrap reports an `else` with no `if` (`@r = "a" else @r = "b"`) as E-SCOPE-001 "`else` is not declared", not E-STMT-UNEXPECTED-TOKEN — `NEW S462; LOW; open`
+
+<!-- @gap id=g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseStmt — a statement-leading keyword `else` falls through to an expression statement and the name resolver reports it) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+
+Loud on both implementations, so no program is miscompiled — but the bootstrap's message names a missing declaration rather than the misplaced `else`, and the conformance case `control-flow/s462-else-without-if-pos` (expects E-STMT-UNEXPECTED-TOKEN) is a bootstrap FAIL for it.
+
+### g-match-arm-braceless-if-body-refused-s462 — a single-expression match arm whose body is a braceless `if` (`.A :> if (c) a.push(1) else a.push(2)`) is refused (E-STMT-MISSING-SEMICOLON + E-PARSE-001 "not a match arm"); the braced form `.A :> if (c) { … } else { … }` compiles — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-match-arm-braceless-if-body-refused-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(match arm-body collectExpr — an `if` arm body is carried as text, so its braceless consequent is never statement-parsed) prov=dispatch:s462-braceless-if-else-dropped -->
+
+Loud, identical on base and after the S462 fix (which keeps the braced arm form's emit byte-identical). Workaround: brace the arm body, `.A :> { if (c) a.push(1) else a.push(2) }` — that form compiles and runs both branches (pinned in `braceless-if-else-not-dropped.test.js`).
 
 ### g-server-fn-value-arg-helper-not-emitted-s462 — a named helper function passed as a VALUE (not called) from a server function is not emitted into the server bundle: the documented `requestMagicLink(email, { store }, sendEmail)` pattern compiles clean and throws `ReferenceError: sendEmail is not defined` on every request — `NEW S462; HIGH; open (pre-existing on BASE)`
 

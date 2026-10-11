@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1749 of 1749 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1752 of 1752 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 185 | 10.6% |
+| PASS | 187 | 10.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 62 | 3.5% |
+| FAIL | 63 | 3.6% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 666 | 38.1% |
-| UNSUPPORTED | 836 | 47.8% |
+| NOT-TWINNED | 666 | 38.0% |
+| UNSUPPORTED | 836 | 47.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 247; of those, 185 hold (74.9%). Runtime half executed on the bootstrap for 63 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 250; of those, 187 hold (74.8%). Runtime half executed on the bootstrap for 65 case(s).
 
-- **Vacuous** passes: 11 of 185 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **174**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 62; the other 34 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 187 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **176**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 63; the other 34 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 582 · parse-reject 254.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **772** — PASS 101 · FAIL 55 · UNSUPPORTED 616. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **775** — PASS 103 · FAIL 56 · UNSUPPORTED 616. Twin holds 103 (non-vacuous 95). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -107,7 +107,7 @@ NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 2 | · | 65 | 1 | · | · |
 | condition | 35 | 23 | · | · | · | 7 | 5 | · | · |
-| control-flow | 70 | 12 | · | 2 | · | 19 | 37 | · | · |
+| control-flow | 73 | 14 | · | 3 | · | 19 | 37 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -160,7 +160,7 @@ NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (62)
+### FAIL (63)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -171,6 +171,8 @@ NOT-TWINNED by reason (666 cases; a case counts once per distinct reason):
   - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-ERROR-012, E-SCOPE-001)
+- `control-flow/s462-else-without-if-pos` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
+  - missing E-STMT-UNEXPECTED-TOKEN
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
   - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
@@ -320,7 +322,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (185)
+### PASS / CODES-ONLY (187)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -385,6 +387,8 @@ none
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
+- `control-flow/s462-braceless-else-if-chain-dangling` — PASS · TWIN
+- `control-flow/s462-braceless-if-else-same-line` — PASS · TWIN
 - `defer/handled-failable-ok` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
