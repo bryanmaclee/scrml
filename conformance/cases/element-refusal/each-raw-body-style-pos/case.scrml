@@ -1,0 +1,4 @@
+<program>
+<items> = [1]
+<div><each in=@items as it><pre><style>body { color: red }</style></pre></each></div>
+</program>

@@ -208,18 +208,10 @@ describe("E-SCRIPT-001 — must NOT fire", () => {
     );
   });
 
-  test("<script> inside an HTML comment inside <code>", () => {
-    expectNoScriptError(
-      `<program>\n<code><!-- <script>alert(1)</script> --></code>\n</program>`,
-    );
-  });
-
-  test("<script> inside an attribute value inside <pre>", () => {
-    expectNoScriptError(
-      `<program>\n<pre><a title="<script>alert(1)</script>">x</a></pre>\n</program>`,
-    );
-  });
-
+  // S462 review: inside a raw body the rule is FAIL-CLOSED — a `<script` start tag
+  // anywhere (a comment, an attribute value) IS refused, because an RCDATA /
+  // RAWTEXT element can end where the body's own text says it ends. See
+  // script-style-refused-everywhere.test.js. Only names and end tags stay silent.
   test("a lone </script> end tag and <scripts> / <script-x> inside <pre>", () => {
     expectNoScriptError(
       `<program>\n<pre></script> <scripts> <script-x> <noscript></pre>\n</program>`,

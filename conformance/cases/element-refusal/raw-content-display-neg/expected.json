@@ -1,6 +1,6 @@
 {
   "id": "raw-content-display-neg",
-  "description": "Raw content that builds no `<script>` / `<style>` element stays silent: the entity-escaped display form, an HTML comment, an attribute value, an end tag.",
+  "description": "Raw content that holds no `<script` / `<style` start-tag text stays silent: the entity-escaped display form, an end tag, and longer names (`<scripts>`, `<script-x>`, `<stylesheet>`).",
   "language-version": "1.0",
   "spec": "§4.17",
   "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built, decided on the parsed element, never on text.",

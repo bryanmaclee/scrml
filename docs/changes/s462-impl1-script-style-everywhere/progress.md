@@ -21,6 +21,20 @@
       refused in type-system; markup value inside a text `${}` now reports at its file position;
       SVG-namespace lift and logic nested in lifted markup confirmed. +5 conformance cases (25 total).
 
+- [x] S239 review of b125d2786 → FIX, addressed:
+      HIGH 1 raw scan bypass via RCDATA/RAWTEXT → fail-closed text rule (any `<script`/`<style` start-tag
+      text anywhere in the body); HIGH 2/3 raw body in component / match arm / each never scanned →
+      `collectRefusedElements` scans the text child of every pre/code node it reaches (structural, any
+      parser) + meta-eval `checkEmittedNodes` scans emit() raw bodies + codegen backstop
+      `refuseRawContentLowering` (emit-html, emit-ssr-render); MED 4 static `on…=` in raw content →
+      NOT refused (§5.2 sanctions static handler text; corpus 0 of 4519 raw bodies) — filed HIGH
+      g-raw-content-static-handler-attribute-executes-s462 for a ruling; LOW 5 handler-arrow markup →
+      TAB escape-hatch token check (E-SCRIPT-001 instead of E-CODEGEN-INVALID-LOGIC). Addendum: `^{}`
+      emit raw bodies refused (ME stage). All reviewer repros (r, r2..r5, n, a) re-run in Chromium via
+      the reviewer's x.mjs: every script/style repro refused; only the two `onerror` repros (item 4) run.
+      Bootstrap: 4 raw-content cases FAIL there → filed g-bootstrap-raw-content-not-fail-closed-s462.
+      +9 conformance cases (34), raw-content-display-neg narrowed to what stays silent.
+
 ## (c) measurement
 
 `<pre>`/`<code>` bodies holding a literal `<script`/`<style` start tag, every `.scrml` file:

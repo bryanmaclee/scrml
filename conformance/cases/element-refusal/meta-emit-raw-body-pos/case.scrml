@@ -1,0 +1,4 @@
+<program>
+<p>page</p>
+^{ emit("<pre><xmp><!--</xmp><script>window.pwned = 1</script>--></xmp></pre>") }
+</program>

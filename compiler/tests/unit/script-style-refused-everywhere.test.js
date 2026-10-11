@@ -175,6 +175,62 @@ describe("(c) raw content — <pre> / <code> (S462 PA ruling, corpus count 0)", 
   });
 });
 
+// S462 S239 review of b125d2786 — every repro ran in Chromium on that head.
+describe("S462 review repros — raw content everywhere, expression-held markup", () => {
+  const css = "body{color:rgb(255,0,0)}";
+  const RCDATA = {
+    textarea_attr: `<pre><textarea><a title="</textarea><script>window.pwned=1</script>">x</a></textarea></pre>`,
+    textarea_comment: `<pre><textarea><!--</textarea><script>window.pwned=1</script>--></textarea></pre>`,
+    xmp_comment: `<pre><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></pre>`,
+    title_attr: `<pre><title><b title="</title><script>window.pwned=1</script>"></b></title></pre>`,
+    iframe_comment: `<pre><iframe><!--</iframe><script>window.pwned=1</script>--></iframe></pre>`,
+    noembed_attr: `<pre><noembed><b title="</noembed><script>window.pwned=1</script>"></b></noembed></pre>`,
+    noframes_comment: `<pre><noframes><!--</noframes><script>window.pwned=1</script>--></noframes></pre>`,
+    code_xmp: `<code><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></code>`,
+    comment: `<pre><!--<script>window.pwned=1</script>--></pre>`,
+    cdata: `<pre><![CDATA[<script>window.pwned=1</script>]]></pre>`,
+  };
+  for (const [name, body] of Object.entries(RCDATA)) {
+    test(`HIGH 1 — raw body, fail-closed: ${name}`, () => expectRefusedOnce(P(body), "E-SCRIPT-001"));
+  }
+  test("HIGH 1 — raw body, fail-closed: noscript attr with <style>", () => {
+    expectRefusedOnce(P(`<pre><noscript><b title="</noscript><style>${css}</style>"></b></noscript></pre>`), "E-STYLE-001");
+  });
+  test("HIGH 2 — a raw body inside a component definition (used and unused)", () => {
+    expectRefusedOnce(P(`\${ const C = <div><pre><script>window.pwned=1</script></pre></div> }\n<C/>`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`\${ const C = <section><code><script>window.pwned=1</script></code></section> }\n<p>x</p>`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`\${ const C = <div><pre><style>${css}</style></pre></div> }\n<C/>`), "E-STYLE-001");
+  });
+  test("HIGH 3 — a raw body inside a <match> arm", () => {
+    const M = (arm) => P(`\${ type K:enum = { A, B } }\n<k> = K.A\n<match for=K on=@k>\n  <A>${arm}</>\n  <B><p>b</p></>\n</match>`);
+    expectRefusedOnce(M(`<pre><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></pre>`), "E-SCRIPT-001");
+    expectRefusedOnce(M(`<pre><style>${css}</style></pre>`), "E-STYLE-001");
+    expectRefusedOnce(M(`<pre><script>window.pwned=1</script></pre>`), "E-SCRIPT-001");
+  });
+  test("HIGH 3 — a raw body inside an <each> body", () => {
+    expectRefusedOnce(P(`<items> = [1]\n<div><each in=@items as it><pre><script>window.pwned=1</script></pre></each></div>`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`<items> = [1]\n<div><each in=@items as it><pre><style>${css}</style></pre></each></div>`), "E-STYLE-001");
+  });
+  test("a raw body in lifted markup and in a markup value", () => {
+    expectRefusedOnce(P(`\${ lift <pre><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></pre> }`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`<f> = true\n<div>\${ @f ? <pre><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></pre> : <b/> }</div>`), "E-SCRIPT-001");
+  });
+  test("addendum — a raw body in ^{} emit() output", () => {
+    expectRefusedOnce(P(`^{ emit("<pre><script>window.pwned=1</script></pre>") }`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`^{ emit("<pre><xmp><!--</xmp><script>window.pwned=1</script>--></xmp></pre>") }`), "E-SCRIPT-001");
+    expectRefusedOnce(P(`^{ emit("<code><style>body{color:red}</style></code>") }`), "E-STYLE-001");
+    expectNotRefused(P(`^{ emit("<pre>&lt;script&gt;</pre>") }`));
+  });
+  test("LOW 5 — markup held in a handler arrow is E-SCRIPT-001, not E-CODEGEN-INVALID-LOGIC", () => {
+    const { codes } = compile(P(`<button onclick={() => <script>x</script>}>b</button>`));
+    expect(codes).toEqual(["E-SCRIPT-001"]);
+  });
+  test("a handler arrow and a `<` comparison on a script-named cell are not refused", () => {
+    expectNotRefused(P(`<n> = 0\n<button onclick={() => @n = @n + 1}>b</button>`));
+    expectNotRefused(P(`<a> = 1\n<script_v> = 2\n<p>\${ @a < @script_v ? "y" : "n" }</p>`));
+  });
+});
+
 describe("must NOT fire — the exact-name rule", () => {
   test("<noscript>, top-level and lifted", () => {
     expectNotRefused(P(`<noscript>enable js</noscript>\n\${ lift <noscript>n</noscript> }`));
@@ -215,23 +271,25 @@ describe("the shared rule (element-refusal.ts)", () => {
     }
   });
 
-  test("scanRawContentForRefusedTags mirrors the HTML tokenizer", () => {
+  test("scanRawContentForRefusedTags is fail-closed (S462 review — no tokenizer model)", () => {
     const hit = (s) => scanRawContentForRefusedTags(s).map((h) => `${h.code}@${h.offset}`);
     expect(hit("<script>x</script>")).toEqual(["E-SCRIPT-001@0"]);
     expect(hit("a <style\n>b")).toEqual(["E-STYLE-001@2"]);
     expect(hit("<script/>")).toEqual(["E-SCRIPT-001@0"]);
-    // not elements:
+    expect(hit("<SCRIPT\t>")).toEqual(["E-SCRIPT-001@0"]);
+    // refused wherever the text sits — comments, attribute values, RCDATA / RAWTEXT, CDATA:
+    expect(hit("<!-- <script> -->")).toEqual(["E-SCRIPT-001@5"]);
+    expect(hit("<a title=\"<script>\">x</a>")).toEqual(["E-SCRIPT-001@10"]);
+    expect(hit("<a title='<style>'>x</a>")).toEqual(["E-STYLE-001@10"]);
+    expect(hit("<textarea><a title=\"</textarea><script>x</script>\">")).toEqual(["E-SCRIPT-001@31"]);
+    expect(hit("<xmp><!--</xmp><script>x</script>--></xmp>")).toEqual(["E-SCRIPT-001@15"]);
+    expect(hit("<![CDATA[<script>x</script>]]>")).toEqual(["E-SCRIPT-001@9"]);
+    expect(hit("text <script")).toEqual(["E-SCRIPT-001@5"]);
+    // not a script / style start tag:
     expect(hit("&lt;script&gt;")).toEqual([]);
-    expect(hit("<!-- <script> -->")).toEqual([]);
-    expect(hit("<!--> <script>")).toEqual(["E-SCRIPT-001@6"]); // abrupt comment close
-    expect(hit("<a title=\"<script>\">x</a>")).toEqual([]);
-    expect(hit("<a title='<style>'>x</a>")).toEqual([]);
     expect(hit("</script>")).toEqual([]);
-    expect(hit("<scripts> <script-x> <noscript>")).toEqual([]);
+    expect(hit("<scripts> <script-x> <noscript> <stylesheet>")).toEqual([]);
     expect(hit("< script>")).toEqual([]);
-    expect(hit("<!DOCTYPE <script>")).toEqual([]); // bogus comment to the first `>`
-    // a name that runs to the end of the body joins the following `</pre>` text
-    expect(hit("text <script")).toEqual([]);
   });
 
   test("collectRefusedElements walks every element node and neutralizes it", () => {

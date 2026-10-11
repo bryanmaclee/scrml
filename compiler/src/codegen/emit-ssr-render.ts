@@ -40,7 +40,7 @@
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
@@ -315,6 +315,7 @@ function nodeToParts(
     if (!tag) throw new SsrUnsupported("markup node without a tag");
     // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never server-rendered.
     if (refuseElementLowering(tag, node)) throw new SsrUnsupported(`refused element in row template: <${tag}>`);
+    if (refuseRawContentLowering(node)) throw new SsrUnsupported(`refused raw content in row template: <${tag}>`);
     // P3-FOLLOW: route via the NR-authoritative predicate
     // (`resolvedKind === "user-component"`, with a backcompat fallback)
     // rather than reading the legacy routing boolean directly. A user

@@ -12,7 +12,7 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
@@ -2003,6 +2003,7 @@ export function generateHtml(
       const tag: string = node.tag ?? node.tagName ?? "div";
       // §4.17 (S462) — codegen backstop: `<script>` / `<style>` never reach the HTML.
       if (refuseElementLowering(tag, node)) return;
+      if (refuseRawContentLowering(node)) return;
       const attrs: any[] = node.attributes ?? node.attrs ?? [];
       const children: any[] = node.children ?? [];
       const isSelfClosing: boolean = node.selfClosing === true && children.length === 0;

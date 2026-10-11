@@ -1,0 +1,4 @@
+<program>
+<p>page</p>
+<button onclick={() => <script>x</script>}>b</button>
+</program>

@@ -56,6 +56,7 @@ import { _SCRML_EMIT_DOCUMENT_MEMBERS } from "./dom-named-property-members.js";
 // S459 round 4 (F4) — the ONE §5.2 URL judge, the one the runtime meta.emit gate applies.
 import { _scrml_is_url_attr, _scrml_url_value_admitted } from "./runtime-url-guard.js";
 import { CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
+import { scanRawContentForRefusedTags } from "./element-refusal.ts";
 // The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
 // `match` is read exactly as the same arms are read everywhere else.
 import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
@@ -985,6 +986,19 @@ function checkEmittedNodes(nodes: ASTNode[], site: Span, filePath: string, error
           refuse("E-STYLE-001", "E-STYLE-001: `<style>` element in ^{} emit() output. scrml does not admit " +
             "`<style>` (CSS lives in `#{}`, §9) — emit() output is held to the same rule as source.");
           continue;
+        }
+        // §4.17 (S462) — a `<pre>` / `<code>` raw body is written verbatim and parsed by
+        // the browser; a `<script` / `<style` start tag anywhere in it is refused (fail-closed).
+        if (/^(pre|code)$/i.test(tag) && Array.isArray(n.children)) {
+          for (const c of n.children as Array<Record<string, unknown>>) {
+            if (!c || c.kind !== "text") continue;
+            const body = typeof c.value === "string" ? c.value : typeof c.raw === "string" ? c.raw : "";
+            for (const hit of scanRawContentForRefusedTags(body)) {
+              refuse(hit.code, `${hit.code}: \`<${hit.tag}>\` inside \`<${tag}>\` raw content in ^{} emit() output. ` +
+                "The raw body is written verbatim and the browser parses it as a live element; scrml does not admit " +
+                `\`<${hit.tag.toLowerCase()}>\` at all (§4.17) — emit() output is held to the same rule as source.`);
+            }
+          }
         }
         if (!isStandardMarkupElementName(tag)) {
           refuse("E-META-EVAL-002", `E-META-EVAL-002: emit() output contains \`<${tag}>\`. impl#1 admits only ` +

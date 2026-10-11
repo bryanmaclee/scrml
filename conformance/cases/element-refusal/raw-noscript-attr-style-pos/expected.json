@@ -1,0 +1,19 @@
+{
+  "id": "raw-noscript-attr-style-pos",
+  "description": "Inside `<pre>`, a `<noscript>` whose attribute text closes it and opens `<style>`: E-STYLE-001.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built; inside a raw-content body the rule is fail-closed — any `<script` / `<style` start-tag text, wherever it sits in the body.",
+  "expect": {
+    "codes": [
+      "E-STYLE-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-STYLE-001": "error"
+    },
+    "codeCounts": {
+      "E-STYLE-001": 1
+    }
+  }
+}

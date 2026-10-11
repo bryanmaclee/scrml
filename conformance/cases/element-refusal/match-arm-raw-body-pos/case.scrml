@@ -1,0 +1,8 @@
+<program>
+${ type K:enum = { A, B } }
+<k> = K.A
+<match for=K on=@k>
+  <A><pre><xmp><!--</xmp><script>window.pwned = 1</script>--></xmp></pre></>
+  <B><p>b</p></>
+</match>
+</program>

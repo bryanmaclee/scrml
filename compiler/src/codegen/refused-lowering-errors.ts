@@ -33,7 +33,7 @@
  */
 
 import { CGError } from "./errors.ts";
-import { refusedElementCode, refusedElementMessage } from "../element-refusal.ts";
+import { refusedElementCode, refusedElementMessage, scanRawContentForRefusedTags } from "../element-refusal.ts";
 
 let _errors: CGError[] = [];
 let _seenByAnchor: WeakMap<object, Set<string>> = new WeakMap();
@@ -100,4 +100,31 @@ export function refuseElementLowering(tag: unknown, anchor?: { span?: unknown } 
     anchor ?? null,
   );
   return true;
+}
+
+/**
+ * §4.17 (S462) — the codegen backstop for a raw-content body. A `<pre>` / `<code>`
+ * body is written verbatim into HTML the browser parses; a `<script` / `<style` start
+ * tag anywhere in it (scanRawContentForRefusedTags — fail-closed) builds a live
+ * element. Returns true (and records the refusal) when `node` is such a raw-content
+ * element: the caller MUST NOT emit it.
+ */
+export function refuseRawContentLowering(node: { tag?: unknown; children?: unknown; span?: unknown } | null): boolean {
+  if (!node || typeof node.tag !== "string" || !/^(pre|code)$/i.test(node.tag) || !Array.isArray(node.children)) return false;
+  let refused = false;
+  for (const c of node.children as Array<Record<string, unknown>>) {
+    if (!c || c.kind !== "text") continue;
+    const body = typeof c.value === "string" ? c.value : typeof c.text === "string" ? c.text : typeof c.raw === "string" ? c.raw : "";
+    for (const hit of scanRawContentForRefusedTags(body)) {
+      refused = true;
+      const span = (c.span && typeof c.span === "object") ? c.span as object
+        : (node.span && typeof node.span === "object") ? node.span as object
+        : { start: 0, end: 0, line: 1, col: 1 };
+      recordRefusedLowering(
+        new CGError(hit.code, `${hit.code}: ${refusedElementMessage(hit.code, hit.tag, `inside <${node.tag}> raw content (codegen backstop)`)}`, span, "error"),
+        c,
+      );
+    }
+  }
+  return refused;
 }

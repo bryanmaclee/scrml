@@ -1628,6 +1628,12 @@ function _compileScrmlImpl(options = {}) {
           const rawFile = String(enriched.filePath ?? (enriched.span && enriched.span.file) ?? "").replace(/#.*$/, "");
           const refusalKey = `${sourceByFile.has(rawFile) ? rawFile : "*"}|${enriched.code}`;
           if (stageName === "CG" && _refusedElementFilesSeen.has(refusalKey)) continue;
+          // Component expansion and the type system re-parse attribute-held markup (a
+          // snippet lambda, a `:let` slot) that the builder's escape-hatch check may have
+          // refused already, at the same source line: one report per line and code.
+          const lineKey = `${rawFile}|${enriched.code}|L${enriched.span && enriched.span.line}`;
+          if ((stageName === "CE" || stageName === "TS") && _refusedElementFilesSeen.has(lineKey)) continue;
+          if (stageName === "BS" || stageName === "TAB") _refusedElementFilesSeen.add(lineKey);
           if (stageName !== "CG") {
             _refusedElementFilesSeen.add(`${rawFile}|${enriched.code}`);
             _refusedElementFilesSeen.add(`*|${enriched.code}`);

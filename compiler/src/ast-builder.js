@@ -23939,7 +23939,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
  * The name is the WHOLE name (`<style-x>` reads `style` `-` `x` — the run continues,
  * so it is not `style`), mirroring the block splitter's exact-name rule.
  */
-function refuseFragmentElementTokens(toks, filePath, errors) {
+function fragmentElementHits(toks) {
+  const hits = [];
   for (let k = 0; k + 1 < toks.length; k++) {
     const lt = toks[k];
     const name = toks[k + 1];
@@ -23952,11 +23953,61 @@ function refuseFragmentElementTokens(toks, filePath, errors) {
     if (after && after.span && after.span.start === name.span.end &&
         (after.kind === "IDENT" || after.kind === "KEYWORD" || after.kind === "NUMBER" ||
          (typeof after.text === "string" && after.text.startsWith("-")))) continue;
+    hits.push({ code, name: name.text, lt });
+  }
+  return hits;
+}
+
+function refuseFragmentElementTokens(toks, filePath, errors) {
+  for (const h of fragmentElementHits(toks)) {
     errors.push(new TABError(
-      code,
-      `${code}: ` + refusedElementMessage(code, name.text, "markup in a logic body"),
-      tokenSpan(lt, filePath),
+      h.code,
+      `${h.code}: ` + refusedElementMessage(h.code, h.name, "markup in a logic body"),
+      tokenSpan(h.lt, filePath),
     ));
+  }
+}
+
+/**
+ * §4.17 (S462 review) — markup held in an expression the JS parser could not read
+ * (an `escape-hatch` ExprNode: `onclick={() => <script/>}`, a markup value whose
+ * `<!-- … -->` defeated the markup-value parse). Pre-fix such a value reached codegen
+ * and failed as E-CODEGEN-INVALID-LOGIC, which names the wrong cause. The value's
+ * TOKENS decide (the same `<`-adjacent-name rule as an html-fragment: a string or a
+ * comment is one token); it is reported at the nearest enclosing statement /
+ * attribute span, because an escape hatch's own span is not a source position.
+ */
+function refuseEscapeHatchMarkup(ast, filePath, errors, reported) {
+  const seen = new Set();
+  const stack = [[ast, null, false]];
+  while (stack.length > 0) {
+    const [n, anchor0, inExpr] = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) stack.push([c, anchor0, inExpr]); continue; }
+    let anchor = anchor0;
+    if (!inExpr && n.span && typeof n.span.start === "number" && typeof n.span.line === "number") anchor = n.span;
+    if (n.kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("<")) {
+      let toks = [];
+      try { toks = tokenizeLogic(n.raw, 0, 1, 1, []); } catch { toks = []; }
+      for (const h of fragmentElementHits(toks)) {
+        const at = anchor ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        const key = `${h.code}@${at.start}`;
+        if (reported.has(key)) continue;
+        reported.add(key);
+        errors.push(new TABError(
+          h.code,
+          `${h.code}: ` + refusedElementMessage(h.code, h.name, "markup in an expression or attribute value"),
+          { file: at.file ?? filePath, start: at.start, end: at.end, line: at.line, col: at.col },
+        ));
+      }
+      continue;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent") continue;
+      const v = n[k];
+      if (v && typeof v === "object") stack.push([v, anchor, inExpr || /expr/i.test(k)]);
+    }
   }
 }
 
@@ -23980,6 +24031,7 @@ function refuseScriptStyleElements(result, bsOutput) {
       { file: span.file ?? result.filePath, start: span.start, end: span.end, line: span.line, col: span.col },
     ));
   }
+  refuseEscapeHatchMarkup(result.ast, result.filePath, result.errors, reported);
 }
 
 function _buildASTImpl(bsOutput, tokenizerOverrides) {
