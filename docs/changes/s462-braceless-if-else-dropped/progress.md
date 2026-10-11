@@ -41,3 +41,11 @@
       2f78ff59b PASS · host-global-scan --check PASS · facts / spec-index / bootstrap-conformance /
       severity --check PASS · snippet-gate PASS · corpus-compile-floor PASS · types-gate PASS ·
       delta-lint PASS · conflict-marker-gate PASS.
+- [x] merged origin/main 37e50e881 (md phase 1 + Q21) → 682f0725e; FACTS / bootstrap-conformance
+      took theirs + regenerated, known-gaps both entry sets kept by hunk + counts regenerated,
+      master-list.md = origin/main. stdlib/md/index.scrml: zero braceless same-line if…else
+      sites; its library emit is byte-identical with/without this fix.
+- [x] FINAL gates on 682f0725e: pre-commit 35103 pass/0 fail/58 skip · tiers 5685/0/10 skip ·
+      browser-baseline PASS 48 (first try) · s34-census --check-new --base 37e50e881 PASS ·
+      host-global-scan PASS · facts/state/spec-index/bootstrap-conformance/severity --check PASS ·
+      snippet-gate PASS · corpus-compile-floor PASS · conflict-marker PASS · types-gate PASS.
