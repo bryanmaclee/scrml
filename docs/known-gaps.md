@@ -32,9 +32,21 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
 | MED | 597 | 6 |
-| LOW | 352 | 0 |
+| LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
+
+<!-- @gap id=g-md-list-marker-tab-column-s462 sev=LOW status=open locus=stdlib/md/index.scrml(readList: spaces = indentOf(after); stripCols on `after` from column 0) prov=review:S239-s462-md-phase1-delta(nit 3) -->
+
+CommonMark expands a tab to the next multiple of 4 counted from the start of the LINE (2.2): after `-` at column 0 a tab reaches column 4 (3 columns of space), so the content column is 2 and the item's continuation lines need 2 columns. `readList` re-counts `after` from column 0, so the tab counts as 4 columns, the content column becomes 5, and with "5+ means 1" the rule flips the item's width. Output differs from CommonMark with no W-MD lint. Tabs in md indentation are rare in practice, and a static body that mixes tabs and spaces in its common prefix is already E-MD-INDENT-MIXED. Fix direction: measure the post-marker whitespace from the marker's absolute column (an `indentFrom(s, col)` helper) and strip continuation lines the same way — or lint a tab after a list marker (W-MD-BULLET-MARKER-style, "write spaces"), which fits "one way to do it".
+
+### g-stdlib-client-chunks-not-minified-md-s462 — stdlib client chunks ship unminified; the `stdlib-md` chunk (the scrml:md reader, §67.7) is 87 KB raw / 22.5 KB gzip as shipped, 32 KB / 11 KB gzip minified — `NEW S462; LOW; open (phase-3 item)`
+
+<!-- @gap id=g-stdlib-client-chunks-not-minified-md-s462 sev=LOW status=open locus=compiler/src/runtime-template.js(_loadStdlibChunk inlines each shim verbatim) prov=review:S239-s462-md-phase1(L6) -->
+
+`_loadStdlibChunk` copies each `compiler/runtime/stdlib/<name>.js` shim into the runtime as written, comments and all. For the hand-written shims that costs little; `md.js` is impl#1's library-mode compile of `stdlib/md/index.scrml` (§67.8), long and heavily commented, so its client chunk is 87,240 B raw / 22,565 B gzip, against 32,301 B / 11,044 B gzip after `bun build --minify` (measured S462 on the md phase-1 review-fix head). The chunk ships only on a page whose client code imports `scrml:md` (and, in phase 3, on pages using `<md of=…/>`), so no page pays it today. Fix direction (phase 3, before `of=` ships): minify stdlib chunks in the client runtime build — a change to `_loadStdlibChunk` that touches EVERY stdlib chunk, so it needs its own review and a size/behaviour check across all of them; not done in phase 1 by direction of the review. The reader's own size (the inlined `_scrml_structural_eq`, `==` lowered to calls) is a separate impl#1 codegen cost.
 
 ### g-server-block-arrow-body-raw-tokens-bypass-trap-s462 — an `if` inside a block-bodied arrow in a server function (`const g = () => { if (verifyPassword(…)) … }`) is emitted as re-joined raw tokens, so neither the §13.2 server Promise trap nor the await classifier sees it — `NEW S462; MED; open (pre-existing on BASE)`
 

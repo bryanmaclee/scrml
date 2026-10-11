@@ -564,6 +564,7 @@ const _STDLIB_FORMAT_CHUNK   = _loadStdlibChunk("format");
 const _STDLIB_HOST_CHUNK     = _loadStdlibChunk("host");
 const _STDLIB_HTTP_CHUNK     = _loadStdlibChunk("http");
 const _STDLIB_MATH_CHUNK     = _loadStdlibChunk("math");
+const _STDLIB_MD_CHUNK       = _loadStdlibChunk("md");
 const _STDLIB_RANDOM_CHUNK   = _loadStdlibChunk("random");
 const _STDLIB_REGEX_CHUNK    = _loadStdlibChunk("regex");
 const _STDLIB_ROUTER_CHUNK   = _loadStdlibChunk("router");
@@ -7545,7 +7546,7 @@ ${URL_GUARD_RUNTIME_SOURCE}
 // compiler/src/markup-attr-allow-list.js + compiler/src/runtime-meta-emit-gate.js. Pulled with the
 // 'meta' chunk (CHUNK_DEPENDENCIES).
 ${META_EMIT_GATE_RUNTIME_SOURCE}
-${_STDLIB_COMPILER_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
+${_STDLIB_COMPILER_CHUNK}${_STDLIB_DATA_CHUNK}${_STDLIB_FORMAT_CHUNK}${_STDLIB_HOST_CHUNK}${_STDLIB_HTTP_CHUNK}${_STDLIB_MATH_CHUNK}${_STDLIB_MD_CHUNK}${_STDLIB_RANDOM_CHUNK}${_STDLIB_REGEX_CHUNK}${_STDLIB_ROUTER_CHUNK}${_STDLIB_TEST_CHUNK}${_STDLIB_TIME_CHUNK}`;
 
 /**
  * g-value-native-map-set-server-runtime — the §59 value-native map/set runtime,

@@ -267,8 +267,9 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 41 chunks", () => {
-    // 41 chunks since S462 P0: 'stdlib-auth' and 'stdlib-crypto' REMOVED. Both are
+  test("RUNTIME_CHUNK_ORDER has 42 chunks", () => {
+    // 42 chunks after S462: 'stdlib-md' (the scrml:md reader, md phase 1) ADDED, and
+    // 'stdlib-auth' + 'stdlib-crypto' REMOVED (S462 P0). Both removed modules are
     // escalation-server-only (§12.2 Trigger 3) and carried a chunk only as a S95
     // Bug 18 exception; a CPS split that left `verifyPassword` on the client ran
     // the password check in the browser on that chunk (un-awaited — every password
@@ -359,12 +360,14 @@ describe("runtime size", () => {
     // when ANY entry-point chunk admits a non-empty components / vendor-
     // units set.
     //
+    // 44 post-S462 md phase 1: 'stdlib-md' (the scrml:md reader's client chunk).
+    //
     // Prior milestones:
     //   19 chunks post-A-4.3: 'prefetch' chunk for §40.9.7 tier-1 idle-
     //   prefetch (helper: _scrml_prefetch_tier1).
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(41);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(42);
   });
 });

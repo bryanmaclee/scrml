@@ -225,6 +225,10 @@ jobs:
         run: bun scripts/host-global-scan.ts --check
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
+      # S462 md phase 1 — the scrml:md runtime shim is impl#1's compile of the scrml reader
+      # (SPEC §67.8, one md reader); it must be byte-current with the source AND the compiler.
+      - name: scrml:md shim gate (compiler/runtime/stdlib/md.js generated from stdlib/md/index.scrml)
+        run: bun scripts/gen-md-shim.ts --check
       # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
       # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3): nothing that grows
       # the corpus was ever made to regenerate it. BLOCKING here, but PATH-SCOPED: only a pull request

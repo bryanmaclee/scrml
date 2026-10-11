@@ -19,5 +19,14 @@ if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conf
   exit 1
 fi
 
+# S462 md phase 1 — compiler/runtime/stdlib/md.js is GENERATED from stdlib/md/index.scrml
+# (SPEC §67.8: one md reader). Byte-for-byte: a reader edit, or a codegen change that alters the
+# compiled reader, must be followed by `bun scripts/gen-md-shim.ts`. (~2s)
+# Guarded: a branch cut before the reader landed has no generator and must not be blocked.
+if [ -f scripts/gen-md-shim.ts ] && ! bun scripts/gen-md-shim.ts --check 2>&1; then
+  echo "✗ compiler/runtime/stdlib/md.js is stale — run: bun scripts/gen-md-shim.ts" >&2
+  exit 1
+fi
+
 echo "✓ Pre-commit checks passed."
 exit 0
