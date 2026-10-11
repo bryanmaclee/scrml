@@ -329,7 +329,7 @@ function go() { const q = login("x", "y"); console.log(q) }
   test("server: `if (verifyPassword(pw, hash))` after the block is AWAITED (the first draft left it bare)", () => {
     const o = compileFile(src(`if (verifyPassword(pw, hash)) { return "accepted" }\n  return "rejected"`));
     expect(o.codes).toEqual([]);
-    expect(o.serverJs).toContain("if (await verifyPassword(pw, hash))");
+    expect(o.serverJs).toContain("if (_scrml_assert_settled(await verifyPassword(pw, hash)))"); // S462 Q20 trap
     expect(o.serverJs).not.toMatch(/if \(verifyPassword\(pw, hash\)\)/);
   });
   test("server: `.some(p => verifyPassword(p, hash))` after the block is lifted + awaited", () => {
