@@ -1533,6 +1533,16 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     }
   }
 
+  /** Walk every attribute's parsed handler statement list (s462 r2; see the
+   *  `case "markup"` call site). */
+  function walkAttrHandlerBlocks(node: any): void {
+    const attrs: any[] = node?.attributes ?? node?.attrs ?? [];
+    for (const attr of attrs) {
+      const stmts = attr?.value?.handlerBlock?.stmts;
+      if (Array.isArray(stmts)) walkBody(stmts);
+    }
+  }
+
   /**
    * §17.1.2 — `ifmount` gate for the three scrml-defined structural elements.
    *
@@ -1800,6 +1810,18 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
             }
           }
         }
+        // s462 r2 — a multi-statement event-handler attribute value
+        // (`onclick={ if (@c) { @o.a.b = 5 } else { … } }`, a `;`-sequence,
+        // a multi-line body, `onclick=${ … }`) is lowered from its PARSED
+        // statement list `attr.value.handlerBlock.stmts` (ast-builder
+        // attachHandlerStatementList → emitHandlerStatementList). Those
+        // statements are emitted exactly like a function body, so the chunk
+        // walk must see them exactly like a function body: before this, a
+        // `reactive-nested-assign` inside a handler list emitted
+        // `_scrml_deep_set(...)` while the `utilities` chunk that DEFINES it
+        // was tree-shaken out → ReferenceError on every click. Every emitted
+        // statement list must be visible to this walk.
+        walkAttrHandlerBlocks(node);
         // Check for reactive for-loop (iterable is @varName) — within children
         if (Array.isArray(node.children)) {
           walkNodes(node.children);
