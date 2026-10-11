@@ -19,7 +19,8 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
-import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs, MARKUP_BODY_STATEMENTS } from "../../src/commands/fix-given-presence.js";
+import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs, MARKUP_BODY_STATEMENTS, MARKUP_BODY_CALLS, isPureReadExpr } from "../../src/commands/fix-given-presence.js";
+import { parseExprToNode } from "../../src/expression-parser.ts";
 import { fixS66, IMPL1_SAFE_RULES, S66_RULES } from "../../src/commands/fix-s66.js";
 
 let TMP;
@@ -301,6 +302,107 @@ describe("§C: scrml fix `given-presence`", () => {
         expect(r.blockers[0].reason).toContain(MARKUP_BODY_STATEMENTS);
       });
     }
+  });
+
+  describe("a markup guard whose body evaluates a call or a component at render time is refused (S462 delta review, repros t1/t3b/t6/t2)", () => {
+    // Each repro: `#hits` diverged 7 → 3 after the rewrite — `track` ran on every read change in
+    // the guard's plain group, and only on its own reads in the arm selector.
+    const PRE = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "ada" }
+<n> = 0
+<m> = 0
+<hits> = []
+function track(v) { @hits = @hits.concat([v]); return v }
+`;
+    const POST = `<main>
+<p id="u">\${@user is given ? "y" : "n"}</p>
+<p id="hits">\${@hits.length}</p>
+<div id="guard">GUARD</div>
+</main>
+</program>
+`;
+    const shapes = {
+      "t1 (an interpolation calls a user function)": ["", `\${ given @user :> { <p class="who">\${track(@n)} \${@m}</p> } }`],
+      "t3b (the call nested deeper in markup)": ["", `\${ given @user :> { <div>\${ track(@m) }<span>\${@n}</span></div> } }`],
+      "t6 (an attribute interpolation inside html-fragment text)": ["", `\${ given @user :> { <p class="who" title="\${track(@n)}">\${@m}</p> } }`],
+      "t2 (a component whose definition interpolates a call)": [`\${ const Cnt = <div class="cnt" props={ v: int }>\${track(v)}</div> }\n`, `\${ given @user :> { <div><Cnt v=@n/><span>\${@m}</span></div> } }`],
+      "a non-handler attribute value that calls": ["", `\${ given @user :> { lift <p class="who" data-x=track(@n)>\${@m}</p> } }`],
+    };
+    for (const [label, [decl, guard]] of Object.entries(shapes)) {
+      test(label, () => {
+        const src = PRE + decl + "\n" + POST.replace("GUARD", guard);
+        const r = fixGivenPresence(src, { filePath: join(TMP, `c/call-${label.split(" ")[0]}.scrml`) });
+        expect(r.changed).toBe(false);
+        expect(r.blockers.length).toBe(1);
+        expect(r.blockers[0].reason).toContain(MARKUP_BODY_CALLS);
+      });
+    }
+
+    test("handlers are not render-time: `onclick=track(@n)` and `onclick=${track(@n)}` in the body are rewritten", () => {
+      const guard = `\${ given @user :> { <p class="who"><button onclick=track(@n)>a</button><button onclick=\${track(@n)}>b</button>\${@m}</p> } }`;
+      const src = PRE + "\n" + POST.replace("GUARD", guard);
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/call-handlers.scrml") });
+      expect(r.blockers).toEqual([]);
+      expect(r.applied.length).toBe(1);
+    });
+
+    test("isPureReadExpr: reads, literals and operators only — no calls, no writes, no interpolating template", () => {
+      const p = (s) => isPureReadExpr(parseExprToNode(s, "/x.scrml", 0));
+      for (const ok of ["@user.name", "@a[0].b", "@n + 1 * 2", "@ok ? \"a\" : \"b\"", "@u is given", "!@b && @c || -@d", "@xs.length", "@a ?? \"z\"", "[1, @n]"]) expect(p(ok)).toBe(true);
+      for (const bad of ["track(@n)", "@xs.map(f)", "@n++", "new Date()", "x => x", "`x ${@n}`", "@a.b()", "JSON.parse(@s)"]) expect(p(bad)).toBe(false);
+    });
+  });
+
+  describe("the \"does not compile\" reason comes first (S462 delta review, repros a6/a8)", () => {
+    // a8: two names, the body reads @b2; literal `+` between interpolations is text, not a statement.
+    test("a8 — gets the compile reason, not the statement reason", () => {
+      const src = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "ada" }
+<b2>: User | not = { name: "bo" }
+<n> = 0
+<main>
+  <div id="guard">\${ given @user, @b2 :> { <p class="who">\${@user.name}+\${@b2.name} \${@n}</p> } }</div>
+</main>
+</program>
+`;
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/a8.scrml") });
+      expect(r.changed).toBe(false);
+      expect(r.blockers.length).toBe(1);
+      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+      expect(r.blockers[0].reason).toContain("E-TYPE-046");
+    });
+    test("literal `-` between interpolations is text, not a statement; impl#1 emits it as `-;`, so the file does not compile (the emitted-JS check runs on the verify compile too)", () => {
+      const src = `<user>: { name: string } | not = { name: "ada" }
+<n> = 0
+<main>
+    <div>\${ given @user :> { <p id="n">\${@user.name} - \${@n}</p> } }</div>
+</main>
+`;
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/punct.scrml") });
+      expect(r.changed).toBe(false);
+      expect(r.blockers.length).toBe(1);
+      expect(r.blockers[0].reason).not.toContain(MARKUP_BODY_STATEMENTS);
+      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+      expect(r.blockers[0].reason).toContain("E-CODEGEN-INVALID-LOGIC");
+    });
+    test("a6 — a guard inside `<each>` gets the compile reason", () => {
+      const src = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "ada" }
+<n> = 0
+<rows> = [{ id: 1 }, { id: 2 }]
+<main>
+  <ul id="guard"><each in=@rows as r><li>\${ given @user :> { <b>\${r.id}-\${@user.name}-\${@n}</b> } }</li></each></ul>
+</main>
+</program>
+`;
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/a6.scrml") });
+      expect(r.changed).toBe(false);
+      expect(r.blockers.length).toBe(1);
+      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+    });
   });
 
   describe("a file that does not compile is not verified vacuously (S462 review, repros a3/a6/a8)", () => {

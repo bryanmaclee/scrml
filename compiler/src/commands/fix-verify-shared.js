@@ -10,6 +10,7 @@
  */
 
 import { existsSync, readdirSync, copyFileSync } from "node:fs";
+import { validateEmittedArtifacts } from "../codegen/validate-emit.ts";
 import { dirname, resolve, join } from "node:path";
 
 /**
@@ -39,6 +40,21 @@ export const FILE_DOES_NOT_COMPILE = "file does not compile; cannot verify";
  */
 export function errorSeverityCodes(result) {
   const out = [];
+  // The emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) runs only on a WRITING compile (api.js —
+  // it gates the write), and the verify compiles with `write: false`. Run it here on the emitted
+  // artifacts, so a file whose real build fails on invalid emitted JS is not "verified" either
+  // (measured: `${@u.name} - ${@n}` in a markup guard emits `-;`).
+  try {
+    const arts = [];
+    for (const [file, v] of result?.outputs ?? new Map()) {
+      for (const f of ["clientJs", "serverJs", "libraryJs", "toolJs"]) {
+        if (typeof v?.[f] === "string" && v[f].length > 0) arts.push({ sourceFile: file, artifact: `${f}`, contents: v[f] });
+      }
+    }
+    for (const e of validateEmittedArtifacts(arts)) if (typeof e?.code === "string") out.push(e.code);
+  } catch {
+    out.push("(the emitted-JS check threw)");
+  }
   for (const d of result?.errors ?? []) {
     if (d && typeof d.code === "string" && (d.severity ?? "error") === "error") out.push(d.code);
   }

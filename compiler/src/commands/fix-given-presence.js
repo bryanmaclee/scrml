@@ -52,10 +52,18 @@
  *      resolved). For a subset holding markup guards, each changed group is cut from both sides
  *      and checked to be exactly that change (same presence test, one arm) and the rest compared
  *      as above — see "The markup-guard compare" below. The diagnostic codes must match all the same.
- *      Only a markup guard whose body is MARKUP ONLY is rewritten (markupBodyIsPure): a statement
- *      in the body — a declaration, an assignment, an `if`, a nested guard, an interpolation that
- *      writes — re-runs on every read change in the guard's plain group but not in the arm selector,
- *      so it is refused ("guard body has statements whose re-run frequency differs …").
+ *      Only a markup guard whose body is MARKUP OF PURE READS is rewritten (markupBodyIsPure,
+ *      decided from the tree; html-fragment text is parsed, never accepted wholesale). The guard's
+ *      plain group re-runs its whole body on every read change; the arm selector re-runs a binding
+ *      only on its own reads — so anything with an effect would run a different number of times:
+ *        · a statement (a declaration, an assignment, an `if`, a nested guard) is refused —
+ *          "guard body has statements whose re-run frequency differs …";
+ *        · a call anywhere at render time (an interpolation `${f(@n)}`, a non-handler attribute
+ *          value `title="${f(@n)}"` / `data-x=f(@n)`), a template literal with interpolations, and
+ *          a component use (its definition may interpolate a call) are refused — "guard body
+ *          evaluates a call or a component at render time …". An interpolation must be cell /
+ *          field / index reads, literals and operators. Handler attributes (`onclick=…`) are not
+ *          checked: a handler does not run at render time.
  *      ACCEPTED DIFFERENCES of a rewritten markup guard — the rewrite follows §7.4.2 ("the
  *      interpolation site SHALL re-render whenever any referenced cell changes") as #1397
  *      implements it, updating each markup binding in place where the guard re-creates its body:
@@ -63,13 +71,12 @@
  *          changes (the guard re-created the input, losing both);
  *        · after a read in the body throws, the rewrite renders again on the next write (the
  *          guard's group went blank for good — a runtime effect that throws loses its
- *          subscriptions);
- *        · an interpolation is re-evaluated when its own reads change, no longer also when a
- *          sibling interpolation's read changes (visible only through a call with a side effect).
+ *          subscriptions).
  *      Executed in compiler/tests/browser/browser-fix-given-presence-markup-s462.browser.test.js.
  *   3. A file whose original compile reports an error-severity diagnostic is refused ("file does
  *      not compile; cannot verify", fix-verify-shared.js): impl#1 emits no artifacts for it, so
- *      the compare would pass for any rewrite.
+ *      the compare would pass for any rewrite. This is checked FIRST: a site in such a file gets
+ *      this reason even when its body would also be refused.
  *   When the whole file does not verify, each site is verified alone and the sites that verify
  *   alone are re-verified together; a site that does not is left as written with the reason.
  *   That is how a site impl#1 compiles differently today is refused: the rewrite would change
@@ -81,7 +88,8 @@
 
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
-import { captureTrailingContentWarnings } from "../expression-parser.ts";
+import { captureTrailingContentWarnings, parseExprToNode } from "../expression-parser.ts";
+import { isUserComponentMarkup } from "../component-expander.ts";
 import { compileScrml } from "../api.js";
 import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
 import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
@@ -281,7 +289,7 @@ function armKind(arm) {
 }
 
 /** Plan one site's edit, or return a blocker reason. */
-function planSite(source, site) {
+function planSite(source, site, filePath) {
   const { node, match } = site;
   if (node.malformedHead === true) {
     // impl#1 refuses the head (E-SYNTAX-044); the reason names what is wrong where it can.
@@ -327,8 +335,9 @@ function planSite(source, site) {
   if (source[head.braceAt] !== "{") {
     return { reason: "the guard's body is not a `{ … }` block (E-SYNTAX-044: a guard body is a block; braces decide what the guard covers) — left for a human" };
   }
-  if (isMarkupGuard(site) && !markupBodyIsPure(site.node.body)) {
-    return { reason: `${MARKUP_BODY_STATEMENTS} — left as written` };
+  if (isMarkupGuard(site)) {
+    const why = markupBodyRefusal(site.node.body, filePath);
+    if (why) return { reason: `${why} — left as written`, needsCompileCheck: true };
   }
   const cond = head.names.map((n) => `${n} is given`).join(" && ");
   return {
@@ -576,8 +585,16 @@ function isMarkupGuard(site) {
 export const MARKUP_BODY_STATEMENTS =
   "guard body has statements whose re-run frequency differs between the plain group and the arm selector";
 
-/** Does this expression write (an assignment, `++` / `--`, `delete`) or `await`, or is it unparsed? */
-function exprWrites(expr) {
+/** Unary operators that only read. (`++` / `--` write; `delete` writes; `await` suspends.) */
+const PURE_UNARY = new Set(["!", "-", "+", "~", "typeof", "void"]);
+
+/**
+ * Is this expression a PURE READ — cell / field / index reads, literals and operators, with NO call
+ * of any kind (a call may have a side effect the scan cannot see: `${track(@n)}`, S462 delta review
+ * repro t1)? Fail closed: any node kind not listed is not a pure read, and so is a template literal
+ * with interpolations (impl#1 keeps it as raw text, so its parts are not visible here).
+ */
+export function isPureReadExpr(expr) {
   if (!expr || typeof expr !== "object") return false;
   const seen = new WeakSet();
   const stack = [expr];
@@ -585,54 +602,304 @@ function exprWrites(expr) {
     const n = stack.pop();
     if (!n || typeof n !== "object" || seen.has(n)) continue;
     seen.add(n);
-    if (!Array.isArray(n)) {
-      if (n.kind === "assign" || n.kind === "escape-hatch") return true;
-      if (n.kind === "unary" && ["++", "--", "delete", "await"].includes(n.op)) return true;
-    }
-    for (const k of Object.keys(n)) if (k !== "span" && n[k] && typeof n[k] === "object") stack.push(n[k]);
-  }
-  return false;
-}
-
-/**
- * The body of a markup guard is markup only — html fragments, markup elements, a `lift` of markup,
- * and `${ … }` interpolations that each hold one expression that writes nothing. Anything else (a
- * declaration, an assignment, an `if`, a nested guard, an interpolation that writes) is a statement.
- *
- * Why it matters (S462 review of s462-fix-rule-followups, repro a1b): the guard's plain lift group
- * re-runs its WHOLE body on every change of any read in it; the rewrite's arm selector re-runs a
- * markup binding only when that binding's own reads change (§7.4.2, #1397 LIVE bindings). For pure
- * markup that is the same DOM; for a statement in the body it is a different number of runs —
- * `@hits = @hits.concat(…)` ran on every `@n` change before and does not after. The compare below
- * cuts both group bodies, so it cannot see that; the body is checked here instead (fail closed: an
- * unknown node kind is a statement).
- */
-function markupBodyIsPure(body) {
-  const ok = (n) => {
-    if (!n || typeof n !== "object") return true;
+    if (Array.isArray(n)) { for (const x of n) stack.push(x); continue; }
     switch (n.kind) {
-      case "html-fragment":
-      case "string-literal":
-      case "text":
-      case "comment":
-        return true;
-      case "markup":
-        return (n.children ?? []).every(ok);
-      case "lift-expr":
-        return n.expr?.kind === "markup" && ok(n.expr);
-      case "logic":
-        return (n.body ?? []).every((s) => s?.kind === "bare-expr" && s.exprNode && !exprWrites(s.exprNode));
+      case "ident":
+      case "member":
+      case "index":
+      case "binary":
+      case "ternary":
+      case "array":
+      case "object":
+      case "prop":
+        break;
+      case "lit":
+        if (n.litType === "template" && n.hasInterpolation !== false) return false;
+        break;
+      case "unary":
+        if (!PURE_UNARY.has(n.op)) return false;
+        break;
       default:
         return false;
     }
+    for (const k of Object.keys(n)) if (k !== "span" && n[k] && typeof n[k] === "object") stack.push(n[k]);
+  }
+  return true;
+}
+
+/** Parse an interpolation's text with impl#1's expression parser and test it; unparseable → false. */
+function isPureReadText(raw, filePath) {
+  try {
+    const node = parseExprToNode(raw.trim(), filePath, 0);
+    return isPureReadExpr(node);
+  } catch {
+    return false;
+  }
+}
+
+/** The index just past the `}` that closes the `{` at `open` (string / template aware), or -1. */
+function matchBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (c === "\"" || c === "'" || c === "`") {
+      const q = c;
+      for (i++; i < text.length && text[i] !== q; i++) if (text[i] === "\\") i++;
+      if (i >= text.length) return -1;
+      continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) return i + 1; }
+  }
+  return -1;
+}
+
+const isHandlerAttr = (name) => typeof name === "string" && /^on[a-z]/i.test(name);
+
+/**
+ * Check the raw text of an html-fragment (impl#1 keeps the tags of a guard body as text). Returns
+ * true only when every interpolation in it is a pure read, every non-handler attribute value is a
+ * plain value or a pure read, and no tag is a component use. The text is PARSED here — never
+ * accepted wholesale (S462 delta review repro t6: `title="${track(@n)}"`).
+ */
+function fragmentIsPure(text, filePath, holes = []) {
+  // An interpolation's text, or a HOLE: `${\u0000N}` stands for the body's Nth `logic` node (impl#1
+  // splits `${…}` out of a fragment into its own node, even mid-tag: `onclick=${f()}`).
+  const interp = (raw, handler) => {
+    const hole = /^\u0000(\d+)$/.exec(raw);
+    if (hole) {
+      const node = holes[Number(hole[1])];
+      if (!node) return false;
+      return handler || ((node.body ?? []).length > 0 && (node.body ?? []).every((x) => x?.kind === "bare-expr" && isPureReadExpr(x.exprNode)));
+    }
+    return handler || isPureReadText(raw, filePath);
   };
-  return (body ?? []).every(ok);
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const lt = text.indexOf("<", i);
+    const dollar = text.indexOf("${", i);
+    // An interpolation in text content (outside a tag).
+    if (dollar !== -1 && (lt === -1 || dollar < lt)) {
+      const end = matchBrace(text, dollar + 1);
+      if (end === -1 || !interp(text.slice(dollar + 2, end - 1), false)) return false;
+      i = end;
+      continue;
+    }
+    if (lt === -1) return true;
+    let j = lt + 1;
+    while (j < n && /\s/.test(text[j])) j++;
+    if (text[j] === "/") { // a closing tag
+      const gt = text.indexOf(">", j);
+      if (gt === -1) return false;
+      i = gt + 1;
+      continue;
+    }
+    if (text[j] === "!") { // a comment / doctype
+      const gt = text.indexOf(">", j);
+      if (gt === -1) return false;
+      i = gt + 1;
+      continue;
+    }
+    const tm = /^[A-Za-z][\w:.-]*/.exec(text.slice(j));
+    if (!tm) { i = lt + 1; continue; } // a bare `<` in text
+    if (/^[A-Z]/.test(tm[0])) return false; // a component use (S462 delta review repro t2)
+    j += tm[0].length;
+    // Attributes, up to `>` / `/>`.
+    for (;;) {
+      while (j < n && /\s/.test(text[j])) j++;
+      if (j >= n) return false;
+      if (text[j] === ">") { j++; break; }
+      if (text[j] === "/" && text[j + 1] === ">") { j += 2; break; }
+      const am = /^[^\s=>\/]+/.exec(text.slice(j));
+      if (!am) return false;
+      const name = am[0];
+      j += name.length;
+      while (j < n && /\s/.test(text[j])) j++;
+      if (text[j] !== "=") continue; // a boolean attribute
+      j++;
+      while (j < n && /\s/.test(text[j])) j++;
+      const handler = isHandlerAttr(name);
+      const c = text[j];
+      if (c === "\"" || c === "'") {
+        // A quoted value: each `${…}` in it must be a pure read (a handler's value never runs at render).
+        let k = j + 1;
+        for (;;) {
+          if (k >= n) return false;
+          if (text[k] === c) { k++; break; }
+          if (text[k] === "$" && text[k + 1] === "{") {
+            const end = matchBrace(text, k + 1);
+            if (end === -1) return false;
+            if (!interp(text.slice(k + 2, end - 1), handler)) return false;
+            k = end;
+            continue;
+          }
+          k++;
+        }
+        j = k;
+      } else if (c === "$" && text[j + 1] === "{") {
+        const end = matchBrace(text, j + 1);
+        if (end === -1) return false;
+        if (!interp(text.slice(j + 2, end - 1), handler)) return false;
+        j = end;
+      } else if (c === "{") {
+        const end = matchBrace(text, j);
+        if (end === -1 || !handler) return false; // a `{ … }` block value outside a handler — refuse
+        j = end;
+      } else {
+        // An unquoted value: read to whitespace / `>` / `/>`, parentheses balanced.
+        let k = j;
+        let depth = 0;
+        while (k < n) {
+          const d = text[k];
+          if (d === "(") depth++;
+          else if (d === ")") depth--;
+          else if (depth === 0 && (/\s/.test(d) || d === ">" || (d === "/" && text[k + 1] === ">"))) break;
+          k++;
+        }
+        if (depth !== 0) return false;
+        const value = text.slice(j, k);
+        if (!handler && !isPureReadText(value, filePath)) return false;
+        j = k;
+      }
+    }
+    i = j;
+  }
+  return true;
+}
+
+/** A top-level bare-expr that is literal TEXT between interpolations (`+`, `-`, `·`): impl#1 could not
+ * parse it as code (an escape-hatch ParseError) and it holds no identifier, call or bracket. */
+function isPunctuationText(node) {
+  const e = node?.exprNode;
+  if (!e || e.kind !== "escape-hatch" || e.nativeKind !== "ParseError") return false;
+  const raw = String(e.raw ?? node.expr ?? "");
+  return raw.trim().length > 0 && !/[\p{L}\p{N}_$@(){}\[\]`'"]/u.test(raw);
+}
+
+/** A markup element (from a `lift`): no component use; attributes and children pure. */
+function markupNodeIsPure(m, filePath) {
+  if (!m || typeof m !== "object") return false;
+  if (isUserComponentMarkup(m) || /^[A-Z]/.test(String(m.tag ?? ""))) return false;
+  for (const a of m.attrs ?? []) {
+    if (isHandlerAttr(a?.name)) continue;
+    const v = a?.value;
+    if (!v) continue; // a boolean attribute
+    if (v.kind === "string-literal") {
+      const s = String(v.value ?? "");
+      if (s.includes("${") && !fragmentIsPure(s, filePath)) return false;
+      continue;
+    }
+    if (v.kind === "variable-ref" && v.exprNode && isPureReadExpr(v.exprNode)) continue;
+    if (v.exprNode && isPureReadExpr(v.exprNode)) continue;
+    return false; // a call-ref, or anything not shown to be a pure read
+  }
+  return (m.children ?? []).every((c) => bodyNodeIsPure(c, filePath));
+}
+
+/** One node of a markup guard's body (or a markup element's child). */
+function bodyNodeIsPure(n, filePath) {
+  if (!n || typeof n !== "object") return true;
+  switch (n.kind) {
+    case "text":
+    case "comment":
+      return true;
+    case "string-literal":
+      return !String(n.value ?? "").includes("${");
+    case "html-fragment":
+      return fragmentIsPure(String(n.content ?? ""), filePath);
+    case "markup":
+      return markupNodeIsPure(n.node ?? n, filePath);
+    case "lift-expr":
+      return n.expr?.kind === "markup" && markupNodeIsPure(n.expr.node ?? n.expr, filePath);
+    case "logic":
+      return (n.body ?? []).length > 0 && (n.body ?? []).every((s) => s?.kind === "bare-expr" && isPureReadExpr(s.exprNode));
+    case "bare-expr":
+      // Literal text between interpolations (`${a}+${b}`) reaches the tree as a top-level bare-expr.
+      return isPunctuationText(n);
+    default:
+      return false;
+  }
+}
+
+/**
+ * The body of a markup guard is markup only, and everything it evaluates at render time is a pure
+ * read. Anything else is refused, deciding from the tree (fail closed: an unknown node kind, an
+ * unparsed fragment, a call — anywhere — are all refusals):
+ *   - a statement (a declaration, an assignment, an `if`, a nested guard);
+ *   - an interpolation, in text or in a non-handler attribute, that is not cell / field reads,
+ *     literals and operators — no calls at all (`${track(@n)}`, `title="${track(@n)}"`);
+ *   - a component use (its definition may interpolate a call: `<Cnt v=@n/>`).
+ * Handler attributes (`onclick=…`) are not checked: a handler does not run at render time.
+ *
+ * Why it matters (S462 reviews of s462-fix-rule-followups, repros a1b, t1, t2, t3b, t6): the
+ * guard's plain lift group re-runs its WHOLE body on every change of any read in it; the rewrite's
+ * arm selector re-runs a markup binding only when that binding's own reads change (§7.4.2, #1397
+ * LIVE bindings). For pure reads that is the same DOM; for anything with an effect it is a different
+ * number of runs — `#hits` diverged 7 → 3 in each repro. The client-JS compare cuts both group bodies,
+ * so it cannot see that; the body is checked here instead.
+ */
+function markupBodyIsPure(body, filePath) {
+  // The top-level fragments are ONE markup text (impl#1 splits it at each `${…}` — even inside a
+  // tag), so they are scanned together, each `logic` node standing in as a hole.
+  let text = "";
+  const holes = [];
+  for (const n of body ?? []) {
+    if (!n || typeof n !== "object") continue;
+    switch (n.kind) {
+      case "html-fragment":
+        text += String(n.content ?? "");
+        break;
+      case "logic":
+        holes.push(n);
+        text += "${\u0000" + (holes.length - 1) + "}";
+        break;
+      case "bare-expr":
+        if (!isPunctuationText(n)) return false;
+        text += " ";
+        break;
+      case "text":
+      case "comment":
+        break;
+      default:
+        if (!bodyNodeIsPure(n, filePath)) return false;
+        text += " ";
+    }
+  }
+  return fragmentIsPure(text, filePath, holes);
+}
+
+export const MARKUP_BODY_CALLS =
+  "guard body evaluates a call or a component at render time, whose re-run frequency differs between the plain group and the arm selector";
+
+/** Has the body a STATEMENT at its top level (or inside an interpolation block)? */
+function hasStatement(body) {
+  return (body ?? []).some((n) => {
+    if (!n || typeof n !== "object") return false;
+    if (["text", "comment", "string-literal", "html-fragment", "markup", "lift-expr"].includes(n.kind)) return false;
+    if (n.kind === "logic") return (n.body ?? []).some((s) => s?.kind !== "bare-expr" || s.exprNode?.kind === "assign");
+    if (n.kind === "bare-expr") return !isPunctuationText(n);
+    return true;
+  });
+}
+
+/** Why a markup guard's body may not be rewritten, or null when it may. */
+function markupBodyRefusal(body, filePath) {
+  if (markupBodyIsPure(body, filePath)) return null;
+  return hasStatement(body) ? MARKUP_BODY_STATEMENTS : MARKUP_BODY_CALLS;
+}
+
+/** "file does not compile; cannot verify (…)" when the ORIGINAL file reports an error-severity
+ * diagnostic, else null (fix-verify-shared.js). One compile of the original. */
+function originalCompileRefusal(filePath, source, auxSources) {
+  return verifyByCompile(filePath, source, null, auxSources);
 }
 
 /**
  * Compile `before` and `after` with impl#1 at the SAME scratch path (the project beside it) and
  * compare. Returns null when they agree, else a reason. `markupSites` > 0: the subset rewrites
- * that many markup guards, whose lift groups are compared as described above.
+ * that many markup guards, whose lift groups are compared as described above. `after === null`:
+ * compile only `before`, and return only the "does not compile" reason (or null).
  */
 function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-given-presence-"));
@@ -681,12 +948,13 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
       a = run(before);
       // A file that does not compile emits nothing to compare: equal codes would verify any
       // rewrite at all. Refuse it (fix-verify-shared.js).
-      if (a.errs.length === 0) b = run(after);
+      if (a.errs.length === 0 && after !== null) b = run(after);
     } finally {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
     if (a.errs.length > 0) return doesNotCompileReason(a.errs);
+    if (after === null) return null; // originalCompileRefusal: the original compiles
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
     if (a.outputs === b.outputs) return null;
@@ -765,15 +1033,27 @@ export function fixGivenPresence(source, opts = {}) {
   }
 
   const planned = [];
+  const refusedBody = [];
   for (const site of sites) {
     if (site.node.rebind === true) continue; // §66.7.5 — not in the window
     // A guard with no names is a parse artifact, not a site (a `const ok = a is given` line cut
     // at `given` — g-impl1-is-given-and-value-position-codegen-s460); the lint skips it too.
     if (!Array.isArray(site.node.variables) || site.node.variables.length === 0) continue;
-    const p = planSite(source, site);
-    if (p.reason) block(site.node.span.start, p.reason);
+    const p = planSite(source, site, filePath);
+    if (p.reason && p.needsCompileCheck) refusedBody.push({ site, reason: p.reason });
+    else if (p.reason) block(site.node.span.start, p.reason);
     else planned.push({ site, edit: p.edit });
   }
+  // A file that does not compile cannot be verified: every candidate site — including one the
+  // body check refuses — gets THAT reason, which is the one an author has to act on first.
+  if (opts.verify !== false && (planned.length > 0 || refusedBody.length > 0)) {
+    const notCompiling = originalCompileRefusal(filePath, source, opts.auxSources);
+    if (notCompiling) {
+      for (const x of [...refusedBody, ...planned]) block(x.site.node.span.start, `${notCompiling} — left as written`);
+      return none();
+    }
+  }
+  for (const x of refusedBody) block(x.site.node.span.start, x.reason);
   if (planned.length === 0) return none();
 
   for (let i = 1; i < planned.length; i++) {

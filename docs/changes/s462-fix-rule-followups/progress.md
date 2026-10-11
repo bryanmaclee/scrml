@@ -47,8 +47,12 @@
 - F4 counts corrected (above).
 - Corpus differential of the three rules, before (06463bb6b) vs after, 3644 tracked .scrml files with
   self-host-v2 excluded:
-  - arm-pipe: 15 rewrites are now refused because the file does not compile (in place too). They are
-    in 9 files: 8 docs/changes repros and 1 test fixture (bootstrap-conformance-counter parse-info).
+  - arm-pipe: newly refused in 9 files, all of which fail in place: 8 docs/changes repros and 1 test
+    fixture (bootstrap-conformance-counter parse-info). That is 9 blocker entries, one per file,
+    because arm-pipe refuses the whole file. Those files had held 15 arm rewrites.
+    CORRECTION, round 2: this line first said "15 rewrites are now refused" without the blocker
+    count. The reviewer counts 11 entries in 9 files. My all-rules run at 222b2a72e shows 11
+    "does not compile" entries in total — 9 arm-pipe, 1 is-some, 1 given-presence — over 11 files.
     A first run also refused samples/compilation-tests/gauntlet-s20-sql/sql-transaction-001, with
     E-PA-002, because the scratch copy lacked the sibling `test.db`. It compiles clean in place. The
     three verifies now mirror sibling .db/.sqlite files into the scratch project, as fix-sql-failable
@@ -67,3 +71,37 @@
   - facts, spec-index, severity and bootstrap-conformance --check: current.
   - snippet-gate: 128/0. corpus-compile-floor: PASS.
   - corpus dry-run differential over 3650 files: identical to the pre-merge head run.
+
+## S239 delta re-review round 2 (FIX on 222b2a72e)
+- Four false accepts (t1, t3b, t6, t2): side effects reached through calls. The classifier now fails
+  closed and decides from the AST:
+  - an interpolation must be cell, field and index reads, literals and operators; there are NO calls
+    and no interpolating template literals (isPureReadExpr);
+  - a non-handler attribute value must be a plain value or a pure read;
+  - any component use is refused;
+  - the html-fragment text is scanned together with its `logic` holes; impl#1 splits `${...}` out of
+    a fragment even inside a tag, as in `onclick=${f()}`;
+  - handler attributes are not checked, because a handler does not run at render time.
+  New refusal reason: "guard body evaluates a call or a component at render time, whose re-run
+  frequency differs between the plain group and the arm selector".
+- The repros now give these reasons:
+  - "evaluates a call or a component": t1, t3b, t6, t2, a5, a9;
+  - "has statements": a1, a1b, a7, and the outer guard of a4;
+  - "does not compile": a3, a6, a8;
+  - still rewritten: a2, and the inner guard of a4.
+- Literal punctuation text between interpolations (a top-level bare-expr that impl#1 could not parse
+  as code) is classified as text, not as a statement.
+  - The "does not compile" check runs FIRST, through one compile of the original.
+  - NEW FINDING: impl#1 lowers that text as code and emits `-;`, so a real build fails with
+    E-CODEGEN-INVALID-LOGIC. The verify compiles with `write: false`, which skips the emitted-JS parse
+    gate. fix-verify-shared.js now runs validateEmittedArtifacts itself, for all three rules.
+  - All-rules corpus delta from that: the arm-pipe site in
+    docs/changes/s441-audit-gap-filing/repro/error-handler-in-inline-handler-leaks-raw-bang-brace
+    (line 24) is now refused. That file fails in place with E-CODEGEN-INVALID-LOGIC.
+- The third accepted-difference text, "an interpolation is re-evaluated on its own reads", is removed:
+  such bodies are now refused. The error-recovery browser test uses a throwing pure read
+  (`@o.a.b`) instead of JSON.parse.
+- All-rules corpus dry-run (fixS66 with the default IMPL1_SAFE_RULES, verify on, 3650 files),
+  222b2a72e → this round: applied 3299 → 3298, blockers 1010 → 1010. The only removed rewrite is the
+  error-handler-in-inline-handler arm above. Four other blockers changed wording only, adding
+  E-CODEGEN-INVALID-LOGIC to the reported codes.

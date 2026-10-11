@@ -174,6 +174,26 @@ describe("scrml fix given-presence — a markup guard and its rewrite render ali
     expect(runs.if.shots[4]).toContain("p#b.=d");
   });
 
+  test("pure-read attribute values render alike", async () => {
+    // (Literal text BETWEEN interpolations — `${a} - ${b}` — is not exercised: impl#1 lowers that
+    // text in a markup guard body as code and emits `-;`, E-CODEGEN-INVALID-LOGIC on a real build,
+    // so the rule refuses the file as not compiling. See the unit test.)
+    const src = `<user>: { name: string } | not = { name: "ada" }
+<n> = 0
+<main>
+    <div id="host">\${ given @user :> { <p id="p" title=@n class="c-\${@n}">\${@user.name}\${@n}</p> } }</div>
+</main>
+`;
+    const { fixed, runs } = await runBoth(src, "punct", [
+      () => set("n", 1),
+      () => set("user", { name: "bob" }),
+    ]);
+    expect(fixed.applied.length).toBe(1);
+    expect(runs.if.shots).toEqual(runs.given.shots);
+    const attrs = () => { const p = document.querySelector("#p"); return [p?.getAttribute("title"), p?.getAttribute("class")]; };
+    expect(attrs()).toEqual(["1", "c-1"]);
+  });
+
   test("the conformance fixture the rule refused before (given-presence-deprecated-markup) renders \"bob\" both ways", async () => {
     const src = readFileSync(resolve(import.meta.dir, "../../../conformance/cases/condition/given-presence-deprecated-markup/case.scrml"), "utf8");
     const { fixed, runs } = await runBoth(src, "conf", [() => document.querySelector("#go").click()]);
@@ -230,9 +250,9 @@ describe("scrml fix given-presence — accepted differences of the markup rewrit
 
   test("after a read in the body throws, the rewrite renders again on the next write; the guard stays blank", async () => {
     const src = `<user>: { name: string } | not = { name: "ada" }
-<s> = "1"
+<o> = { a: { b: 1 } }
 <main>
-    <div id="guard">\${ given @user :> { <p class="who">\${@user.name} \${JSON.parse(@s)}</p> } }</div>
+    <div id="guard">\${ given @user :> { <p class="who">\${@user.name} \${@o.a.b}</p> } }</div>
 </main>
 `;
     const fixed = fixGivenPresence(src, { filePath: resolve(tmpRoot, "throw.scrml") });
@@ -241,9 +261,10 @@ describe("scrml fix given-presence — accepted differences of the markup rewrit
       const orig = console.error;
       console.error = () => {};
       try {
-        set("s", "{");
+        // A pure read that throws: `@o.a` is gone, so `@o.a.b` is a TypeError.
+        set("o", {});
         await flush();
-        set("s", "2");
+        set("o", { a: { b: 2 } });
         await flush();
       } finally {
         console.error = orig;

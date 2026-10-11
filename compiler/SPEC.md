@@ -45001,9 +45001,11 @@ Applying the machine to the existing corpus:
   `${ if (@u is given) { … } }` re-renders a changed read while `@u` stays present since #1397
   (`g-impl1-markup-if-branch-memo-stale-render-s462`, resolved). The two emit different lift groups by design, so
   the rule checks that changed group (same presence test, one arm) and compares the rest as above. It rewrites
-  such a guard only when its body is markup only; a body with a statement (a declaration, an assignment, an `if`,
-  a nested guard, an interpolation that writes) is refused, because the guard re-runs its whole body on every
-  read change and the rewrite re-runs a binding only on its own reads. The rewrite's accepted differences, both
+  such a guard only when its body is markup whose every render-time expression is a pure read (cell, field and
+  index reads, literals and operators). It refuses a body with a statement (a declaration, an assignment, an
+  `if`, a nested guard), a call anywhere at render time (an interpolation, a non-handler attribute value), or a
+  component use, because the guard re-runs its whole body on every read change and the rewrite re-runs a binding
+  only on its own reads. Handler attributes are not checked: a handler does not run at render time. The rewrite's accepted differences, both
   from §7.4.2 as #1397 implements it (each markup binding updates in place): an input inside the guard keeps its
   text and focus when another read in the body changes (the guard re-creates it); and after a read in the body
   throws, the rewrite renders again on the next write, where the guard's group stays blank. A file whose
