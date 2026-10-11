@@ -206,3 +206,12 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   pre-first value reaches the server (as request data, like a parameter) and the two refused shapes are
   implementation consequences the owner may want stated in §19.9.9.8.
 - Gate (rule-4 tree): 33033 tests, 11 fail — the recorded env/flake set + validate-emit-gate trucking-dispatch (35 s timeout under load; passes alone, 3/0).
+- REVISED after the corpus differential (head vs d5910316d: samples/gauntlet-r13/htmx-forms `validateForm`
+  gained an E-RI-002 for its nested helper `checkRequired` — refusing every pre-first nested helper would have
+  been a regression for a common shape): a nested `function` declared before the first server statement that
+  server work calls now STAYS in the browser and is ALSO declared at the top of every batch handler
+  (`carriedFunctionIndices`; a declaration has no effect). Admitted only if it touches no cell and needs
+  nothing browser-only (`clientOnlyReason` allow-list); the pre-first locals it closes over are carried with
+  it (fixpoint); refused (E-RI-002 client-local) if it needs the browser / touches a cell, or reassigns a
+  pre-first local. Executed: `function fmt(x) { return x + "!" }` pre-first → `@v` shows "saving" during the
+  request and the route stores "saving!". htmx-forms back to its d5910316d code set.

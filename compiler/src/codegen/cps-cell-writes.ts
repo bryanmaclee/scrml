@@ -347,3 +347,9 @@ export function cpsCarriedLocals(cpsSplit: unknown): string[] {
   const c = (cpsSplit as { carriedLocals?: unknown } | null | undefined)?.carriedLocals;
   return Array.isArray(c) ? c.filter((n): n is string => typeof n === "string" && n.length > 0) : [];
 }
+
+/** S465 — `CPSSplit.carriedFunctionIndices`: nested function declarations the batch handler also declares. */
+export function cpsCarriedFunctionIndices(cpsSplit: unknown): number[] {
+  const c = (cpsSplit as { carriedFunctionIndices?: unknown } | null | undefined)?.carriedFunctionIndices;
+  return Array.isArray(c) ? c.filter((n): n is number => Number.isInteger(n) && n >= 0) : [];
+}

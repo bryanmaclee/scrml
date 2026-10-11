@@ -220,6 +220,9 @@ export class CPSSplit {
    */
   carriedLocals: string[] = [];
 
+  /** S465 — `CPSResult.carriedFunctionIndices` (declared in the batch handler too). */
+  carriedFunctionIndices: number[] = [];
+
   /**
    * Construct a CPS split plan.
    *
@@ -447,6 +450,13 @@ interface CPSResult {
    * bound from `_scrml_body` in the batch handler). Source order.
    */
   carriedLocals?: string[];
+  /**
+   * S465 — body indices of nested `function` declarations BEFORE the first server
+   * statement that server work calls. They stay in the browser AND are emitted at
+   * the top of every batch handler (a declaration has no effect; only functions
+   * that touch no cell and need nothing browser-only qualify).
+   */
+  carriedFunctionIndices?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -3384,36 +3394,78 @@ export function analyzeCPSEligibility(
       }
     }
   }
-  // S465 — §19.9.9.8 rule 4: the locals a pre-first-server statement declares
-  // that server work reads travel WITH the request, as client data. Two shapes
-  // cannot be carried and are refused (E-RI-002) instead of moving the statement:
-  // a nested `function` (not a value a request can carry), and a local a server
-  // statement REASSIGNS (the browser keeps its own copy, which would silently
-  // diverge from the server's).
+  // S465 — §19.9.9.8 rule 4: what a pre-first-server statement declares and server
+  // work needs travels WITH the batch, the statement itself staying in the browser:
+  //   - a value local → `carriedLocals`, sent in the request like a parameter;
+  //   - a nested `function` → `carriedFunctionIndices`: its declaration is ALSO
+  //     emitted at the top of the batch handler (a declaration has no effect, so
+  //     running it on both sides changes nothing the page shows). Only a function
+  //     that could run on either side qualifies — it touches no cell and needs
+  //     nothing browser-only — and the pre-first locals it closes over are carried
+  //     with it. To a fixpoint.
+  // Refused (E-RI-002) instead of moving the statement: a local the server half
+  // (or a carried function) REASSIGNS — the browser keeps its own copy, which would
+  // silently diverge — and a nested function that touches a cell or the browser.
   const carriedLocals: string[] = [];
-  for (let k = 0; k < firstServer && k < body.length; k++) {
-    if (isServerIdx(k) || refusedIdx.has(k)) continue;
-    const kStmt = (handledSqlGuardInner(body[k]) ?? body[k]) as any;
-    for (const n of topLevelDeclaredLocals(body[k])) {
-      let readAt = -1;
+  const carriedFunctionIndices: number[] = [];
+  {
+    const preDecl = new Map<string, number>();
+    for (let k = 0; k < firstServer && k < body.length; k++) {
+      if (isServerIdx(k) || refusedIdx.has(k)) continue;
+      for (const n of topLevelDeclaredLocals(body[k])) if (!preDecl.has(n)) preDecl.set(n, k);
+    }
+    const serverReads = (n: string): boolean => {
       for (let i = firstServer; i < body.length; i++) {
-        if (isServerIdx(i) && statementReadsAnyLocal(body[i], new Set([n]))) { readAt = i; break; }
+        if (isServerIdx(i) && statementReadsAnyLocal(body[i], new Set([n]))) return true;
       }
-      if (readAt < 0) continue;
+      return false;
+    };
+    const serverAssigns = (n: string): boolean => {
+      for (let i = firstServer; i < body.length; i++) {
+        if (isServerIdx(i) && statementAssignsLocal(body[i], n)) return true;
+      }
+      return false;
+    };
+    const queue: string[] = [...preDecl.keys()].filter(serverReads);
+    const done = new Set<string>();
+    const carriedFnNames: string[] = [];
+    const valueNames: string[] = [];
+    while (queue.length > 0) {
+      const n = queue.shift()!;
+      if (done.has(n)) continue;
+      done.add(n);
+      const k = preDecl.get(n)!;
+      if (refusedIdx.has(k)) continue;
+      const kStmt = (handledSqlGuardInner(body[k]) ?? body[k]) as any;
       if (kStmt && kStmt.kind === "function-decl") {
-        refusedIdx.add(k);
-        placementRefusals.push({
-          index: k, value: n, kind: "client-local",
-          why: `the server half calls the function \`${n}\` this statement declares, and a function cannot be sent with the request`,
-          fix: `declare \`${n}\` at file level, where the server half can call it too`,
-        });
+        const why = clientOnlyReason(body[k], movableKnown) ?? (statementMentionsAnyCell(body[k]) ? "it reads or writes a cell" : null);
+        if (why !== null) {
+          refusedIdx.add(k);
+          placementRefusals.push({
+            index: k, value: n, kind: "client-local",
+            why: `the server half calls the function \`${n}\` this statement declares, and it cannot run there — ${why}`,
+            fix: `declare \`${n}\` at file level without browser-only work, or compute its result before the first server statement`,
+          });
+          continue;
+        }
+        carriedFnNames.push(n);
+        carriedFunctionIndices.push(k);
+        for (const m of preDecl.keys()) {
+          if (m === n) continue;
+          if (statementAssignsLocal(body[k], m)) {
+            refusedIdx.add(preDecl.get(m)!);
+            placementRefusals.push({
+              index: preDecl.get(m)!, value: m, kind: "client-local",
+              why: `the function \`${n}\`, which the server half calls, reassigns the local \`${m}\` this statement declares, so the browser's copy and the server's would diverge`,
+              fix: `make \`${n}\` return the new value instead of reassigning \`${m}\``,
+            });
+            continue;
+          }
+          if (statementReadsAnyLocal(body[k], new Set([m]))) queue.push(m);
+        }
         continue;
       }
-      let assignedAt = -1;
-      for (let i = firstServer; i < body.length; i++) {
-        if (isServerIdx(i) && statementAssignsLocal(body[i], n)) { assignedAt = i; break; }
-      }
-      if (assignedAt >= 0) {
+      if (serverAssigns(n)) {
         refusedIdx.add(k);
         placementRefusals.push({
           index: k, value: n, kind: "client-local",
@@ -3422,8 +3474,12 @@ export function analyzeCPSEligibility(
         });
         continue;
       }
-      if (!carriedLocals.includes(n)) carriedLocals.push(n);
+      valueNames.push(n);
     }
+    for (const n of valueNames.sort((a, b) => preDecl.get(a)! - preDecl.get(b)!)) {
+      if (!refusedIdx.has(preDecl.get(n)!)) carriedLocals.push(n);
+    }
+    carriedFunctionIndices.sort((a, b) => a - b);
   }
 
   // (d) DERIVED THROUGH THE BROWSER. A statement that stays in the browser (it
@@ -3543,7 +3599,30 @@ export function analyzeCPSEligibility(
     deferServerIndices,
     placementRefusals,
     carriedLocals,
+    carriedFunctionIndices,
   };
+}
+
+/**
+ * S465 — does `stmt` mention any `@cell` (read or write), at any depth, in the AST
+ * or in raw expression text? Over-approximates.
+ */
+function statementMentionsAnyCell(stmt: unknown): boolean {
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") { if (/(?<![\w$])@[A-Za-z_$]/.test(v)) return true; }
+      else if (walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(stmt);
 }
 
 /**
@@ -7397,6 +7476,7 @@ export function runRI(input: RIInput): RIOutput {
               cpsResult.returnVarName,
             );
             cpsSplit.carriedLocals = [...(cpsResult.carriedLocals ?? [])];
+            cpsSplit.carriedFunctionIndices = [...(cpsResult.carriedFunctionIndices ?? [])];
 
             // Ext 1 M1.3: run the multi-batch planner over the body-DG. The
             // planner topologically schedules the statement-grain DG (M1.2),

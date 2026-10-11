@@ -175,6 +175,38 @@ describe("§19.9.9.8 rule 4 — a browser value read before the first server sta
   }, T);
 });
 
+// A nested helper declared before the first server statement: the declaration
+// stays in the browser AND is declared in the batch handler (it touches no cell
+// and needs nothing browser-only, so it runs identically on either side).
+const HELPER = `<program db="./app.db">
+<v> = "x"
+function save() {
+  function fmt(x) { return x + "!" }
+  @v = "saving"
+  ?{\`INSERT INTO notes (s) VALUES (\${fmt(@v)})\`}.run()
+}
+<button id="go" onclick={ save() }>save</button>
+<p id="out">\${@v}</p>
+</program>
+`;
+
+describe("§19.9.9.8 rule 4 — a pre-first nested helper the server calls is declared on both sides", () => {
+  test("EXECUTED: `@v` shows \"saving\" while the request is in flight", async () => {
+    const { errors, outDir } = build(HELPER);
+    expect(errors.map((e) => e.code)).toEqual([]);
+    const r = await runHeld(outDir);
+    expect(r.during).toBe("saving");
+    expect(r.sent.v).toBe("saving");
+  }, T);
+
+  test("EXECUTED: the batch calls the helper on the server", async () => {
+    const { dir, outDir } = build(HELPER);
+    const res = await callRoute(outDir, "save", { v: "saving" });
+    expect(res.status).toBe(200);
+    expect(rows(dir)).toEqual(["saving!"]);
+  }, T);
+});
+
 // Shapes a request cannot carry: refused, never moved — and the message names the
 // real reason (browser data that cannot reach the request), not a server value
 // crossing to the browser.
@@ -205,10 +237,10 @@ function save() {
 <p id="out">\${@busy}</p>
 </program>
 `,
-  "a nested function the server half calls": `<program db="./app.db">
+  "a nested function the server half calls that needs the browser": `<program db="./app.db">
 <v> = "x"
 function save() {
-  function fmt(x) { return x + "!" }
+  function fmt(x) { return x + localStorage.getItem("suffix") }
   @v = "saving"
   ?{\`INSERT INTO notes (s) VALUES (\${fmt(@v)})\`}.run()
 }

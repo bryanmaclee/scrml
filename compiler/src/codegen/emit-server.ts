@@ -15,7 +15,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
-import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
+import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals, cpsCarriedFunctionIndices } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -5121,6 +5121,16 @@ function generateServerJsImpl(
       // and failed the build with a confidentiality error about code the author
       // never wrote. The window must contain ONLY author-lowered lines.
       const _authorBodyStartCsrf = lines.length;
+      // S465 (§19.9.9.8 rule 4) — a nested function declared before the first server
+      // statement and called by server work stays in the browser and is ALSO declared
+      // here (route inference admits only functions that run identically on either side).
+      if (cpsSplit) {
+        for (const _k of cpsCarriedFunctionIndices(_cpsSplit)) {
+          if (_k >= body.length) continue;
+          const _fnCode = serverRewriteEmitted(emitLogicNode(body[_k], _serverFnOpts));
+          if (_fnCode) for (const line of indentBodyLines(_fnCode, "    ")) lines.push(line);
+        }
+      }
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
       // loop — for a multi-batch route it carries THIS batch's index set; for
       // the single-handler case it is `route.cpsSplit` verbatim.
@@ -5458,6 +5468,16 @@ function generateServerJsImpl(
       // correct only as long as nothing compiler-emitted is added between here
       // and the author-body loop below.
       const _authorBodyStartNonCsrf = lines.length;
+      // S465 (§19.9.9.8 rule 4) — a nested function declared before the first server
+      // statement and called by server work stays in the browser and is ALSO declared
+      // here (route inference admits only functions that run identically on either side).
+      if (cpsSplit) {
+        for (const _k of cpsCarriedFunctionIndices(_cpsSplit)) {
+          if (_k >= body.length) continue;
+          const _fnCode = serverRewriteEmitted(emitLogicNode(body[_k], _serverFnOptsNonCsrf));
+          if (_fnCode) for (const line of indentBodyLines(_fnCode, _bodyIndentNonCsrf)) lines.push(line);
+        }
+      }
 
       if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
         // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
