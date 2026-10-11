@@ -887,8 +887,9 @@ function computeToolAsyncImportedLocals(
   toolFileAST: unknown,
   files: unknown[],
   exportRegistry?: CrossModuleExportRegistry | null,
+  importGraph?: unknown,
 ): Set<string> {
-  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>(), exportRegistry ?? null);
+  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>(), exportRegistry ?? null, importGraph ?? null);
 }
 
 /** MOD per-module by-name export metadata threaded through the cross-module
@@ -911,13 +912,14 @@ function asyncExportNamesOf(
   files: unknown[],
   memo: Map<string, Set<string>>,
   exportRegistry?: CrossModuleExportRegistry | null,
+  importGraph?: unknown,
 ): Set<string> {
   const fp = (fileAST as any)?.filePath as string | undefined;
   if (fp && memo.has(fp)) return memo.get(fp)!;
   const result = new Set<string>();
   if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
   // This file's OWN async imported locals seed its local async-coloring fixpoint.
-  const seed = asyncImportedLocalsOf(fileAST, files, memo, exportRegistry);
+  const seed = asyncImportedLocalsOf(fileAST, files, memo, exportRegistry, importGraph);
   // Seam-A Gap 1 — thread exportRegistry so a fn calling `safeCallAsync` (etc.)
   // is recognized async here too, else the importing file never learns this
   // export is async (repro-crossmodule: main.orchestrate → helper.wrapAsync).
@@ -938,6 +940,7 @@ function asyncImportedLocalsOf(
   files: unknown[],
   memo: Map<string, Set<string>>,
   exportRegistry?: CrossModuleExportRegistry | null,
+  importGraph?: unknown,
 ): Set<string> {
   const result = new Set<string>();
   const tf = fileAST as any;
@@ -974,7 +977,7 @@ function asyncImportedLocalsOf(
     const absSource = resolveModulePath(imp.source, filePath);
     const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue;
-    const asyncNames = asyncExportNamesOf(srcFile, files, memo, exportRegistry);
+    const asyncNames = asyncExportNamesOf(srcFile, files, memo, exportRegistry, importGraph);
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
     // scrml libs export NAMED bindings only), so only the named arm binds an
     // async imported fn. Await-color each named local whose EXPORTED name is
@@ -986,6 +989,24 @@ function asyncImportedLocalsOf(
       if (asyncNames.has(spec.imported) ||
           (exportRegistry && isPromiseReturningStdlibFn(spec.imported, absSource, exportRegistry))) {
         result.add(spec.local);
+        continue;
+      }
+      // S465 — a name the source module RE-EXPORTS from another `.scrml` module
+      // (`export { check as reCheck } from "./lib.scrml"`, or `export *`): follow
+      // the re-export chain to the DECLARING module (§21.4, `resolveExportedBinding`)
+      // and ask that module's own analysis whether the function is async. Without
+      // this, `reCheck(p, h)` was classified sync while the declaring module's
+      // `.server.js` exports `async function check` — an un-awaited Promise.
+      if (importGraph) {
+        const b = resolveExportedBinding(importGraph, absSource, spec.imported) as
+          | { filePath: string; name: string; localName?: string } | null;
+        if (b && b.filePath !== absSource) {
+          const declFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === toPosix(b.filePath));
+          if (declFile) {
+            const declAsync = asyncExportNamesOf(declFile, files, memo, exportRegistry, importGraph);
+            if (declAsync.has(b.localName ?? b.name) || declAsync.has(b.name)) result.add(spec.local);
+          }
+        }
       }
     }
   }
@@ -2630,7 +2651,20 @@ export function runCG(input: CgInput): CgOutput {
       // into computeAsyncFnNames). Stashed here because emit-server has no `files`
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
-      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
+      // S465 (s465-await-imported-server-fn) — the SAME set is the SERVER call-site
+      // await fact: `buildServerCalleeImportMap` carries it as `asyncImportedLocals`
+      // and `isPromiseReturningImportedCallee` answers true for it, so a server body
+      // calling an async fn imported from another `.scrml` module awaits it exactly
+      // like a same-file peer (the CPS wrapper's client continuation reads it too).
+      // Some emitters hold the TABResult's `.ast` (where the imports are hoisted),
+      // so the set is mirrored there.
+      {
+        const _inner = (fileAST as any).ast;
+        if (_inner && typeof _inner === "object" && _inner !== fileAST) {
+          _inner._asyncImportedLocals = (fileAST as any)._asyncImportedLocals;
+        }
+      }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
       // value-export block (`export { w as helper } from "./c.server.js"`). A name
@@ -2654,7 +2688,7 @@ export function runCG(input: CgInput): CgOutput {
         // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
         // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
         checkToolImportsAreImportable(fileAST, files, filePath, errors);
-        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
         // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
         // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
         // route-inference routeMap + the auth/middleware/protect stage results
@@ -3286,7 +3320,7 @@ export function runCG(input: CgInput): CgOutput {
       if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
         // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
         // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
-        const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+        const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
         // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
         // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
         // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with

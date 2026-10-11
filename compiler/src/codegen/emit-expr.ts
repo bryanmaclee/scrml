@@ -59,7 +59,7 @@ import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
 // builtins (no codegen), so this is cycle-free.
-import { isPromiseReturningImportedCallee, isStdlibImportedCallee } from "../module-resolver.js";
+import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee, isStdlibImportedCallee } from "../module-resolver.js";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -2136,7 +2136,14 @@ export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean
   const calleeMap = ctx.asyncCalleeMap ?? _serverAsyncClassifier?.calleeMap ?? null;
   const registry = ctx.asyncExportRegistry ?? _serverAsyncClassifier?.exportRegistry ?? null;
   if (!calleeMap || !registry) return false;
-  return isPromiseReturningImportedCallee(name, calleeMap, registry);
+  // S465 — the server map's cross-module async facts (`asyncImportedLocals`) are a
+  // SERVER fact. The module-level classifier installed by `generateServerJs` stays
+  // set across files, so client-mode emission can fall back to a server map here:
+  // keep client mode on the stdlib-only half (its own seeds / peer sets await user
+  // `.scrml` imports).
+  return ctx.mode === "server"
+    ? isPromiseReturningImportedCallee(name, calleeMap, registry)
+    : isPromiseReturningStdlibImportedCallee(name, calleeMap, registry);
 }
 
 /**

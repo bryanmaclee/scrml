@@ -171,3 +171,9 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
 ## FIX ROUND 2 (S465)
 
 - 2026-10-11 brief (+ PA change of plan) archived as BRIEF-fix-round-2-S465.md. Finding 1 done first on a separate branch from origin/main (auto/s465-await-imported-server-fn @ f8309fd64); merged here next.
+- merged auto/s465-await-imported-server-fn (f8309fd64). Conflicts: emit-functions.ts CPS client-statement
+  emission (kept this branch's no-skip / no-rewrite form, wrapped with the continuation auto-await) and
+  docs/FACTS.md (regenerated). The S465 CPS test is retargeted: under §19.9.9.8 the imported `check` runs IN
+  the server batch (route test: wrong → `__scrml_cells.seen` REJECTED, right → "WELCOME bob", no `$argon2` in
+  the response). On d5910316d 9/17 of the S465 tests FAIL. Gate on the merge tree: 33023 tests, 10 fail — the
+  environmental/flake set recorded on the await branch (dev ×5, bind-host, read-only-as-root, tenant ×3 load).

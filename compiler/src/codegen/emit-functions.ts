@@ -6,7 +6,7 @@ import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
-import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
+import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
 import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
@@ -372,8 +372,11 @@ function emitMultiBatchWrapper(opts: {
   cpsOptsBase: Record<string, unknown>;
   errors: CGError[];
   filePath: string;
+  /** S465 — the CPS continuation auto-await (see `cpsContinuationAutoAwait`). */
+  autoAwait?: (code: string) => string;
 }): void {
   const { lines, name, body, cpsSplit, batchPlan, batchStubs, fnParamNames, cpsOptsBase, errors, filePath } = opts;
+  const _autoAwait = opts.autoAwait ?? ((c: string): string => c);
 
   // The traversal order: the planner's topological schedule when present,
   // else source order. A single-batch split's schedule equals source order,
@@ -508,7 +511,7 @@ function emitMultiBatchWrapper(opts: {
     // statement that receives a batch result is a server statement of that batch
     // (handled above), so the only writes reaching this point are genuine client
     // writes, and skipping them dropped them.
-    const code = emitLogicNode(stmt, cpsOptsBase);
+    const code = _autoAwait(emitLogicNode(stmt, cpsOptsBase));
     if (code) {
       for (const line of code.split("\n")) lines.push(`    ${line}`);
     }
@@ -598,6 +601,44 @@ export function computeClientAsyncSets(
 }
 
 /**
+ * S465 (s465-await-imported-server-fn) — the auto-await for a CPS wrapper's
+ * CLIENT continuation statements. The wrapper (`async function _scrml_cps_<fn>`)
+ * emits its client statements with `emitLogicNode` directly — it never runs
+ * through `scheduleStatements`, so the §13.2 choke-point injector that every
+ * other client fn body gets (`injectFnBodyServerCallAwaits`) never saw them, and
+ * a Promise-returning call in a continuation emitted BARE: `if (!check(p, h))`
+ * on an imported async `check` tested a pending Promise (always truthy) — every
+ * password "accepted". Same candidate set as `scheduleStatements`: this file's
+ * server fns (owning-file filtered, F5) + every Promise-returning stdlib import
+ * (`isPromiseReturningImportedCallee`) + every async fn imported from another
+ * `.scrml` module per that module's own analysis (`asyncImportedLocalsOfFile`). The wrapper
+ * is async, so an await is always legal at statement level; the injector's own
+ * position model leaves sync callback bodies alone.
+ */
+function cpsContinuationAutoAwait(
+  routeMap: CompileContext["routeMap"],
+  filePath: string,
+  calleeMap: ReturnType<typeof buildCalleeImportMap>,
+  exportRegistry: CompileContext["exportRegistry"] | null,
+  asyncImportedLocals: Set<string>,
+): (code: string) => string {
+  const candidates = new Set<string>(routeMap ? _clientServerFnNames(routeMap as any, filePath) : []);
+  for (const n of asyncImportedLocals) candidates.add(n);
+  if (calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0) {
+    for (const localName of calleeMap.keys()) {
+      if (isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry as any)) candidates.add(localName);
+    }
+  }
+  if (candidates.size === 0) return (code) => code;
+  return (code: string): string => {
+    if (!code) return code;
+    let mentions = false;
+    for (const n of candidates) { if (code.includes(n)) { mentions = true; break; } }
+    return mentions ? injectFnBodyServerCallAwaits(code, (n) => candidates.has(n)) : code;
+  };
+}
+
+/**
  * s441 — the client async facts (server fns · the transitive client async set ·
  * the stdlib classifier) for `ctx`, computed once and cached on the ctx. Every
  * client emitter that lowers a body OUTSIDE the function pipeline (an inline /
@@ -648,6 +689,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // Cleanup 8 — buildCalleeImportMap now folds the `.ast.imports` hoist internally.
   const _calleeMap = buildCalleeImportMap(ctx.fileAST as any);
   const _exportRegistry = ctx.exportRegistry ?? null;
+  const _cpsAutoAwait = cpsContinuationAutoAwait(ctx.routeMap, ctx.filePath, _calleeMap, _exportRegistry, asyncImportedLocalsOfFile(ctx.fileAST as any));
   const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
   const machineBindings = buildMachineBindingsMap(ctx.fileAST);
   // C13 (§51.0.F + §51.0.G): mirror machineBindings wiring for new <engine>
@@ -1214,6 +1256,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         batchPlan: _wrapBatchPlan,
         batchStubs: _batchStubs,
         fnParamNames: paramNames,
+        autoAwait: _cpsAutoAwait,
         cpsOptsBase: {
           declaredNames: new Set<string>(),
           insideFunctionBody: true,
@@ -1368,7 +1411,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         // server call, read `_scrml_server_result` before its declaration (a
         // TDZ ReferenceError). The statement that receives the server result is
         // a server statement and never reaches this branch.
-        const code = emitLogicNode(stmt, cpsOpts);
+        const code = _cpsAutoAwait(emitLogicNode(stmt, cpsOpts));
         if (code) {
           for (const line of code.split("\n")) {
             lines.push(`    ${line}`);

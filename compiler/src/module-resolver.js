@@ -2035,6 +2035,32 @@ export function isPromiseReturningImportedCallee(localName, calleeMap, exportReg
   if (!localName || !calleeMap || !exportRegistry) return false;
   const sourceModule = calleeMap.get(localName);
   if (!sourceModule) return false;
+  // S465 (s465-await-imported-server-fn) — an async function imported from
+  // another `.scrml` module: its emitted form is `async function` (it does
+  // `?{}` / calls a Promise-returning stdlib export / an async peer — decided by
+  // the IMPORTED module's own analysis, `asyncImportedLocalsOf` in
+  // codegen/index.ts), so a bare call yields a Promise. `if (!check(p, h))` on an
+  // un-awaited Promise is always false — an accept-all auth bypass. The set is
+  // keyed by LOCAL name (aliases resolved when it was built).
+  const asyncLocals = calleeMap.asyncImportedLocals;
+  if (asyncLocals && typeof asyncLocals.has === "function" && asyncLocals.has(localName)) return true;
+  return isPromiseReturningStdlibFn(importedNameOf(localName, calleeMap), sourceModule, exportRegistry);
+}
+
+/**
+ * S465 — the STDLIB-only half of `isPromiseReturningImportedCallee`: ignores a
+ * map's `asyncImportedLocals` (the server-side cross-module facts). For CLIENT
+ * emission, which must never treat a user `.scrml` import as stdlib-owned.
+ *
+ * @param {string} localName
+ * @param {Map<string, string> & { importedNames?: Map<string, string> }} calleeMap
+ * @param {Map<string, Map<string, object>>} exportRegistry
+ * @returns {boolean}
+ */
+export function isPromiseReturningStdlibImportedCallee(localName, calleeMap, exportRegistry) {
+  if (!localName || !calleeMap || !exportRegistry) return false;
+  const sourceModule = calleeMap.get(localName);
+  if (!sourceModule) return false;
   return isPromiseReturningStdlibFn(importedNameOf(localName, calleeMap), sourceModule, exportRegistry);
 }
 

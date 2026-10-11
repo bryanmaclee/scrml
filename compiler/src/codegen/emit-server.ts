@@ -50,7 +50,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
-import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
+import { extractCalleeNames, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
@@ -1235,7 +1235,8 @@ function emitModuleValueExportLines(
   // `.imports` off the FileAST; the TABResult wrapper hoists imports to
   // `.ast.imports`, so fall back to `.ast` when present (mirrors :1096).
   // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
-  const _veCalleeMap = buildCalleeImportMap(fileAST);
+  // S465 — the server map carries the cross-module async facts (see buildServerCalleeImportMap).
+  const _veCalleeMap = buildServerCalleeImportMap(fileAST);
   const asyncFnNames = computeAsyncFnNames(
     Array.from(fnDeclByName.values()) as any[],
     _sourceText,
@@ -1925,11 +1926,12 @@ function generateServerJsImpl(
   // `const ok = verifyPassword(...)` predicate accepts every password (auth
   // bypass) and a `${hashPassword(...)}` INSERT stores a stringified Promise.
   // `emit-expr.ts:emitCall` consumes these via `_makeExprCtx` and wraps the
-  // call in `await` in every awaitable server-mode position. `buildCalleeImportMap`
-  // reads `.imports` off the FileAST; the TABResult wrapper hoists imports to
-  // `.ast.imports`, so fall back to `.ast` when present (mirrors emit-functions.ts).
-  const _asyncFileAstForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
-  const _asyncCalleeMap = buildCalleeImportMap(_asyncFileAstForImports);
+  // call in `await` in every awaitable server-mode position. (`buildCalleeImportMap`
+  // folds the TABResult's `.ast.imports` hoist internally — Cleanup 8.)
+  // S465 — the server map carries the cross-module async facts, so an async fn
+  // imported from another `.scrml` module is awaited at every server call site
+  // exactly like a same-file peer (see buildServerCalleeImportMap).
+  const _asyncCalleeMap = buildServerCalleeImportMap(fileAST);
   const _asyncExportRegistry = ctxForCache?.exportRegistry ?? exportRegistryLegacy ?? null;
   // §13.2 server Promise trap (S462 Q20) — every boolean-test position whose
   // operand is a direct `scrml:` stdlib call is wrapped in `_scrml_assert_settled`
