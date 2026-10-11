@@ -130,3 +130,10 @@
 - The verify now refuses a rewrite whose own compile reports an error (b.errs, incl. the emitted-JS
   gate) — given-presence, is-some, arm-pipe. No natural corpus case triggers it; not separately tested.
 - All-rules corpus dry-run: identical to round 2 (3298 applied / 1010 blockers).
+- Merged origin/main 37e50e881 (#1399-#1403) as c374c0846. SPEC-INDEX, FACTS and bootstrap-conformance were taken from main and regenerated; my SPEC-INDEX changes had been line ranges and totals only. Pre-commit: 35099 pass, 0 fail.
+- Gates after the merge, all run in the foreground:
+  - browser-baseline: PASS. integration+lsp+commands: 5688/0. top-level: 2239/0. e2e: 259/0.
+  - s34-census --check-new: PASS. host-global-scan --check: 0 violations.
+  - facts, spec-index, severity and bootstrap-conformance --check: current.
+  - snippet-gate: 128/0. corpus-compile-floor: PASS.
+- All-rules dry-run: 3310 applied, 1011 blockers. Every delta from round 3 is in conformance cases new on main, under unwrap-logic and program-move; given-presence, is-some and arm-pipe are unchanged.
