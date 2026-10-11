@@ -1,0 +1,53 @@
+{
+  "id": "raw-content-active-html-displays-as-text",
+  "description": "Active HTML written in a `<pre>` raw body (`<img onerror>`, `<svg onload>`, `<iframe srcdoc>` in both entity forms, `<link rel=stylesheet>`) renders as visible text and builds no element.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
+  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "pre img",
+        "count": 0
+      },
+      {
+        "selector": "pre svg",
+        "count": 0
+      },
+      {
+        "selector": "pre iframe",
+        "count": 0
+      },
+      {
+        "selector": "pre link",
+        "count": 0
+      },
+      {
+        "selector": "#onerror",
+        "text": "<img src=x onerror=\"window.pwned=1\">"
+      },
+      {
+        "selector": "#svg",
+        "text": "<svg onload=\"window.pwned=2\"></svg>"
+      },
+      {
+        "selector": "#srcdoc1",
+        "text": "<iframe srcdoc=\"<script>parent.pwned=3</script>\"></iframe>"
+      },
+      {
+        "selector": "#srcdoc2",
+        "text": "<iframe srcdoc=\"<img src=x onerror=parent.pwned=4>\"></iframe>"
+      },
+      {
+        "selector": "#link",
+        "text": "<link rel=\"stylesheet\" href=\"data:text/css,body{background:red}\">"
+      }
+    ]
+  }
+}
