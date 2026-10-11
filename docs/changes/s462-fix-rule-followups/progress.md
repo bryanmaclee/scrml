@@ -57,3 +57,13 @@
     (E-COMPONENT-PROP-WRITE, E-TYPE-031).
   - given-presence: 13 applied, the same as before. 1 reason changed: top-level-given-guard-return-neg now
     says it does not compile.
+- Fix round code 8715aec4f (pre-commit 34730 tests / 0 fail). Merged origin/main 8b9cd9919 (#1398) as
+  f0d49098f. FACTS and bootstrap-conformance conflicts were resolved by regen; both files are generated
+  only. Pre-commit passed.
+- Gates after the merge:
+  - browser-baseline --check: PASS, 48 asserted.
+  - integration+lsp+commands: 5643/0. top-level: 2239/0. e2e-render-map: 259/0.
+  - s34-census --check-new: PASS. host-global-scan --check: 0 violations.
+  - facts, spec-index, severity and bootstrap-conformance --check: current.
+  - snippet-gate: 128/0. corpus-compile-floor: PASS.
+  - corpus dry-run differential over 3650 files: identical to the pre-merge head run.
