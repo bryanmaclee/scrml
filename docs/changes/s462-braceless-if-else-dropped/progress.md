@@ -155,3 +155,16 @@
       because archives carry no git revision. 0 newly failing · 5 newly passing (round-1 template cases + meta-type-registry-001)
       · 6 diagnostic-code changes, all those same round-1 sources losing an error/warning · 0 sources gain E-VARIANT-AMBIGUOUS
       or E-TYPE-063 · 1 text-only change (s450-attr-multi-statement-pos: same codes, same messages — capture-path noise).
+- [x] F2 committed b0927db36. types-gate then caught (e7e3a3db5): the F1 refactor had left the message-arm parse-FAILURE
+      fallback referencing a removed `inner` local (TS2304 → compile-time ReferenceError on that path) — fixed via a shared
+      `messageArmInnerSource`; and the new `typeof import("./emit-match.ts")` pulled emit-match into the checked program,
+      surfacing a pre-existing TS2554 (collectMatchBlocks top-level `walk()` without `eachIterVar`) — now passes `null`
+      (every reader tests `typeof === "string"`; behaviour unchanged).
+- [x] 2026-10-11T23:30Z FINAL gates on e7e3a3db5: pre-commit 32880 pass / 10 fail / 132 skip — the 10 are the known env-only
+      files (dev-db-no-side-file ×5, promote-safety-harness ×1, headless-serve-bind-host ×1 — the SAME 7 fail on origin/main
+      in this container; tenant-floor-project-set ×3 under load — passes alone) · tracking tiers (after pretest) 2498/0 ·
+      browser-baseline --check: 1 "new" = each-alias-in-lifted-markup nested-each JSON "bad" — IDENTICAL on origin/main in
+      this container (re-measured), baseline NOT re-recorded · s34-census --check-new --base origin/main PASS ·
+      host-global-scan --check exit 0, 0 violations · facts (regen) / state / spec-index / bootstrap-conformance / severity
+      --check PASS · types-gate OK 182 unchanged · snippet-gate 128/0 · corpus-compile-floor PASS · conflict-marker PASS ·
+      delta-lint PASS.
