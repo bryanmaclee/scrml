@@ -28,7 +28,7 @@
       parser) + meta-eval `checkEmittedNodes` scans emit() raw bodies + codegen backstop
       `refuseRawContentLowering` (emit-html, emit-ssr-render); MED 4 static `on…=` in raw content →
       NOT refused (§5.2 sanctions static handler text; corpus 0 of 4519 raw bodies) — filed HIGH
-      g-raw-content-static-handler-attribute-executes-s462 for a ruling; LOW 5 handler-arrow markup →
+      g-raw-content-static-handler-attribute-executes-s462 (renamed g-raw-content-static-active-html-executes-s462 and widened after the delta re-review) for a ruling; LOW 5 handler-arrow markup →
       TAB escape-hatch token check (E-SCRIPT-001 instead of E-CODEGEN-INVALID-LOGIC). Addendum: `^{}`
       emit raw bodies refused (ME stage). All reviewer repros (r, r2..r5, n, a) re-run in Chromium via
       the reviewer's x.mjs: every script/style repro refused; only the two `onerror` repros (item 4) run.

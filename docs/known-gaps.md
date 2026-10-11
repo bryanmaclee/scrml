@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
 | MED | 592 | 6 |
-| LOW | 350 | 0 |
+| LOW | 351 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -210,19 +210,36 @@ Reproduced on `origin/main` `6e58dd9eb`: `<program> <pre><script>window.pwned=3<
 
 Measured by `bun scripts/bootstrap-conformance.ts` after the S462 impl#1 review fix: `element-refusal/{raw-comment-script-pos, raw-noscript-attr-style-pos, raw-textarea-attr-breakout-pos, raw-xmp-comment-breakout-pos}` FAIL on the bootstrap (code not emitted). Whether the bootstrap's artifact EXECUTES these was not measured here (its printer escapes `<` in text and attribute values, s462-bootstrap-script-style-refusal, which may make it fail-safe); the divergence is the missing refusal. Fix: when the bootstrap gains raw content, apply the same fail-closed text rule as `scanRawContentForRefusedTags` (any case-insensitive `<script` / `<style` start-tag text in the body).
 
-### g-raw-content-static-handler-attribute-executes-s462 — a `<pre>` / `<code>` raw body passes author tag text through verbatim, so `<pre><img src=x onerror="…"></pre>` builds a live `<img>` whose handler RUNS (Chromium, base `d6820a607` AND the S462 head); in a `<match>` arm the `<xmp><!--</xmp><img … onerror=…>-->` form runs too — `NEW S462; HIGH; open (needs a ruling)`
+### g-raw-content-static-active-html-executes-s462 — a `<pre>` / `<code>` raw body passes author tag text through verbatim, so ANY active HTML written there runs: `<img onerror=…>`, `<svg onload=…>`, an `<iframe srcdoc="&lt;script&gt;…">` (a real script in a same-origin child document), a `<link rel=stylesheet href="data:text/css,…">` (CSS injection); a static string component prop holding `<img onerror>` substituted into `<pre>${t}</pre>` runs too — all Chromium-confirmed, base `d6820a607` AND the S462 head — `NEW S462; HIGH; open (needs a ruling)`
 
-<!-- @gap id=g-raw-content-static-handler-attribute-executes-s462 sev=HIGH status=open locus=compiler/src/block-splitter.js(RAW_CONTENT_ELEMENTS body — emitted verbatim)+compiler/src/element-refusal.ts(scanRawContentForRefusedTags is the place a ruling would extend) route=bryan prov=review:S462-S239-of-b125d2786(Chromium)+empirical:corpus-0-of-4519-raw-bodies-hold-an-on-attribute-in-tag-text -->
+<!-- @gap id=g-raw-content-static-active-html-executes-s462 sev=HIGH status=open locus=compiler/src/block-splitter.js(RAW_CONTENT_ELEMENTS body — emitted verbatim)+compiler/src/element-refusal.ts(scanRawContentForRefusedTags — the S462 rule covers only script/style start tags)+compiler/src/codegen/emit-html.ts(raw-content text child written unescaped) route=bryan prov=review:S462-S239-of-b125d2786-and-delta-re-review-of-36bc17114(Chromium)+empirical:corpus-0-of-4519-raw-bodies-hold-an-on-attribute-in-tag-text+review-relayed:4523-raw-bodies-189-files-12-repos-326-hold-a-tag-meant-to-render-all-bare-pre-code-wrappers-1608-hold-entities -->
 
-Reproduced in Chromium by the S239 review of b125d2786, and re-run on the S462 head: `<program>\n<pre><img src=x onerror="window.pwned=1"></pre>\n</program>` compiles clean and `window.pwned === 1`. Author-static text only (raw content has no interpolation, §4.17), so no data path — but the author wrote it as DISPLAY text and the page runs it.
+(Renamed S462 from `g-raw-content-static-handler-attribute-executes-s462` — the delta re-review of 36bc17114 showed the class is active HTML, not only `on…=` attributes.)
 
-**Not refused in S462, because the governing text does not cover it.** The brief's rule: refuse with `prov=pa-ruled` only if the corpus count is zero AND a governing sentence covers it. The count IS zero — measured on the raw bodies the block splitter actually captures (4519 bodies in 276 `.scrml` files across scrml, scrml-support and 8 sibling repos): **0** hold an `on…=` attribute in tag text. But the governing sentences point the other way:
+Chromium-confirmed by the S239 review of b125d2786 and its delta re-review of 36bc17114, on base and head:
+- `<pre><img src=x onerror="window.pwned=1"></pre>` — the handler runs (also via `<xmp><!--</xmp><img … onerror=…>-->` in a `<match>` arm);
+- `<pre><svg onload=…>` — runs;
+- `<pre><iframe srcdoc="&lt;script&gt;parent.pwned=1&lt;/script&gt;"></iframe></pre>` — a real script in a same-origin child document; the `&lt;img onerror&gt;` srcdoc form runs too (the srcdoc's entity-encoded text IS the child document's HTML, so entity-escaping does not neutralize it);
+- `<pre><link rel="stylesheet" href="data:text/css,…"></pre>` — CSS injection;
+- a STATIC string component prop holding `<img onerror=…>` substituted into `<pre>${t}</pre>` in the component body — runs (base and head);
+- NOT running: `<embed>` / `<object>` with a `data:` URL (opaque origin).
+Author-static text only (raw content has no interpolation, §4.17) — no data path — but the author wrote it as DISPLAY text and the page runs it.
+
+**Not refused in S462, because the governing text does not cover it.** The brief's rule: refuse with `prov=pa-ruled` only if the corpus count is zero AND a governing sentence covers it. For `on…=` the count IS zero (measured on the raw bodies the block splitter captures: 0 of 4519 in 276 `.scrml` files across scrml, scrml-support and 8 sibling repos), but the governing sentences point the other way:
 - §5.2 (first rule): "`attr="value"` SHALL produce a static attribute with the literal string `value`."
 - §5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string (the rule above)." — a static author-written handler is SANCTIONED in ordinary markup.
 - §4.17: "HTML entity-escaping of `<` / `>` / `&` / `"` for display remains author responsibility."
-No sentence says a raw-content body must not build a handler. The §4.17 "does not admit those elements at all" sentence that carried the `<script>`/`<style>` ruling is about those two ELEMENTS, not handler attributes.
+No sentence says a raw-content body must not build active HTML. The §4.17 "does not admit those elements at all" sentence that carried the `<script>` / `<style>` ruling is about those two ELEMENTS.
 
-**Ruling needed (bryan):** (a) refuse any `on[a-z]+=` inside tag text in a raw body (fail-closed, same code family — needs a code: E-ATTR-INTERP-EXECUTABLE is about interpolation, so likely a new one); (b) emit raw-content bodies entity-encoded (`<` → `&lt;`) so a raw body can never build an element — the cleanest closure of the whole class, but it reverses §4.17's "author responsibility" and the S101 authoring example; (c) keep author responsibility and document it. Recommendation: (b) — a "raw-content" body is display text by intent, and encoding is the only rule that does not depend on enumerating dangerous tags/attributes (an `<a href="javascript:…">`, `<iframe src=…>`, `<form action=…>` and `<meta http-equiv=refresh>` in a raw body are the same class); corpus cost would need its own measurement (every raw body that intentionally renders real tags).
+**Ruling needed (bryan):** (a) refuse active constructs in a raw body by enumeration (`on…=`, `srcdoc`, `<iframe>`, `<link>`, `<svg>`, `javascript:` URLs, `<meta http-equiv>`, …) — a deny list, which the review history of this very gap shows is bypassable; (b) emit raw-content bodies with `<` and `>` entity-encoded so a raw body can never build an element — the closure of the whole class; it reverses §4.17's "author responsibility" and the S101 authoring example; (c) keep author responsibility and document it. Recommendation: (b).
+
+**Blast radius of (b), measured by the delta re-review (relayed, not re-run here):** 4,523 raw bodies in 189 files across 12 repos. 326 bodies in 136 files hold a tag meant to RENDER, and every one is a bare `<pre><code>…</code></pre>` wrapper — so (b) must keep a nested raw-content element (`<code>` directly inside `<pre>`, or the reverse) as an element, and encode only the text inside it. 1,608 bodies hold entities (`&lt;`, `&amp;`, …), so encode ONLY `<` and `>` — never `&` (re-encoding `&` would double-escape every existing display sample). The component-prop form (a raw body that interpolates through component substitution) needs the same encoding applied after substitution.
+
+### g-match-arm-each-raw-body-script-silently-accepted-s462 — a `<match>` arm containing an `<each>` whose row holds `<li><pre><script>…</script></pre></li>` compiles CLEAN; the raw body is emitted as `createTextNode("<script>…</script>")` (inert — nothing runs), but it is a silent accept, inconsistent with every other position, which refuses it as E-SCRIPT-001 — `NEW S462; LOW; open`
+
+<!-- @gap id=g-match-arm-each-raw-body-script-silently-accepted-s462 sev=LOW status=open locus=compiler/src/codegen/emit-match.ts(the arm body re-parse that routes an `<each>`-holding arm through splitBlocks+buildAST at codegen — its errors are not collected)+compiler/src/codegen/emit-each.ts(raw-content text child → createTextNode, so refuseRawContentLowering is never asked) prov=review:S462-delta-re-review-of-36bc17114+empirical:reproduced-at-36bc17114-compiles-clean-createTextNode -->
+
+Reproduced at `36bc17114`: `<program>\n${ type K:enum = { A, B } }\n<k> = K.A\n<items> = [1]\n<match for=K on=@k>\n  <A><ul><each in=@items as it><li><pre><script>window.pwned=1</script></pre></li></each></ul></>\n  <B><p>b</p></>\n</match>\n</program>` compiles with no diagnostic; `app.client.js` holds `createTextNode("<script>window.pwned=1</script>")` and Chromium runs nothing. Fail-safe (a text node is never parsed as HTML) but not refused: the `<each>` inside the arm is re-split at TAB with its errors discarded, and the per-item emitter writes raw-content text through `createTextNode`, which never consults the codegen backstop. Fix: have the TAB match-arm re-split keep the `<each>` body's nodes reachable by the end-of-build structural check (or call `refuseRawContentLowering` from emit-each's raw-content text branch).
 
 ### g-bootstrap-printer-escattr-raw-text-breakout-s462 — the BOOTSTRAP printer's `escAttr` escaped only `&` and `"`: an attribute value inside a raw-text or RCDATA element (`noscript`, `xmp`, `noembed`, `iframe`, `title`) could spell the element's closer and inject a running `<script>` — `NEW S462; HIGH; RESOLVED S462 (s462-bootstrap-script-style-refusal)`
 
