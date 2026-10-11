@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 4 |
-| MED | 600 | 6 |
+| MED | 601 | 6 |
 | LOW | 359 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -59,6 +59,12 @@ Probed S462 through `slice-m2/lowered.js` `frontEnd`: `if (c) @r = "a" else @r =
 <!-- @gap id=g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseStmt — a statement-leading keyword `else` falls through to an expression statement and the name resolver reports it) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
 
 Loud on both implementations, so no program is miscompiled — but the bootstrap's message names a missing declaration rather than the misplaced `else`, and the conformance case `control-flow/s462-else-without-if-pos` (expects E-STMT-UNEXPECTED-TOKEN) is a bootstrap FAIL for it.
+
+### g-for-lift-item-does-not-rerender-on-body-condition-cell-s465 — a reactive `${ for (x of @xs) { if (@c) { lift <li>${x}</li> } } }` does NOT re-render when `@c` changes: toggling `@c` to false leaves every `<li>` on screen (Chromium: "12" before and after), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-for-lift-item-does-not-rerender-on-body-condition-cell-s465 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitForStmt reactive list-render — the per-item create fn reads `@c`, but the list effect re-runs `_scrml_reconcile_list` only on the ITERABLE, and the keyed reconcile reuses an existing item, so a body-only dependency never re-creates it)+compiler/src/runtime-template.js(_scrml_reconcile_list) prov=review:s465-braceless-r2 -->
+
+Found by the S239 review of the s462 braceless-else work (round 2, item (f)); identical on origin/main `1c1e9eee5` and the s462 head (executed in Chromium: `#o="12"` before and after `@c = false`). Silent stale render: the item creator is called once per key, so any reactive read inside the loop body other than the item itself is frozen at first render. A fix needs the body's own reactive reads in the list effect's dependency set (re-create on change) or a per-item effect around the body.
 
 ### g-for-lift-else-empty-state-body-dropped-s462 — the §17.4a `for/lift … else { … }` empty-state body never renders: `${ for (x of @items) { lift <li>${x}</li> } else { lift <li>none</li> } }` with `@items = []` renders NOTHING (the else body is absent from the emitted JS), at exit 0 — `NEW S462; HIGH; open (pre-existing on BASE)`
 

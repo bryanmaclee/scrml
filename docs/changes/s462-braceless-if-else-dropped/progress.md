@@ -73,3 +73,33 @@
       0 syntax delta. Server-template structural switch: byte-identical after path normalization.
       flogence app.scrml W-AUTH-001 appeared/disappeared between captures — not reproducible
       (14 on both sides compiled directly): capture noise under load.
+
+## Review round 2 (S239 verdict FIX on 845d9e41e, S465)
+- [x] 2026-10-11T17:40Z brief archived (d27f86d79); worktree on 845d9e41e (non-destructive switch, not reset).
+- [x] 2026-10-11T17:50Z F1 [HIGH] reproduced in Chromium (reviewer driver): every if/else / multi-line / `;`-sequence
+      handler writing a nested path or index (`@o.a.b`, `@p2.x`, `@xs[0]`, `<each>` row `@rows[0].v`, `onclick=${…}`,
+      inside `<program>`, braceless) → `_scrml_deep_set is not defined` per click. Root: `detectRuntimeChunks`
+      (emit-client.ts) never walked `attr.value.handlerBlock.stmts`. Fix: `case "markup"` walks every attribute's
+      handler statement list exactly like a function body (`walkAttrHandlerBlocks`). Multi-line + `;`-sequence
+      handlers (broken on base too) fixed by the same line. Sweep (c11 families: structural ==, match, index set,
+      spread, compound, `?.`, `is .V`, delete): all run correctly in Chromium; a ground-truth scan of EVERY reviewer
+      probe output (250 cases, c1–c17 + r2) finds 0 `_scrml_*(` calls without a shipped definition on head
+      (base: 4). Pinned: unit/s462-handler-runtime-helpers-shipped.test.js (fails 10/18 without the fix) +
+      browser/browser-handler-if-else-helpers-s462.browser.test.js (executed, both arms; fails 14/16 without).
+- [x] 2026-10-11T18:00Z F2 [MED] SPEC decision: YES. §14.10: "A bare variant reference SHALL be resolved by the
+      compiler when the type at the position can be inferred from one of: … a previously-declared cell or local
+      with a known type (`@cell = .V` where `@cell: T`) … or any other position where the type is fixed by the
+      surrounding declaration." §66.3 rule 5 (S462 amendment, reading (a)): "a QUALIFIED unit variant `E.V`
+      (§14.10: legal everywhere) is a **literal** of `E`" — so `<col> = Col.Red` has the known type `Col`, and
+      E-VARIANT-AMBIGUOUS was wrong on BOTH paths. Fixed at the shared root (type-system.ts): the hoisted cell
+      pre-bind records `variantCtxEnum` for an unannotated qualified-variant (or payload-construction) initializer;
+      a bare-variant write uses it as the §14.10 context. `resolvedType` is untouched (asIs) → no other check moves.
+      Handler (one-line, braceless, multi-line, `;`-seq) AND function-body forms now compile and run (Chromium:
+      Blue/Red). Newly-accepting at exactly the positions that fired E-VARIANT-AMBIGUOUS before. Direction notes
+      (deliberate, §14.10-conformant): in an if/else handler a variant the enum lacks is now E-TYPE-063 (base
+      emitted the string "Green" silently), and `.V` written into a string-initialised cell is E-VARIANT-AMBIGUOUS
+      (§14.10: "SHALL fail … no type context at all") — base never type-checked if/else handler bodies.
+- [x] out-of-scope (a) template-initialised cell drops the interpolation: already filed
+      (g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded, open; now renders "d " for the cell
+      form, "" for const). (b) `?{x}` text → placeholder: already filed (g-sql-placeholder-clobbers-string-literals-s457).
+      (f) for/lift body condition no re-render: NEW g-for-lift-item-does-not-rerender-on-body-condition-cell-s465.
