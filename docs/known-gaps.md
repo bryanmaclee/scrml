@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 598 | 6 |
-| LOW | 356 | 0 |
+| MED | 599 | 6 |
+| LOW | 358 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -24990,6 +24990,18 @@ Found by the S465 review of the s462 P0 SQL chain fix (probe `lf-tail` / `lf-not
 ### g-impl1-sql-get-result-member-access-not-type046-s465 — a member access on a `?{…}.get()` result (`Row | not`) is not E-TYPE-046; no row throws a TypeError at run time — `NEW S465; LOW; open`
 <!-- @gap id=g-impl1-sql-get-result-member-access-not-type046-s465 sev=LOW status=open locus=searched:compiler/src/type-system.ts(the E-TYPE-046 pass, `resolveValueInfo` / `fire` — no receiver kind for a `?{}` `.get()` value) — not traced prov=review:s465-sqlchain-r2 -->
 Found by the S465 round-2 review of the s462 P0 SQL chain fix (probes `t46-local`, `t46-tail`). §8.3 types `.get()` as `Row | not` ("First matching row, or `not` if no rows") and §44.3 says no row is not a failure; §42.3.5 (SPEC.md ~:10906): dereferencing a value whose type admits `not` "without optional-chaining … or narrowing … is compile error **E-TYPE-046**. The same rule applies to any receiver whose type admits `not`". impl#1 does not fire it on a `.get()` result: `const r = ?{…}.get()` then `return r.name`, and the tailed `return ?{…}.get().name`, both compile clean and, on a query that matches no row, the route throws `TypeError: null is not an object (evaluating '(… [0] ?? null).name')`. Identical untailed on base 1c1e9eee (`t46-local`); the tailed form returned the whole (null) row on base only because base dropped the tail (the P0). Pre-existing; not changed by s462 (not in its scope). Fix direction: give the §44 `.get()` value a `Row | not` receiver kind in the E-TYPE-046 pass (local binding and the inline tail alike), so `?{…}.get()?.name` / `is not` narrowing are the accepted spellings.
+
+### g-mounthydrate-currentuser-loader-throws-s465 — a `/__mountHydrate` loader (or Pattern C tail) that reads `@currentUser` throws `ReferenceError: _scrml_currentUser is not defined` and takes the page down — `NEW S465; MED; open`
+<!-- @gap id=g-mounthydrate-currentuser-loader-throws-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(§8.11 __mountHydrate route + SSR compose — the `@currentUser` resolver is emitted only when the SQL text reads it) — not traced prov=review:s465-sqlchain-r3 -->
+Found by the S465 round-3 review of the s462 P0 SQL chain fix. `<mine server> = rowsFor(@currentUser.id)` ×2 (base `1c1e9eee`, probe `cu-two-twin2`) and two `<x server> = ?{…}.all().filter(u => u.owner == @currentUser.id)` cells under `auth="optional"` (probe `cu-two`, head) compile clean, then `/__mountHydrate` and the SSR compose throw. Fails closed (no data leaves), but the page does not work. On base the `cu-two` shape "served" every owner's rows (the tail was dropped — the P0 the fix closes). Fix direction: emit the `@currentUser` resolver for the loader whenever any loader expression reads `@currentUser` (classified from the tree), and apply the §14.8 auth gate. Not the same as [[g-mounthydrate-client-scope-loader-s465]], which covers client functions and names.
+
+### g-patternc-closed-tail-ignores-shadowed-builtins-s465 — a file-scope FUNCTION named `JSON` / `Math` / `Object` / … is ignored by the Pattern C closed-tail allow-list; the load route evaluates the builtin instead of the author's binding — `NEW S465; LOW; open`
+<!-- @gap id=g-patternc-closed-tail-ignores-shadowed-builtins-s465 sev=LOW status=open locus=compiler/src/codegen/sql-attempt.ts(patternCQueryOfInit — closed-tail allow-list of Math/JSON/Object/Array/Number/String/Boolean) prov=review:s465-sqlchain-r3 -->
+`server function JSON(x) { return 'S' }` + `<v server> = ?{…}.get().id + JSON.stringify(1)` (probe `r3/s-json-shadow-srvfn`; also a client `function Math(x)`, `s-math-shadow-fn`) compiles clean and `/__serverLoad/v` + SSR serve the builtin's result. No crash, no data leak; the wrong binding is silently used. A shadowing `const Math = {…}` is handled (mirrored into the server module). Fix direction: a file-scope binding that shadows an allow-listed global makes the tail non-closed (fail closed).
+
+### g-mounthydrate-partner-lost-when-sibling-is-patternc-s465 — with one Pattern C cell and one callable cell, the callable cell loses its `/__mountHydrate` partner and fails closed (E-CG-001 + E-CG-006) — `NEW S465; LOW; open`
+<!-- @gap id=g-mounthydrate-partner-lost-when-sibling-is-patternc-s465 sev=LOW status=open locus=compiler/src/codegen/collect.ts(serverVarDeclExprQueries / callableServerVarDecls — the coalescing count) prov=review:s465-sqlchain-r3 -->
+`server function wrap(r){…}` · `<a server> = ?{…id=1}.get().name` · `<b server> = wrap(?{…id=2}.get())` (probe `r3/mix-1-1`): head and base both refuse (E-CG-001 + E-CG-006); the round-1 interim commit served it through `/__mountHydrate`. Fails closed, equals base. Fix direction: count every non-Pattern-C callable cell toward coalescing regardless of how many siblings are Pattern C.
 
 ### g-mounthydrate-client-scope-loader-s465 — a `<x server>` callable initializer that calls a CLIENT function (or reads a client name) compiles clean, and `/__mountHydrate` + the SSR compose throw `ReferenceError` — `NEW S465; MED; open`
 <!-- @gap id=g-mounthydrate-client-scope-loader-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(§8.11 Mount-Hydration Coalescing — synthetic __mountHydrate route, ~:6049; SSR compose of callable cells) — not traced prov=review:s465-sqlchain-r2 -->
