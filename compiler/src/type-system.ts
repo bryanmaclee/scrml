@@ -120,6 +120,7 @@ import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-m
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
+import { refusedElementMessage } from "./element-refusal.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -24274,6 +24275,9 @@ function _loadLetReparseHandles(): NonNullable<typeof _letReparseHandles> {
 function _parseColumnLetArrow(
   rawLet: string,
   filePath: string,
+  // §4.17 (S462) — called once per `<script>` / `<style>` element the arrow body
+  // holds (markup in an ATTRIBUTE value; decided on the re-parsed nodes).
+  onRefusedElement?: (code: string) => void,
 ): { rowBindingName: string; slotBody: unknown[] } | null {
   if (!rawLet || typeof rawLet !== "string") return null;
   // Match (<param>) => <body> OR bare <param> => <body>. The body is the
@@ -24296,6 +24300,14 @@ function _parseColumnLetArrow(
     const { splitBlocks, buildAST } = _loadLetReparseHandles();
     const bs = splitBlocks(filePath + "#col-let", body);
     const tab = buildAST(bs);
+    if (onRefusedElement) {
+      // The block splitter refuses at its own opener (its marker is not reported
+      // again by the builder); every other position is the builder's.
+      const all = [...((bs as { errors?: Array<{ code?: string }> }).errors ?? []), ...((tab.errors ?? []) as Array<{ code?: string }>)];
+      for (const e of all) {
+        if (e && (e.code === "E-SCRIPT-001" || e.code === "E-STYLE-001")) onRefusedElement(e.code);
+      }
+    }
     const nodes = (tab.ast?.nodes ?? []) as unknown[];
     const markupNodes = nodes.filter(
       (n) => n && typeof n === "object" && (n as { kind?: string }).kind === "markup",
@@ -25896,7 +25908,13 @@ function _processTableForNode(
       // Prefer the full `(<param>) => <markup>` arrow form (§16.6): it carries
       // BOTH the binding name AND the slot-body markup (which the attribute
       // pipeline left as opaque expr text). Re-parse the arrow body into AST.
-      const parsedLet = _parseColumnLetArrow(letAttr.rawValue, span.file);
+      const parsedLet = _parseColumnLetArrow(letAttr.rawValue, span.file, (code) => {
+        errors.push(new TSError(
+          code,
+          `${code}: ` + refusedElementMessage(code, code === "E-STYLE-001" ? "style" : "script", "in a `<column :let={…}>` slot body"),
+          (colNode.span as Span | undefined) ?? span,
+        ));
+      });
       if (parsedLet) {
         rowBindingName = parsedLet.rowBindingName;
         letSlotBody = parsedLet.slotBody;

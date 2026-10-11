@@ -127,6 +127,39 @@ describe("markup values, returns, components, slots", () => {
   });
 });
 
+describe("markup held in attributes, and more logic corners", () => {
+  const SNIPPET_LIST = `\${ type Item:struct = { id: number, label: string } }\n\${ const List = <div props={ items: Item[], row: snippet(item: Item) }>\n  \${ for (i of items) { lift <div>\${render row(i)}</> }}\n</> }\n<items> = [{ id: 1, label: "a" }]`;
+  test("a parametric snippet lambda attribute (rendered inside a for-lift)", () => {
+    expectRefusedOnce(P(`${SNIPPET_LIST}\n<List items=@items row={ (item) => <script>window.pwned=1</script> }/>`), "E-SCRIPT-001");
+  });
+  test("a parametric snippet lambda attribute rendered at the top of the body", () => {
+    expectRefusedOnce(P(`\${ type Item:struct = { id: number } }\n\${ const Card = <div props={ it: Item, foot: snippet(v: Item) }>\${render foot(it)}</div> }\n<x> = { id: 1 }\n<Card it=@x foot={ (v) => <script>x</script> }/>`), "E-SCRIPT-001");
+  });
+  test("a zero-arg snippet lambda attribute", () => {
+    expectRefusedOnce(P(`\${ const Card = <div props={ head: snippet }>\${render head()}</div> }\n<Card head={ () => <style>p{}</style> }/>`), "E-STYLE-001");
+  });
+  test("a parametric snippet lambda that renders its markup is not refused", () => {
+    expectNotRefused(P(`${SNIPPET_LIST}\n<List items=@items row={ (item) => <span>\${item.label}</span> }/>`));
+  });
+  test("a <tableFor> column `:let={(row) => …}` slot body", () => {
+    const { errors } = compile(`\${\n  import { tableFor } from 'scrml:data'\n  type User:struct = { id: integer, name: string req }\n}\n<program>\n  <users> = [{ id: 1, name: "A" }]\n  <tableFor for=User rows=@users>\n    <column field="name" :let={(row) => <script>x</script>}/>\n  </tableFor>\n</program>\n`);
+    expect(errors.map((e) => e.code)).toEqual(["E-SCRIPT-001"]);
+    expect(errors[0].span.line).toBe(8);
+  });
+  test("an SVG-namespace <script> in lifted markup", () => {
+    expectRefusedOnce(P(`\${ lift <svg><script>x</script></svg> }`), "E-SCRIPT-001");
+  });
+  test("a markup value inside a `${ }` interpolation reports at its file position", () => {
+    const { errors } = compile(P(`<f> = true\n<div>\${ @f ? <style>p{}</style> : <b>b</b> }</div>`));
+    expect(errors.map((e) => e.code)).toEqual(["E-STYLE-001"]);
+    expect(errors[0].span.line).toBe(3);
+    expect(errors[0].span.col).toBe(14);
+  });
+  test("logic nested inside lifted markup", () => {
+    expectRefusedOnce(P(`<f> = true\n\${ lift <div>\${ if (@f) { lift <script>x</script> } }</div> }`), "E-SCRIPT-001");
+  });
+});
+
 describe("(c) raw content — <pre> / <code> (S462 PA ruling, corpus count 0)", () => {
   test("a literal <script> in <pre> is refused", () => {
     expectRefusedOnce(P(`<pre><script>window.p=1</script></pre>`), "E-SCRIPT-001");

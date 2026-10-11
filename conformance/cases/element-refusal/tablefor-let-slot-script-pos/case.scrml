@@ -1,0 +1,10 @@
+${
+  import { tableFor } from 'scrml:data'
+  type User:struct = { id: integer, name: string req }
+}
+<program>
+  <users> = [{ id: 1, name: "A" }]
+  <tableFor for=User rows=@users>
+    <column field="name" :let={(row) => <script>x</script>}/>
+  </tableFor>
+</program>

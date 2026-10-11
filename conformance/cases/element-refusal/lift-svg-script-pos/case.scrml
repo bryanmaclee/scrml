@@ -1,0 +1,4 @@
+<program>
+<p>page</p>
+${ lift <svg><script>x</script></svg> }
+</program>

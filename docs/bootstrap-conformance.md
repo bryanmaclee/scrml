@@ -7,16 +7,16 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1735 of 1735 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1740 of 1740 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 185 | 10.7% |
+| PASS | 185 | 10.6% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 58 | 3.3% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 661 | 38.1% |
-| UNSUPPORTED | 831 | 47.9% |
+| NOT-TWINNED | 664 | 38.2% |
+| UNSUPPORTED | 833 | 47.9% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,18 +26,18 @@ Scope: **1735 of 1735 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 28 of 58; the other 30 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 580 · parse-reject 251.
+UNSUPPORTED by reason: bootstrap-unsupported 580 · parse-reject 253.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **770** — PASS 101 · FAIL 55 · UNSUPPORTED 614. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **771** — PASS 101 · FAIL 55 · UNSUPPORTED 615. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (661 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (664 cases; a case counts once per distinct reason):
 
-- 101 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 70 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 103 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 71 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 65 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 57 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -58,11 +58,11 @@ NOT-TWINNED by reason (661 cases; a case counts once per distinct reason):
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
+- 7 — rhs-decl: object literal needs a struct type (CTX)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
-- 6 — rhs-decl: object literal needs a struct type (CTX)
 - 5 — engine-simple: engine without a bare-variant `…`
 - 5 — rhs-decl: bare variant .X declared by N enums (needs a type)
 - 5 — rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
@@ -113,7 +113,7 @@ NOT-TWINNED by reason (661 cases; a case counts once per distinct reason):
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
-| element-refusal | 20 | 2 | · | · | · | 6 | 12 | · | · |
+| element-refusal | 25 | 2 | · | · | · | 9 | 14 | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
@@ -494,7 +494,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (831)
+### UNSUPPORTED (833)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -693,10 +693,12 @@ none
 - `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
 - `element-refusal/fn-return-script-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/implied-lift-arm-script-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
+- `element-refusal/interp-markup-value-style-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `element-refusal/lift-script-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/lift-script-src-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/lift-script-uppercase-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/lift-style-body-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
+- `element-refusal/lift-svg-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/logic-bare-markup-script-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `<` (statements at logic-block level are not in bootstrap slice M2)
 - `element-refusal/match-arm-script-pos` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `element-refusal/near-names-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `lift` (statements at logic-block level are not in bootstrap slice M2)
@@ -1328,7 +1330,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (661)
+### NOT-TWINNED (664)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1525,6 +1527,9 @@ none
 - `element-refusal/each-body-style-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `element-refusal/for-lift-script-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `element-refusal/markup-value-script-pos` — not mechanical: rhs-decl: initializer extent could not be verified against impl#1's AST
+- `element-refusal/snippet-lambda-attr-script-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: object literal needs a struct type (CTX)
+- `element-refusal/snippet-lambda-attr-unrendered-style-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `element-refusal/tablefor-let-slot-script-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `engine/accepts-not-enum-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/arm-pipe-legacy-message` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/component-engine-scope-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · engine-simple: `<engine>` impl#1's front end did not surface as an engine declaration (left untouched)

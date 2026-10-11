@@ -14,6 +14,13 @@
       NEW open g-toplevel-decl-string-rhs-scanned-as-markup-s462 (pre-existing false refusal);
       g-bootstrap-admits-script-style-elements-s462 corrected ("impl#1 refuses both" was opener-only).
 
+- [x] merged origin/main 8b9cd9919 (#1398 bootstrap refusal); generated docs regenerated; known-gaps by hunk
+      (the two impl#1 gaps #1398 filed are RESOLVED here; this branch's duplicate entry dropped).
+- [x] adversarial round: attribute-held markup — snippet lambda attribute (rendered / unrendered /
+      zero-arg) refused in component-expander at the call site; `<tableFor>` column `:let` slot body
+      refused in type-system; markup value inside a text `${}` now reports at its file position;
+      SVG-namespace lift and logic nested in lifted markup confirmed. +5 conformance cases (25 total).
+
 ## (c) measurement
 
 `<pre>`/`<code>` bodies holding a literal `<script`/`<style` start tag, every `.scrml` file:
@@ -28,3 +35,13 @@ must-not-fire unit cases in script-element-rejected.test.js, flipped.
 that can hold a refused element); each compiled with base d6820a607 and head. Outcome changed in
 16 files — exactly the 16 new positive conformance cases (conformance/cases/element-refusal/*-pos).
 Newly refused corpus sites outside the new cases: NONE. 78 files refused identically on both.
+Re-run after the adversarial round + merge: 4972 files, 163 candidates, 21 changed = exactly the 21
+positive element-refusal cases; 83 refused identically (78 + the 5 positive block-grammar cases #1398 added).
+
+## emit differential (scripts/corpus-emit-differential.ts, base d6820a607 vs head 65700ddb)
+
+2759 common sources: 0 newly failing, 0 newly passing, 0 diagnostic-code changes, 0 text-only changes;
+165 differing artifacts, ALL `case.server.js` differing only in the embedded `_scrml_project_root`
+path (base compiled from a scratch `git archive`; verified by normalizing the root: 165/165 path-only,
+0 real). The tool's own exit 2 is its INCOMPARABLE "revision <unknown>" finding — the base side is
+an archive, not a git checkout.

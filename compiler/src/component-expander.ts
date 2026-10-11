@@ -3681,6 +3681,10 @@ function expandComponentNode(
       if (!match) continue;
       const paramName = match[1] ?? ""; // "" for a zero-arg lambda
       const body = match[2].trim();
+      // §4.17 (S462) — markup held in an ATTRIBUTE: the lambda body is raw text
+      // until a render site re-parses it, and a fill that is never rendered is
+      // never parsed. Parse it here, once, whether or not it renders.
+      refuseSnippetLambdaBody(body, filePath, ceErrors, attr.span ?? node.span);
       if (snippetDecl.snippetParamType !== null) {
         // Parametric snippet — rendered `render foo(arg)` via renderParamMatch.
         // Both `(v) =>` (substitute v→arg) and zero-arg `() =>` (body as-is,
@@ -3703,6 +3707,7 @@ function expandComponentNode(
           : parseSnippetBodyNodes(
               body, filePath, counter, ceErrors,
               node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+              false,
             );
         slottedGroups.set(attr.name, nodes);
       }
@@ -4194,6 +4199,36 @@ function expandComponentNode(
  * the component's root element children.
  */
 /**
+ * §4.17 (S462) — refuse a `<script>` / `<style>` element in a snippet-lambda
+ * attribute body (`row={ (item) => <script>…</script> }`), decided on the body
+ * parsed exactly as a render site parses it (a plain-markup wrapper): the block
+ * splitter's refusal marker becomes an element node and the builder's structural
+ * check reports it. Reported once, at the call-site attribute.
+ */
+function refuseSnippetLambdaBody(body: string, filePath: string, ceErrors: CEError[], span: Span | undefined): void {
+  if (!body.trim()) return;
+  // The block splitter refuses an element at its own opener (and the builder then
+  // does not report that marker again); every other position is the builder's.
+  let errors: Array<{ code: string }> = [];
+  try {
+    const bs = splitBlocks(filePath, `<div>\n${body}\n</div>\n`);
+    const tab = buildAST(bs) as { errors: TABErrorInfo[] };
+    errors = [...((bs as { errors?: Array<{ code: string }> }).errors ?? []), ...(tab.errors ?? [])];
+  } catch {
+    return;
+  }
+  const at = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  const seen = new Set<string>();
+  for (const e of errors) {
+    if (e.code !== "E-SCRIPT-001" && e.code !== "E-STYLE-001") continue;
+    if (seen.has(e.code)) continue;
+    seen.add(e.code);
+    const tag = e.code === "E-STYLE-001" ? "style" : "script";
+    ceErrors.push(makeCEError(e.code, `${e.code}: ${refusedElementMessage(e.code, tag, "in a snippet lambda attribute value")}`, at));
+  }
+}
+
+/**
  * g-render-snippet-slot-renders-empty (default-pipeline parametric limb, S375-peter).
  *
  * A parametric snippet fill `foot={ (v) => <span>F${v}</span> }` rendered via
@@ -4215,6 +4250,9 @@ function parseSnippetBodyNodes(
   counter: NodeCounter,
   ceErrors?: CEError[],
   span?: Span,
+  // §4.17 (S462) — false for a snippet LAMBDA body: its `<script>` / `<style>`
+  // was already refused at the call-site attribute (refuseSnippetLambdaBody).
+  reportRefusedElements: boolean = true,
 ): ASTNode[] {
   const trimmed = body.trim();
   if (!trimmed) return [];
@@ -4241,6 +4279,7 @@ function parseSnippetBodyNodes(
   const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
   if (ceErrors) {
     for (const e of tabOut.errors ?? []) {
+      if (!reportRefusedElements && (e.code === "E-SCRIPT-001" || e.code === "E-STYLE-001")) continue;
       if ((e.severity ?? "error") === "error") {
         ceErrors.push(makeCEError(e.code, e.message, e.tabSpan ?? span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }));
       }
@@ -4435,7 +4474,7 @@ function _injectChildrenWalk(
             // substitution component-prop expansion uses; markup / text literals are
             // left untouched. A zero-arg lambda on a parametric prop has an empty
             // paramName — no substitution (the body renders as-is, ignoring the arg).
-            let nodes = parseSnippetBodyNodes(snippet.body, filePath ?? "", idCounter, ceErrors, child.span);
+            let nodes = parseSnippetBodyNodes(snippet.body, filePath ?? "", idCounter, ceErrors, child.span, false);
             if (snippet.paramName) {
               let argNode: ExprNode | null = null;
               try { argNode = parseExprToNode(renderParamMatch.argExpr, filePath ?? "", child.span?.start ?? 0); } catch { argNode = null; }

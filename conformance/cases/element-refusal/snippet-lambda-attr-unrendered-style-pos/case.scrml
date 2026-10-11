@@ -1,0 +1,4 @@
+<program>
+${ const Card = <div props={ head: snippet }>${render head()}</div> }
+<Card head={ () => <style>p { color: red }</style> }/>
+</program>

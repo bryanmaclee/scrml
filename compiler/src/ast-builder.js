@@ -5867,7 +5867,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // §4.17 (S462) — this value's nodes carry offsets into `"lift " + markupSrc`;
           // a refused element in it is reported (by the end-of-build structural check)
           // at its FILE position, rebased exactly as the forwarded errors above are.
-          const _mvDelta = _realStart >= 0 ? _realStart - _LIFT_PREFIX : (startOffset ?? 0) + a - _LIFT_PREFIX;
+          // Position only (the decision is the node): when the verbatim alignment
+          // above did not run (`startOffset` is not a file offset at some call
+          // sites), align the value against the enclosing block's raw text from
+          // the first occurrence of its leading character.
+          let _posStart = _realStart;
+          if (_posStart < 0 && parentBlock && typeof parentBlock.raw === "string" && parentBlock.span && typeof parentBlock.span.start === "number") {
+            const _fc = expr.trimStart().charAt(0);
+            const _k = _fc ? parentBlock.raw.indexOf(_fc) : -1;
+            const _al = _k >= 0 ? _alignToSourceText(expr, a, b, parentBlock.raw, _k) : null;
+            if (_al) _posStart = parentBlock.span.start + _al.start;
+          }
+          const _mvDelta = _posStart >= 0 ? _posStart - _LIFT_PREFIX : (startOffset ?? 0) + a - _LIFT_PREFIX;
           for (const site of collectRefusedElements([mkNode])) {
             if (!site.span) continue;
             const holder = { span: { ...site.span } };
