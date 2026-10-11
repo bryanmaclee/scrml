@@ -1,0 +1,14 @@
+{
+  "id": "script-style-exact-name-neg",
+  "description": "`<noscript>`, `<scripts>`, `<style-x>` and a `style=` attribute are NOT `<script>` / `<style>` — neither code fires (§4.17).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 (companion considerations): \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all. Both are rejected symmetrically at the block-splitter level: `<style>` triggers `E-STYLE-001` (CSS lives in `#{...}`), and `<script>` triggers `E-SCRIPT-001` … The match on the tag name is exact, not a prefix — `<noscript>` is an ordinary element and is unaffected.\" Exact match: `<noscript>`, `<scripts>` and `<style-x>` are other names (ordinary elements), and a `style=\"…\"` attribute is not the `<style>` element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+<program>
+    <SCRIPT>alert(1)</sCrIpT>
+    <Style>p { color: red; }</STYLE>
+    <p>after</p>
+</program>

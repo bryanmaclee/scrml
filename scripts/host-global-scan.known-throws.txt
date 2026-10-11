@@ -8,6 +8,10 @@
 [build] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
 [default] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
 [embed] samples/gauntlet-s19-phase4/nested-comments.scrml  # RangeError: Maximum call stack size exceeded.
+[esm] conformance/cases/block-grammar/script-001-bound-src-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
+[esm] conformance/cases/block-grammar/script-001-interp-body-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
+[esm] conformance/cases/block-grammar/script-001-svg-namespace-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
+[esm] conformance/cases/block-grammar/style-001-interp-body-pos/case.scrml  # emit-client-esm: The keyword 'let' is reserved (an expect-reject case: E-SCRIPT-001 / E-STYLE-001, §4.17, S462)
 [esm] conformance/cases/body-top/template-cell-renders/case.scrml  # emit-client-esm: Unexpected character '@'
 [esm] conformance/cases/channel/dup-name-cross-file/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
 [esm] conformance/cases/channel/same-source-two-aliases/case.scrml  # emit-client-esm: Identifier '_scrml_ws_chat' has already been declared
