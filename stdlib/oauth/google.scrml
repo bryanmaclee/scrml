@@ -43,7 +43,7 @@ ${
      *   clientSecret,             // required for confidential clients (server)
      *   redirectUri,              // required — must be registered in GCP console
      *   scopes?,                  // default: ["openid","email","profile"]
-     *   storage,                  // required — put/get/del adapter
+     *   storage,                  // required — an OAuthStore tag (e.g. memoryAdapter())
      *   loginHint?,               // optional — prefill the email field
      *   hostedDomain?,            // optional — restrict to a Workspace domain
      * }
