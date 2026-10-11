@@ -586,8 +586,21 @@ export function rewriteSqlRefs(
   for (const site of sites) {
     // The site's chain: the `.name()` calls directly after its `}` (the shape the lowering
     // reads; whitespace between them as the earlier whole-text pattern allowed).
-    const chain = /^(?:\s*\.\w+\(\s*\))*/.exec(expr.slice(site.end))![0];
-    out += expr.slice(cursor, site.at) + lowerSqlSite(site.body, chain, dbVar, errors);
+    //
+    // S462 P0 (sql-chain-truncation) — only the SQL chain METHODS are the site's
+    // chain (the set the structured paths read: sql-attempt.ts `sqlQueryExprShape`,
+    // ast-builder `SQL_CHAIN_METHOD_NAMES`). Pre-fix any `.word()` was taken —
+    // `.all().reverse()` lowered `reverse` as a terminator and appended it to the
+    // un-parenthesized driver call. The lowered site is PARENTHESIZED so whatever
+    // follows applies to the QUERY'S VALUE, as written: unwrapped,
+    // `?{…}.get().name` became `(await q)[0] ?? null.name` (the WHOLE ROW whenever
+    // a row exists) and `?{…}.all().length` became `await q.length` (the length
+    // of the query object, awaited).
+    const chain = /^(?:\s*\.(?:all|get|first|run|prepare|nobatch|acrossTenants)\(\s*\))*/.exec(expr.slice(site.end))![0];
+    // A site that IS the whole text keeps its bare form (nothing can bind to it).
+    const lowered = lowerSqlSite(site.body, chain, dbVar, errors);
+    const whole = expr.slice(0, site.at).trim() === "" && expr.slice(site.end + chain.length).trim() === "";
+    out += expr.slice(cursor, site.at) + (whole ? lowered : `(${lowered})`);
     cursor = site.end + chain.length;
   }
   return out + expr.slice(cursor);
@@ -617,9 +630,11 @@ function lowerSqlSite(
 
   const methodCall = /^\.(\w+)\(\)/.exec(rest);
   if (methodCall) {
-    return lowerSqlMethodSite(sqlContent, methodCall[1]!, across, dbVar, errors) + rest.slice(methodCall[0].length);
+    const after = rest.slice(methodCall[0].length);
+    const lowered = lowerSqlMethodSite(sqlContent, methodCall[1]!, across, dbVar, errors);
+    return after ? `(${lowered})${after}` : lowered;
   }
-  return lowerSqlBareSite(sqlContent, across, dbVar) + rest;
+  return rest ? `(${lowerSqlBareSite(sqlContent, across, dbVar)})${rest}` : lowerSqlBareSite(sqlContent, across, dbVar);
 }
 
 /** `?{…}.method()` — the chained form (see `rewriteSqlRefs`). */
