@@ -7573,8 +7573,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Guard (Bug M, 2026-04-26): `function` / `fn` after expression-RHS context
         // is a function expression — keep collecting. See collectExpr above.
         // S462 — a depth-0 `else` ends the lifted expression too (see collectExpr):
-        // `if (c) lift a else lift b`.
-        if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
+        // `if (c) lift a else lift b`. Same exception as collectExpr: a lifted
+        // value that is itself an `if` (`lift if (c) { … } else { … }`) keeps its
+        // own `else`.
+        if (parts.length > 0 && parts[0]?.trim() !== "if" && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
           break;
         }
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {

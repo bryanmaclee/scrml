@@ -161,6 +161,14 @@ describe("S462 — a braceless `if` keeps its `else` (library mode, executed)", 
     expect(m.f(0, 0, 0)).toEqual(["---"]);
   });
 
+  test("`if (c) lift x else lift 0` in a for/lift body — the else lift is NOT unconditional", async () => {
+    // Pre-fix the `else` was dropped and `lift 0` became an unconditional sibling,
+    // so every iteration pushed BOTH values.
+    const m = await lib(`export function f(c, xs) {\n  const v = for (x of xs) { if (c) lift x else lift 0 }\n  return v\n}`, "lift-else");
+    expect(m.f(true, [1, 2])).toEqual([1, 2]);
+    expect(m.f(false, [1, 2])).toEqual([0, 0]);
+  });
+
   test("assignment arms `if (c) x = 1 else x = 2`", async () => {
     const m = await lib(`export function f(c) {\n  let x = 0\n  if (c) x = 1 else x = 2\n  return x\n}`, "assign");
     expect(m.f(true)).toBe(1);
@@ -208,6 +216,27 @@ describe("S462 — client code (reactive `@x` arms), executed", () => {
     expect(store.get("n")).toBe(10);
     store.set("c", false); handler({});
     expect(store.get("n")).toBe(20);
+  });
+});
+
+describe("S462 — a markup value-form `${ if (@c) \"yes\" else \"no\" }`", () => {
+  test("renders the else value when the condition is false (pre-fix: empty)", () => {
+    const { files, errors } = build(
+      `<program>\n<c> = true\n<p>\${ if (@c) "yes" else "no" }</p>\n</program>`,
+      "value-form",
+      "browser",
+    );
+    expect(errors.map((e) => e.code)).toEqual([]);
+    const js = readFileSync(files["value-form.client.js"], "utf8");
+    const m = /const _scrml_cf__scrml_logic_\d+ = (function\(\) \{ return [^\n]*\}); \};|const _scrml_cf__scrml_logic_\d+ = (function\(\) \{ return [^\n]*?; \});/.exec(js);
+    expect(m).not.toBeNull();
+    const fnText = m[1] ?? m[2];
+    const store = new Map();
+    const fn = new Function("_scrml_cs_reactive_get", `return (${fnText});`)((k) => store.get(k));
+    store.set("c", true);
+    expect(fn()).toBe("yes");
+    store.set("c", false);
+    expect(fn()).toBe("no");
   });
 });
 
