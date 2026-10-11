@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 4 |
-| MED | 601 | 6 |
-| LOW | 359 | 0 |
+| MED | 602 | 6 |
+| LOW | 360 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -59,6 +59,18 @@ Probed S462 through `slice-m2/lowered.js` `frontEnd`: `if (c) @r = "a" else @r =
 <!-- @gap id=g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseStmt — a statement-leading keyword `else` falls through to an expression statement and the name resolver reports it) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
 
 Loud on both implementations, so no program is miscompiled — but the bootstrap's message names a missing declaration rather than the misplaced `else`, and the conformance case `control-flow/s462-else-without-if-pos` (expects E-STMT-UNEXPECTED-TOKEN) is a bootstrap FAIL for it.
+
+### g-match-nested-in-match-arm-inner-arm-never-renders-s465 — a `<match>` placed inside another `<match>`'s arm body mounts its own `data-scrml-match-mount` slot but NEVER renders the inner arm: `<match on=@col><Red><match on=@col><Red><button id="b">…</button></>…</match></>…</match>` leaves `#b` absent from the DOM (Chromium + happy-dom), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-match-nested-in-match-arm-inner-arm-never-renders-s465 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(buildMatchArms re-parses the outer arm body; the inner match-block it yields is rendered as a mount slot but is not reached by collectMatchBlocks(fileAST) for its render fn + dispatcher — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+Found by the s462 round-3 sweep (S465). Identical on origin/main `1c1e9eee5` and the s462 head: the outer arm renders `<div data-scrml-match-mount="match_…"></div>` for the inner match and nothing fills it. Silent non-render. The round-3 chunk walk does reach the inner match's arm bodies (the helper-shipping guard `m-match-in-match` passes), so this is a render-dispatch gap, not a chunk gap.
+
+### g-markup-value-ternary-brace-handler-codegen-invalid-s465 — any `{ … }` event-handler body on an element inside a markup-value ternary (`${ @c ? <button onclick={ @n = 1 }>b</button> : "" }`) fails `E-CODEGEN-INVALID-LOGIC` — single statement, `;`-sequence, if/else and nested-path writes alike — `NEW S465; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-markup-value-ternary-brace-handler-codegen-invalid-s465 sev=LOW status=open locus=compiler/src/codegen(markup-value element attribute lowering does not consume attr.value.handlerBlock — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+Found by the s462 round-3 sweep (S465); identical on origin/main `1c1e9eee5`. Loud (compile fails), so nothing is miscompiled; the bare-call spelling `onclick=fn()` is the workaround.
 
 ### g-for-lift-item-does-not-rerender-on-body-condition-cell-s465 — a reactive `${ for (x of @xs) { if (@c) { lift <li>${x}</li> } } }` does NOT re-render when `@c` changes: toggling `@c` to false leaves every `<li>` on screen (Chromium: "12" before and after), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
 

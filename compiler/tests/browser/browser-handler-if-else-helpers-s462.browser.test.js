@@ -104,6 +104,74 @@ describe("S462 r2 F1 — an if/else handler's runtime helpers ship (executed)", 
   }
 });
 
+// Review round 3 (S465) F1 — the same handlers inside a `<match>` arm (arm bodies are raw
+// text until emit-match re-parses them; the chunk walk now walks the lowered arm bodies),
+// plus the engine bodies that are re-parsed at emit time (message arm, opener `effect=`).
+const MC = `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n` + O;
+const MH = `onclick={ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`;
+const mArm = (red, open = `<match on=@col>`) => `${open}\n  <Red>${red}</>\n  <Blue><span>blue</span></>\n</match>\n`;
+const mBtn = (h = MH) => `<button id="b" ${h}>b</button>`;
+const MATCH = [
+  ["<match> arm, one-line if/else (the reviewer repro)", MC + mArm(mBtn()) + TOG + P, ["5", "9"]],
+  ["<match> arm, onclick=${…}", MC + mArm(mBtn(`onclick=\${ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`)) + TOG + P, ["5", "9"]],
+  ["<match for=Col on=@col>", MC + mArm(mBtn(), `<match for=Col on=@col>`) + TOG + P, ["5", "9"]],
+  ["<match> arm, button in <div><section>", MC + mArm(`<div><section>${mBtn()}</section></div>`) + TOG + P, ["5", "9"]],
+  ["<match> arm, braceless", MC + mArm(mBtn(`onclick={ if (@c) @o.a.b = 5 else @o.a.b = 9 }`)) + TOG + P, ["5", "9"]],
+  ["<match> arm, multi-line (base failed too)", MC + mArm(mBtn(`onclick={\n    if (@c) {\n      @o.a.b = 5\n    } else {\n      @o.a.b = 9\n    }\n  }`)) + TOG + P, ["5", "9"]],
+  ["<match> arm, `;`-sequence (base failed too)", MC + `<r> = "-"\n` + mArm(mBtn(`onclick={ @r = "s"; @o.a.b = 5 }`)) + TOG + `<p id="o">\${@o.a.b}\${@r}</p>\n`, ["5s", "5s"]],
+  ["<match> arm, @xs[0] = 7", `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n<c> = true\n<xs> = [1, 2]\n` + mArm(mBtn(`onclick={ if (@c) { @xs[0] = 7 } else { @xs[0] = 4 } }`)) + TOG + `<p id="o">\${@xs[0]}</p>\n`, ["7", "4"]],
+  ["<match> `:` shorthand arm", MC + `<match on=@col>\n  <Red> : ${mBtn()}\n  <Blue> : <span>blue</span>\n</match>\n` + TOG + P, ["5", "9"]],
+  ["<match> arm that also holds an <each>", MC + `<rows> = [1]\n` + mArm(`<ul><each in=@rows as r><li>\${r}</li></each></ul>${mBtn()}`) + TOG + P, ["5", "9"]],
+  ["<match> in a component", MC + `const Panel = <div>\n${mArm(mBtn())}</div>\n<Panel/>\n` + TOG + P, ["5", "9"]],
+  ["<match> in an <engine> state arm", `type Phase:enum = { Idle, Active }\n` + MC + `<program>\n<engine for=Phase initial=.Active>\n  <Idle rule=.Active><p>idle</p></>\n  <Active rule=.Idle>${mArm(mBtn())}</>\n</>\n` + TOG + P + `</program>\n`, ["5", "9"]],
+  // (A `<match>` nested inside a `<match>` arm never renders its inner arm — on origin/main
+  // too, Chromium-verified; filed g-match-nested-in-match-arm-inner-arm-never-renders-s465.
+  // Its helper shipping is pinned in the unit guard.)
+];
+
+describe("S462 r3 F1 — `<match>` arm handlers ship their runtime helpers (executed)", () => {
+  for (const [label, src, want] of MATCH) {
+    test(label, async () => {
+      const { errors } = compileAndMount(src, "m");
+      expect(errors).toEqual([]);
+      const { out, seen } = await bothArms();
+      expect(seen).toEqual([]);
+      expect(out).toEqual(want);
+    });
+  }
+
+  const ENG = `<program>\n\${\n  type Ph:enum = { Idle, Busy }\n  type Msg:enum = { Go, Stop }\n}\n` + O;
+  test("engine (state × message) arm body writing a nested path", async () => {
+    const src = ENG + `<engine for=Ph initial=.Idle accepts=Msg>\n  <Idle rule=.Busy>\n    | .Go :> { @o.a.b = 5; .Busy }\n    | _ :> @ph\n    <p id="st">idle</p>\n  </>\n  <Busy rule=.Idle>\n    | .Stop :> .Idle\n    | _ :> @ph\n    <p id="st">busy</p>\n  </>\n</>\n<button id="b" onclick=@ph.advance(.Go)>b</button>\n` + P + `</program>\n`;
+    const { errors } = compileAndMount(src, "msg");
+    expect(errors).toEqual([]);
+    const seen = [];
+    const origConsoleError = console.error;
+    console.error = (...a) => { seen.push(a.map(String).join(" ")); };
+    try {
+      await flush();
+      expect(text("#o")).toBe("1");
+      document.querySelector("#b").click(); await flush();
+    } finally { console.error = origConsoleError; }
+    expect(seen).toEqual([]);
+    expect(text("#o")).toBe("5");
+  });
+
+  test("engine opener effect= writing a nested path runs at boot", async () => {
+    const seen = [];
+    const origConsoleError = console.error;
+    console.error = (...a) => { seen.push(a.map(String).join(" ")); };
+    let errors;
+    try {
+      ({ errors } = compileAndMount(ENG + `<engine for=Ph initial=.Idle effect=\${\n    @o.a.b = 5\n}>\n  <Idle rule=.Busy><p>idle</p></>\n  <Busy rule=.Idle><p>busy</p></>\n</>\n` + P + `</program>\n`, "eff"));
+      await flush();
+    } finally { console.error = origConsoleError; }
+    expect(errors).toEqual([]);
+    expect(seen).toEqual([]);
+    expect(text("#o")).toBe("5");
+  });
+});
+
 const EN = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
 const ENP = TOG + `<p id="o">\${@col}</p>\n`;
 

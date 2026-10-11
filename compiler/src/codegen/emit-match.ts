@@ -1092,6 +1092,27 @@ function buildMatchArms(
   return arms;
 }
 
+/**
+ * s462 r3 — the lowered arm bodies of a `<match>` block, EXACTLY the node lists
+ * codegen emits (the memoized `buildMatchArms` result — same object refs the
+ * HTML-mount pass and the client-render pass consume).
+ *
+ * A match body is a structural raw-body element: at TAB it is `armsRaw` text,
+ * and its arm bodies only become AST here, at CG time. `detectRuntimeChunks`
+ * (emit-client.ts) must walk these bodies like any other markup — before this
+ * it text-probed `armsRaw` for `<each` and never saw an arm's event-handler
+ * statement lists, so `onclick={ if (@c) { @o.a.b = 5 } … }` in an arm emitted
+ * `_scrml_deep_set(...)` against a runtime that pruned the `utilities` chunk
+ * (ReferenceError per click). Calling this before the render passes is safe:
+ * the result is cached on the node, so every later caller sees the same arms
+ * and the same each-block ids.
+ */
+export function matchBlockArmBodies(matchBlock: MatchBlockAstNode, fileAST: any): any[][] {
+  const arms = buildMatchArms(matchBlock, fileAST);
+  if (!arms) return [];
+  return arms.map((a) => (Array.isArray(a.body) ? a.body : []));
+}
+
 // ---------------------------------------------------------------------------
 // each-in-block-form-match (S153) — id re-stamping for arm-body each-blocks
 // ---------------------------------------------------------------------------

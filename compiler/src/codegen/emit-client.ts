@@ -1977,6 +1977,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         // `node --check`-clean: the call sites are syntactically valid, the gap
         // is purely tree-shaking). Recurse so those nested shapes gate correctly.
         if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
+        // s462 r3 — the opener `effect=` body and every `(state × message)` arm
+        // body are RAW TEXT until emit-engine re-parses them at emit time, so
+        // neither is reachable through `bodyChildren`. Walk the same parse the
+        // emitters lower from (a `@o.a.b = 5` in one emits `_scrml_deep_set`).
+        if (engineMeta) {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { engineDeferredStatementBodies } = require("./emit-engine.ts") as {
+            engineDeferredStatementBodies: typeof import("./emit-engine.ts").engineDeferredStatementBodies;
+          };
+          for (const stmts of engineDeferredStatementBodies(engineMeta)) walkBody(stmts);
+        }
         break;
       }
 
@@ -1995,16 +2006,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // actually contain an each. Both chunks are unconditional once an each is
       // present (every non-empty each emits the `_scrml_reconcile_list` call +
       // the `_scrml_effect_static` registration), mirroring the each-block case.
+      //
+      // s462 r3 — the arm bodies are now WALKED, not text-probed. The probe saw
+      // only `<each`; an arm's event-handler statement lists (if/else, braceless,
+      // multi-line, `;`-sequence, `onclick=${…}`) were invisible, so a
+      // `reactive-nested-assign` in an arm handler emitted `_scrml_deep_set(...)`
+      // with the `utilities` chunk pruned → ReferenceError per click.
+      // `matchBlockArmBodies` returns the memoized `buildMatchArms` result — the
+      // exact node lists codegen emits (each-bearing arms included: their
+      // `each-block` nodes reach `case "each-block"` above, which adds
+      // `reconciliation` + `deep_reactive`). Every arm-body shape now gates its
+      // chunks exactly as the same markup at file level does.
       case "match-block": {
         addIfMountChunkForStructural(node);
-        const armsRaw = (node as any).armsRaw;
-        if (typeof armsRaw === "string" && /<\s*each\b/.test(armsRaw)) {
-          chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_remount_each + _scrml_each_renderers
-          chunks.add("deep_reactive");  // _scrml_effect_static
-        }
-        // Defensive: if buildMatchArms already attached the lifted each-blocks
-        // to bodyChildren (re-run ordering), descend so any OTHER chunk-
-        // requiring shape inside them gates too.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { matchBlockArmBodies } = require("./emit-match.ts") as {
+          matchBlockArmBodies: typeof import("./emit-match.ts").matchBlockArmBodies;
+        };
+        for (const armBody of matchBlockArmBodies(node as any, fileAST)) walkNodes(armBody);
+        // buildMatchArms attaches the lifted arm each-blocks to bodyChildren;
+        // they are the same refs as above (visitedChunkNodes dedups).
         if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
         break;
       }

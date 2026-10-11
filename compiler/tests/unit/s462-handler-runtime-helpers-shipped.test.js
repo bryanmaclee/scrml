@@ -101,6 +101,59 @@ export const FIXTURES = [
   ["h-delete", D + `<button id="b" onclick={ if (@c) { delete @o.a } else { @o = { a: 4 } } }>b</button>\n` + TOG + OUT],
 ];
 
+// Review round 3 (S465), finding 1 — the same handlers inside a `<match>` block arm. An arm
+// body is `armsRaw` TEXT at TAB and only becomes AST in emit-match `buildMatchArms`, so the
+// chunk walk (which text-probed `armsRaw` for `<each` and nothing else) never saw an arm's
+// handler statement lists. Fixed by walking the lowered arm bodies (`matchBlockArmBodies`).
+const MC = `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n<c> = true\n<o> = { a: { b: 1 } }\n`;
+const MH = `onclick={ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`;
+const mArm = (red, open = `<match on=@col>`) => `${open}\n  <Red>${red}</>\n  <Blue><span>blue</span></>\n</match>\n`;
+const mBtn = (h = MH) => `<button id="b" ${h}>b</button>`;
+export const MATCH_FIXTURES = [
+  ["m-oneline", MC + mArm(mBtn()) + TOG + P],
+  ["m-dollar", MC + mArm(mBtn(`onclick=\${ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`)) + TOG + P],
+  ["m-for-on", MC + mArm(mBtn(), `<match for=Col on=@col>`) + TOG + P],
+  ["m-nested-div-section", MC + mArm(`<div><section>${mBtn()}</section></div>`) + TOG + P],
+  ["m-braceless", MC + mArm(mBtn(`onclick={ if (@c) @o.a.b = 5 else @o.a.b = 9 }`)) + TOG + P],
+  ["m-multiline", MC + mArm(mBtn(`onclick={\n    if (@c) {\n      @o.a.b = 5\n    } else {\n      @o.a.b = 9\n    }\n  }`)) + TOG + P],
+  ["m-semiseq", MC + `<r> = "-"\n` + mArm(mBtn(`onclick={ @r = "s"; @o.a.b = 5 }`)) + TOG + P],
+  ["m-index", `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n<c> = true\n<xs> = [1, 2]\n` + mArm(mBtn(`onclick={ if (@c) { @xs[0] = 7 } else { @xs[0] = 4 } }`)) + TOG + `<p id="o">\${@xs[0]}</p>\n`],
+  ["m-shorthand-arm", MC + `<match on=@col>\n  <Red> : ${mBtn()}\n  <Blue> : <span>blue</span>\n</match>\n` + TOG + P],
+  ["m-each-bearing-arm", MC + `<rows> = [1]\n` + mArm(`<ul><each in=@rows as r><li>\${r}</li></each></ul>${mBtn()}`) + TOG + P],
+  ["m-in-component", MC + `const Panel = <div>\n${mArm(mBtn())}</div>\n<Panel/>\n` + TOG + P],
+  ["m-in-engine-arm", `type Phase:enum = { Idle, Active }\n` + MC + `<program>\n<engine for=Phase initial=.Active>\n  <Idle rule=.Active><p>idle</p></>\n  <Active rule=.Idle>${mArm(mBtn())}</>\n</>\n` + TOG + P + `</program>\n`],
+  ["m-match-in-match", MC + `<match on=@col>\n  <Red>${mArm(mBtn())}</>\n  <Blue><span>blue</span></>\n</match>\n` + TOG + P],
+];
+
+// Round 3 sweep — the OTHER bodies that are raw text until emit time and are re-parsed to
+// statement ASTs there (emit-engine `parseEngineSynthLogicBody`): an engine `(state ×
+// message)` arm body and the opener `effect=` body. Both dangled `_scrml_deep_set` on base.
+// (The remaining emit-time re-parses — `!{}` arm handlers incl. nested, engine `:` shorthand
+// arms, match-statement arms, `parseExprToNode` expression re-parses — emit no chunk helper
+// the walk misses; pinned here so a future lowering change cannot regress silently.)
+const ENG = `<program>\n\${\n  type Ph:enum = { Idle, Busy }\n  type Msg:enum = { Go, Stop }\n}\n` + O;
+const ERRF = `\${\n  type LoadError:enum = { Bad }\n  function risky() ! LoadError { fail LoadError.Bad }\n}\n`;
+export const DEFERRED_BODY_FIXTURES = [
+  ["engine-message-arm", ENG + `<engine for=Ph initial=.Idle accepts=Msg>\n  <Idle rule=.Busy>\n    | .Go :> { @o.a.b = 5; .Busy }\n    | _ :> @ph\n    <p>idle</p>\n  </>\n  <Busy rule=.Idle>\n    | .Stop :> .Idle\n    | _ :> @ph\n    <p>busy</p>\n  </>\n</>\n<button id="b" onclick=@ph.advance(.Go)>b</button>\n` + P + `</program>\n`],
+  ["engine-opener-effect", ENG + `<engine for=Ph initial=.Idle effect=\${\n    @o.a.b = 5\n}>\n  <Idle rule=.Busy><p>idle</p></>\n  <Busy rule=.Idle><p>busy</p></>\n</>\n` + P + `</program>\n`],
+  ["engine-shorthand-arm", ENG + `<engine for=Ph initial=.Idle>\n  <Idle rule=.Busy> : ${mBtn()}\n  <Busy rule=.Idle><p>busy</p></>\n</>\n` + TOG + P + `</program>\n`],
+  ["guard-arm-fn", O + ERRF + `\${ function go() { const r = risky() !{ | e :> { @o.a.b = 5 } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
+  ["guard-arm-nested", O + ERRF + `\${ function go() { const r = risky() !{ | e :> { const q = risky() !{ | f :> { @o.a.b = 7 } } } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
+  ["guard-arm-handler", O + ERRF + `<button id="b" onclick={ const r = risky() !{ | e :> { @o.a.b = 5 } } }>b</button>\n` + P],
+  ["match-stmt-arms", MC + `\${ function go() { match @col { .Red :> { @o.a.b = 5 } .Blue :> { @o.a.b = 9 } } } }\n<button id="b" onclick=go()>b</button>\n` + P],
+];
+
+describe("S462 r3 — `<match>` arm handlers and emit-time-parsed bodies ship their helpers", () => {
+  for (const [name, src] of [...MATCH_FIXTURES, ...DEFERRED_BODY_FIXTURES]) {
+    test(name, () => {
+      const { errors, files } = build(src, name);
+      expect(errors).toEqual([]);
+      expect(Object.keys(files).some((f) => f.endsWith(".client.js"))).toBe(true);
+      expect(undefinedHelperCalls(files)).toEqual([]);
+    });
+  }
+});
+
 describe("S462 r2 — every runtime helper an if/else handler calls is shipped", () => {
   for (const [name, src] of FIXTURES) {
     test(name, () => {
