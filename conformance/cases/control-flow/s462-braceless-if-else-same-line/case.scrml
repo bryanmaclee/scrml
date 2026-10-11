@@ -1,9 +1,9 @@
 <r> = ""
 ${
-    function pick(c) {
-        const a = []
-        if (c) a.push("yes") else a.push("no")
-        return a.join(",")
+    function pick(c: boolean) {
+        let s = ""
+        if (c) s = "yes" else s = "no"
+        return s
     }
     function go() {
         if (@r == "") @r = pick(false) else @r = "ran-twice"
