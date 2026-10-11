@@ -213,6 +213,14 @@ export class CPSSplit {
   monotonicity?: MonotonicityVerdict;
 
   /**
+   * S465 (§19.9.9.8 rule 4) — locals declared before the function's first server
+   * statement that its server work reads: client data, sent with every batch
+   * request after the function's parameters (`CPSResult.carriedLocals`).
+   * Consumed by emit-functions.ts (stub args) and emit-server.ts (handler binds).
+   */
+  carriedLocals: string[] = [];
+
+  /**
    * Construct a CPS split plan.
    *
    * @param serverBatches      server batches in source order. At M1.1 callers
@@ -429,7 +437,16 @@ interface CPSResult {
    * server (they read / sit between server-originated values) but which need the
    * browser. Each is an E-RI-002 at the call site in runRI.
    */
-  placementRefusals?: Array<{ index: number; value: string; why: string }>;
+  placementRefusals?: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local"; fix?: string }>;
+  /**
+   * S465 (§19.9.9.8 rule 4) — locals declared by statements BEFORE the function's
+   * first server statement that a server statement reads. Those statements stay
+   * in the browser (the spinner / optimistic-update shape); their values are
+   * CLIENT data, sent with the batch request exactly like the function's own
+   * parameters (they follow the parameters in the stub's argument list and are
+   * bound from `_scrml_body` in the batch handler). Source order.
+   */
+  carriedLocals?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -3243,7 +3260,16 @@ export function analyzeCPSEligibility(
   // never relocated and never fed a client-carried server value. Statements
   // BEFORE the first server statement are never pulled by (a) / (c), so the
   // spinner (`@busy = true` ahead of the query) still renders before the request.
-  const placementRefusals: Array<{ index: number; value: string; why: string }> = [];
+  const placementRefusals: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local"; fix?: string }> = [];
+  // S465 — §19.9.9.8 rule 4: "Statements before the function's first server
+  // statement are never moved". The first server statement is fixed by the
+  // tiering above; no pull below can create an earlier one (every pull reads a
+  // value an EARLIER server statement produced, or sits after one), so this bound
+  // holds through the fixpoint. A pre-first statement's local that server work
+  // reads is CLIENT data: it is carried into the request (`carriedLocals`), never
+  // pulled.
+  const _initialServer = [...serverIndices, ...reactiveServerIndices, ...mixedIndices];
+  const firstServer = _initialServer.length > 0 ? Math.min(..._initialServer) : body.length;
   const refusedIdx = new Set<number>();
   const serverFnNames = new Set<string>();
   for (const [name, entries] of functionIndex) {
@@ -3337,15 +3363,69 @@ export function analyzeCPSEligibility(
           changed = tryPull(k, value, `it sits between the server work that produces \`${value}\` and the server work that uses it (the value would have to cross the browser to reach the second request)`) || changed;
         }
       }
-      // A client-declared local the server statement reads moves to the server with it.
-      for (let k = 0; k < i; k++) {
+      // A client-declared local the server statement reads moves to the server with
+      // it — unless the declaring statement precedes the first server statement
+      // (rule 4): it then stays in the browser and the local is carried into the
+      // request as client data (see `carriedLocals` below).
+      for (let k = firstServer; k < i; k++) {
         if (isServerIdx(k)) continue;
         const declared = topLevelDeclaredLocals(body[k]);
         const used = declared.find((n) => statementReadsAnyLocal(stmt, new Set([n])));
-        if (used !== undefined) changed = tryPull(k, used, `the server half reads the local \`${used}\` it declares`) || changed;
+        if (used === undefined) continue;
+        const _before = placementRefusals.length;
+        changed = tryPull(
+          k, used,
+          `the server half reads the local \`${used}\` it declares, and this statement runs after the function's server work has begun, so \`${used}\` cannot travel with that request`,
+        ) || changed;
+        for (let r = _before; r < placementRefusals.length; r++) {
+          placementRefusals[r].kind = "client-local";
+          placementRefusals[r].fix = `compute \`${used}\` before the function's first server statement (it is then sent with the request), or pass it in as a parameter`;
+        }
       }
     }
   }
+  // S465 — §19.9.9.8 rule 4: the locals a pre-first-server statement declares
+  // that server work reads travel WITH the request, as client data. Two shapes
+  // cannot be carried and are refused (E-RI-002) instead of moving the statement:
+  // a nested `function` (not a value a request can carry), and a local a server
+  // statement REASSIGNS (the browser keeps its own copy, which would silently
+  // diverge from the server's).
+  const carriedLocals: string[] = [];
+  for (let k = 0; k < firstServer && k < body.length; k++) {
+    if (isServerIdx(k) || refusedIdx.has(k)) continue;
+    const kStmt = (handledSqlGuardInner(body[k]) ?? body[k]) as any;
+    for (const n of topLevelDeclaredLocals(body[k])) {
+      let readAt = -1;
+      for (let i = firstServer; i < body.length; i++) {
+        if (isServerIdx(i) && statementReadsAnyLocal(body[i], new Set([n]))) { readAt = i; break; }
+      }
+      if (readAt < 0) continue;
+      if (kStmt && kStmt.kind === "function-decl") {
+        refusedIdx.add(k);
+        placementRefusals.push({
+          index: k, value: n, kind: "client-local",
+          why: `the server half calls the function \`${n}\` this statement declares, and a function cannot be sent with the request`,
+          fix: `declare \`${n}\` at file level, where the server half can call it too`,
+        });
+        continue;
+      }
+      let assignedAt = -1;
+      for (let i = firstServer; i < body.length; i++) {
+        if (isServerIdx(i) && statementAssignsLocal(body[i], n)) { assignedAt = i; break; }
+      }
+      if (assignedAt >= 0) {
+        refusedIdx.add(k);
+        placementRefusals.push({
+          index: k, value: n, kind: "client-local",
+          why: `the server half reassigns the local \`${n}\` this statement declares, so the browser's copy and the server's would diverge`,
+          fix: `give the server's value its own name (\`const ${n}2 = …\`) instead of reassigning \`${n}\``,
+        });
+        continue;
+      }
+      if (!carriedLocals.includes(n)) carriedLocals.push(n);
+    }
+  }
+
   // (d) DERIVED THROUGH THE BROWSER. A statement that stays in the browser (it
   // needs the client) yet reads a server-originated value makes everything it
   // writes or declares server-originated too: `@x = localStorage.getItem(@row.role)`
@@ -3462,7 +3542,38 @@ export function analyzeCPSEligibility(
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
     placementRefusals,
+    carriedLocals,
   };
+}
+
+/**
+ * S465 — does `stmt` ASSIGN the plain local `name` anywhere (`name = …`,
+ * `name += …`, `name++`, `name.f = …`, `name[k] = …`)? Over-approximates (raw
+ * expression text is scanned too): a write that may happen counts.
+ */
+function statementAssignsLocal(stmt: unknown, name: string): boolean {
+  const seen = new WeakSet<object>();
+  const rootIs = (t: any): boolean => {
+    let cur = t;
+    while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+    return !!cur && cur.kind === "ident" && cur.name === name;
+  };
+  const textRe = new RegExp(`(?<![\\w$.@])${escapeRegex(name)}(?:\\s*(?:\\.[\\w$]+|\\[[^\\]]*\\]))*\\s*(?:\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\||[-+*/%&|^])?=(?!=)|(?<![\\w$.@])${escapeRegex(name)}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${escapeRegex(name)}(?![\\w$])`);
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "assign" && rootIs(o.target)) return true;
+    // A bare `name = …` statement parses as a declaration flagged `_bareAssign`.
+    if (o._bareAssign === true && o.name === name) return true;
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && rootIs(o.argument)) return true;
+    if (o.kind === "update" && rootIs(o.argument)) return true;
+    if (o.kind === "bare-expr" && typeof o.expr === "string" && textRe.test(o.expr)) return true;
+    for (const k of Object.keys(o)) if (k !== "span" && walk(o[k])) return true;
+    return false;
+  };
+  return walk(stmt);
 }
 
 /**
@@ -7197,6 +7308,20 @@ export function runRI(input: RIInput): RIOutput {
           for (const _r of cpsResult?.placementRefusals ?? []) {
             const _fnName = record.fnNode.name ?? "<anonymous>";
             const _node = body[_r.index] as any;
+            if (_r.kind === "client-local") {
+              // S465 — the value is BROWSER data that cannot reach the request; it is
+              // not a server value crossing to the client, so it is not described as one.
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and its ` +
+                `server half needs \`${_r.value}\` from this statement — ${_r.why}. A browser value reaches ` +
+                `the server only as part of the request (like a parameter), and statements before the ` +
+                `function's first server statement stay in the browser (§19.9.9.8 rule 4), so the compiler ` +
+                `refuses instead of moving this statement. Fix: ${_r.fix ?? "pass the value in as a parameter"}.`,
+                (_node && _node.span) ?? record.fnNode.span,
+              ));
+              continue;
+            }
             errors.push(new RIError(
               "E-RI-002",
               `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
@@ -7271,6 +7396,7 @@ export function runRI(input: RIInput): RIOutput {
               cpsResult.clientStmtIndices,
               cpsResult.returnVarName,
             );
+            cpsSplit.carriedLocals = [...(cpsResult.carriedLocals ?? [])];
 
             // Ext 1 M1.3: run the multi-batch planner over the body-DG. The
             // planner topologically schedules the statement-grain DG (M1.2),

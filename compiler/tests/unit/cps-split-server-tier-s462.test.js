@@ -245,12 +245,27 @@ ${cells}${fn}
     expect(splitOf(r).serverStmtIndices).toEqual([0, 1, 2]);
   });
 
-  test("a client local the server reads moves to the server with it", () => {
+  // S465 — §19.9.9.8 rule 4: "Statements before the function's first server
+  // statement are never moved". The local is CLIENT data: it stays in the browser
+  // and travels with the request (`carriedLocals`), like a parameter. (Before S465
+  // this test pinned the statement moving to the server.)
+  test("a client local declared BEFORE the first server statement stays client and is carried", () => {
     const split = splitOf(ri(prog(`function f(id: number) {
   const y = @n + 1
   @rows = ?{\`SELECT name FROM users WHERE rowid = \${y}\`}.all()
 }`)));
-    expect(split.serverStmtIndices).toEqual([0, 1]);
+    expect(split.serverStmtIndices).toEqual([1]);
+    expect(split.carriedLocals).toEqual(["y"]);
+  });
+
+  test("a client local declared AFTER the first server statement moves to the server with its reader", () => {
+    const split = splitOf(ri(prog(`function f(id: number) {
+  @rows = ?{\`SELECT name FROM users\`}.all()
+  const y = id + 1
+  ?{\`DELETE FROM users WHERE rowid = \${y}\`}.run()
+}`)));
+    expect(split.serverStmtIndices).toEqual([0, 1, 2]);
+    expect(split.carriedLocals).toEqual([]);
   });
 });
 

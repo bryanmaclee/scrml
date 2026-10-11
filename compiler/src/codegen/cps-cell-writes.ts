@@ -336,3 +336,14 @@ export function cpsCellsApplyLines(resultVar: string, cells: string[], indent: s
   }
   return out;
 }
+
+/**
+ * S465 (§19.9.9.8 rule 4) — the locals a CPS split carries from the statements
+ * before its first server statement into the batch request (route-inference
+ * `carriedLocals`). They follow the function's parameters in every stub's
+ * argument list and are bound from `_scrml_body` in the batch handler.
+ */
+export function cpsCarriedLocals(cpsSplit: unknown): string[] {
+  const c = (cpsSplit as { carriedLocals?: unknown } | null | undefined)?.carriedLocals;
+  return Array.isArray(c) ? c.filter((n): n is string => typeof n === "string" && n.length > 0) : [];
+}

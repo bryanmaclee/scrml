@@ -15,7 +15,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
-import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell } from "./cps-cell-writes.ts";
+import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -4859,7 +4859,9 @@ function generateServerJsImpl(
       // batch's forwarded result. The handler destructures all of them from
       // `_scrml_body` identically — the wrapper (emit-functions.ts) places the
       // forwarded results into the request body.
-      const paramNames: string[] = [...fnParamNames, ..._batch.fwdResultNames];
+      // S465 (§19.9.9.8 rule 4) — then the locals the client computed before the
+      // function's first server statement (client data, sent like parameters).
+      const paramNames: string[] = [...fnParamNames, ...cpsCarriedLocals(_cpsSplit), ..._batch.fwdResultNames];
 
       // The CPS-split view this batch's handler runs over. For the single-
       // handler case it is the route's own cpsSplit (or `null` for a non-CPS

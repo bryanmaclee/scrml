@@ -177,3 +177,32 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   the server batch (route test: wrong → `__scrml_cells.seen` REJECTED, right → "WELCOME bob", no `$argon2` in
   the response). On d5910316d 9/17 of the S465 tests FAIL. Gate on the merge tree: 33023 tests, 10 fail — the
   environmental/flake set recorded on the await branch (dev ×5, bind-host, read-only-as-root, tenant ×3 load).
+- FINDING 2 (o1) REPRODUCED on d5910316d: `const n = @clicks + 1; @clicks = n; ?{INSERT … ${n}}.run()` — both
+  earlier statements in the server batch (`const n = _scrml_cell_clicks + 1; _scrml_cell_clicks = n`), the
+  client only applies `__scrml_cells.clicks` after the response. Root: analyzeCPSEligibility's "a client-declared
+  local the server statement reads moves to the server with it" pulled from k = 0, ignoring rule 4 ("Statements
+  before the function's first server statement are never moved"); the pull of `const n` then made `@clicks = n`
+  a reader of a server local (rule 1 pull).
+  FIX: `firstServer` (fixed by the initial tiering; no later pull can precede it) bounds that pull; a pre-first
+  local read by server work is CLIENT data → `CPSResult.carriedLocals` / `CPSSplit.carriedLocals`, sent after the
+  function's params in every stub's argument list (emit-functions: stub signature + body, single and multi-batch
+  wrapper calls) and bound `const <n> = _scrml_body["<n>"]` in the batch handler (emit-server paramNames).
+  Shapes that cannot be carried are REFUSED (E-RI-002, kind "client-local"), never moved:
+  (i) a nested `function` declared pre-first that server work calls (a function is not request data);
+  (ii) a pre-first local the server half REASSIGNS (`let n = 1 … n = ?{…}` — the copies would diverge).
+  A browser-only local declared AFTER the first server statement and read by later server work stays refused (it
+  cannot join the request already in flight) — now with the accurate message.
+- FINDING 3 (d1): compiles clean now (statement stays client, `draft` carried). The client-local refusals get
+  their own E-RI-002 text ("A browser value reaches the server only as part of the request … statements before
+  the function's first server statement stay in the browser (§19.9.9.8 rule 4)") with a per-shape Fix — never
+  the server-value "sending `x` to the browser and trusting …" text.
+- Tests: integration/s465-cps-pre-first-stays-client.test.js (9; d5910316d: 8 FAIL) — o1 executed in happy-dom
+  with the request held open (`@clicks` shows 1 DURING the request, request carries n = 1) + route stores the
+  carried value; d1 spinner shows during the request, request carries localStorage draft, route stores it; the
+  three refusal shapes with message assertions. unit/cps-split-server-tier-s462: the test that pinned the
+  rule-4-violating pull is retargeted (pre-first local stays client + carried) and a post-first pull test added.
+- NOT CHANGED (per brief): control-dependence g1/g4 (§19.9.9.8 rule 3 last sentence — owner's call); a1/g5
+  fail-closed 500s — KNOWN LOW, left as they are. No SPEC edit: rule 4 is implemented as written; how a
+  pre-first value reaches the server (as request data, like a parameter) and the two refused shapes are
+  implementation consequences the owner may want stated in §19.9.9.8.
+- Gate (rule-4 tree): 33033 tests, 11 fail — the recorded env/flake set + validate-emit-gate trucking-dispatch (35 s timeout under load; passes alone, 3/0).

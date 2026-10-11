@@ -4,7 +4,7 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
-import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell } from "./cps-cell-writes.ts";
+import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
@@ -430,7 +430,7 @@ function emitMultiBatchWrapper(opts: {
       // Call args: original fn params, then each prior batch's return cell
       // (cross-batch parameter forwarding — M1.3). The prior cells are bound
       // as `const`s after their batch's await, below.
-      const callArgs = [...fnParamNames, ...plan.fwdResultNames].join(", ");
+      const callArgs = [...fnParamNames, ...cpsCarriedLocals(cpsSplit), ...plan.fwdResultNames].join(", ");
 
       lines.push(`    // Ext 1 M1.5: CPS batch ${owningBatch}`);
       lines.push(`    let ${resultVar};`);
@@ -1051,8 +1051,10 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const _batchStubNames: string[] = [];
 
     for (const _sb of _stubBatches) {
-    // Batch-i's param list: original fn params, then prior batch return cells.
-    const paramNames = [...fnParamNames, ..._sb.fwdResultNames];
+    // Batch-i's param list: original fn params, then the locals carried from the
+    // statements before the first server statement (S465, §19.9.9.8 rule 4 — client
+    // data, sent like a parameter), then prior batch return cells.
+    const paramNames = [...fnParamNames, ...cpsCarriedLocals(_cps), ..._sb.fwdResultNames];
     // The route path this stub fetches. Single-stub → the route's own path;
     // multi-batch → the per-batch path emitted by emit-server.ts.
     const batchPath = _isMultiStub ? `${path}__batch_${_sb.batchIndex}` : path;
@@ -1363,7 +1365,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           if (cpsSplit.returnVarName) {
             // The reactive assignment that receives the server result will reference
             // this variable. Emit: const _result = await serverStub(args);
-            lines.push(`    const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    const _scrml_server_result = await ${stubName}(${[...paramNames, ...cpsCarriedLocals(cpsSplit)].join(", ")});`);
             // A9-Ext-4 D1: detect server-serialized error shape (per §19.9.1)
             // and propagate as-is. The server endpoint (emit-server.ts D1 site)
             // wraps thrown exceptions in this tagged shape with status 500.
@@ -1371,7 +1373,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
             lines.push(`      return _scrml_server_result;`);
             lines.push(`    }`);
           } else {
-            lines.push(`    await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    await ${stubName}(${[...paramNames, ...cpsCarriedLocals(cpsSplit)].join(", ")});`);
           }
           serverCallEmitted = true;
         }
