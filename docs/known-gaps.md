@@ -31,10 +31,16 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 597 | 6 |
+| MED | 598 | 6 |
 | LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-server-match-arm-same-file-peer-call-not-defined-s465 — a same-file server fn called from another server fn's `match` arm body throws `ReferenceError: <peer> is not defined` at run time: the call is lowered (`await peer(…)`) but no in-process peer callable is emitted for it — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-server-match-arm-same-file-peer-call-not-defined-s465 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(peer-callable registration ~:4000 / "some server-fn body actually calls" harvest does not see a match-arm body carried as text) prov=review:s465-await -->
+
+Reproduced on f8309fd6 and on the s465 fix-round-1 head (reviewer probe c3, `mPeer`): in `function mPeer(name, pass) { … match (k) { "a" :> { if (peer(pass, row.pw)) { r = "WELCOME" } } … } }`, where `peer` is a same-file server fn, the route answers 500 with `ReferenceError: peer is not defined`. Since fix round 1 the arm body is emitted from its parsed tree, so the call site reads `await peer(pass, row.pw)`, but the server bundle defines only `_scrml_handler_peer_1` (the Request→Response wrapper) and no `async function peer(…)` peer callable: the registration of peers "that some server-fn body actually calls" walks the fn body's structured nodes, and a literal-arm `{ … }` body reaches that walk as raw text. Fails loud (500, no silent accept), so MED. Fix direction: harvest callees from the same parsed arm statements codegen now emits (`codegen/arm-structure.ts`).
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
