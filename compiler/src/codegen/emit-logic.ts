@@ -634,6 +634,8 @@ interface LogicArm {
   // (`{ fail EnumType::Variant(args) }`). When present, emitArmBody lowers it
   // via the shared fail-expr emitter (`return { __scrml_error, ... }`).
   failExpr?: FailExprLike;
+  /** The handler body's parsed expression, when the builder produced one. */
+  handlerExpr?: ExprNode | null;
 }
 
 /** Shape of the fail-expr node (subset emitFailExpr reads). */
