@@ -4,7 +4,7 @@
 
 ## ⏭ NEXT-SESSION PICKUP (ordered)
 
-### 0. In flight at wrap — each anchored by a LOCAL branch on the ASUS + progress.md (resume via SendMessage-by-name in a new session is not possible; re-dispatch a fresh agent pointing at the branch). Branches are also pushed to origin as `wip/s462-*` (see Worktrees below).
+### 0. In flight at wrap — each anchored by a LOCAL branch on the ASUS + progress.md (resume via SendMessage-by-name in a new session is not possible; re-dispatch a fresh agent pointing at the branch). Backups: `wip/s462-{p0-sql-chain,braceless-else,markup-text-not-code,md-phase2}` on origin. The two P0 CPS branches were refused by the pre-push hook (a test mid-round), so they are saved as patches in `scrml-support/handOffs/s462-wip-patches/` (README there).
 | work | branch (local + `wip/` copy) | state at wrap |
 |---|---|---|
 | **P0 CPS: server logic + password hash on the client** — H1 helper-call bypass · H2 derived-local leak · H3 cross-batch forged trust (a forged `role` ran a DELETE) · H4 silent login break · M1 crypto browser-safe chunk | `worktree-agent-a06a11ac003248013` (round 1, resumed after a context-overflow crash; base work `worktree-agent-aaf433dac5f8224df` a466175f9; WIP patch `scratchpad/cps-round1-wip.patch`) | fix round 1 running. Review verdict on 533609165: FIX (H1–H4). **Do not land without re-review.** |
