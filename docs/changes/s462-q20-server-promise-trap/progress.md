@@ -18,3 +18,15 @@
   1 real server-file change (samples/compilation-tests/protect-001-basic-auth.server.js — helper +
   `if (!_scrml_assert_settled(verifyHash(...)))`); 164 artifact + 107 diagnostic diffs are the base
   checkout path only (verified by normalization); 0 compile-outcome / syntax / load-context changes.
+- [x] Review follow-up (S239 review of c78e325b4 → LAND, docs/gap round):
+  - SPEC §13.2 limit widened: comparisons, coercion calls, assignment-in-condition, member reads,
+    block-bodied arrows, library-mode modules, non-headless tool main are named OUTSIDE the trap.
+  - CPS envelope: the helper now throws `Error("Internal Server Error", { cause: <reason> })`, so a
+    non-protect CPS 500 envelope (which sends `err.message`) carries only the fixed text; SPEC says so.
+  - known-gaps: g-server-block-arrow-body-raw-tokens-bypass-trap-s462 (MED),
+    g-cstyle-for-condition-drops-string-quotes-s462 (MED, pre-existing) — both reproduced.
+  - CORRECTION to the corpus claim above: 3 real server-output changes, not 1. The CLI differential
+    saw only protect-001 because the other two FAIL to compile (no artifacts written):
+    stdlib/compiler/module-resolver.scrml (`if (_scrml_assert_settled(existsSync(dirPath)))` ×2) and
+    conformance/cases/auth/auth-async-stdlib-sync-callback-neg (a `.sort` comparator ternary). All
+    three wrap sync calls or a refused compile — harmless.

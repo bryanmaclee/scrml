@@ -31,10 +31,22 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
-| MED | 592 | 6 |
+| MED | 594 | 6 |
 | LOW | 351 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-server-block-arrow-body-raw-tokens-bypass-trap-s462 — an `if` inside a block-bodied arrow in a server function (`const g = () => { if (verifyPassword(…)) … }`) is emitted as re-joined raw tokens, so neither the §13.2 server Promise trap nor the await classifier sees it — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-server-block-arrow-body-raw-tokens-bypass-trap-s462 sev=MED status=open locus=compiler/src/codegen/emit-expr.ts(block-bodied lambda emitted as escape-hatch raw text)+compiler/src/codegen/emit-server.ts(escape-hatch async walk) prov=review:S239-review-of-c78e325b4(s462-q20-server-promise-trap);empirical:s462-q20-follow-up -->
+
+Reproduced on the s462-q20 head: in a server function, `const g = () => { if (safeCompare(name, pass)) { return 1 } return 2 }` emits `const g = ( ) => { if ( safeCompare ( name , pass ) ) { return 1 } return 2 };` — the block body is re-joined tokens, not a structured emit, so the S462 Q20 trap (`_scrml_assert_settled`) is not applied there and no `await` is inserted. Reach: for an async stdlib callee the escape-hatch walk already raises `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` (fail-closed compile error), so only an await-classifier MISS reaches the un-awaited, untrapped test — exactly the case the trap exists for. SPEC §13.2's trap sentence lists this shape as outside the trap. Fix direction: emit block-bodied arrows in server bodies through the structured statement emitter (so every condition goes through `emitConditionField`), or have the escape-hatch walk refuse any direct `scrml:` stdlib call in a boolean position of a raw body.
+
+### g-cstyle-for-condition-drops-string-quotes-s462 — a C-style `for` condition loses its string-literal quotes: `for (let i = 0; i < "abc".length; i++)` emits `i < abc.length`, compiles clean, and throws `ReferenceError: abc is not defined` at run time — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-cstyle-for-condition-drops-string-quotes-s462 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(C-style for ~:800 — the `iterable` header string / cStyleParts path) prov=review:S239-review-of-c78e325b4(s462-q20-server-promise-trap);empirical:s462-q20-follow-up -->
+
+Reproduced on the s462-q20 head in a server function: `for (let i = 0; i < "abc".length; i++) { n = n + 1 }` emits `for (let i = 0; i < abc.length; i++) {`. The C-style header is carried as a joined text (`node.iterable`) split by a regex; the condition's ExprNode (`cStyleParts.condExpr`) is evidently built from the de-quoted text, or absent so the de-quoted fallback string is used. Silent wrong output (green compile, run-time ReferenceError, or a wrong value if a binding of that name exists). Not introduced by s462-q20 (that change only routes the same condition through `emitConditionField`). Fix direction: keep the source token text (quotes included) when the C-style header is split, and build the three ExprNodes from it; add a conformance case with a string literal, a template literal and a regex in each header slot.
 
 ### g-server-fn-value-arg-helper-not-emitted-s462 — a named helper function passed as a VALUE (not called) from a server function is not emitted into the server bundle: the documented `requestMagicLink(email, { store }, sendEmail)` pattern compiles clean and throws `ReferenceError: sendEmail is not defined` on every request — `NEW S462; HIGH; open (pre-existing on BASE)`
 
