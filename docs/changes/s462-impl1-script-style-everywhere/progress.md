@@ -35,6 +35,13 @@
       Bootstrap: 4 raw-content cases FAIL there → filed g-bootstrap-raw-content-not-fail-closed-s462.
       +9 conformance cases (34), raw-content-display-neg narrowed to what stays silent.
 
+- [x] review-round gates: emit differential vs origin/main f2284b72e (git-archive base): 2765 common
+      sources, 0 newly failing/passing, 0 code changes, 0 text changes, 165 artifacts differ = all
+      `_scrml_project_root` path-only (normalized 165/165), 34 added sources (the new cases). Targeted
+      refusal differential: 4981 files / 172 candidates, 30 changed = exactly the 30 positive
+      element-refusal cases. host-global-scan: the new handler-arrow expect-reject case throws in esm
+      mode like the other expect-reject cases → pinned in known-throws.txt.
+
 ## (c) measurement
 
 `<pre>`/`<code>` bodies holding a literal `<script`/`<style` start tag, every `.scrml` file:
