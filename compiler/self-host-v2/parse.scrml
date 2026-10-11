@@ -3112,6 +3112,11 @@ ${
     // classified — E-DECL-RENDERS-IN-OPENER on a DECLARATION opener only.
     fn rendersInOpener(mp: MP, afterWord: MP) -> RAttrScan {
         const at: MP = skipSpace(afterWord)
+        if (scriptStyleAt(at) != "") {
+            // s462: refused whole (§4.17) — the misplaced-`renders` report still follows
+            const rs: MP = refuseScriptStyle(at)
+            return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, rs.pos)], kws: [], mp: rs }
+        }
         const ro: ROpener = parseOpener(at)
         const re: RElem = finishElem(ro.o, ro.mp)
         return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, re.mp.pos)], kws: [], mp: re.mp }
@@ -3554,6 +3559,7 @@ ${
 
     // A tag in markup position: an element, a `<*x>` reference, or a declaration.
     fn parseMarkupNode(mp: MP) -> RNodeOne {
+        if (scriptStyleAt(mp) != "") return refusedNode(refuseScriptStyle(mp), mp.pos)
         const ro: ROpener = parseOpener(mp)
         if (isThemeOpener(ro.o)) {
             const m: MP = refuseTheme(ro.o, ro.mp)
@@ -3586,6 +3592,70 @@ ${
             m = kids.mp
         }
         return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
+    }
+
+    // ---- s462: `<script>` / `<style>` are not scrml (SPEC §4.17) -------------
+    // "`<script>` and `<style>` are NOT raw-content in scrml because scrml does
+    // not admit those elements at all. Both are rejected symmetrically at the
+    // block-splitter level: `<style>` triggers `E-STYLE-001` (CSS lives in
+    // `#{...}`), and `<script>` triggers `E-SCRIPT-001` … Each rejection
+    // recovers by scanning past the matching close tag (case-insensitive) or to
+    // EOF … The match on the tag name is exact, not a prefix — `<noscript>` is
+    // an ordinary element and is unaffected."
+    // Mirrors impl#1 compiler/src/block-splitter.js (the markup-opener path):
+    // the name is read with impl#1's ident set ([A-Za-z0-9_-], so `<script$x>`
+    // and `<script.x>` are `script` there too), compared case-insensitively and
+    // exactly; a `<*x>` reference is not an element (impl#1 reads no name after
+    // `*`). It is checked at EVERY opener — element, declaration, state-child,
+    // `renders` element, in every namespace (`<svg><script>` is a script) —
+    // before the opener's attributes are parsed: the attributes and the body
+    // are skipped whole, so neither a bound `src=@u` nor a `${@code}` body is
+    // ever read.
+    fn scriptStyleAt(mp: MP) -> string {
+        if (chAt(mp, 0) != "<") return ""
+        let k: int = 1
+        while (isSplitterIdentCh(chAt(mp, k))) { k = k + 1 }
+        const w: string = mp.src.substring(mp.pos + 1, mp.pos + k).toLowerCase()
+        if (w == "script" || w == "style") return w
+        return ""
+    }
+
+    fn isSplitterIdentCh(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        if (c >= "0" && c <= "9") return true
+        return c == "_" || c == "-"
+    }
+
+    // Report the element and skip past its `</script>` / `</style>` (the name
+    // matched case-insensitively, `>` immediately after it — impl#1's match),
+    // or to the end of the file.
+    fn refuseScriptStyle(mp: MP) -> MP {
+        const which: string = scriptStyleAt(mp)
+        const start: int = mp.pos
+        const headEnd: int = start + 1 + which.length
+        const close: int = rawCloseAt(mp.src, headEnd, which)
+        const end: int = close < 0 ? mp.src.length : close + which.length + 3
+        if (which == "style") {
+            return mDiag(mAt(mp, end), "E-STYLE-001", "<style> blocks are not supported in scrml. Use #{} for CSS (§4.17, §9.1).", start, headEnd)
+        }
+        return mDiag(mAt(mp, end), "E-SCRIPT-001", "<script> elements are not supported in scrml. Use " + interpOpen() + "...} for scrml logic; for genuine foreign JS, use the `_{...}` foreign-code block (§4.17, §23).", start, headEnd)
+    }
+
+    fn rawCloseAt(src: string, from: int, name: string) -> int {
+        let i: int = src.indexOf("</", from)
+        while (i >= 0) {
+            const after: int = i + 2 + name.length
+            if (src.substring(i + 2, after).toLowerCase() == name && src.substring(after, after + 1) == ">") return i
+            i = src.indexOf("</", i + 1)
+        }
+        return -1
+    }
+
+    fn refusedNode(mp: MP, start: int) -> RNodeOne {
+        const t: ANode = { nid: mp.nid, span: mkSpan(start, mp.pos), k: ANodeK.Text("") }
+        return { n: t, mp: mBump(mp) }
     }
 
     // ---- s449: `<effect deps=[…]>${ … }</>` (SPEC §6.7.4) ---------------------
@@ -3755,7 +3825,10 @@ ${
         const rw: RWord = readName(after)
         if (rw.w == "renders") {
             const at: MP = skipTrivia(rw.mp)
-            if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
+            if (scriptStyleAt(at) != "") {
+                // s462: a `<script>` / `<style>` is no element (§4.17) — refused whole
+                m = refuseScriptStyle(at)
+            } else if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
                 const ro: ROpener = parseOpener(at)
                 const re: RElem = finishElem(ro.o, ro.mp)
                 renders = re.e
@@ -3877,7 +3950,10 @@ ${
                     isLet = true
                     m = skipTrivia(wl.mp)
                 }
-                if (chAt(m, 0) == "<") {
+                if (scriptStyleAt(m) != "") {
+                    // s462: §4.17 — no child of a declaration either
+                    m = refuseScriptStyle(m)
+                } else if (chAt(m, 0) == "<") {
                     const rc: RChild = parseDeclChild(m, exported, isLet)
                     out = out.concat([rc.c])
                     m = rc.mp
@@ -3998,6 +4074,8 @@ ${
     }
 
     fn parseTagItem(mp: MP, exported: boolean, isLet: boolean) -> RMItems {
+        // s462: §4.17 — refused whole, before its attributes or body are read
+        if (scriptStyleAt(mp) != "") return { items: [], mp: refuseScriptStyle(mp) }
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }

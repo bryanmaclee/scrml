@@ -24,10 +24,20 @@ ${
         return c
     }
 
+    // An attribute value escapes `<` and `>` too, not only `&` and `"`. The
+    // printed HTML is parsed AGAIN when a view's <template> is cloned. Inside a
+    // raw-text or RCDATA element (`noscript`, `xmp`, `noembed`, `iframe`,
+    // `title`, …), the parser does not see attributes: it looks only for that
+    // element's closer. A value holding `</noscript><script>…` would end the
+    // element there, and the rest would be parsed as markup and run (S462
+    // review, Chromium). With `<` escaped, no value can spell a closer.
+    // `escText` already escapes all three.
     export fn escAttr(s: string) -> string {
         const a: string = s.replaceAll("&", "&amp;")
         const b: string = a.replaceAll("\"", "&quot;")
-        return b
+        const c: string = b.replaceAll("<", "&lt;")
+        const d: string = c.replaceAll(">", "&gt;")
+        return d
     }
 
     // HTML void elements: no closer, no children.
