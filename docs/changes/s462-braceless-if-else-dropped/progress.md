@@ -103,3 +103,19 @@
       (g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded, open; now renders "d " for the cell
       form, "" for const). (b) `?{x}` text → placeholder: already filed (g-sql-placeholder-clobbers-string-literals-s457).
       (f) for/lift body condition no re-render: NEW g-for-lift-item-does-not-rerender-on-body-condition-cell-s465.
+- [x] 2026-10-11T19:40Z corpus differential round 3 (base = git archive origin/main 1c1e9eee5, head = git archive
+      31bfdca17; roots examples,samples,conformance,stdlib,benchmarks; 2809 / 2816 sources; ext/giti + ext/flogence NOT
+      in this container — skipped). Verdict line INCOMPARABLE only because archives carry no git revision.
+      0 newly failing · 5 newly passing (the round-1 template cases + meta-type-registry-001) · 170 content diffs =
+      165 path-only (equal after normalizing the capture dir name / runtime hash / chunk token) + 5 real = the SAME
+      known round-1 restructures (callback-prop-pass-not, nested-server-write-awaited,
+      inline-handler-server-call-condition-runtime, s437-r5-template-cell-read-value-attr .client.js + .html).
+      ⇒ F1 and F2 change NO corpus artifact and reject NO corpus source (F2's two newly-rejecting edges measured 0).
+- [x] gates on 9d61a1fa2: pre-commit suite (see report) · tracking tiers (`compiler/tests/*.test.js` +
+      e2e-render-map, after pretest) 2498 pass / 0 fail · s34-census --check-new --base origin/main PASS ·
+      host-global-scan PASS · facts (regenerated in 9d61a1fa2) / spec-index / bootstrap-conformance / severity /
+      state --check PASS · types-gate PASS (182 diagnostics, unchanged) · snippet-gate PASS · corpus-compile-floor
+      PASS · conflict-marker PASS · delta-lint PASS. browser-baseline --check: 1 "new" failure
+      (each-alias-in-lifted-markup "a nested <each> under an element in a lifted each row", JSON parse "bad" —
+      order-dependent: passes alone and paired with the new test) — IDENTICAL on origin/main 1c1e9eee5 in this
+      container, so pre-existing/environmental; baseline NOT re-recorded.
