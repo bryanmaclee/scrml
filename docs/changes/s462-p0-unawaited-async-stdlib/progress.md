@@ -23,7 +23,16 @@
       busy loop) and conformance protect/hmac-constant-key-e006 `await hmac(`
       (negative case, codes unchanged). No adopter output changed.
 
-Deferred (surfaced, not fixed here):
+- [x] S239 review F1: optional call `f?.(…)` awaited (stdlib, server peer,
+      client async peer; emitted-JS injector + name scanners) — 9c3ea646e
+- [x] known-gaps filed: g-server-fn-value-arg-helper-not-emitted-s462 (HIGH),
+      g-local-stdlib-reexport-no-server-emit-s462 (MED, F2),
+      g-trigger3-no-follow-local-reexport-s462 (MED, F3),
+      g-export-star-misses-stdlib-chain-name-s462 (LOW, F4),
+      g-shim-async-parity-heuristic-gaps-s462 (LOW, F5),
+      g-stdlib-selfcompile-async-exports-emitted-sync-s462 (LOW/NIT, F6)
+
+Deferred (surfaced, not fixed here — now filed, see above):
 - a local `.scrml` that only re-exports stdlib names emits no server-side
   re-export (W-SERVER-IMPORT-UNEMITTED; the importer's server bundle fails to
   link — fails closed). Pre-existing on base.
