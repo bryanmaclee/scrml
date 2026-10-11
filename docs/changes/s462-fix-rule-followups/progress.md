@@ -19,4 +19,9 @@
     given-cell-guard-multi-all-or-nothing-pos) — not migrated. Other 19 blockers unchanged.
   - Arm refusal reason text no longer names the resolved gap (states else-if vs else); lifting it is a follow-up.
 - [x] ITEM B: client-server-call TRANSPORT_HANDLER → `!{ .Transport(_) :> return }` (only leave-arm emitter in compiler/src).
-- [ ] gates
+- [x] merged origin/main d6820a607 (#1393) → ba3fbf91b; FACTS conflict resolved by regen (only hunk was the table).
+- [x] gates (post-merge): pre-commit 34724 tests / 0 fail; browser-baseline --check PASS (48 asserted);
+  integration+lsp+commands 5631/0 pre-merge, lsp+commands 724/0 post-merge; top-level 2239/0;
+  e2e-render-map 259/0; s34-census --check-new PASS; host-global-scan --check 0 violations;
+  facts / spec-index / bootstrap-conformance / severity --check current; snippet-gate 128/0;
+  corpus-compile-floor PASS; conformance run 1634 pass + 76 xfail of 1710.
