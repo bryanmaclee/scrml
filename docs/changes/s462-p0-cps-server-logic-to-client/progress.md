@@ -215,3 +215,18 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   it (fixpoint); refused (E-RI-002 client-local) if it needs the browser / touches a cell, or reassigns a
   pre-first local. Executed: `function fmt(x) { return x + "!" }` pre-first → `@v` shows "saving" during the
   request and the route stores "saving!". htmx-forms back to its d5910316d code set.
+- Corpus differential (2808 files: samples, examples, conformance, stdlib, scrml-support gauntlet-r25; ../giti
+  and ../flogence NOT cloned in this container — skipped; each side compiles its own tree, per-file standalone):
+  head vs d5910316d: code-set changes 0, newly refused 0, emit changes 0 (the round-2 fixes and the merged await
+  fix are corpus-neutral on this branch). head vs origin/main 1c1e9eee5: newly refused (clean → error) 0; code
+  changes 5 = the round-1 record (two derived-reach negatives gain E-STDLIB-CLIENT-CHUNK-MISSING,
+  server-fn-writes-reactive-cell-pos E-RI-002 → clean, gauntlet-r10-bun-admin and gauntlet-r13 htmx-forms lose
+  E-RI-002 / E-REACTIVE-003) + the branch's two new conformance cases; emit changes 4 (defer cps-* ×3 client,
+  examples/19-lin-token client+server — the round-1 `login` fix).
+- Gates (head): pre-commit 33035/10 fail (env/flake set); root 2239/0; e2e-render-map 259/0; self-host-v2 slices
+  2274/0; lsp+commands 713/11 (all `scrml dev`/`serve` bind/watch — container); facts (regen), spec-index,
+  host-global-scan, s34-census --check-new --base 1c1e9eee5 (1 new row, well-formed), state (gap-counts was stale
+  since round 1 — regenerated), conflict-marker, types-gate, snippet-gate 128/128, corpus-compile-floor,
+  bootstrap-conformance, severity, delta-lint: PASS. browser-baseline --check: 3 new names — the nested-<each>
+  one (identical on origin/main here) + 2 of cps-server-logic-stays-server-s462.browser (that file fails 6/10 on
+  d5910316d in this container too: its `settle()` waits 200 ms and argon2 verify measures 236 ms at load ~10).
