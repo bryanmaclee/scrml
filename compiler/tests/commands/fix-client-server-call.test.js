@@ -3,7 +3,7 @@
  * S454 F8). change-id: s454-scrml-fix-f8-r11.
  *
  * An UNHANDLED client call of a server function not declared `!` gets the local handler
- * `!{ .Transport(_) :> { return } }` (braced arm body, §18.2); an unbraced / `${…}` handler value is
+ * `!{ .Transport(_) :> return }` (a bare leave arm, §18.2 S462); an unbraced / `${…}` handler value is
  * written braced; a client-function-body site carries an INFO (callers no longer abort). Sites the
  * rule cannot rewrite are LISTED. Every rewritten file passes a gate (re-parse + same impl#1 codes).
  */
@@ -12,6 +12,7 @@ import { describe, test, expect } from "bun:test";
 import { fixClientServerCall, armsCoverTransport, TRANSPORT_HANDLER, CLIENT_SERVER_CALL_RULE } from "../../src/commands/fix-client-server-call.js";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES } from "../../src/commands/fix-s66.js";
 import { runFixCommand } from "../../src/commands/fix.js";
+import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -88,10 +89,51 @@ describe("client-server-call — rewrites", () => {
     expect(r.blockers).toEqual([]);
   });
 
-  test("the arm body is BRACED — never a bare `:> return` (§18.2 arm-body ::= expression | block-body)", () => {
-    expect(H).toBe("!{ .Transport(_) :> { return } }"); // `_`: both implementations accept it (S454 fix round)
+  test("the arm body is a BARE leave — `:> return` (§18.2 S462: \"A single leave is written bare\")", () => {
+    // §18.2 (S462, dpa-068 W1): `arm-body ::= expression | block-body | leave-stmt`;
+    // "**Canonical spelling.** A single leave is written bare (`:> return`)".
+    expect(H).toBe("!{ .Transport(_) :> return }"); // `_`: both implementations accept it (S454 fix round)
     const r = fix(program(["  <button onclick=touch()>A</button>"]));
-    expect(r.output).not.toMatch(/:>\s*return\b/);
+    expect(r.output).toContain("!{ .Transport(_) :> return } }>A</button>");
+    expect(r.output).not.toContain(":> { return }");
+  });
+
+  test("the bare arm compiles exactly as the braced one did (§18.2: it \"means exactly what the same statement means as the only statement of a `{ }` block arm\")", () => {
+    const src = program([
+      "  ${ function go() {",
+      "      touch()",
+      "      @count = getN()",
+      "      const v = getN()",
+      "      @msg = \"done \" + v",
+      "  } }",
+      "  <button onclick=go()>Go</button>",
+      "  <button onclick=touch()>T</button>",
+      "  <button onclick=@count = getN()>N</button>",
+    ]);
+    const r = fix(src);
+    expect(r.applied.length).toBe(5);
+    expect(r.output.split(H).length - 1).toBe(5);
+    const braced = r.output.split(H).join("!{ .Transport(_) :> { return } }");
+    const dir = mkdtempSync(join(tmpdir(), "fix-csc-bare-"));
+    try {
+      const compileAt = (text) => {
+        const f = join(dir, "app.scrml");
+        writeFileSync(f, text);
+        const out = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} });
+        const codes = [...(out.errors ?? []), ...(out.warnings ?? [])].map((d) => d.code).sort();
+        const arts = [...out.outputs.values()].map((v) => [v.clientJs ?? "", v.serverJs ?? "", v.html ?? ""]);
+        return { codes, arts };
+      };
+      const bare = compileAt(r.output);
+      const brace = compileAt(braced);
+      expect(bare.codes).toEqual(brace.codes);
+      // (The fixture's own codes — e.g. a warning-severity E-DG-002 on `@msg` — are the same on both sides.)
+      expect(bare.arts.length).toBeGreaterThan(0);
+      expect(bare.arts[0][0]).toContain("Transport");
+      expect(bare.arts).toEqual(brace.arts);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("idempotent — a second run changes nothing", () => {

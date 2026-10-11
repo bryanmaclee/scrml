@@ -12,14 +12,19 @@
  * At an UNHANDLED client call `f(…)` of a server-placed `f` that is not declared `!`, the rule writes
  * the old behaviour out — a failed call stopped the rest of the code from running:
  *
- *     f(…)            →  f(…) !{ .Transport(_) :> { return } }
- *     @x = f(…)       →  @x = f(…) !{ .Transport(_) :> { return } }
- *     const v = f(…)  →  const v = f(…) !{ .Transport(_) :> { return } }
+ *     f(…)            →  f(…) !{ .Transport(_) :> return }
+ *     @x = f(…)       →  @x = f(…) !{ .Transport(_) :> return }
+ *     const v = f(…)  →  const v = f(…) !{ .Transport(_) :> return }
  *
- * The arm body is BRACED: §18.2 `arm-body ::= expression | block-body`, and `return` is a statement,
- * not an expression (the bootstrap rejects a bare `:> return` — E-SCOPE-001; measured S454 Phase 0,
- * docs/changes/s454-scrml-fix-f8-r11/progress.md). An event-handler value is written in the BRACED
- * form: `onclick=f()` → `onclick={ f() !{ .Transport(_) :> { return } } }` (impl#1 silently drops a
+ * The arm body is a BARE leave statement — §18.2 (S462, dpa-068 W1): `arm-body ::= expression |
+ * block-body | leave-stmt`, `leave-stmt ::= 'return' expression? | …`, and "**Canonical spelling.**
+ * A single leave is written bare (`:> return`); anything longer is braced". It "means exactly what
+ * the same statement means as the only statement of a `{ }` block arm (`:> { return }`)", and a
+ * `!{}` handler arm is one of the arms it applies to. (S454 wrote it braced: `arm-body` was then
+ * `expression | block-body`, and the bootstrap rejected a bare `return` arm — E-SCOPE-001; #1395
+ * widened the grammar and taught both implementations the bare form.) The operand is empty: the
+ * arm ends at the `}` closing the handler (§18.2 "Extent"). An event-handler value is written in the
+ * BRACED form: `onclick=f()` → `onclick={ f() !{ .Transport(_) :> return } }` (impl#1 silently drops a
  * `!{}` written after an UNBRACED handler call — §19.4.3 carried gap). `return` is legal in a braced
  * handler: §5.2.3 makes it "the same statement grammar as a function body (§7.3)".
  *
@@ -91,10 +96,10 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 
 export const CLIENT_SERVER_CALL_RULE = "client-server-call";
-/** The handler the rule writes after the call (S454 F8; braced arm body — §18.2). */
+/** The handler the rule writes after the call (S454 F8; a bare leave arm — §18.2, S462 dpa-068 W1). */
 // The binder is `_`: the arm does not read the ServerCallError (both implementations accept
 // `.Transport(_)` — measured S454 fix round; impl#1 then emits no unused binding).
-export const TRANSPORT_HANDLER = "!{ .Transport(_) :> { return } }";
+export const TRANSPORT_HANDLER = "!{ .Transport(_) :> return }";
 
 const LIFECYCLE_TAGS = new Set(["onMount", "onmount", "effect", "timer", "poll", "timeout", "engine", "onDismount"]);
 const DECL_KINDS = new Set(["state-decl", "const-decl", "let-decl", "tilde-decl"]);
@@ -490,7 +495,7 @@ function collectSites(ast, ri, files, isEntry = true, batches = { inFn: new Set(
       if (armsCoverTransport(guard.arms)) return { ...base, action: "skip", why: "handled" };
       return {
         ...base, action: "list", kind: "handled-not-covering",
-        reason: `the \`!{}\` on this call of \`${name}\` names neither \`.Transport(t)\` nor a catch-all — a client call of a server function also fails with \`Transport(t: ServerCallError)\` (§19.9.10); add the arm you want (e.g. \`.Transport(_) :> { return }\`)`,
+        reason: `the \`!{}\` on this call of \`${name}\` names neither \`.Transport(t)\` nor a catch-all — a client call of a server function also fails with \`Transport(t: ServerCallError)\` (§19.9.10); add the arm you want (e.g. \`.Transport(_) :> return\`)`,
       };
     }
     if (parent && (parent.kind === "match-expr" || parent.kind === "match-stmt" || parent.kind === "match-block")) {
