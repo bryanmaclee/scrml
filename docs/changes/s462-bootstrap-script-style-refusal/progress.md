@@ -14,4 +14,4 @@
 - [x] bootstrap printer escAttr `<`/`>` (html.scrml) + slice-m4/printer-escape.test.js (5 breakout forms fail without the fix); gap g-bootstrap-printer-escattr-raw-text-breakout-s462 filed RESOLVED
 - [x] RESOLVED note scoped to what it closes
 - [x] g-impl1-pre-code-raw-content-passes-script-style-s462 (MED, §4.17 self-contradiction flagged)
-- [ ] gates
+- [x] gates (post-merge d6820a607): pre-commit 34723 tests green, self-host-v2 2274/0 + CI bootstrap steps, bootstrap-conformance/severity --check, s34-census, host-global-scan, facts, spec-index, state --check
