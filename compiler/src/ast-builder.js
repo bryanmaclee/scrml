@@ -8512,6 +8512,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //     (checkForElseWithoutLift / codegen read it there).
     if (matchArrowGlyphAt(peek, 1) != null) return false;
     if (prevNode && prevNode.kind === "for-stmt") return false;
+    // S462 review — an `else` after a VALUE-position `for` (`const v = for (…) { lift … }
+    // else { … }`) is a for…else, not an if/else: name it as such. The §17.4a empty-state
+    // `else` is defined on a `for/lift` loop; the compiler does not lower it after a
+    // value-position `for`, so it is refused rather than dropped.
+    if (prevNode && prevNode.forExpr && typeof prevNode.forExpr === "object") {
+      errors.push(new TABError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        "E-STMT-UNEXPECTED-TOKEN: this `else` follows a `for` used as a value " +
+        "(`const v = for (…) { lift … } else { … }`). The §17.4a empty-state `else` is not " +
+        "supported on a value-position `for`. Compute the empty case separately, e.g. " +
+        "`const v = for (…) { lift … }` then `if (v.length == 0) { … }`. (SPEC §17.4a)",
+        tokenSpan(t, filePath),
+      ));
+      consume(); // the `else`
+      return true;
+    }
     if (!prevNode || prevNode.kind !== "if-stmt") {
       errors.push(new TABError(
         "E-STMT-UNEXPECTED-TOKEN",
@@ -19946,7 +19962,20 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
     // `else` as part of the consequent's expression and produced malformed JS
     // (`_scrml_reactive_set("n", 1 else …)`). The statement view has the
     // if/else as structure, so it always takes it.
-    if (stmts[0] && stmts[0].kind === "if-stmt" && stmts[0].alternate != null) {
+    // Review round 1: ANY if-with-else in the statement's tree, not only a top-level
+    // one — `{ if (@c) if (@d) a else b }` (the else is the INNER if's) and
+    // `{ while (…) if (@c) a else b }` reached the text path the same way.
+    const _hasIfElse = (n, seen = new Set()) => {
+      if (!n || typeof n !== "object" || seen.has(n)) return false;
+      seen.add(n);
+      if (Array.isArray(n)) return n.some((x) => _hasIfElse(x, seen));
+      if (n.kind === "if-stmt" && n.alternate != null) return true;
+      for (const k of ["consequent", "alternate", "body"]) {
+        if (n[k] && _hasIfElse(n[k], seen)) return true;
+      }
+      return false;
+    };
+    if (stmts[0] && _hasIfElse(stmts[0])) {
       value.handlerBlock = { stmts };
       report(nonFatal);
       return;

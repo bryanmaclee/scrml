@@ -219,6 +219,34 @@ describe("S462 — client code (reactive `@x` arms), executed", () => {
   });
 });
 
+describe("S462 review — a client template literal that reads a cell is lowered", () => {
+  // The if/else handler reroute (S462) exposed this: the handler statement path
+  // and every client FUNCTION BODY emitted `` `x ${@n}` `` with the bare `@n`
+  // (invalid JS, E-CODEGEN-INVALID-LOGIC). Pre-existing in function bodies.
+  test("in a function body and in a braced if/else handler, both branches", () => {
+    const { files, errors } = build(
+      `<program>\n<c> = true\n<n> = 7\n<s> = "q"\n\${\n  function f() {\n    @s = \`x \${@n}-\${"a@b"}\`\n  }\n}\n<button onclick=f()>f</button>\n<button onclick={ if (@c) { @s = \`h \${@n}\` } else { @s = 'y' } }>h</button>\n<p>\${@s}</p>\n</program>`,
+      "template-cell",
+      "browser",
+    );
+    expect(errors.map((e) => e.code)).toEqual([]);
+    const js = readFileSync(files["template-cell.client.js"], "utf8");
+    const store = new Map([["n", 7]]);
+    const get = (k) => store.get(k), set = (k, v) => store.set(k, v);
+    const fnSrc = extractFn(js, /function _scrml_f_\d+\(\)/);
+    const f = new Function("_scrml_cs_reactive_get", "_scrml_cs_reactive_set", `${fnSrc}\nreturn ${/function (\w+)/.exec(fnSrc)[1]};`)(get, set);
+    f();
+    expect(store.get("s")).toBe("x 7-a@b");
+    const h = /"_scrml_attr_onclick_\d+": (function\(_scrml_event\) \{ if \(_scrml_cs_reactive_get\("c"\)\)[\s\S]*?\} \}),\n/.exec(js);
+    expect(h).not.toBeNull();
+    const handler = new Function("_scrml_cs_reactive_get", "_scrml_cs_reactive_set", `return (${h[1]});`)(get, set);
+    store.set("c", true); handler({});
+    expect(store.get("s")).toBe("h 7");
+    store.set("c", false); handler({});
+    expect(store.get("s")).toBe("y");
+  });
+});
+
 describe("S462 — a markup value-form `${ if (@c) \"yes\" else \"no\" }`", () => {
   test("renders the else value when the condition is false (pre-fix: empty)", () => {
     const { files, errors } = build(
@@ -300,7 +328,22 @@ describe("S462 — an `else` nothing can claim is a compile error, never a silen
     expect(m.f("Square")).toEqual(["o"]);
   });
 
-  test("a `for/lift … else` empty-state block is NOT a dangling else (control)", () => {
+  test("a value-position `for … else` names the for, not a missing `if`", () => {
+    const { errors } = build(
+      `\${\n  export function f(xs) {\n    const v = for (x of xs) { lift x } else { lift 0 }\n    return v\n  }\n}`,
+      "for-value-else",
+    );
+    const e = errors.find((x) => x.code === "E-STMT-UNEXPECTED-TOKEN");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("follows a `for` used as a value");
+    expect(e.message).not.toContain("has no `if`");
+  });
+
+  // NARROW CLAIM: this only pins that the parser does not REJECT a statement-level
+  // §17.4a `for/lift … else` as a dangling else. It does NOT claim the else body
+  // renders — it does not (silently dropped, on base too):
+  // g-for-lift-else-empty-state-body-dropped-s462.
+  test("a `for/lift … else` empty-state block is not rejected as a dangling else (parse only)", () => {
     const { errors } = build(
       `<program>\n<items> = []\n<ul>\${ for (x of @items) { lift <li>\${x}</li> } else { lift <li>none</li> } }</ul>\n</program>`,
       "for-else",

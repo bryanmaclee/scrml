@@ -1535,6 +1535,37 @@ function emitServerTemplateLit(raw: string, ctx: EmitExprContext): string {
   return out;
 }
 
+/**
+ * S462 — emit a template literal from its STRUCTURE: the quasis' source text
+ * (escapes intact) and each `${…}` interpolation as a parsed ExprNode routed
+ * through `emitExpr` (so `@n` lowers to the cell read). Structure comes from the
+ * node's non-enumerable `_tplQuasiRaws` / `_tplExprs` (esTreeToExprNode); a node
+ * that lost them (a structuredClone) is re-parsed from its own `raw`. Returns
+ * null when no structure is available — the caller then keeps the raw path.
+ */
+function emitTemplateLitStructured(node: LitExpr, ctx: EmitExprContext): string | null {
+  let quasis = (node as unknown as { _tplQuasiRaws?: string[] })._tplQuasiRaws;
+  let exprs = (node as unknown as { _tplExprs?: ExprNode[] })._tplExprs;
+  if (!Array.isArray(quasis) || !Array.isArray(exprs)) {
+    try {
+      const re = parseExprToNode(node.raw, "<client-template>", 0) as unknown as {
+        kind?: string; litType?: string; _tplQuasiRaws?: string[]; _tplExprs?: ExprNode[];
+      };
+      if (re && re.kind === "lit" && re.litType === "template") {
+        quasis = re._tplQuasiRaws;
+        exprs = re._tplExprs;
+      }
+    } catch { /* no structure */ }
+  }
+  if (!Array.isArray(quasis) || !Array.isArray(exprs) || quasis.length !== exprs.length + 1) return null;
+  const inner = { ...ctx, _tplSourceRaw: true } as EmitExprContext;
+  let out = "`" + quasis[0];
+  for (let i = 0; i < exprs.length; i++) {
+    out += "${" + emitExpr(exprs[i], inner) + "}" + quasis[i + 1];
+  }
+  return out + "`";
+}
+
 function emitLit(node: LitExpr, ctx: EmitExprContext): string {
   // The `not` keyword (§42 absence value) compiles to null
   if (node.litType === "not") {
@@ -1549,7 +1580,35 @@ function emitLit(node: LitExpr, ctx: EmitExprContext): string {
     typeof node.raw === "string" &&
     node.raw.includes("${")
   ) {
+    // S462 — the structural emitter first (the text scanner below mis-bounds a
+    // quote inside a regex / comment and loses nested-template escapes); the
+    // scanner remains only for a node with no recoverable structure.
+    const structured = emitTemplateLitStructured(node, ctx);
+    if (structured !== null) return structured;
     return emitServerTemplateLit(node.raw, ctx);
+  }
+  // S462 — a CLIENT-mode template literal whose interpolation reads a cell
+  // (`` `x ${@n}` ``) used to take the raw path below and ship the bare `@n`
+  // (invalid JS → E-CODEGEN-INVALID-LOGIC) in every client function body and
+  // handler statement list (g-client-template-interpolation-lowering-needs-a-
+  // structural-emitter). It is now emitted from the PARSED template — quasi SOURCE
+  // text + each `${…}` as an ExprNode — never by re-scanning template text.
+  // Gated on an `@` in the source: a template with no cell read keeps its raw bytes.
+  if (
+    node.litType === "template" &&
+    ctx.mode !== "server" &&
+    typeof node.raw === "string" &&
+    node.raw.includes("${") &&
+    node.raw.includes("@")
+  ) {
+    const structured = emitTemplateLitStructured(node, ctx);
+    if (structured !== null) return structured;
+  }
+  // Inside a structurally-emitted template, a nested no-interpolation template
+  // keeps its SOURCE text (`raw` is rebuilt from the cooked value and loses `\${`).
+  if (node.litType === "template" && (ctx as { _tplSourceRaw?: boolean })._tplSourceRaw) {
+    const src = (node as unknown as { _tplSourceRaw?: string })._tplSourceRaw;
+    if (typeof src === "string") return src;
   }
   // Use raw source text to preserve exact formatting (string quotes, number format, etc.)
   return node.raw;

@@ -1,0 +1,60 @@
+{
+  "id": "markup-handler-s462-handler-if-else-template-cell-false",
+  "description": "S462 review regression pin. A handler whose statement is an if/else with a TEMPLATE-LITERAL cell read in a branch (`@s = `x ${@n}``) — braced and braceless arms, `{…}` and `${…}` handler forms, and a multi-line value with a trailing newline — compiles and runs the right branch; plus a `;`-sequence handler with a template cell read (button 6, failing on base). The S462 if/else reroute put these on the handler statement path, whose client template literals shipped a bare `@n` (E-CODEGEN-INVALID-LOGIC); the client emitter now lowers a template interior that reads a cell. Condition = false.",
+  "language-version": "1.0",
+  "spec": "§5.2.3, §17",
+  "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
+  "rationale": "§5.2.3: an inline block's statements SHALL run; a template literal's `${@cell}` is a cell read in every logic position.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#b1"
+      },
+      {
+        "click": "#b2"
+      },
+      {
+        "click": "#b3"
+      },
+      {
+        "click": "#b4"
+      },
+      {
+        "click": "#b5"
+      },
+      {
+        "click": "#b6"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#oa",
+        "text": "y"
+      },
+      {
+        "selector": "#ob",
+        "text": "y"
+      },
+      {
+        "selector": "#od",
+        "text": "y"
+      },
+      {
+        "selector": "#oe",
+        "text": "y"
+      },
+      {
+        "selector": "#of",
+        "text": "y"
+      },
+      {
+        "selector": "#og",
+        "text": "n=7"
+      }
+    ]
+  }
+}
