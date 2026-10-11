@@ -154,6 +154,12 @@ const SHAPES = {
   handlerValue: (H) => `
     const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> ${H}(pass, row.pw) }
     return x ? "WELCOME" : "REJECTED"`,
+  // Guard on the fix itself: an EMPTY braced handler is an empty BLOCK (the
+  // binding takes `null`), never the object value `{}` (truthy) — so this shape
+  // answers REJECTED for any password. Checked on its own below.
+  handlerEmpty: () => `
+    const x = ?{\`SELECT nope FROM missing\`}.get() !{ _ :> {} }
+    return x ? "WELCOME" : "REJECTED"`,
   // A one-line `!{}` STATEMENT arm. At the base it did not even compile — the
   // token rewrite produced `_scrml_result = if ( … )` (E-CODEGEN-INVALID-LOGIC) —
   // so it is its own compile unit, keeping the other shapes' failures behavioural.
@@ -224,7 +230,8 @@ async function compileUnit(unit, shapeNames) {
 
 beforeAll(async () => {
   for (const [unit, shapeNames] of UNITS) units.set(unit, await compileUnit(unit, shapeNames));
-}, EXECUTED_DB_TIMEOUT_MS * 2);
+  units.set("handler-empty", await compileUnit("handler-empty", ["handlerEmpty"]));
+}, EXECUTED_DB_TIMEOUT_MS * 3);
 
 afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
@@ -275,6 +282,11 @@ describe("S465 r1 — a Promise-returning call in a server arm body is awaited (
       }
     }
   }
+
+  test("an empty braced `!{ _ :> {} }` handler is an empty block (binds null), not the value `{}`", async () => {
+    expect(await call("handler-empty", "handlerEmptyImp", "right-password")).toBe("REJECTED");
+    expect(units.get("handler-empty").serverJs).not.toMatch(/_scrml__scrml_result_\d+ = \{\};/);
+  }, EXECUTED_DB_TIMEOUT_MS);
 
   test("no arm body is re-emitted as raw token text in the server bundle", () => {
     for (const [unit] of UNITS) {
@@ -356,7 +368,7 @@ async function runClient(appSrc, button, checkAnswer) {
     };
     const bodyHtml = (/<body[^>]*>([\s\S]*)<\/body>/i.exec(app.html) ?? [null, app.html])[1];
     g.document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
-    (0, eval)("(function () {\n" + SCRML_RUNTIME + "\n" + lib.clientJs + "\n" + app.clientJs + "\n})();");
+    (0, eval)("(function () {\n" + SCRML_RUNTIME + "\n" + (lib?.clientJs ?? "") + "\n" + app.clientJs + "\n})();");
     g.document.dispatchEvent(new g.Event("DOMContentLoaded", { bubbles: true }));
     g.document.querySelector("#" + button).click();
     for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
@@ -386,8 +398,38 @@ describe("S465 r1 — an async import in a .filter / .some callback is lowered, 
   }
 });
 
+// The same facts reach a NESTED body: a call to an async client peer inside an
+// `if` was emitted bare (fire-and-forget), so the next statement read the cell
+// before the peer had written it (corpus: examples/08-chat, gauntlet-r10-rails-blog).
+const NESTED_APP = `<program db="./app.db">
+<x> = "init"
+<seen> = ""
+function fetchName() {
+  return ?{\`SELECT name FROM users WHERE name = 'bob'\`}.get()
+}
+function load() {
+  const r = fetchName()
+  @x = r.name
+}
+function go(flag: boolean) {
+  if (flag) { load() }
+  @seen = "after=" + @x
+}
+<button id="go" onclick={ go(true) }>go</button>
+<p id="seen">\${@seen}</p>
+</program>
+`;
+
+describe("S465 r1 — an async client peer called inside an `if` body is awaited (happy-dom)", () => {
+  test("the statement after the `if` sees the peer's write", async () => {
+    const r = await runClient(NESTED_APP, "go", false);
+    expect(r.clientJs).toMatch(/await _scrml_load_\d+\(\)/);
+    expect(r.seen).toBe("after=bob");
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
 // ---------------------------------------------------------------------------
-// Finding 4 — the fail-closed refusal of an async USER export in a sync callback
+// Finding 4— the fail-closed refusal of an async USER export in a sync callback
 // keeps its code and names the user module (not "stdlib").
 // ---------------------------------------------------------------------------
 

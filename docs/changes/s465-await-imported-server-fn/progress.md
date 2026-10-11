@@ -90,3 +90,22 @@
   FAILS (32), handlerStmt does not compile there (E-CODEGEN-INVALID-LOGIC `_scrml_result = if ( … )`).
 - Gate (pre-commit full, 32969): 10 fail — dev-db-no-side-file ×5, tenant-floor-project-set ×3 (24/24 alone),
   promote-safety read-only, headless-serve-bind-host — all on the known env list.
+- 2026-10-11 r1 corpus differential (scripts/corpus-emit-differential.ts, head 917d4847 vs origin/main 1c1e9eee5 —
+  base = `git archive origin/main`, so the prior round's change is in the delta; 2809 sources: examples, samples,
+  conformance, stdlib, benchmarks; ../giti and ../flogence NOT cloned in this container — skipped): 0 newly
+  failing, 0 newly passing, 0 diagnostic-code changes (1 text-only: stdlib/auth/index.scrml — the F4 module note);
+  171 artifacts differ, 163 only by the absolute `_scrml_project_root` (the two trees live at different paths);
+  8 real emit changes:
+  * driver-card.server.js ×2, status-picker.server.js, sql-handled-match-scrutinee-rt: arm values now from the
+    tree — token spacing only (`[ "OnDuty" , "SleeperBerth" ]` → `["OnDuty", "SleeperBerth"]`, `row . body` →
+    `row.body`); behaviour-identical.
+  * 19-lin-token.client.js: the prior round's CPS `await _scrml_fetch_mintTicket_12(…)`.
+  * 08-chat.client.js (`await _scrml_sendMessage_14()` inside `if` in async `handleKey`),
+    gauntlet-r10-rails-blog.client.js (`await _scrml_showList_77()` ×3 inside `if (result.ok)`): hostAsyncFacts
+    now reaches nested bodies — a FIXED bug: executed probe (happy-dom) `if (flag) { load() } @seen = "after=" + @x`
+    reads "after=init" on origin/main and "after=bob" on head; pinned in the new test.
+  * sql-handled-split-write-rt case.server.js: `!{ _ :> {} }` lowered as the VALUE `{}` (truthy) — a defect of
+    this round, FIXED (a braced handler is always a block; empty → `= null`); recompiled byte-identical to main;
+    pinned by the `handlerEmpty` test.
+- Gate after the fix (33037): 10 fail, the same env set; dev-db-no-side-file ×5 / promote-safety / headless-serve
+  -bind-host fail identically in the origin/main tree (7/7); tenant-floor 24/24 alone.

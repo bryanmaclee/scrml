@@ -5,6 +5,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
+import { armBodyStatementsFromText } from "../arm-body-statements.ts";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
@@ -835,10 +836,14 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   // text lowerings below run in a CLIENT context (`_makeExprCtx({})`,
   // `rewriteBlockBody`) and never await: `!{ _ :> check(pass, h) }` bound a
   // pending — always truthy — Promise.
-  if (opts?.boundary === "server") {
-    const stmts = serverArmBlockStatements(handler, "server");
-    if (stmts) return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
-    const node = serverArmExprNode(handler, "server", arm.handlerExpr);
+  // A braced handler body is ALWAYS a statement block here (never an object
+  // literal — the text path below reads it the same way), so `{}` stays an empty
+  // block (`resultVar = null`), not the value `{}`.
+  const isBraced = handler.startsWith("{") && handler.endsWith("}");
+  if (opts?.boundary === "server" && !(isBraced && !handler.slice(1, -1).trim())) {
+    const stmts = isBraced ? armBodyStatementsFromText(handler) : null;
+    if (stmts && stmts.length > 0) return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
+    const node = isBraced ? null : serverArmExprNode(handler, "server", arm.handlerExpr);
     if (node) {
       const code = emitExpr(node, _makeExprCtx(opts)).trim();
       return code.endsWith(";") ? code : code + ";";
