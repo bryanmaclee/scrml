@@ -144,3 +144,60 @@
       compiler source (5c5e4064a `compiler/src`, this round's tests) fails the SAME 3 tenant tests (plus the 20 new
       S465 tests, as expected) → pre-existing in this container, order-dependent (process-shared state in the one
       bun process), NOT this change. Not chased (outside scope); recorded here for the PA.
+
+## S465 fix round 2 (cloud, owner absent) — BRIEF-fix-round-2-S465.md
+- 2026-10-11T22:40Z reset worktree to wip/s464-p0-sql-chain @ 279e0e1ce; node_modules symlinked (package.json == origin/main); pretest OK.
+      Reviewer probes copied to .tmp/r2; base 1c1e9eee5, pre-F2 a33bf5849 ("pref2" — the path before round 1's F2) and WIP
+      279e0e1ce compilers git-archived under .tmp/ for A/B/C. Brief archived verbatim (4254d710b).
+- F1 [HIGH] Pattern C over-reach — REPRODUCED (279e0e1c: pc-notleft/-srv, pc-two-wrap, pc-two-plainfn, pc-clientcell,
+      pc-two-cell, pc-cell2cell, pc-fncall, pc-cu-none/-opt → `/__serverLoad/<v>` + `GET /app` ReferenceError
+      (`wrap` / `label` / `fmt` / `_scrml_body` / `_scrml_current_user` not defined); pc-const served a value only by luck).
+      Governing: SPEC §52.6.5 (SPEC.md:39878): "When the RHS of a `<var server>` declaration is an inline `?{}` query,
+      that `?{}` IS the cell's mount load. The compiler emits a `/__serverLoad/<var>` route that runs the query
+      server-side". FIX: sql-attempt.ts `patternCQueryOfInit` — Pattern C only when the query is the initializer's
+      LEFTMOST operand (`sqlQueryHeadOfExpr`) AND the tail is closed: literals, its own plain arrow params, property
+      names, the pure built-in namespaces Math/JSON/Object/Array/Number/String/Boolean (+ undefined/NaN/Infinity). Any
+      `@x` read (client cell, another server cell, `@currentUser` — classified from the TREE, Rule 7), a second query,
+      a file-scope name (client/server fn, const), assignment, `new`, `await`, a block-bodied / async / destructured /
+      defaulted lambda → not Pattern C. collect.ts `serverVarDeclExprQueries` (the ONE reader for load kind, row
+      scope, `_ssrUsesCurrentUser`, W-AUTH-004) uses it, so a non-qualifying cell returns to the pre-round-1 callable
+      path EXACTLY as pref2 emitted it: ≥2 → `/__mountHydrate` (pc-two-wrap: route + SSR serve {"nm":"ada","nm2":"bob"}),
+      1 → fail-closed E-CG-006. Verified probe-by-probe: head == pref2 for every pc-* shape.
+      Inherited, NOT introduced: pc-two-plainfn (`label(?{…})` ×2, client fn) → `/__mountHydrate` ReferenceError, identical
+      on pref2 AND on base for the SQL-free twin `label(1)` ×2 → filed `g-mounthydrate-client-scope-loader-s465`.
+      Round-1 probes that change: c2-lead (`"x" + ?{…}.get().name`), c2-tern (`1 ? ?{…}.get().name : "n"`) and
+      c-p-tern now fail closed (E-CG-006 / E-CG-001+E-CG-006) — the query is not leftmost; identical to pref2. The
+      round-1 test "ONE cell where the query is not the leftmost operand" now asserts that refusal.
+- F2 [MED] `!{}` not applied to a non-leftmost / second query — REPRODUCED (h-notleft, h-nested2, h-nested1,
+      h-nullish-q, h-notleft-partial compiled clean; failing query THREW `SQLiteError: integer overflow`).
+      Governing §19.8.3 (SPEC.md:19720): "an unhandled `?{}` SHALL be a compile error, **E-ERROR-002**"; item 1: "A
+      `!{}` handler on the query — written after the terminator (`.get()`, `.all()`, `.run()`)". FIX: refusal (one
+      handler = one query). type-system `_checkHandlerCoversQueries` (statement guards and expression-position guards,
+      skipped when the operand is a call to a `!` function — the handler's subject is that call): every `?{}` the
+      operand evaluates other than its leftmost query (`sql-attempt.ts sqlQueriesNotCoveredByHandler`; queries inside
+      a nested lambda or a nested `!{}` operand are not counted) → E-ERROR-002 naming the query and the remedy (bind
+      it first, or move into a `!` fn). Code choice: base had no single code for these shapes (E-TYPE-080 only for
+      partial arms; E-CODEGEN-INVALID-LOGIC / E-ERROR-003 for full ones), so the SPEC's own code is used. NOTE: impl#1
+      does not emit E-ERROR-002 for a wholly UNHANDLED query (frozen divergence g-impl1-sql-unhandled-outside-failable-s451;
+      h-nested2-noh still compiles clean on head and WIP) — this fires only where a handler was written.
+- F3 [LOW, record only] `?{…}.get().name` on no row → TypeError (E-TYPE-046 not enforced on a `.get()` result;
+      t46-local identical on base) → filed `g-impl1-sql-get-result-member-access-not-type046-s465` (prov=review:s465-sqlchain-r2).
+      `.all().map(({ pw }) => pw)` (pp-destr): F1 routes the destructured-param shape AWAY from Pattern C → fails closed
+      (E-CG-006) instead of a route throwing `pw is not defined`. Also observed (not changed): pp-len
+      (`.get().pw.length` under protect="pw") serves 13 — protect treats a derived scalar as non-egress; the same
+      server-fn `return r.pw.length` serves 13 on base too (pre-existing protect semantics, not this change).
+- Tests: s462-p0-sql-chain-truncation.test.js +23 (19 fail on 279e0e1c source, 4 controls pass on both) → 66/0.
+- 2026-10-11T23:00Z pre-commit gate (unit+integration+conformance): 32947 pass / 132 skip / 10 fail — the SAME 10 as round 1
+      (dev-db-no-side-file 5, tenant-floor-project-set 3, promote-safety-harness 1, headless-serve-bind-host 1). Commit 0fef2982d.
+- [x] probe re-runs: pc-* == pref2 (12/12); h/q/t46/tn/cps (41): head == WIP except the 6 F2 shapes now refused
+      (h-armq differs only in an internal-error byte offset, E-CODEGEN-INVALID-LOGIC on both, pre-existing); cl-* (16):
+      head == WIP; c* round-1 shapes with a leftmost query + closed tail unchanged.
+- [x] targeted corpus differential — 387 `?{`-bearing .scrml (examples/samples/conformance/stdlib/benchmarks), each
+      compiled standalone by head, WIP 279e0e1c and base 1c1e9eee5 (paths normalized): WIP→head and base→head both
+      200 ok / 187 fail, 0 newly failing, 0 newly passing, 0 warning diffs, 0 artifact diffs; the only fatal-code diffs
+      are the 3 stdlib harness artifacts recorded in round 1. ../giti and ../flogence NOT cloned here — skipped.
+- [x] gates: types-gate --check 0 (182, unchanged) · facts --check 1 → --write → 0 · state --check 1 → --write (2 new
+      gaps) → 0 · regen-spec-index 0 · bootstrap-conformance 0 · gen-bootstrap-severity 0 · host-global-scan 0 ·
+      s34-census --check-new --base 1c1e9eee PASS · gen-md-shim 0 · conflict-marker-gate 0 · delta-lint 0 · snippet-gate
+      128/0 · corpus-compile-floor PASS · compiler/tests/*.test.js 2239/0 · e2e-render-map 259/0 · lsp+commands 713/11
+      (the same 11 env failures) · browser-baseline --check 1: the same one pre-existing name as rounds 0/1, not re-recorded.
