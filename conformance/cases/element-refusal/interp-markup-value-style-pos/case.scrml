@@ -1,0 +1,4 @@
+<program>
+<f> = true
+<div>${ @f ? <style>p { color: red }</style> : <b>b</b> }</div>
+</program>

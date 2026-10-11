@@ -1,0 +1,5 @@
+<program>
+<f> = true
+<x> = @f ? <script>a</script> : <b>b</b>
+<div>${@x}</div>
+</program>

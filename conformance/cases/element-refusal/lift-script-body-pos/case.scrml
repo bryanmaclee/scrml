@@ -1,0 +1,5 @@
+<program>
+<code> = "window.pwned = 7"
+<p>page</p>
+${ lift <script>${@code}</script> }
+</program>

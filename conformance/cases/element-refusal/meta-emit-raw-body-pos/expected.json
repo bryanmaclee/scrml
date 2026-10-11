@@ -1,0 +1,19 @@
+{
+  "id": "meta-emit-raw-body-pos",
+  "description": "A `<pre>` raw body in `^{ emit(…) }` output is scanned too: E-SCRIPT-001.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all.\" S462 amendment: the element is rejected with the same codes at EVERY position markup is parsed or built; inside a raw-content body the rule is fail-closed — any `<script` / `<style` start-tag text, wherever it sits in the body.",
+  "expect": {
+    "codes": [
+      "E-SCRIPT-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SCRIPT-001": "error"
+    },
+    "codeCounts": {
+      "E-SCRIPT-001": 1
+    }
+  }
+}

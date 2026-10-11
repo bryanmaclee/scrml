@@ -1,0 +1,6 @@
+<program>
+<items> = [1, 2]
+<ul>
+${ for (const it of @items) { lift <li><script>x</script></li> } }
+</ul>
+</program>

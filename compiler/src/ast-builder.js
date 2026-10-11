@@ -103,6 +103,7 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
+import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -5863,6 +5864,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const lift = (liftNodes || []).find((n) => n.kind === "lift-expr");
         if (lift && lift.expr && lift.expr.kind === "markup" && lift.expr.node) {
           mkNode = lift.expr.node;
+          // §4.17 (S462) — this value's nodes carry offsets into `"lift " + markupSrc`;
+          // a refused element in it is reported (by the end-of-build structural check)
+          // at its FILE position, rebased exactly as the forwarded errors above are.
+          // Position only (the decision is the node): when the verbatim alignment
+          // above did not run (`startOffset` is not a file offset at some call
+          // sites), align the value against the enclosing block's raw text from
+          // the first occurrence of its leading character.
+          let _posStart = _realStart;
+          if (_posStart < 0 && parentBlock && typeof parentBlock.raw === "string" && parentBlock.span && typeof parentBlock.span.start === "number") {
+            const _fc = expr.trimStart().charAt(0);
+            const _k = _fc ? parentBlock.raw.indexOf(_fc) : -1;
+            const _al = _k >= 0 ? _alignToSourceText(expr, a, b, parentBlock.raw, _k) : null;
+            if (_al) _posStart = parentBlock.span.start + _al.start;
+          }
+          const _mvDelta = _posStart >= 0 ? _posStart - _LIFT_PREFIX : (startOffset ?? 0) + a - _LIFT_PREFIX;
+          for (const site of collectRefusedElements([mkNode])) {
+            if (!site.span) continue;
+            const holder = { span: { ...site.span } };
+            _rebaseSubparseSpans([holder], _mvDelta, parentBlock);
+            site.node.refusalSpan = { ...holder.span, file: filePath };
+          }
         }
       } catch (_e) { /* fall through — mkNode stays null */ }
       if (!mkNode) return null; // couldn't recover — bail to plain parse
@@ -11134,7 +11156,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         i = markupCursor;
       }
       // Non-markup lift (identifier, call, etc.) or malformed markup
+      const _liftFrom = i;
+      const _liftIsMarkup = peek().text === "<" && peek().kind === "PUNCT";
       const { expr, span } = collectLiftExpr();
+      // §4.17 (S462) — malformed lifted markup takes the string path; its element
+      // openers are refused from the token run exactly as a parsed element is.
+      if (_liftIsMarkup) refuseFragmentElementTokens(tokens.slice(_liftFrom, i), filePath, errors);
       return { id: ++counter.next, kind: "lift-expr", expr: { kind: "expr", expr, exprNode: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0) }, span: spanOf(startTok, peek()) };
     }
 
@@ -12988,6 +13015,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Default: bare-expr (or html-fragment for HTML tokens)
     {
       const startTok = peek();
+      const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // §19.5: `fallible()?` as a statement — propagate-expr with no binding
@@ -13035,6 +13063,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
           return { id: ++counter.next, kind: "html-fragment", content: expr, span };
         }
         return { id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span };
@@ -15642,6 +15671,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // parseLiftTag failed — reset cursor and fall back to string path
           i = markupCursor;
           const { expr, span } = collectLiftExpr();
+          // §4.17 (S462) — the string path's element openers are refused too.
+          refuseFragmentElementTokens(tokens.slice(markupCursor, i), filePath, errors);
           nodes.push({
             id: ++counter.next,
             kind: "lift-expr",
@@ -17305,6 +17336,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // Anything else: BareExpr or html-fragment — collect until statement boundary
     {
       const startTok = peek();
+      const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // Check for `?` propagation suffix on bare expressions
@@ -17340,6 +17372,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
           nodes.push({ id: ++counter.next, kind: "html-fragment", content: expr, span });
         } else {
           nodes.push({ id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span });
@@ -23867,6 +23900,7 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     const result = _buildASTImpl(bsOutput, tokenizerOverrides);
     if (result && typeof result === "object") {
       result.legacyIsSomeSites = [...sink.values()].sort((a, b) => a.start - b.start);
+      refuseScriptStyleElements(result, bsOutput);
     }
     return result;
   } finally {
@@ -23878,6 +23912,126 @@ export function buildAST(bsOutput, tokenizerOverrides) {
       _isSomeSinkFile = savedFile;
     }
   }
+}
+
+/**
+ * §4.17 (S462) — scrml does not admit `<script>` / `<style>` at ANY position.
+ * One structural check over every element node of the finished tree: a lifted
+ * element, markup used as a value, a `return <markup>`, a component body, an
+ * `<each>` / `<match>` / engine body the builder re-split from text — wherever the
+ * element node came from, it is refused here with the block splitter's own codes.
+ * Decided from the parsed nodes (element-refusal.ts), never from text.
+ *
+ * A top-level element the block splitter already refused left a bodiless marker
+ * in the block tree; its node starts where that error starts, so it is not
+ * reported twice. Every other refused node is reported here.
+ */
+/**
+ * §4.17 (S462) — markup written bare in a `${ … }` logic body that the builder
+ * does not turn into element nodes (an `html-fragment`: `${ <script>…</script> }`,
+ * an implied-`lift` arm the desugar declines). Codegen drops such a fragment, so
+ * pre-S462 a `<script>` / `<style>` there vanished silently; it is refused instead.
+ *
+ * Decided from the fragment's TOKENS, never its rejoined text: an element opener
+ * is a `<` PUNCT token immediately followed (no gap) by a name token. A string
+ * literal or a comment is one token, so `"<script>"` / `// <script>` inside the run
+ * is never an opener; `</script>` (a `/` between) is a closer, not an element.
+ * The name is the WHOLE name (`<style-x>` reads `style` `-` `x` — the run continues,
+ * so it is not `style`), mirroring the block splitter's exact-name rule.
+ */
+function fragmentElementHits(toks) {
+  const hits = [];
+  for (let k = 0; k + 1 < toks.length; k++) {
+    const lt = toks[k];
+    const name = toks[k + 1];
+    if (!lt || lt.kind !== "PUNCT" || lt.text !== "<") continue;
+    if (!name || (name.kind !== "IDENT" && name.kind !== "KEYWORD")) continue;
+    if (!lt.span || !name.span || name.span.start !== lt.span.end) continue;
+    const code = refusedElementCode(name.text);
+    if (code === null) continue;
+    const after = toks[k + 2];
+    if (after && after.span && after.span.start === name.span.end &&
+        (after.kind === "IDENT" || after.kind === "KEYWORD" || after.kind === "NUMBER" ||
+         (typeof after.text === "string" && after.text.startsWith("-")))) continue;
+    hits.push({ code, name: name.text, lt });
+  }
+  return hits;
+}
+
+function refuseFragmentElementTokens(toks, filePath, errors) {
+  for (const h of fragmentElementHits(toks)) {
+    errors.push(new TABError(
+      h.code,
+      `${h.code}: ` + refusedElementMessage(h.code, h.name, "markup in a logic body"),
+      tokenSpan(h.lt, filePath),
+    ));
+  }
+}
+
+/**
+ * §4.17 (S462 review) — markup held in an expression the JS parser could not read
+ * (an `escape-hatch` ExprNode: `onclick={() => <script/>}`, a markup value whose
+ * `<!-- … -->` defeated the markup-value parse). Pre-fix such a value reached codegen
+ * and failed as E-CODEGEN-INVALID-LOGIC, which names the wrong cause. The value's
+ * TOKENS decide (the same `<`-adjacent-name rule as an html-fragment: a string or a
+ * comment is one token); it is reported at the nearest enclosing statement /
+ * attribute span, because an escape hatch's own span is not a source position.
+ */
+function refuseEscapeHatchMarkup(ast, filePath, errors, reported) {
+  const seen = new Set();
+  const stack = [[ast, null, false]];
+  while (stack.length > 0) {
+    const [n, anchor0, inExpr] = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) stack.push([c, anchor0, inExpr]); continue; }
+    let anchor = anchor0;
+    if (!inExpr && n.span && typeof n.span.start === "number" && typeof n.span.line === "number") anchor = n.span;
+    if (n.kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("<")) {
+      let toks = [];
+      try { toks = tokenizeLogic(n.raw, 0, 1, 1, []); } catch { toks = []; }
+      for (const h of fragmentElementHits(toks)) {
+        const at = anchor ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+        const key = `${h.code}@${at.start}`;
+        if (reported.has(key)) continue;
+        reported.add(key);
+        errors.push(new TABError(
+          h.code,
+          `${h.code}: ` + refusedElementMessage(h.code, h.name, "markup in an expression or attribute value"),
+          { file: at.file ?? filePath, start: at.start, end: at.end, line: at.line, col: at.col },
+        ));
+      }
+      continue;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent") continue;
+      const v = n[k];
+      if (v && typeof v === "object") stack.push([v, anchor, inExpr || /expr/i.test(k)]);
+    }
+  }
+}
+
+function refuseScriptStyleElements(result, bsOutput) {
+  if (!result.ast || !Array.isArray(result.errors)) return;
+  const reported = new Set();
+  for (const e of Array.isArray(bsOutput?.errors) ? bsOutput.errors : []) {
+    if (e && (e.code === "E-SCRIPT-001" || e.code === "E-STYLE-001") && e.bsSpan) reported.add(`${e.code}@${e.bsSpan.start}`);
+  }
+  for (const e of result.errors) {
+    if (e && (e.code === "E-SCRIPT-001" || e.code === "E-STYLE-001") && e.tabSpan) reported.add(`${e.code}@${e.tabSpan.start}`);
+  }
+  for (const site of collectRefusedElements(result.ast)) {
+    const span = site.span ?? { file: result.filePath, start: 0, end: 0, line: 1, col: 1 };
+    const key = `${site.code}@${span.start}`;
+    if (reported.has(key)) continue;
+    reported.add(key);
+    result.errors.push(new TABError(
+      site.code,
+      `${site.code}: ` + refusedElementMessage(site.code, site.tag, "markup built in logic, a component, or a structural body"),
+      { file: span.file ?? result.filePath, start: span.start, end: span.end, line: span.line, col: span.col },
+    ));
+  }
+  refuseEscapeHatchMarkup(result.ast, result.filePath, result.errors, reported);
 }
 
 function _buildASTImpl(bsOutput, tokenizerOverrides) {

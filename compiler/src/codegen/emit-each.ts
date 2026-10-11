@@ -45,7 +45,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -1379,6 +1379,11 @@ function renderTemplateChildToJs(
     }
 
     const elVar = `_scrml_el_${nextLocalId()}`;
+    // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built.
+    if (refuseElementLowering(tagName, child as { span?: unknown })) {
+      lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createComment(""));`);
+      return;
+    }
     lines.push(`${indent}const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tagName)});`);
 
     // S130 HU-1 iteration Landing 2 — per-item element attribute codegen.

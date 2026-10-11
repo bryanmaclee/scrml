@@ -1,0 +1,5 @@
+<program>
+<f> = true
+<p>page</p>
+${ if (@f) { <script>x</script> } }
+</program>

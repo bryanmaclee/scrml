@@ -36,6 +36,7 @@
 [esm] conformance/cases/defer/duplicate-function-neg/case.scrml  # emit-client-esm: Identifier 'g' has already been declared
 [esm] conformance/cases/defer/unsupported-site-neg/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/defer/yield-in-defer-neg/case.scrml  # emit-client-esm: The keyword 'yield' is reserved
+[esm] conformance/cases/element-refusal/handler-arrow-markup-script-pos/case.scrml  # emit-client-esm: Unexpected token (an expect-reject case: E-SCRIPT-001, markup held in a handler arrow, §4.17, S462)
 [esm] conformance/cases/error/await-not-in-scrml/case.scrml  # emit-client-esm: Cannot use keyword 'await' outside an async function
 [esm] conformance/cases/fn/arrow-body-reject/case.scrml  # emit-client-esm: Unexpected token
 [esm] conformance/cases/fn/scope-redeclare-neg/case.scrml  # emit-client-esm: Identifier 'x' has already been declared

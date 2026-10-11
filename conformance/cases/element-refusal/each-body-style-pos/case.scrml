@@ -1,0 +1,8 @@
+<program>
+<items> = [1, 2]
+<ul>
+  <each in=@items as it>
+    <style>li { color: red }</style>
+  </each>
+</ul>
+</program>
