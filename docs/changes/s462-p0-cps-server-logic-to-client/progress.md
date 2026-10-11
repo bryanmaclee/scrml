@@ -167,3 +167,7 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
 - [corpus diff head 563a4f1e1 vs origin/main 1c1e9eee5] 2875 files (samples 310, examples 71, conformance 1799, benchmarks 7, gauntlet-r25 4 + samples/gauntlet-*, giti 83, flogence 31; per-file standalone compile). Newly refused: 1 = the branch's own negative fixture `cps-batch-field-write-refused`. Newly compiling: 1 (`server-fn-writes-reactive-cell-pos`, retargeted). Code-set changes on already-refused files: 4 (2 e-derived negative cases gain E-STDLIB-CLIENT-CHUNK-MISSING; gauntlet-r10-bun-admin + htmx-forms swap E-RI-002/E-REACTIVE-003 for E-CPS-NONIDEM-NO-STORAGE). Artifact changes (both compile): 5 — 3 defer CPS cases (client), the branch's cps-login fixture, examples/19-lin-token. giti / flogence: 0 changes.
 - [SPEC] §19.9.9.8 added (placement rule; narrowing; provenance = this brief) + §19.9.9.7 bullet 1 amended (it normatively described the H3 round trip). SPEC-INDEX/FACTS regenerated.
 - NOTE (out of scope, pre-existing): a NON-split escalated function (no cell write) containing `localStorage.setItem` runs it on the server (ReferenceError → 500). By design per the S263 CLIENT_ONLY_GLOBAL_ROOTS minimal set (document/window only). Not a CPS round-trip.
+
+## FIX ROUND 2 (S465)
+
+- 2026-10-11 brief (+ PA change of plan) archived as BRIEF-fix-round-2-S465.md. Finding 1 done first on a separate branch from origin/main (auto/s465-await-imported-server-fn @ f8309fd64); merged here next.
