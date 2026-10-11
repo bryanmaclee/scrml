@@ -11,7 +11,8 @@
  *
  *   §1 buildCalleeImportMap carries local → imported names; the classifier
  *      helper resolves an alias through them.
- *   §2 every server emit shape awaits an aliased async stdlib callee; a SYNC
+ *   §2 every server emit shape awaits an aliased async stdlib callee; the alias
+ *      used as a value is E-ASYNC-FN-ESCAPES-AS-VALUE (§13.2); a SYNC
  *      aliased stdlib call is still not awaited.
  *   §3 a client function calling an aliased async stdlib export is async-colored.
  *   §4 a local `.scrml` module that re-exports a stdlib async function
@@ -136,6 +137,19 @@ describe("§2 server emit awaits an aliased async stdlib callee", () => {
     });
     expect(codes).toEqual([]);
     expect(out("app.scrml").serverJs ?? "").toMatch(/const r = await httpGet\(pass\)/);
+  });
+
+  test("an aliased async import used as a VALUE is E-ASYNC-FN-ESCAPES-AS-VALUE (base: compiled clean, the call through it unawaited)", () => {
+    const { codes } = compile({
+      "app.scrml": serverApp(
+        `import { verifyPassword as vp } from "scrml:auth"`,
+        `        const f = vp
+        const ok = f(pass, row.pw)
+        if (!ok) { return "REJECTED" }
+        return "ACCEPTED"`,
+      ),
+    });
+    expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
   });
 
   test("an aliased SYNC stdlib call is not awaited", () => {
