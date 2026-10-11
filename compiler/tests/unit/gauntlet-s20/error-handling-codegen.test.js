@@ -133,7 +133,8 @@ describe("? propagation codegen (§19.5)", () => {
     const { fatalErrors, clientJs } = compileSource(source, "propagate-let.scrml");
     expect(fatalErrors.length).toBe(0);
     // Must emit a check-and-return pattern, not leave `?` in the source
-    expect(clientJs).toMatch(/if \(_scrml_\w+\.__scrml_error\) return _scrml_\w+;/);
+    // S462 — guarded: the success value may be `not`.
+    expect(clientJs).toMatch(/if \((_scrml_\w+) && \1\.__scrml_error\) return \1;/);
     expect(clientJs).not.toMatch(/risky\([^)]*\)\s*\?\s*;/);
   });
 

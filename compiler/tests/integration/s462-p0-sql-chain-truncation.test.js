@@ -89,11 +89,16 @@ const OPERAND_FNS = `
       function optName(id) {
         return ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get()?.name
       }
+      function propName(id)! -> SqlError {
+        const r = ?{\`SELECT name, pw FROM users WHERE id = \${id}\`}.get()?
+        if (r is not) { return "none" }
+        return r.name
+      }
       function parenLambda() {
         return ?{\`SELECT name, pw FROM users ORDER BY id\`}.all().map((u) => u.name)
       }
 `;
-const OPERAND_CALLED = ["optName", "missing", "viaTernary", "viaNullish", "parenLambda"];
+const OPERAND_CALLED = ["optName", "missing", "viaTernary", "viaNullish", "parenLambda", "propName"];
 
 const app = (dbAttrs, fns, called) => `<program auth="none" db="./app.db">
   <schema>
@@ -223,6 +228,15 @@ describe("S462 P0 — a query that is an operand keeps its statement whole", () 
     expect(r).toEqual(ok(JSON.stringify("ada")));
     expect(r.body).not.toContain(SECRET);
     expect(await a.post("optName", { id: 99 })).toEqual(ok("null"));
+  }, TIMEOUT);
+  test("`const r = ?{…}.get()?` in a `!` function is server-placed; no row is `not`, not a crash", async () => {
+    // Base: the statement split (`const tmp = ;`, E-CODEGEN-INVALID-LOGIC). With the
+    // tail routed through the expression path the function must still be
+    // server-placed (route inference reads the propagate-expr) and the propagation
+    // test must not dereference a `not` success value.
+    expect(a.clientJs).not.toContain("sql-ref unresolved");
+    expect(await a.post("propName", { id: 1 })).toEqual(ok(JSON.stringify("ada")));
+    expect(await a.post("propName", { id: 99 })).toEqual(ok(JSON.stringify("none")));
   }, TIMEOUT);
   test("a call with nested parentheses after the query (`.map((u) => …)`) is one call", async () => {
     const r = await a.post("parenLambda", {});

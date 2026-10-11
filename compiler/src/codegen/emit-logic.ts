@@ -4011,10 +4011,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       lines.push(`const ${tmpVar} = ${expr};`);
       // §19.10.3 / §19.5.2 — `?` is a `fail` of the callee's variant: inside a
       // `transaction { }` it rolls back before returning (_markTransactionExits).
+      // The success value may be `not` (`?{…}.get()?` on no row — §19.8.3: no row is
+      // not a failure), so the envelope test reads it guarded, as `emitPropagateArm`
+      // does; unguarded, `null.__scrml_error` threw (S462).
       const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
       lines.push(typeof txnRollback === "string" && txnRollback.length > 0
-        ? `if (${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
-        : `if (${tmpVar}.__scrml_error) return ${tmpVar};`);
+        ? `if (${tmpVar} && ${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
+        : `if (${tmpVar} && ${tmpVar}.__scrml_error) return ${tmpVar};`);
       if (node.binding) {
         lines.push(`const ${node.binding} = ${tmpVar};`);
       }

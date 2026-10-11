@@ -238,6 +238,18 @@ describe("§4 a query in operand position stays in its statement", () => {
     });
   }
 
+  test("`const r = ?{…}.get()?` (a `!` function) is server-placed; the propagation test is guarded", () => {
+    const src = program("return 1", `      function k(id)! -> SqlError {
+        const r = ${Q1}.get()?
+        return r
+      }`).replace("@out = f(1)", "@out = k(1) !{ _ :> { return } } + f(1)");
+    const r = compile(src);
+    expect(r.fatal.map((e) => e.code)).toEqual([]);
+    expect(r.clientJs).not.toContain("sql-ref unresolved");
+    expect(r.serverJs).toContain(`= ${LOWER_GET};`);
+    expect(r.serverJs).toMatch(/if \((_scrml_\w+) && \1\.__scrml_error\) return \1;/);
+  });
+
   test("`f()?` ⏎ `?{…}` on the next line keeps the old statement boundary", () => {
     const src = program("return 1", `      function k()! -> SqlError {
         const a = g()?
