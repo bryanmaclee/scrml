@@ -32,7 +32,7 @@
  * reader's W-MD-* codes. E-MD-IN-PHRASING is the parent's check (`mdInPhrasingParent`).
  */
 
-import { parseSlots, dedent, headingSlugs, MdBlock, MdInline } from "../runtime/stdlib/md.js";
+import { parseSlots, dedent, headingSlugs, MdBlock, MdInline } from "./md-reader.js";
 import { _scrml_url_value_admitted, _scrml_read_url_scheme, _scrml_url_scheme_admitted } from "./runtime-url-guard.js";
 
 /** The object replacement character: one reader atom per slot (§67.4). */
@@ -424,7 +424,7 @@ export function lowerMdBlock(block: any, attrs: any[], span: Span, ctx: MdLowerC
       const first = segs[0];
       const prefix = first && first.variant === "Lit" ? String(first.data.text) : "";
       const r = _scrml_read_url_scheme(prefix, false) as { kind: string; scheme?: string; rest?: string };
-      if (r.kind === "scheme" && !_scrml_url_scheme_admitted(name, r.scheme, r.rest ?? "")) {
+      if (r.kind === "scheme" && !_scrml_url_scheme_admitted(name, r.scheme ?? "", r.rest ?? "")) {
         // `data:` on an image source whose media type the data still supplies — judged at run time
         const pendingDataType = r.scheme === "data" && name === "src" && !/[;,]/.test(r.rest ?? "");
         if (!pendingDataType) urlSchemeError(name, prefix, ownerTag, true);
