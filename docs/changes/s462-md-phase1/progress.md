@@ -9,7 +9,13 @@
 - [x] SPEC §67 + SPEC-INDEX + §34 codes (+ §4.15 row, §4.18.1a note, §5.2 rule-3 bullet, §26.6.5 note, OQ-6 annotation)
 - [x] client chunk `stdlib-md` registered (stdlib-client-registry §1b forces every shim to be classified;
       the derived rule — no host reach, no credentials — makes md client-registered)
-- [ ] gates (see report)
+- [x] gates: pre-commit (35,036 tests at 0dc2a4f09, 0 fail) · unit+conformance after SPEC (27,852, 0 fail) ·
+      tracking tier integration+lsp+commands (5,671, 0 fail) · browser-baseline --check PASS (first run: harness
+      parser disagreement 49 vs 50, no verdict; rerun PASS) · s34-census --check-new PASS (30 rows) ·
+      host-global-scan --check 0 violations · facts --check PASS (after --write: stdlib 21 -> 22) ·
+      regen-spec-index --check OK · bootstrap-conformance --check current · gen-bootstrap-severity --check current ·
+      snippet-gate 128/128 · corpus-compile-floor --check PASS · types-gate --check OK · gen-md-shim --check current ·
+      stdlib-shim-export-parity (scrml:md §1-3/§4/§6) PASS · conflict-marker-gate PASS · delta-lint PASS
 
 ## Candidate questions for bryan / the PA (normative decisions the rulings did not cover)
 Each is marked "(PA reading, s462-md-phase1)" in §67. Recommendation in brackets.
