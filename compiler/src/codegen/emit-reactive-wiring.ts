@@ -511,8 +511,8 @@ const LIFT_MOUNT_RUN_HELPER: readonly string[] = [
   "  const disposers = [];",
   "  let collecting = true;",
   "  let alive = true;",
-  "  const own = (make, keepAlways) => function(fn) {",
-  "    const d = make(function() { if (alive) fn(); });",
+  "  const own = (make, keepAlways) => function(fn, gate) {",
+  "    const d = make(function() { if (alive) fn(); }, gate);",
   "    if ((collecting || keepAlways) && typeof d === \"function\") disposers.push(d);",
   "    return d;",
   "  };",
@@ -554,8 +554,8 @@ const NESTED_LIFT_RUN_HELPERS: readonly string[] = [
   "  const disposers = [];",
   "  let collecting = true;",
   "  let alive = true;",
-  "  const own = (make, keepAlways) => function(fn) {",
-  "    const d = make(function() { if (alive) fn(); });",
+  "  const own = (make, keepAlways) => function(fn, gate) {",
+  "    const d = make(function() { if (alive) fn(); }, gate);",
   "    if ((collecting || keepAlways) && typeof d === \"function\") disposers.push(d);",
   "    return d;",
   "  };",
@@ -783,29 +783,36 @@ function emitIfChainForArms(
  * emitted once per file that uses it.
  *
  * `_scrml_lift_if_group(host, armOf, body, mkEffect, mkStatic)` — the group.
- *   Its SELECTOR effect is the group's render gate and the ONLY place the
- *   chain's conditions are evaluated: `armOf()` once per run. It owns the
- *   selected arm; when the index changes it stops the current arm run, clears
- *   the host and starts the new arm's run (`-1`: no arm, the host stays empty).
- *   ⚑ A render-gate scheduling PRIORITY (render gates before user effects on
- *   the same write) attaches at the one `mkEffect(select)` call below.
+ *   Its SELECTOR effect is the group's RENDER GATE (`mkEffect(select, true)`):
+ *   on a write it runs before every other effect of that write (the runtime's
+ *   '_scrml_write_fx'), so an arm's effects never run for a write that
+ *   de-selects their arm — the selector has already stopped them. It is the
+ *   ONLY place the chain's conditions are evaluated: `armOf()` once per run. It
+ *   owns the selected arm; when the index changes it stops the current arm run,
+ *   clears the host and starts the new arm's run (`-1`: no arm, the host stays
+ *   empty). An arm run started during a write's gate pass renders on creation,
+ *   with the state of that write; the runtime then skips its effects for the
+ *   rest of the write (they were born in the gate pass).
  *
  * `_scrml_lift_arm_run(host, arm, isCurrent, body, mkEffect, mkStatic)` — one
  *   arm. It renders the arm's body in its own effect, so the arm RE-RENDERS when
  *   a value the body reads directly changes, and only then; the markup bindings
  *   the lift emitter wires as their own effects (emit-lift.js LIVE mode) update
  *   in place, so listeners and input state survive.
- *     · Every effect of the run is gated on `isCurrent()`, which compares the
- *       selector's OWN arm — no condition is re-evaluated. A write that is about
- *       to switch arms can reach an outgoing arm's effect before the selector;
- *       such an effect may still run, and an error it throws is reported only
- *       if its arm is still current once the write has settled (a microtask
- *       later) — `@user.name` read as `@user` turns `not` is not an error.
+ *     · Every effect of the run is guarded by `isCurrent()`, which compares the
+ *       selector's OWN arm — no condition is re-evaluated.
+ *     · Errors are never hidden. While the group is being created (init) an
+ *       error throws out of it, exactly as the plain group's first render does.
+ *       After init, an effect of the group (the selector included) that throws
+ *       is reported AT ONCE with the runtime's own "scrml effect error:" line —
+ *       and it stays subscribed, so the next write it depends on runs it again
+ *       (a runtime effect whose run throws loses its subscriptions for good: the
+ *       plain group stays blank after one error).
  *     · Ownership: the body receives tracking wrappers as `_scrml_effect` /
- *       `_scrml_effect_static` (lexically shadowed). Every effect a render
- *       creates — during the render or later (a keyed list's rows added after
- *       the first render) — is owned by that render and disposed when the arm
- *       re-renders or the run stops.
+ *       `_scrml_effect_static` (lexically shadowed; a render-gate flag is
+ *       passed through). Every effect a render creates — during the render or
+ *       later (a keyed list's rows added after the first render) — is owned by
+ *       that render and disposed when the arm re-renders or the run stops.
  *     · Re-entrancy: the body renders into a fragment that reaches the host
  *       only if the run is still alive when the body returns. A body that
  *       writes its own condition makes the selector stop this run in the
@@ -815,43 +822,44 @@ function emitIfChainForArms(
  *       returns — is disposed again once the write has settled.
  *   `mkEffect` / `mkStatic` are the constructors in scope where the group is
  *   emitted — inside a mount-deferred or nested group they are that group's own
- *   tracking wrappers, so the group is torn down with its host.
+ *   tracking wrappers (which pass the render-gate flag through), so the group is
+ *   torn down with its host.
  */
 const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
   "function _scrml_lift_if_group(host, armOf, body, mkEffect, mkStatic) {",
   "  let arm = null;",
   "  let stopRun = null;",
-  "  const select = function() {",
+  "  let initing = true;",
+  "  const safe = (fn) => function() {",
+  "    if (initing) return fn();",
+  "    try { return fn(); } catch (e) { _scrml_g.console.error(\"scrml effect error:\", e); }",
+  "  };",
+  "  const select = safe(function() {",
   "    const next = armOf();",
   "    if (next === arm) return;",
   "    arm = next;",
   "    if (stopRun) { const stop = stopRun; stopRun = null; stop(); }",
   "    host.replaceChildren();",
-  "    if (next !== -1) stopRun = _scrml_lift_arm_run(host, next, () => arm === next, body, mkEffect, mkStatic);",
-  "  };",
-  "  // The group's render gate (see the note on a scheduling priority above).",
-  "  const d = mkEffect(select);",
+  "    if (next !== -1) stopRun = _scrml_lift_arm_run(host, next, () => arm === next, body, mkEffect, mkStatic, safe);",
+  "  });",
+  "  // The group's render gate: it runs first on a write (see above).",
+  "  let d;",
+  "  try { d = mkEffect(select, true); } finally { initing = false; }",
   "  return function() { if (typeof d === \"function\") d(); if (stopRun) { const stop = stopRun; stopRun = null; stop(); } };",
   "}",
-  "function _scrml_lift_arm_run(host, arm, isCurrent, body, mkEffect, mkStatic) {",
+  "function _scrml_lift_arm_run(host, arm, isCurrent, body, mkEffect, mkStatic, safe) {",
   "  let alive = true;",
   "  let rendering = false;",
   "  let owned = new _scrml_g.Set();",
-  "  const live = () => alive && isCurrent();",
-  "  const gate = (fn) => function() {",
-  "    if (!live()) return;",
-  "    try { fn(); } catch (e) {",
-  "      _scrml_g.queueMicrotask(() => { if (live()) _scrml_g.console.error(\"scrml effect error:\", e); });",
-  "    }",
-  "  };",
-  "  const own = (make) => function(fn) {",
+  "  const guard = (fn) => safe(function() { if (alive && isCurrent()) fn(); });",
+  "  const own = (make) => function(fn, gate) {",
   "    const set = owned;",
-  "    const d = make(gate(fn));",
+  "    const d = make(guard(fn), gate);",
   "    if (typeof d === \"function\") { if (alive) set.add(d); else d(); }",
   "    return d;",
   "  };",
   "  const disposeOwned = () => { const set = owned; owned = new _scrml_g.Set(); for (const d of set) d(); };",
-  "  const render = mkEffect(gate(function() {",
+  "  const render = mkEffect(guard(function() {",
   "    disposeOwned();",
   "    const frag = host.ownerDocument.createDocumentFragment();",
   "    const prevTarget = _scrml_lift_target;",

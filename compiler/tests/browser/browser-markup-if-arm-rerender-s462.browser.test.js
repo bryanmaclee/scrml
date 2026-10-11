@@ -32,11 +32,12 @@ const tmpRoot = resolve(tmpdir(), "scrml-markup-if-arm-s462");
 
 // Counts the effects the page creates, disposes and runs (`globalThis.__fx`), so a
 // test can assert that a cycle leaves no live effect behind. Wraps the runtime's
-// two effect constructors in place; the client code calls them by name.
+// two effect constructors in place (passing the render-gate flag through); the
+// client code calls them by name.
 const EFFECT_COUNTERS = `
 globalThis.__fx = { live: 0, runs: 0 };
-{ const o = _scrml_effect; _scrml_effect = function(fn) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
-{ const o = _scrml_effect_static; _scrml_effect_static = function(fn) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
+{ const o = _scrml_effect; _scrml_effect = function(fn, gate) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }, gate); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
+{ const o = _scrml_effect_static; _scrml_effect_static = function(fn, gate) { __fx.live++; let l = true; const d = o(function() { __fx.runs++; return fn(); }, gate); return function() { if (l) { l = false; __fx.live--; } return d(); }; }; }
 `;
 
 function compileAndMount(source, baseName) {
@@ -63,9 +64,15 @@ function compileAndMount(source, baseName) {
       `globalThis.__s462_set = typeof _scrml_cs_reactive_set === "function" ? _scrml_cs_reactive_set : _scrml_reactive_set;\n`,
     ),
   );
-  exec(window, document);
+  let loadError = null;
+  try {
+    exec(window, document);
+  } catch (e) {
+    if (!globalThis.__s462_catchLoad) throw e;
+    loadError = e;
+  }
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
-  return { errors, clientJs };
+  return { errors, clientJs, loadError };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -751,5 +758,152 @@ describe("markup ${ if } lift — reads in an unchanged arm re-render (g-impl1-m
     set("sel", 2);
     await flush();
     expect(globalThis.__fx.runs).toBe(runs);
+  });
+
+  // ---- S462 fix round 2, items 2-4: the selector is a render gate ----------
+
+  test("g1 — an arm body never runs for a write that de-selects it (the selector is a render gate)", async () => {
+    compileAndMount(`<program>
+<sel> = 1
+<hist> = []
+<div id="h1">\${ if (@sel != 0) { @hist = @hist.concat([@sel]); lift <p id="p">sel-\${@sel}</p> } else { lift <p id="none">none</p> } }</div>
+<p id="hist">\${@hist.join(",")}</p>
+</program>
+`, "g1");
+    expect(text("#hist")).toBe("1");
+    set("sel", 2);
+    await flush();
+    expect(text("#hist")).toBe("1,2");
+    set("sel", 0);
+    await flush();
+    // Pre-fix: the outgoing arm re-rendered with @sel already 0 and recorded it.
+    expect(text("#hist")).toBe("1,2");
+    expect(text("#h1")).toBe("none");
+    set("sel", 3);
+    set("sel", 0);
+    await flush();
+    expect(text("#hist")).toBe("1,2,3");
+  });
+
+  /**
+   * Run `driver` against the chain form of a program and against its PLAIN twin
+   * (the same block with a leading `const zz = 0`, which keeps the plain
+   * re-render shape), counting `console.error` calls synchronously.
+   */
+  async function bothForms(chainSrc, name, driver) {
+    const plainSrc = chainSrc.replace("${ if (", "${ const zz = 0; if (");
+    const out = [];
+    for (const [form, src] of [["chain", chainSrc], ["plain", plainSrc]]) {
+      const errs = [];
+      const orig = console.error;
+      console.error = (...a) => { errs.push(a.map(String).join(" ")); };
+      globalThis.__s462_catchLoad = true;
+      try {
+        const m = compileAndMount(src, `${name}-${form}`);
+        if (form === "chain") expect(m.clientJs).toContain("_scrml_lift_if_group(");
+        else expect(m.clientJs).not.toContain("_scrml_lift_if_group(");
+        out.push(await driver(m, () => errs.length));
+      } finally {
+        console.error = orig;
+        globalThis.__s462_catchLoad = false;
+      }
+    }
+    return out;
+  }
+
+  const E_SRC = (s0) => `<program>
+<on> = true
+<s> = "${s0}"
+<k> = 0
+function both() { @s = "bad"; @on = false }
+<div id="h1">\${ if (@on) { lift <p id="p">v=\${JSON.parse(@s)}</p> } else { lift <p id="off">off</p> } }</div>
+<button id="b" onclick=both()>b</button>
+</program>
+`;
+
+  test("e1 — an error in a current arm is reported synchronously, once, like the plain group (both forms)", async () => {
+    const [chain, plain] = await bothForms(E_SRC("1"), "e1", async (m, errCount) => {
+      const r = { init: text("#h1") };
+      set("s", "oops");
+      r.errsSync = errCount();       // reported inside the write, not a tick later
+      await flush();
+      r.errsAfterTick = errCount();
+      return r;
+    });
+    expect(chain).toEqual({ init: "v=1", errsSync: 1, errsAfterTick: 1 });
+    expect(chain).toEqual(plain);
+  });
+
+  test("e1 — an error and then a de-selection: one error, reported synchronously, in both forms", async () => {
+    const [chain, plain] = await bothForms(E_SRC("1"), "e1b", async (m, errCount) => {
+      // What `both()` does, as two writes (a click would also reach the delegated
+      // listeners earlier mounts in this file left on the shared document).
+      set("s", "bad");
+      set("on", false);
+      const r = { errsSync: errCount() };
+      await flush();
+      r.errsAfterTick = errCount();
+      r.html = text("#h1");
+      return r;
+    });
+    expect(chain.errsSync).toBe(1);
+    expect(chain.errsAfterTick).toBe(1);
+    expect(plain.errsSync).toBe(1);
+    expect(plain.errsAfterTick).toBe(1);
+    // The chain shows the selected `else` arm. The plain group's effect threw on
+    // `@s = "bad"` and lost its subscriptions, so it never saw `@on = false`.
+    expect(chain.html).toBe("off");
+    expect(plain.html).toBe("");
+  });
+
+  test("e1 — after a reported error the chain's binding is still live: the next good write renders", async () => {
+    const [chain, plain] = await bothForms(E_SRC("1"), "e1c", async (m, errCount) => {
+      set("s", "oops");
+      set("s", "2");
+      await flush();
+      return { errs: errCount(), html: text("#h1") };
+    });
+    expect(chain).toEqual({ errs: 1, html: "v=2" });
+    // The plain group stays blank: its effect died with the first error.
+    expect(plain).toEqual({ errs: 1, html: "" });
+  });
+
+  test("e3 — an error in the first render throws out of init, like the plain group (both forms)", async () => {
+    const [chain, plain] = await bothForms(E_SRC("bad"), "e3", async (m, errCount) => {
+      return { threw: m.loadError !== null, kind: m.loadError?.name ?? null, errs: errCount() };
+    });
+    expect(chain.threw).toBe(true);
+    expect(chain.kind).toBe("SyntaxError");
+    expect(chain).toEqual(plain);
+  });
+
+  test("an arm started in a write's gate pass renders that write's state, and its bindings track later writes", async () => {
+    compileAndMount(`<program>
+<n> = 0
+<items> = ["a", "b"]
+<div id="h">\${ if (@n > 0) { lift <p id="p">\${@n}-\${@n * 2}</p> for (x of @items) { lift <li class="li">\${x}-\${@n}</li> } } else { lift <p id="z">zero</p> } }</div>
+</program>
+`, "gate-newborn");
+    const lis = () => [...document.querySelectorAll("#h .li")].map((e) => e.textContent);
+    expect(text("#z")).toBe("zero");
+    set("n", 5);
+    await flush();
+    expect(text("#p")).toBe("5-10");
+    expect(lis()).toEqual(["a-5", "b-5"]);
+    // The next write reaches the bindings born in the previous write's gate pass.
+    set("n", 6);
+    await flush();
+    expect(text("#p")).toBe("6-12");
+    expect(lis()).toEqual(["a-6", "b-6"]);
+    set("items", ["a", "b", "c"]);
+    await flush();
+    expect(lis()).toEqual(["a-6", "b-6", "c-6"]);
+    set("n", 0);
+    await flush();
+    expect(text("#z")).toBe("zero");
+    set("n", 7);
+    await flush();
+    expect(text("#p")).toBe("7-14");
+    expect(lis()).toEqual(["a-7", "b-7", "c-7"]);
   });
 });

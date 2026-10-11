@@ -78,7 +78,16 @@ priority there. Once render gates run first, the microtask-deferred error report
       deleted. Tests m1_1, m1_2, m1_3, m1_4, m1_6, m1_7 (the five named ones fail on 821da6c69);
       m1_5 (`[o.v] = [40]`) fails the compile with E-CODEGEN-INVALID-LOGIC on base and head alike —
       not a runtime case.
-- [ ] WAITING on coordinator signal: narrowing branch's `_scrml_effect(fn, gate=true)` priority.
-      Then: item 2 (selector `mkEffect(select)` → gate=true; test g1) and item 3 (remove the
-      microtask error suppression; e1 both forms + e3 behave like the plain group). Do not merge
-      main until the signal.
+- [x] SIGNAL received (narrowing #1396 at 3d5fab91c). Merged origin/main (be7762efa): import-line
+      conflicts in emit-control-flow.ts / emit-logic.ts kept both sides; generated docs regenerated.
+- [x] Item 2 MED-HIGH — the selector is a render gate: `mkEffect(select, true)`. The mount-deferred
+      and nested-group `own` wrappers, and the arm run's own wrapper, now pass the gate flag through
+      (they dropped every second argument). Test g1: hist never records 0.
+- [x] Item 3 MED — the microtask error suppression is gone. During the group's creation an error
+      throws out of init, as the plain group's first render does (e3, both forms). After init an
+      effect of the group that throws is reported AT ONCE with the runtime's own line and stays
+      subscribed (e1, both forms: same error count, synchronous). That last part is the kept
+      improvement: the plain group's effect loses its subscriptions with one error (blank for good);
+      the chain keeps rendering — and nothing is hidden.
+- [x] Item 4 — an arm started during a write's gate pass renders that write's state; its bindings
+      (born in the gate pass, skipped for that write) track the next write (test).
