@@ -10,10 +10,12 @@
  *     click threw `ReferenceError`. Each case clicks BOTH arms and reads the DOM.
  *     (Static guard over every emitted helper call:
  *     `compiler/tests/unit/s462-handler-runtime-helpers-shipped.test.js`.)
- *  2. §14.10 + §66.3 rule 5(a): `<col> = Col.Red` gives the cell the type `Col`, so a
- *     bare-variant write `@col = .Blue` resolves — in a one-line if/else handler (newly
- *     rejected E-VARIANT-AMBIGUOUS by the s462 reroute) AND in a function body (rejected
- *     on base too).
+ *  2. §14.10: a bare-variant write `@col = .Blue` resolves against a cell with a KNOWN
+ *     type (`<col>: Col = .Red`) — in every if/else handler spelling AND a function body.
+ *     (Round 3, S465 PA ruling: an UNANNOTATED `<col> = Col.Red` is E-VARIANT-AMBIGUOUS on
+ *     every path, handler and function body alike; the round-2 widening was removed.)
+ *  3. (round 3) the same handlers inside `<match>` arms, and engine bodies re-parsed at
+ *     emit time (message arm, opener `effect=`).
  *
  * The same shapes were driven in Chromium during the fix (reported in progress.md).
  */
@@ -172,10 +174,10 @@ describe("S462 r3 F1 — `<match>` arm handlers ship their runtime helpers (exec
   });
 });
 
-const EN = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
+const EN = `type Col:enum = { Red, Blue }\n<c> = true\n<col>: Col = .Red\n`;
 const ENP = TOG + `<p id="o">\${@col}</p>\n`;
 
-describe("S462 r2 F2 — §14.10: `<col> = Col.Red` types the cell, a bare `.V` write resolves (executed)", () => {
+describe("S462 r2/r3 F2 — §14.10: `<col>: Col` types the cell, a bare `.V` write resolves (executed)", () => {
   const cases = [
     ["one-line if/else handler", EN + `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n` + ENP],
     ["braceless if/else handler", EN + `<button id="b" onclick={ if (@c) @col = .Blue else @col = .Red }>b</button>\n` + ENP],
@@ -192,8 +194,8 @@ describe("S462 r2 F2 — §14.10: `<col> = Col.Red` types the cell, a bare `.V` 
     });
   }
 
-  test("a payload construction `Sh.Circle(2)` types the cell too", async () => {
-    const src = `type Sh:enum = { Dot, Circle(r: number) }\n<c> = true\n<sh> = Sh.Circle(2)\n` +
+  test("an annotated payload-enum cell `<sh>: Sh = Sh.Circle(2)` resolves `.Dot` / `.Circle(3)`", async () => {
+    const src = `type Sh:enum = { Dot, Circle(r: number) }\n<c> = true\n<sh>: Sh = Sh.Circle(2)\n` +
       `<button id="b" onclick={ if (@c) { @sh = .Dot } else { @sh = .Circle(3) } }>b</button>\n` + TOG +
       `<p id="o">\${@sh == Sh.Dot ? "dot" : "circ"}</p>\n`;
     const { errors } = compileAndMount(src, "sh");
@@ -206,6 +208,14 @@ describe("S462 r2 F2 — §14.10: `<col> = Col.Red` types the cell, a bare `.V` 
   test("a variant the enum does not declare is rejected (E-TYPE-063), never emitted as a string", () => {
     const src = EN + `<button id="b" onclick={ if (@c) { @col = .Green } else { @col = .Red } }>b</button>\n` + ENP;
     expect(compileAndMount(src, "wrong").errors).toContain("E-TYPE-063");
+  });
+
+  test("an UNANNOTATED `<col> = Col.Red` is E-VARIANT-AMBIGUOUS in a handler, as in a function body (§14.10; S465 ruling)", () => {
+    const U = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
+    expect(compileAndMount(U + `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n` + ENP, "un1").errors)
+      .toContain("E-VARIANT-AMBIGUOUS");
+    expect(compileAndMount(U + `\${ function go() { @col = .Blue } }\n<button id="b" onclick=go()>b</button>\n` + ENP, "un2").errors)
+      .toContain("E-VARIANT-AMBIGUOUS");
   });
 
   test("a cell with no enum type keeps E-VARIANT-AMBIGUOUS (§14.10: no type context)", () => {

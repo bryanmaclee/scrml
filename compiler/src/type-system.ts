@@ -1048,18 +1048,6 @@ interface ScopeEntry {
    */
   declNode?: ASTNodeLike;
   /**
-   * §14.10 + §66.3 rule 5(a) — an UNANNOTATED reactive cell whose declaration
-   * initializer is a QUALIFIED variant of a known enum (`<col> = Col.Red`, or a
-   * payload construction `Col.Rgb(1, 2, 3)`) has a known type: §66.3 rule 5's
-   * reading "a qualified unit variant `E.V` is a literal of `E`" (a payload
-   * construction is a call whose declared type is `E`). §14.10 position 2 then
-   * resolves a later bare-variant write `@col = .Blue` against `E`. Carried as a
-   * bare-variant CONTEXT only — `resolvedType` stays what it was (asIs), so no
-   * other check changes; the effect is newly-accepting at exactly the positions
-   * that fired E-VARIANT-AMBIGUOUS before (s462 review round 2, finding 2).
-   */
-  variantCtxEnum?: ResolvedType;
-  /**
    * §14.10 — the binding's `resolvedType` comes from a written TYPE ANNOTATION
    * (`let e: Expr = …`), so a later reassignment `e = .V` has a declared
    * position type ("a previously-declared … local with a known type").
@@ -3339,39 +3327,6 @@ function findMapEntryColon(inner: string): number {
  * When resolution fails, tAsIs() is returned (conservative; no error emitted
  * here — callers decide whether unknown is an error).
  */
-/**
- * §14.10 + §66.3 rule 5(a)/(g) — the enum an UNANNOTATED cell initializer names
- * by a qualified variant: `E.V` (unit variant — "a literal of `E`") or `E.V(…)`
- * (payload construction — "a call whose declared type is `E`"). Parentheses are
- * transparent (§66.3 rule 5). Returns null for every other initializer, for a
- * name that is not a registered enum, for a variant the enum does not declare,
- * and when `E` is shadowed by a value binding in scope.
- */
-function qualifiedVariantInitEnum(
-  expr: unknown,
-  typeRegistry: Map<string, ResolvedType>,
-  scopeChain: ScopeChain,
-): ResolvedType | null {
-  let e = expr as Record<string, any> | null | undefined;
-  while (e && e.kind === "paren") e = e.expr;
-  if (!e || typeof e !== "object") return null;
-  const member = e.kind === "call" ? e.callee : e;
-  if (!member || member.kind !== "member" || member.optional) return null;
-  const obj = member.object;
-  if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
-  if (typeof member.property !== "string") return null;
-  const shadow = scopeChain.lookup(obj.name) as ScopeEntry | undefined;
-  if (shadow && shadow.kind !== "type") return null;
-  const t = typeRegistry.get(obj.name);
-  if (!t || t.kind !== "enum") return null;
-  const v = ((t as EnumType).variants ?? []).find((x) => x.name === member.property);
-  if (!v) return null;
-  // A payload variant is only a value when constructed; a unit variant only bare.
-  const hasPayload = v.payload instanceof Map && v.payload.size > 0;
-  if ((e.kind === "call") !== hasPayload) return null;
-  return t;
-}
-
 function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>): ResolvedType {
   if (!expr) return tAsIs();
 
@@ -12963,14 +12918,6 @@ function annotateNodes(
               ) {
                 bvCtxType = prior.resolvedType;
               }
-              // §14.10 + §66.3 rule 5(a) — the cell was declared WITHOUT an
-              // annotation from a qualified variant (`<col> = Col.Red`): its type
-              // is that enum, so a bare-variant write resolves against it (see
-              // ScopeEntry.variantCtxEnum).
-              if (!bvCtxType && prior && prior.kind === "reactive"
-                  && (prior as ScopeEntry).variantCtxEnum) {
-                bvCtxType = (prior as ScopeEntry).variantCtxEnum!;
-              }
             }
             // §65.6 (css-wave1-theme-tokens) — theme-bound cell variant inference.
             // A `<mode> = .Light` cell bound by a `<theme for=@mode>` infers its
@@ -13089,18 +13036,8 @@ function annotateNodes(
           // enum-only fence can recover this cell's initializer when `bindType`
           // erases to `asIs` (an untyped reactive cell). Lazily read by the fence
           // ONLY; never type-driving. See ScopeEntry.declNode + the render fence.
-          // §14.10 + §66.3 rule 5(a) — see ScopeEntry.variantCtxEnum. Set from the
-          // FIRST (declaring) state-decl only; a later write (the AST builder
-          // lowers `@x = …` in a body to a state-decl too) inherits it.
-          const _priorVcBind = scopeChain.lookup(`@${n.name as string}`) as ScopeEntry | undefined;
-          const variantCtxEnum: ResolvedType | undefined =
-            _priorVcBind && _priorVcBind.kind === "reactive"
-              ? _priorVcBind.variantCtxEnum
-              : (!(n as ASTNodeLike).typeAnnotation
-                  ? qualifiedVariantInitEnum((n as any).initExpr, typeRegistry, scopeChain) ?? undefined
-                  : undefined);
-          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: bindType, isServer, declNode: n, ...(variantCtxEnum ? { variantCtxEnum } : {}) });
-          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: bindType, isServer, declNode: n, ...(variantCtxEnum ? { variantCtxEnum } : {}) });
+          scopeChain.bind(`@${n.name as string}`, { kind: "reactive", resolvedType: bindType, isServer, declNode: n });
+          scopeChain.bind(n.name as string, { kind: "reactive", resolvedType: bindType, isServer, declNode: n });
 
           if (isServer) {
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -16576,21 +16513,8 @@ function annotateNodes(
         const cellName = n.name;
         const atName = `@${cellName}`;
         if (!scopeChain.lookup(atName) && !scopeChain.lookup(cellName)) {
-          // §14.10 + §66.3 rule 5(a) — the hoisted node IS the declaring one
-          // (this walk never enters a function body), so an unannotated
-          // qualified-variant initializer fixes the cell's bare-variant context
-          // for every write, whatever order the bodies are visited in.
-          const variantCtxEnum = !(n as ASTNodeLike).typeAnnotation
-            ? qualifiedVariantInitEnum((n as any).initExpr, typeRegistry, scopeChain) ?? undefined
-            : undefined;
           scopeChain.bind(atName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
           scopeChain.bind(cellName, { kind: "reactive", resolvedType: tAsIs(), isServer: false });
-          if (variantCtxEnum) {
-            for (const nm of [atName, cellName]) {
-              const entry = scopeChain.lookup(nm) as ScopeEntry | undefined;
-              if (entry) entry.variantCtxEnum = variantCtxEnum;
-            }
-          }
         }
       }
       // Recurse into container blocks that wrap top-level declarations.

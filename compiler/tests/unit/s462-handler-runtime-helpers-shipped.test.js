@@ -164,25 +164,35 @@ describe("S462 r2 — every runtime helper an if/else handler calls is shipped",
     });
   }
 
-  // Review round 2, finding 2 — §14.10 ("a previously-declared cell or local with a known
-  // type") + §66.3 rule 5(a) ("a QUALIFIED unit variant `E.V` … is a literal of `E`"):
-  // `<col> = Col.Red` types the cell `Col`, so `@col = .Blue` resolves on every path.
-  // Executed in browser-handler-if-else-helpers-s462.browser.test.js.
-  const EN = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
-  for (const [label, body] of [
-    ["en-handler-oneline", `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n`],
-    ["en-handler-multiline", `<button id="b" onclick={\n  if (@c) {\n    @col = .Blue\n  } else {\n    @col = .Red\n  }\n}>b</button>\n`],
-    ["en-fn-body", `\${ function go() { if (@c) { @col = .Blue } else { @col = .Red } } }\n<button id="b" onclick=go()>b</button>\n`],
-    ["en-fn-body-single", `\${ function go() { @col = .Blue } }\n<button id="b" onclick=go()>b</button>\n`],
-  ]) {
-    test(`${label}: an unannotated qualified-variant cell gives a bare variant its type`, () => {
-      const { errors, files } = build(EN + body + `<p id="o">\${@col}</p>\n`, label);
+  // Bare-variant writes from an if/else handler (round 3, S465 PA ruling — the round-2
+  // enum-context widening for UNANNOTATED cells is REMOVED). §14.10: the resolution source
+  // is "a previously-declared cell or local with a known type (`@cell = .V` where
+  // `@cell: T`)", and an unannotated `let x = .Small` is E-VARIANT-AMBIGUOUS. So:
+  // the annotated cell `<col>: Col = .Red` resolves on every path (handler AND function
+  // body); an UNANNOTATED cell is E-VARIANT-AMBIGUOUS on every path — the handler now
+  // reports exactly what a function body always did. Executed in
+  // browser-handler-if-else-helpers-s462.browser.test.js.
+  const FORMS = [
+    ["oneline", `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n`],
+    ["braceless", `<button id="b" onclick={ if (@c) @col = .Blue else @col = .Red }>b</button>\n`],
+    ["multiline", `<button id="b" onclick={\n  if (@c) {\n    @col = .Blue\n  } else {\n    @col = .Red\n  }\n}>b</button>\n`],
+    ["fn-body", `\${ function go() { if (@c) { @col = .Blue } else { @col = .Red } } }\n<button id="b" onclick=go()>b</button>\n`],
+    ["fn-body-single", `\${ function go() { @col = .Blue } }\n<button id="b" onclick=go()>b</button>\n`],
+  ];
+  const ENA = `type Col:enum = { Red, Blue }\n<c> = true\n<col>: Col = .Red\n`;
+  const ENU = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
+  for (const [label, body] of FORMS) {
+    test(`en-annotated-${label}: \`<col>: Col\` gives a bare variant its type`, () => {
+      const { errors, files } = build(ENA + body + `<p id="o">\${@col}</p>\n`, `ena-${label}`);
       expect(errors).toEqual([]);
       expect(undefinedHelperCalls(files)).toEqual([]);
     });
+    test(`en-unannotated-${label}: \`<col> = Col.Red\` is no §14.10 context → E-VARIANT-AMBIGUOUS`, () => {
+      expect(build(ENU + body + `<p id="o">\${@col}</p>\n`, `enu-${label}`).errors).toContain("E-VARIANT-AMBIGUOUS");
+    });
   }
-  test("en: a variant `Col` does not declare is E-TYPE-063; a string-initialised cell stays E-VARIANT-AMBIGUOUS", () => {
-    expect(build(EN + `<button onclick={ if (@c) { @col = .Green } else { @col = .Red } }>b</button>\n`, "en-wrong").errors)
+  test("en: a variant `Col` does not declare is E-TYPE-063 (annotated cell); a string-initialised cell is E-VARIANT-AMBIGUOUS", () => {
+    expect(build(ENA + `<button onclick={ if (@c) { @col = .Green } else { @col = .Red } }>b</button>\n`, "en-wrong").errors)
       .toContain("E-TYPE-063");
     expect(build(`<c> = true\n<col> = "Red"\n<button onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n`, "en-str").errors)
       .toContain("E-VARIANT-AMBIGUOUS");

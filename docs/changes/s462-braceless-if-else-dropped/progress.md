@@ -119,3 +119,39 @@
       (each-alias-in-lifted-markup "a nested <each> under an element in a lifted each row", JSON parse "bad" —
       order-dependent: passes alone and paired with the new test) — IDENTICAL on origin/main 1c1e9eee5 in this
       container, so pre-existing/environmental; baseline NOT re-recorded.
+
+## Review round 3 (S239 re-review of acfc64d3, S465 — owner absent)
+- [x] 2026-10-11T20:10Z brief archived verbatim (1acba0714); worktree reset to acfc64d3b (asserted). origin/main = 1c1e9eee5 (unmoved — no merge needed).
+- [x] 2026-10-11T20:40Z F1 [HIGH] reproduced in Chromium (puppeteer chrome 146, served out dir, pruned runtime): every `<match>`-arm
+      handler shape → `_scrml_deep_set is not defined` on acfc64d3 (13/13 shapes incl. the reviewer repro). Root: emit-client
+      `detectRuntimeChunks` `case "match-block"` regex-probed `armsRaw` for `<each`; arm bodies are AST only after emit-match
+      `buildMatchArms`. Fix: the case walks `matchBlockArmBodies(node, fileAST)` (new export = the memoized `buildMatchArms`
+      bodies — the exact nodes codegen emits; the HTML pass already populated the cache before chunk detection, so calling it
+      first changes nothing). Regex probe removed (Rule 7); each-bearing arms now reach `case "each-block"` structurally.
+- [x] Sweep of OTHER bodies parsed only at emit time (grep buildAST / nativeParseFile / splitBlocks / runBlockSplitter /
+      parseExprToNode in codegen/): engine `(state × message)` arm bodies + engine opener `effect=` — BOTH dangled
+      `_scrml_deep_set` (on origin/main too). Fixed: emit-engine lowers both from one parser `parseEngineSynthLogicBody`, and
+      `engineDeferredStatementBodies(meta)` hands the chunk walk the same parse (engine-decl case). Probed clean (no helper
+      dangles): `!{}` arm handlers (fn / nested / handler), engine `:` shorthand arms, match-statement arms, if=/lift/when;
+      the `parseExprToNode` re-parses are expression positions (no statement-level helper). All pinned in the unit guard.
+- [x] Chromium result (head): 18/19 PASS; `<match>` nested in a `<match>` arm renders no inner arm on base AND head →
+      filed g-match-nested-in-match-arm-inner-arm-never-renders-s465 (MED). `{…}` handler in a markup-value ternary is
+      E-CODEGEN-INVALID-LOGIC on base and head → filed g-markup-value-ternary-brace-handler-codegen-invalid-s465 (LOW).
+- [x] 2026-10-11T21:10Z F1 committed 8b9120a3b (gate: only the known env-only files failed; conf-MARKUP-001 hook timeout +
+      tenant-floor-project-set under load passed on re-run).
+- [x] F2 [PA DECISION] round-2 enum-context widening REMOVED: compiler/src/type-system.ts restored to origin/main byte-for-byte
+      (`variantCtxEnum` / `qualifiedVariantInitEnum` gone). `prov=pa-ruled:S465` newly-rejecting vs origin/main: a bare variant
+      written from an if/else handler into an UNANNOTATED cell (`<col> = Col.Red` / `<col> = "Red"` / `<sh> = Sh.Circle(2)`)
+      is now E-VARIANT-AMBIGUOUS, exactly as the function-body form always was; a non-member variant into an ANNOTATED cell
+      from a handler is E-TYPE-063 (does not depend on the removed code — same check as the function body). Governing
+      §14.10 (SPEC.md:13800): "A bare variant reference SHALL be resolved by the compiler when the type at the position can be
+      inferred from one of: … a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`) …";
+      SPEC.md:13802: "A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or
+      otherwise ambiguous (e.g., `let x = .Small` with no annotation …)". Corpus measured: 0 (see differential below).
+      Annotated `<col>: Col = .Red` compiles and runs in Chromium (one-line / braceless / multi-line / fn body: Blue, Red).
+- [x] Corpus differential round 4 (base = git archive origin/main 1c1e9eee5, head = git archive 8b9120a3b + restored
+      type-system.ts; roots examples,samples,conformance,stdlib,benchmarks,ext; ext = scrml-support gauntlet-r25 (4 files);
+      ext/giti + ext/flogence NOT in this container — skipped). 2813 base / 2820 head sources. Verdict INCOMPARABLE only
+      because archives carry no git revision. 0 newly failing · 5 newly passing (round-1 template cases + meta-type-registry-001)
+      · 6 diagnostic-code changes, all those same round-1 sources losing an error/warning · 0 sources gain E-VARIANT-AMBIGUOUS
+      or E-TYPE-063 · 1 text-only change (s450-attr-multi-statement-pos: same codes, same messages — capture-path noise).
