@@ -19,7 +19,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
-import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens } from "../../src/commands/fix-given-presence.js";
+import { fixGivenPresence, GIVEN_PRESENCE_RULE, normalizePresenceParens, compareMarkupClientJs } from "../../src/commands/fix-given-presence.js";
 import { fixS66, IMPL1_SAFE_RULES, S66_RULES } from "../../src/commands/fix-s66.js";
 
 let TMP;
@@ -259,16 +259,72 @@ describe("§C: scrml fix `given-presence`", () => {
     expect(r.output).toContain("if (@label is given) { let _b = @label }");
   });
 
-  test("a markup guard over a cell is refused: its `if` rewrite renders stale today (named gap)", () => {
+  test("a markup guard over a cell migrates (s462-fix-rule-followups: #1397 resolved the stale render)", () => {
+    // §42.2.3: `${ given @u :> { <p>…</p> } }` → `${ if (@u is given) { <p>…</p> } }`.
+    // The two emit different lift groups by design; the verify cuts the changed group from both
+    // sides and checks it (markup-guard compare). Executed in
+    // compiler/tests/browser/browser-fix-given-presence-markup-s462.browser.test.js.
     const src = `<user>: { name: string } | not = not
 <main>
     \${ given @user :> { <p>\${@user.name}</p> } }
 </main>
 `;
     const r = fixGivenPresence(src, { filePath: join(TMP, "c/cell-markup.scrml") });
-    expect(r.changed).toBe(false);
-    expect(r.blockers.length).toBe(1);
-    expect(r.blockers[0].reason).toContain("g-impl1-markup-if-branch-memo-stale-render-s462");
+    expect(r.blockers).toEqual([]);
+    expect(r.applied.length).toBe(1);
+    expect(r.output).toContain("${ if (@user is given) { <p>${@user.name}</p> } }");
+    // Idempotent.
+    expect(fixGivenPresence(r.output, { filePath: join(TMP, "c/cell-markup.scrml") }).changed).toBe(false);
+  });
+
+  describe("the markup-guard compare fails closed (compareMarkupClientJs)", () => {
+    const BEFORE = `<user>: { name: string } | not = { name: "a" }
+<main>
+    <div>\${ given @user :> { <p id="n">\${@user.name}</p> } }</div>
+</main>
+`;
+    const AFTER = BEFORE.replace("given @user :>", "if (@user is given)");
+    let jsBefore;
+    let jsAfter;
+    beforeAll(() => {
+      const compileAt = (text) => {
+        const dir = join(TMP, "cmp");
+        mkdirSync(dir, { recursive: true });
+        const f = join(dir, "cmp.scrml");
+        writeFileSync(f, text);
+        const r = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} });
+        return [...r.outputs.values()].find((v) => typeof v.clientJs === "string").clientJs;
+      };
+      jsBefore = compileAt(BEFORE);
+      jsAfter = compileAt(AFTER);
+    });
+
+    test("the real pair passes", () => {
+      expect(jsAfter).toContain("_scrml_lift_if_group(");
+      expect(compareMarkupClientJs(jsBefore, jsAfter, 1)).toBeNull();
+    });
+    test("a selector testing a different condition is refused", () => {
+      const bad = jsAfter.replace(/return \(\((_scrml_cs_reactive_get\("user"\)) !== null && \1 !== undefined\)\)/, 'return ((_scrml_cs_reactive_get("user") !== null))');
+      expect(bad).not.toBe(jsAfter);
+      expect(compareMarkupClientJs(jsBefore, bad, 1)).toContain("different condition");
+    });
+    test("more changed groups than markup guards rewritten is refused", () => {
+      expect(compareMarkupClientJs(jsBefore, jsAfter, 0)).toContain("changed shape");
+    });
+    test("a change outside the cut group is refused", () => {
+      const bad = jsAfter.replace('{name: "a"}', '{name: "z"}');
+      expect(bad).not.toBe(jsAfter);
+      expect(compareMarkupClientJs(jsBefore, bad, 1)).toContain("around the rewritten markup guard");
+    });
+    test("an altered arm-run appendix is refused", () => {
+      const bad = jsAfter.replace("let initing = true;", "let initing = false;");
+      expect(bad).not.toBe(jsAfter);
+      expect(compareMarkupClientJs(jsBefore, bad, 1)).toContain("appendix");
+    });
+    test("a second arm in the selector group is refused", () => {
+      const bad = jsAfter.replace("if (_scrml_arm === 0) {", "if (_scrml_arm === 0) {\n  } else if (_scrml_arm === 1) {");
+      expect(compareMarkupClientJs(jsBefore, bad, 1)).toContain("not a single presence arm");
+    });
   });
 
   test("refuses an arm that does not name the scrutinee, a match with no `not` arm, and a property path", () => {

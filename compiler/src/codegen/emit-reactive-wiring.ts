@@ -825,7 +825,11 @@ function emitIfChainForArms(
  *   tracking wrappers (which pass the render-gate flag through), so the group is
  *   torn down with its host.
  */
-const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
+// Exported (with the banner) for `scrml fix` given-presence's verify compile
+// (commands/fix-given-presence.js), which recognises this appendix exactly.
+export const LIFT_BRANCH_RUN_BANNER =
+  "// --- arm runs of `${ if … }` lift groups (re-render an arm only when its own reads change) ---";
+export const LIFT_BRANCH_RUN_HELPER: readonly string[] = [
   "function _scrml_lift_if_group(host, armOf, body, mkEffect, mkStatic) {",
   "  let arm = null;",
   "  let stopRun = null;",
@@ -1806,7 +1810,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // function declaration, so it hoists to every group that calls it.
   if (_liftBranchRunUsed) {
     lines.push("");
-    lines.push("// --- arm runs of `${ if … }` lift groups (re-render an arm only when its own reads change) ---");
+    lines.push(LIFT_BRANCH_RUN_BANNER);
     lines.push(...LIFT_BRANCH_RUN_HELPER);
   }
 

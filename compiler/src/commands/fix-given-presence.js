@@ -47,12 +47,16 @@
  *      standing as an `if` test or an `&&` operand is read without its parentheses — the only
  *      difference between the guard's lowering and `x is given`'s (and, for an artifact with no
  *      template literal, each line's leading indentation — `normalizeForCompare`).
+ *      A markup guard is the one rewrite that is MEANT to emit differently: its `${ if … }`
+ *      takes the arm-selector lift group since #1397 (g-impl1-markup-if-branch-memo-stale-render-s462,
+ *      resolved). For a subset holding markup guards, each changed group is cut from both sides
+ *      and checked to be exactly that change (same presence test, one arm) and the rest compared
+ *      as above — see "The markup-guard compare" below. The diagnostic codes must match all the same.
  *   When the whole file does not verify, each site is verified alone and the sites that verify
  *   alone are re-verified together; a site that does not is left as written with the reason.
  *   That is how a site impl#1 compiles differently today is refused: the rewrite would change
- *   what runs (a `given` arm whose body impl#1 drops, g-impl1-given-match-arm-body-dropped-s462;
- *   a markup guard over a cell, whose `if` rewrite renders stale today,
- *   g-impl1-markup-if-branch-memo-stale-render-s462; a site whose diagnostic codes change).
+ *   what runs (a `given` arm, lowered as `else if (<presence>)` where `else :>` is `else` — a follow-up;
+ *   a markup guard whose group is not the recognised shape; a site whose diagnostic codes change).
  *
  * Idempotent: the output has no `given` head at a rewritten site, so a second run makes no edit.
  */
@@ -61,6 +65,7 @@ import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { captureTrailingContentWarnings } from "../expression-parser.ts";
 import { compileScrml } from "../api.js";
+import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
@@ -385,11 +390,173 @@ export function normalizeForCompare(js) {
   return t.includes("`") ? t : t.replace(/^[ \t]+/gm, "");
 }
 
+// ---------------------------------------------------------------------------
+// The markup-guard compare (S462 s462-fix-rule-followups)
+// ---------------------------------------------------------------------------
+//
+// A markup guard `${ given @u :> { <p>${@u.name}</p> } }` and its rewrite `${ if (@u is given)
+// { … } }` do NOT emit the same client JS, and are not meant to: since #1397
+// (g-impl1-markup-if-branch-memo-stale-render-s462, resolved) a lift group that is exactly one
+// `if` takes the arm-selector shape (`_scrml_lift_if_group`, emit-reactive-wiring.ts
+// emitLiftIfChainGroup), while the guard keeps the plain one-effect group. Both re-render a read
+// that changes while the presence test stays true (§7.4.2) — executed in
+// compiler/tests/browser/browser-fix-given-presence-markup-s462.browser.test.js.
+//
+// So for a subset holding markup guards the client JS is compared with each CHANGED group cut
+// out of both sides, and each cut pair is checked to be what the rewrite must produce:
+//   - before: the plain group anchored at `[data-scrml-logic="X"]`
+//       `const T = _scrml_g.document.querySelector('[data-scrml-logic="X"]');⏎_scrml_effect(function() {`
+//       … through the first column-0 `});`, whose first `if (C) {` is the guard's presence test;
+//   - after: the selector group anchored at the same X
+//       `_scrml_lift_if_group(_scrml_g.document.querySelector('[data-scrml-logic="X"]'), function A() { return (C') ? 0 : -1; }, …`
+//       … through the first `}, _scrml_effect, _scrml_effect_static);`, with ONE arm, and C' the
+//       same presence test as C (the same names, each `!== null && … !== undefined`);
+//   - the number of cut pairs is at most the number of markup guards rewritten (a guard that
+//     shares its `${ }` with other statements keeps the plain group and is compared as text);
+//   - the file-local arm-run appendix (LIFT_BRANCH_RUN_BANNER + LIFT_BRANCH_RUN_HELPER, exactly)
+//     is cut from the after side when the before side has none;
+//   - what remains is identical once compiler-generated counter names (`_scrml_<kind>_<n>`) are
+//     renumbered in order of first appearance (the rewrite shifts the shared counter) and read
+//     through normalizeForCompare. Every other artifact must be identical as it stands.
+// Any shape this does not recognise (a mount-deferred host, a hoisted keyed setup, …) fails the
+// compare, so the site is left as written with the reason (fail closed).
+
+const BEFORE_GROUP_RE = /^const ([A-Za-z_$][\w$]*) = _scrml_g\.document\.querySelector\('\[data-scrml-logic="([\w$-]+)"\]'\);\n_scrml_effect\(function\(\) \{\n/gm;
+const AFTER_GROUP_RE = /^_scrml_lift_if_group\(_scrml_g\.document\.querySelector\('\[data-scrml-logic="([\w$-]+)"\]'\), function [A-Za-z_$][\w$]*\(\) \{ return \((.*)\) \? 0 : -1; \}, function\([^)\n]*\) \{\n/gm;
+const AFTER_GROUP_END = "\n}, _scrml_effect, _scrml_effect_static);";
+const PRESENCE_TERM = String.raw`([A-Za-z_$][\w$]*(?:\("[^"\\\n]*"\))?)!==null&&\1!==undefined`;
+
+/**
+ * A presence test read without parentheses or whitespace — `a` / `_scrml_cs_reactive_get("a")`
+ * each `!== null && … !== undefined`, joined by `&&` — as the list of names it tests, or null when
+ * the condition is anything else. (`&&` is associative, so the parentheses carry no meaning in a
+ * condition made only of these terms.)
+ */
+function presenceNames(cond) {
+  // Keep the parentheses of a cell read; drop every other one.
+  const flat = cond.replace(/\s+/g, "").replace(/_scrml_cs_reactive_get\("([^"\\\n]*)"\)/g, "\u0000$1\u0001")
+    .replace(/[()]/g, "").replace(/\u0000([^\u0001]*)\u0001/g, '_scrml_cs_reactive_get("$1")');
+  const names = [];
+  const term = new RegExp(`^${PRESENCE_TERM}(?:&&|$)`);
+  let rest = flat;
+  while (rest.length) {
+    const m = term.exec(rest);
+    if (!m) return null;
+    names.push(m[1]);
+    rest = rest.slice(m[0].length);
+  }
+  return names.length ? names : null;
+}
+
+/** Cut the plain group anchored at each logic id from `js`; returns { rest, groups: Map<id, cond> } or a reason. */
+function cutBeforeGroups(js, ids) {
+  const groups = new Map();
+  let rest = js;
+  for (const id of ids) {
+    BEFORE_GROUP_RE.lastIndex = 0;
+    let m;
+    let found = null;
+    while ((m = BEFORE_GROUP_RE.exec(rest))) if (m[2] === id) { found = m; break; }
+    if (!found) return { why: `no plain lift group for ${id} before the rewrite` };
+    const bodyStart = found.index + found[0].length;
+    const end = rest.indexOf("\n});", bodyStart);
+    if (end === -1) return { why: `unterminated lift group for ${id} before the rewrite` };
+    const ifm = /^\s*if \((.*)\) \{$/m.exec(rest.slice(bodyStart, end));
+    if (!ifm) return { why: `the lift group for ${id} has no presence test before the rewrite` };
+    groups.set(id, ifm[1]);
+    rest = rest.slice(0, found.index) + `/*cut:${id}*/` + rest.slice(end + "\n});".length);
+  }
+  return { rest, groups };
+}
+
+/** Rename every compiler-generated counter name (`_scrml_<kind>_<n>`) by order of first appearance. */
+function renumberGenerated(js) {
+  const seen = new Map();
+  return js.replace(/\b_scrml_([A-Za-z_]*?[A-Za-z])_(\d+)\b/g, (m, kind) => {
+    if (!seen.has(m)) seen.set(m, `_scrml_${kind}_#${seen.size}`);
+    return seen.get(m);
+  });
+}
+
+/** Compare one client JS pair for a subset with `markupSites` markup guards. Returns null or a reason. */
+export function compareMarkupClientJs(before, after, markupSites) {
+  // The selector groups after the rewrite that are new (no selector group at that id before).
+  const beforeSelectors = new Set([...before.matchAll(AFTER_GROUP_RE)].map((m) => m[1]));
+  const changed = [];
+  let afterRest = after;
+  for (;;) {
+    AFTER_GROUP_RE.lastIndex = 0;
+    let m;
+    let found = null;
+    while ((m = AFTER_GROUP_RE.exec(afterRest))) if (!beforeSelectors.has(m[1])) { found = m; break; }
+    if (!found) break;
+    const bodyStart = found.index + found[0].length;
+    const end = afterRest.indexOf(AFTER_GROUP_END, bodyStart);
+    if (end === -1) return `unterminated selector group for ${found[1]} after the rewrite`;
+    const body = afterRest.slice(bodyStart, end);
+    if (!/^\s*if \(_scrml_arm === 0\) \{$/m.test(body) || /_scrml_arm === [1-9]/.test(body)) {
+      return `the selector group for ${found[1]} after the rewrite is not a single presence arm`;
+    }
+    changed.push({ id: found[1], cond: found[2] });
+    afterRest = afterRest.slice(0, found.index) + `/*cut:${found[1]}*/` + afterRest.slice(end + AFTER_GROUP_END.length);
+  }
+  // At most one group per rewritten guard. Fewer is fine: guards that share a `${ }` with other
+  // statements keep the plain group (it is not exactly one `if`), and are compared as text below.
+  if (changed.length > markupSites) return `${changed.length} lift group(s) changed shape for ${markupSites} markup guard(s) rewritten`;
+  const cut = cutBeforeGroups(before, changed.map((c) => c.id));
+  if (cut.why) return cut.why;
+  for (const c of changed) {
+    const was = presenceNames(cut.groups.get(c.id));
+    const now = presenceNames(c.cond);
+    if (!was || !now || was.join(",") !== now.join(",")) return `the group for ${c.id} tests a different condition after the rewrite`;
+  }
+  // The arm-run appendix: emitted once per file that has a selector group.
+  const appendix = `\n\n${LIFT_BRANCH_RUN_BANNER}\n${LIFT_BRANCH_RUN_HELPER.join("\n")}`;
+  if (!before.includes(LIFT_BRANCH_RUN_BANNER)) {
+    if (!afterRest.includes(appendix)) return "the arm-run appendix after the rewrite is not the one impl#1 emits";
+    afterRest = afterRest.replace(appendix, "");
+  }
+  const a = normalizeForCompare(renumberGenerated(cut.rest));
+  const b = normalizeForCompare(renumberGenerated(afterRest));
+  return a === b ? null : "the code around the rewritten markup guard changed";
+}
+
+/** Compare raw artifacts for a subset that holds markup guards. Returns null or a reason. */
+function compareWithMarkupGroups(rawA, rawB, markupSites) {
+  if (rawA.length !== rawB.length) return "a different set of artifacts";
+  for (let i = 0; i < rawA.length; i++) {
+    const [pa, fa] = rawA[i];
+    const [pb, fb] = rawB[i];
+    if (pa !== pb) return "a different set of artifacts";
+    const keys = Object.keys(fa);
+    if (keys.join(",") !== Object.keys(fb).join(",")) return `different artifact fields for ${pa}`;
+    let clientSeen = false;
+    for (const k of keys) {
+      if (k === "clientJs" && fa[k] !== fb[k]) {
+        if (clientSeen) return "two client artifacts changed";
+        clientSeen = true;
+        const why = compareMarkupClientJs(fa[k], fb[k], markupSites);
+        if (why) return why;
+      } else if (normalizeForCompare(fa[k]) !== normalizeForCompare(fb[k])) {
+        return `${k} changed`;
+      }
+    }
+  }
+  return null;
+}
+
+/** Is this site a guard (not an arm) whose body renders markup? */
+function isMarkupGuard(site) {
+  if (site.match) return false;
+  return (site.node.body ?? []).some((b) => b && typeof b === "object" && /markup|lift|html-fragment/.test(String(b.kind ?? "")));
+}
+
 /**
  * Compile `before` and `after` with impl#1 at the SAME scratch path (the project beside it) and
- * compare. Returns null when they agree, else a reason.
+ * compare. Returns null when they agree, else a reason. `markupSites` > 0: the subset rewrites
+ * that many markup guards, whose lift groups are compared as described above.
  */
-function verifyByCompile(filePath, before, after, auxSources) {
+function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-given-presence-"));
   const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
   try {
@@ -412,13 +579,20 @@ function verifyByCompile(filePath, before, after, auxSources) {
       const r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
       const codes = [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d?.code).filter((c) => typeof c === "string").sort();
       const outputs = [];
+      const raw = [];
       for (const [k, v] of r.outputs ?? new Map()) {
         const fields = {};
-        for (const f of Object.keys(v ?? {}).sort()) if (!/Map$/.test(f) && typeof v[f] === "string") fields[f] = normalizeForCompare(v[f]);
+        const rawFields = {};
+        for (const f of Object.keys(v ?? {}).sort()) {
+          if (!/Map$/.test(f) && typeof v[f] === "string") { fields[f] = normalizeForCompare(v[f]); rawFields[f] = v[f]; }
+        }
         outputs.push([relative(dir, k), fields]);
+        raw.push([relative(dir, k), rawFields]);
       }
-      outputs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-      return { codes, outputs: JSON.stringify(outputs) };
+      const byPath = (a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+      outputs.sort(byPath);
+      raw.sort(byPath);
+      return { codes, outputs: JSON.stringify(outputs), raw };
     };
     let a;
     let b;
@@ -433,8 +607,12 @@ function verifyByCompile(filePath, before, after, auxSources) {
     }
     const strip = (cs) => cs.filter((c) => c !== LINT).join(",");
     if (strip(a.codes) !== strip(b.codes)) return `impl#1 reports different codes after the rewrite (${strip(a.codes) || "none"} → ${strip(b.codes) || "none"})`;
-    if (a.outputs !== b.outputs) return "impl#1 emits different code after the rewrite, so it would change what runs";
-    return null;
+    if (a.outputs === b.outputs) return null;
+    if (markupSites > 0) {
+      const why = compareWithMarkupGroups(a.raw, b.raw, markupSites);
+      return why ? `impl#1 emits different code after the rewrite (${why}), so it would change what runs` : null;
+    }
+    return "impl#1 emits different code after the rewrite, so it would change what runs";
   } catch (e) {
     return `the verify compile threw: ${String(e?.message ?? e).split("\n")[0]}`;
   } finally {
@@ -444,12 +622,10 @@ function verifyByCompile(filePath, before, after, auxSources) {
 
 /** Why a site that does not verify alone may not: the known impl#1 miscompiles of the old form. */
 function knownCause(site) {
-  if (site.match) return " (impl#1 drops the body of a `given` match arm — g-impl1-given-match-arm-body-dropped-s462 — and `else :>` runs it)";
-  const names = Array.isArray(site.node.spellings) ? site.node.spellings : [];
-  const hasMarkup = (site.node.body ?? []).some((b) => b && typeof b === "object" && /markup|lift|html-fragment/.test(String(b.kind ?? "")));
-  if (hasMarkup && names.some((n) => typeof n === "string" && n.startsWith("@"))) {
-    return " (in markup, impl#1 lowers `${ if (@cell is given) { … } }` with a branch memo (`_scrml_lift_branch_N`) that skips the re-render while the branch holds (any markup `if`, emit-reactive-wiring.ts emitLiftGroup), so `${@cell.field}` inside it goes stale; `given @cell` re-renders — the rewrite would make it worse — g-impl1-markup-if-branch-memo-stale-render-s462)";
-  }
+  // g-impl1-given-match-arm-body-dropped-s462 is resolved (#1395): the arm body is lowered now,
+  // but as `else if (<presence test>)` where `else :>` lowers to `else`, and this compare does not
+  // read the two as alike (they are, after a `not :>` arm of the same scrutinee) — a follow-up.
+  if (site.match) return " (impl#1 lowers a `given` match arm as `else if (<presence test>)` and `else :>` as `else`; the verify does not yet read them as alike — follow-up to g-impl1-given-match-arm-body-dropped-s462, resolved)";
   return "";
 }
 
@@ -538,7 +714,8 @@ export function fixGivenPresence(source, opts = {}) {
     const s = structural(subset);
     if (!s.ok) return { out: s.out, why: "impl#1 reads the rewritten file differently (a `given` head it still sees, or a tree it cannot build)" };
     if (opts.verify === false) return { out: s.out, why: null };
-    return { out: s.out, why: verifyByCompile(filePath, source, s.out, opts.auxSources) };
+    const markupSites = subset.filter((p) => isMarkupGuard(p.site)).length;
+    return { out: s.out, why: verifyByCompile(filePath, source, s.out, opts.auxSources, markupSites) };
   };
 
   let accepted = planned;

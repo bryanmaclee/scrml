@@ -1,0 +1,14 @@
+// §42.2.3 / §42.4 / §63.5 (S462) — the canonical twin of condition/given-presence-deprecated-markup:
+// the same program with the markup guard written as `scrml fix` given-presence writes it,
+// `${ if (@user is given) { … } }`. Same run-time effect — the read re-renders while @user stays
+// present — and no deprecation code.
+<user>: { name: string } | not = { name: "ada" }
+
+${
+    function rename() { @user = { name: "bob" } }
+}
+
+<main>
+    <button id="go" onclick=rename()>Rename</button>
+    ${ if (@user is given) { <p id="name">${@user.name}</p> } }
+</main>

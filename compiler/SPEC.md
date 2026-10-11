@@ -44994,12 +44994,13 @@ Applying the machine to the existing corpus:
   unscheduled; reserved `E-GIVEN-PRESENCE-DEPRECATED` named, unfired; **gate-blocked** until its `scrml fix` rule is
   verified-landed (§63.4) — the rule LANDED S462 (`compiler/src/commands/fix-given-presence.js`, a default rule of
   `scrml fix`); §63.4 verification is not claimed. It rewrites only the sites impl#1 compiles identically before and
-  after (verified per site). Two shapes are refused on impl#1 today because the two spellings do not run alike
-  there, so the §63.5 runtime identity does not yet hold for them on impl#1: the `given` match arm (impl#1 drops
-  its body; `g-impl1-given-match-arm-body-dropped-s462`), and a markup-`${ … }` guard over a cell whose body reads
-  the cell (`${ given @u :> { <p>${@u.name}</p> } }` re-renders when `@u` changes; its rewrite
-  `${ if (@u is given) { … } }` keeps the stale text while `@u` stays present —
-  `g-impl1-markup-if-branch-memo-stale-render-s462`; here the deprecated form is the correct one). A `given @cell`
+  after (verified per site). The `given` match arm is still refused on impl#1: its body is lowered since #1395
+  (`g-impl1-given-match-arm-body-dropped-s462`, resolved), but as `else if (<presence test>)` where `else :>` lowers
+  to `else`, and the rule's compare does not yet read the two as alike. A markup-`${ … }` guard over a cell
+  (`${ given @u :> { <p>${@u.name}</p> } }`) migrates since S462 (s462-fix-rule-followups): its rewrite
+  `${ if (@u is given) { … } }` re-renders a changed read while `@u` stays present since #1397
+  (`g-impl1-markup-if-branch-memo-stale-render-s462`, resolved). The two emit different lift groups by design, so
+  the rule checks that changed group (same presence test, one arm) and compares the rest as above. A `given @cell`
   guard in logic and a markup guard over a plain value migrate since #1380 (S461), which fixed the bare-name
   lowering and the dropped markup body. The rebind head `given c = @h :>` (§66.7.5) is not in the
   window. *(Provenance: ruling:user-voice-scrml.md S462 "a, go".)*
