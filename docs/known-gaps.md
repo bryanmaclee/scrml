@@ -31,10 +31,53 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 597 | 6 |
-| LOW | 354 | 0 |
+| MED | 598 | 6 |
+| LOW | 356 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-md-static-owed-s462 — the bootstrap (impl#2, `compiler/self-host-v2/`) has no `<md>`: it reads `<md>` as an ordinary element with a free-text body, so a static `<md>` renders its markdown source as page text (`## Title` shown with the `#`s, no `h2`), and none of the §67 checks exists — `NEW S462; MED; open (bootstrap twin of s462-md-phase2)`
+
+<!-- @gap id=g-bootstrap-md-static-owed-s462 sev=MED status=open locus=searched:compiler/self-host-v2/*.scrml(grep `md>` / `"md"` / `E-MD-` / `W-MD-` / `parseSlots` — zero hits; lex.scrml + parse.scrml treat `<md>` as a generic element) prov=empirical:s462-md-phase2-bootstrap-conformance--filter-md -->
+
+impl#1 implements §67 phase 2 (change-id `s462-md-phase2`): `compiler/src/block-splitter.js` (the fourth
+text-mode production — the body ends at the first `</md>`; `${…}` extents taken, not parsed, by
+`scanMdSlots`), `compiler/src/md-lower.ts` (slots → U+FFFC, the reader's `dedent`, `parseSlots`, W-MD
+position mapping, lowering to the §67.6 closed set, heading ids, every `E-MD-*`). Measured with
+`bun scripts/bootstrap-conformance.ts --filter md/` on the 14 `conformance/cases/md/*` cases: 7 FAIL
+(`heading-ids-page-wide`, `in-phrasing-refused`, `indent-mixed`, `of-body-refused`, `second-spelling-strict`,
+`static-tree`, `url-scheme-literal-refused` — the `<md>` renders as a plain element, the codes never
+fire), 5 UNSUPPORTED (the bootstrap's free-text body parses `${…}` as logic: `${HOME:-/tmp}` is
+E-PARSE-EXPECTED, an unclosed `${` E-PARSE-EXPR, and the §66 twins of the slot cases reject at
+parse), 2 NOT-TWINNED. What the bootstrap owes, in order: (1) the `<md>` body production in
+`lex.scrml`/`parse.scrml` — exits `${` and `</md>` only, the slot extent by token-depth WITHOUT parsing
+(§67.2); (2) a compile-time call into the SAME reader (F4: "the bootstrap uses the same module" —
+`stdlib/md/index.scrml`, imported, never re-written); (3) parse-after-placement of non-code slots
+(§67.4); (4) lowering to the §67.6 set in `lower.scrml` / `print.scrml` (text nodes only; data-led
+URLs through the bootstrap's §5.2 rule 3 guard); (5) E-MD-URL-SCHEME, E-MD-INTERP-UNCLOSED,
+E-MD-INDENT-MIXED, E-MD-IN-PHRASING, E-MD-OF-BODY and the W-MD surfacing with source positions;
+(6) page-wide heading ids. `<md of=…/>` (phase 3) is owed by both implementations.
+
+### g-md-in-phrasing-through-wrapper-s462 — E-MD-IN-PHRASING is checked against the `<md>`'s direct parent element only: an `<md>` that reaches a phrasing parent through a component root, an `<each>` / `<match>` wrapper or an `if=` chain (`<p><each in=@xs><md>…</md></each></p>`) is not refused, and the browser reparents its blocks — `NEW S462; LOW; open`
+
+<!-- @gap id=g-md-in-phrasing-through-wrapper-s462 sev=LOW status=open locus=compiler/src/md-lower.ts(checkMdInPhrasing — called by ast-builder.js for each element's built children; structural nodes between are not looked through) prov=agent:s462-md-phase2 -->
+
+§67.2 Placement: "An `<md>` whose parent is phrasing content … is `E-MD-IN-PHRASING`". impl#1 checks the
+parent markup node of the lowered host. A structural wrapper (`each-block`, `match-block`, an
+if-chain, a component use whose root holds the `<md>`) is not a markup parent, so the check does not
+see the element around it. Fix direction: run the check after CE over the expanded tree, looking
+through structural nodes to the nearest element ancestor. No corpus program uses `<md>`.
+
+### g-md-heading-ids-match-arm-codegen-reparse-s462 — heading ids of an `<md>` inside a `<match>` arm (and an engine state-child) are deduped only within that arm: the arm body is re-parsed at codegen (emit-match.ts / emit-engine.ts), after the page-wide heading-id pass, so an arm heading can repeat an id used elsewhere on the page — `NEW S462; LOW; open`
+
+<!-- @gap id=g-md-heading-ids-match-arm-codegen-reparse-s462 sev=LOW status=open locus=compiler/src/codegen/emit-match.ts(bare-body arm re-parse — `buildAST(splitBlocks(…))` for an `<md>`-bearing arm),compiler/src/api.js(assignMdHeadingIds runs after CE, before codegen) prov=agent:s462-md-phase2 -->
+
+§67.6: a slug already used on the page gets the first free `-1`, `-2`, … suffix. impl#1 assigns ids
+page-wide twice (after TAB, and after CE for component instances); `<match>` arm bodies are re-parsed
+from their raw text during codegen, so their headings get ids local to the arm. Only one arm is
+mounted at a time, but an arm heading can still collide with a heading outside the match. Fix
+direction: pass the page's taken ids into the codegen re-parse, or stop re-parsing arm bodies that
+TAB already built.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
