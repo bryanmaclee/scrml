@@ -1458,6 +1458,30 @@ export function isPlainPureFn(fnNode: unknown): boolean {
 }
 
 /**
+ * s464-pure-fn-placement — does this function's subtree reference any `@`-name
+ * (a reactive cell, derived value, channel cell, `@session` / `@currentUser`)?
+ * Used to keep such a `fn` on its prior placement path, so a server body that
+ * reaches it still meets the existing fail-closed diagnostics (E-REACTIVE-003,
+ * E-CHANNEL-SERVER-CELL-READ, E-SESSION-AMBIENT-SERVER) instead of shipping a
+ * client-cell read into the server bundle. Over-detection is safe (the fn keeps
+ * the old placement); string literals are skipped so `"a@b.com"` does not count.
+ */
+function subtreeReferencesAtName(node: unknown, seen: Set<unknown> = new Set()): boolean {
+  if (node === null || node === undefined) return false;
+  if (typeof node === "string") return /(^|[^A-Za-z0-9_$.])@[A-Za-z_$]/.test(node);
+  if (typeof node !== "object" || seen.has(node)) return false;
+  seen.add(node);
+  if (Array.isArray(node)) return node.some((c) => subtreeReferencesAtName(c, seen));
+  const n = node as Record<string, unknown>;
+  if (n.kind === "lit" || n.kind === "string-literal") return false;
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    if (subtreeReferencesAtName(n[key], seen)) return true;
+  }
+  return false;
+}
+
+/**
  * s464-pure-fn-placement — decide which bundle(s) carry each plain pure `fn`.
  *
  * A plain `fn` is placed wherever it is called (§12.4: "MAY be called from both
@@ -1479,13 +1503,14 @@ export function isPlainPureFn(fnNode: unknown): boolean {
  * token-based and walks everything.
  *
  * Scope: file-scope (not nested) non-exported plain `fn`s whose route boundary
- * is `client`. An exported `fn` reaches the server through the value-export
+ * is `client` and that do not reach reactive state (`placeFreePureFnIds`). An exported `fn` reaches the server through the value-export
  * path; a nested one is emitted inside its parent.
  */
 function computePureFnSidePlacement(
   files: FileAST[],
   functions: Map<string, FunctionRoute>,
   exportedFnNames: Set<string>,
+  placeFreePureFnIds: Set<string>,
   serverHelperIds: Set<string>,
   clientSkipIds: Set<string>,
 ): void {
@@ -1544,6 +1569,8 @@ function computePureFnSidePlacement(
     for (const fn of fileScopeFns) {
       if (!isPlainPureFn(fn)) continue;
       const id = idOf(fn);
+      // A `fn` that reaches reactive state keeps its prior placement (5c note).
+      if (id && !placeFreePureFnIds.has(id)) continue;
       const name = fn.name;
       if (!id || typeof name !== "string" || !name) continue;
       if (exportedFnNames.has(name) || fn.fromExport === true || fn.exported === true) continue;
@@ -5914,6 +5941,59 @@ export function runRI(input: RIInput): RIOutput {
     }
   }
 
+  // s464-pure-fn-placement — the plain `fn`s exempt from 5c promotion: every
+  // plain pure `fn` EXCEPT one that reaches reactive state, directly or through
+  // another plain `fn` it calls (by identifier token, so a call inside a lambda
+  // counts). Those keep the prior path so the existing server-side cell-read
+  // diagnostics still fire on them (fail closed).
+  const placeFreePureFnIds = new Set<string>();
+  {
+    const pureIds: string[] = [];
+    const atReaching = new Set<string>();
+    const tokensById = new Map<string, Set<string>>();
+    const IDENT_TOK = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    const collect = (node: unknown, out: Set<string>, seen: Set<unknown>): void => {
+      if (node === null || node === undefined) return;
+      if (typeof node === "string") {
+        IDENT_TOK.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = IDENT_TOK.exec(node)) !== null) out.add(m[0]);
+        return;
+      }
+      if (typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) collect(c, out, seen); return; }
+      for (const key of Object.keys(node as object)) {
+        if (key === "span") continue;
+        collect((node as Record<string, unknown>)[key], out, seen);
+      }
+    };
+    for (const [fnNodeId, record] of analysisMap) {
+      if (!isPlainPureFn(record.fnNode)) continue;
+      pureIds.push(fnNodeId);
+      if (subtreeReferencesAtName((record.fnNode as any).body)) atReaching.add(fnNodeId);
+      const toks = new Set<string>();
+      collect((record.fnNode as any).body, toks, new Set());
+      tokensById.set(fnNodeId, toks);
+    }
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const id of pureIds) {
+        if (atReaching.has(id)) continue;
+        for (const t of tokensById.get(id)!) {
+          const calleeIds = fnNameToNodeIds.get(t);
+          if (calleeIds && calleeIds.some((c) => c !== id && atReaching.has(c))) {
+            atReaching.add(id);
+            grew = true;
+            break;
+          }
+        }
+      }
+    }
+    for (const id of pureIds) if (!atReaching.has(id)) placeFreePureFnIds.add(id);
+  }
+
   const MAX_CALLER_CTX_ITER = analysisMap.size + 1;
   let callerCtxChanged = true;
   let callerCtxIter = 0;
@@ -5947,7 +6027,8 @@ export function runRI(input: RIInput): RIOutput {
       // which bundle(s) carry its body — the server one when a server-placed
       // body reaches it, the client one when client code does. `server fn` is
       // the explicit pin (Trigger 4) and never reaches this point unpromoted.
-      if (isPlainPureFn(record.fnNode)) continue;
+      // A `fn` that reaches reactive state is not in the set (see above).
+      if (placeFreePureFnIds.has(fnNodeId)) continue;
 
       // #284 — the DIRECT caller counting is BASELINE-IDENTICAL (from
       // `inverseCallerMap` only): a direct client caller keeps the fn ambient, a
@@ -7587,7 +7668,9 @@ export function runRI(input: RIInput): RIOutput {
   // s464-pure-fn-placement — the bundle(s) each plain pure `fn` lands in.
   const pureFnServerHelperIds = new Set<string>();
   const pureFnClientSkipIds = new Set<string>();
-  computePureFnSidePlacement(files, functions, exportedFnNames, pureFnServerHelperIds, pureFnClientSkipIds);
+  computePureFnSidePlacement(
+    files, functions, exportedFnNames, placeFreePureFnIds, pureFnServerHelperIds, pureFnClientSkipIds,
+  );
 
   return {
     routeMap: {
