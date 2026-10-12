@@ -160,3 +160,40 @@
   state (regen, MED +1), spec-index, s34-census --check-new --base origin/main, bootstrap-conformance, severity,
   conflict-marker, delta-lint, gen-md-shim, snippet-gate 128/128, corpus-compile-floor: PASS.
 - 2026-10-12T03:18Z r3 start: worktree reset to fd3e365c (origin/main 41af4153a already merged); brief archived.
+
+## Fix round 3 (S239 re-review of fd3e365c)
+- 2026-10-12 r3 REPRODUCED (reviewer probes rv3 t1–t6, copied to .tmp): gArmTwoBlk / gArmTwoBlkV / gArmThree /
+  gTopTwoBlk wrong → WELCOME; eSeqTern "A" / eSeqPlus "xyy" / eSeqTop "A"; aSeqVal / aSeqArm / aSeqTop wrong →
+  WELCOME; fAsgArm / fAsgTop TDZ ReferenceError, fAsgArmIf "R0123456789".
+- F1 root (a): `ast-builder.js` collectExpr BUG-ASI-NEWLINE — a `{` on a later line after a value ends the statement
+  (bare block, SPEC §7.2.2 "Terms"), unless a depth-0 brace-head word (function/fn/match/if/else/for/while/do/switch/
+  try/catch/finally/given/when/class/partial/transaction/server/import/type/use) was collected or immediately
+  precedes the collection (the import handler eats `import` first — `import:host⏎{ tok } from …` regressed import-host
+  F1 until that was added). (b) defer-structure `soleProbeFunction`: refuse unless the probe built to ONE logic node
+  holding ONE function-decl (the probe fn). (c) NEW `compiler/src/brace-pair.ts` `isWholeBraceBlock` (strings,
+  templates with nested `${}`, regex literals, comments) gates the strip in parseStatementTextDetailed and
+  bareBlockText (a first version without regex awareness broke defer-statement "regex with a quote" — fixed).
+  (d) expression-parser stamps `_s465DroppedStatement` when the "trailing content would be silently dropped" warning
+  fires; emit-expr `emitExpr` refuses (E-STMT-UNEXPECTED-TOKEN) any server node carrying it OR `_s441Trailing`
+  (the warning's own newline+word test missed `let ok = 1⏎!(r = guard())` — measured wrong → WELCOME silently on
+  base AND head). Corpus: newly rejects 0. The warning was FALSE for match-stmt arm statements (`"a" :> { … }` — the
+  arm is read from text by parseMatchArm); it is now held there (parseOneStatement, arm level + arm arrow).
+- F4: bArmAfterVal / bArmAfterValSemi / bArmAfterCall / bArmTwo and all bTop* now lower and run (R1, R1, Rxy, R12;
+  RB, RIB, R1B, RIN …). bTopShadow throws "name is a constant" identically on base (assigning a parameter) — not r3.
+- F2: SPEC §4.18 — "scrml has no comma operator": a SequenceExpression hatch on the server is E-CODEGEN-INVALID-LOGIC
+  (arm value, arm block, top level). Refusing EVERY non-arrow hatch on the server was measured: it rejects legal scrml
+  (g-server-fn-bare-dot-payload-variant `.Found(name: …)` ParseError hatch; protect-scalar-egress tagged templates) —
+  narrowed to the sequence; the residue (a tagged template's substitutions ship un-awaited on the server, executed
+  probe hTagTop) filed as g-server-text-hatch-unawaited-call-s465 (HIGH, pre-existing on base). Duplication root:
+  `makeEscapeHatch` stored the WHOLE expression text as every hatch's raw; it now slices the node's own span (a
+  sequence keeps its parens) — `(0, "x") + "y"` client lowering evaluates "xy".
+- F3: emit-control-flow C-style `for` adds the header's declared names (`cStyleDeclaredLoopNames`) to the body's
+  declaredNames: fAsgArm/fAsgTop "R49", fAsgArmIf/fAsgTopIf "R789", aCForUpd wrong → REJECTED.
+- Tests: NEW integration/s465-await-arm-r3.test.js (59: 9 route shapes × {check, verifyPassword} × wrong/right, a
+  raw-token + dropped-content-warning scan, 11 executed value tests, 9 compile-error tests, 2 hatch-text tests):
+  41 fail on origin/main, 49 fail on fd3e365c. NEW unit/brace-pair-s465.test.js (17).
+- Corpus differential (head 422d99663 vs origin/main 41af4153a via git archive; 2809 sources; ../giti and
+  ../flogence NOT cloned — skipped): 0 newly failing, 0 newly passing, 0 code changes, 0 text-only; 171 artifacts
+  differ, 164 only by the absolute project root; the 7 real changes are exactly r1's list (sql-handled-match-
+  scrutinee-rt, 08-chat, 19-lin-token, status-picker, driver-card ×2, gauntlet-r10-rails-blog). r3 changes no corpus
+  artifact. (Verdict line says "NOT A VALID COMPARISON" only because the base tree has no .git — same as r2.)

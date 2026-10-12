@@ -30,11 +30,17 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
+| HIGH | 250 | 5 |
 | MED | 599 | 6 |
 | LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-server-text-hatch-unawaited-call-s465 — on the SERVER an escape-hatch expression other than an arrow / function value (a tagged template, a ParseError hatch such as a named-arg payload variant) is lowered from its TEXT, so an async call inside it is never awaited — `NEW S465 r3; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-server-text-hatch-unawaited-call-s465 sev=HIGH status=open locus=compiler/src/codegen/emit-expr.ts(emitEscapeHatch server branch → rewriteServerExpr(node.raw)) + compiler/src/expression-parser.ts(esTreeToExprNode default / TaggedTemplateExpression → makeEscapeHatch) prov=review:s465-await-r3 -->
+
+Measured in s465 fix round 3 (executed, origin/main 41af4153a and r3 head alike): in a server fn, `const v = String.raw\`${check(pass, row.pw)}\`` ships `check(…)` un-awaited inside the template (the value is `"[object Promise]"`; a guard comparing it with `!=` would pass for any password). r3 refuses the comma SEQUENCE hatch on the server (scrml has no comma operator, §4.18 — E-CODEGEN-INVALID-LOGIC), but refusing EVERY non-arrow hatch on the server was measured to reject legal scrml whose designed lowering is the text rewriter: `.Found(name: "carol")` named-arg payload variants (g-server-fn-bare-dot-payload-variant, a ParseError hatch) and the §14.8 tagged-template protect tests. The fix is structural: a TaggedTemplate ExprNode (tag + quasis + substitutions) and a structured named-arg variant constructor, so their sub-expressions reach `emitCall`'s await classification — then the server text fallback can be removed.
 
 ### g-client-match-arm-text-body-skips-statement-checks-s465 — a CLIENT literal / alternation / product `match` arm body or `!{}` handler arm carried as text is never read by the statement parser, so `switch` / `try` / `throw` / `for … in` inside it compile and ship as raw JS (each is a compile error at function top level) — `NEW S465; MED; open (pre-existing on BASE)`
 
@@ -17159,6 +17165,7 @@ closure nodes, and it should be narrowed the same way or deleted.
 <!-- @gap id=g-bare-block-statement-is-silently-dropped sev=HIGH status=open locus=searched:ast-builder.js(parseOneStatement/parseRecursiveBody),emit-logic.ts,emit-control-flow.ts — the drop was isolated by execution with two controls but the deciding site was NOT traced, so this locus is recorded as a SEARCH, not a claim prov=review:S414-peter-third-adversarial-pass-on-the-loop-head-arc-isolated-by-a-clean-control -->
 > **S440 reconfirmed (JS-WAT gauntlet C25, finder-executed at `7e4bc8155`):** `let r = 0` / `{ r = 5 }` renders `"0"` — block deleted, exit 0, no diagnostic.
 > **S465 r2 (deciding site traced):** the block is not dropped by codegen — the statement collector (`ast-builder.js` `collectExpr`, the BUG-ASI-NEWLINE boundary) does not end a statement at a line break before `{`, so the block is SWALLOWED into the previous statement's text (`let r = 0⏎{ r = 5 }` → `init: "0\n{ r = 5 }"`) and the expression parser reads `0`, dropping the rest (`_s441Trailing`). Violates §7.2.2 rule 1 ("a line break ends a statement" — `0` is not a continuation token). A block that is the FIRST statement of a list survives as a `bare-expr` carrying the block text; on the server it is now read and lowered structurally (s465 r2), and inside a server arm body the swallowed form is a compile error (E-STMT-UNEXPECTED-TOKEN) rather than a silent drop. The top-level swallow remains.
+> **S465 r3 (fixed at the deciding site, execution-verified):** `collectExpr`'s BUG-ASI-NEWLINE boundary now ends a statement at a `{` on a later line after a value (SPEC §7.2.2 "Terms" lists a bare block as a statement list) unless the statement holds a depth-0 head whose construct takes a brace body (`function`/`match`/`if`/… and `import`/`type`/`use`). `let r = 0⏎{ r = 5 }` → 5; `{ A }⏎{ B }` runs both, at top level and in arms, client and server (`compiler/tests/integration/s465-await-arm-r3.test.js`). Readers that strip a block's braces now prove the pair first (`compiler/src/brace-pair.ts`), and any server expression still read by dropping trailing content is E-STMT-UNEXPECTED-TOKEN. Status left `open` for PA: the §49.2.1 braceless-body language question this entry raises is not ruled here.
 
 A bare block statement — `{ … }` used as a statement rather than as some construct's body — is
 **silently removed from the emitted JS**. No diagnostic, exit 0.
