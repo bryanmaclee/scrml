@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 597 | 6 |
+| MED | 598 | 6 |
 | LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -270,6 +270,10 @@ No sentence says a raw-content body must not build active HTML. The §4.17 "does
 Reproduced at `36bc17114`: `<program>\n${ type K:enum = { A, B } }\n<k> = K.A\n<items> = [1]\n<match for=K on=@k>\n  <A><ul><each in=@items as it><li><pre><script>window.pwned=1</script></pre></li></each></ul></>\n  <B><p>b</p></>\n</match>\n</program>` compiles with no diagnostic; `app.client.js` holds `createTextNode("<script>window.pwned=1</script>")` and Chromium runs nothing. Fail-safe (a text node is never parsed as HTML) but not refused: the `<each>` inside the arm is re-split at TAB with its errors discarded, and the per-item emitter writes raw-content text through `createTextNode`, which never consults the codegen backstop. Fix: have the TAB match-arm re-split keep the `<each>` body's nodes reachable by the end-of-build structural check (or call `refuseRawContentLowering` from emit-each's raw-content text branch).
 
 **RESOLVED S462 Q21** (s462-q21-raw-body-as-text) by the second route: `emit-each.ts` now asks `refuseRawContentLowering` beside `refuseElementLowering` for every row element (`emit-lift.js` likewise), so the repro reports E-SCRIPT-001 once (codegen backstop) and the compile fails. Pinned in `raw-content-as-text-s462-q21.test.js`. (The TAB re-split still discards its own errors; the backstop is the reporting site for this position.)
+
+### g-lifecycle-is-given-does-not-narrow-s465 — `if (u is given) { u.name }` on a lifecycle return (`(not to User)`) is E-TYPE-001 on impl#1, though §42.2.3 makes it the canonical replacement for the retired `given u :>`, which narrows — `NEW S465; MED; open`
+<!-- @gap id=g-lifecycle-is-given-does-not-narrow-s465 sev=MED status=open locus=compiler/src/type-system.ts(the §14.12.6.1 lifecycle narrowing tracker credits `given u :>` and `if (u is not) return` only; the E-TYPE-001 message ~:31070 still recommends `given u => { … }`) prov=empirical:s465-docs-currency -->
+Found by the S465 docs-currency pass while rewriting the PRIMER/kickstarter lifecycle examples off the retired in-place `given`. Governing: §42.2.3 — the in-place guard `given x :> { … }` is soft-deprecated and its table maps it to `if (x is given) { … }`; "each canonical form narrows what the deprecated form narrows". On impl#1 the canonical form is refused with E-TYPE-001 for a lifecycle-typed binding, so the docs now teach the early-return form `if (u is not) return`, which narrows. Also stale: SPEC §14.12.6.1 / §14.12 still list `given` as the narrowing form, and the E-TYPE-001 message recommends `given u => { … }`. Fix: credit `if (u is given) { … }` (and `else`) in the lifecycle tracker; update the message and the two SPEC mentions (the SPEC edit follows the S462 retirement ruling).
 
 ### g-lift-pre-code-not-raw-content-s462 — a `<pre>` / `<code>` written in `lift` (or any logic-context markup parsed by `parseLiftTag`) is NOT a §4.17 raw-content element: its body is tokenized as markup, so `${…}` interpolates and tag text builds live elements (`lift <pre><img src=x onerror=…></pre>` builds the `<img>` with its handler) — `NEW S462; MED; open`
 
