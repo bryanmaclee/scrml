@@ -2,6 +2,40 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S462 — 2026-10-10/11 (bryan · ASUS) — 20 PRs; four security holes closed on main; `<md>` designed and its reader landed
+
+**Security (all on main before S462, all S239-reviewed and executed in Chromium or real routes):**
+- **#1399 (P0):** `import { verifyPassword as vp }` left `vp(…)` un-awaited, so a wrong password passed. Seven stdlib functions were declared sync but returned Promises. Optional calls `f?.()` were never awaited.
+- **#1400:** `${ lift <script>${@code}</script> }` ran cell data as JS. `<script>`/`<style>` are now refused at every markup position.
+- **#1402 (Q21):** static active HTML in `<pre>`/`<code>` ran (`onerror`, `srcdoc`, `<link>`). Raw bodies now render as text.
+- **#1398:** the bootstrap admitted `<script>`/`<style>`, and its printer's attribute escape allowed a template breakout.
+- **#1386:** the bootstrap did not judge data-bound URL, srcdoc or handler sinks.
+- **#1387:** `<errors>` rendered messages as HTML (XSS).
+- **#1401 (Q20):** a server condition that tests a `scrml:` stdlib result which is still a Promise now fails closed with a 500.
+
+**Language:**
+- **#1385 / #1392:** `is some` and in-place `given` are retired through §63.
+- **#1395:** statement-position `match` lowers inline; arm leaves leave; bare `:> return` arms (dpa-068 W1).
+- **#1396:** presence narrowing ends on a write (Q3, Q10–Q13). `if=`-gated handlers keep narrowing for user-input events (Q18, allow-list). Render gates settle before user effects.
+- **#1397:** markup `${ if }` arms re-render their reads; else-if → else now switches.
+- **#1394:** E-IMPORT-004 checks `scrml:` imports and named re-exports (Q19).
+- **#1388:** undeclared use-site attributes refused (dpa-069); X specified.
+- **#1390:** own-value inference (dpa-065).
+- **#1384:** E-CHANNEL-006 widened.
+
+**Stdlib:**
+- **#1393:** closure factories became structs; no function is stored in a value (Q15/Q16).
+- **#1389:** scrml:data validator rules are data (Q17b).
+- **#1387:** registerMessages takes templates.
+
+**`<md>`:** designed by deep-dive and four rulings (F1–F4, Q22). **#1403** landed SPEC §67 and the single `scrml:md` reader, written in scrml with a generated shim.
+
+**Tooling:** **#1404** — `scrml fix` migrates markup `given` guards only when the body is pure reads, and the verify fails closed.
+
+**Rulings:** Q1–Q24 and `<md>` F1–F4. Record: `scrml-support/user-voice-scrml.md` §S462.
+
+**In flight at wrap:** see `hand-off.md` §S462.0. It covers the P0 CPS fix, P0 SQL chain truncation, the braceless-else miscompile, markup text parsed as code, and `<md>` phase 2.
+
 ## S462 — stdlib API change: no function is stored in a value (change `s462-stdlib-closure-factories`)
 
 **Breaking stdlib API (no §63 window — these are stdlib functions, not language forms).** Ruling: bryan S462 "go on the package" (no-function-in-value migration). Every former object-of-closures factory now returns DATA and the behaviour lives in free functions:
