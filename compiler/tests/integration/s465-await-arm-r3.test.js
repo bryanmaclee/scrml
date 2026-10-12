@@ -19,7 +19,7 @@
  *            output — E-STMT-UNEXPECTED-TOKEN.
  *   2. A comma sequence (`(0, check(…))`) shipped on the server as TEXT, never
  *      awaited (a pending Promise is truthy → WELCOME). scrml has no comma
- *      operator (SPEC §4.18): on the server it is E-CODEGEN-INVALID-LOGIC, as is
+ *      operator (SPEC §40.8 S441 bullet, §4.18.2): on the server it is E-CODEGEN-INVALID-LOGIC, as is
  *      any escape-hatch expression that can hold an un-awaited call. The hatch's
  *      text was also the WHOLE enclosing expression (`(0, "x") + "y"` → "xyy").
  *   3. A C-style `for` declared loop variable reassigned in the body was emitted

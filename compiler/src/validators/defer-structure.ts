@@ -16,7 +16,7 @@
 // `_emitNestedGuardedArmBody` precedent): a static import of emit-control-flow
 // from a validator closes an import cycle through the codegen modules.
 import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
-import { isWholeBraceBlock } from "../brace-pair.ts";
+import { isWholeBraceBlock, closingBraceIndex } from "../brace-pair.ts";
 /* eslint-disable @typescript-eslint/no-require-imports */
 function splitBlocks(filePath: string, source: string): unknown {
   return (require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => unknown }).splitBlocks(filePath, source);
@@ -202,10 +202,14 @@ function unreadableContentIn(stmts: unknown, filePath: string, checkTrailing: bo
       return;
     }
     const block = bareBlockText(nn);
-    if (block !== null) {
-      // The by-design bare-block hatch: its body is read by this same parser.
-      const inner = parseStatementTextDetailed(block, filePath, { lostTrailing: checkTrailing });
-      if (!inner.ok) bad = inner.refusal.text || block;
+    const blocks = block !== null ? [block] : bareBlockSequenceTexts(nn);
+    if (blocks !== null) {
+      // The by-design bare-block hatch (one block, or S465 r4 several on one line):
+      // each body is read by this same parser.
+      for (const b of blocks) {
+        const inner = parseStatementTextDetailed(b, filePath, { lostTrailing: checkTrailing });
+        if (!inner.ok) { bad = inner.refusal.text || b; return; }
+      }
       return;
     }
     for (const k of Object.keys(nn)) if (k !== "span") scan(nn[k]);
@@ -239,6 +243,33 @@ export function bareBlockText(n: unknown): string | null {
   const en = nn.exprNode as Node | undefined;
   if (!en || en.kind !== "escape-hatch" || en.nativeKind !== "ParseError") return null;
   return t;
+}
+
+/**
+ * S465 r4 — a bare-expr whose text is TWO OR MORE whole `{ … }` blocks on one
+ * line (`{ A } { B }`, SPEC §7.2.2 "Terms" — each is its own bare block statement):
+ * the block texts in order, or null. The builder keeps the line as one bare-expr
+ * (a ParseError escape hatch); the server reads each block on its own.
+ */
+export function bareBlockSequenceTexts(n: unknown): string[] | null {
+  if (!n || typeof n !== "object") return null;
+  const nn = n as Node;
+  if (nn.kind !== "bare-expr" || typeof nn.expr !== "string") return null;
+  const en = nn.exprNode as Node | undefined;
+  if (!en || en.kind !== "escape-hatch" || en.nativeKind !== "ParseError") return null;
+  const t = (nn.expr as string).trim();
+  const blocks: string[] = [];
+  let i = 0;
+  while (i < t.length) {
+    while (i < t.length && /[\s;]/.test(t[i])) i++;
+    if (i >= t.length) break;
+    if (t[i] !== "{") return null;
+    const close = closingBraceIndex(t, i);
+    if (close < 0) return null;
+    blocks.push(t.slice(i, close + 1));
+    i = close + 1;
+  }
+  return blocks.length >= 2 ? blocks : null;
 }
 
 /** Split `text` at its top-level commas (outside brackets, strings and templates). */

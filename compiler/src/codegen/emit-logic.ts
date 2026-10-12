@@ -3,13 +3,15 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
-import { bareBlockText } from "../validators/defer-structure.ts";
+import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
+import { isWholeBraceBlock, firstCallInText } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
+import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -30,7 +32,7 @@ import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.t
 import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
-import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan, currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -1125,6 +1127,38 @@ function givenHeadRef(node: { variableIsCell?: unknown; span?: unknown }, name: 
 /**
  * Build an EmitExprContext from the current EmitLogicOpts.
  */
+/**
+ * S465 r4 — a destructuring pattern's default values are EXPRESSIONS: lowered from
+ * the builder's parsed node through emitExpr (so a call in one is awaited on the
+ * server, and `@x` reads lower on the client), never pasted as source text.
+ */
+export function patternDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer {
+  return (text: string, n: unknown): string => emitExprFromText((n as ExprNode | null) ?? null, text, _makeExprCtx(opts));
+}
+
+/**
+ * S465 r4 — a nested SERVER function's parameter defaults, lowered from the tree
+ * (never pasted as text). A default that needs an `await` cannot be written in a
+ * parameter list (`await` is not allowed there) — a compile error that says where
+ * to move the call. Client: undefined (the default is kept as written).
+ */
+function serverParamDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer | undefined {
+  if (opts.boundary !== "server") return undefined;
+  const lower = patternDefaultLowerer(opts);
+  return (text: string, n: unknown): string => {
+    const out = lower(text, n);
+    if (!/\bawait\b/.test(out)) return out;
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      `the parameter default \`${String(text).replace(/\s+/g, " ").trim().slice(0, 60)}\` calls an async function — ` +
+        "its result must be awaited (§13.2), and a parameter default cannot await. Give the parameter no " +
+        "default and compute the value as the function body's first statement.",
+      currentLoweringSpan(),
+    ), null);
+    return "null";
+  };
+}
+
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
   return {
     // R25-Bug-42 (S138): honor opts.boundary so server-mode contexts (e.g.
@@ -1255,6 +1289,60 @@ function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
     serverFnPeerAliasNames: ctx.serverFnPeerAliasNames ?? undefined,
     serverFnPeerDispatchObjs: ctx.serverFnPeerDispatchObjs ?? undefined,
   } as EmitLogicOpts;
+}
+
+/**
+ * S465 r4 — a block-bodied arrow / function VALUE in server code (`x => { … }`,
+ * `function (q) { … }`), which the expression parser keeps as an escape hatch, lowered
+ * from the TREE: its body is read by the function-body statement parser and emitted by
+ * the statement emitter in this server context (so every call in it is classified).
+ * The value is a synchronous callback: a body that needs an `await` cannot be written
+ * in it — null is returned and the caller refuses (server-text-guard.ts), as it does
+ * for a head it cannot read (type annotations, a call in a default) or a body the
+ * parser refuses. Returns the JS function text, or null.
+ */
+export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext): string | null {
+  const t = String(raw ?? "").trim();
+  let head: string;
+  let body: string;
+  const fnM = /^function\b\s*([A-Za-z_$][\w$]*)?\s*\(/.exec(t);
+  if (fnM) {
+    const open = fnM[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let j = open; j < t.length; j++) {
+      if (t[j] === "(") depth++;
+      else if (t[j] === ")") { depth--; if (depth === 0) { close = j; break; } }
+    }
+    if (close < 0) return null;
+    head = t.slice(0, close + 1);
+    body = t.slice(close + 1).trim();
+  } else {
+    const arrow = t.indexOf("=>");
+    if (arrow < 0) return null;
+    head = t.slice(0, arrow).trim();
+    body = t.slice(arrow + 2).trim();
+  }
+  // The head is kept as written: only a plain parameter list (no annotation, no call).
+  if (!/^[\s\w$,()[\]{}.=]*$/.test(head.replace(/^function\b/, "")) || firstCallInText(head) !== null) return null;
+  if (!isWholeBraceBlock(body)) return null;
+  const r = body.slice(1, -1).trim() ? armBlockStatementsDetailed(body) : { ok: true as const, stmts: [] };
+  if (!r || !r.ok) return null;
+  const base = _logicOptsFromExprCtx(ctx);
+  const params = new Set<string>();
+  for (const m of head.replace(/^function\s*[A-Za-z_$][\w$]*/, "").matchAll(/[A-Za-z_$][\w$]*/g)) params.add(m[0]);
+  const declared = new Set<string>([...((base.declaredNames as Set<string> | undefined) ?? []), ...params]);
+  const lines = emitLogicBody(r.stmts, {
+    ...base,
+    boundary: "server",
+    declaredNames: declared,
+    insideFunctionBody: true,
+    tildeContext: undefined,
+  } as EmitLogicOpts).filter((l: string) => l.trim() !== "");
+  const out = lines.join("\n");
+  if (/\bawait\b/.test(out)) return null;
+  const inner = lines.map((l: string) => "  " + l).join("\n");
+  return fnM ? `${head} {\n${inner}\n}` : `${head} => {\n${inner}\n}`;
 }
 
 /**
@@ -2229,14 +2317,23 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // bare blocks). On the SERVER its body is read by the function-body statement
       // parser and lowered through this emitter — the text rewriter never awaits —
       // and a body the parser refuses is a compile error (arm-structure.ts).
-      if (opts.boundary === "server" && bareBlockText(node) !== null) {
-        const stmts = serverArmBlockStatements(bareBlockText(node) as string, "server", node, {
-          alwaysBlock: true,
-          where: "in a server block statement",
-        }) ?? [];
-        const inner = emitLogicBody(stmts, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) })
-          .filter((l: string) => l.trim() !== "");
-        return ["{", ...inner.map((l: string) => "  " + l), "}"].join("\n");
+      // S465 r4 — `{ A } { B }` on one line is two bare block statements: each is
+      // read and lowered the same way, in order.
+      const serverBlocks = opts.boundary !== "server"
+        ? null
+        : bareBlockText(node) !== null ? [bareBlockText(node) as string] : bareBlockSequenceTexts(node);
+      if (serverBlocks) {
+        const out: string[] = [];
+        for (const blockText of serverBlocks) {
+          const stmts = serverArmBlockStatements(blockText, "server", node, {
+            alwaysBlock: true,
+            where: "in a server block statement",
+          }) ?? [];
+          const inner = emitLogicBody(stmts, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) })
+            .filter((l: string) => l.trim() !== "");
+          out.push(["{", ...inner.map((l: string) => "  " + l), "}"].join("\n"));
+        }
+        return out.join("\n");
       }
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
@@ -2444,7 +2541,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // For codegen purposes, render it back to JS source text. For
       // declaredNames bookkeeping, register each bound ident (the
       // destructured names) rather than the pattern itself.
-      const _letDeclLhs = nameOrPatternText(node.name);
+      const _letDeclLhs = nameOrPatternText(node.name, patternDefaultLowerer(opts));
       if (isDestructurePattern(node.name)) {
         if (opts.declaredNames) {
           for (const bind of _iterDestructureBindNames(node.name)) { opts.declaredNames.add(bind); markDeclaredMutable(opts.declaredNames, bind); }
@@ -2538,7 +2635,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node._compileTimeOnly) return "";
       // A5 (2026-05-17) — same as let-decl: `node.name` may be a structured
       // DestructurePattern (const-decl only; tilde-decl never destructures).
-      const _constDeclLhs = nameOrPatternText(node.name);
+      const _constDeclLhs = nameOrPatternText(node.name, patternDefaultLowerer(opts));
       // S458 slice 2 (position 1) — a reassignment of a REFINED binding
       // (`refineAssign`, stamped by the type-system stage): judge the new value
       // BEFORE the assignment, so the binding keeps its prior value on refusal
@@ -4215,7 +4312,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         // yielded after the arms, as `return` returns it.
         const _isYieldGuard = guardedNode.kind === "yield-stmt";
         if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard || _isYieldGuard)) {
-          if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name);
+          if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name, patternDefaultLowerer(opts));
           if (_isLiftGuard && opts.boundary === "server") returnsResult = true;
           if (_isYieldGuard) yieldsResult = true;
           if (_isCellGuard) cellWriteNode = guardedNode;
@@ -5080,7 +5177,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const params: ParamLike[] = (node.params ?? []) as ParamLike[];
       // §7.3.2: param signatures carry `name = defaultValue` when defaults are present.
       // Strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
-      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i));
+      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, serverParamDefaultLowerer(opts)));
       const generatorStar: string = node.isGenerator ? "*" : "";
 
       // Function body has its own scope for declared names. C5: set
@@ -5348,7 +5445,7 @@ function _emitForStmtWithTilde(node: any, opts: EmitLogicOpts): string {
   // A5 (2026-05-17) — destructuring LHS: render pattern back to JS source text.
   let varName: string;
   if (isDestructurePattern(node.variable)) {
-    varName = nameOrPatternText(node.variable);
+    varName = nameOrPatternText(node.variable, patternDefaultLowerer(opts));
   } else {
     varName = (typeof node.variable === "string" && node.variable) || node.name || "item";
   }
@@ -5834,7 +5931,7 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
   // not. g-destructure-pattern-object-object-in-for-comprehension-emit.
   let varName: string;
   if (isDestructurePattern(forExpr.variable)) {
-    varName = nameOrPatternText(forExpr.variable);
+    varName = nameOrPatternText(forExpr.variable, patternDefaultLowerer(opts));
   } else {
     varName = (typeof forExpr.variable === "string" && forExpr.variable) || forExpr.name || "item";
   }

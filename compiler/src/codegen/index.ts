@@ -67,6 +67,7 @@ import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-mac
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
+import { dropCascadeOnlyErrors } from "./server-text-guard.ts";
 import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
 import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
@@ -4497,6 +4498,11 @@ export function runCG(input: CgInput): CgOutput {
   // afterwards fails closed instead of inheriting this compilation's database scope).
   setProgramBodySqlPolicy(null);
   setProgramBodySqlFile(null);
+  // S465 r4 — the server text guard's refusal is a BACKSTOP: when the compile already
+  // failed with another error (the precise diagnostic for the same construct —
+  // E-SERVER-FN-IN-SYNC-CALLBACK, E-SQL-009, E-SQL-QUERY-NOT-READABLE, …) nothing
+  // ships either way, so the backstop's generic text is dropped (server-text-guard.ts).
+  dropCascadeOnlyErrors(errors);
 
   return {
     outputs,

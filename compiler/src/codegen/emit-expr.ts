@@ -47,6 +47,8 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
+import { splitTemplateLiteral, firstCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
@@ -54,7 +56,7 @@ import { srcmapMark } from "./srcmap-provenance.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
-import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
+import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
@@ -1029,9 +1031,77 @@ export function rawReferencesRegisteredRequest(raw: string, requestIds: Set<stri
  * _scrml_reactive_get). When derivedNames is null/empty, rewriteExprWithDerived
  * delegates to rewriteExpr — char-identical to the previous behavior.
  */
+/**
+ * S465 r4 — THE one place server code is lowered from text (the string rewriter).
+ * Every server text path in codegen reaches the rewriter only through here
+ * (`emitExprField(null, …)` — and with it `rewriteBlockBody` in server mode —, the
+ * server escape hatch, the server `match` expression shim), so the rule holds by
+ * construction: a text that contains a call is refused (server-text-guard.ts) — lowered
+ * from text, the await classifier never sees the call and it runs un-awaited.
+ * `compiler/tests/integration/s465-server-text-guard.test.js` pins that nothing else in
+ * codegen calls the server rewriters.
+ *
+ * A text that holds a call is first LOWERED STRUCTURALLY when the compiler can read
+ * it: an expression the parser reads (a caller that had no node for a readable
+ * expression — `Date.now()`, `{ echo: f(x) }`) is emitted from the tree; a
+ * block-bodied arrow / function value is emitted by the statement emitter
+ * (emit-logic `emitServerFnValueFromText`). Only what neither reads is refused.
+ */
+function serverTextLowering(
+  text: string,
+  ctx: EmitExprContext,
+  what: string,
+  // `checkText`: the part of `text` that is author TEXT, when the rest was already
+  // emitted from a tree (the `match` shim's subject). `noReparse`: the text is the
+  // shim of an emitter the tree would route straight back to.
+  opts: { arrowBody?: boolean; span?: object | null; defaultDb?: boolean; checkText?: string; noReparse?: boolean } = {},
+): string {
+  if (!opts.noReparse && firstCallInText(opts.checkText ?? text) !== null) {
+    if (opts.arrowBody) {
+      const fn = emitServerFnValueFromText(text, ctx);
+      if (fn !== null) return fn;
+    } else {
+      const tree = readableExprTree(text);
+      if (tree) return emitExpr(tree, ctx);
+    }
+  }
+  if (refuseServerTextCall(opts.checkText ?? text, what, opts.span ?? null)) return REFUSED_SERVER_TEXT;
+  const dbVar = opts.defaultDb ? undefined : ctx.dbVar;
+  return opts.arrowBody
+    ? rewriteServerExprArrowBody(text, dbVar, ctx.errors)
+    : rewriteServerExpr(text, dbVar, ctx.errors);
+}
+
+/**
+ * S465 r4 — lower an expression the front-end kept as TEXT only (a default value):
+ * read it with the expression parser and emit the tree; when it does not read
+ * (a parse-error hatch, dropped trailing content), take the text path — which on
+ * the server refuses any text holding a call (serverTextLowering).
+ */
+export function emitExprFromText(node: ExprNode | null | undefined, text: string, ctx: EmitExprContext): string {
+  if (node) return emitExpr(node, ctx);
+  const parsed = readableExprTree(text);
+  return parsed ? emitExpr(parsed, ctx) : emitExprField(null, text, ctx);
+}
+
+/**
+ * The tree of `text` when the expression parser READS it: not an escape hatch at its
+ * root, nothing dropped. (Hatches deeper in the tree are lowered — and guarded — on
+ * their own.) Null otherwise.
+ */
+function readableExprTree(text: string): ExprNode | null {
+  const t = String(text ?? "").trim();
+  if (!t) return null;
+  let parsed: ExprNode | null = null;
+  try { parsed = parseExprToNode(t, "<server-text>", 0) as ExprNode | null; } catch { parsed = null; }
+  if (!parsed || hasLostTrailingContent(parsed)) return null;
+  if ((parsed as { kind?: string }).kind === "escape-hatch") return null;
+  return parsed;
+}
+
 export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
   if (exprNode) return emitExpr(exprNode, ctx);
-  if (ctx.mode === "server") return rewriteServerExpr(fallbackStr, undefined, ctx.errors);
+  if (ctx.mode === "server") return serverTextLowering(fallbackStr, ctx, "server code", { defaultDb: true });
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — collapse §55 synth-surface reads in the RAW-STRING statement fallback to the
   // SAME dotted synth cell the AST path (emitMember) emits, BEFORE the generic
@@ -4677,7 +4747,11 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");
     const reconstructed = `match ${subject} { ${arms} }`;
-    return rewriteServerExpr(reconstructed, ctx.dbVar, ctx.errors);
+    return serverTextLowering(reconstructed, ctx, "a server `match` expression's arms", {
+      checkText: arms,
+      noReparse: true,
+      span: (node as { span?: object }).span ?? null,
+    });
   }
 
   // The structured emitter uses `emitExprField(headerExpr, header, _matchCtx)`
@@ -4796,6 +4870,44 @@ function excerptRaw(t: string): string {
   return one.length > 60 ? one.slice(0, 57) + "..." : one;
 }
 
+/**
+ * S465 r4 — a tagged template on the SERVER, lowered from its parts (closes
+ * g-server-text-hatch-unawaited-call-s465 for the tagged-template shape). The tag
+ * and each `${ … }` substitution are read by the expression parser and emitted
+ * from the tree; the literal text parts are kept verbatim. Null when the text is
+ * not `<tag>\`…\`` with a readable tag (the caller then takes the guarded text path).
+ */
+function emitTaggedTemplateFromText(raw: string, ctx: EmitExprContext): string | null {
+  const t = String(raw ?? "").trim();
+  if (!t.endsWith("`")) return null;
+  const parse = (s: string): ExprNode | null => {
+    try {
+      const n = parseExprToNode(s, "<tagged-template>", 0) as ExprNode | null;
+      if (!n || hasLostTrailingContent(n)) return null;
+      if ((n as { kind?: string }).kind === "escape-hatch" && (n as { nativeKind?: string }).nativeKind === "ParseError") return null;
+      return n;
+    } catch { return null; }
+  };
+  for (let p = t.indexOf("`"); p > 0; p = t.indexOf("`", p + 1)) {
+    const parts = splitTemplateLiteral(t, p);
+    if (!parts || parts.end !== t.length - 1) continue;
+    const tagNode = parse(t.slice(0, p).trim());
+    if (!tagNode) return null;
+    const subNodes: ExprNode[] = [];
+    for (const s of parts.subs) {
+      const n = parse(s.trim());
+      if (!n) return null;
+      subNodes.push(n);
+    }
+    let out = emitExpr(tagNode, ctx) + "`" + parts.quasis[0];
+    for (let k = 0; k < subNodes.length; k++) {
+      out += "${" + emitExpr(subNodes[k], ctx) + "}" + parts.quasis[k + 1];
+    }
+    return out + "`";
+  }
+  return null;
+}
+
 function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
   // The string pipeline handles whatever the structured parser couldn't parse.
   // This path disappears when all escape hatches are eliminated (Phase 3.5).
@@ -4815,8 +4927,12 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     node.nativeKind === "ArrowFunctionExpression" ||
     node.nativeKind === "FunctionExpression";
   if (ctx.mode === "server") {
-    // S465 r3 — a comma SEQUENCE is not a scrml expression (SPEC §4.18: "scrml
-    // has no comma operator"). On the server its text fallback was also never
+    // S465 r3 — a comma SEQUENCE is not a scrml expression (SPEC §40.8, the S441
+    // bullet: "A comma sequence … is not a scrml expression — §4.18.2 lists what a
+    // bare run may be, and scrml has no comma operator"). S465 r4: a C-style `for`
+    // header's comma init / update (`i = 0, j = 5`, `i++, j--`) is the same
+    // operator — the SPEC names no exception for headers — so it is refused here
+    // too (recorded for the owner in progress.md r4). On the server its text fallback was also never
     // awaited (`(0, check(p, h))` shipped a Promise — truthy — so a wrong
     // password passed), so it is refused rather than lowered as text.
     // (Measured r3: refusing EVERY non-arrow hatch on the server also rejects
@@ -4828,15 +4944,25 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
       recordRefusedLowering(new CGError(
         "E-CODEGEN-INVALID-LOGIC",
         `a comma sequence \`${excerptRaw(node.raw)}\` is not a scrml expression — scrml has no comma ` +
-          "operator (§4.18) — and it cannot be lowered in server code. Write each expression as its own " +
+          "operator (§40.8, S441; §4.18.2) — and it cannot be lowered in server code. Write each expression as its own " +
           "statement, and use the value you need directly.",
         (node as { span?: object }).span ?? {},
       ), node as object);
       return "null /* E-CODEGEN-INVALID-LOGIC */";
     }
-    return isArrowOrFn
-      ? rewriteServerExprArrowBody(node.raw, ctx.dbVar, ctx.errors)
-      : rewriteServerExpr(node.raw, ctx.dbVar, ctx.errors);
+    // S465 r4 — a §-ordinary JS tagged template (`String.raw\`…${x}…\``) is lowered
+    // from its parts: the tag and every substitution are read as expressions and
+    // emitted from the tree (so a call in a substitution is awaited like any other).
+    if (node.nativeKind === "TaggedTemplateExpression") {
+      const structured = emitTaggedTemplateFromText(node.raw, ctx);
+      if (structured !== null) return structured;
+    }
+    // Everything else on this path is lowered from text: refused when it calls
+    // anything (server-text-guard.ts).
+    return serverTextLowering(node.raw, ctx, isArrowOrFn ? "a server function value" : "a server expression", {
+      arrowBody: isArrowOrFn,
+      span: (node as { span?: object }).span ?? null,
+    });
   }
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — the ACTUAL locus. A STATEMENT-bodied `on mount { if (@f.isValid) {…} }`

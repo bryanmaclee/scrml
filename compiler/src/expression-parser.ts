@@ -1963,9 +1963,12 @@ function preprocessForAcorn(
   // skips — rewriteMatchExpr re-parses them downstream exactly as before. The
   // negation class is kept unchanged for genuine CODE-position member-access
   // exclusion (`obj.Prop`, `f().Variant`).
+  // S465 r4 — a `.` that ends a spread `...` is not a variant dot: `...Array.from(x)`
+  // / `[...Items]` read as the spread of a capitalised name (they were masked as the
+  // variant `.Array` and the whole expression fell to a parse-error hatch).
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
-      /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
+      /(?<![A-Za-z0-9_$\)\]"'`|.]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
       `${PHP_BARE_VARIANT()}$1__`
     )
   );

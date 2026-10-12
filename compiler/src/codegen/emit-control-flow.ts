@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
-import { emitExpr, emitExprField, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
 import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
@@ -778,6 +778,21 @@ function cStyleDeclaredLoopNames(decl: { declarators: any[] } | null, initText: 
   return out;
 }
 
+/**
+ * S465 r4 — a `for` pattern's default values lowered from their parsed nodes
+ * (see emit-logic `patternDefaultLowerer`), in the loop's own expression ctx.
+ */
+function _loopPatternDefaultLowerer(opts: any): (text: string, n: unknown) => string {
+  return (text: string, n: unknown): string => emitExprFromText((n as any) ?? null, text, {
+    mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts),
+    serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null,
+    serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null,
+    localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null,
+    localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null,
+    setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts,
+  } as EmitExprContext);
+}
+
 export function emitForStmt(
   node: any,
   opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
@@ -835,7 +850,7 @@ function _emitForStmtInner(
   // unchanged (`item`, `entry`, etc.).
   let varName: string;
   if (isDestructurePattern(node.variable)) {
-    varName = emitDestructurePatternText(node.variable);
+    varName = emitDestructurePatternText(node.variable, _loopPatternDefaultLowerer(opts));
   } else {
     varName = (typeof node.variable === "string" && node.variable) || node.name || "item";
   }
@@ -1321,7 +1336,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   // A5 — destructuring LHS support in the batch-hoisted for-stmt path.
   let loopVar: string;
   if (isDestructurePattern(node.variable)) {
-    loopVar = emitDestructurePatternText(node.variable);
+    loopVar = emitDestructurePatternText(node.variable, _loopPatternDefaultLowerer(opts));
   } else {
     loopVar = (typeof node.variable === "string" && node.variable) || hoist.loopVar || "item";
   }

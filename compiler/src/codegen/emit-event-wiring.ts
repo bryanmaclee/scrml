@@ -1,5 +1,5 @@
 import { guardDetachedListener } from "./detached-listener.ts";
-import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
+import { rewriteReactiveRefs, rewriteExprArrowBody } from "./rewrite.js";
 import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";

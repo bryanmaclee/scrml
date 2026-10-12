@@ -6348,6 +6348,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // not a body, but a `{ … }` that continues the statement on its next line:
       // `import:host⏎{ tok } from "./h.js"`, a `type` / `use` declaration's shape.
       "import", "type", "use"]);
+    // S465 r4 — the heads that are EXPRESSION constructs and so may follow a
+    // statement's start (`const f = function (x)⏎{`, `const v = match x⏎{`).
+    const EXPR_BRACE_HEAD_WORDS = new Set(["function", "fn", "match", "if", "else", "for", "while", "do", "switch", "try", "catch", "finally", "given", "when"]);
     // A caller that consumed the statement's head word before collecting (the
     // `import` handler collects `:host⏎{ … } from …` after eating `import`).
     { const _h = peek(-1); if (_h && (_h.kind === "KEYWORD" || _h.kind === "IDENT") && BRACE_HEAD_WORDS.has(_h.text)) sawBraceHeadAtDepth0 = true; }
@@ -7046,6 +7049,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             lastKind === "BLOCK_REF" ||
             lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
+            // S465 r4 — a keyword-spelled PROPERTY name (`row.type`, `x?.match`) ends a value.
+            (lastKind === "KEYWORD" && !!prevLastTok && (prevLastTok.text === "." || prevLastTok.text === "?.")) ||
             endsPresenceGiven(lastTok) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
@@ -7132,12 +7137,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       }
       // S465 r3 — see the bare-block boundary (BUG-ASI-NEWLINE) above.
-      if (depth === 0 && (tok.kind === "KEYWORD" || tok.kind === "IDENT") && BRACE_HEAD_WORDS.has(tok.text)) sawBraceHeadAtDepth0 = true;
+      // S465 r4 — the word counts only as a construct HEAD: never as a property
+      // name (`row.type`, `x?.match`), and a statement-only head (`type`, `import`,
+      // `use`, `class`, `server`, …) only when it LEADS the statement; an
+      // expression-construct head (`function`, `match`, `if`, …) may sit mid-statement.
+      if (depth === 0 && (tok.kind === "KEYWORD" || tok.kind === "IDENT") && BRACE_HEAD_WORDS.has(tok.text)) {
+        const _afterDot = parts.length > 0 && !!lastTok && (lastTok.text === "." || lastTok.text === "?.");
+        if (!_afterDot && (parts.length === 0 || EXPR_BRACE_HEAD_WORDS.has(tok.text))) sawBraceHeadAtDepth0 = true;
+      }
       // Track brace / paren depth
       if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === "(" || tok.text === "[")) depth++;
       if (tok.kind === "PUNCT" && (tok.text === "}" || tok.text === ")" || tok.text === "]")) {
         if (depth === 0) break;
         depth--;
+        // S465 r4 — the head's brace body has closed: the exception ends with it
+        // (`const f = function (q) { return q }⏎{ … }` — the `{` on the next line
+        // opens a bare block again).
+        if (depth === 0 && tok.text === "}") sawBraceHeadAtDepth0 = false;
       }
       // g-division-in-ternary-arm (S188): track ternary `?`/`:` nesting at
       // delimiter-depth 0 (and outside markup). A depth-0 `?` opens a ternary;
