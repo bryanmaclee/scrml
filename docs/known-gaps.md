@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 254 | 4 |
-| MED | 610 | 6 |
-| LOW | 372 | 0 |
+| HIGH | 255 | 4 |
+| MED | 612 | 6 |
+| LOW | 373 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -55,6 +55,30 @@ Measured in s465 fix round 4 (S239 probes c1 / cl3, client functions): `{ @out =
 <!-- @gap id=g-js-exclusions-unchecked-in-block-arrow-value-bodies-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(ArrowFunctionExpression / FunctionExpression with a BlockStatement body → makeEscapeHatch; the body text is never read by the statement parser) + compiler/src/codegen/emit-expr.ts(emitEscapeHatch: client text path; server serverTextLowering → emitServerFnValueFromText only when the text holds a call) prov=review:s465-await-r5 -->
 
 Measured in s465 fix round 5 (executed, origin/main 41af4153a and r5 head alike): a client function with `const g = (x) => { switch (x) { case 2: return "two"⏎default: return "other" } }` compiles with zero errors (also `throw`, `try`); a server function's arrow value with the same body and no call runs. Since r4 a server block-bodied value whose body holds a call is read by the function-body statement parser (`emitServerFnValueFromText`), and since r5 that path reports the front-end's own code (E-SWITCH-FORBIDDEN …) — so on the server the diagnostic now depends on whether the body happens to call something. Fix direction (the one-reader fix): the front-end reads a block-bodied function value's body with the statement parser at stage 1 (the same reader a function declaration's body gets), on both sides. Direction of change: newly-rejecting — each such body becomes the code its statement gets in a function body.
+
+### g-top-level-fn-param-default-dropped-server-s465 — a top-level `function g(x = 5) { return x }` called from server code returns `undefined` for `g()`: the parameter default is dropped when the function is emitted as a server peer — `NEW S465 r6; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-top-level-fn-param-default-dropped-server-s465 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(peer-callable / route-escalated function emission of a top-level function's params)—not-traced prov=review:s465-await-r6 -->
+
+Executed in s465 fix round 6 (branch s465-await-r5 and origin/main 3cebd3387 alike): a server function `f` calling a top-level `function g(x = 5) { return x }` as `g()` gets `undefined` (probe `pre.mjs` preParamDefault: "baddefault:undefined"). Silent wrong value at exit 0. Reported in passing by the S239 review of dcbbd64d7. Fix direction: emit the escalated function's parameter list through `paramSignature` with the server default lowerer (as the nested-function path does since s465 r4).
+
+### g-lib-export-const-lambda-missing-import-s465 — a lib's `export const check = (p, h) => verifyPassword(p, h)` emits a server module without the `verifyPassword` import: `ReferenceError` at call time (500) — `NEW S465 r6; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lib-export-const-lambda-missing-import-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(emitModuleValueExportLines const branch + the server import prune)—not-traced prov=review:s465-await-r6 -->
+
+Executed in s465 fix round 6 (branch and main alike): the importer's `if (!check(pass, hash))` throws `ReferenceError: verifyPassword is not defined` — fails closed (no wrong password accepted), but the program cannot run. Since r6 the binding is async-coloured (fn-valued-bindings.ts), so the importer awaits it once the import is emitted. Fix direction: the value-export path's free identifiers keep their imports (the server import prune does not see a value-export initializer as a use).
+
+### g-lib-exported-fn-destructured-param-codegen-s465 — an exported lib server function with a destructured parameter (`export function check({ p, h }) { … }`) emits `const [object Object] = _scrml_body[…]` in its route handler — E-CODEGEN-INVALID-LOGIC (compiler defect, fails closed) — `NEW S465 r6; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lib-exported-fn-destructured-param-codegen-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(route handler body-param unpacking reads param.name as a string)—not-traced prov=review:s465-await-r6 -->
+
+Executed in s465 fix round 6 (branch and main alike; probe `pre.mjs` preLibDestr). The handler unpacks `_scrml_body` by parameter NAME; a destructuring pattern has none. Fix direction: unpack positionally into a temp and destructure it with emit-destructure-pattern.
+
+### g-typed-arrow-param-in-server-fn-value-s465 — a function value with an annotated parameter in server code (`const label = (r: R) => { … }`) emits the annotation into JS — E-CODEGEN-INVALID-LOGIC "Unexpected token" (compiler defect, fails closed) — `NEW S465 r6; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-typed-arrow-param-in-server-fn-value-s465 sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(emitServerFnValueFromText keeps the head as written)+compiler/src/expression-parser.ts(an annotated arrow is a hatch) prov=review:s465-await-r6 -->
+
+Found in s465 fix round 6 while reproducing review MED-2 (the variant `match` in a function value): `(r: R) => { … }` fails on main and the branch alike. It matters beyond syntax: an annotated parameter is the type a `match` in the body needs (r6 refuses an untyped variant `match` there with E-TYPE-025). Fix direction: read the head's annotations, strip them from the emitted JS, and type-check the body.
 
 ### g-destructured-lambda-param-computed-key-s465 — a destructured lambda parameter with a computed key (`({ [k]: z }) => z`) is refused (E-CODEGEN-INVALID-LOGIC) — `NEW S465 r5; LOW; open`
 
@@ -22260,6 +22284,8 @@ Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/mk-if`, `mk-show`
 ### g-top-level-async-closure-called-later-accept-all — a TOP-LEVEL `const check = (n) => isOk(n)` (or a function expression, or an object method wrapping a server call) is emitted sync, and a later `check(1) ? … : …` tests its Promise — accept-all, no diagnostic — `NEW S441`; **HIGH** (SECURITY); open
 Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/tl-arrow-const`, `tl-arrow-handler`, `tl-fnexpr-const`, `tl-obj-method`. The async coloring (`computeAsyncFnNames`) and the escape check (E-ASYNC-FN-ESCAPES-AS-VALUE) see `function` declarations only; a top-level arrow / function expression / method bound to a name is neither colored async nor treated as async-colored at its call sites. Fix direction: color a top-level `const f = <lambda>` like a function declaration (it is one in every respect that matters here), or refuse a server call inside a top-level lambda.
 <!-- @gap id=g-top-level-async-closure-called-later-accept-all sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts(computeAsyncFnNames — function-decl only)+compiler/src/codegen/emit-reactive-wiring.ts(top-level lambda emission) prov=review:S441-f4f5-review -->
+
+**S465 r6 (branch `s465-await-r5`) — SERVER half closed; CLIENT half fail-closed, not coloured.** A function-valued top-level binding (`const f = (…) => …`, a function expression, a block-bodied arrow, `export const f = …`) is now a function for the async-coloring fixpoint (`codegen/fn-valued-bindings.ts`), in-file (`_asyncLocalBindings`: the server callee map awaits calls to it; the server module emits it `async`) and across imports (`collectAsyncFnNamesFromFile`). A module value that aliases / stores / calls one at load is E-ASYNC-FN-ESCAPES-AS-VALUE; a nested sync lambda that would have to await is E-ASYNC-STDLIB-IN-SYNC-CALLBACK. Executed: 13 wrong-password shapes REJECTED (s465-await-r6.test.js). CLIENT: the client emitters still do not colour a function-valued binding; since r6 any client use of an async-coloured one (scope-aware over the emitted bundle, `codegen/module-scope-refs.ts`) is E-ASYNC-FN-ESCAPES-AS-VALUE ("declare it with `function`") — executed: `const w = (n) => isOk(n)` + client `w(2) ? "Y" : "N"` (was always "Y") is refused. Open: colouring the client copy (so the binding works on the client instead of being refused), and object-method bindings (`tl-obj-method`).
 
 ### g-cross-file-async-helper-called-unawaited — an imported helper that calls a server function (`export function check(n) { return isOk(n) }` in `lib.scrml`) is emitted `async` in its module but the importer calls it un-awaited; aliasing it raises no E-ASYNC-FN-ESCAPES-AS-VALUE — `NEW S441`; **HIGH** (SECURITY: accept-all across a module boundary); open
 Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/xf-call-fn`, `xf-call-handler`, `xf-alias-fn`, `xf-alias-handler`, `xf-obj-fn`, `xf-toplevel-obj` (each with its `lib.scrml`). The importer's async facts come from `_asyncImportedLocals` / `asyncExportNamesOf`, which do not carry "calls a server function in its own module" for this shape; both the await and the escape rule key on those facts. Related: g-crossmodule-async-in-markup-position-not-awaited (S317, the markup position).
