@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 253 | 4 |
-| MED | 611 | 6 |
-| LOW | 383 | 0 |
+| HIGH | 254 | 4 |
+| MED | 612 | 6 |
+| LOW | 384 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -202,6 +202,18 @@ Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mj
 ### g-tree-path-destructured-arrow-param-s465 — an arrow with a destructured parameter emitted through the tree path becomes `(__destructured__) => k + v` → ReferenceError at run time — `NEW S465; MED; open`
 <!-- @gap id=g-tree-path-destructured-arrow-param-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(arrow param emission on the tree path) prov=review:s465-await-r5 -->
 `[[s, 1]].map(([k, v]) => k + v)` and `({ k }) =>` at server function top level throw on main (probe rv7/g.mjs dTop/dTopObj). The await branch routes block-bodied server function values through this path, so it newly breaks shapes that worked on main — fix this before that branch lands.
+
+### g-template-interp-helper-not-server-placed-s465 — a plain helper called ONLY inside a template-literal interpolation of a server function (`server function f(n) { return \`v ${doubleIt(n)}\` }`) is not server-placed: the server bundle calls `doubleIt` without defining it → ReferenceError at run time, compiled clean — `NEW S465; HIGH; open (pre-existing on BASE)`
+<!-- @gap id=g-template-interp-helper-not-server-placed-s465 sev=HIGH status=open locus=compiler/src/route-inference.ts(caller edges read structured call nodes; template interpolations are not decomposed)+compiler/src/indirect-callee-resolver.ts(dispatchCalledTargets raw-text scan covers only the dispatch-table shape) prov=dispatch:s465-value-function-stored -->
+Surfaced by the s465-value-fn-land migration of the #284 dispatch-table tests (the table shape is now E-VALUE-FUNCTION-STORED; the migrated direct-call shape exposed this). Repro: `${ function doubleIt(n) { return n * 2 }  server function f(n) { return \`v ${doubleIt(n)}\` } }` — `serverJs` holds `doubleIt(n)` and no `function doubleIt`. The same call outside a template (`const v = doubleIt(n); return \`v ${v}\``) is placed. Pinned as a `test.todo` in compiler/tests/integration/peer-call-in-template-interp-awaited.test.js. Fix direction: give route inference the calls inside template interpolations (decompose them to ExprNodes, or extend the raw-text scan from dispatch calls to plain calls) — mind the S299 note that widening the shared direct-call map over-escalated 72 sites; use the escalation-only indirect map.
+
+### g-fn-expr-map-literal-value-misparsed-s465 — a `fn` expression as a §59 map-literal VALUE (`["k": fn(x) { return x }]`) re-parses as the call `fn(x)` and silently drops the body: the program is refused with a misleading E-SCOPE-001 (`fn`, `x` undeclared) instead of E-VALUE-FUNCTION-STORED — `NEW S465; MED; open`
+<!-- @gap id=g-fn-expr-map-literal-value-misparsed-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(map-literal unmask re-parses each value slice with parseExprToNode, which reads `fn(x) { … }` as a call and drops the trailing block) prov=dispatch:s465-value-function-stored -->
+Found by s465-value-fn-land. `parseExprToNode("fn(x) { return x }")` returns `call fn(x)` (trailing content lost); inside an object literal the same text is a ParseError escape hatch that codegen lowers with `rewriteFnKeyword`. Fails closed (still refused) but with the wrong code and a message that does not name the cause. Fix direction: lower `fn` before the per-entry re-parse (as the object path does), or flag the lost trailing content.
+
+### g-object-method-shorthand-named-rejection-unchecked-s465 — `{ run() { return 7 } }` (object-literal method shorthand) is now refused by E-VALUE-FUNCTION-STORED, but the S440 JS-WAT #4 ruling asked for a NAMED rejection (method shorthand is not scrml); whether that named code fires is unchecked — `NEW S465; LOW; open`
+<!-- @gap id=g-object-method-shorthand-named-rejection-unchecked-s465 sev=LOW status=open locus=searched:compiler/src(no E-*-NOT-IN-SCRML code for method shorthand found) prov=dispatch:s465-value-function-stored -->
+Record: `docs/changes/s441-audit-gap-filing/repro/object-method-shorthand-emits-invalid-js.scrml` (kept as a record, S464). It compiled clean before E-VALUE-FUNCTION-STORED and is refused now — but by the value rule, whose message steers to "pass the function", not by a code that says method shorthand is not scrml syntax. Check whether the named rejection exists; if not, it is owed.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
