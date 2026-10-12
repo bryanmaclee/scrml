@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 4 |
 | MED | 603 | 6 |
-| LOW | 360 | 0 |
+| LOW | 361 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -63,6 +63,10 @@ Loud on both implementations, so no program is miscompiled — but the bootstrap
 ### g-match-nested-in-match-arm-inner-arm-never-renders-s465 — a `<match>` placed inside another `<match>`'s arm body mounts its own `data-scrml-match-mount` slot but NEVER renders the inner arm: `<match on=@col><Red><match on=@col><Red><button id="b">…</button></>…</match></>…</match>` leaves `#b` absent from the DOM (Chromium + happy-dom), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-match-nested-in-match-arm-inner-arm-never-renders-s465 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(buildMatchArms re-parses the outer arm body; the inner match-block it yields is rendered as a mount slot but is not reached by collectMatchBlocks(fileAST) for its render fn + dispatcher — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+### g-runtime-chunk-gate-skip-rules-match-string-text-s465 — the emitted-text helper gate (`chunksForEmittedHelpers`) applies its skip rules inside string / template / markup text, so user text naming an internal `_scrml_*` helper can suppress shipping its chunk → ReferenceError at run time — `NEW S465; LOW; open`
+<!-- @gap id=g-runtime-chunk-gate-skip-rules-match-string-text-s465 sev=LOW status=open locus=compiler/src/codegen/runtime-chunks.ts(chunksForEmittedHelpers — CLIENT_DECL and same-line `typeof` skip rules) prov=review:s465-braceless-r5 -->
+Found by the S465 round-5 review of the brace-less else fix (probes `scratchpad/rv5/r5h.mjs`, `r5i.mjs`). Triggers: lifted `<pre>function _scrml_deep_set(obj, path, v)</pre>` in the same file as a deep-set handler; a cell `<note> = "let _scrml_deep_set"`; `@o.a.b = "typeof _scrml_deep_set".length` on every deep-set line. Compile exits 0, click throws `_scrml_deep_set is not defined`; base lowered those handlers inline and worked. 0 corpus sites. Fix direction: mask string, template and comment contents before applying the CLIENT_DECL and same-line `typeof` rules, or scope CLIENT_DECL to column-0 declarations. Also: the `runtime-chunks.ts` comment cites `unit/s462-runtime-helper-chunk-index.test.js`, which does not exist — the pin lives in `unit/s462-handler-runtime-helpers-shipped.test.js`.
 
 ### g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 — a braceless same-line if/else handler in the `onclick=${…}` spelling, on markup LIFTED inside a component body (`const Panel = <div>${ lift <button onclick=${ if (@c) @o.a.b = 5 else @o.a.b = 9 }>b</button> }</div>`), fails the component body re-parse: E-COMPONENT-021 ("Parse error: expected ';' or a newline to end the statement") cascading into E-COMPONENT-020 / -035 at the use site — `NEW S465; MED; open (pre-existing on cf4b0a6e)`
 
