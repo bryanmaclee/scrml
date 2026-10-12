@@ -143,3 +143,19 @@
   On afc77f87: 37 fail (every wrong-password case, both label shapes, the handler shape, the scan, all 8 error tests).
 - Gaps: filed g-client-match-arm-text-body-skips-statement-checks-s465 (client arm `switch` ships raw JS); annotated
   g-bare-block-statement-is-silently-dropped with the traced deciding site (collectExpr swallows a next-line block).
+- 2026-10-12T02:10Z r2 gate 1 found 1 regression of mine: `boom() !{ | _ :> return 7 }` (transaction-in-function-body)
+  — an UNBRACED leave arm reached the value reader and was refused; emitArmBody's server branch now reads a §18.2
+  leave statement as a statement first. Fixed; that suite 26/26.
+- 2026-10-12T02:40Z r2 corpus differential (corpus-emit-differential.ts; head 5ce2060b+r2 working tree vs origin/main
+  41af4153a via git archive; 2809 sources: examples, samples, conformance, stdlib, benchmarks; ../giti and ../flogence
+  NOT cloned in this container — skipped): **1a newly failing = 0**, 0 newly passing, 0 diagnostic-code changes, 1
+  text-only (stdlib/auth/index.scrml — r1's F4 note); 171 artifacts differ, 164 only by the absolute project root;
+  the 7 real emit changes are EXACTLY r1's list (sql-handled-match-scrutinee-rt, 08-chat, 19-lin-token,
+  status-picker, driver-card ×2, gauntlet-r10-rails-blog) — r2 changes no corpus artifact.
+- Gates (head 6b55e889 + cf84772e): pre-commit full 33095: 12 fail — dev-db-no-side-file ×5, tenant-floor-project-set
+  ×3, promote-safety read-only, headless-serve-bind-host (known env list), conf-MARKUP-001 + for-unparenthesized-head
+  "OBJECT-destructure" (load flakes: 12/12 and 13/13 alone). root 2239/0; e2e-render-map 259/0; lsp+commands 713/11
+  (all `scrml dev`/`serve` bind/watch, same as r1); browser-baseline --check: 1 NEW name (nested <each> in lifted row)
+  — IDENTICAL in an origin/main tree → environmental; types-gate (180, unchanged), host-global-scan, facts (regen),
+  state (regen, MED +1), spec-index, s34-census --check-new --base origin/main, bootstrap-conformance, severity,
+  conflict-marker, delta-lint, gen-md-shim, snippet-gate 128/128, corpus-compile-floor: PASS.
