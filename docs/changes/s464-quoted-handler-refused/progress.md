@@ -1,0 +1,1 @@
+- 2026-10-12T09:57:17-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a8f0e792acc939988; branch s464-quoted-handler-refused
