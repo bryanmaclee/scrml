@@ -1,0 +1,1 @@
+- 2026-10-12T03:21:52Z WIP(s465-lift-pre-raw): start at /home/user/scrml/.claude/worktrees/agent-a7ab64cff211dc70e (base origin/main 41af4153a)
