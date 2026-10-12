@@ -1,1 +1,2 @@
 - 2026-10-12T05:13:22Z WIP(s465-bare-return-migration): start at /home/user/scrml/.claude/worktrees/agent-ac90ae8412409d36f; base origin/main 41af4153a
+- 2026-10-12T06:06:26Z RESUME at /home/user/scrml/.claude/worktrees/agent-a31d8f30130d02856 on WIP 98fbcfc97; audit: 169 files / 237 sites, every changed line is exactly ':> { return }' -> ':> return' (no other edits); 7 match-leave conformance cases that pin the braced form were already left untouched
