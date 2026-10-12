@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
 | MED | 614 | 6 |
-| LOW | 387 | 0 |
+| LOW | 388 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -63,6 +63,14 @@ The S239 review of s462-given-body-text-as-code found the readers disagreeing: t
 <!-- @gap id=g-promote-match-function-body-return-chain-s464 sev=MED status=open locus=compiler/src/commands/promote.js(rewriteOneChain — chain end span runs past the last branch's `}`; no check that the chain sits in markup position)+compiler/src/lint-i-match-promotable.js(nominates value/return chains) prov=dispatch:s464-markup-text-q24 -->
 
 Executed S464 (`compiler/tests/unit/g-if-chain-promotable-lints-blind.test.js` fixture, `promoteMatchOnFile` dry run): base reported `count: 1` for the rewrite `function render() { <match for=Phase on=@phase> <Idle> return 'a' </> … </> 'z' }`. Since S464 Q24 the sanity parse refuses that rewrite (E-MARKUP-STATEMENT-NOT-RENDERED) and the file is left untouched — fail-closed, but the lint still suggests a promotion the tool cannot perform. Fix direction: nominate (and rewrite) only chains in a markup render position; a `return` / value chain promotes to a logic `match`, not a `<match>` element. The S464 branch also made a chain that is the sole content of `${…}` replace the whole `${…}` (before, the `<match>` was left inside the `${}` and rendered nothing).
+
+**S464 fix round 1 (review of a0d464f1f):** `promote --match` now rewrites ONLY a chain that is the sole content of a `${…}` block AND whose every arm is exactly one markup element (bare, or `lift <el>` with the `lift` dropped) — `singleMarkupArmElement` in `promote.js`; anything else is skipped with a reason and the file left untouched. (The first S464 cut replaced the whole `${…}` for any chain, which turned `lift` arms and logic arms like `{ @x = 10 }` into DISPLAY TEXT that compiled clean.) What remains open here is the LINT: `I-MATCH-PROMOTABLE` still nominates chains the tool refuses (return chains, logic-arm chains).
+
+### g-arrow-block-body-markup-return-codegen-invalid-s464 — a markup value RETURNED from an arrow function's block body (`const g = () => { return <p>x</p> }`) fails as E-CODEGEN-INVALID-LOGIC, while the expression-bodied arrow (`() => <p>x</p>`) and a `function` returning markup compile and render — `NEW S464; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-arrow-block-body-markup-return-codegen-invalid-s464 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(arrow block body statements re-parsed as JS; markup not lowered) prov=dispatch:s464-markup-text-q24(fix round 1) -->
+
+Found while writing the §17.6.10.1 context table (S464 fix round 1): identical on base `7e90f6ff0` and head. The error names the wrong cause (a codegen defect) for valid source; the statement-position case in the same body (`() => { <p>x</p> }`) is now E-MARKUP-STATEMENT-NOT-RENDERED.
 
 ### g-lift-of-markup-value-renders-escaped-source-s464 — `lift` of a markup VALUE that is not written inline renders the element as escaped TEXT: `const m = <p>val</p>; lift m`, `lift mk()` (a function returning `<p>…</p>`), `lift @c ? <p>a</p> : <p>b</p>`, and `${m}` inside lifted markup all render `&lt;p&gt;val&lt;/p&gt;` at exit 0 — `NEW S464; HIGH; open (pre-existing on BASE)`
 
