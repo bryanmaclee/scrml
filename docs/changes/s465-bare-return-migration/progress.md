@@ -1,0 +1,1 @@
+- 2026-10-12T05:13:22Z WIP(s465-bare-return-migration): start at /home/user/scrml/.claude/worktrees/agent-ac90ae8412409d36f; base origin/main 41af4153a

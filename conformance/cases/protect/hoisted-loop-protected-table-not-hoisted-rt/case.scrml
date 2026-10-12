@@ -45,9 +45,9 @@
   <c> = not
   <d> = not
   <button id="load" onclick={
-    @a = aliased([{ id: 7 }]) !{ .Transport(_) :> { return } }
-    @b = computed([{ id: 7 }]) !{ .Transport(_) :> { return } }
-    @c = aliasedAll([{ id: 7 }]) !{ .Transport(_) :> { return } }
-    @d = plain([{ id: 7 }]) !{ .Transport(_) :> { return } }
+    @a = aliased([{ id: 7 }]) !{ .Transport(_) :> return }
+    @b = computed([{ id: 7 }]) !{ .Transport(_) :> return }
+    @c = aliasedAll([{ id: 7 }]) !{ .Transport(_) :> return }
+    @d = plain([{ id: 7 }]) !{ .Transport(_) :> return }
   }>load</button>
 </program>
