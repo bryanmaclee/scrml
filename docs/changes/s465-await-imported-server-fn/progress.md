@@ -399,3 +399,15 @@
 - Gates: pre-commit full at 34eb17922 (pre-merge) 33411/0 fail; at db4e5b6d4 (merge) and 50329d051: 35824/35830
   pass ("Pre-commit checks passed"); types-gate OK (180, unchanged — after casting the new ESNode field reads
   through unknown); host-global-scan 0 violations; state + facts --check PASS (regenerated at the merge).
+- 2026-10-12T19:30Z r5 merged origin/main 3cebd3387 (#1414 batch; generated hunks regenerated, hand entries unioned —
+  every main gap id kept). known-gaps: g-tree-path-destructured-arrow-param-s465 → resolved (r5); annotated
+  g-imported-async-server-fn-not-awaited-s465 (r5 status; stays open until landed) and
+  g-destructure-string-default-loses-quotes-s465 — CORRECTION, executed: the branch does NOT fix it on the server
+  (`const user = "admin"⏎const { v = "user" } = {}` → "admin" on branch and main; root: ast-builder.js
+  parseDestructurePattern → collectDefaultText joins token `.text`, a STRING token has no quotes). Not fixed here.
+- ab1415e74 tightening (self-review): `x?.Check(…)` and `{ A: f }.A(…)` are calls, not `.Variant(…)` constructors.
+- FINAL CORPUS (base = archive of origin/main 3cebd3387; head = 075f9bf43 + ab1415e74's brace-pair.ts; 3583 sources,
+  same roots): 0 newly failing, 0 newly passing, syntax delta 0, 1 code change (sql/query-not-readable-neg +
+  E-SQL-MULTIPLE-STATEMENTS), 1 text-only, 221 artifacts differ — 197 root-path only, 24 real (identical list to the
+  5d0565dc0 measurement). F1 lexical refusal: **0 corpus sources newly refused.**
+- FINAL GATE (pre-commit at ab1415e74): 35960 pass / 0 fail.
