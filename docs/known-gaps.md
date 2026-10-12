@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 250 | 4 |
-| MED | 607 | 6 |
+| HIGH | 251 | 4 |
+| MED | 606 | 6 |
 | LOW | 370 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -126,6 +126,9 @@ Loud, identical on base and after the S462 fix (which keeps the braced arm form'
 | HIGH | 249 | 5 |
 | MED | 599 | 6 |
 | LOW | 359 | 0 |
+| HIGH | 250 | 5 |
+| MED | 596 | 6 |
+| LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -853,9 +856,25 @@ expression forms alike — the recommendation, since data-supplied URLs are legi
 compile-time refusal (rejects legitimate code); (c) leave it to the author. `readLiteralUrlScheme` already
 says which prefixes need it (`kind:"none"`).
 
-### g-unquoted-href-cell-ref-renders-cell-name-s456 — `<a href=@link1>` (a top-level `<link1> = "…"` cell) renders the static attribute `href="link1"` — the cell's NAME, no client wiring — at exit 0 with no diagnostic, while `href=${@link1}` binds — `NEW S456; MED; open (unverified against prior filings)`
+### g-unquoted-href-cell-ref-renders-cell-name-s456 — an unquoted `attr=@cell` on ANY attribute renders the static attribute `attr="cell"` — the cell's NAME, no client wiring, zero reactive reads — at exit 0 with no diagnostic; `href="${@cell}"` and `bind:value=@cell` bind — `NEW S456; HIGH (raised S462 from MED: silent wrong output, every attribute); open`
 
-<!-- @gap id=g-unquoted-href-cell-ref-renders-cell-name-s456 sev=MED status=open locus=searched:none(observed in the emitted HTML only) prov=empirical:S456-attr-injection-rulings-probe -->
+<!-- @gap id=g-unquoted-href-cell-ref-renders-cell-name-s456 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-html.ts(static attribute emission for an unquoted `@ident` value — not traced) prov=empirical:S456-attr-injection-rulings-probe;review:s462-wrap-gaps-href-widen -->
+
+**S462 (raised to HIGH and widened; re-measured on main `1c1e9eee5`).** Not href-specific. Program:
+`<x> = "hello"` then `<a id="a1" href=@x>`, `<img id="i1" src=@x>`, `<p id="p1" title=@x class=@x data-k=@x>`,
+`<div id=@x>`, `<input id="in1" value=@x>`, plus controls `<a id="a2" href="${@x}">` and
+`<input id="in2" bind:value=@x>`. Compile is clean (only W-PROGRAM-SPA-INFERRED). Emitted HTML:
+`href="x"`, `src="x"`, `title="x" class="x" data-k="x"`, `id="x"`, `value="x"` — the literal cell
+name. The client JS has no read of `x` for any of those elements; the only `_scrml_cs_reactive_get("x")`
+reads are the two controls (the `href="${@x}"` template + `_scrml_safe_url`, and the `bind:value`
+wiring). Governing: SPEC §5.1 (~:1860) *"`attr=name` SHALL resolve `name` as an identifier in the
+current scope at the point of use. The compiler SHALL emit code that passes the runtime value of `name`
+as the attribute value."* HIGH because the output is silently wrong on a basic binding form, and a
+URL attribute written this way also skips the `_scrml_safe_url` scheme guard the template form gets.
+Fix direction: lower an unquoted `@cell` attribute value exactly like `"${@cell}"` (same emitter, same
+URL guard), or refuse it loudly; never emit the name as text.
+
+**Original S456 note:**
 
 Observed at the S456 attr-injection-rulings head (no change in this area) while measuring
 [[g-quoted-url-attribute-data-supplied-scheme-s456]]. §3's context table lists `=@x` as a direct binding in
