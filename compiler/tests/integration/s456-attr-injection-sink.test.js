@@ -277,7 +277,8 @@ describe("§2 refused at every markup position, exactly once, no interpolated se
 
 describe("§3 admitted controls", () => {
   const CONTROLS = {
-    staticHandler: () => `<button onclick="go(1)">b</button>`,
+    // S464: a quoted static handler (`onclick="go(1)"`) is no longer admitted — it is
+    // E-ATTR-QUOTED-HANDLER (s464-quoted-handler-refused.test.js).
     relative: (x) => `<a href="/users/\${${x}}">a</a>`,
     httpsPath: (x) => `<a href="https://x.example/u/\${${x}}">a</a>`,
     mailto: (x) => `<a href="mailto:\${${x}}">a</a>`,

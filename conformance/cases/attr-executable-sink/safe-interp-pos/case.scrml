@@ -5,5 +5,5 @@ ${ function go(n) { log(n) } }
 <a id="rel" href="/users/${@id}">rel</a>
 <a id="abs" href="https://example.com/users/${@id}">abs</a>
 <a id="mail" href="mailto:${@email}">mail</a>
-<button id="h" onclick="go(1)">static handler</button>
+<button id="h" onclick=go(1)>handler</button>
 </program>

@@ -334,6 +334,34 @@ export function attrSinkKey(
 export const ATTR_INTERP_EXECUTABLE_CODE = "E-ATTR-INTERP-EXECUTABLE";
 
 /**
+ * SPEC §5.2 rule 1 (S464) — a QUOTED event-handler attribute with no `${…}` (`onclick="alert(1)"`).
+ * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name provisional —
+ * the owner's call.)
+ */
+export const ATTR_QUOTED_HANDLER_CODE = "E-ATTR-QUOTED-HANDLER";
+
+/**
+ * §5.2 rule 1 (S464) — is the QUOTED `name="value"` a static event-handler text? True when `name` is
+ * an event-handler attribute by rule 1's name test (`isExecutableEventHandlerAttrName` — the one
+ * reader) and `value` holds no `${…}` (a value with `${…}` is `classifyInterpolatedAttrSink`'s
+ * `event-handler` refusal instead).
+ */
+export function isQuotedStaticHandler(name: string, value: string): boolean {
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  if (value.indexOf("${") >= 0) return false;
+  return isExecutableEventHandlerAttrName(name);
+}
+
+/** The author-facing message for a quoted static event-handler attribute (S464). */
+export function quotedHandlerMessage(name: string, tag: string, where = ""): string {
+  const on = (tag ? ` on \`<${tag}>\`` : "") + (where ? ` ${where}` : "");
+  return `${ATTR_QUOTED_HANDLER_CODE}: the quoted \`${name}="…"\` attribute` + on +
+    " is an event handler written as a string. scrml does not hand quoted text to the browser to " +
+    "run as JavaScript — an event attribute takes logic, unquoted: a call `" + name + "=fn()`, an " +
+    "inline block `" + name + "={ … }`, or an expression `" + name + "=${…}` (§5.2, §5.2.3).";
+}
+
+/**
  * §5.2 (S457) — a value that is not a static string, written into an attribute the browser EXECUTES
  * in every form: `srcdoc` (an HTML document — script included) and an event-handler attribute
  * (handler text). `srcdoc=${@doc}`, `srcdoc=@doc`, `srcdoc=fn()`, an `<each>` row's `srcdoc=it.html`
@@ -386,8 +414,7 @@ export function interpolatedAttrSinkMessage(
     case "event-handler":
       return head + " into event-handler text. JavaScript is never built from interpolated text " +
         "— a value can close a string and run code on the event. Pass the value as data: the " +
-        `unquoted call form \`${name}=f(x)\` or an expression handler \`${name}=\${() => f(x)}\`. ` +
-        "A quoted event attribute with no `${…}` stays a static string (§5.2).";
+        `unquoted call form \`${name}=f(x)\` or an expression handler \`${name}=\${() => f(x)}\` (§5.2).`;
     case "srcdoc":
       return head + " into an iframe `srcdoc`, which is an HTML document — interpolated text " +
         "there can carry script. Build the frame from a URL (`src=`) or render the content as " +

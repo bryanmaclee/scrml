@@ -44,6 +44,9 @@ import {
   executableDataWriteSink,
   interpolatedAttrSinkMessage,
   ATTR_INTERP_EXECUTABLE_CODE,
+  ATTR_QUOTED_HANDLER_CODE,
+  isQuotedStaticHandler,
+  quotedHandlerMessage,
   attrSinkKey,
 } from "../attr-injection-sink.ts";
 
@@ -245,7 +248,15 @@ export function collectExecutableSinkErrors(
       if ((attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef === true) continue;
       let sink: ReturnType<typeof classifyInterpolatedAttrSink> = null;
       let form: "quoted" | "data" = "quoted";
-      if (v.kind === "string-literal" && typeof v.value === "string") {
+      let quotedHandler = false;
+      if (v.kind === "string-literal" && typeof v.value === "string" &&
+          isQuotedStaticHandler(attr.name, v.value) && dataValueReachesElementAttr(node, attr.name)) {
+        // S464 — a quoted event attribute with no `${…}` (`onclick="alert(1)"`): text the browser
+        // would run as raw JavaScript. A component call's prop (`<Btn onclick="…"/>`, a DECLARED
+        // prop) is not an element attribute; an undeclared one that falls through onto the
+        // expanded root is (`dataValueReachesElementAttr`).
+        quotedHandler = true;
+      } else if (v.kind === "string-literal" && typeof v.value === "string") {
         // The element is passed so an SVG animation value (`<set attributeName="href" to="…">`) is
         // judged as the URL it writes (S457).
         sink = classifyInterpolatedAttrSink(attr.name, v.value, { tag: node.tag, attrs: node.attrs });
@@ -257,7 +268,7 @@ export function collectExecutableSinkErrors(
         const s = executableDataWriteSink(attr.name);
         if (s && s.kind === "srcdoc") { sink = s; form = "data"; }
       }
-      if (!sink) continue;
+      if (!sink && !quotedHandler) continue;
       if (opts.markReported) (attr as { _execSinkReportedAtDef?: boolean })._execSinkReportedAtDef = true;
       const own: Span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
       // An attribute inside an EXPANDED component instance: the value judged here is the one
@@ -277,8 +288,10 @@ export function collectExecutableSinkErrors(
       if (reported.has(key)) continue;
       reported.add(key);
       const err: AttrInterpError = {
-        code: ATTR_INTERP_EXECUTABLE_CODE,
-        message: interpolatedAttrSinkMessage(sink, attr.name, node.tag ?? "", where, form),
+        code: quotedHandler ? ATTR_QUOTED_HANDLER_CODE : ATTR_INTERP_EXECUTABLE_CODE,
+        message: quotedHandler
+          ? quotedHandlerMessage(attr.name, node.tag ?? "", where)
+          : interpolatedAttrSinkMessage(sink!, attr.name, node.tag ?? "", where, form),
         span,
         severity: "error",
       };
