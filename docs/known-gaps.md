@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
-| MED | 597 | 6 |
-| LOW | 354 | 0 |
+| MED | 596 | 6 |
+| LOW | 355 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -271,9 +271,15 @@ Reproduced at `36bc17114`: `<program>\n${ type K:enum = { A, B } }\n<k> = K.A\n<
 
 **RESOLVED S462 Q21** (s462-q21-raw-body-as-text) by the second route: `emit-each.ts` now asks `refuseRawContentLowering` beside `refuseElementLowering` for every row element (`emit-lift.js` likewise), so the repro reports E-SCRIPT-001 once (codegen backstop) and the compile fails. Pinned in `raw-content-as-text-s462-q21.test.js`. (The TAB re-split still discards its own errors; the backstop is the reporting site for this position.)
 
-### g-lift-pre-code-not-raw-content-s462 — a `<pre>` / `<code>` written in `lift` (or any logic-context markup parsed by `parseLiftTag`) is NOT a §4.17 raw-content element: its body is tokenized as markup, so `${…}` interpolates and tag text builds live elements (`lift <pre><img src=x onerror=…></pre>` builds the `<img>` with its handler) — `NEW S462; MED; open`
+### g-lift-pre-code-not-raw-content-s462 — a `<pre>` / `<code>` written in `lift` (or any logic-context markup parsed by `parseLiftTag`) is NOT a §4.17 raw-content element: its body is tokenized as markup, so `${…}` interpolates and tag text builds live elements (`lift <pre><img src=x onerror=…></pre>` builds the `<img>` with its handler) — `NEW S462; MED; RESOLVED S465 (s465-lift-pre-raw)`
 
-<!-- @gap id=g-lift-pre-code-not-raw-content-s462 sev=MED status=open locus=compiler/src/ast-builder.js(parseLiftTag — no raw-content body mode; the logic tokenizer has already split the body)+compiler/src/tokenizer.ts prov=empirical:s462-q21-raw-body-as-text(head client.js holds createElement("img") + setAttribute("onerror", …) for a lifted <pre>) -->
+<!-- @gap id=g-lift-pre-code-not-raw-content-s462 sev=MED status=resolved locus=compiler/src/ast-builder.js(parseLiftTag — no raw-content body mode; the logic tokenizer has already split the body)+compiler/src/tokenizer.ts prov=empirical:s462-q21-raw-body-as-text(head client.js holds createElement("img") + setAttribute("onerror", …) for a lifted <pre>) -->
+
+**RESOLVED S465 (s465-lift-pre-raw; ruling S462 Q21 "I like a").** `parseLiftTag` captures a lowercase-first `<pre>`/`<code>` body from SOURCE up to the first matching close tag (case-insensitive, the block splitter's rule) as one text child; the malformed-markup string path seals raw bodies before the deprecated string reader; every lifted raw body is written through `rawContentDomLines` → `encodeRawContentBody` (one rule). Chromium: `lift <div><pre><img src=x onerror=…></pre></div>` and `lift <pre>${window.pwned=6}</pre>` run on base, display as text on the fix. Tests: `compiler/tests/unit/lift-raw-content-s465.test.js`, `conformance/cases/raw-content/lift-raw-body-displays-as-text/`. S239 review of `fbd800fc` CLEAN (66 Chromium probes); its two LOWs are [[g-lift-raw-body-malformed-close-no-diagnostic-s465]].
+
+### g-lift-raw-body-malformed-close-no-diagnostic-s465 — a lifted `<pre>`/`<code>` body closed with `</>` or left unclosed silently swallows text or later logic statements, with no diagnostic — `NEW S465; LOW; open`
+<!-- @gap id=g-lift-raw-body-malformed-close-no-diagnostic-s465 sev=LOW status=open locus=compiler/src/ast-builder.js(parseLiftTag → _parseLiftRawContentBody) prov=review:s465-lift-pre-raw -->
+Found by the S465 review of the lift raw-content fix. (1) `lift <div id="p">see <code>x</> here</div>` renders `&gt; here &lt; / div &gt;` (base rendered `see<code>x</code>here`); `lift <code id="p">x</>` adds a trailing space. (2) `lift <pre id="p">abc</> }⏎ @x = "CHANGED"⏎ if (@f) { lift <pre id="q">def</pre> }` — the body runs to the next `</pre>`, so the assignment is displayed as text and never runs (base ran it). Both follow §4.17 ("`</>` SHALL NOT be recognized as a closer"; recognition resumes at the matching close tag), and top-level markup behaves the same, but in logic it silently changes what code runs. Fix direction: when a lift/logic raw body has no matching close tag before its enclosing statement/brace ends, report E-CTX-001 (the unclosed-element code) — newly-rejecting, needs a measured corpus count first.
 
 §4.17 says raw-content scanning applies wherever the body is parsed ("lifted markup" is named in the S462 amendment), but only the block splitter has the mode. A `<pre>` inside `${ lift <div><pre>…</pre></div> }` is parsed by `parseLiftTag` from LOGIC tokens: `${@x}` in the body becomes a live interpolation, `<img onerror=…>` becomes `createElement("img")` plus a static handler, and text such as `don't` can open a string token that runs past `</pre>`. Not a new execution class (the same author-static markup in a lifted `<div>` is sanctioned by §5.2), but the Q21 promise "nothing in a raw body can execute" does not hold at this position, and the display differs from the same body at top level. A `<pre>` / `<code>` reached through a component (`lift <Box/>` whose body holds `<pre>${t}</pre>`) IS raw (the component body is block-split) and is encoded. The S462 Q21 change makes `emit-lift.js` encode a lifted `<pre>` / `<code>`'s TEXT children (so `&lt;b&gt;` now displays `<b>` there too), but the parsed element and logic children remain. Fix: give the logic tokenizer a raw-content body mode for a lowercase-first `<pre>` / `<code>` opener in markup position (capture to the matching `</pre>` / `</code>` from source, case-insensitive), so `parseLiftTag` receives one text child.
 
