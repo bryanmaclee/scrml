@@ -175,3 +175,57 @@ describe("markup text between interpolations is text — sibling positions (s462
     await runCase("plain-track", `<p id="p">\${@u.name} ${T} \${@n}</p>`, "#p", (n) => `bob ${T} ${n}`);
   });
 });
+
+// Fix round 1 (S462 review of a273fd596).
+describe("fix round 1 — fail closed, no new silent drops, no expression split (s462)", () => {
+  // MED-2 + ruling Q24 (a): an element whose text the parser read as markup but that no
+  // lowering renders is a compile ERROR — never an empty render at exit 0.
+  const refused = {
+    "`a < b` in the element's text (the implied-lift re-parse declines it)":
+      `<div id="host">\${ if (@u is given) { <p>\${@n} a < b track(@n) \${@n}</p> } }</div>`,
+    "a quoted `\"</p>\"` in the element's text":
+      `<div id="host">\${ if (@u is given) { <p>\${@n} "</p>" track(@n) \${@n}</p> } }</div>`,
+    "a `for` body without `lift`":
+      `<div id="host">\${ for (const x of @xs) { <p>\${x} track(@n) - \${@n}</p> } }</div>`,
+    "two elements in one arm":
+      `<div id="host">\${ if (@n > 1) { <p>\${@n} track(@n) - \${@n}</p> <p>two</p> } }</div>`,
+  };
+  for (const [label, body] of Object.entries(refused)) {
+    test(`refused: ${label}`, () => {
+      const { errors } = compileAndMount(PRE + body + POST, "refused-" + label.replace(/[^a-z]+/gi, "-").slice(0, 30));
+      expect(errors).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
+    });
+  }
+
+  test("`lift` — the fix the refusal names — renders the nested element", async () => {
+    const { errors } = compileAndMount(PRE + `<div id="host">\${ if (@n > 1) { <div id="d">\${@n} \${ if (@n > 2) { lift <b>\${@n}</b> } } tail</div> } }</div>` + POST, "liftfix");
+    expect(errors).toEqual([]);
+    await flush();
+    expect(squash(text("#d"))).toBe("33 tail");
+  });
+
+  // LOW-3: an HTML comment in the element's text is skipped; its `</p>` closes nothing.
+  test("an HTML comment holding `</p>` inside the element renders as on base", async () => {
+    await runCase("html-comment", `<div id="host">\${ if (@u is given) { <p id="p">\${@n} <!-- </p> --> track(@n) \${@n}</p> } }</div>`,
+      "#p", (n) => `${n} track(@n) ${n}`);
+  });
+
+  // HIGH-1: a `<` comparison continued on the next line stays one expression.
+  test("`return @n⏎ <input && @n > 0` is evaluated as one expression (base: OUT)", async () => {
+    const src = `<program>
+@n = 3
+@hits = 0
+function inRange(input) {
+  return @n
+    <input && @n > 0
+}
+\${ @hits = inRange(2) ? "IN" : "OUT" }
+<span id="hits">\${@hits}</span>
+</program>
+`;
+    const { errors } = compileAndMount(src, "inv1");
+    expect(errors).toEqual([]);
+    await flush();
+    expect(text("#hits")).toBe("OUT");
+  });
+});

@@ -30,11 +30,53 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
-| MED | 597 | 6 |
-| LOW | 354 | 0 |
+| HIGH | 250 | 5 |
+| MED | 599 | 6 |
+| LOW | 358 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-statement-markup-silently-not-rendered-s462 — (P1) markup written as a statement in a logic body, outside the §17.6.10 single-element branch, renders NOTHING at exit 0 when it holds no `${…}`: `${ <p>hi</p> }`, two elements in one branch, an element after a statement, a `for` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a nested `${ if }` inside an implied-lift element — `NEW S462; HIGH (P1); open — ruling Q24 (a) RULED, build queued`
+
+<!-- @gap id=g-statement-markup-silently-not-rendered-s462 sev=HIGH status=open locus=compiler/src/ast-builder.js(statement-position markup → html-fragment)+compiler/src/implied-lift-desugar.ts(single-element arms only)+compiler/src/codegen/emit-logic.ts(case "html-fragment" returns "") prov=ruling:user-voice-scrml.md(S462 Q24 "a");review:S239-s462-given-body-text-as-code;dispatch:s462-given-body-text-as-code -->
+
+Ruled S462 Q24 (a): such markup is a compile ERROR naming the fix (`lift <…>`, or make it the branch's single element), never silently dropped. **Partially closed by s462-given-body-text-as-code fix round 1:** an element that holds a `${…}` (impl#1's statement-position markup reader arms it, `collectMarkupTextRun`) and that no lowering renders is now `E-MARKUP-STATEMENT-NOT-RENDERED` (§34; emitted in `emit-logic.ts` through the refused-lowering sink). Still silent: an element with NO interpolation (`${ for (x of @xs) { <p>hi</p> } }`, `${ <p>hello</p> }`), and an element the reader does not arm because its text holds an apostrophe that tokenizes as a string (`<p>don't ${@n}</p>` — see g-display-text-apostrophe-tokenizes-as-code-s462). Measured (round 1): a nested `${ if (c) { <b>${@n}</b> } }` inside an implied-lift `<div>` was silently dropped on base (`<div>3 tail</div>`) and is now refused; `lift <b>…</b>` there renders. The full Q24 build (every unrendered statement-position element, with the corpus measured first per the ruling) is queued. Single-reader direction: see g-statement-markup-two-readers-s462.
+
+### g-statement-markup-two-readers-s462 — a statement-position markup element's extent is decided by TWO readers that can disagree: the logic token stream (ast-builder `scanMarkupElementEnd`, parseLiftTag's grammar) and the implied-lift desugar's source re-parse (block splitter) — `NEW S462; MED; open (direction recorded)`
+
+<!-- @gap id=g-statement-markup-two-readers-s462 sev=MED status=open locus=compiler/src/ast-builder.js(scanMarkupElementEnd, collectMarkupTextRun)+compiler/src/implied-lift-desugar.ts(recoverMarkupNode re-parse) prov=review:S239-s462-given-body-text-as-code(HIGH-1, MED-2) -->
+
+The S239 review of s462-given-body-text-as-code found the readers disagreeing: text `a < b` or a quoted `"</p>"` passes the token scanner but the block splitter's re-parse closes or opens a tag there, so the arm declined and the element was dropped (now fail-closed: E-MARKUP-STATEMENT-NOT-RENDERED). **Direction (recorded with the fix round):** parse statement-position markup ONCE, with the markup grammar, at the TAB — a statement that begins with an element opener becomes a markup node (as `lift <…>` already does via parseLiftTag), retiring BOTH `scanMarkupElementEnd` and the desugar's source re-parse. Then no second reader can decide the element's extent differently from the first.
+
+### g-display-text-apostrophe-tokenizes-as-code-s462 — an apostrophe in display text inside statement-position or lifted markup opens a string token: `${ if (c) { <p>${@n} don't ${@n}</p> } }` is E-SCOPE-001 on `don`; `lift <p>${@n} don't …</p>` renders garbage (`don "t … &lt;/p&gt; } "`); with no interpolation before it the element is silently dropped — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-display-text-apostrophe-tokenizes-as-code-s462 sev=MED status=open locus=compiler/src/tokenizer.ts(tokenizeLogic reads `'` as a string opener inside markup text) prov=review:S239-s462-given-body-text-as-code(repros apos2, apos-lift, apos-noint) -->
+
+The logic tokenizer does not know it is inside an element's free-text body (§4.18.1), so `'` starts a JS string that swallows the rest of the element. Plain markup (`<p>${@n} don't …</p>` outside a logic block) is correct. Fix direction: the single-reader parse (g-statement-markup-two-readers-s462) reads element text with the markup grammar, where `'` is text.
+
+### g-unclosed-statement-element-text-runs-s462 — an UNCLOSED element at statement position (`${ if (c) { <p>${@n} track(@n) ${@n} } }`, no `</p>`) still parses its text as statements: `track(@n)` RUNS — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-unclosed-statement-element-text-runs-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(armMarkupTextRuns declines when scanMarkupElementEnd finds no closer) prov=review:S239-s462-given-body-text-as-code(repro unclosed) -->
+
+The token scanner arms only a cleanly closed element, so an unclosed one keeps the base parse (measured: `#hits` 1 on base and head). Fix direction: refuse an unclosed statement-position element (E-CTX-003-shaped) instead of re-reading its text as code — falls out of the single-reader parse.
+
+### g-lift-markup-lt-text-garbled-s462 — `lift <p>${@n} a < b … ${@n}</p>` renders garbled (`p >`): parseLiftTag reads `< b` in the text as an opener — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lift-markup-lt-text-garbled-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(parseLiftTag children — `<` + name with no adjacency check) prov=review:S239-s462-given-body-text-as-code(repro lift-altb) -->
+
+§4.18.1b exit (3) makes `<` an exit only when FOLLOWED BY a letter; `a < b` is text. parseLiftTag accepts `<` IDENT regardless of the space. Fix direction: require source adjacency of `<` and the name in parseLiftTag's child loop (as scanMarkupElementEnd does).
+
+### g-bs-lt-space-text-read-as-tag-s462 — the block splitter reads `5 < 7` in plain markup text as a tag (E-CTX-001 `'</p>' tries to close '<7>'`), contrary to §4.18.1b ("So `5 < 7` is just text") — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-bs-lt-space-text-read-as-tag-s462 sev=LOW status=open locus=compiler/src/block-splitter.js(markup opener recognition after `<` + whitespace) prov=dispatch:s462-given-body-text-as-code;review:S239-s462-given-body-text-as-code(repro plain-altb) -->
+
+`<p>${@n} 5 < 7 and a > b ${@n}</p>` fails to compile; the same splitter is what the implied-lift desugar uses to read back a statement-position element, so such an element is now refused there (E-MARKUP-STATEMENT-NOT-RENDERED) rather than rendered. §4.18 marks the free-text exit fixes as built in the bootstrap first (impl#1 only if security).
+
+### g-lift-path-drops-whitespace-around-interpolation-s462 — on the lift / markup-value paths, the space between a `${…}` and adjacent text is dropped (`lift <p>${@u.name} track ${@n}</p>` → `bobtrack3`; a component body also re-spaces `if (x)` → `if(x)`), contrary to §4.18.5 (whitespace kept exactly) — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lift-path-drops-whitespace-around-interpolation-s462 sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(text/interpolation part assembly)+compiler/src/component-expander.ts(body re-join) prov=dispatch:s462-given-body-text-as-code -->
+
+Measured in happy-dom and Chromium on base and head. The implied-lift (`${ if (c) { <p>…</p> } }`) and plain-markup paths keep the space; the explicit `lift` and markup-value (`const m = <p>…</p>`, `return <p>…</p>`, ternary arm) paths do not.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 

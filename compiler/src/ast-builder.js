@@ -5439,49 +5439,121 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // logic context drops html-fragments, so nothing executes).
   // ---------------------------------------------------------------------------
   let _markupTextEnd = -1;
+  // The armed element's tag + opener span, handed to its FIRST text run
+  // (`_markupLead`): codegen reports an element that no lowering rendered at that
+  // run (E-MARKUP-STATEMENT-NOT-RENDERED, emit-logic.ts) — once per element.
+  let _markupArmLead = null;
 
   /**
    * The token index just past the markup element that opens at token `start`
-   * (`<` followed by a tag name), or -1 when the element does not close cleanly
-   * within the token stream — the caller then keeps the pre-existing parse.
-   * Mirrors parseLiftTag's element grammar (explicit `</tag>` and inferred `</>`
-   * closers, `/>` self-close, HTML void elements) without its side effects.
-   * A nested opener counts only when the name is source-adjacent to its `<`
-   * (§4.18.1b exit (3): `<` FOLLOWED BY a letter), so text such as `5 < 7` or
-   * `a < b` stays text.
+   * (`<` followed by a tag name), or -1 when the tokens are not certainly a
+   * well-formed element — the caller then keeps the pre-existing parse.
+   *
+   * The OPENER grammar is parseLiftTag's, no wider (one reader of an element's
+   * extent, not a looser second one — S462 review HIGH-1): the tag name, then
+   * attributes only — `name`, `name:sub` / `name-sub`, each optionally `=` a
+   * value that is a quoted string, a `${…}`, a balanced `( … )`, or an unquoted
+   * run of names / `@cell` / numbers / `.` member access / balanced call or index
+   * brackets. Anything else in an opener (`&&`, `?`, `||`, a comparison, `{`) is
+   * not an attribute, so the tokens are not an element: -1.
+   *
+   * Children: explicit `</tag>` and inferred `</>` closers, `/>` self-close, HTML
+   * void elements. A nested opener counts only when the name is source-adjacent
+   * to its `<` (§4.18.1b exit (3): `<` FOLLOWED BY a letter), so text such as
+   * `5 < 7` or `a < b` stays text. An HTML comment `<!-- … -->` is skipped whole
+   * (a `</p>` inside it closes nothing). A `}` that closes a brace opened before
+   * the element ends the enclosing body: -1.
    */
   function scanMarkupElementEnd(start) {
     const at = (k) => (k < tokens.length ? tokens[k] : null);
     const isPunct = (t, text) => !!t && t.kind === "PUNCT" && t.text === text;
     const isName = (t) => !!t && (t.kind === "IDENT" || t.kind === "KEYWORD");
     const adjacent = (a, b) => !!(a && b && a.span && b.span && a.span.end === b.span.start);
-    const stack = [];
-    // Read one opener at `k` (`<` name …). Returns the index after it, or -1.
-    const readOpener = (k) => {
+    const isEnd = (t) => !t || t.kind === "EOF";
+    // A balanced bracket group opened at `k` (`(` or `[`); index after it, or -1.
+    const readGroup = (k) => {
+      let depth = 0;
+      for (; k < tokens.length; k++) {
+        const t = at(k);
+        if (isEnd(t)) return -1;
+        if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+        else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) {
+          depth--;
+          if (depth < 0) return -1;
+          if (depth === 0) return k + 1;
+        }
+      }
+      return -1;
+    };
+    // One attribute value after `=`; index after it, or -1.
+    const readValue = (k) => {
+      const t = at(k);
+      if (isEnd(t)) return -1;
+      if (t.kind === "STRING" || t.kind === "BLOCK_REF") return k + 1;
+      if (isPunct(t, "(")) return readGroup(k);
+      const unquotedLead = t.kind === "IDENT" || t.kind === "KEYWORD" || t.kind === "AT_IDENT" ||
+        t.kind === "NUMBER" || isPunct(t, "@");
+      if (!unquotedLead) return -1;
+      let prev = null;
+      while (k < tokens.length) {
+        const c = at(k);
+        if (isEnd(c)) return -1;
+        if (isPunct(c, ">") || (isPunct(c, "/") && isPunct(at(k + 1), ">"))) return k;
+        if (prev && !adjacent(prev, c)) return k; // whitespace ends an unquoted value
+        if (isPunct(c, "(") || isPunct(c, "[")) {
+          const next = readGroup(k);
+          if (next === -1) return -1;
+          prev = at(next - 1);
+          k = next;
+          continue;
+        }
+        const ok = c.kind === "IDENT" || c.kind === "KEYWORD" || c.kind === "AT_IDENT" ||
+          c.kind === "NUMBER" || isPunct(c, ".") || isPunct(c, "@");
+        if (!ok) return -1;
+        prev = c;
+        k++;
+      }
+      return -1;
+    };
+    // Read one opener at `k` (`<` name …): index after it (pushing the name unless
+    // the element closes itself), or -1.
+    const readOpener = (k, stack) => {
       const name = at(k + 1).text;
       k += 2;
       while (k < tokens.length) {
         const t = at(k);
-        if (!t || t.kind === "EOF") return -1;
+        if (isEnd(t)) return -1;
         if (isPunct(t, "/") && isPunct(at(k + 1), ">")) return k + 2;
         if (isPunct(t, ">")) {
           if (!HTML_VOID_ELEMENTS.has(String(name).toLowerCase())) stack.push(name);
           return k + 1;
         }
-        // A statement end inside an opener: not a well-formed element.
-        if (isPunct(t, ";") || isPunct(t, "}")) return -1;
+        if (!isName(t)) return -1;
         k++;
+        while ((isPunct(at(k), ":") || isPunct(at(k), "-")) && isName(at(k + 1))) k += 2;
+        if (isPunct(at(k), "=")) {
+          k = readValue(k + 1);
+          if (k === -1) return -1;
+        }
       }
       return -1;
     };
     if (!(isPunct(at(start), "<") && isName(at(start + 1)))) return -1;
-    let k = readOpener(start);
-    // A `}` that closes a brace opened BEFORE the element ends the enclosing body:
-    // the element did not close inside it, so it is not a well-formed element here.
+    const stack = [];
+    let k = readOpener(start, stack);
     let braces = 0;
     while (k !== -1 && stack.length > 0) {
       const t = at(k);
-      if (!t || t.kind === "EOF") return -1;
+      if (isEnd(t)) return -1;
+      // `<!-- … -->`: skip to the `>` that follows a `--`.
+      if (isPunct(t, "<") && isPunct(at(k + 1), "!") && adjacent(t, at(k + 1))) {
+        let j = k + 2;
+        while (j < tokens.length && !isEnd(at(j)) &&
+               !(isPunct(at(j), ">") && at(j - 1) && /--$/.test(String(at(j - 1).text)) && adjacent(at(j - 1), at(j)))) j++;
+        if (j >= tokens.length || isEnd(at(j))) return -1;
+        k = j + 1;
+        continue;
+      }
       if (isPunct(t, "{")) braces++;
       if (isPunct(t, "}") && --braces < 0) return -1;
       if (isPunct(t, "<") && isPunct(at(k + 1), "/")) {
@@ -5495,7 +5567,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         return -1; // a mismatched closer
       }
       if (isPunct(t, "<") && isName(at(k + 1)) && adjacent(t, at(k + 1))) {
-        k = readOpener(k);
+        k = readOpener(k, stack);
         continue;
       }
       k++;
@@ -5514,7 +5586,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const end = scanMarkupElementEnd(i);
     if (end <= i) return;
     for (let k = i; k < end; k++) {
-      if (tokens[k] && tokens[k].kind === "BLOCK_REF") { _markupTextEnd = end; return; }
+      if (tokens[k] && tokens[k].kind === "BLOCK_REF") {
+        _markupTextEnd = end;
+        _markupArmLead = { tag: String(tokens[i + 1].text), span: tokenSpan(tokens[i], filePath) };
+        return;
+      }
     }
   }
 
@@ -5550,12 +5626,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // §4.17 (S462) — a `<script>` / `<style>` opener in the run is refused exactly
     // as in any other markup in a logic body.
     refuseFragmentElementTokens(tokens.slice(from, i), filePath, errors);
+    const lead = _markupArmLead;
+    _markupArmLead = null;
     return {
       id: ++counter.next,
       kind: "html-fragment",
       content: joinWithNewlines(parts, lines, spans),
       span: spanOf(first, lastTok),
       _markupText: true,
+      ...(lead ? { _markupLead: lead } : {}),
     };
   }
 
@@ -7234,23 +7313,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // shape does not match a state-decl (Shape 1/2/3 or Variant C).
             const declShape = scanStructuralDeclLookahead();
             if (declShape) break;
-          }
-          // S462 (s462-given-body-text-as-code) — the same newline boundary for a
-          // markup ELEMENT on a later line (`let k = 1⏎<p>${a} - ${b}</p>`): it is a
-          // new statement, not a continuation of the value. Without this the
-          // element — its display text included — was collected into the previous
-          // statement's expression and its text read as code. The `<` must be
-          // source-adjacent to the tag name and the element must close cleanly
-          // (scanMarkupElementEnd), so a `<` comparison continuing onto a new line
-          // is not affected.
-          if (
-            lastEndsValue &&
-            tok.kind === "PUNCT" && tok.text === "<" &&
-            peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD") &&
-            tok.span && peek(1).span && tok.span.end === peek(1).span.start &&
-            scanMarkupElementEnd(i) > i
-          ) {
-            break;
           }
         }
         // Phase A1a Step 11.0a — compound-body child boundary.

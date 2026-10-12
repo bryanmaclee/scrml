@@ -86,21 +86,36 @@ describe("markup text in a logic body is text (s462-given-body-text-as-code)", (
     expect(findAll(ast, "bare-expr").filter((n) => /track/.test(String(n.expr ?? "")))).toEqual([]);
   });
 
-  test("a markup element on the line after a statement is a new statement, not part of the value", () => {
-    const { ast } = build(PRE + "<div>${ given @u :> { let k = 1\n  <p>${@u.name} track(@n) ${@n}</p> } }</div>" + POST);
-    const [guard] = findAll(ast, "given-guard");
-    const [decl] = findAll(guard, "let-decl");
-    expect(decl).toBeDefined();
-    expect(String(decl.init ?? "")).not.toContain("<");
-    expect(guard.body.slice(1).map((n) => n.kind)).toEqual(["html-fragment", "logic", "html-fragment", "logic", "html-fragment"]);
+  // Fix round 1 (S462 review HIGH-1): the scanner's OPENER grammar is parseLiftTag's —
+  // names and `=` values only. Tokens that are not an element are never armed, so they
+  // keep the base parse (an expression stays an expression).
+  test("`return @n⏎ <input && @n > 0` stays ONE expression (review repro inv1: base OUT, round-0 head IN)", () => {
+    const { ast } = build("<program>\n@n = 3\nfunction inRange(input) {\n  return @n\n    <input && @n > 0\n}\n</program>\n");
+    const [ret] = findAll(ast, "return-stmt");
+    expect(ret).toBeDefined();
+    expect(String(ret.expr)).toMatch(/@n\s*<\s*input\s*&&\s*@n\s*>\s*0/);
+    expect(findAll(ast, "html-fragment").filter((n) => n._markupText)).toEqual([]);
   });
 
-  test("a `<` comparison continued on the next line is unaffected", () => {
-    const { ast } = build("<program>\n${\n  let a = 1\n  let ok = a\n    < 5\n}\n</program>\n");
-    const decls = findAll(ast, "let-decl");
-    const ok = decls.find((d) => d.name === "ok");
-    expect(ok).toBeDefined();
-    expect(String(ok.init ?? "")).toMatch(/a\s*<\s*5/);
+  test("an opener whose attribute value is an operator expression (`a=x&&y`) is not armed", () => {
+    const { ast } = build(PRE + "<div>${ given @u :> { <p a=@n&&@n>${@u.name} - ${@n}</p> } }</div>" + POST);
+    const [guard] = findAll(ast, "given-guard");
+    expect(guard.body.some((n) => n._markupText)).toBe(false);
+  });
+
+  test("an HTML comment inside the element is skipped whole — its `</p>` closes nothing", () => {
+    const { ast } = build(PRE + "<div>${ if (@u is given) { <p>${@n} <!-- </p> --> track(@n) ${@n}</p> } }</div>" + POST);
+    const [ifs] = findAll(ast, "if-stmt");
+    expect(ifs.consequent.map((n) => n.kind)).toEqual(["html-fragment", "logic", "html-fragment", "logic", "html-fragment"]);
+    expect(ifs.consequent[2].content).toContain("track");
+  });
+
+  test("the first text run of an armed element carries the element's tag for the not-rendered refusal", () => {
+    const { ast } = build(PRE + "<div>${ for (x of @xs) { <li>${x} - ${@n}</li> } }</div>" + POST);
+    const runs = findAll(ast, "html-fragment").filter((n) => n._markupText);
+    expect(runs.length).toBe(2);
+    expect(runs[0]._markupLead?.tag).toBe("li");
+    expect(runs[1]._markupLead).toBeUndefined();
   });
 
   test("an element with no interpolation is unchanged (one html-fragment)", () => {
