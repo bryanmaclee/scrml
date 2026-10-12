@@ -197,7 +197,7 @@ async function callF(unit, pass) {
   return { status: res.status, body: await res.text() };
 }
 
-describe("S465 r6 HIGH-1 — function-valued top-level bindings are async-coloured (executed)", () => {
+describe("S465 r6 — server shapes that must run (HIGH-1 bindings, MED-1 regex, LOW-2 variants, LOW-3 for headers; executed)", () => {
   for (const [name, spec] of Object.entries(RUN)) {
     test(`${name}: wrong → REJECTED, right → WELCOME`, async () => {
       const u = await compileShape(name, spec);
@@ -207,7 +207,7 @@ describe("S465 r6 HIGH-1 — function-valued top-level bindings are async-colour
   }
 });
 
-describe("S465 r6 HIGH-1 — an async-coloured binding used as a value is refused", () => {
+describe("S465 r6 — server shapes that must be compile errors (HIGH-1 escapes, MED-2, LOW-3)", () => {
   for (const [name, [spec, code]] of Object.entries(REFUSE)) {
     test(`${name}: ${code}`, async () => {
       const u = await compileShape(name, spec);
@@ -245,6 +245,47 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
     const r = clientCompile("let s = 0\n    for (let i = 0, j = 3; i < j; i++, j--) { s = s + 1 }\n    @out = String(s)");
     expect(r.codes).toEqual([]);
     expect(r.clientJs).toMatch(/i\+\+, j--/);
+  });
+  // HIGH-1, client half — the client does not colour a function-valued binding: a client
+  // use of an async-coloured one fails closed (it would test a Promise: always "Y").
+  test("client code using an async-coloured function-valued binding is refused", () => {
+    const dir = mkdtempSync(join(tmpdir(), "s465-r6-clienth1-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "app.scrml"), `<program db="./app.db">
+\${
+  server function isOk(n) { return n == 1 }
+  const w = (n) => isOk(n)
+  <out> = ""
+  function h() {
+    @out = w(2) ? "Y" : "N"
+  }
+}
+<button onclick=h()>go</button>
+<p>\${@out}</p>
+</program>
+`);
+    const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, gather: true, log: () => {} });
+    expect((r.errors ?? []).map((e) => e.code)).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  });
+  test("a client parameter named like an async binding is not a use of it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "s465-r6-clientshadow-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "app.scrml"), `<program db="./app.db">
+\${
+  server function isOk(n) { return n == 1 }
+  const w = (n) => isOk(n)
+  <out> = ""
+  function h() {
+    const g = (w) => w + 1
+    @out = String(g(1))
+  }
+}
+<button onclick=h()>go</button>
+<p>\${@out}</p>
+</program>
+`);
+    const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, gather: true, log: () => {} });
+    expect((r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
   });
   test("a comma in a client VALUE position is refused", () => {
     const r = clientCompile("let a = 0\n    const v = (a = 2, a + 1)\n    @out = String(v)");
