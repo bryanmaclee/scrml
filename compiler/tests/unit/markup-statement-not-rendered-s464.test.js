@@ -115,6 +115,11 @@ describe("E-MARKUP-STATEMENT-NOT-RENDERED (S464 Q24) — refused shapes", () => 
     expect(codes.filter((c) => c === CODE).length).toBe(1);
   });
 
+  test("a `^{ }` meta body is out of scope (it renders through emit(), with its own §22 diagnostics)", () => {
+    const { codes } = compile(`^{ <p>meta</p> }`);
+    expect(codes).not.toContain(CODE);
+  });
+
   test("a refused `<script>` keeps its own code and is not double-reported", () => {
     const { codes } = compile(`${D} <script>x</script> }`);
     expect(codes).not.toContain(CODE);

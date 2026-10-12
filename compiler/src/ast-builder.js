@@ -5705,6 +5705,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * continuation of a fragmented `lift`) carries none.
    */
   function takeStatementMarkupLead(from) {
+    // A `^{ }` meta body renders through `emit(…)`, not `lift`, and has its own
+    // diagnostics (§22); the refusal is scoped to `${ }` / function logic bodies.
+    if (blockContext === "meta") { _markupArmLead = null; return null; }
     if (_markupArmLead) {
       const lead = _markupArmLead;
       _markupArmLead = null;
@@ -5760,6 +5763,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * inspected.
    */
   function refuseSwallowedStatementMarkup(from, to) {
+    if (blockContext === "meta") return; // see takeStatementMarkupLead
     if (!(to > from + 1)) return;
     const endsOperand = (t) => !!t && (
       t.kind === "IDENT" || t.kind === "AT_IDENT" || t.kind === "NUMBER" || t.kind === "STRING" ||

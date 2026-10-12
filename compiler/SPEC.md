@@ -16782,6 +16782,7 @@ that neither way reaches is not rendered, and the compiler SHALL NOT drop it sil
   <b>x</b> } }</div> } }` renders the inner `<b>`).
 - Markup in a VALUE position is not in statement position and is unaffected: an initializer
   (`const m = <p/>`), a `return` operand, a ternary arm, a call argument, a `lift` operand.
+- A `^{ }` meta body is outside this rule: it renders through `emit(…)` and is governed by §22.
 
 ### 17.7 Iteration (`<each>`)
 
