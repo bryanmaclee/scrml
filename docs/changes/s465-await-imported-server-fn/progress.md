@@ -333,3 +333,69 @@
 - Maps: primary.map.md (stamp 8ce6d61b5) read for routing; NOT load-bearing — no row covers the server text-
   lowering surface (rewriteServerExpr / emitEscapeHatch / destructure defaults); every locus here was found by
   grep in source.
+
+## Fix round 5 (S239 re-review of 55cdda9d8) — branch s465-await-r5
+- 2026-10-12T11:50Z r5 start: worktree cut from origin/auto/s465-await-imported-server-fn @ 55cdda9d8 as
+  `s465-await-r5`; origin/main already contained; brief archived (BRIEF-fix-round-5.md); bun install + pretest OK.
+  Probe harness: a server fn `f(name, pass)` reading `row.pw`, imported async helpers `check` / `of` (lib.scrml →
+  `verifyPassword`), executed vs bun:sqlite, wrong + right password (shapes now pinned in
+  integration/s465-await-r5.test.js).
+- r5 REPRODUCED F1 (both halves HELD) on 55cdda9d8: `const r = [of(pass, row.pw), .Found(name: "c")]⏎if (!r[0])`
+  → wrong password WELCOME (`of` is in NOT_CALLEE_WORDS); `[i++ / 1 + (check(pass, row.pw) ? 1 : 0) / 1, .Found(…)]`
+  → WELCOME (`/ … /` after `++` read as a regex literal). Control: the same array with `check` refused.
+- F1 fix (the reviewer's root, fail closed): NEW brace-pair.ts `lexicalCallInText` — purely lexical, NOTHING skipped
+  (no string / template / comment / regex reading): any `(` or backtick after a value is a call, except the
+  grammar's own non-calls (a reserved word's head — reserved in an ES module, so `of`/`async`/`let`/`get` count; a
+  parameter list `function f(` / `function* f(`; `new X(`; a `.Variant(` payload constructor after no value or after
+  a reserved word). `serverTextLowering` (both the structural-read gate and the refusal), `refuseServerTextCall` and
+  the `emitServerFnValueFromText` head check use it; `firstCallInText` is no longer a guard (kept, unit-tested).
+  A false positive (a `(` in a string) first tries the tree (`readableExprTree`), so it refuses only text that is
+  ALSO unreadable.
+- Found while measuring F1 (pre-existing on origin/main, silent): the expression parser's SQL-block mask
+  (`replaceSqlBlockPlaceholder`) replaced a `?{` inside a quoted string or template TEXT with
+  `__scrml_sql_placeholder__` — `const v = "?{\`SELECT 1\`}"` evaluated to "__scrml_sql_placeholder__" (main,
+  executed). The lexical guard routed `if (x == "?{…}")` onto that tree path (sql-one-reader-s457 caught it). Fixed:
+  the mask skips quoted strings and tracks template text (a `${…}` substitution is code again).
+- F2 REPRODUCED, REFINED: (a) `__destructured__` HELD — but it is NOT r4-new at its root: every destructured lambda
+  parameter emitted from the expression tree was the placeholder (origin/main, executed: `[{ a: 1 }].map(({ a }) =>
+  a + 1)` in a server fn throws `a is not defined`; also inside a function declaration). r4 extended it to every
+  lambda nested in a block-bodied server value (base ran those as text). Fix: expression-parser `convertParams`
+  structures the pattern (`LambdaParam.pattern`, a DestructurePattern, defaults as ExprNodes); emitLambdaParam writes
+  it back through emit-destructure-pattern with defaults lowered from their trees; a computed key is refused
+  (E-CODEGEN-INVALID-LOGIC; gap g-destructured-lambda-param-computed-key-s465, LOW). Note: the block-bodied value's
+  OWN destructured parameter (`({ a }) => { … }`) was never broken (head kept as text) — the reviewer's shape is the
+  nested lambda. (b) the word `await` in a string: HELD (`/\bawait\b/` on the emitted body) — now syntactic (the
+  body must parse as a non-async function in a module, acorn). switch / try / throw / for…in: HELD as a code
+  regression only — SPEC §7.2.1 makes each "rejected at the parse layer" in every position (for…in: E-CTRL-011), so
+  there is NO legal host position; base RAN them only because the arrow body was never read. r5 reports the
+  front-end's own code (E-SWITCH-FORBIDDEN / E-TRY-NOT-IN-SCRML / E-THROW-NOT-IN-SCRML / E-CTRL-011) instead of the
+  generic E-CODEGEN-INVALID-LOGIC. Residue filed: g-js-exclusions-unchecked-in-block-arrow-value-bodies-s465 (MED) —
+  the same bodies compile clean on the client always and on the server when the body holds no call (both sides,
+  pre-existing).
+- F3 adjudicated by SPEC §13.2 (SPEC.md:10290): "A call the compiler awaits yields the resolved value, not a Promise.
+  Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile error (`E-ASYNC-CALL-PROMISE-METHOD`)."
+  Neither base (silent no-op on the un-awaited Promise; `verifyPassword(…).then` threw on base too) nor r4 (TypeError
+  → 500) met it. Fix: emitMember on the server records E-ASYNC-CALL-PROMISE-METHOD when the receiver is the awaited
+  form `(await …)`. Not widened (index access `x["then"]` not covered).
+- Test-text relaxations (same semantics): hoisted-loop reads `(await _scrml_batch_read_N(it.id))` are now lowered
+  from the tree as `await _scrml_batch_read_N(it.id)` (s455-hoist-allow-list, s455-hoist-keyed-read-depth,
+  sql-loop-hoist-rewrite, s455-handled-sql-guard-consumers); sql-one-statement F4 also reports
+  E-SQL-MULTIPLE-STATEMENTS alongside E-SQL-QUERY-NOT-READABLE (the tree reader reads the two statements).
+- Tests: NEW integration/s465-await-r5.test.js (51) — on 55cdda9d8 38 of 45 (pre-template additions) FAIL; NEW
+  unit/s465-lexical-call-in-text.test.js (42). Gate (pre-merge, 33411): 0 fail.
+- origin/main moved during the round (#1407, #1409): merged 5d0565dc0 (generated gap-counts / FACTS hunks resolved by
+  regenerating; hand entries kept).
+- 2026-10-12T15:40Z r5 CORPUS (scripts/corpus-emit-differential.ts; base = archive of origin/main 5d0565dc0, head =
+  archive of 50329d051 (r5 + that main merged); 3557 sources: examples, samples, conformance, stdlib, benchmarks,
+  docs; ../giti and ../flogence not measured; verdict line "NOT A VALID COMPARISON" only because archived trees have
+  no .git — same as r1–r4): **0 newly failing, 0 newly passing**; syntax delta 0; 1 diagnostic-code change
+  (conformance sql/query-not-readable-neg — already a failing neg case — now also reports E-SQL-MULTIPLE-STATEMENTS);
+  1 text-only (s441 repro match-arm-bare-binding: the r3-held "trailing content dropped" warning gone); 221 artifacts
+  differ, 197 only by the absolute project root; 24 real = r1–r4's 12 + r5's 12: ten hoisted-loop conformance
+  servers + the nplus1 repro (`(await _scrml_batch_read_N(it.id))` → `await _scrml_batch_read_N(it.id)`, tree path)
+  and s441 repro fp1a (`x => { return "m(" + x }` — a `(` in a string; lexical false positive → read by the
+  statement emitter; same function, multi-line). **The F1 lexical refusal newly refuses 0 corpus sources.** The
+  template-aware mask (50329d051) changes no corpus artifact (head before it: identical 24).
+- Gates: pre-commit full at 34eb17922 (pre-merge) 33411/0 fail; at db4e5b6d4 (merge) and 50329d051: 35824/35830
+  pass ("Pre-commit checks passed"); types-gate OK (180, unchanged — after casting the new ESNode field reads
+  through unknown); host-global-scan 0 violations; state + facts --check PASS (regenerated at the merge).
