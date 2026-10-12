@@ -224,4 +224,54 @@ describe("Chromium — static <md>", () => {
     expect(dialogs).toEqual([]);
     await page.close();
   });
+
+  test("review round 2: a component's <md> text slot inside <each> (literal, row-bound, two slots, heading + list, nested)", async () => {
+    if (!ready()) { console.warn(`[md-chromium] skipped: ${launchError}`); return; }
+    const { errors, url } = build(`<program>
+<rows> = [{ id: 1, t: "One", u: "first" }, { id: 2, t: "<b>Two</b>", u: "second" }]
+const Lit = <div class="lit" props={ t: string }>
+    <md>
+        **\${t}** done
+    </md>
+</div>
+const Card = <section props={ t: string, u: string }>
+    <md>
+        ## \${t}
+
+        - item \${u} and \${t}
+        - plain
+    </md>
+</section>
+const Inner = <div class="inner" props={ v: string }>
+    <md>
+        inner **\${v}**
+    </md>
+</div>
+const Outer = <article props={ t: string }>
+    <Inner v=t/>
+</article>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Lit t="literal"/>
+        <Card t=@.t u=@.u/>
+        <Outer t=@.u/>
+    </each>
+</div>
+</program>`);
+    expect(errors).toEqual([]);
+    const page = await browser.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (e) => pageErrors.push(String(e?.message ?? e)));
+    await page.goto(url);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(50);
+    const read = (sel, prop) => page.evaluate(`[...document.querySelectorAll(${JSON.stringify(sel)})].map((e) => e.${prop})`);
+    expect(await read("#w .lit p", "innerHTML")).toEqual(["<strong>literal</strong> done", "<strong>literal</strong> done"]);
+    expect(await read("#w section h2", "textContent")).toEqual(["One", "<b>Two</b>"]);
+    expect(await read("#w section li", "textContent")).toEqual(["item first and One", "plain", "item second and <b>Two</b>", "plain"]);
+    expect(await read("#w section b", "tagName")).toEqual([]);
+    expect(await read("#w article .inner p", "innerHTML")).toEqual(["inner <strong>first</strong>", "inner <strong>second</strong>"]);
+    expect(pageErrors).toEqual([]);
+    await page.close();
+  });
 });

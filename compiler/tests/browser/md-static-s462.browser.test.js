@@ -320,3 +320,140 @@ const Card = <section class="card" props={ title: string }>
     assertClosedSet(document.querySelector("#arm h2").parentElement);
   });
 });
+
+// S465 review round 2, finding 1 — a component's `<md>` TEXT slot used inside an `<each>` row.
+// The component body re-parses through the legacy BS+TAB path (it holds an `<md>`), whose
+// bare-expr carries its source text in `expr`; the CE substituted only `exprNode`, and the row
+// emitter reads a non-empty `expr` first, so every row emitted `String(t)` — a ReferenceError,
+// an empty list, exit 0. Each case below reads the LIVE rows.
+describe("review round 2 — a component's <md> text slot inside <each>", () => {
+  test("a literal prop", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1 }, { id: 2 }]
+const Row = <div props={ t: string }>
+    <md>
+        **\${t}** done
+    </md>
+</div>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row t="literal"/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    expect(r.clientJs).not.toMatch(/String\(t\)/);
+    await flush();
+    const ps = [...document.querySelectorAll("#w p")];
+    expect(ps.map((p) => p.innerHTML)).toEqual(["<strong>literal</strong> done", "<strong>literal</strong> done"]);
+  });
+
+  test("a row-bound prop is the row's value, is text, and follows the rows", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1, t: "**a**" }, { id: 2, t: "<img src=x onerror=globalThis.__md_pwned=1>" }]
+const Row = <div props={ t: string }>
+    <md>
+        **\${t}** done
+    </md>
+</div>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row t=@.t/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    await flush();
+    const strongs = () => [...document.querySelectorAll("#w strong")].map((s) => s.textContent);
+    expect(strongs()).toEqual(["**a**", "<img src=x onerror=globalThis.__md_pwned=1>"]);
+    expect(document.querySelectorAll("#w img").length).toBe(0);
+    expect(globalThis.__md_pwned).toBe(0);
+    set("rows", [{ id: 3, t: "c" }]);
+    await flush();
+    expect(strongs()).toEqual(["c"]);
+  });
+
+  test("two slots in one component", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1, a: "x", b: "y" }]
+const Row = <div props={ a: string, b: string }>
+    <md>
+        \${a} *and* \${b}
+    </md>
+</div>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row a=@.a b="lit"/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    await flush();
+    expect(document.querySelector("#w p").innerHTML).toBe("x <em>and</em> lit");
+  });
+
+  test("a heading and a list item", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1, t: "One", u: "first" }, { id: 2, t: "Two", u: "second" }]
+const Row = <section props={ t: string, u: string }>
+    <md>
+        ## \${t}
+
+        - item \${u}
+        - plain
+    </md>
+</section>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row t=@.t u=@.u/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    await flush();
+    expect([...document.querySelectorAll("#w h2")].map((h) => h.textContent)).toEqual(["One", "Two"]);
+    expect([...document.querySelectorAll("#w li")].map((li) => li.textContent)).toEqual(["item first", "plain", "item second", "plain"]);
+    for (const s of document.querySelectorAll("#w section")) assertClosedSet(s.querySelector("h2").parentElement);
+  });
+
+  test("a nested component carries the prop through", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1, t: "deep" }]
+const Inner = <div props={ v: string }>
+    <md>
+        inner **\${v}**
+    </md>
+</div>
+const Outer = <article props={ t: string }>
+    <Inner v=t/>
+</article>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Outer t=@.t/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    await flush();
+    expect(document.querySelector("#w article p")?.innerHTML).toBe("inner <strong>deep</strong>");
+  });
+
+  test("the same defect outside <md>: a template literal in a component body (legacy re-parse)", async () => {
+    const r = compileAndMount(`<program>
+<rows> = [{ id: 1 }]
+const Row = <div props={ t: string }>
+    <p><b>\${t}</b> \${\`[\${t}]\`}</p>
+</div>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row t="lit"/>
+    </each>
+</div>
+</program>`);
+    expect(r.errors).toEqual([]);
+    await flush();
+    // (the inter-interpolation space is the row emitter's existing whitespace rule, not this defect)
+    expect(document.querySelector("#w p b")?.textContent).toBe("lit");
+    expect(document.querySelector("#w p")?.textContent).toMatch(/^lit ?\[lit\]$/);
+  });
+});

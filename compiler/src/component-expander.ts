@@ -2965,7 +2965,21 @@ function substitutePropsInLogicStmt(
     }
     case "bare-expr": {
       const n = stmt as BareExprNode;
-      return { ...n, exprNode: subInExpr(n.exprNode) } satisfies BareExprNode;
+      const newExprNode = subInExpr(n.exprNode);
+      // S465 (s462-md-phase2 round 2) — a bare-expr built by the LEGACY BS+TAB path (a
+      // component body re-parsed through `sourceNeedsLiveFallback`: an `<md>` text slot, a
+      // template literal, an `<each>`/`<match>`) carries its source text in `expr` beside
+      // `exprNode`, and the `<each>` row emitters read a non-empty `expr` first
+      // (emit-each.ts, "LEGACY path stays byte-identical"). Substituting only the tree left
+      // the prop's NAME in that text — `textContent = String(t)`, a ReferenceError in every
+      // row. The text is re-derived from the substituted tree, so the two never disagree.
+      const legacyText = (n as { expr?: unknown }).expr;
+      if (newExprNode !== n.exprNode && newExprNode && typeof legacyText === "string" && legacyText.trim() !== "") {
+        let text: string | null = null;
+        try { text = emitStringFromTree(newExprNode as ExprNode); } catch { text = null; }
+        return { ...n, exprNode: newExprNode, expr: text ?? "" } as BareExprNode;
+      }
+      return { ...n, exprNode: newExprNode } satisfies BareExprNode;
     }
     case "lift-expr": {
       const n = stmt as LiftExprNode;
