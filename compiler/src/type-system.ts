@@ -118,6 +118,7 @@ import {
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
+import { checkValueFunctionStored } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
@@ -10526,6 +10527,13 @@ function annotateNodes(
   if (registerMessagesLocals.size > 0) {
     const _rmDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     checkRegisterMessagesCalls(_allTopNodes, registerMessagesLocals, errors, _rmDefaultSpan);
+  }
+
+  // §14.3 / §15.11.5 (S462 "no value holds a function") — an object / array / map literal (or a
+  // spread into one) or a state cell that STORES a function value is refused. A literal written
+  // directly as a host-JS call argument is at the boundary and allowed. See value-function-stored.ts.
+  for (const d of checkValueFunctionStored(_allTopNodes, filePath, importedFnDecls?.keys() ?? [])) {
+    errors.push(new TSError(d.code, d.message, d.span as Span));
   }
 
   // ---------------------------------------------------------------------------
