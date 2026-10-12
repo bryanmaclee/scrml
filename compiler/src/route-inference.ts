@@ -1930,6 +1930,27 @@ export function walkBodyForTriggers(
       return;
     }
 
+    // S462 P0 (sql-chain-truncation) — `const r = ?{…}.get()?` (a `?` propagation
+    // in a `!` function, §19.5.4) is a `propagate-expr` whose `exprNode` carries the
+    // query as an expression-position `sql-ref`. Nothing above scanned it, so the
+    // function was CLIENT-placed and the query emitted as `null /* sql-ref
+    // unresolved */.get()` — compiling clean. Escalate on a server-only resource in
+    // it like a return expression; no early return (the generic walk below keeps
+    // collecting its callees).
+    if (node.kind === "propagate-expr") {
+      const pExpr = (node as any).exprNode
+        ? emitStringFromTree((node as any).exprNode)
+        : ((node as any).expr ?? "");
+      const pResource = detectServerOnlyResourceForNode((node as any).exprNode, pExpr);
+      if (pResource !== null) {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: pResource,
+          span: node.span,
+        });
+      }
+    }
+
     // S93 cg-006 fix (Layer 1, continued): lift-expr inside a function body —
     // `lift ?{...}.method()` shape stores SQL under `expr: { kind: "sql", node: <sqlNode> }`
     // (ast-builder.js similar to return-stmt path). Walk lift's sql-bearing child.

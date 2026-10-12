@@ -153,8 +153,9 @@ describe("errarm-refail §3: `?` propagation desugars in a const-decl", () => {
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The `?` must NOT survive into emitted JS as a literal suffix.
     expect(clientJs).not.toMatch(/\(\s*\)\s*\?\s*;/);
-    // propagate-expr lowering: const tmp = …; if (tmp.__scrml_error) return tmp; const v = tmp;
-    expect(clientJs).toMatch(/if \(_scrml_\w+\.__scrml_error\) return _scrml_\w+;/);
+    // propagate-expr lowering: const tmp = …; if (tmp && tmp.__scrml_error) return tmp; const v = tmp;
+    // (S462 — the success value may be `not`, so the envelope test is guarded.)
+    expect(clientJs).toMatch(/if \((_scrml_\w+) && \1\.__scrml_error\) return \1;/);
     cleanup();
   });
 

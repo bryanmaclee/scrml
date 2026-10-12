@@ -3,7 +3,7 @@ import { withHostGlobalAlias } from "./host-global-alias.ts";
 import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, serverVarDeclLoadQuery, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { SyncCallSite } from "./emit-library-shared.ts";
@@ -2732,9 +2732,29 @@ function generateServerJsImpl(
     [..._serverLoadGateForVar.values()].some((g) => g.gate) || _anyCallableGated;
   // A Fork-3 row-scope Pattern-C query reads the @currentUser ambient (active).
   const _anyCurrentUserQuery = _currentUserAmbient && _patternCLoadDecls.some((d) => {
-    const q = (d as any).sqlNode?.query ?? (d as any).sqlNode?.body ?? "";
+    const q = serverVarDeclLoadQuery(d) ?? "";
     return typeof q === "string" && q.includes("@currentUser");
   });
+  /**
+   * §52.6.5 Pattern C — the server-side expression a cell's mount load evaluates
+   * (the `/__serverLoad/<var>` route and the SSR seed run the SAME one). A bare
+   * `<x server> = ?{…}.get()` lowers its structured `sqlNode` through the §44
+   * emitter. S465 — a tailed initializer (`?{…}.get().name`, `?{…}.all().length`)
+   * is evaluated WHOLE, server-side, through the expression emitter (whose
+   * `sql-ref` operand is the same §44 lowering): the route serves the tail's
+   * value, never the row the query produced.
+   */
+  const _patternCLoadExpr = (decl: any): string => {
+    const sqlNode = decl.sqlNode;
+    if (sqlNode && sqlNode.kind === "sql") {
+      return (serverRewriteEmitted(
+        emitLogicNode(sqlNode, { boundary: "server", ...(_dbIdentAt(sqlNode) ? { dbVar: _dbIdentAt(sqlNode)! } : {}) }),
+      ) ?? "").replace(/;\s*$/, "");
+    }
+    const dbVar = _dbIdentAt(decl);
+    const expr = emitExprField(decl.initExpr, decl.init ?? "null", { mode: "server", ...(dbVar ? { dbVar } : {}) } as any);
+    return `await (${serverRewriteEmitted(expr) ?? expr})`;
+  };
   // Emit the §52 request-context authority infra (session store + enriched
   // middleware userId/role + the @currentUser resolver + the 401 serverload-auth
   // gate) whenever the app declares auth, OR a serverLoad route gates, OR a Fork-3
@@ -6223,14 +6243,12 @@ function generateServerJsImpl(
   // shape-gated (empty iterable in headless mode → zero routes emitted).
   for (const decl of (_webAppShape ? _patternCLoadDecls : [])) {
     const varName = decl.name as string;
-    const sqlNode = (decl as any).sqlNode;
     const slHandler = `_scrml_serverLoad_${varName}_handler`;
     const slRoute = `_scrml_route___serverLoad_${varName}`;
     // Lower the cell's `?{}` to its server-side form (e.g.
-    // `(await _scrml_sql`SELECT …`)[0] ?? null;` for `.get()`).
-    const sqlExpr = (serverRewriteEmitted(
-      emitLogicNode(sqlNode, { boundary: "server", ...(_dbIdentAt(sqlNode) ? { dbVar: _dbIdentAt(sqlNode)! } : {}) }),
-    ) ?? "").replace(/;\s*$/, "");
+    // `(await _scrml_sql`SELECT …`)[0] ?? null;` for `.get()`; S465 — with a
+    // tail, the whole initializer, e.g. `await (((await _scrml_sql`…`)[0] ?? null).name)`).
+    const sqlExpr = _patternCLoadExpr(decl);
     // §52 (S233) Fork-3 — the lowered query references the @currentUser ambient
     // (`_scrml_currentUser`) iff it carries a `${@currentUser.…}` row-scope filter.
     const _slUsesCurrentUser = sqlExpr.includes("_scrml_currentUser");
@@ -6317,9 +6335,7 @@ function generateServerJsImpl(
     // cell in the anon seed while the lint reports it omitted-and-safe (a leak).
     // The predicate scans ONLY the interior of each LIVE `${...}` (comment-stripped).
     const _ssrCellIsRowScoped = (decl: unknown): boolean => {
-      const q = (decl as { sqlNode?: { query?: string; body?: string } })?.sqlNode?.query
-        ?? (decl as { sqlNode?: { query?: string; body?: string } })?.sqlNode?.body
-        ?? "";
+      const q = serverVarDeclLoadQuery(decl as any) ?? ""; // S465 — bare or tailed Pattern C
       return _currentUserAmbient && queryInterpolationsAreServerAmbientOnly(q);
     };
     const _ssrOmitAuthScoped = (varName: string, rowScoped: boolean): boolean => {
@@ -6381,7 +6397,7 @@ function generateServerJsImpl(
       // the request (else an unscoped run bakes cross-user rows into the first
       // paint — the auto-omitted I-SSR-AUTH-SCOPED-CLIENT-HYDRATED case above; §52.8 / dive §7).
       const _ssrUsesCurrentUser = _currentUserAmbient && _ssrSeedPatternC.some((d) => {
-        const q = (d as any).sqlNode?.query ?? (d as any).sqlNode?.body ?? "";
+        const q = serverVarDeclLoadQuery(d) ?? "";
         return typeof q === "string" && q.includes("@currentUser");
       });
       // §52.8 A-terminus (Dispatch 1) — server-side per-row markup renderers. For
@@ -6462,8 +6478,7 @@ function generateServerJsImpl(
       // /__serverLoad/<var> route uses), redacted at the sink when protected/tenant.
       for (const decl of _ssrSeedPatternC) {
         const _vn = decl.name as string;
-        const _sqlNode = (decl as any).sqlNode;
-        const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server", ...(_dbIdentAt(_sqlNode) ? { dbVar: _dbIdentAt(_sqlNode)! } : {}) })) ?? "").replace(/;\s*$/, "");
+        const _sqlExpr = _patternCLoadExpr(decl); // S465 — the same expression the route runs (tail applied)
         if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_result = ${_sqlExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_result")}; }`);
