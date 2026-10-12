@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1773 of 1773 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1774 of 1774 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -16,7 +16,7 @@ Scope: **1773 of 1773 cases attempted** — every attempted case reached the pur
 | FAIL | 72 | 4.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 670 | 37.8% |
-| UNSUPPORTED | 845 | 47.7% |
+| UNSUPPORTED | 846 | 47.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,7 +26,7 @@ Scope: **1773 of 1773 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 72; the other 39 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 583 · parse-reject 262.
+UNSUPPORTED by reason: bootstrap-unsupported 583 · parse-reject 263.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -135,7 +135,7 @@ NOT-TWINNED by reason (670 cases; a case counts once per distinct reason):
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 45 | 11 | · | · | · | 9 | 25 | · | · |
-| md | 15 | · | · | 7 | · | 2 | 6 | · | · |
+| md | 16 | · | · | 7 | · | 2 | 7 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 45 | 1 | · | 13 | · | 8 | 23 | · | · |
@@ -551,7 +551,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (845)
+### UNSUPPORTED (846)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1049,6 +1049,7 @@ none
 </div>
 </program>
 `
+- `md/interp-unclosed-quote-in-code-span` — parse-reject: E-PARSE-EXPECTED: expected `}`, found ``
 - `md/slot-hostile-values-are-text` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `md/slot-text-reactive` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
