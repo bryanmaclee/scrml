@@ -11,13 +11,13 @@
  *
  * The rule is enforced at the string rewriter itself, so it holds for every server text
  * path by construction — the ones known today and any added later: a server text that
- * contains a call (`firstCallInText`) is a compile error, recorded in the run-wide
+ * contains a call (`lexicalCallInText`, fail-closed: S465 r5) is a compile error, recorded in the run-wide
  * refused-lowering sink, and the site emits an inert placeholder. Sites that CAN lower the
  * code from a tree do so before they reach the rewriter (emit-logic bare blocks,
  * arm-structure.ts arms, destructuring defaults); what still arrives here is code the
  * compiler cannot read structurally.
  */
-import { firstCallInText } from "../brace-pair.ts";
+import { lexicalCallInText } from "../brace-pair.ts";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -48,7 +48,7 @@ export function dropCascadeOnlyErrors(errors: Array<{ severity?: string; cascade
 }
 
 export function refuseServerTextCall(text: string, what = "this server expression", span?: object | null): boolean {
-  const callee = firstCallInText(text);
+  const callee = lexicalCallInText(text);
   if (callee === null) return false;
   const at = span && typeof (span as { start?: unknown }).start === "number" && (span as { start: number }).start > 0
     ? span

@@ -97,7 +97,7 @@ function excerpt(t: string): string {
  * Record the refusal of a server arm body (see the file header) and return
  * nothing: the caller emits the inert placeholder.
  */
-function refuseServerArm(body: string, refusal: { code: string | null; message: string; text: string }, anchor?: object | null, whereText?: string): void {
+export function refuseServerArm(body: string, refusal: { code: string | null; message: string; text: string }, anchor?: object | null, whereText?: string): void {
   const where = whereText ?? "in a server `match` / `!{}` arm body";
   let err: CGError;
   if (refusal.code) {

@@ -48,7 +48,7 @@ import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
 import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
-import { splitTemplateLiteral, firstCallInText } from "../brace-pair.ts";
+import { splitTemplateLiteral, lexicalCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
@@ -1057,7 +1057,7 @@ function serverTextLowering(
   // shim of an emitter the tree would route straight back to.
   opts: { arrowBody?: boolean; span?: object | null; defaultDb?: boolean; checkText?: string; noReparse?: boolean } = {},
 ): string {
-  if (!opts.noReparse && firstCallInText(opts.checkText ?? text) !== null) {
+  if (!opts.noReparse && lexicalCallInText(opts.checkText ?? text) !== null) {
     if (opts.arrowBody) {
       const fn = emitServerFnValueFromText(text, ctx);
       if (fn !== null) return fn;
@@ -3110,8 +3110,31 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
 
   const obj = emitReceiver(node.object, ctx);
   const dot = node.optional ? "?." : ".";
+  // S465 r5 — SPEC §13.2: "A call the compiler awaits yields the resolved value, not a
+  // Promise. Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile
+  // error (`E-ASYNC-CALL-PROMISE-METHOD`)." On the server the receiver the compiler
+  // awaited is emitted `(await …)` (emitReceiver's precedence wrap) — read off it, the
+  // method is looked up on the resolved value and throws at run time (an HTTP 500).
+  // (Client bodies are checked on the emitted text by js-async-analysis.)
+  if (ctx.mode === "server" && PROMISE_METHOD_NAMES.has(node.property) && /^\(\s*await\b/.test(obj)) {
+    const ce = node.object.kind === "call" ? (node.object as CallExpr).callee : null;
+    const callee = ce && ce.kind === "ident" ? (ce as IdentExpr).name
+      : ce && ce.kind === "member" && typeof (ce as MemberExpr).property === "string" ? `….${(ce as MemberExpr).property}`
+      : "the call";
+    recordRefusedLowering(new CGError(
+      "E-ASYNC-CALL-PROMISE-METHOD",
+      `E-ASYNC-CALL-PROMISE-METHOD: \`.${node.property}(…)\` is called on \`${callee}(…)\`, which the compiler ` +
+        `awaits for you (§13.2) — so \`.${node.property}\` would be read off the RESOLVED value, not a ` +
+        `Promise, and throw a TypeError at run time. Remove \`.${node.property}(…)\` and use the value ` +
+        `directly: \`const r = ${callee}(…)\` then work with \`r\`` +
+        (node.property === "then" ? "." : ` (a failure is handled with \`!{}\`, §19).`),
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+  }
   return `${obj}${dot}${node.property}`;
 }
+
+const PROMISE_METHOD_NAMES = new Set(["then", "catch", "finally"]);
 
 /**
  * Bug 61 helper — walk a `@<compound>[.field].<synthProp>` member chain to its

@@ -185,7 +185,10 @@ describe("S456 fix round F2/F4 — `?{}` in expression text the parser held unpa
   });
   test("F4: an unbackticked `?{ … }` in a condition (emitted unrewritten — invalid JS — on main) is E-SQL-QUERY-NOT-READABLE", () => {
     const r = compile(fnApp(`if (?{ SELECT 7; select 8 }.acrossTenants()) { return 3 }`));
-    expect(r.codes).toEqual(["E-SQL-QUERY-NOT-READABLE"]);
+    // S465 r5: the condition is now lowered from the tree (the server text guard refuses
+    // text holding any call), whose reader also reports the two statements.
+    expect(r.codes).toContain("E-SQL-QUERY-NOT-READABLE");
+    expect(r.codes.filter((c) => c !== "E-SQL-QUERY-NOT-READABLE" && c !== "E-SQL-MULTIPLE-STATEMENTS")).toEqual([]);
     expect(r.errors[0].message).toContain("bind it to a local first");
     // A single unbackticked statement in a condition is parsed structurally and lowered (control).
     const ok = compile(fnApp(`if (?{ SELECT 7 }.get()) { return 3 }`));

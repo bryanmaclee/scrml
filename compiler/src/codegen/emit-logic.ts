@@ -5,10 +5,12 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
+import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
+import * as acorn from "acorn";
+import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
-import { isWholeBraceBlock, firstCallInText } from "../brace-pair.ts";
+import { isWholeBraceBlock, lexicalCallInText } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
@@ -1324,10 +1326,22 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext): st
     body = t.slice(arrow + 2).trim();
   }
   // The head is kept as written: only a plain parameter list (no annotation, no call).
-  if (!/^[\s\w$,()[\]{}.=]*$/.test(head.replace(/^function\b/, "")) || firstCallInText(head) !== null) return null;
+  if (!/^[\s\w$,()[\]{}.=]*$/.test(head.replace(/^function\b/, "")) || lexicalCallInText(head) !== null) return null;
   if (!isWholeBraceBlock(body)) return null;
   const r = body.slice(1, -1).trim() ? armBlockStatementsDetailed(body) : { ok: true as const, stmts: [] };
-  if (!r || !r.ok) return null;
+  if (!r) return null;
+  if (!r.ok) {
+    // S465 r5 — a body the statement grammar refuses WITH the front-end's own code
+    // (`switch` E-SWITCH-FORBIDDEN, `try` E-TRY-NOT-IN-SCRML, `throw`
+    // E-THROW-NOT-IN-SCRML, `for … in` E-CTRL-011 — SPEC §7.2.1: not scrml in any
+    // position) reports THAT diagnostic, the one the same statement gets in a
+    // function body, instead of the generic text-guard refusal.
+    if (r.refusal.code) {
+      refuseServerArm(body, r.refusal, null, "in a server function value's body");
+      return REFUSED_SERVER_TEXT;
+    }
+    return null;
+  }
   const base = _logicOptsFromExprCtx(ctx);
   const params = new Set<string>();
   for (const m of head.replace(/^function\s*[A-Za-z_$][\w$]*/, "").matchAll(/[A-Za-z_$][\w$]*/g)) params.add(m[0]);
@@ -1340,9 +1354,23 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext): st
     tildeContext: undefined,
   } as EmitLogicOpts).filter((l: string) => l.trim() !== "");
   const out = lines.join("\n");
-  if (/\bawait\b/.test(out)) return null;
+  // The value is a SYNCHRONOUS callback: a body whose lowering needs an `await` cannot
+  // be written in it (null — the caller refuses). Decided on the emitted JS's own
+  // syntax, not its text (S465 r5: a `/\bawait\b/` test refused `"await " + x`): the
+  // body must parse as a plain function in a module, where `await` is reserved.
+  if (!parsesAsSyncFunctionBody(out)) return null;
   const inner = lines.map((l: string) => "  " + l).join("\n");
   return fnM ? `${head} {\n${inner}\n}` : `${head} => {\n${inner}\n}`;
+}
+
+/** S465 r5 — true when `body` parses as the body of a NON-async function in a module. */
+function parsesAsSyncFunctionBody(body: string): boolean {
+  try {
+    acorn.parse(`(function () {\n${body}\n});`, { ecmaVersion: "latest", sourceType: "module" });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

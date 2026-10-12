@@ -185,6 +185,87 @@ export function splitTemplateLiteral(t: string, open: number): { quasis: string[
  * what it scanned — callers refuse on non-null only, so they also refuse to lower
  * a text that is not well formed only through their own reader.
  */
+/**
+ * S465 r5 — the FAIL-CLOSED form of the question: could `text` hold a call? Purely
+ * lexical, nothing is skipped — no string, template, comment or regex literal is
+ * recognised, so no mis-read of one can hide a call (r5: `firstCallInText` treated
+ * `of(x)` as the keyword `of` and read `i++ / f(x) /` as a regex literal, and the call
+ * shipped un-awaited). Returns the callee excerpt of the first `(` or backtick that
+ * follows a value — an identifier, `)`, `]`, a backtick, `?.` — or null.
+ *
+ * The only `(`s that are NOT calls are the ones the grammar fixes as something else:
+ * a reserved word's head (`if (`, `for (`, `return (`, `typeof (` …; reserved in an
+ * ES module, so never a callee — `of`, `async`, `get`, `let` are not reserved and
+ * count), a function's parameter list (`function f(`, `function* f(`), a constructor
+ * (`new X(` — a scrml async function is not constructible; `new` on one throws), and a
+ * payload VARIANT constructor `.Found(…)` (a leading-dot capitalised name with no value
+ * before the dot, §19). A false positive (a `(` inside a string) refuses the text, which
+ * the caller first tries to lower from a tree.
+ */
+const RESERVED_HEAD_WORDS = new Set([
+  "if", "for", "while", "switch", "catch", "return", "typeof", "await", "do", "else",
+  "case", "void", "delete", "throw", "in", "instanceof", "new", "with", "yield", "function",
+]);
+
+export function lexicalCallInText(text: string): string | null {
+  const t = String(text ?? "");
+  const isWord = (ch: string | undefined): boolean => ch !== undefined && /[A-Za-z0-9_$]/.test(ch);
+  const skipWsBack = (j: number): number => { while (j >= 0 && /\s/.test(t[j])) j--; return j; };
+  const wordEndingAt = (j: number): { word: string; start: number } => {
+    let k = j;
+    while (k >= 0 && isWord(t[k])) k--;
+    return { word: t.slice(k + 1, j + 1), start: k + 1 };
+  };
+  const excerptAt = (end: number): string => {
+    const s = t.slice(Math.max(0, end - 40), end + 1).replace(/\s+/g, " ").trim();
+    const m = /[A-Za-z_$@][\w$.@?]*$/.exec(s);
+    return m ? m[0] : s.slice(-20) || "a function";
+  };
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c !== "(" && c !== "`") continue;
+    const j = skipWsBack(i - 1);
+    if (j < 0) continue;
+    const p = t[j];
+    if (c === "`") {
+      // A backtick after a value: a tagged template (a call) — or the CLOSING backtick
+      // of a template whose text ends in a word character. Lexically the two are the
+      // same; both refuse (fail closed).
+      if (isWord(p) || p === ")" || p === "]") return excerptAt(j);
+      continue;
+    }
+    if (p === ")" || p === "]" || p === "`") return excerptAt(j);
+    if (p === "." && t[j - 1] === "?") return excerptAt(j - 2);
+    if (!isWord(p)) continue;
+    const { word, start } = wordEndingAt(j);
+    const b = skipWsBack(start - 1);
+    const before = b >= 0 ? t[b] : "";
+    if (before === "." && t[b - 1] !== ".") {
+      // A member call — unless it is a payload variant constructor `.Found(…)`: a
+      // capitalised name after a dot that follows no value.
+      if (/^[A-Z]/.test(word)) {
+        const d = skipWsBack(b - 1);
+        if (d < 0 || !/[A-Za-z0-9_$)\]`'"]/.test(t[d])) continue;
+        // `return .Found(…)`, `case .A(…)` — a reserved word is not a value.
+        if (isWord(t[d]) && RESERVED_HEAD_WORDS.has(wordEndingAt(d).word)) continue;
+      }
+      return excerptAt(j);
+    }
+    if (/^[0-9]/.test(word)) return excerptAt(j);
+    if (RESERVED_HEAD_WORDS.has(word)) continue;
+    // `function f(` / `function* f(` — a parameter list; `new X(` — a constructor.
+    let pb = b;
+    if (before === "*") pb = skipWsBack(b - 1);
+    if (pb >= 0 && isWord(t[pb])) {
+      const pw = wordEndingAt(pb).word;
+      if (pw === "function") continue;
+      if (pw === "new" && before !== "*") continue;
+    }
+    return excerptAt(j);
+  }
+  return null;
+}
+
 const NOT_CALLEE_WORDS = new Set([
   "if", "for", "while", "switch", "catch", "return", "typeof", "await", "in", "of", "do", "else",
   "case", "void", "delete", "throw", "yield", "function", "with", "instanceof", "new",

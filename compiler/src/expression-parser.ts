@@ -225,6 +225,19 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
       out += PH_SQL_PLACEHOLDER();
       continue;
     }
+    // S465 r5 — a `?{` inside a quoted string is text, not a SQL block (the S457 one
+    // reader's reading: `x == "?{`…`}"` keeps its string). Pre-r5 the string's
+    // content was replaced by the placeholder — `const s = "?{`SELECT 1`}"` emitted
+    // `"__scrml_sql_placeholder__"`, silently. A string ends at its closing quote or
+    // at a newline (an unterminated quote masks nothing further on its line).
+    if (ch === "\"" || ch === "'") {
+      let j = i + 1;
+      while (j < n && input[j] !== ch && input[j] !== "\n") j += input[j] === "\\" ? 2 : 1;
+      const end = j < n && input[j] === ch ? j + 1 : j;
+      out += input.slice(i, end);
+      i = end;
+      continue;
+    }
     out += ch;
     i++;
   }

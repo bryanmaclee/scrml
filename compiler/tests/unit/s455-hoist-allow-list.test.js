@@ -158,6 +158,6 @@ describe("P3 — emission", () => {
     ].join("\n"));
     // S456: the per-iteration read returns a fresh array of row copies for its slot.
     expect(js).toContain("return (_hit ?? []).map((_r) => ({ ..._r }));");
-    expect(js).toMatch(/const rows = \(await _scrml_batch_read_\d+\(it\.id\)\);/);
+    expect(js).toMatch(/const rows = \(?await _scrml_batch_read_\d+\(it\.id\)\)?;/);
   });
 });
