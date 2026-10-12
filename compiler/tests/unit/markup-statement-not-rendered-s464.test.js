@@ -72,6 +72,8 @@ const REFUSED = {
   "an arm whose text holds `a < b`": `${D} if (@n > 1) { <p>a < b</p> } }`,
   "an arm whose text holds a quoted closer": `${D} if (@n > 1) { <p>x "</p>" y</p> } }`,
   "markup in statement position in a `function` body": `${D} function f() { <p>fnbody</p> } }`,
+  "a second element after a `lift` on the same line": `${D} lift <p>a</p> <p>b</p> }`,
+  "an element on the line after a `lift`": `${D} lift <p>a</p>\n<p>b</p> }`,
 };
 
 const ACCEPTED = {
