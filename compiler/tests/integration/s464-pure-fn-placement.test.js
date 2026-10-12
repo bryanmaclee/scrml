@@ -255,6 +255,38 @@ describe("s464 — each fn lands in the bundle(s) whose code calls it", () => {
   });
 });
 
+describe("s464 — a local fn whose name another module exports", () => {
+  test("the local fn is still defined in the server bundle that calls it", () => {
+    const tag = `collide-${++tmpCounter}`;
+    const tmpDir = resolve(TMP_ROOT, tag);
+    mkdirSync(join(tmpDir, "models"), { recursive: true });
+    writeFileSync(join(tmpDir, "models", "m.scrml"), `\${\n  export fn fmt(n: int) -> int { return n + 1000 }\n}\n`);
+    writeFileSync(join(tmpDir, "app.scrml"), `<program db="./x.db">
+\${
+  import { fmt as other } from './models/m.scrml'
+  fn fmt(n: int) -> int { return n * 2 }
+  function save(n: int) {
+    const t = fmt(n)
+    ?{\`INSERT INTO t (v) VALUES (\${t})\`}.run()
+  }
+  function go() { save(@n); @shown = other(@n) }
+}
+<n> = 3
+<shown> = 0
+<button onclick=go()>s</button>
+<p>\${@shown}</p>
+</program>
+`);
+    const outDir = join(tmpDir, "dist");
+    const result = compileScrml({ inputFiles: [join(tmpDir, "app.scrml")], write: true, outputDir: outDir, log: () => {} });
+    expect((result.errors ?? []).filter((e) => e.severity == null || e.severity === "error")).toEqual([]);
+    const server = readFileSync(join(outDir, "app.server.js"), "utf-8");
+    expect(server).toContain("const t = fmt(n);");
+    expect(server).toMatch(/^function fmt\(n\) \{\n  return n \* 2;/m);
+    expect(routesOf(server)).toEqual(["save"]);
+  });
+});
+
 describe("s464 — fail-closed guard: a fn that reads a client cell, reached from a server function", () => {
   // Regression guard (not a fix): such a fn keeps its prior placement path so the
   // existing E-REACTIVE-003 still rejects the program instead of shipping a

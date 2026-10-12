@@ -1509,7 +1509,6 @@ function subtreeReferencesAtName(node: unknown, seen: Set<unknown> = new Set()):
 function computePureFnSidePlacement(
   files: FileAST[],
   functions: Map<string, FunctionRoute>,
-  exportedFnNames: Set<string>,
   placeFreePureFnIds: Set<string>,
   serverHelperIds: Set<string>,
   clientSkipIds: Set<string>,
@@ -1563,6 +1562,13 @@ function computePureFnSidePlacement(
     };
     findFns(nodes, false, new Set());
 
+    // This FILE's exported names (a same-named export in another file is a
+    // different binding and must not exclude a local fn here).
+    const fileExportedNames = new Set<string>();
+    const fileExps = (fileAST.exports ?? ((fileAST as any).ast ? (fileAST as any).ast.exports : [])) as
+      Array<{ exportedName: string | null }> | undefined;
+    for (const exp of fileExps ?? []) if (exp && exp.exportedName) fileExportedNames.add(exp.exportedName);
+
     // Candidate plain pure fns, by name.
     const candidateIdsByName = new Map<string, string[]>();
     const candidateNodeById = new Map<string, any>();
@@ -1573,7 +1579,7 @@ function computePureFnSidePlacement(
       if (id && !placeFreePureFnIds.has(id)) continue;
       const name = fn.name;
       if (!id || typeof name !== "string" || !name) continue;
-      if (exportedFnNames.has(name) || fn.fromExport === true || fn.exported === true) continue;
+      if (fileExportedNames.has(name) || fn.fromExport === true || fn.exported === true) continue;
       const route = functions.get(id);
       if (!route || route.boundary !== "client") continue;
       if (!candidateIdsByName.has(name)) candidateIdsByName.set(name, []);
@@ -7669,7 +7675,7 @@ export function runRI(input: RIInput): RIOutput {
   const pureFnServerHelperIds = new Set<string>();
   const pureFnClientSkipIds = new Set<string>();
   computePureFnSidePlacement(
-    files, functions, exportedFnNames, placeFreePureFnIds, pureFnServerHelperIds, pureFnClientSkipIds,
+    files, functions, placeFreePureFnIds, pureFnServerHelperIds, pureFnClientSkipIds,
   );
 
   return {
