@@ -1,0 +1,8 @@
+<program>
+<x> = "VAL"
+<f> = true
+<div id="h1">${ if (@f) { lift <div><pre class="a"><img src="x" onerror="window.pwned=7"></pre></div> } }</div>
+<div id="h2">${ if (@f) { lift <pre class="b">a ${@x} b</pre> } }</div>
+<div id="h3">${ if (@f) { lift <pre class="c"><code>&lt;i&gt; a < b</code></pre> } }</div>
+<div id="h4">${ if (@f) { lift <div><code class="d">don't stop</code><span class="e">${@x}</span></div> } }</div>
+</program>
