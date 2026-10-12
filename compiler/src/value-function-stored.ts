@@ -67,6 +67,13 @@ const EXPR_KINDS = new Set<string>([
 /** Array methods that put their arguments INTO the receiver (a store). */
 const STORING_ARRAY_METHODS = new Set<string>(["push", "unshift", "splice", "fill"]);
 
+/**
+ * Methods that put their arguments into a scrml value receiver, judged on any call whose receiver
+ * is rooted in a scrml binding: the array storing methods, the §59.7 map write `.insert(k, v)`,
+ * and the §59.12 set write `.add(k)`.
+ */
+const STORING_VALUE_METHODS = new Set<string>([...STORING_ARRAY_METHODS, "insert", "add"]);
+
 /** Statement-list keys: an array under one of these is a block (a lexical scope). */
 const BLOCK_KEYS = new Set<string>(["body", "consequent", "alternate", "stmts", "children", "elseBody", "finallyBody", "catchBody"]);
 
@@ -149,6 +156,18 @@ export function checkValueFunctionStored(
       }
     }
     return "other";
+  }
+
+  /** "The state cell `@m`" / "The value `xs`" — the receiver of a storing method call. */
+  function describeReceiver(e: unknown): string {
+    let cur = e as Rec | undefined;
+    for (let guard = 0; cur && guard < 64; guard++) {
+      if (cur.kind === "member" || cur.kind === "index") { cur = cur.object as Rec; continue; }
+      break;
+    }
+    const name = cur && cur.kind === "ident" && typeof cur.name === "string" ? cur.name : null;
+    if (!name) return "This value";
+    return name.startsWith("@") ? `The state cell \`${name}\`` : `The value \`${name}\``;
   }
 
   /**
@@ -240,6 +259,24 @@ export function checkValueFunctionStored(
       case "call": case "new": {
         walkExpr(x.callee, at, false);
         const host = isHostCallee(x.callee);
+        // A storing method on a scrml value — `xs.push(f)`, `m.insert(k, f)`, `s.add(f)`, and the
+        // same on an `@` cell inside an expression (`@m = @m.insert(k, f)`) — puts the argument
+        // INTO the receiver: the array / map / set then holds a function (§59 map entries are
+        // values too — S464 "Yes, maps too"). A receiver rooted in a host binding is not judged.
+        const callee = x.callee as Rec | undefined;
+        if (x.kind === "call" && callee && callee.kind === "member" && typeof callee.property === "string" &&
+            STORING_VALUE_METHODS.has(callee.property)) {
+          const rk = rootKind(callee.object);
+          if (rk === "value") {
+            const recv = describeReceiver(callee.object);
+            const args = (x.args as unknown[] | undefined) ?? [];
+            const from = callee.property === "splice" ? 2 : 0;
+            for (let ai = from; ai < args.length; ai++) {
+              const d = fnDescription(args[ai]);
+              if (d) report(recv, d, at, `through \`.${callee.property}(…)\``);
+            }
+          }
+        }
         for (const a of (x.args as Rec[] | undefined) ?? []) {
           if (!a || typeof a !== "object") continue;
           const lit = a.kind === "object" || a.kind === "array" || a.kind === "map-lit";

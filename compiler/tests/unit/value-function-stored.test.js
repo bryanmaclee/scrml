@@ -139,4 +139,58 @@ describe("E-VALUE-FUNCTION-STORED — allowed (passed / called / host boundary)"
     const res = compile(prog(`  const inc = (x) => x + 1\n  const y = inc(1)`, `<p>\${y}</p>`));
     expect(stored(res).length).toBe(0);
   });
+
+  test("a map literal holding only data, and a map whose value is a call result", () => {
+    const res = compile(prog(`  function twice(x) { return x * 2 }\n  const m = ["a": 1, "b": twice(2)]`, `<p>\${m["a"]}</p>`));
+    expect(stored(res).length).toBe(0);
+  });
+
+  test("a storing method on a host receiver is the host boundary", () => {
+    const res = compile(prog(`  function twice(x) { return x * 2 }\n  function go() { window.handlers.push(twice) }`, `<button onclick=go()>go</button>`));
+    expect(stored(res).length).toBe(0);
+  });
+});
+
+// S464 "Yes, maps too (Recommended)" — MAP LITERALS are values too: a function-valued map entry is
+// refused, whether written in the §59.3 literal or put there by the §59.7 `.insert` write.
+describe("E-VALUE-FUNCTION-STORED — maps (§59.3 / §59.7)", () => {
+  test("string-key map literal whose value is a declared function", () => {
+    const d = stored(compile(prog(`  function twice(x) { return x * 2 }\n  const m = ["k": twice]`, `<p>\${m["k"]}</p>`)));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("map literal");
+    expect(d[0].message).toContain("`twice`");
+  });
+
+  test("identifier-key map literal whose value is an arrow function", () => {
+    const d = stored(compile(prog(`  const k = "a"\n  const m = [k: (x) => x + 1]`, `<p>\${m[k]}</p>`)));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("arrow function");
+  });
+
+  test("a map literal mixing data and a function reports the function entry", () => {
+    const d = stored(compile(prog(`  const m = ["n": 2, "f": (x) => x + 1]`, `<p>\${m["n"]}</p>`)));
+    expect(d.length).toBe(1);
+  });
+
+  test("a state cell initialised with a function-valued map literal", () => {
+    const d = stored(compile(`\${\n  function twice(x) { return x * 2 }\n}\n<m> = ["k": twice]\n<program><p>x</p></>\n`));
+    expect(d.length).toBe(1);
+  });
+
+  test("`.insert(k, f)` on a local map stores a function in it", () => {
+    const d = stored(compile(prog(`  function twice(x) { return x * 2 }\n  let m = [:]\n  m = m.insert("k", twice)`, `<p>\${m.size}</p>`)));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain(".insert(");
+  });
+
+  test("`@m = @m.insert(k, f)` on a map state cell", () => {
+    const d = stored(compile(`\${\n  function twice(x) { return x * 2 }\n}\n<m> = [:]\n<program><button onclick=\${@m = @m.insert("k", twice)}>x</button></>\n`));
+    expect(d.length).toBe(1);
+    expect(d[0].message).toContain("state cell `@m`");
+  });
+
+  test("`.push(f)` on a local array stores a function in it", () => {
+    const d = stored(compile(prog(`  function twice(x) { return x * 2 }\n  let xs = []\n  xs.push(twice)`, `<p>\${xs.length}</p>`)));
+    expect(d.length).toBe(1);
+  });
 });
