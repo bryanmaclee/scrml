@@ -159,3 +159,4 @@
   — IDENTICAL in an origin/main tree → environmental; types-gate (180, unchanged), host-global-scan, facts (regen),
   state (regen, MED +1), spec-index, s34-census --check-new --base origin/main, bootstrap-conformance, severity,
   conflict-marker, delta-lint, gen-md-shim, snippet-gate 128/128, corpus-compile-floor: PASS.
+- 2026-10-12T03:18Z r3 start: worktree reset to fd3e365c (origin/main 41af4153a already merged); brief archived.
