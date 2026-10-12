@@ -411,3 +411,63 @@
   E-SQL-MULTIPLE-STATEMENTS), 1 text-only, 221 artifacts differ — 197 root-path only, 24 real (identical list to the
   5d0565dc0 measurement). F1 lexical refusal: **0 corpus sources newly refused.**
 - FINAL GATE (pre-commit at ab1415e74): 35960 pass / 0 fail.
+
+## Fix round 6 (S239 adversarial review of dcbbd64d7) — branch s465-await-r5
+- 2026-10-12 r6 start: brief archived (BRIEF-fix-round-6.md); origin/main had no new commits (merged #1415 later).
+  Harness: the reviewer's `harness.mjs` copied to .tmp (out dir → TMPDIR); base = archive of origin/main 3cebd3387.
+- HIGH-1 REPRODUCED (branch + main): lib `const inner = (p, h) => verifyPassword(p, h)` + `export function check` →
+  wrong password WELCOME; in-file `const w = (a, b) => check(a, b)`; stdlib twin. Root: computeAsyncFnNames saw
+  `function` declarations only. FIX (fn-valued-bindings.ts): a top-level `const/let/export const NAME = <lambda | fn
+  expr | block arrow>` is a pseudo function declaration for the fixpoint — cross-file (collectAsyncFnNamesFromFile)
+  and in-file (codegen/index.ts `_asyncLocalBindings`, seeded by async imports, Promise stdlib imports, `?{}` and this
+  file's server functions). The server callee map carries the set (module-resolver answers it before the registry
+  check) so every server call site awaits it; D-5 (emitReferencedModuleConstLines) emits the binding `async` (tree
+  lambda `isAsync`; block body via emitServerFnValueFromText `{async:true}`), closes over bindings read only by other
+  emitted bindings (was `ReferenceError: a`), refuses a module value that aliases / stores / calls one
+  (E-ASYNC-FN-ESCAPES-AS-VALUE), and drains the sync-callback sink after itself (`const mk = (h) => (p) => check(p,
+  h)` → E-ASYNC-STDLIB-IN-SYNC-CALLBACK). In function bodies the existing escape machinery sees the binding through
+  the classifier (alias / object / pass-to-user-fn → E-ASYNC-FN-ESCAPES-AS-VALUE). CLIENT half: the client does not
+  colour the binding; a client use (scope-aware over the emitted bundle, module-scope-refs.ts) is refused — executed
+  `w(2) ? "Y" : "N"` was always "Y". Colouring the client copy is left open (gap annotated).
+- MED-1 REPRODUCED (11 regex shapes refused, "it calls `/[A-Z]`"): the parser keeps a regex as a Literal hatch.
+  FIX: a hatch acorn parses as ONE Literal token lowers without the guard (serverTextLowering `literal`).
+- MED-2 REPRODUCED (`badmatch:undefined` at exit 0; base refused): a function value's body is never type-checked,
+  so a variant `match` in it had no subject type. FIX: E-TYPE-025 (what the same body gets in a `function`); a
+  string-literal match in a function value still lowers (and now runs — base refused it).
+- LOW-1 REPRODUCED: `const s = "?{`SELECT pw FROM users`}"` in a client fn → E-CG-006. FIX: isServerOnlyNode
+  tests only hatch text of a parsed tree (a real query is a `sql-ref` node); the client leak scan blanks string /
+  template-text contents (acorn tokenizer; untokenizable → read raw).
+- LOW-2 REPRODUCED (`.Found(name: "a (b)")`, `.Found(name: name.trim())` refused, fake callee). FIX: named /
+  mixed named-argument variants are put in declared field order and lowered from the tree (arguments awaited —
+  `.Found(name: String(check(…)))` now carries "false"/"true"; main ships "[object Promise]"). The refusal text no
+  longer names a callee ("holds what may be a call (at `x(`)").
+- LOW-3 per ruling S464 cfor-comma "b": a C-style `for` header comma list (init / update) is lowered element by
+  element (server and client); a VALUE-position comma stays refused on the server and is now refused on the client
+  too (cascade-only; api.js drops cascade-only CG refusals behind an earlier stage's error — defer-outside-function).
+- Found while fixing: a local `splitTopLevelCommas` I added shadowed emit-expr's import and broke multi-scrutinee
+  match lowering (`if (true)` arms) — caught by the gate, removed.
+- Pre-existing, filed (executed): g-top-level-fn-param-default-dropped-server-s465 (HIGH: `function g(x = 5)` →
+  `g()` is undefined on the server), g-lib-export-const-lambda-missing-import-s465 (MED, ReferenceError — fails
+  closed), g-lib-exported-fn-destructured-param-codegen-s465 (MED, compiler defect — fails closed),
+  g-typed-arrow-param-in-server-fn-value-s465 (LOW). `export { verifyPassword as check } from "scrml:auth"` →
+  already g-local-stdlib-reexport-no-server-emit-s462. `new verifyPassword(…)` is ALREADY refused
+  (E-ASYNC-FN-ESCAPES-AS-VALUE) — my r5 note was wrong.
+- Tests: NEW integration/s465-await-r6.test.js (39): on dcbbd64d7 32 of 37 (pre-client-half) FAIL; the 5 that pass
+  there are controls (fn-decl twin, sync lambda, string match, mixed variant, value comma). Updated to the ruling /
+  new reading: s465-await-arm-r3 (client comma → refused), -r4 (for-header comma → value comma), -r5 (hatch shapes
+  use an unknown field so they stay unreadable; the readable ones run in r6).
+- Reviewer probe set (s1–s14, 206 shapes) on the final head: 0 wrong passwords accepted; failures are compile
+  errors or the pre-existing re-export IMPORT-FAILs (fail closed).
+- CORPUS (corpus-emit-differential; base = archive of origin/main 707c499fb, head = archive of bd743f3ac; 3583
+  sources: examples, samples, conformance, stdlib, benchmarks, docs): 3 newly failing — exactly the S441 gap
+  reproducers docs/changes/s441-async-escape-f4-f5/review-repro/{tl-arrow-const, tl-arrow-handler, tl-fnexpr-const}
+  (the client accept-all this round refuses: E-ASYNC-FN-ESCAPES-AS-VALUE); 0 newly passing; syntax delta 0; 4 code
+  changes (those 3 + query-not-readable-neg's extra E-SQL-MULTIPLE-STATEMENTS from r5); bare `_scrml_fetch_*` sites
+  78 → 74; 221 artifacts differ, 197 by the project root only, 24 real — the SAME list as r5 (r6 changes no other
+  corpus artifact).
+- EXTERNAL CORPUS (the reviewer's list.txt: 231 files across giti / flogence / scrml-site / 6nz; per-file compile,
+  status + hash of emitted .js): 0 status changes (14 failing on both sides), 3 emit-only changes, all inspected:
+  6nz playground-four (C-for header lowered from the tree: `n.children.length` spacing), giti cli-args (`const i = i
+  + 1` → `i = i + 1` inside a C-for body: main ships a TDZ ReferenceError — the r3 for-header-names fix), flogence
+  fsp-wire-tool (`await (rpc(…))` → `await (await rpc(…))`: `rpc` is a function-valued binding now coloured async;
+  same value).
