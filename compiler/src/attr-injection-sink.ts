@@ -358,8 +358,8 @@ export function isQuotedStaticHandler(name: string, value: string): boolean {
  * §5.2 (S464 "(a) Refuse both") — a STATIC attribute value (no `${…}`) the browser would EXECUTE:
  * any `srcdoc`, or a URL-valued attribute (element-scoped as rule 3 scopes it; an SVG animation value
  * when `attributeName` names a URL attribute or is not static) whose scheme rule 2's safe set does not
- * admit (`<a href="javascript:…">`, `vbscript:`, `data:text/html`). (Code name provisional — the
- * owner's call.)
+ * admit (`<a href="javascript:…">`, `vbscript:`, `data:text/html`). (Code name owner-ruled,
+ * S464.)
  */
 export const ATTR_STATIC_EXECUTABLE_CODE = "E-ATTR-STATIC-EXECUTABLE";
 
