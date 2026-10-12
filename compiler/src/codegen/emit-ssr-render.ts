@@ -40,7 +40,7 @@
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseQuotedHandlerWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
@@ -268,6 +268,11 @@ function attrsToParts(attrs: any[], iterVarName: string | null, tag = ""): strin
   for (const attr of Array.isArray(attrs) ? attrs : []) {
     const name = attr && typeof attr.name === "string" ? attr.name : "";
     if (!name) continue;
+    // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is never
+    // written (E-ATTR-QUOTED-HANDLER). `isDroppableAttr` below drops only `on[A-Za-z]…` names, so
+    // `ONCLICK="…"` would otherwise reach the server-rendered row HTML.
+    if (attr.value && attr.value.kind === "string-literal" &&
+        refuseQuotedHandlerWrite(name, attr.value.value, attr, tag)) continue;
     if (isDroppableAttr(name)) continue; // behavioral — client re-wires on rebuild
     // Conditional visibility, directive-form (`class:`/`style:`/`bind:`/`on:`),
     // or bind — these change WHICH markup shows / require runtime evaluation.

@@ -12,7 +12,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseQuotedHandlerWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
@@ -1098,7 +1098,9 @@ function parseAttrs(attrsStr) {
       while (i < s.length && /\s/.test(s[i])) i++;
 
       let value = "";
+      let quoted = false;
       if (i < s.length && (s[i] === '"' || s[i] === "'")) {
+        quoted = true;
         // Quoted value
         const quote = s[i];
         i++; // consume opening quote
@@ -1142,7 +1144,9 @@ function parseAttrs(attrsStr) {
         }
         value = s.slice(valueStart, i);
       }
-      attrs.push({ name, value });
+      // `quoted` (S464): a quoted value is a static string — §5.2 refuses one on an event-handler
+      // attribute (emitSetAttrs → refuseQuotedHandlerWrite).
+      attrs.push(quoted ? { name, value, quoted: true } : { name, value });
     } else {
       // Boolean attribute (no value)
       attrs.push({ name, value: null });
@@ -1401,6 +1405,10 @@ function splitTagSegments(s) {
 function emitSetAttrs(elVar, attrs, engineCtx = null, tag = "") {
   const lines = [];
   for (const attr of attrs) {
+    // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is never
+    // written nor wired (E-ATTR-QUOTED-HANDLER; `refuseQuotedHandlerWrite`). Without this the
+    // event branch below wired the quoted text as a listener body.
+    if (attr && attr.quoted === true && refuseQuotedHandlerWrite(attr.name, attr.value, null, tag)) continue;
     if (attr.value === null) {
       // Boolean attribute
       lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, "");`);
@@ -1699,6 +1707,10 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     const name = attr.name;
     const val = attr.value;
 
+    // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is never
+    // written (E-ATTR-QUOTED-HANDLER; `refuseQuotedHandlerWrite`).
+    if (val && val.kind === "string-literal" && refuseQuotedHandlerWrite(name, val.value, attr, tag)) continue;
+
     // LIFT-2 fix (S88) — bind:* two-way wiring (parity with top-level §5.4.1).
     // Recognized before kind-dispatch because the wiring is name-driven, not
     // value-kind-driven. attr.value here is one of: variable-ref (@cell),
@@ -1956,7 +1968,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       }
     } else if (typeof val === "string") {
-      // Raw string value
+      // Raw string value. §5.2 (S464) — written verbatim as attribute text, so an `on…` name is a
+      // static handler the browser would run: refused (fail closed — `refuseQuotedHandlerWrite`).
+      if (refuseQuotedHandlerWrite(name, val, attr, tag)) continue;
       lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${JSON.stringify(val)});`);
     } else if (val.kind === "expr" || val.kind === "props-block") {
       // Inline expression from ${...} attribute (e.g. oninput=${@var = event.target.value})

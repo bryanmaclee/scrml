@@ -4174,6 +4174,10 @@ function expandComponentNode(
     // §5.2 executable-sink rule (S456) — the call site, so VP-3 can anchor a refusal of an
     // attribute whose EXPANDED value (the caller's prop text substituted in) is a sink.
     _expansionSiteSpan: node.span,
+    // §5.2 (S464) — the component's DEFINITION span, so VP-3 can anchor a refusal of text the
+    // author wrote in this definition (a quoted handler on a nested component call that falls
+    // through onto the callee's root) once, at the definition, not per instance.
+    _componentDefSpan: def.defSpan,
     // i81 (S239 finding 7) — the DECLARED prop names of the component this root
     // came from. After expansion the root's `attrs` are a MERGE of the
     // definition's own attributes and the call site's props, and downstream
@@ -4203,6 +4207,7 @@ function expandComponentNode(
     isComponent: false,
     _expandedFrom: componentName,
     _expansionSiteSpan: node.span,
+    _componentDefSpan: def.defSpan,
   }));
 
   // S458 F2 — refuse every body write to a prop the caller did not bind with `bind:`

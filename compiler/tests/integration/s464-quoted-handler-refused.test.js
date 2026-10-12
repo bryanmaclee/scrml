@@ -13,11 +13,21 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { isQuotedStaticHandler } from "../../src/attr-injection-sink.ts";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
+import {
+  refuseQuotedHandlerWrite,
+  resetRefusedLowerings,
+  drainRefusedLowerings,
+} from "../../src/codegen/refused-lowering-errors.ts";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
 const CODE = "E-ATTR-QUOTED-HANDLER";
+// A static handler attribute in emitted HTML: an `on…` name (not one/online/onboarding) followed by
+// a quoted value, as TAG markup (preceded by an opener, not by `&lt;` display text).
+const STATIC_HANDLER_IN_HTML = /<[a-zA-Z][^<>]*\s(?!one\b|online\b|onboarding\b)on[a-z:]+\s*=\s*"/i;
+// A static handler written by JS: `setAttribute("on…", "<literal>")`.
+const STATIC_HANDLER_IN_JS = /setAttribute\(\s*"(?!one"|online"|onboarding")on[^"]*"\s*,\s*"/i;
 const _dirs = [];
 afterAll(() => { for (const d of _dirs) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
 
@@ -56,6 +66,23 @@ describe("§1 isQuotedStaticHandler", () => {
   });
   test("a value with `${…}` is E-ATTR-INTERP-EXECUTABLE's, not this rule's", () => {
     expect(isQuotedStaticHandler("onclick", "go('${x}')")).toBe(false);
+  });
+});
+
+describe("§1b refuseQuotedHandlerWrite — the codegen backstop every attribute writer asks", () => {
+  test("refuses (and records once per attribute) a quoted static handler on ANY tag; admits the rest", () => {
+    resetRefusedLowerings();
+    const attr = { span: { file: "f.scrml", start: 10, end: 30, line: 2, col: 3 } };
+    expect(refuseQuotedHandlerWrite("onclick", "pwn()", attr, "button")).toBe(true);
+    expect(refuseQuotedHandlerWrite("onclick", "pwn()", attr, "button")).toBe(true); // same attribute again
+    // An unexpanded component still built as an element (`createElement("Btn")`) is not exempt.
+    expect(refuseQuotedHandlerWrite("ONCLICK", "pwn()", { span: { file: "f.scrml", start: 40, end: 50 } }, "Btn")).toBe(true);
+    expect(refuseQuotedHandlerWrite("onclick", "go('${x}')", attr, "button")).toBe(false);
+    expect(refuseQuotedHandlerWrite("title", "pwn()", attr, "button")).toBe(false);
+    expect(refuseQuotedHandlerWrite("online", "yes", attr, "div")).toBe(false);
+    const errs = drainRefusedLowerings();
+    expect(errs.map((e) => e.code)).toEqual(["E-ATTR-QUOTED-HANDLER", "E-ATTR-QUOTED-HANDLER"]);
+    expect(errs.every((e) => e.severity === "error")).toBe(true);
   });
 });
 
@@ -139,6 +166,76 @@ const Btn = <button>b</button>
 <Btn onclick="go(1)"/>
 </program>
 `,
+  // Fix round 1 (S239 F1) — a `<match>` arm body is re-parsed in codegen, so VP-3 never sees the
+  // rows inside it; the codegen backstop (`refuseQuotedHandlerWrite`) refuses the write.
+  eachInMatchArm: `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a", subs: [1] }]
+  <c> = true
+  function go(n) { log(n) }
+}
+const Btn = <button>b</button>
+<match for=Phase on=@phase>
+  <Idle>
+    <ul><each in=@items as it><li>${EL}</li></each></ul>
+  </>
+  <Ready><p>r</p></>
+</match>
+`,
+  nestedEachInMatchArm: `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a", subs: [1] }]
+  <c> = true
+  function go(n) { log(n) }
+}
+const Btn = <button>b</button>
+<match for=Phase on=@phase>
+  <Idle>
+    <each in=@items as it><div><each in=it.subs as s>${EL}</each></div></each>
+  </>
+  <Ready><p>r</p></>
+</match>
+`,
+  componentInEachInMatchArm: `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a", subs: [1] }]
+  <c> = true
+  function go(n) { log(n) }
+}
+const Btn = <button>b</button>
+<match for=Phase on=@phase>
+  <Idle>
+    <each in=@items as it><Btn onclick="go(1)"/></each>
+  </>
+  <Ready><p>r</p></>
+</match>
+`,
+  eachInEngineArm: `\${
+  type Light:enum = { Green, Red }
+  <items> = [{ name: "a" }]
+  function go(n) { log(n) }
+}
+<engine for=Light initial=.Green>
+  <Green rule=.Red>
+    <each in=@items as it>${EL}</each>
+  </>
+  <Red rule=.Green></>
+</>
+<program>
+<p>\${@light}</p>
+</program>
+`,
+  eachInEach: `<program>
+<items> = [{ name: "a", subs: [1] }]
+\${ function go(n) { log(n) } }
+<each in=@items as it>
+  <div><each in=it.subs as s>${EL}</each></div>
+</each>
+</program>
+`,
 };
 
 describe("§2 refused at every markup position, exactly once", () => {
@@ -164,6 +261,51 @@ describe("§2 refused at every markup position, exactly once", () => {
     expect((result.errors ?? []).some((d) => d.code === "E-META-EVAL-002")).toBe(true);
     expect(html).not.toContain(`onclick="go(1)"`);
     expect(client).not.toContain("go(1)");
+  });
+
+  test("F1 — every `on…` spelling and an `if=`/`else` pair in a row inside a `<match>` arm: one refusal per attribute", () => {
+    const { refusals, client } = compile("matcheachspell", `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a", subs: [1] }]
+  <c> = true
+  function go(n) { log(n) }
+}
+const Btn = <button>b</button>
+<match for=Phase on=@phase>
+  <Idle>
+    <each in=@items as it><button onclick="go(1)" ONCLICK="go(2)" onmouseover="go(3)" onfocus="go(4)">b</button><a if=@c onclick="go(5)">x</a><b else onfocus="go(6)">y</b></each>
+  </>
+  <Ready><p>r</p></>
+</match>
+`);
+    expect(refusals.length).toBe(6);
+    expect(client).not.toMatch(/setAttribute\("on/i);
+  });
+
+  test("F2 — a quoted handler on a nested component call in a definition is reported once, at the definition", () => {
+    const { refusals } = compile("nestedcomp", `<program>
+const Inner = <button>in</button>
+const Outer = <div class="o"><Inner onclick="go(1)"/></div>
+<Outer/>
+<Outer/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect(refusals[0].message).toContain("in component `Outer`");
+    expect(refusals[0].message).not.toContain("caller's prop value");
+    expect(refusals[0].span.line).toBeLessThan(4);
+  });
+
+  test("F3 — markup held by a snippet lambda (an unparsed expression) is judged too, once", () => {
+    const { refusals } = compile("sniplambda", `<program>
+<items> = [{ name: "a" }]
+const List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>
+<List items=@items row={ (x) => <b onclick="go(1)">\${x.name}</b> }/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect(refusals[0].span.line).toBe(4);
   });
 
   test("the message names the three unquoted forms", () => {
@@ -197,6 +339,42 @@ describe("§2 refused at every markup position, exactly once", () => {
 // ---------------------------------------------------------------------------
 
 describe("§3 admitted controls", () => {
+  test("F3 control — markup TEXT inside a string literal in an expression is not an element", () => {
+    const { refusals } = compile("strmarkup", `<program>
+<p title=\${"<b onclick=\\"x()\\">"}>t</p>
+</program>
+`);
+    expect(refusals.length).toBe(0);
+  });
+
+  test("executed — the unquoted form at every §2 position compiles, and no artifact carries a static `on…=` handler", () => {
+    for (const [pname, src] of Object.entries(POS)) {
+      const fixed = src.replace(/(on[A-Za-z:]*)="go\(1\)"/g, "$1=go(1)");
+      const { html, client, all } = compile(`ok-${pname}`.toLowerCase(), fixed);
+      expect(all.filter((d) => d.code === CODE)).toEqual([]);
+      expect(html).not.toMatch(STATIC_HANDLER_IN_HTML);
+      expect(client).not.toMatch(STATIC_HANDLER_IN_JS);
+    }
+  });
+
+  test("executed — the built sample corpus (samples/compilation-tests/dist) carries no static `on…=` handler", () => {
+    const dist = join(import.meta.dir, "../../../samples/compilation-tests/dist");
+    if (!existsSync(dist)) return; // populated by `bun run pretest`
+    const hits = [];
+    const walk = (d) => {
+      for (const n of readdirSync(d)) {
+        const p = join(d, n);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.(html|js)$/.test(n) && !/runtime/.test(n)) {
+          const t = readFileSync(p, "utf8");
+          if (STATIC_HANDLER_IN_HTML.test(t) || STATIC_HANDLER_IN_JS.test(t)) hits.push(p);
+        }
+      }
+    };
+    walk(dist);
+    expect(hits).toEqual([]);
+  });
+
   test("the unquoted handler forms compile clean", () => {
     const { refusals, result } = compile("unquoted", `<program>
 <n> = 0
