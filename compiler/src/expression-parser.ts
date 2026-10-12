@@ -39,6 +39,7 @@ import type {
   UnaryExpr, BinaryExpr, AssignExpr, TernaryExpr,
   MemberExpr, IndexExpr, CallExpr, NewExpr,
   LambdaExpr, LambdaParam,
+  DestructurePattern, DestructureArrayElement, DestructureObjectProperty,
   CastExpr, MatchExpr, MapLitExpr, MapEntry, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
   ResetExpr,
 } from "./types/ast.ts";
@@ -3229,7 +3230,7 @@ export function esTreeToExprNode(
       const isAsync = node.async as boolean ?? false;
       const fnStyle: LambdaExpr["fnStyle"] =
         node.type === "ArrowFunctionExpression" ? "arrow" : "function";
-      const params = convertParams((node.params as ESNode[]) ?? [], filePath, baseOffset);
+      const params = convertParams((node.params as ESNode[]) ?? [], filePath, baseOffset, rawSource);
       const bodyNode = node.body as ESNode;
 
       if (bodyNode.type !== "BlockStatement") {
@@ -3349,7 +3350,7 @@ function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): Escap
 }
 
 /** Convert ESTree parameter nodes to LambdaParam[]. */
-function convertParams(params: ESNode[], filePath: string, baseOffset: number): LambdaParam[] {
+function convertParams(params: ESNode[], filePath: string, baseOffset: number, rawSource?: string): LambdaParam[] {
   return params.map(p => {
     if (p.type === "Identifier") {
       return { name: p.name as string };
@@ -3364,12 +3365,94 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
       return { name: left.name as string ?? "", defaultValue };
     }
-    // Destructured patterns (a defaulted / rest one included) — not yet structured. S458:
-    // the names the pattern BINDS are recorded (`boundNames`, the shared binding-names.ts
-    // answer) so a consumer that resolves names in the body (component prop
-    // substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
-    return { name: "__destructured__", boundNames: boundNamesOf(p) };
+    // Destructured patterns (a defaulted / rest one included). S458: the names the
+    // pattern BINDS are recorded (`boundNames`, the shared binding-names.ts answer) so a
+    // consumer that resolves names in the body (component prop substitution) sees
+    // `({ label }) => label` read the PARAMETER, not a prop.
+    // S465 r5 — the pattern itself is structured too (`pattern`, the same
+    // DestructurePattern a `const { a } = …` carries; defaults as ExprNodes), so the
+    // emitter writes the pattern back instead of the `__destructured__` placeholder (a
+    // ReferenceError at run time). A pattern this cannot structure (a computed key)
+    // carries no `pattern`; the emitter refuses it.
+    const out: LambdaParam = { name: "__destructured__", boundNames: boundNamesOf(p) };
+    let target = p;
+    if (p.type === "RestElement") { out.isRest = true; target = (p as { argument: ESNode }).argument; }
+    let paramDefault: ESNode | null = null;
+    if (target.type === "AssignmentPattern") {
+      paramDefault = (target as { right: ESNode }).right;
+      target = (target as { left: ESNode }).left;
+    }
+    const pattern = destructurePatternFromESTree(target, filePath, baseOffset, rawSource);
+    if (pattern) out.pattern = pattern;
+    if (paramDefault) out.defaultValue = esTreeToExprNode(paramDefault, filePath, baseOffset, rawSource);
+    return out;
   });
+}
+
+/**
+ * S465 r5 — an ESTree ObjectPattern / ArrayPattern as a DestructurePattern (the
+ * shape `const { a } = …` carries): every default is kept as its ExprNode
+ * (`defaultExpr`) with its source text (`default`). Null for a shape the
+ * DestructurePattern cannot hold (a computed key, a non-identifier rest).
+ */
+function destructurePatternFromESTree(
+  node: ESNode, filePath: string, baseOffset: number, rawSource?: string,
+): DestructurePattern | null {
+  const defaultOf = (right: ESNode): { default: string; defaultExpr: ExprNode } => {
+    const s = (right as { start?: number }).start;
+    const e = (right as { end?: number }).end;
+    const text = rawSource && typeof s === "number" && typeof e === "number" && s >= 0 && e <= rawSource.length && e > s
+      ? restoreHandledOperands(rawSource.slice(s, e))
+      : "default";
+    return { default: text, defaultExpr: esTreeToExprNode(right, filePath, baseOffset, rawSource) };
+  };
+  const restName = (r: ESNode): string | null => {
+    const a = (r as { argument?: ESNode }).argument;
+    return a && a.type === "Identifier" ? (a.name as string) : null;
+  };
+  if (node.type === "ArrayPattern") {
+    const elements: DestructureArrayElement[] = [];
+    let rest: string | undefined;
+    for (const el of ((node as { elements?: Array<ESNode | null> }).elements ?? [])) {
+      if (el === null) { elements.push({ kind: "hole" }); continue; }
+      if (el.type === "RestElement") { const r = restName(el); if (r === null) return null; rest = r; continue; }
+      let t = el;
+      let def: { default: string; defaultExpr: ExprNode } | null = null;
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as { right: ESNode }).right); t = (t as { left: ESNode }).left; }
+      if (t.type === "Identifier") { elements.push({ kind: "name", name: t.name as string, ...(def ?? {}) }); continue; }
+      const nested = destructurePatternFromESTree(t, filePath, baseOffset, rawSource);
+      if (!nested) return null;
+      elements.push({ kind: "nested", pattern: nested, ...(def ?? {}) });
+    }
+    return { kind: "destructure-array", elements, ...(rest !== undefined ? { rest } : {}) };
+  }
+  if (node.type === "ObjectPattern") {
+    const properties: DestructureObjectProperty[] = [];
+    let rest: string | undefined;
+    for (const prop of ((node as { properties?: ESNode[] }).properties ?? [])) {
+      if (prop.type === "RestElement") { const r = restName(prop); if (r === null) return null; rest = r; continue; }
+      if (prop.type !== "Property" || prop.computed) return null;
+      const key = prop.key as ESNode;
+      let fieldName: string;
+      if (key.type === "Identifier") fieldName = key.name as string;
+      else if (key.type === "Literal" && typeof key.value === "string") {
+        fieldName = /^[A-Za-z_$][\w$]*$/.test(key.value) ? key.value : JSON.stringify(key.value);
+      } else if (key.type === "Literal" && typeof key.value === "number") fieldName = String(key.value);
+      else return null;
+      let t = prop.value as ESNode;
+      let def: { default: string; defaultExpr: ExprNode } | null = null;
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as { right: ESNode }).right); t = (t as { left: ESNode }).left; }
+      if (t.type === "Identifier") {
+        properties.push({ kind: "name", fieldName, bindName: t.name as string, ...(def ?? {}) });
+        continue;
+      }
+      const nested = destructurePatternFromESTree(t, filePath, baseOffset, rawSource);
+      if (!nested) return null;
+      properties.push({ kind: "nested", fieldName, pattern: nested, ...(def ?? {}) });
+    }
+    return { kind: "destructure-object", properties, ...(rest !== undefined ? { rest } : {}) };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

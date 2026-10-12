@@ -1952,6 +1952,11 @@ export interface LambdaParam {
   isLin?: boolean;     // §35.2.1 lin parameter
   /** S458 — for a destructured parameter (`name: "__destructured__"`), the names it binds. */
   boundNames?: string[];
+  /**
+   * S465 r5 — for a destructured parameter, the pattern (defaults as ExprNodes).
+   * Absent when the pattern has a shape a DestructurePattern cannot hold (a computed key).
+   */
+  pattern?: DestructurePattern;
 }
 
 // ---- Type Cast ----

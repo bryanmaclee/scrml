@@ -50,6 +50,7 @@ import { CGError } from "./errors.ts";
 import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { splitTemplateLiteral, firstCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
@@ -4654,7 +4655,27 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
 }
 
 function emitLambdaParam(param: LambdaParam, ctx: EmitExprContext): string {
-  let result = param.isRest ? `...${param.name}` : param.name;
+  let name = param.name;
+  if (name === "__destructured__") {
+    // S465 r5 — a destructured parameter is written back from its pattern (defaults
+    // lowered from their trees, in the parameter ctx — never awaitable). Pre-r5 the
+    // placeholder name itself was emitted: `(__destructured__) => a` — a ReferenceError.
+    // A pattern the parser could not structure (a computed key) is refused.
+    if (param.pattern) {
+      name = emitDestructurePatternText(param.pattern, (_text, n) =>
+        n ? emitExpr(n as ExprNode, ctx) : emitExprField(null, _text, ctx));
+    } else {
+      recordRefusedLowering(new CGError(
+        "E-CODEGEN-INVALID-LOGIC",
+        "a destructured function parameter with a computed key or a nested rest pattern cannot be lowered " +
+          "here. Take the value as one parameter and destructure it in the body " +
+          "(`(row) => { const { a } = row … }`).",
+        {},
+      ), param as object);
+      name = "__destructured__ /* E-CODEGEN-INVALID-LOGIC */";
+    }
+  }
+  let result = param.isRest ? `...${name}` : name;
   if (param.defaultValue) {
     result += ` = ${emitExpr(param.defaultValue, ctx)}`;
   }
