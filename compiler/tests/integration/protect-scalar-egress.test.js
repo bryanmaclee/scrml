@@ -541,9 +541,26 @@ const R7_CLEAN = {
   "a method writing a clean column through this": fnBody([ONE, 'u.greet = function () { this.label = "hi " + this.name }', "u.greet()", "return u"]),
   "a counter object mutated through this": fnBody([ONE, "const c = { n: 0 }", "c.inc = function () { this.n = this.n + 1 }", "c.inc()", "return { id: u.id, n: c.n }"]),
   "a tag over clean values": fnBody([ONE, "const tag = (s, v) => s[0] + v", "return tag`id ${u.id}`"]),
+};
+
+// S464 — these two were R7_CLEAN (no false E-PROTECT-006) cases. Each needs a value that HOLDS a
+// function (a host-protocol hook in an object literal), which S462/S464 refuse outright
+// (E-VALUE-FUNCTION-STORED; the host-protocol carve-out was ruled out). Converted to negatives:
+// the program is refused for the stored function, and STILL not charged with E-PROTECT-006.
+const R7_CLEAN_NOW_STORED = {
   "a toString hook over a clean column": fnBody([ONE, "const o = { toString: () => u.name }", "return `${o}`"]),
   "an iterator over clean values": fnBody([ONE, "const o = { [Symbol.iterator]: function* () { yield u.name } }", "return [...o]"]),
 };
+
+describe("S447 round 7 — clean protocol hooks are now E-VALUE-FUNCTION-STORED (S464), not E-PROTECT-006", () => {
+  for (const [name, body] of Object.entries(R7_CLEAN_NOW_STORED)) {
+    test(name, () => {
+      const { result } = compileMem(prog(body));
+      const codes = (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
+      expect(codes).toEqual(["E-VALUE-FUNCTION-STORED"]);
+    });
+  }
+});
 
 describe("S447 round 7 — no false positives", () => {
   for (const [name, body] of Object.entries(R7_CLEAN)) {

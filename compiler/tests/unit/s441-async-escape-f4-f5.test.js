@@ -434,14 +434,13 @@ function go() { @v = checks[0](1) ? "accepted" : "rejected" }
     expect(o.codes).not.toContain(ESCAPE);
   });
 
-  test("not an escape: a SYNC helper aliased / stored / passed", () => {
+  test("not an escape: a SYNC helper aliased / passed", () => {
     const o = compileFile(`<program>
 server function check(n) {
   function twice(x) { return x * 2 }
   const g = twice
-  const t = { d: twice }
   function drive(f) { return f(n) }
-  return g(n) + t.d(n) + drive(twice)
+  return g(n) + drive(twice)
 }
 <button onclick=\${ check(1) }>go</button>
 </program>
@@ -449,7 +448,40 @@ server function check(n) {
     expect(o.codes).toEqual([]);
   });
 
+  // S464 — the STORED leg of this case was converted to a negative: a value holding a
+  // function is E-VALUE-FUNCTION-STORED (§14.3), sync or async. It is still NOT an escape.
+  test("a SYNC helper STORED in an object literal is E-VALUE-FUNCTION-STORED, not an escape", () => {
+    const o = compileFile(`<program>
+server function check(n) {
+  function twice(x) { return x * 2 }
+  const t = { d: twice }
+  return t.d(n)
+}
+<button onclick=\${ check(1) }>go</button>
+</program>
+`);
+    expect(o.codes).toEqual(["E-VALUE-FUNCTION-STORED"]);
+    expect(o.codes).not.toContain(ESCAPE);
+  });
+
   test("not an escape: a plain helper route inference placed on the server (#284 dispatch)", () => {
+    // S464 migration: the dispatch chooses by CALLING, not by indexing a stored map.
+    const o = compileFile(`<program>
+\${
+  function doubleIt(n) { return n * 2 }
+  server function dispatchPlain(n, which) {
+    return \`v \${which == "d" ? doubleIt(n) : n}\`
+  }
+}
+<div>P</div>
+</program>
+`);
+    expect(o.codes).toEqual([]);
+  });
+
+  // S464 — the original #284 shape (a function-valued dispatch map) converted to a negative:
+  // the map stores a function (E-VALUE-FUNCTION-STORED), and it is still not an async escape.
+  test("a #284 dispatch MAP storing a plain helper is E-VALUE-FUNCTION-STORED, not an escape", () => {
     const o = compileFile(`<program>
 \${
   function doubleIt(n) { return n * 2 }
@@ -461,7 +493,8 @@ server function check(n) {
 <div>P</div>
 </program>
 `);
-    expect(o.codes).toEqual([]);
+    expect(o.codes).toEqual(["E-VALUE-FUNCTION-STORED"]);
+    expect(o.codes).not.toContain(ESCAPE);
   });
 
   test("a shadowing param named like the async fn is not an escape", () => {
@@ -534,7 +567,8 @@ function go() { @out = check("x", "y") }
     expect(o.codes).toEqual([]);
   });
   test("a member call `o.m(x)` in a block-body callback", () => {
-    const o = server(`const o = { m: (x) => x + 1 }\n  const ys = [1, 2].map(x => { return o.m(x) })\n  return ok ? ys.join(",") : "no"`);
+    // S464: `o` is host data (a scrml value cannot hold `m` as a function).
+    const o = server(`const o = globalThis.helpers\n  const ys = [1, 2].map(x => { return o.m(x) })\n  return ok ? ys.join(",") : "no"`);
     expect(o.codes).toEqual([]);
   });
   test("template TEXT `call m(${pw})`", () => {

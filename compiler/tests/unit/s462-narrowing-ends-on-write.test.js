@@ -443,12 +443,12 @@ describe("S462 fix round 1 — fail-open holes closed", () => {
   test("F3: a built-in method NAME on a receiver of unknown type is not trusted", () => {
     expect(n046(`
     function clear() { @user = not }
-    function show() { const api = { get: clear }
+    function show(api) {
         if (@user is given) { api.get()
             @out = @user.name } }`)).toBe(1);
     expect(n046(`
     function clear() { @user = not }
-    function show() { const api = { clear: clear }
+    function show(api) {
         if (@user is given) { api.clear()
             @out = @user.name } }`)).toBe(1);
   });
@@ -591,13 +591,13 @@ const n3 = (logic) => all3(logic).length;
 describe("S462 fix round 2 — N1: destructuring binders shadow file functions", () => {
   test("const { noop } = { noop: clear }; noop()", () => {
     expect(n3(`
-    function show() { if (@user is given) { const { noop } = { noop: clear }
+    function show(o) { if (@user is given) { const { noop } = o
             noop()
             @out = @user.name } }`)).toBe(1);
   });
   test("const { a: noop } = { a: clear }; noop()", () => {
     expect(n3(`
-    function show() { if (@user is given) { const { a: noop } = { a: clear }
+    function show(o) { if (@user is given) { const { a: noop } = o
             noop()
             @out = @user.name } }`)).toBe(1);
   });
@@ -605,7 +605,7 @@ describe("S462 fix round 2 — N1: destructuring binders shadow file functions",
     expect(n3(`
     function apply({ noop }) { if (@user is given) { noop()
             @out = @user.name } }
-    function go() { apply({ noop: clear }) }`)).toBe(1);
+    function go(o) { apply(o) }`)).toBe(1);
   });
 });
 
@@ -935,9 +935,9 @@ describe("S462 fix round 5 — P1-a: parameters are read structurally (no param 
   });
   test("a destructured parameter with a nested default", () => {
     expect(n5(`
-    function show() { const run = ({ b = { c: 1 }, noop } = {}) => { if (@user is given) { noop()
+    function show(o) { const run = ({ b = { c: 1 }, noop } = {}) => { if (@user is given) { noop()
                 @out = @user.name } }
-        run({ noop: clear }) }`)).toBe(1);
+        run(o) }`)).toBe(1);
   });
   test("a rest parameter", () => {
     expect(n5(`
@@ -1016,9 +1016,9 @@ describe("S462 fix round 5 — parameter defaults run on each call, before the b
   });
   test("a destructured array parameter shadows a file function", () => {
     expect(n5(`
-    function show() { const run = ([noop]) => { if (@user is given) { noop()
+    function show(xs) { const run = ([noop]) => { if (@user is given) { noop()
                 @out = @user.name } }
-        run([clear]) }`)).toBe(1);
+        run(xs) }`)).toBe(1);
   });
 });
 

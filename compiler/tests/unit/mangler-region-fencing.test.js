@@ -140,14 +140,17 @@ function rewind() { replay(@order, @hist) }
   // §2 fixture — object-literal shorthand whose keys are user fn names. The
   // PROPERTY NAME is part of the object's public shape; renaming it silently
   // turns `inner.get(...)` into `undefined is not a function`.
+  // S464: no scrml value holds a function (E-VALUE-FUNCTION-STORED), so the one
+  // place a function-valued shorthand is still written is a literal handed
+  // DIRECTLY to a host-JS call (the §14.3 host boundary) — that is the shape here.
   shorthandFx = fix("shorthand-keys.scrml", `<program>
 \${
 function get(u) { return u }
 function post(u) { return u }
-const api = { get, post }
+function share() { console.log({ get, post }) }
 @out = ""
 }
-<button onclick=\${ @out = api.get("x") }>go</button>
+<button onclick=\${ share() }>go</button>
 </program>
 `);
 
@@ -173,14 +176,13 @@ function greet(n) { return "hi " + n }
 \${
 function get(u) { return "G" + u }
 function post(u) { return "P" + u }
-function run() {
-    const src = { get: (x) => "src-get" + x, post: (x) => "src-post" + x }
+function run(src) {
     const { get, post } = src
     return get(1) + "|" + post(2)
 }
 @out = ""
 }
-<button onclick=\${ @out = run() }>go</button>
+<button onclick=\${ @out = run(globalThis.apiSource) }>go</button>
 </program>
 `);
 
@@ -193,8 +195,7 @@ function run() {
 function __proto__(u) { return "P" + u }
 function get(u) { return "G" + u }
 function shape() {
-    const o = { __proto__, get }
-    return Object.keys(o).length + "|" + (typeof o.call)
+    return Object.keys({ __proto__, get }).length + "|" + (typeof Object.getPrototypeOf({ __proto__, get }).call)
 }
 @out = ""
 }
@@ -210,12 +211,12 @@ function shape() {
 function get(u) { return "G" + u }
 function post(u) { return "P" + u }
 const base = { z: 1 }
-const flag = true
-const nested = { api: { get, post } }
-const spread = { ...base, get, post }
-const mixed = { get, post, n: 1 }
-const ternary = flag ? { get, post } : { get, post }
-const commented = { get, /* c */ post }
+function shapes() {
+    console.log({ api: { get, post } })
+    console.log({ ...base, get, post })
+    console.log({ get, post, n: 1 })
+    console.log({ get, /* c */ post })
+}
 @out = ""
 }
 <button onclick=\${ @out = "x" }>go</button>
@@ -233,7 +234,7 @@ const commented = { get, /* c */ post }
 \${
 export function get(u) { return "GET " + u }
 export function post(u) { return "POST " + u }
-const bundle = { get, post }
+function share() { console.log({ get, post }) }
 }
 <p>lib</p>
 </program>
@@ -415,7 +416,7 @@ describe("§2b object shorthand keeps its KEY and gains the encoded VALUE", () =
 
   test("EXECUTED: the emitted object answers to its SOURCE property names", () => {
     const js = compile(shorthandFx).outputs.get(shorthandFx).clientJs;
-    const m = js.match(/const api = (\{[^}]*\})/);
+    const m = js.match(/console\.log\((\{[^}]*\})\)/);
     expect(m).not.toBeNull();
     const probe = new Function(
       `function _scrml_get_1(u) { return "got:" + u }
@@ -474,7 +475,8 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     const src = ["_scrml_get_", "_scrml_post_", "_scrml_run_"].map(lift).join("\n");
     const runName = js.match(/function (_scrml_run_\d+)\(/)[1];
     const run = new Function(`${src}\n; return ${runName};`)();
-    expect(run()).toBe("src-get1|src-post2");
+    // The source object is HOST data handed in (the scrml program cannot hold one).
+    expect(run({ get: (x) => "src-get" + x, post: (x) => "src-post" + x })).toBe("src-get1|src-post2");
   });
 
   test("§2e `{ __proto__ }` expands to the COMPUTED key — B.3.1 shape preservation (S239, s457)", () => {
@@ -487,7 +489,8 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(protoFx).clientJs;
     expect(js).not.toMatch(/[{,]\s*__proto__\s*:/);
-    expect(js).toMatch(/const o = \{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\};/);
+    expect(js).toMatch(/Object\.keys\(\{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\}\)/);
+    expect(js).toMatch(/Object\.getPrototypeOf\(\{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\}\)/);
 
     // EXECUTED: TWO own keys, nothing inherited, and both keys hold the functions.
     const lift = (prefix) => {
@@ -506,17 +509,40 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     // (S239 F5): nested, spread, mixed, the ternary ALTERNATE, and the commented
     // group. The rename now reads the parsed program, where each is an ordinary
     // shorthand property of an object literal, so each expands the same way.
+    // S464: each is written as a literal handed directly to a host call (the only
+    // place a function-valued shorthand is still legal). The ternary-ALTERNATE
+    // shape cannot be written that way — see the E-VALUE-FUNCTION-STORED test below.
     const result = compile(residualFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(residualFx).clientJs;
     const pair = "get: _scrml_get_\\d+, post: _scrml_post_\\d+";
-    expect(js).toMatch(new RegExp(`const nested = \\{api: \\{${pair}\\}\\};`));
-    expect(js).toMatch(new RegExp(`const spread = \\{\\.\\.\\.base, ${pair}\\};`));
-    expect(js).toMatch(new RegExp(`const mixed = \\{${pair}, n: 1\\};`));
-    expect(js).toMatch(new RegExp(`const ternary = flag \\? \\{${pair}\\} : \\{${pair}\\};`));
-    expect(js).toMatch(new RegExp(`const commented = \\{${pair}\\};`));
+    expect(js).toMatch(new RegExp(`console\\.log\\(\\{api: \\{${pair}\\}\\}\\)`));
+    expect(js).toMatch(new RegExp(`console\\.log\\(\\{\\.\\.\\.base, ${pair}\\}\\)`));
+    expect(js).toMatch(new RegExp(`console\\.log\\(\\{${pair}, n: 1\\}\\)`));
+    expect(js).toMatch(new RegExp(`console\\.log\\(\\{${pair}\\}\\)`));
     // No KEY is renamed anywhere.
     expect(js).not.toMatch(/[{,]\s*_scrml_(get|post)_\d+\s*[,}]/);
+  });
+
+  test("§2f the ternary-ALTERNATE shape (and every STORED function shorthand) is now refused — E-VALUE-FUNCTION-STORED (S464)", () => {
+    // Converted from a positive residual-map shape: `flag ? { get, post } : { get, post }`
+    // stores functions in a value, which the S462/S464 ruling refuses before codegen.
+    const ternaryFx = fix("ternary-shorthand.scrml", `<program>
+\${
+function get(u) { return "G" + u }
+function post(u) { return "P" + u }
+const flag = true
+const ternary = flag ? { get, post } : { get, post }
+const nested = { api: { get, post } }
+@out = ""
+}
+<button onclick=\${ @out = "x" }>go</button>
+</program>
+`);
+    const result = compile(ternaryFx);
+    const stored = result.errors.filter((e) => e.code === "E-VALUE-FUNCTION-STORED");
+    expect(stored.length).toBeGreaterThan(0);
+    expect(result.errors.every((e) => e.code === "E-VALUE-FUNCTION-STORED")).toBe(true);
   });
 
   test("§2f a group with NO left context stays unknown (interpolation-leading)", () => {
@@ -531,7 +557,7 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
   test("the lib's own shorthand object is the ONLY thing that changed", () => {
     const js = [...compileScrml({ inputFiles: [importerFx], outputDir: FIXTURE_OUTPUT, write: false })
       .outputs.entries()].find(([p]) => p.endsWith("registry-lib.scrml"))[1].clientJs;
-    expect(js).toMatch(/const bundle = \{get: _scrml_get_\d+, post: _scrml_post_\d+\};/);
+    expect(js).toMatch(/console\.log\(\{get: _scrml_get_\d+, post: _scrml_post_\d+\}\)/);
   });
 });
 
