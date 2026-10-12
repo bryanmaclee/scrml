@@ -100,3 +100,14 @@ E-TYPE-001 message still recommends `given u => { … }`. Both docs now teach th
 - kickstarter: `is some` 15 → 3, all naming the deprecated spelling (§6.1 table note, deprecated-forms bullet ×2);
   teaching uses = 0. In-place `given` guard forms 3 → 0 teaching uses; remaining mentions are the mistakes-table
   "wrong pattern" column, the deprecated-forms bullet and the §3.2 impl#1 note.
+
+## Maps
+
+- 2026-10-12T07:50Z — commit `8822c4d34` (`git commit -- .claude/maps/`): incremental refresh per the project-mapper
+  persona, stamp `8ce6d61b5` -> `41af4153a` (51 commits). All 13 files: stamp line + S465 header; per-map S465 delta
+  sections; primary: S465 READ-FIRST, Map Index, 6 Task-Shape Routing rows; non-compliance: 2 findings. Verified:
+  committed `primary.map.md` line 3 reads `commit: 41af4153a`; `state.ts --check` now `maps: 4 commits behind HEAD
+  (watermark 41af4153a)` = this branch's own commits. `../giti` / `../flogence` not cloned — not consulted.
+- Maps load-bearing? NO for the doc rewrite (the work routed through SPEC-INDEX / SPEC §42 / §63 / `git log --grep`);
+  the S458-era map had no `is given` / §42.4 / deprecation rows to route by.
+- Scratch `.tmp/` deleted before push.
