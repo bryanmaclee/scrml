@@ -5399,6 +5399,32 @@ function _captureWhenHandlerBody(peek, consume) {
   return { bodyRaw, lastTok };
 }
 
+/**
+ * S462 P0 (sql-chain-truncation audit) — is a `?{}` BLOCK_REF `refTok` an OPERAND
+ * of the expression being collected, i.e. does the token before it (`lastTok`,
+ * on the SAME line) demand an operand? A binary / logical / nullish operator, a
+ * prefix `!` / `-` / `+`, a ternary `?`, the `:` that opened a ternary's
+ * alternate (`ternaryColonTok`), a word operator (`and` / `or`, `in`, `of`,
+ * `instanceof`, `typeof`, `await`). Assignment operators are NOT counted: an
+ * assignment `x = ?{…}` keeps its own statement path. A line break before the
+ * block keeps the old statement boundary (`f()?` ⏎ `?{…}` is two statements).
+ */
+function sqlOperandPositionAfter(lastTok, refTok, ternaryColonTok) {
+  if (!lastTok || !refTok || !lastTok.span || !refTok.span) return false;
+  if (typeof lastTok.span.line !== "number" || lastTok.span.line !== refTok.span.line) return false;
+  const tx = lastTok.text;
+  if (lastTok.kind === "OPERATOR") {
+    return ["===", "!==", "==", "!=", "<=", ">=", "**", "&&", "||", "??", "<<", ">>", ">>>"].includes(tx);
+  }
+  if (lastTok.kind === "PUNCT") {
+    if (tx === ":") return lastTok === ternaryColonTok;
+    return ["?", "!", "+", "-", "*", "/", "%", "<", ">", "&", "|", "^"].includes(tx);
+  }
+  if (lastTok.kind === "IDENT") return tx === "and" || tx === "or";
+  if (lastTok.kind === "KEYWORD") return ["in", "of", "instanceof", "typeof", "await"].includes(tx);
+  return false;
+}
+
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
@@ -6315,6 +6341,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // mid-expression at depth 0 — false for a ternary consequent `cond ? @cell
     // : alt`. Incremented on a depth-0 `?`, decremented on the matching `:`.
     let ternaryDepth = 0;
+    // The most recent depth-0 `:` that closed a ternary's consequent (S462 — read
+    // by the operand-position `?{}` test at the BLOCK_REF boundary).
+    let ternaryColonTok = null;
     // markup-value-in-expression-2026-06-17 (b) / g-derived-markup-cell-drops-
     // sibling-fn — markup-as-value in a ternary ARM. The `markupRootClosed`
     // boundary (the Cluster-C S190 markup-RHS over-consumption break, below) must
@@ -6512,7 +6541,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // test caught it); a `?{}` SQL block in EITHER arm of an arrow-body ternary
       // must capture into the arrow escape-hatch → E-SQL-009, never break.
       const _lastIsTernaryPunctInArrow = lastTok && lastTok.kind === "PUNCT" && (lastTok.text === "?" || lastTok.text === ":") && sawArrowGlyphAtDepth0;
-      if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0 && !_lastIsArrowGlyph && !_lastIsTernaryPunctInArrow) break;
+      // S462 P0 (sql-chain-truncation audit) — a `?{}` query in OPERAND position
+      // (`1 + ?{…}.get().n`, `d ?? ?{…}.get().n`, `!?{…}.get()`, `f ? ?{…}.get().n : x`)
+      // is part of THIS expression: the token before it demands an operand, on the
+      // same line, so it cannot end a statement. Breaking here split the statement
+      // (`return d ??;` + an orphan query) — invalid JS, or a mis-read `?`
+      // (E-ERROR-003) for the ternary form. Kept in the expression, the query lowers
+      // as an expression-position `sql-ref` (emit-expr) with its full chain applied.
+      const _sqlInOperandPosition = tok.kind === "BLOCK_REF" && tok.block?.type === "sql" && sqlOperandPositionAfter(lastTok, tok, ternaryColonTok);
+      if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0 && !_lastIsArrowGlyph && !_lastIsTernaryPunctInArrow && !_sqlInOperandPosition) break;
       // S89 §13.2 Sub-Phase B — `async function` / `async fn` decl-shape boundary.
       // When collectExpr sees `async` immediately followed by `function`/`fn` at
       // depth 0 (with optional `server` between), this is the start of an
@@ -7127,6 +7164,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (tok.text === "?") { ternaryDepth++; }
         else if (tok.text === ":" && ternaryDepth > 0) {
           ternaryDepth--;
+          ternaryColonTok = tok;
           // g-derived-markup-cell-drops-sibling-fn — crossing into the alternate
           // arm: a CONSEQUENT markup arm that already closed (markupRootClosed) is
           // NOT the completion of the whole ternary value. Clear the flag so the
@@ -9106,35 +9144,125 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    */
   function consumeSqlChainedCalls(sqlNode) {
     if (!sqlNode || sqlNode.kind !== "sql" || !sqlNode.chainedCalls) return;
-    while (peek().kind === "PUNCT" && peek().text === ".") {
+    // S462 P0 (sql-chain-truncation) — consume ONLY the SQL method calls
+    // (`.all()` / `.get()` / `.first()` / `.run()` / `.prepare()` /
+    // `.nobatch()` / `.acrossTenants()`, each a CALL). Pre-fix this loop took
+    // every `.name` after the block as a "chained call" — `.get().name` recorded
+    // `name` as a second call, which the lowering never applied, so the
+    // expression evaluated to the WHOLE ROW (a `return` sent every column to the
+    // client). Anything after the SQL chain is the rest of an ordinary
+    // expression: the statement sites check `sqlBlockRefHasTail` BEFORE taking
+    // this structured path and route such a site through the expression path,
+    // which applies the full chain.
+    // Each pass takes one `.` method `(` args `)` link — bounds checked by
+    // sqlChainEndOffset (a link it does not recognise ends the chain).
+    while (sqlChainEndOffset(0) > 0) {
       consume(); // dot
-      // Accept IDENT or KEYWORD as the method name. `get` and `set` are
-      // tokenized as KEYWORD per tokenizer.ts:62 — without this, `.get()`
-      // would be left orphan in the parent token stream.
-      if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-        const methodTok = consume();
-        let args = "";
-        if (peek().kind === "PUNCT" && peek().text === "(") {
-          consume(); // open paren
-          while (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && peek().text === ")")) {
-            args += consume().text;
-          }
-          if (peek().kind === "PUNCT" && peek().text === ")") consume(); // close paren
+      const methodTok = consume();
+      let args = "";
+      consume(); // open paren
+      let depth = 1;
+      while (peek().kind !== "EOF") {
+        const t = peek();
+        if (t.kind === "PUNCT" && t.text === "(") depth++;
+        else if (t.kind === "PUNCT" && t.text === ")") {
+          depth--;
+          if (depth === 0) break;
         }
-        // §8.9.5: `.nobatch()` is a compile-time marker with no
-        // runtime effect. Flag the node and drop the call.
-        if (methodTok.text === "nobatch") {
-          sqlNode.nobatch = true;
-        } else {
-          sqlNode.chainedCalls.push({ method: methodTok.text, args });
-        }
+        args += consume().text;
+      }
+      if (peek().kind === "PUNCT" && peek().text === ")") consume(); // close paren
+      // §8.9.5: `.nobatch()` is a compile-time marker with no
+      // runtime effect. Flag the node and drop the call.
+      if (methodTok.text === "nobatch") {
+        sqlNode.nobatch = true;
       } else {
-        // Defensive: a dot followed by a non-IDENT is malformed; bail to avoid
-        // spinning. The trailing tokens fall through to the parent's normal
-        // statement processing.
-        break;
+        sqlNode.chainedCalls.push({ method: methodTok.text, args });
       }
     }
+  }
+
+  /**
+   * S462 P0 (sql-chain-truncation) — the SQL chain methods a `?{}` block may be
+   * followed by (§8.3 / §44.3 terminators, §8.9.5 `.nobatch()`, §14.8.10
+   * `.acrossTenants()`). The SAME set the expression path reads
+   * (codegen/sql-attempt.ts `sqlQueryExprShape`), so a statement-position query
+   * and an expression-position query split their chain at the same place.
+   */
+  const SQL_CHAIN_METHOD_NAMES = new Set(["all", "get", "first", "run", "prepare", "nobatch", "acrossTenants"]);
+
+  /**
+   * Peek offset just past the SQL method chain that starts at peek offset `k`
+   * (the token after a `?{}` BLOCK_REF). Each link is `.` + a SQL method name +
+   * a balanced `( … )`. Pure lookahead — consumes nothing.
+   */
+  function sqlChainEndOffset(k) {
+    for (;;) {
+      const dot = peek(k);
+      if (!(dot.kind === "PUNCT" && dot.text === ".")) return k;
+      const m = peek(k + 1);
+      if (!((m.kind === "IDENT" || m.kind === "KEYWORD") && SQL_CHAIN_METHOD_NAMES.has(m.text))) return k;
+      const open = peek(k + 2);
+      if (!(open.kind === "PUNCT" && open.text === "(")) return k;
+      let j = k + 3;
+      let depth = 1;
+      for (;;) {
+        const t = peek(j);
+        if (t.kind === "EOF") return k;
+        if (t.kind === "PUNCT" && t.text === "(") depth++;
+        else if (t.kind === "PUNCT" && t.text === ")") {
+          depth--;
+          if (depth === 0) break;
+        }
+        j++;
+      }
+      k = j + 1;
+    }
+  }
+
+  /**
+   * Does the token at peek offset `e` (just past a `?{}` + SQL chain) CONTINUE
+   * the expression whose leftmost operand is the query? A member / optional /
+   * index access, a call, a binary / ternary / word operator does; a statement
+   * end (`;` `}` `)` `]` `,` `:`, EOF, a `!{}` handler, a new statement on a
+   * later line) does not. `[` `(` and the single-character operators continue
+   * only on the SAME line — on a later line they may open the next statement
+   * (`<cell> = 0`, `[a, b] = …`). Pure lookahead.
+   */
+  function sqlOperandContinuesAt(e) {
+    let k = e;
+    while (peek(k).kind === "COMMENT") k++;
+    const t = peek(k);
+    if (!t || t.kind === "EOF") return false;
+    const last = peek(e - 1);
+    const sameLine = !!(t.span && last && last.span && typeof t.span.line === "number"
+      && typeof last.span.line === "number" && t.span.line === last.span.line);
+    if (t.kind === "PUNCT") {
+      if (t.text === "." || t.text === "?") return true;
+      if (t.text === "[" || t.text === "(") return sameLine;
+      if ("+-*/%^&|<>=".includes(t.text)) return sameLine;
+      return false;
+    }
+    if (t.kind === "OPERATOR") return !["=>", ":>", "...", "::", "..", "++", "--"].includes(t.text);
+    if (t.kind === "KEYWORD") return t.text === "is" || t.text === "as" || t.text === "in" || t.text === "instanceof";
+    if (t.kind === "IDENT") return t.text === "and" || t.text === "or";
+    return false;
+  }
+
+  /**
+   * Is the token at peek offset `k` a `?{}` SQL BLOCK_REF that is only the
+   * LEFTMOST OPERAND of a larger expression (`?{…}.get().name`,
+   * `?{…}.all().length`, `?{…}.get() is not`, …)? Such a site must NOT take a
+   * statement-level structured-`sqlNode` path (that path holds the query and its
+   * SQL chain only, and dropped the rest); it is parsed as an ordinary
+   * expression, whose `sql-ref` operand lowers exactly as the structured query
+   * (emit-expr `sqlQueryExprShape`) and whose remaining chain applies to the
+   * query's value, as in JS.
+   */
+  function sqlBlockRefHasTail(k) {
+    const t = peek(k);
+    if (!(t && t.kind === "BLOCK_REF" && t.block && t.block.type === "sql")) return false;
+    return sqlOperandContinuesAt(sqlChainEndOffset(k + 1));
   }
 
   /**
@@ -9163,6 +9291,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (!(next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql")) {
       return null;
     }
+    // S462 P0 — `= ?{…}.get().name`: the query is only the leftmost operand;
+    // the caller's collectExpr path parses the whole initializer (chain applied).
+    if (sqlBlockRefHasTail(0)) return null;
     const refTok = consume(); // consume the BLOCK_REF
     const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
     if (!childNode || childNode.kind !== "sql") {
@@ -10905,7 +11036,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const tok = peek();
 
     // BLOCK_REF — embedded child block
-    if (tok.kind === "BLOCK_REF") {
+    if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
       consume();
       const child = tok.block;
       if (child) {
@@ -11417,7 +11548,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // LIFT
     if (tok.kind === "KEYWORD" && tok.text === "lift") {
       const startTok = consume();
-      if (peek().kind === "BLOCK_REF") {
+      if (peek().kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
         const refTok = consume();
         const child = refTok.block;
         if (child) {
@@ -11855,7 +11986,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // lift-expr SQL fix from `fix-lift-sql-chained-call` (S40).
       // Without this, `safeParseExprToNode` parses `?{...}.all()` → preprocesses
       // `?{}` to `__scrml_sql_placeholder__` → emits `return /* sql-ref:-1 */.all();`.
-      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         // Skip leading comments (already accounted for by lookAhead) — consume them.
         for (let i = 0; i < lookAhead; i++) consume();
         const refTok = consume(); // consume the BLOCK_REF
@@ -11996,7 +12127,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // `yield ?{...}.method()` — SQL BLOCK_REF + optional chained call.
       // Attach as structured sqlNode so emit-logic routes through case "sql".
-      if (next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         for (let _i = 0; _i < lookAhead; _i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
@@ -14565,7 +14696,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
 
     // BLOCK_REF — embedded child block from the block splitter
-    if (tok.kind === "BLOCK_REF") {
+    if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
       consume();
       const child = tok.block;
       if (child) {
@@ -15933,7 +16064,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
 
       // If the next token is a BLOCK_REF, the lift target is an embedded block
-      if (peek().kind === "BLOCK_REF") {
+      if (peek().kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
         const refTok = consume();
         const child = refTok.block;
         if (child) {
@@ -16956,7 +17087,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // `return ?{...}.method()` collapses to `return /* sql-ref:-1 */.method()`
       // when the BLOCK_REF is left to fall through collectExpr → safeParseExprToNode.
       // Detect the SQL BLOCK_REF here, build the child, and attach as `sqlNode`.
-      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         for (let i = 0; i < lookAhead; i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
@@ -17013,7 +17144,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         continue;
       }
       // `yield ?{...}.method()` — attach structured sqlNode.
-      if (yieldNext.kind === "BLOCK_REF" && yieldNext.block && yieldNext.block.type === "sql") {
+      if (yieldNext.kind === "BLOCK_REF" && yieldNext.block && yieldNext.block.type === "sql" && !sqlBlockRefHasTail(yieldLookAhead)) {
         for (let _i = 0; _i < yieldLookAhead; _i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
