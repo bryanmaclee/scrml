@@ -5439,10 +5439,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   // logic context drops html-fragments, so nothing executes).
   // ---------------------------------------------------------------------------
   let _markupTextEnd = -1;
-  // The armed element's tag + opener span, handed to its FIRST text run
-  // (`_markupLead`): codegen reports an element that no lowering rendered at that
-  // run (E-MARKUP-STATEMENT-NOT-RENDERED, emit-logic.ts) — once per element.
-  let _markupArmLead = null;
 
   /**
    * The token index just past the markup element that opens at token `start`
@@ -5586,11 +5582,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const end = scanMarkupElementEnd(i);
     if (end <= i) return;
     for (let k = i; k < end; k++) {
-      if (tokens[k] && tokens[k].kind === "BLOCK_REF") {
-        _markupTextEnd = end;
-        _markupArmLead = { tag: String(tokens[i + 1].text), span: tokenSpan(tokens[i], filePath) };
-        return;
-      }
+      if (tokens[k] && tokens[k].kind === "BLOCK_REF") { _markupTextEnd = end; return; }
     }
   }
 
@@ -5626,15 +5618,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // §4.17 (S462) — a `<script>` / `<style>` opener in the run is refused exactly
     // as in any other markup in a logic body.
     refuseFragmentElementTokens(tokens.slice(from, i), filePath, errors);
-    const lead = _markupArmLead;
-    _markupArmLead = null;
     return {
       id: ++counter.next,
       kind: "html-fragment",
       content: joinWithNewlines(parts, lines, spans),
       span: spanOf(first, lastTok),
       _markupText: true,
-      ...(lead ? { _markupLead: lead } : {}),
     };
   }
 

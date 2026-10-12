@@ -177,27 +177,8 @@ describe("markup text between interpolations is text — sibling positions (s462
 });
 
 // Fix round 1 (S462 review of a273fd596).
-describe("fix round 1 — fail closed, no new silent drops, no expression split (s462)", () => {
-  // MED-2 + ruling Q24 (a): an element whose text the parser read as markup but that no
-  // lowering renders is a compile ERROR — never an empty render at exit 0.
-  const refused = {
-    "`a < b` in the element's text (the implied-lift re-parse declines it)":
-      `<div id="host">\${ if (@u is given) { <p>\${@n} a < b track(@n) \${@n}</p> } }</div>`,
-    "a quoted `\"</p>\"` in the element's text":
-      `<div id="host">\${ if (@u is given) { <p>\${@n} "</p>" track(@n) \${@n}</p> } }</div>`,
-    "a `for` body without `lift`":
-      `<div id="host">\${ for (const x of @xs) { <p>\${x} track(@n) - \${@n}</p> } }</div>`,
-    "two elements in one arm":
-      `<div id="host">\${ if (@n > 1) { <p>\${@n} track(@n) - \${@n}</p> <p>two</p> } }</div>`,
-  };
-  for (const [label, body] of Object.entries(refused)) {
-    test(`refused: ${label}`, () => {
-      const { errors } = compileAndMount(PRE + body + POST, "refused-" + label.replace(/[^a-z]+/gi, "-").slice(0, 30));
-      expect(errors).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
-    });
-  }
-
-  test("`lift` — the fix the refusal names — renders the nested element", async () => {
+describe("fix round 1 — no expression split, comments skipped (s462)", () => {
+  test("`lift` of a nested element inside an implied-lift element renders it", async () => {
     const { errors } = compileAndMount(PRE + `<div id="host">\${ if (@n > 1) { <div id="d">\${@n} \${ if (@n > 2) { lift <b>\${@n}</b> } } tail</div> } }</div>` + POST, "liftfix");
     expect(errors).toEqual([]);
     await flush();

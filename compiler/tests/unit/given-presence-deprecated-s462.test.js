@@ -289,6 +289,8 @@ describe("§C: scrml fix `given-presence`", () => {
 `;
     const shapes = {
       "a1b (assignment + lift)": `\${ given @user :> { @hits = @hits.concat([@user.name]); lift <p class="who">\${@n}</p> } }`,
+      "a1 (assignment + markup)": `\${ given @user :> { @hits = @hits.concat([@user.name]); <p class="who">\${@n}</p> } }`,
+      "a3 (if-stmt)": `\${ given @user :> { if (@n > 1) { @hits = [] }; <p class="who">\${@user.name} \${@n}</p> } }`,
       "an interpolation that writes": `\${ given @user :> { <p class="who">\${@user.name} \${@n = 2}</p> } }`,
     };
     for (const [label, guard] of Object.entries(shapes)) {
@@ -298,24 +300,6 @@ describe("§C: scrml fix `given-presence`", () => {
         expect(r.changed).toBe(false);
         expect(r.blockers.length).toBe(1);
         expect(r.blockers[0].reason).toContain(MARKUP_BODY_STATEMENTS);
-      });
-    }
-    // a1 / a3 — a statement and a BARE `<p>` in one guard body: the `<p>` is not the arm's
-    // single element, so no lowering renders it. Base rendered nothing at exit 0; since
-    // s462-given-body-text-as-code fix round 1 (ruling Q24 (a)) the file does not compile
-    // (E-MARKUP-STATEMENT-NOT-RENDERED), and the rule reports that reason first.
-    const unrendered = {
-      "a1 (assignment + markup)": `\${ given @user :> { @hits = @hits.concat([@user.name]); <p class="who">\${@n}</p> } }`,
-      "a3 (if-stmt)": `\${ given @user :> { if (@n > 1) { @hits = [] }; <p class="who">\${@user.name} \${@n}</p> } }`,
-    };
-    for (const [label, guard] of Object.entries(unrendered)) {
-      test(label, () => {
-        const src = `<program>\n${PRE}<main>\n  <p id="hits">\${@hits.length}</p>\n  <div id="guard">${guard}</div>\n</main>\n</program>\n`;
-        const r = fixGivenPresence(src, { filePath: join(TMP, `c/stmt-${label.split(" ")[0]}.scrml`) });
-        expect(r.changed).toBe(false);
-        expect(r.blockers.length).toBe(1);
-        expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
-        expect(r.blockers[0].reason).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
       });
     }
   });

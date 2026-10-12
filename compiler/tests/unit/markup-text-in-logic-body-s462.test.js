@@ -110,13 +110,6 @@ describe("markup text in a logic body is text (s462-given-body-text-as-code)", (
     expect(ifs.consequent[2].content).toContain("track");
   });
 
-  test("the first text run of an armed element carries the element's tag for the not-rendered refusal", () => {
-    const { ast } = build(PRE + "<div>${ for (x of @xs) { <li>${x} - ${@n}</li> } }</div>" + POST);
-    const runs = findAll(ast, "html-fragment").filter((n) => n._markupText);
-    expect(runs.length).toBe(2);
-    expect(runs[0]._markupLead?.tag).toBe("li");
-    expect(runs[1]._markupLead).toBeUndefined();
-  });
 
   test("an element with no interpolation is unchanged (one html-fragment)", () => {
     const { ast } = build(PRE + "<div>${ given @u :> { <p>track(@n) a + b</p> } }</div>" + POST);
