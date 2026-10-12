@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
 | MED | 599 | 6 |
-| LOW | 356 | 0 |
+| LOW | 358 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -97,6 +97,25 @@ TAB already built.
 <!-- @gap id=g-md-list-marker-tab-column-s462 sev=LOW status=open locus=stdlib/md/index.scrml(readList: spaces = indentOf(after); stripCols on `after` from column 0) prov=review:S239-s462-md-phase1-delta(nit 3) -->
 
 CommonMark expands a tab to the next multiple of 4 counted from the start of the LINE (2.2): after `-` at column 0 a tab reaches column 4 (3 columns of space), so the content column is 2 and the item's continuation lines need 2 columns. `readList` re-counts `after` from column 0, so the tab counts as 4 columns, the content column becomes 5, and with "5+ means 1" the rule flips the item's width. Output differs from CommonMark with no W-MD lint. Tabs in md indentation are rare in practice, and a static body that mixes tabs and spaces in its common prefix is already E-MD-INDENT-MIXED. Fix direction: measure the post-marker whitespace from the marker's absolute column (an `indentFrom(s, col)` helper) and strip continuation lines the same way — or lint a tab after a list marker (W-MD-BULLET-MARKER-style, "write spaces"), which fits "one way to do it".
+
+### g-md-prose-backtick-dollar-brace-one-slot-s465 — in `<md>` prose, "Write `${` to open a slot and `}` to close it." is read as ONE slot: inside the slot the backtick opens a template literal, so the `${`'s extent runs through the code span to the later `}` (§67.2 token-depth extent) — the author meant two code spans — `NEW S465; LOW; open (record)`
+
+<!-- @gap id=g-md-prose-backtick-dollar-brace-one-slot-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(mdSlotExtent — a backtick inside a slot opens a template-literal frame) prov=review:s465-md -->
+
+§67.2 takes each `${` by its token-depth extent, found by lexing the interpolation body, before the
+markdown reader places anything; a code span is the reader's, so it cannot stop the splitter. The
+reading is consistent with §67.2 as written (review S239 of `3e3991c3`, finding 3, record only). An
+author documenting slot syntax puts that text in a fenced block, where a slot is inert. If a future ruling wants
+code spans to bound slots, the splitter would need the reader's code-span rule before slot extents.
+
+### g-raw-body-skip-dollar-brace-regex-quote-s465 — inside an `<each>` / `<match>` body, a `${…}` holding a regex literal with a quote (`${ @.t.replace(/'/g, "") }`) makes the raw-body scanner read the quote as a string opener, so the row never closes: E-CTX-001 "Unclosed <each>" plus E-CTX-003 for every enclosing element — `NEW S465; LOW; open`
+
+<!-- @gap id=g-raw-body-skip-dollar-brace-regex-quote-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(skipDollarBrace — tracks `"`/`'` strings, no regex literal) prov=agent:s462-md-phase2 -->
+
+Found while pinning review finding 2 (S465). Not `<md>`-specific: `<li><strong>${ @.t.replace(/'/g, "") }</strong></li>`
+in an `<each>` row fails the same way; outside a raw-body element the same expression compiles. The
+diagnostic is loud (compile fails), not silent. Fix direction: give `skipDollarBrace` the logic
+tokenizer's regex decision, as `mdSlotExtent` now does (`mdRegexLiteralEnd`), or share one slot lexer.
 
 ### g-stdlib-client-chunks-not-minified-md-s462 — stdlib client chunks ship unminified; the `stdlib-md` chunk (the scrml:md reader, §67.7) is 87 KB raw / 22.5 KB gzip as shipped, 32 KB / 11 KB gzip minified — `NEW S462; LOW; open (phase-3 item)`
 

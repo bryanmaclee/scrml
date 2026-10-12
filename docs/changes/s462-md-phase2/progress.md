@@ -103,3 +103,36 @@ run after TAB and again after CE (component instances).
   not cloned here): 0 newly failing, 0 newly passing, 0 diagnostic-code changes; 165 differing artifacts
   and 4 gauntlet diagnostic texts all differ ONLY by the checkout path (base built from a nested
   worktree) — 0 real emit changes. 17 added sources = this branch's 16 md cases + the dog-food sample.
+
+## S465 — fix round 2 (cloud, AUTO; review S239 of 3e3991c3)
+- 2026-10-12T05:00Z reset to wip/s464-md-phase2 @ 3e3991c37; archived BRIEF-fix-round-2-S465.md (f6283feeb).
+- Finding 1 (MED) reproduced: probe f_each_lit emitted `textContent = _scrml_g.String(t)`. Root cause is
+  NOT md-specific: a component body re-parsed through the legacy BS+TAB path (`sourceNeedsLiveFallback`:
+  `<md>`, a template literal, `<each>`/`<match>`, …) builds bare-exprs that carry source text in `expr`
+  beside `exprNode`; CE `substitutePropsInLogicStmt` "bare-expr" substituted only `exprNode`, and
+  emit-each's row value path reads a non-empty `expr` first ("LEGACY path stays byte-identical"). The
+  same defect reproduced without `<md>`: `${`[${t}]`}` in a component used in an `<each>` row. Fix
+  (component-expander.ts): when the tree changes, `expr` is re-derived from the substituted tree. The
+  native-bridge shape (`expr: ""`) is untouched. An `<md>` ATTRIBUTE slot already worked (attr path).
+  Tests (all fail with the CE hunk reverted): happy-dom ×6 (literal, row-bound + rows update + hostile
+  value is text, two slots, heading + list item, nested component, template-literal twin); Chromium ×1
+  (headless_shell-1194 via a scratch executablePath copy; also fails reverted); conformance
+  md/component-text-slot-in-each.
+- Finding 2 (LOW): `mdSlotExtent` now asks the logic tokenizer about each `/` in a slot's code
+  (`mdRegexLiteralEnd`: `tokenizeLogic` over the frame's code from its `${` to the line end, a NUL
+  sentinel telling a literal closed at the line end from an unclosed one). One reader: the tokenizer's
+  `isRegexContext` + `readRegex`. A closed regex is skipped whole; division stays division; MED-B's
+  unterminated-quote rule is unchanged (a regex earlier in the slot does not excuse a later bad quote).
+  Probe q_md now emits exactly what the `<p>` twin emits. Tests: unit ×3 (fail reverted), conformance
+  md/slot-regex-literal-quote.
+- Found while pinning F2 (pre-existing, not md, not fixed — out of scope): in an `<each>`/`<match>` body,
+  `skipDollarBrace` (the raw-body scanner) reads a quote inside a regex as a string, so
+  `<li>${ @.t.replace(/'/g, "") }</li>` in a row fails E-CTX-001/003 (loud). Gap filed:
+  g-raw-body-skip-dollar-brace-regex-quote-s465.
+- Finding 3 (record only): "Write `${` to open a slot and `}` to close it." in `<md>` prose is one slot
+  (the backtick inside the slot opens a template literal) — consistent with §67.2's token-depth extent.
+  Gap filed: g-md-prose-backtick-dollar-brace-one-slot-s465 (prov=review:s465-md). No SPEC sentence
+  added or changed this round.
+- Gates (see report): pre-commit 32859 pass / 10 fail / 132 skip — the 10 are the brief's env-only set
+  (dev-db-no-side-file ×5, promote-safety-harness ×1, headless-serve-bind-host ×1, tenant-floor-project-set
+  ×3 — passes 24/24 solo). FACTS + bootstrap-conformance regenerated (+2 md cases only).
