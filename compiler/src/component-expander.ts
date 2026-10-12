@@ -53,6 +53,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectRefusedElements, refusedElementMessage } from "./element-refusal.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
+import { isQuotedStaticHandler, classifyStaticExecutableAttr } from "./attr-injection-sink.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
   substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
@@ -1598,6 +1599,39 @@ function parseComponentDef(
   // stamp travels with its expanded copies, so VP-3 does not report it again per instance.
   // An attribute whose DEFINITION text is not a sink (`href="${u}"`) is judged again by VP-3
   // on every expanded instance, AFTER the caller's prop text is substituted in.
+  // S464 — every attribute in the body whose STATIC value is a sink (a quoted handler, a static
+  // `srcdoc`, a static URL with an unadmitted scheme) is stamped with its own SOURCE position
+  // (`_srcSpan`), mapped from the re-parsed body. The stamp travels with each expanded copy, so a
+  // refusal is anchored where the author wrote it, once — whichever stage reports it (this
+  // definition check, or VP-3 when a nested component call's attribute falls through onto the
+  // callee's root).
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const stack: unknown[] = [nodes];
+    const seenNodes = new Set<object>();
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (!cur || typeof cur !== "object" || seenNodes.has(cur as object)) continue;
+      seenNodes.add(cur as object);
+      if (Array.isArray(cur)) { for (const c of cur) stack.push(c); continue; }
+      const rec = cur as Record<string, unknown>;
+      if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
+        for (const a of rec.attrs as AttrNode[]) {
+          const v = a && (a.value as { kind?: string; value?: unknown } | undefined);
+          if (!a || typeof a.name !== "string" || !v || v.kind !== "string-literal" || typeof v.value !== "string") continue;
+          if (!isQuotedStaticHandler(a.name, v.value) &&
+              classifyStaticExecutableAttr(a.name, v.value, { tag: rec.tag as string, attrs: rec.attrs as unknown[] }) === null) continue;
+          const sp = a.span as Span | undefined;
+          (a as { _srcSpan?: Span })._srcSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, sp?.start, sp?.end);
+        }
+      }
+      for (const k of Object.keys(rec)) {
+        if (k === "span") continue;
+        const v = rec[k];
+        if (v && typeof v === "object") stack.push(v);
+      }
+    }
+  }
   for (const e of collectExecutableSinkErrors(nodes, filePath, {
     where: `in component \`${name}\``,
     spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
@@ -4174,10 +4208,6 @@ function expandComponentNode(
     // §5.2 executable-sink rule (S456) — the call site, so VP-3 can anchor a refusal of an
     // attribute whose EXPANDED value (the caller's prop text substituted in) is a sink.
     _expansionSiteSpan: node.span,
-    // §5.2 (S464) — the component's DEFINITION span, so VP-3 can anchor a refusal of text the
-    // author wrote in this definition (a quoted handler on a nested component call that falls
-    // through onto the callee's root) once, at the definition, not per instance.
-    _componentDefSpan: def.defSpan,
     // i81 (S239 finding 7) — the DECLARED prop names of the component this root
     // came from. After expansion the root's `attrs` are a MERGE of the
     // definition's own attributes and the call site's props, and downstream
@@ -4207,7 +4237,6 @@ function expandComponentNode(
     isComponent: false,
     _expandedFrom: componentName,
     _expansionSiteSpan: node.span,
-    _componentDefSpan: def.defSpan,
   }));
 
   // S458 F2 — refuse every body write to a prop the caller did not bind with `bind:`

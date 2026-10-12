@@ -40,7 +40,7 @@
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseQuotedHandlerWrite } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
@@ -272,7 +272,7 @@ function attrsToParts(attrs: any[], iterVarName: string | null, tag = ""): strin
     // written (E-ATTR-QUOTED-HANDLER). `isDroppableAttr` below drops only `on[A-Za-z]…` names, so
     // `ONCLICK="…"` would otherwise reach the server-rendered row HTML.
     if (attr.value && attr.value.kind === "string-literal" &&
-        refuseQuotedHandlerWrite(name, attr.value.value, attr, tag)) continue;
+        refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs)) continue;
     if (isDroppableAttr(name)) continue; // behavioral — client re-wires on rebuild
     // Conditional visibility, directive-form (`class:`/`style:`/`bind:`/`on:`),
     // or bind — these change WHICH markup shows / require runtime evaluation.

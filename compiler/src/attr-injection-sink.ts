@@ -42,6 +42,8 @@ import {
   _scrml_is_url_attr,
   _scrml_read_url_scheme,
   _scrml_url_scheme_admitted,
+  _scrml_url_value_admitted,
+  _scrml_animation_value_admitted,
 } from "./runtime-url-guard.js";
 import { jsInterpolationEnd } from "./codegen/sql-lex.ts";
 
@@ -352,6 +354,74 @@ export function isQuotedStaticHandler(name: string, value: string): boolean {
   return isExecutableEventHandlerAttrName(name);
 }
 
+/**
+ * §5.2 (S464 "(a) Refuse both") — a STATIC attribute value (no `${…}`) the browser would EXECUTE:
+ * any `srcdoc`, or a URL-valued attribute (element-scoped as rule 3 scopes it; an SVG animation value
+ * when `attributeName` names a URL attribute or is not static) whose scheme rule 2's safe set does not
+ * admit (`<a href="javascript:…">`, `vbscript:`, `data:text/html`). (Code name provisional — the
+ * owner's call.)
+ */
+export const ATTR_STATIC_EXECUTABLE_CODE = "E-ATTR-STATIC-EXECUTABLE";
+
+export type StaticExecutableSink =
+  | { kind: "srcdoc" }
+  | { kind: "url-scheme"; scheme: string | null };
+
+/**
+ * Is the STATIC `name="value"` (a value holding no `${…}`) on the element `element` an executable
+ * sink? The URL judgment is the RUNTIME guard's, applied to the literal value — the value written is
+ * exactly the author's text (HTML output escapes `&`, so no entity is decoded): `_scrml_url_value_admitted`
+ * (srcset / ping / archive lists judged per entry) and `_scrml_animation_value_admitted` (`values` per
+ * `;` entry), with rule 2's safe set and scheme reader — one definition. A relative URL or a value with
+ * no scheme is admitted. When the element is not known the URL-attribute set is read element-insensitive
+ * (fail closed).
+ */
+export function classifyStaticExecutableAttr(
+  name: string,
+  value: string,
+  element?: AttrElementContext | null,
+): StaticExecutableSink | null {
+  if (typeof name !== "string" || typeof value !== "string") return null;
+  if (value.indexOf("${") >= 0) return null; // the interpolated form is classifyInterpolatedAttrSink's
+  const lower = name.toLowerCase();
+  if (lower === "srcdoc") return { kind: "srcdoc" };
+  const schemeOf = (text: string): string | null => {
+    const r = _scrml_read_url_scheme(text, false) as { kind: string; scheme?: string };
+    return r.kind === "scheme" && typeof r.scheme === "string" ? r.scheme : null;
+  };
+  const target = element ? animationUrlTarget(element.tag, name, element.attrs) : null;
+  if (target !== null) {
+    if (_scrml_animation_value_admitted(lower, value, target)) return null;
+    const bad = (lower === "values" ? value.split(";") : [value])
+      .find((v) => !_scrml_url_value_admitted(target, v));
+    return { kind: "url-scheme", scheme: bad !== undefined ? schemeOf(bad) : null };
+  }
+  const tag = element && typeof element.tag === "string" ? element.tag : "";
+  if (!_scrml_is_url_attr(tag, lower)) return null;
+  if (_scrml_url_value_admitted(lower, value)) return null;
+  return { kind: "url-scheme", scheme: schemeOf(value) };
+}
+
+/** The author-facing message for a static executable attribute value (S464). */
+export function staticExecutableMessage(
+  sink: StaticExecutableSink,
+  name: string,
+  tag: string,
+  where = "",
+): string {
+  const on = (tag ? ` on \`<${tag}>\`` : "") + (where ? ` ${where}` : "");
+  const head = `${ATTR_STATIC_EXECUTABLE_CODE}: the \`${name}="…"\` attribute` + on;
+  if (sink.kind === "srcdoc") {
+    return head + " is an inline HTML document (`srcdoc`), which the browser runs — script included — " +
+      "without scrml checking it. Point the frame at a page with `src=` instead (§5.2).";
+  }
+  return head + " is a URL" + (sink.scheme ? ` whose scheme is \`${sink.scheme}:\`` : " whose scheme is not admitted") +
+    ". A URL attribute may name `http:`, `https:`, `ftp:`, `mailto:`, `tel:` or `sms:` (and, on an image " +
+    "source, a raster `data:image/…`), or be relative; any other scheme (`javascript:`, `vbscript:`, " +
+    "`data:text/html`, …) runs code scrml never checked. For behaviour, use an event handler " +
+    "(`onclick=fn()`) (§5.2).";
+}
+
 /** The author-facing message for a quoted static event-handler attribute (S464). */
 export function quotedHandlerMessage(name: string, tag: string, where = ""): string {
   const on = (tag ? ` on \`<${tag}>\`` : "") + (where ? ` ${where}` : "");
@@ -399,8 +469,8 @@ export function interpolatedAttrSinkMessage(
       " takes its value from data (an expression, a variable, a call or a component prop)";
     if (sink.kind === "srcdoc") {
       return head + ", and `srcdoc` is an HTML document — data written there can carry script. " +
-        "A `srcdoc` value is a static string only (`srcdoc=\"<p>…</p>\"`, no `${…}`). Build the frame " +
-        "from a URL (`src=`) or render the content as markup in the page (§5.2).";
+        "scrml admits no `srcdoc` value at all (S464 — a static one is E-ATTR-STATIC-EXECUTABLE). Build the " +
+        "frame from a URL (`src=`) or render the content as markup in the page (§5.2).";
     }
     // The spelling every emitter wires as a listener: `on` + the lowercase event name.
     const wired = "on" + name.slice(2).replace(/^[:\-]/, "").toLowerCase();

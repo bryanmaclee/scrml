@@ -294,7 +294,21 @@ const Outer = <div class="o"><Inner onclick="go(1)"/></div>
     expect(refusals.length).toBe(1);
     expect(refusals[0].message).toContain("in component `Outer`");
     expect(refusals[0].message).not.toContain("caller's prop value");
-    expect(refusals[0].span.line).toBeLessThan(4);
+    // Round 2 (review N1): anchored at the ATTRIBUTE as written in Outer's definition.
+    expect([refusals[0].span.line, refusals[0].span.col]).toEqual([3, 37]);
+  });
+
+  test("N1 — a quoted handler directly in a definition body is anchored at the attribute, multi-line body", () => {
+    const { refusals } = compile("deflinecol", `<program>
+const Outer = <div class="o">
+    <p>pad</p>
+    <button onclick="go(1)">b</button>
+</div>
+<Outer/>
+</program>
+`);
+    expect(refusals.length).toBe(1);
+    expect([refusals[0].span.line, refusals[0].span.col]).toEqual([4, 13]);
   });
 
   test("F3 — markup held by a snippet lambda (an unparsed expression) is judged too, once", () => {
@@ -359,7 +373,8 @@ describe("§3 admitted controls", () => {
 
   test("executed — the built sample corpus (samples/compilation-tests/dist) carries no static `on…=` handler", () => {
     const dist = join(import.meta.dir, "../../../samples/compilation-tests/dist");
-    if (!existsSync(dist)) return; // populated by `bun run pretest`
+    // Populated by `bun run pretest`; a missing corpus is a FAILURE, never a silent pass (review N4).
+    expect(existsSync(dist)).toBe(true);
     const hits = [];
     const walk = (d) => {
       for (const n of readdirSync(d)) {
@@ -389,10 +404,10 @@ describe("§3 admitted controls", () => {
     expect(result.errors ?? []).toEqual([]);
   });
 
-  test("exempt words and static non-handler strings (href, to) stay static strings", () => {
+  test("exempt words and static non-handler strings (an admitted href, a non-URL `to`) stay static strings", () => {
     const { refusals, html } = compile("exempt", `<program>
 <div one="x" online="y" onboarding="z">d</div>
-<a href="javascript:void(0)">a</a>
+<a href="/docs">a</a>
 <svg><set attributeName="fill" to="red"/></svg>
 </program>
 `);
@@ -417,5 +432,108 @@ const Tag = <span props={ onboard: string, onclick: string }>\${onclick}</span>
 `);
     expect(refusals.length).toBe(0);
     expect(html).toContain("onclick=");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 2 (review N2) — markup TEXT in an unparsed expression is read as markup
+// ---------------------------------------------------------------------------
+
+describe("N2 — text before the attribute (apostrophe, quote, backtick, //) does not hide it", () => {
+  const lam = (body) => `<program>\n<items> = [{ name: "a" }]\nconst List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>\n<List items=@items row={ (x) => ${body} }/>\n</program>\n`;
+  const SHAPES = {
+    apos1: `<span><b>don't</b><i onclick="go(1)">y</i></span>`,
+    apos2: `<span><b>it's</b><i onclick="go(1)">y</i><b>that's</b></span>`,
+    txtdq: `<span>say "hi <i onclick="go(1)">y</i></span>`,
+    txtbt: "<span>use ` here <i onclick=\"go(1)\">y</i></span>",
+    txtcomment: `<span>see a // b <i onclick="go(1)">y</i></span>`,
+    backtickValue: "<b onclick=`go(1)`>a</b>",
+  };
+  for (const [name, body] of Object.entries(SHAPES)) {
+    test(name, () => {
+      const { refusals } = compile(`n2-${name}`.toLowerCase(), lam(body));
+      expect(refusals.length).toBe(1);
+    });
+  }
+  test("an interpolated handler in lambda markup is E-ATTR-INTERP-EXECUTABLE", () => {
+    const { all } = compile("n2-interp", lam("<b onclick=\"go(${x.name})\">${x.name}</b>"));
+    expect(all.filter((d) => d.code === "E-ATTR-INTERP-EXECUTABLE").length).toBe(1);
+  });
+  test("controls: a handler-looking string in a title, a template literal, a comment, text — not elements", () => {
+    for (const [i, body] of [
+      `<b title="<b onclick='x()'>">\${x.name}</b>`,
+      "<b>\${ `<i onclick=\"go(1)\">` }</b>",
+      `<b>\${ /* <i onclick="go(1)"> */ x.name}</b>`,
+      `<b>call onclick="go(1)" later</b>`,
+    ].entries()) {
+      const { refusals, all } = compile(`n2-ctl${i}`, lam(body));
+      expect(refusals.length).toBe(0);
+      expect(all.filter((d) => /^E-ATTR-(STATIC|INTERP)-EXECUTABLE$/.test(d.code))).toEqual([]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 2 — S464 "(a) Refuse both": static executable values (E-ATTR-STATIC-EXECUTABLE)
+// ---------------------------------------------------------------------------
+
+describe("S464 (a) — a static srcdoc / a static URL with an unadmitted scheme is E-ATTR-STATIC-EXECUTABLE", () => {
+  const SE = "E-ATTR-STATIC-EXECUTABLE";
+  const se = (r) => r.all.filter((d) => d.code === SE);
+  const MATCH = (el) => `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a" }]
+}
+<match for=Phase on=@phase>
+  <Idle>
+    <each in=@items as it>${el}</each>
+  </>
+  <Ready><p>r</p></>
+</match>
+`;
+  const POS2 = {
+    top: (el) => `<program>\n${el}\n</program>\n`,
+    componentDef: (el) => `<program>\nconst C = <div>${el}</div>\n<C/>\n<C/>\n</program>\n`,
+    each: (el) => `<program>\n<items> = [{ name: "a" }]\n<each in=@items as it>${el}</each>\n</program>\n`,
+    eachInMatchArm: MATCH,
+    forLift: (el) => `<program>\n<items> = [1]\n<ul>\${ for (const it of @items) { lift <li>${el}</li> } }</ul>\n</program>\n`,
+    snippetLambda: (el) => `<program>\n<items> = [{ name: "a" }]\nconst List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>\n<List items=@items row={ (x) => <span>${el}</span> }/>\n</program>\n`,
+  };
+  const SHAPES2 = {
+    hrefJs: `<a href="javascript:doThing()">a</a>`,
+    hrefVb: `<a href="VBScript:x">a</a>`,
+    iframeDataHtml: `<iframe src="data:text/html,hi"></iframe>`,
+    srcdoc: `<iframe srcdoc="<p>x</p>"></iframe>`,
+    svgSet: `<svg><a><set attributeName="href" to="javascript:alert(1)"/></a></svg>`,
+    srcsetCandidate: `<img src="/a.png" srcset="/a.png 1x, javascript:x 2x">`,
+  };
+  for (const [pname, mk] of Object.entries(POS2)) {
+    for (const [sname, el] of Object.entries(SHAPES2)) {
+      test(`${sname} @ ${pname}`, () => {
+        const r = compile(`se-${sname}-${pname}`.toLowerCase(), mk(el));
+        expect(se(r).length).toBe(1);
+        expect(r.html + r.client).not.toMatch(/javascript:|vbscript:|data:text\/html|srcdoc="/i);
+      });
+    }
+  }
+  test("admitted: relative, https, mailto, raster data:image on an image source, `data` on a non-object element, a non-URL `to`", () => {
+    const r = compile("se-ok", `<program>
+<a href="/docs">a</a>
+<a href="https://x.example/p">b</a>
+<a href="mailto:a@b.c">c</a>
+<a href="">d</a>
+<img src="data:image/png;base64,AAAA">
+<div data="javascript:x">e</div>
+<svg><set attributeName="fill" to="red"/></svg>
+</program>
+`);
+    expect(se(r)).toEqual([]);
+    expect(r.result.errors ?? []).toEqual([]);
+  });
+  test("an <md> destination is judged once, by E-MD-URL-SCHEME (not twice)", () => {
+    const r = compile("se-md", `<program>\n<div>\n    <md>\n        [click](javascript:alert(1))\n    </md>\n</div>\n</program>\n`);
+    expect(se(r)).toEqual([]);
+    expect(r.all.filter((d) => d.code === "E-MD-URL-SCHEME").length).toBe(1);
   });
 });

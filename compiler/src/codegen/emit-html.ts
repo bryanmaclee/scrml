@@ -12,7 +12,7 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering, refuseQuotedHandlerWrite } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -3251,9 +3251,9 @@ export function generateHtml(
         const val = armNameAttrAsExpr(registry, name, attr.value, node, tag);
 
         // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is
-        // never written into HTML (E-ATTR-QUOTED-HANDLER; `refuseQuotedHandlerWrite`).
+        // never written into HTML (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`).
         if (attr.value && attr.value.kind === "string-literal" &&
-            refuseQuotedHandlerWrite(name, attr.value.value, attr, tag)) {
+            refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs)) {
           continue;
         }
 

@@ -45,7 +45,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseQuotedHandlerWrite } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -2363,9 +2363,10 @@ function renderTemplateAttrToJs(
 
   // ---- (0) §5.2 (S464) — a QUOTED event-handler attribute with no `${…}` is never written
   // (E-ATTR-QUOTED-HANDLER). A row inside a `<match>` arm is re-parsed in codegen and never
-  // reached VP-3; this is the backstop (one predicate, `refuseQuotedHandlerWrite`).
+  // reached VP-3; this is the backstop (one backstop, `refuseStaticAttrWrite`, which also refuses a static executable value).
   if (valKind === "string-literal" &&
-      refuseQuotedHandlerWrite(aName, val.value, attr, elNode && typeof elNode.tag === "string" ? elNode.tag : "")) {
+      refuseStaticAttrWrite(aName, val.value, attr, elNode && typeof elNode.tag === "string" ? elNode.tag : "",
+        elNode && Array.isArray(elNode.attrs) ? elNode.attrs : null)) {
     lines.push(`${indent}/* E-ATTR-QUOTED-HANDLER: quoted "${aName}" handler refused */`);
     return;
   }
