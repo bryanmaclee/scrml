@@ -353,7 +353,8 @@ For value-shape progression on a cell that is NOT an engine cell, declare as Sha
 server fn loadUser(id: number) -> (not to User) { ... }
 
 const u = loadUser(42)
-given u :> { const name = u.name }        // OK — `given` discriminates AND transitions
+if (u is not) return                      // the presence test discriminates AND transitions
+const name = u.name                       // OK — u is narrowed to User here
 
 // Variant-progression (.A to .B) — explicit transition()
 server fn publish(id: number) -> (.Draft to .Published) { ... }
@@ -364,6 +365,8 @@ if (a is .Draft) {
     const publishedAt = a.publishedAt     // OK
 }
 ```
+
+(Presence-progression on impl#1 today: write the `if (u is not) return` early-return. The SPEC block form `if (u is given) { … }` is not yet credited as the transition by impl#1's lifecycle tracker — a read inside it still fires E-TYPE-001 — and the pre-S462 `given u :> { … }` guard is soft-deprecated, §42.2.3 / §63.)
 
 The `transition()` built-in is compile-time-only — zero runtime cost. It exists because variant tags (`.Draft`) prove the source variant but not that the callee advanced the lifecycle; the explicit call provides the per-access signal.
 
@@ -893,7 +896,7 @@ These predicates work in three loci with different enforcement contexts: state-c
 | Predicate | Meaning | Example |
 |---|---|---|
 | `req` | Non-empty value (string `""` fails; `not` fails) | `<name req>` |
-| `is some` | Value exists at all (`not` fails). Coexists with `req` because `""` IS some. | `<x is some>` |
+| `is given` | Value exists at all (`not` fails). Coexists with `req` because `""` IS given. (`is some` is its soft-deprecated spelling — §55.1 / §63.) | `<x is given>` |
 | `length(predicate)` | String/array length matches the predicate | `<name length(>=2)>` |
 | `pattern(regex)` | String matches the regex | `<email pattern(/^[^@]+@[^@]+$/)>` |
 | `min(n)`, `max(n)` | Numeric range | `<age min(18) max(120)>` |
@@ -1140,8 +1143,8 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `not null` / `unique` on a state cell | SQL muscle memory | Schema vocabulary stays in `<schema>`. State cells use `req`, `length(>=N)`, `eq(...)`, etc. — the shared core. Schema also accepts the shared core (additive). |
 | `<phase>: (Idle to Done) = .Idle` next to `<engine for=Phase initial=.Idle>` over the same cell | (extrapolation) | **Engine cells reject lifecycle annotation** (`E-TYPE-LIFECYCLE-ON-ENGINE-CELL`). Engines own variant-graph progression via `rule=`. For lifecycle on a NON-engine cell, declare as plain Shape 1. For variant-graph state, use the engine — don't put a lifecycle annotation on its auto-declared variable (§3.2). |
 | `(A -> B)` lifecycle annotation in new code | legacy glyph | Use `to`: `(A to B)`. The `->` glyph is accepted during the deprecation window and surfaces `W-LIFECYCLE-LEGACY-ARROW`. `to` is the canonical (§3.2). |
-| `transition(u)` on every assignment defensively | over-application | `transition()` is for **variant-progression** `(.A to .B)` returns after discrimination. **Presence-progression** `(not to T)` discriminates via `given` / `if-is-not` / `match` — the act of discriminating IS the transition; an additional `transition()` is redundant (§3.2). |
-| `if (@u is some) { use(@u.name) }` to narrow + use | habit from `if (x !== null)` patterns | **`given x :> use(x.name)`** is the canonical narrow-AND-use form (§42.2.3). The bound `x` is type-narrowed to non-`not` inside the body. `if (x is some)` only BRANCHES; `given` BINDS the narrowed value. (Also: `T \| not` is the canonical absence-possible union; `""` / `0` / `false` are defined values, NOT absence — §42.1.1.) |
+| `transition(u)` on every assignment defensively | over-application | `transition()` is for **variant-progression** `(.A to .B)` returns after discrimination. **Presence-progression** `(not to T)` discriminates via `if (u is not) return` / `is given` / `match` — the act of discriminating IS the transition; an additional `transition()` is redundant (§3.2). |
+| `given x :> { use(x.name) }` or `if (x !== null)` to narrow + use | pre-S462 scrml docs / JS habit | **`if (x is given) { use(x.name) }`** is the canonical narrow-AND-use form (§42.2.2a, §42.4 statement 8): the presence test both BRANCHES and narrows `x` to non-`not` inside the body. As a whole condition a bare `if (x)` is the same test (§42.4 statement 2). The in-place `given x :>` guard is SOFT-DEPRECATED (W-GIVEN-PRESENCE-DEPRECATED, §42.2.3 / §63). (Also: `T \| not` is the canonical absence-possible union; `""` / `0` / `false` are defined values, NOT absence — §42.1.1.) |
 
 **If you don't see your case in the table, default to the canonical shape from §2.** Do not invent syntax.
 
@@ -1158,17 +1161,17 @@ A small set of operator-position forms accept BOTH the JS-style symbol form AND 
 // All four are bit-identical at codegen:
 const <a> = @x is .Active or @y == 1
 const <b> = @x is .Active || @y == 1
-const <c> = @x is .Active and @y == 1 and @z is some
-const <d> = @x is .Active && @y == 1 && @z is some
+const <c> = @x is .Active and @y == 1 and @z is given
+const <d> = @x is .Active && @y == 1 && @z is given
 ```
 
 The compiler lowers word-form to symbol-form at the JS-host boundary; both paths produce bit-identical emitted JS. Mixed-form expressions (`a or b && c`) are legal but stylistically discouraged. Precedence follows JS standard (`&&` / `and` bind tighter than `\|\|` / `or`).
 
 **NOT in this category** — these are word-form keywords that DO NOT have symbol-form aliases:
 
-- `not` — the ABSENCE value, NOT a logical-NOT operator. `not` ≠ `!`. Use `is not` / `is some` for absence predicates; use `!` for logical negation (still JS-host); see SPEC §42.
-- `is` / `is not` / `is some` — presence + variant predicates with no JS-host equivalent.
-- `given X :> {}` — narrow-AND-use form with no JS-host equivalent.
+- `not` — the ABSENCE value, NOT a logical-NOT operator. `not` ≠ `!`. Use `is not` / `is given` for absence / presence predicates; use `!` for logical negation (still JS-host); see SPEC §42.
+- `is` / `is not` / `is given` — presence + variant predicates with no JS-host equivalent; `is given` / `is not` also NARROW the tested place (§42.4 statement 8).
+- **Deprecated presence forms (S462, §63 Stage 1 — they still parse and run identically and fire an Info lint; `scrml fix` rewrites them):** `x is some` / `<x is some>` → `x is given` / `<x is given>` (W-IS-SOME-DEPRECATED); the in-place guard `given x :> { … }` → `if (x is given) { … }`, `given x, y :>` → `if (x is given && y is given)`, the `given x :>` match arm → `else :>` after `not :>` (W-GIVEN-PRESENCE-DEPRECATED). The §66.7.5 rebind head `given c = @h :> { … }` is NOT deprecated.
 
 ---
 
@@ -1359,7 +1362,7 @@ function doSignup() { @token = signup(@email, @password) }
     <button type="submit">Log in</button>
     <button type="button" onclick=doSignup()>Sign up</button>
 </form>
-<p if=(@token is some)>Signed in.</p>
+<p if=(@token is given)>Signed in.</p>
 
 </program>
 ```
@@ -1804,18 +1807,21 @@ These four features compose into the canonical scrml pipeline pattern — the on
 
 ```scrml
 ${
-  function tokenize(input) {
-    while ((m = TOKEN_RE.exec(input)) is some) {     // §49 while + §50 assign-as-expr + §42 is some
-      lift { kind: m[1], value: m[2] }              // §10 lift into ~ — accumulates tokens
+  const TOKEN_RE = /(\w+)=(\w+)/g
+  function tokenize(input: string) {
+    const tokens = []
+    let m = not
+    while ((m = TOKEN_RE.exec(input)) is given) {    // §49 while + §50 assign-as-expr + §42 is given
+      tokens.push({ kind: m[1], value: m[2] })      // collect (a `lift` is E-SYNTAX-002 in a function body)
     }
-    return ~                                        // §32 consume the accumulator
+    return tokens
   }
 }
 ```
 
-That single function uses ALL FOUR features. This is the self-host parser's primary idiom — one canonical shape for "iterate-and-collect" pipelines.
+That function uses three of the features — `while`, assignment-as-expression and the `is given` presence test — in the "iterate-and-collect" shape. (S465 currency: an earlier version of this example did `lift` inside the `function` and `return ~`; that does not compile — `lift` in a standard `function` body is E-SYNTAX-002, §49.6.2 — and each `lift` REinitializes `~` rather than appending to it, §32.6. Use `~` / `lift` in a `${ }` logic block, per §32.7.)
 
-**`while` loops + `break` / `continue` + labels (§49).** The canonical regex-iteration form is `while ((m = re.exec(str)) is some) { ... }`. Adopters who default to `for (item of items)` and never reach for `while` miss the regex/state-machine surface entirely.
+**`while` loops + `break` / `continue` + labels (§49).** The canonical regex-iteration form is `while ((m = re.exec(str)) is given) { ... }`. Adopters who default to `for (item of items)` and never reach for `while` miss the regex/state-machine surface entirely.
 
 ```scrml
 ${
@@ -1823,7 +1829,7 @@ ${
     outer: while (true) {
       for (let p of patterns) {
         const m = p.exec(input)
-        if (m is some) {
+        if (m is given) {
           if (m[0].length < 3) continue outer    // labeled continue restarts the outer while
           return m
         }
@@ -1837,15 +1843,18 @@ ${
 
 `break` / `continue` accept optional labels (`outer:` / `inner:`). The `E-LOOP-*` family of error codes (§49.x) guards illegal label targets, bare `break` outside loops, etc.
 
-**Assignment-as-expression (§50).** `(x = expr)` is a value-producing expression. Required for the canonical `while ((m = re.exec(str)) is some)` pattern — the assignment must produce the new value for the loop guard to check. Use **double parens** to disambiguate from declaration syntax (`while ((x = expr))` works; `while (x = expr)` may fire `W-ASSIGN-001` advisory).
+**Assignment-as-expression (§50).** `(x = expr)` is a value-producing expression. Required for the canonical `while ((m = re.exec(str)) is given)` pattern — the assignment must produce the new value for the loop guard to check. Use **double parens** to disambiguate from declaration syntax (`while ((x = expr))` works; `while (x = expr)` may fire `W-ASSIGN-001` advisory).
 
 ```scrml
-let line = ""
-while ((line = readLine()) is some) {              // double-paren assignment-as-expr
-  if (line.startsWith("#")) continue
-  lift parseRow(line)
+function readRows() {
+  const rows = []
+  let line = ""
+  while ((line = readLine()) is given) {           // double-paren assignment-as-expr
+    if (line.startsWith("#")) continue
+    rows.push(parseRow(line))
+  }
+  return rows
 }
-return ~
 ```
 
 **Why these four together?** They're the self-host compiler's core pipeline vocabulary. scrml's own parser uses `while` + assignment-as-expr to consume tokens; its codegen uses `lift` + `~` to accumulate JS source. Adopters writing similar pipelines (CSV/JSON parsers, custom tokenizers, transform-pipelines) should reach for this cluster rather than JS-style `let result = []; for(...) result.push(x); return result`.

@@ -450,6 +450,10 @@ function maybeEmitMarkupUnknown(
   // Only all-lowercase ASCII-alphanumeric names look like an HTML-element typo.
   // (Excludes camelCase cells, custom-element hyphen forms, dotted/namespaced.)
   if (!isPlausibleHtmlElementName(name)) return;
+  // SPEC §67 (S462 md phase 2) — `<md>` is a scrml element. One that reaches here as a markup
+  // node was built outside a markup body and is already refused, by name, at TAB
+  // (E-MD-IN-LOGIC-NOMINAL, md-lower.ts `refuseUnreadMdElements`); it is not an unknown element.
+  if (/^m[dD]$/.test(name)) return;
   // A valid element in any namespace (HTML ∪ SVG ∪ MathML ∪ custom / registry).
   if (isKnownElementName(name)) return;
   // scrml structural / lifecycle / directive tags.

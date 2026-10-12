@@ -1,0 +1,8 @@
+<program>
+<on> = true
+<div id="w">
+${ @on ? <div><md>
+    **yes**
+</md></div> : <p>no</p> }
+</div>
+</program>

@@ -1,0 +1,8 @@
+<program>
+<text> = "**hi**"
+<div>
+    <md of=@text>
+        A body as well.
+    </md>
+</div>
+</program>

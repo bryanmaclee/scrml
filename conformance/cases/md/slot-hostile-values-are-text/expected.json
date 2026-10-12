@@ -1,0 +1,47 @@
+{
+  "id": "md-slot-hostile-values-are-text",
+  "description": "Values that look like markdown or HTML (`**x**`, `[a](javascript:…)`, a newline plus `## heading` / `- item`, `<img onerror>`) inserted through `${…}` render as text inside the node where the atom sits: no heading, list, link, image or handler is built.",
+  "language-version": "1.0",
+  "spec": "§67.4",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY)",
+  "rationale": "§67.4 (F1): an atom's value is inserted as text and SHALL NEVER create markdown structure; structure is read from the literal text only. §67.6: content reaches the DOM only as text nodes or listed attribute values.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "input": [
+      {
+        "click": "#b1"
+      },
+      {
+        "click": "#b2"
+      }
+    ],
+    "state": {
+      "v": "<img src=x onerror=window.pwned=2>"
+    },
+    "domAnchored": [
+      {
+        "selector": "#w p",
+        "text": "Value: <img src=x onerror=window.pwned=2>"
+      },
+      {
+        "selector": "#w strong",
+        "text": "<img src=x onerror=window.pwned=2>"
+      },
+      {
+        "selector": "#w a",
+        "count": 1,
+        "text": "link <img src=x onerror=window.pwned=2>",
+        "attr": {
+          "href": "/x"
+        }
+      },
+      {
+        "selector": "#w img, #w h1, #w h2, #w ul, #w li, #w script",
+        "count": 0
+      }
+    ]
+  }
+}

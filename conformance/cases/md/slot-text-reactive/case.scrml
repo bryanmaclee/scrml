@@ -1,0 +1,12 @@
+<program>
+<who> = "Ann"
+<count> = 1
+<div id="w">
+    <md>
+        ## Hello ${@who}
+
+        **${@who}** has ${@count} open issues.
+    </md>
+</div>
+<button id="rename" onclick=${ @who = "Bob"; @count = @count + 1 }>rename</button>
+</program>

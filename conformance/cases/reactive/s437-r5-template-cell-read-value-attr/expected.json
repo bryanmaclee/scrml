@@ -27,16 +27,5 @@
         }
       }
     ]
-  },
-  "xfail": {
-    "impl1-ts": {
-      "gap": "g-client-template-interpolation-lowering-needs-a-structural-emitter",
-      "fails": {
-        "codes": [
-          "forbidden:W-CG-VALUE-ATTR-UNLOWERABLE"
-        ],
-        "runtime": "sha256:d0131f214565ca0a"
-      }
-    }
   }
 }

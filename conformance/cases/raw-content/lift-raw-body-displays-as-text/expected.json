@@ -1,0 +1,45 @@
+{
+  "id": "raw-content-lift-raw-body-displays-as-text",
+  "description": "A raw body written in `lift` markup renders the same as at top level: active HTML is text, `${…}` is not interpolated, an entity displays decoded, the bare `<code>` wrapper stays an element, and an apostrophe in the body does not disturb the markup after it.",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\" · gap:g-lift-pre-code-not-raw-content-s462 (change s465-lift-pre-raw)",
+  "rationale": "§4.17: the element names `pre` and `code` are raw-content elements; inside the body `${...}` SHALL NOT be recognized as a logic-context interpolation and `<TagName ...>` SHALL NOT be recognized as a markup-element opener. (S462 Q21) every `<` and `>` in a raw-content body SHALL be written as `&lt;` / `&gt;` to every output the body reaches, including the client DOM a `lift` builds; a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCRIPT-001",
+      "E-STYLE-001"
+    ],
+    "domAnchored": [
+      {
+        "selector": "pre.a img",
+        "count": 0
+      },
+      {
+        "selector": "pre.a",
+        "text": "<img src=\"x\" onerror=\"window.pwned=7\">"
+      },
+      {
+        "selector": "pre.b",
+        "text": "a ${@x} b"
+      },
+      {
+        "selector": "pre.c > code",
+        "count": 1
+      },
+      {
+        "selector": "pre.c",
+        "text": "<i> a < b"
+      },
+      {
+        "selector": "code.d",
+        "text": "don't stop"
+      },
+      {
+        "selector": "span.e",
+        "text": "VAL"
+      }
+    ]
+  }
+}

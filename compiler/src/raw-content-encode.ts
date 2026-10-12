@@ -151,3 +151,41 @@ export function rawContentDomLines(
     `${indent}${parentVar}.appendChild(${tplVar}.content);`,
   ];
 }
+
+/**
+ * S465 (g-lift-pre-code-not-raw-content-s462) — the TRANSPORT form of a raw body through the
+ * lift string path (malformed lifted markup that the tag parser declined is collected as a
+ * token-joined string and re-read by the string emitter). Not an encoding of the body for
+ * output: the body is sealed losslessly between two private-use marks, percent-encoded so no
+ * character the string reader acts on (`<` `>` `/` `$` `{` `}` quotes, whitespace) appears
+ * inside it; the string emitter unseals it for its raw-content element and writes it by the
+ * one rule above (`rawContentDomLines` → `encodeRawContentBody`).
+ */
+const SEAL_OPEN = "\uE100";
+const SEAL_CLOSE = "\uE101";
+
+export function sealRawContentBody(body: string): string {
+  // Every UTF-16 code unit outside [A-Za-z0-9_.-] as `%` + four hex digits (lossless, lone
+  // surrogates included).
+  const pct = body.replace(/[^A-Za-z0-9_.-]/g, (c) => "%" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+  return SEAL_OPEN + pct + SEAL_CLOSE;
+}
+
+/**
+ * The sealed raw bodies in `text`, unsealed and concatenated, or null when `text` holds none.
+ * Characters outside the seals are the token-joined spacing the string path adds; they are
+ * not body text.
+ */
+export function unsealRawContentBody(text: string): string | null {
+  let out: string | null = null;
+  let k = 0;
+  for (;;) {
+    const a = text.indexOf(SEAL_OPEN, k);
+    if (a < 0) break;
+    const b = text.indexOf(SEAL_CLOSE, a + 1);
+    if (b < 0) break;
+    out = (out ?? "") + text.slice(a + 1, b).replace(/%([0-9a-f]{4})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+    k = b + 1;
+  }
+  return out;
+}

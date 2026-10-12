@@ -1,0 +1,8 @@
+<r> = ""
+${
+    function go() {
+        @r = "a" else @r = "b"
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@r}</p>

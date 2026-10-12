@@ -32,8 +32,8 @@
         return out.join(",")
     }
     function go() {
-        @found = bodies([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> { return } }
-        @failed = bodiesGone([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> { return } }
+        @found = bodies([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return }
+        @failed = bodiesGone([{ id: 7 }, { id: 8 }]) !{ .Transport(_) :> return }
     }
     <button id="go" onclick=go()>go</button>
     <p id="found">${@found}</p>

@@ -1,0 +1,8 @@
+<program>
+<v> = "it's {here}"
+<div id="w">
+    <md>
+        A **${ @v.replace(/'/g, "") }** and ${ @v.replace(/[{}]/g, "") } B
+    </md>
+</div>
+</program>
