@@ -30,11 +30,99 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
-| MED | 599 | 6 |
-| LOW | 358 | 0 |
+| HIGH | 250 | 4 |
+| MED | 605 | 6 |
+| LOW | 365 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-braceless-if-same-line-else-dropped-s462 — a braceless `if (c) a else b` with the `else` on the SAME line silently dropped the else branch (client, server and library mode) — `NEW S462; HIGH; RESOLVED S462`
+
+<!-- @gap id=g-braceless-if-same-line-else-dropped-s462 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(collectExpr / collectLiftExpr — a depth-0 `else` now ends the expression; rejectDanglingElse widened; attachHandlerStatementList routes a single-line if/else handler to the statement path) prov=dispatch:s462-braceless-if-else-dropped -->
+
+Reported by the md phase-1 dev. `if (c) a.push(1) else a.push(2)` emitted `if (c) { a.push(1); }` at exit 0: the braceless consequent's `collectExpr` broke at a statement keyword or a newline but not at a same-line `else`, so it collected `a.push(1) else a.push(2)` as one bare expression and acorn kept `a.push(1)`. Same root: a one-line `else if` chain lost its structure (the middle `if` became an unconditional sibling, the final `else` vanished), the dangling-else nesting `if (a) if (b) x else y` lost `y`, and an `else` after a non-`if` statement (`foo() else bar()`, `x = 1 else 2`, `return 1 else 2`) compiled with the `else` dropped. The S437 fix (#1106) had covered only the `;`- and newline-separated spellings. Related, still open: g-braceless-if-else-both-lifting-drops-the-else-and-leaks-a-block-scoped-name (S397) — its `if (cond) lift 1; else lift 2` now keeps the `else` (S437), but the tilde slot is still `let`-declared inside the then-block, so `~` after the if is broken; not fixed here. Fixed S462: the `else` ends the expression, `parseOneIfStmt` takes it (dangling else binds to the nearest `if`), and an `else` nothing can claim is E-STMT-UNEXPECTED-TOKEN. **Scope of the guarantee:** an `else` the parser reads is either bound to an `if` or refused — with ONE pre-existing exception, the §17.4a `for/lift … else` empty-state body, which parses as before and is still dropped at codegen (g-for-lift-else-empty-state-body-dropped-s462). Review round 1 (S462) added: a one-statement handler whose if/else is NESTED (`{ if (@c) if (@d) a else b }`, `{ while (…) if (@c) a else b }`) now takes the statement path too (pinned `markup-handler/s462-handler-nested-if-else`, `markup-handler/s462-handler-while-body-if-else`); the if/else reroute exposed client templates' unlowered `${@cell}` (a REGRESSION for `onclick={ if (@c) { @s = `x ${@n}` } else { … } }`), closed by the structural template emitter (g-client-template-interpolation-lowering-needs-a-structural-emitter, RESOLVED). Braceless bodies are on their way out: bryan ruled Q23 (b) at S462 (braces REQUIRED; braceless retires via §63) — this fix keeps them CORRECT until the retirement lands. Corpus: zero pre-existing same-line sites in examples / samples / conformance / stdlib / benchmarks / giti / flogence / gauntlet-r25 (the emit differential in `docs/changes/s462-braceless-if-else-dropped/progress.md`). Two more sites of the same root, also fixed: `for (…) { if (c) lift x else lift 0 }` ran the else-lift UNCONDITIONALLY, and the markup value-form `${ if (@c) "yes" else "no" }` rendered "" for false. Pins: `compiler/tests/unit/braceless-if-else-not-dropped.test.js` (28, executes both branches; 20 fail on base) + `conformance/cases/control-flow/s462-*` (3; all fail on base).
+
+### g-spec-if-stmt-grammar-omits-braceless-body-s462 — SPEC §50.2.1 `if-stmt-logic` requires a `block` body and never defines `else-clause`; both implementations accept a braceless body and ~3,200 corpus sites use one — `NEW S462; MED; open (RULED Q23 (b) S462 — braces required; retirement dispatch pending)`
+
+<!-- @gap id=g-spec-if-stmt-grammar-omits-braceless-body-s462 sev=MED status=open locus=compiler/SPEC.md(§50.2.1 if-stmt-logic, §49.2.1 loop-body, §17.6.1) prov=dispatch:s462-braceless-if-else-dropped -->
+
+The only grammar for a bare `if` statement is §50.2.1 `if-stmt-logic ::= 'if' '(' condition-expr ')' block else-clause?` — `block` is required and `else-clause` is not defined anywhere; §49.2.1 likewise gives `loop-body ::= '{' loop-statement* '}'`. §17.6.1 defers a bare `if` to "standard if-statement semantics". Yet SPEC prose presumes braceless bodies compile (§49.2.3 "a block body, a braceless body, or the next statement"; §34 E-CONDITION-HEAD-UNPARENTHESIZED "Does NOT fire: … any braceless body (#933)"), impl#1 implements them (`parseOneIfStmt` braceless limb; #933 while/for; #1106 S437 braceless else), and the bootstrap implements them (`parse.scrml` `parseBlockOrStmt`: "`if (c) stmt` without braces is one statement in a block of its own"). Heuristic census at S462: **3,225** braceless `if` bodies in **189** `.scrml` files (stdlib 242, examples 190, conformance 64, samples 26, docs 36, giti 43, flogence 249, gauntlet-r25 12, compiler/self-host-v2 2,363). Ruling owed — recommendation: ratify the shipped form, `if-stmt-logic ::= 'if' '(' condition-expr ')' if-body ('else' (if-stmt-logic | if-body))?`, `if-body ::= block | statement`, with the dangling-else rule (an `else` binds to the nearest unmatched `if`) and the same `statement` alternative on `loop-body`. Refusing braceless bodies instead would be newly-rejecting over that whole population. **RULED S462 (bryan, Q23 (b)): braces are REQUIRED** — the grammar text stands, and braceless bodies retire through §63 (W-lint, a `scrml fix` rule, then E-), so the ratify recommendation above is declined; the census is the migration population. Same question for loops: g-braceless-loop-body-is-accepted-against-the-normative-grammar (S413).
+
+### g-bootstrap-semicolon-braceless-else-rejected-s462 — the bootstrap refuses `if (c) a; else b` (E-SCOPE-001 "`else` is not declared"), which impl#1 accepts since S437 — `NEW S462; MED; open`
+
+<!-- @gap id=g-bootstrap-semicolon-braceless-else-rejected-s462 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseIf — the braceless then-body's terminating `;` is consumed as a statement end, so `isWord(t, "else")` never sees the `else`) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+
+Probed S462 through `slice-m2/lowered.js` `frontEnd`: `if (c) @r = "a" else @r = "b"` → no diagnostics (the else is kept — the bootstrap's recursive-descent expression parser stops at `else` naturally); `if (c) @r = "a"; else @r = "b"` → E-SCOPE-001 "`else` is not declared". impl#1 accepts the `;` spelling (#1106, pinned by `control-flow/s437-braceless-else-in-failable-arm`, which `docs/bootstrap-conformance.md` lists as a bootstrap FAIL with exactly this E-SCOPE-001). Fix direction: in `parseIf`, after a braceless then-body, look past one `;` (and comments) for an `else`, braceless consequent only — as impl#1's `parseOneIfStmt` does.
+
+### g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 — the bootstrap reports an `else` with no `if` (`@r = "a" else @r = "b"`) as E-SCOPE-001 "`else` is not declared", not E-STMT-UNEXPECTED-TOKEN — `NEW S462; LOW; open`
+
+<!-- @gap id=g-bootstrap-unclaimed-else-misdiagnosed-as-undeclared-s462 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseStmt — a statement-leading keyword `else` falls through to an expression statement and the name resolver reports it) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+
+Loud on both implementations, so no program is miscompiled — but the bootstrap's message names a missing declaration rather than the misplaced `else`, and the conformance case `control-flow/s462-else-without-if-pos` (expects E-STMT-UNEXPECTED-TOKEN) is a bootstrap FAIL for it.
+
+### g-match-nested-in-match-arm-inner-arm-never-renders-s465 — a `<match>` placed inside another `<match>`'s arm body mounts its own `data-scrml-match-mount` slot but NEVER renders the inner arm: `<match on=@col><Red><match on=@col><Red><button id="b">…</button></>…</match></>…</match>` leaves `#b` absent from the DOM (Chromium + happy-dom), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-match-nested-in-match-arm-inner-arm-never-renders-s465 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(buildMatchArms re-parses the outer arm body; the inner match-block it yields is rendered as a mount slot but is not reached by collectMatchBlocks(fileAST) for its render fn + dispatcher — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+### g-runtime-chunk-gate-skip-rules-match-string-text-s465 — the emitted-text helper gate (`chunksForEmittedHelpers`) applies its skip rules inside string / template / markup text, so user text naming an internal `_scrml_*` helper can suppress shipping its chunk → ReferenceError at run time — `NEW S465; LOW; open`
+<!-- @gap id=g-runtime-chunk-gate-skip-rules-match-string-text-s465 sev=LOW status=open locus=compiler/src/codegen/runtime-chunks.ts(chunksForEmittedHelpers — CLIENT_DECL and same-line `typeof` skip rules) prov=review:s465-braceless-r5 -->
+Found by the S465 round-5 review of the brace-less else fix (probes `scratchpad/rv5/r5h.mjs`, `r5i.mjs`). Triggers: lifted `<pre>function _scrml_deep_set(obj, path, v)</pre>` in the same file as a deep-set handler; a cell `<note> = "let _scrml_deep_set"`; `@o.a.b = "typeof _scrml_deep_set".length` on every deep-set line. Compile exits 0, click throws `_scrml_deep_set is not defined`; base lowered those handlers inline and worked. 0 corpus sites. Fix direction: mask string, template and comment contents before applying the CLIENT_DECL and same-line `typeof` rules, or scope CLIENT_DECL to column-0 declarations. Also: the `runtime-chunks.ts` comment cites `unit/s462-runtime-helper-chunk-index.test.js`, which does not exist — the pin lives in `unit/s462-handler-runtime-helpers-shipped.test.js`.
+
+### g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 — a braceless same-line if/else handler in the `onclick=${…}` spelling, on markup LIFTED inside a component body (`const Panel = <div>${ lift <button onclick=${ if (@c) @o.a.b = 5 else @o.a.b = 9 }>b</button> }</div>`), fails the component body re-parse: E-COMPONENT-021 ("Parse error: expected ';' or a newline to end the statement") cascading into E-COMPONENT-020 / -035 at the use site — `NEW S465; MED; open (pre-existing on cf4b0a6e)`
+
+<!-- @gap id=g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 sev=MED status=open locus=compiler/src/component-expander.ts(reparseSynthesizedFile → native parser; the message is compiler/native-parser/parse-stmt.js's — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r4 -->
+
+Loud, so nothing is miscompiled. The same handler compiles and runs at top level, in a non-lifted component child, in `${ lift … }` outside a component, and in the `{…}` spelling inside the component's lift (Chromium, s462 round 4); only the `${…}` + braceless + component-lift combination reaches the native-parser re-parse that rejects the same-line `else`. The native parser is frozen (#1240), so the fix belongs with whichever path the CE re-parse is moved to.
+
+Found by the s462 round-3 sweep (S465). Identical on origin/main `1c1e9eee5` and the s462 head: the outer arm renders `<div data-scrml-match-mount="match_…"></div>` for the inner match and nothing fills it. Silent non-render. The round-3 chunk walk does reach the inner match's arm bodies (the helper-shipping guard `m-match-in-match` passes), so this is a render-dispatch gap, not a chunk gap.
+
+### g-markup-value-ternary-brace-handler-codegen-invalid-s465 — any `{ … }` event-handler body on an element inside a markup-value ternary (`${ @c ? <button onclick={ @n = 1 }>b</button> : "" }`) fails `E-CODEGEN-INVALID-LOGIC` — single statement, `;`-sequence, if/else and nested-path writes alike — `NEW S465; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-markup-value-ternary-brace-handler-codegen-invalid-s465 sev=LOW status=open locus=compiler/src/codegen(markup-value element attribute lowering does not consume attr.value.handlerBlock — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+Found by the s462 round-3 sweep (S465); identical on origin/main `1c1e9eee5`. Loud (compile fails), so nothing is miscompiled; the bare-call spelling `onclick=fn()` is the workaround.
+
+### g-for-lift-item-does-not-rerender-on-body-condition-cell-s465 — a reactive `${ for (x of @xs) { if (@c) { lift <li>${x}</li> } } }` does NOT re-render when `@c` changes: toggling `@c` to false leaves every `<li>` on screen (Chromium: "12" before and after), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-for-lift-item-does-not-rerender-on-body-condition-cell-s465 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitForStmt reactive list-render — the per-item create fn reads `@c`, but the list effect re-runs `_scrml_reconcile_list` only on the ITERABLE, and the keyed reconcile reuses an existing item, so a body-only dependency never re-creates it)+compiler/src/runtime-template.js(_scrml_reconcile_list) prov=review:s465-braceless-r2 -->
+
+Found by the S239 review of the s462 braceless-else work (round 2, item (f)); identical on origin/main `1c1e9eee5` and the s462 head (executed in Chromium: `#o="12"` before and after `@c = false`). Silent stale render: the item creator is called once per key, so any reactive read inside the loop body other than the item itself is frozen at first render. A fix needs the body's own reactive reads in the list effect's dependency set (re-create on change) or a per-item effect around the body.
+
+### g-for-lift-else-empty-state-body-dropped-s462 — the §17.4a `for/lift … else { … }` empty-state body never renders: `${ for (x of @items) { lift <li>${x}</li> } else { lift <li>none</li> } }` with `@items = []` renders NOTHING (the else body is absent from the emitted JS), at exit 0 — `NEW S462; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-for-lift-else-empty-state-body-dropped-s462 sev=HIGH status=open locus=compiler/src/ast-builder.js(the for/else `else { … }` is carried as an `else`-led bare-expr sibling after the for-stmt — only checkForElseWithoutLift reads it)+compiler/src/codegen(no general for/lift emitter consumes it; only emit-table-for.ts materializes `elseBody`) prov=review:S462-review-of-s462-braceless-if-else-dropped;empirical:s462-braceless-if-else-dropped-compiled-on-base-and-head -->
+
+Executed S462 on origin/main and on the S462 head: both the one-line form and the SPEC §17.4a worked-example layout drop the else body (no `none` text anywhere in the client JS or HTML). The SPEC spelling with `;` after each `lift` (`lift <li>${item.name}</>;`) fails instead, E-CODEGEN-INVALID-LOGIC (`…; else { lift < li …` reaches the output). §17.4a: "If `collection.length === 0` … the `else` body executes exactly once." Not touched by S462: the S462 `else`-boundary change deliberately exempts an `else` after a for-stmt so this shape parses exactly as before; the unit pin `braceless-if-else-not-dropped.test.js` asserts ONLY that it is not rejected as a dangling else. A value-position `const v = for (…) { lift … } else { … }` is refused (E-STMT-UNEXPECTED-TOKEN, with a message naming the value-position `for`); on base it was E-CODEGEN-INVALID-LOGIC. Fix direction: fold the `else` block into `for-stmt.elseBody` at parse time and lower it in the for/lift emitter (the table-for path already does).
+
+### g-braceless-if-else-in-arrow-and-function-expression-body-s462 — a braceless same-line `if (c) a else b` inside an arrow or function-EXPRESSION body (`const g = () => { if (c) a.push(1) else a.push(2) }`, `@xs.forEach(x => { if (@c) @n = 1 else @n = 2 })`) fails E-CODEGEN-INVALID-LOGIC — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-braceless-if-else-in-arrow-and-function-expression-body-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(a block-bodied arrow / function expression body is carried as escape-hatch TEXT, never statement-parsed — the same region the E-CONDITION-HEAD-UNPARENTHESIZED §34 entry names) prov=review:S462-review-of-s462-braceless-if-else-dropped;empirical:s462-braceless-if-else-dropped-compiled-on-base-and-head -->
+
+Loud on base and head (the emitted `… a . push ( 1 ) else a . push ( 2 ) …` fails the emitted-JS gate). The braced form works. Bryan ruled Q23 (b) at S462 — braces are REQUIRED and braceless bodies retire through §63 — so the fix is the retirement (W-lint → `scrml fix` → E-), not teaching the expression body the braceless form.
+
+### g-engine-effect-and-ontransition-braceless-if-else-s462 — a braceless `if (c) @r = "a" else @r = "b"` in an engine state-child `effect=${…}` or an `<onTransition>` body fails E-CODEGEN-INVALID-LOGIC (`_scrml_reactive_set("r", "pos" else …)`) — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-engine-effect-and-ontransition-braceless-if-else-s462 sev=LOW status=open locus=compiler/src/codegen(engine effect= / onTransition body lowering — text path, not the statement list) prov=review:S462-review-of-s462-braceless-if-else-dropped;empirical:s462-braceless-if-else-dropped-compiled-on-base-and-head -->
+
+Loud on base and head. The `;`-separated spelling (`if (@n > 0) @r = "pos"; else @r = "neg"`) works (pinned by `engine/s437-braceless-else-in-effect-bodies`). Retires with braceless bodies (Q23 (b)); until then the braced form is the workaround.
+
+### g-nested-value-form-if-renders-empty-s462 — a NESTED value-form `${ if (@c) { if (@d) {"cd"} else {"c"} } else {"none"} }` renders "" — the inner if/else's value is never lifted, at exit 0 — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-nested-value-form-if-renders-empty-s462 sev=MED status=open locus=compiler/src/codegen(the §17.6.10 value-form sugar — an arm whose single expression is itself an if/else is emitted as a bare statement, not lifted) prov=review:S462-review-of-s462-braceless-if-else-dropped;empirical:s462-braceless-if-else-dropped-compiled-on-base-and-head -->
+
+Executed S462, base and head identical: the client JS carries `"cd";` / `"none";` as bare expression statements and the `<p>` renders empty. Braced throughout, so this is NOT a braceless-body defect and does not retire with Q23 (b). Silent wrong output — MED.
+
+### g-bootstrap-while-in-handler-block-not-parsed-s462 — the BOOTSTRAP does not parse a `while` statement inside a `{ … }` event-handler block: `onclick={ while (@i < 3) { @i = @i + 1 } }` → E-PARSE-OBJECT + E-SCOPE-001 "`while` is not declared" (the block is read as an object literal) — `NEW S462; LOW; open`
+
+<!-- @gap id=g-bootstrap-while-in-handler-block-not-parsed-s462 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(handler-block statement parsing — no `while` statement) prov=empirical:s462-braceless-if-else-dropped-bootstrap-probe -->
+
+Probed S462 through `slice-m2/lowered.js` `frontEnd`. Loud. Makes `markup-handler/s462-handler-while-body-if-else` a bootstrap FAIL (no artifact). `if`/nested-`if`/`else` in a handler block are fine there (`markup-handler/s462-handler-nested-if-else` PASSES on the bootstrap). The two template-cell handler cases are UNSUPPORTED there (the bootstrap parser does not read a template literal in that position).
+
+### g-match-arm-braceless-if-body-refused-s462 — a single-expression match arm whose body is a braceless `if` (`.A :> if (c) a.push(1) else a.push(2)`) is refused (E-STMT-MISSING-SEMICOLON + E-PARSE-001 "not a match arm"); the braced form `.A :> if (c) { … } else { … }` compiles — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-match-arm-braceless-if-body-refused-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(match arm-body collectExpr — an `if` arm body is carried as text, so its braceless consequent is never statement-parsed) prov=dispatch:s462-braceless-if-else-dropped -->
+
+Loud, identical on base and after the S462 fix (which keeps the braced arm form's emit byte-identical). Workaround: brace the arm body, `.A :> { if (c) a.push(1) else a.push(2) }` — that form compiles and runs both branches (pinned in `braceless-if-else-not-dropped.test.js`).
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
@@ -21107,8 +21195,23 @@ handler statement list. Probe: `parseExprToNode("this.x = 2")` gives `assign(tar
 instead of `this`, so the member emit is `<whole expr>.x`. A separate root from the client template-literal defect (g-client-template-interpolation-lowering-needs-a-structural-emitter)
 (checked, per the review's ask). Fix = give ThisExpression a structured node (or slice `raw` to the node's own span).
 
-### g-client-template-interpolation-lowering-needs-a-structural-emitter — a `${@cell}` inside a client template literal is emitted RAW (invalid JS); since S437 this also breaks multi-statement handlers holding a template — `NEW S437; HIGH; carried (S437)`
-<!-- @gap id=g-client-template-interpolation-lowering-needs-a-structural-emitter sev=HIGH status=carried locus=compiler/src/codegen/emit-expr.ts(emitLit — a client-mode template `lit` returns node.raw verbatim; the server-mode emitServerTemplateLit re-scans template TEXT) prov=review:S437-round5-review(two executed silent-miscompile shapes);empirical:S437-round5+landing-reproduced-by-compile -->
+### g-client-template-interpolation-lowering-needs-a-structural-emitter — a `${@cell}` inside a client template literal is emitted RAW (invalid JS); since S437 this also breaks multi-statement handlers holding a template — `NEW S437; HIGH; RESOLVED S462`
+<!-- @gap id=g-client-template-interpolation-lowering-needs-a-structural-emitter sev=HIGH status=resolved locus=compiler/src/codegen/emit-expr.ts(emitLit — a client-mode template `lit` returns node.raw verbatim; the server-mode emitServerTemplateLit re-scans template TEXT) prov=review:S437-round5-review(two executed silent-miscompile shapes);empirical:S437-round5+landing-reproduced-by-compile -->
+
+**⚑ RESOLVED S462 (s462-braceless-if-else-dropped, review round 1) — by the structural emitter (d) asks for.**
+`esTreeToExprNode` now records, NON-enumerably, each multi-quasi template's quasi SOURCE text (sliced by the
+quasi's own offsets — escapes intact) and each `${…}` as a parsed ExprNode (`_tplQuasiRaws` / `_tplExprs`), and a
+no-interpolation template's source text (`_tplSourceRaw`). `emit-expr` `emitTemplateLitStructured` emits from that
+structure (re-parsing `raw` if a clone lost it): a CLIENT template whose source contains `@` lowers its cell reads;
+a template without `@` keeps its raw bytes; nested no-interpolation templates inside a structural emission keep
+their SOURCE text. SERVER-mode templates use the same emitter first; the old text scanner (`emitServerTemplateLit`)
+is now only the fallback for a node with no recoverable structure. The (c) bar, executed against the new emitter
+and origin/main: `` `[${s.replace(/'/g, "")}] tail` `` → `"[its] tail"`; `` `[${`\${s}`}]` `` → the literal `"[${s}]"`;
+`` `[${`\``}]` `` → `` "[`]" ``; escapes/`\${`/multi-line/nested-arrow-template/ternary interiors all equal base.
+(`` `${x /* it's */} tail` `` is refused by the BLOCK SPLITTER — E-CTX-003 — on base and head alike; a separate,
+loud limit.) The five XFAIL pins now pass and their marks are removed; the S462 handler cases
+`markup-handler/s462-handler-if-else-template-cell-{true,false}` pin the handler shapes.
+
 
 **(a) The regression this change ships.** §5.2.3 multi-statement handlers now lower through the function-body path
 (S437 round 3). That path reaches `emitLit`, which returns a client template literal's `raw` VERBATIM, so

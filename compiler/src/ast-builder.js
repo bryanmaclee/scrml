@@ -6692,6 +6692,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `obj.x = function() {...}` truncated at `=` and emitted an orphan
         // function-decl. (Function-as-call-arg already worked because it sits inside
         // `(`...`)` and never reached depth 0 here.)
+        //
+        // S462 — a depth-0 `else` ENDS the expression. No scrml expression
+        // contains `else` at its own top level (if-as-expression is handled
+        // before collectExpr is entered; a match wildcard arm's `else` is an
+        // arm boundary, below; a member `x.else` is guarded by the `.` check),
+        // so the only thing it can be is the `else` of an enclosing braceless
+        // `if`. The newline-crossing break below already stopped there when the
+        // `else` sat on its OWN line; on the SAME line nothing stopped it, so
+        // `if (c) a.push(1) else a.push(2)` collected `a.push(1) else a.push(2)`
+        // as ONE bare expression, acorn parsed `a.push(1)` and the rest — the
+        // whole `else` branch — was dropped from the emitted JS at exit 0.
+        // Stop here and let `parseOneIfStmt` take it (or reject it as dangling).
+        // EXCEPT when this collection is itself an `if` construct carried as text
+        // (a single-expression match arm body `.A :> if (c) { … } else { … }`):
+        // `if` is a statement keyword, so a depth-0 `if` can only be the FIRST
+        // part, and the `else` then belongs to it.
+        if (parts.length > 0 && parts[0]?.trim() !== "if" && tok !== _headBodyTok && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
+          break;
+        }
         if (parts.length > 0 && tok !== _headBodyTok && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           const _lastPart = parts[parts.length - 1]?.trim() ?? "";
           // RHS context: the previous part is an operator/punctuation that
@@ -7591,6 +7610,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Guard: keywords inside markup text content (angleDepth > 0) are text, not code.
         // Guard (Bug M, 2026-04-26): `function` / `fn` after expression-RHS context
         // is a function expression — keep collecting. See collectExpr above.
+        // S462 — a depth-0 `else` ends the lifted expression too (see collectExpr):
+        // `if (c) lift a else lift b`. Same exception as collectExpr: a lifted
+        // value that is itself an `if` (`lift if (c) { … } else { … }`) keeps its
+        // own `else`.
+        if (parts.length > 0 && parts[0]?.trim() !== "if" && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
+          break;
+        }
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           // §42.2.4 (S462): `is given` is one operator — see collectExpr.
           let _isFnExprAfterRhs = givenContinuesIsOperator();
@@ -8511,7 +8537,47 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   function rejectDanglingElse(prevNode) {
     const t = peek();
     if (!(t.kind === "KEYWORD" && t.text === "else")) return false;
-    if (!prevNode || prevNode.kind !== "if-stmt") return false;
+    // S462 — widened from "directly after an if-stmt" to "any statement-leading
+    // `else` that nothing can claim". collectExpr now ENDS an expression at a
+    // depth-0 `else` (so a braceless `if (c) a else b` keeps its else branch);
+    // the same cut means `foo() else bar()` / `x = 1 else 2` — an `else` after
+    // a statement that is not an `if` — now reaches here instead of being
+    // swallowed into the previous expression and silently dropped by acorn.
+    // Two statement-leading `else`s ARE legitimate and are left untouched:
+    //   - a match wildcard arm, `else :> body` (an arm arrow follows), and
+    //   - the §17.4a `for (…) { … } else { … }` empty-state block, which the
+    //     parser carries as an `else`-led bare-expr after the for-stmt
+    //     (checkForElseWithoutLift / codegen read it there).
+    if (matchArrowGlyphAt(peek, 1) != null) return false;
+    if (prevNode && prevNode.kind === "for-stmt") return false;
+    // S462 review — an `else` after a VALUE-position `for` (`const v = for (…) { lift … }
+    // else { … }`) is a for…else, not an if/else: name it as such. The §17.4a empty-state
+    // `else` is defined on a `for/lift` loop; the compiler does not lower it after a
+    // value-position `for`, so it is refused rather than dropped.
+    if (prevNode && prevNode.forExpr && typeof prevNode.forExpr === "object") {
+      errors.push(new TABError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        "E-STMT-UNEXPECTED-TOKEN: this `else` follows a `for` used as a value " +
+        "(`const v = for (…) { lift … } else { … }`). The §17.4a empty-state `else` is not " +
+        "supported on a value-position `for`. Compute the empty case separately, e.g. " +
+        "`const v = for (…) { lift … }` then `if (v.length == 0) { … }`. (SPEC §17.4a)",
+        tokenSpan(t, filePath),
+      ));
+      consume(); // the `else`
+      return true;
+    }
+    if (!prevNode || prevNode.kind !== "if-stmt") {
+      errors.push(new TABError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        "E-STMT-UNEXPECTED-TOKEN: `else` has no `if` to belong to. Only an `if` " +
+        "statement takes an `else`, and the statement before this one is not an `if`. " +
+        "Write `if (c) a else b` (or `if (c) { a } else { b }`), or remove the `else`." +
+        " (SPEC §4, §17)",
+        tokenSpan(t, filePath),
+      ));
+      consume(); // the `else`
+      return true;
+    }
     // Name what actually ended the `if` — the nearest significant token before
     // this `else` (comments / blank tokens are not separators: S437 round 5 F1).
     let back = i - 1;
@@ -20017,6 +20083,30 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
     // it — which is also what lets the §19.4.3 check see the call as handled
     // (S440: E-ERROR-002 follows the unhandled call in every handler form).
     if (stmts[0] && stmts[0].kind === "guarded-expr") {
+      value.handlerBlock = { stmts };
+      report(nonFatal);
+      return;
+    }
+    // S462 — an `if` with an `else` likewise: the single-expression path lowers
+    // the value as TEXT, and for a braceless consequent
+    // (`onclick={ if (@c) @n = 1 else @n = 2 }`) that text lowering read the
+    // `else` as part of the consequent's expression and produced malformed JS
+    // (`_scrml_reactive_set("n", 1 else …)`). The statement view has the
+    // if/else as structure, so it always takes it.
+    // Review round 1: ANY if-with-else in the statement's tree, not only a top-level
+    // one — `{ if (@c) if (@d) a else b }` (the else is the INNER if's) and
+    // `{ while (…) if (@c) a else b }` reached the text path the same way.
+    const _hasIfElse = (n, seen = new Set()) => {
+      if (!n || typeof n !== "object" || seen.has(n)) return false;
+      seen.add(n);
+      if (Array.isArray(n)) return n.some((x) => _hasIfElse(x, seen));
+      if (n.kind === "if-stmt" && n.alternate != null) return true;
+      for (const k of ["consequent", "alternate", "body"]) {
+        if (n[k] && _hasIfElse(n[k], seen)) return true;
+      }
+      return false;
+    };
+    if (stmts[0] && _hasIfElse(stmts[0])) {
       value.handlerBlock = { stmts };
       report(nonFatal);
       return;

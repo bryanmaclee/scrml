@@ -1,0 +1,5 @@
+<c> = true
+<d> = false
+<x> = 0
+<button id="b1" onclick={ if (@c) if (@d) @x = 1 else @x = 2 }>1</button>
+<p id="ox">${@x}</p>
