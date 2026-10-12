@@ -223,3 +223,46 @@ describe("S462 r2/r3 F2 — §14.10: `<col>: Col` types the cell, a bare `.V` wr
     expect(compileAndMount(src, "str").errors).toContain("E-VARIANT-AMBIGUOUS");
   });
 });
+
+// Review round 4 (S465) — markup LIFTED inside a component body / `<match>` arm. The pre-emit
+// chunk walk never visited the lifted markup's handler blocks; the chunk set is now completed
+// from the emitted text against the runtime-derived helper index (runtime-chunks.ts
+// chunksForEmittedHelpers). Every lift position × every helper family, both arms executed.
+const LO = `<c> = true\n<o> = { a: { b: 1 } }\n<xs> = [1, 2]\n<n> = 1\n`;
+const LP = `<p id="o">\${@o.a.b}|\${@xs[0]}|\${@n}</p>\n`;
+const LH = [
+  ["if/else", `{ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`, ["5|1|1", "9|1|1"]],
+  ["braceless", `{ if (@c) @o.a.b = 5 else @o.a.b = 9 }`, ["5|1|1", "9|1|1"]],
+  ["multi-line", `{\n  if (@c) {\n    @o.a.b = 5\n  } else {\n    @o.a.b = 9\n  }\n}`, ["5|1|1", "9|1|1"]],
+  ["`;`-sequence", `{ @n = 2; @o.a.b = 7 }`, ["7|1|2", "7|1|2"]],
+  ["index set", `{ if (@c) { @xs[0] = 5 } else { @xs[0] = 9 } }`, ["1|5|1", "1|9|1"]],
+  ["compound", `{ if (@c) { @o.a.b += 2 } else { @o.a.b -= 1 } }`, ["3|1|1", "2|1|1"]],
+  ["delete", `{ if (@c) { delete @o.a.b } else { @o.a.b = 3 } }`, ["|1|1", "3|1|1"]],
+];
+const lBtn = (h, dollar = false) => `<button id="b" onclick=${dollar ? "$" : ""}${h}>b</button>`;
+const lArm = (inner) => `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n<match on=@col>\n  <Red><div>${inner}</div></>\n  <Blue><span>blue</span></>\n</match>\n`;
+const LS = [
+  ["component, `${ if … { lift … } }`", (h) => `const Panel = <div>\${ if (@n > 0) { lift ${lBtn(h)} } }</div>\n<Panel/>\n`],
+  ["component, `${ if … { lift … } }`, onclick=${…}", (h) => `const Panel = <div>\${ if (@n > 0) { lift ${lBtn(h, true)} } }</div>\n<Panel/>\n`],
+  ["component, `${ lift … }`", (h) => `const Panel = <div>\${ lift ${lBtn(h)} }</div>\n<Panel/>\n`],
+  ["component, `${ for … { lift … } }`", (h) => `const Panel = <div>\${ for (const x of [1]) { lift ${lBtn(h)} } }</div>\n<Panel/>\n`],
+  ["<match> arm, `${ lift … }`", (h) => lArm(`\${ lift ${lBtn(h)} }`)],
+  ["<match> arm, `${ if … { lift … } }`", (h) => lArm(`\${ if (@n > 0) { lift ${lBtn(h)} } }`)],
+];
+
+describe("S462 r4 — lifted-markup handlers in a component / `<match>` arm ship their helpers (executed)", () => {
+  for (const [sl, sf] of LS) {
+    for (const [hl, h, want] of LH) {
+      // Braceless `onclick=${ if (c) a else b }` in a component's lift is E-COMPONENT-021 on
+      // cf4b0a6e too (CE re-parse; filed g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465).
+      if (sl.includes("onclick=${") && hl === "braceless") continue;
+      test(`${sl} × ${hl}`, async () => {
+        const { errors } = compileAndMount(LO + sf(h) + TOG + LP, "lift");
+        expect(errors).toEqual([]);
+        const { out, seen } = await bothArms();
+        expect(seen).toEqual([]);
+        expect(out).toEqual(want);
+      });
+    }
+  }
+});

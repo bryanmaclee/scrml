@@ -26,7 +26,13 @@
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync } from "fs";
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync } from "fs";
+import {
+  RUNTIME_CHUNKS,
+  RUNTIME_HELPER_DEFINING_CHUNK,
+  RUNTIME_HELPER_AMBIGUOUS,
+  chunksForEmittedHelpers,
+} from "../../src/codegen/runtime-chunks.ts";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -65,7 +71,12 @@ export function undefinedHelperCalls(files) {
   const missing = new Set();
   for (const [name, src] of Object.entries(files)) {
     if (!name.endsWith(".client.js")) continue;
-    for (const m of src.matchAll(/(?<![\w.$])(_scrml_\w+)\s*\(/g)) {
+    // Comments are not calls: an emitted diagnostic comment such as
+    // `// client cannot evaluate _scrml_sql (E-CG-006)` must not read as one. Strips
+    // `//` comments that start a line or follow whitespace / `;` `{` `}` (never the
+    // `//` of a `https://` string) and `/* … */` blocks.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[\s;{}])\/\/[^\n]*/g, "$1");
+    for (const m of code.matchAll(/(?<![\w.$])(_scrml_\w+)\s*\(/g)) {
       if (!defs.has(m[1]) && !guarded.has(m[1])) missing.add(m[1]);
     }
   }
@@ -205,4 +216,138 @@ describe("S462 r2 — every runtime helper an if/else handler calls is shipped",
     };
     expect(undefinedHelperCalls(files)).toEqual(["_scrml_deep_set"]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Review round 4 (S465) — markup LIFTED inside a component body or a `<match>` arm.
+//
+//   const Panel = <div>${ if (@c) { lift <button onclick={ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }>b</button> } }</div>
+//
+// called `_scrml_deep_set` with no `utilities` chunk shipped. This was the FOURTH position
+// in which the pre-emit chunk walk failed to predict a helper an emitter wrote (handler
+// lists → `<match>` arms → engine bodies → lifted markup), so the fix is not a fifth walk
+// case: the chunk set is now completed FROM THE EMITTED TEXT against an index DERIVED from
+// the runtime chunk sources (runtime-chunks.ts RUNTIME_HELPER_DEFINING_CHUNK /
+// chunksForEmittedHelpers, applied by emit-client gateChunksByEmittedReference over the
+// emitted lines AND the final body). Any position that emits a helper ships it.
+// ---------------------------------------------------------------------------
+const LO = `<c> = true\n<o> = { a: { b: 1 } }\n<xs> = [1, 2]\n<n> = 1\n`;
+const LP = `<p id="o">\${@o.a.b}|\${@xs[0]}|\${@n}</p>\n`;
+const LH = {
+  ifelse: `{ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }`,
+  braceless: `{ if (@c) @o.a.b = 5 else @o.a.b = 9 }`,
+  multiline: `{\n  if (@c) {\n    @o.a.b = 5\n  } else {\n    @o.a.b = 9\n  }\n}`,
+  seq: `{ @n = 2; @o.a.b = 7 }`,
+  index: `{ if (@c) { @xs[0] = 5 } else { @xs[0] = 9 } }`,
+  compound: `{ if (@c) { @o.a.b += 2 } else { @o.a.b -= 1 } }`,
+  del: `{ if (@c) { delete @o.a.b } else { @o.a.b = 3 } }`,
+};
+const lBtn = (h, dollar = false) => `<button id="b" onclick=${dollar ? "$" : ""}${h}>b</button>`;
+const lArm = (inner) => `type Col:enum = { Red, Blue }\n<col>: Col = .Red\n<match on=@col>\n  <Red><div>${inner}</div></>\n  <Blue><span>blue</span></>\n</match>\n`;
+export const LIFT_SHAPES = {
+  "comp-if-lift": (h) => `const Panel = <div>\${ if (@n > 0) { lift ${lBtn(h)} } }</div>\n<Panel/>\n`,
+  "comp-if-lift-dollar": (h) => `const Panel = <div>\${ if (@n > 0) { lift ${lBtn(h, true)} } }</div>\n<Panel/>\n`,
+  "comp-bare-lift": (h) => `const Panel = <div>\${ lift ${lBtn(h)} }</div>\n<Panel/>\n`,
+  "comp-for-lift": (h) => `const Panel = <div>\${ for (const x of [1]) { lift ${lBtn(h)} } }</div>\n<Panel/>\n`,
+  "match-bare-lift": (h) => lArm(`\${ lift ${lBtn(h)} }`),
+  "match-if-lift": (h) => lArm(`\${ if (@n > 0) { lift ${lBtn(h)} } }`),
+};
+export const LIFT_HANDLERS = LH;
+export const LIFT_FIXTURES = [];
+for (const [sk, sf] of Object.entries(LIFT_SHAPES)) {
+  for (const [hk, h] of Object.entries(LH)) {
+    // `onclick=${ if (c) a else b }` (braceless, `${}` form) inside a component's lift is
+    // E-COMPONENT-021 on cf4b0a6e too — the CE body re-parse goes through the native parser,
+    // which rejects the same-line else there. Filed
+    // (g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465); not this fix.
+    if (sk === "comp-if-lift-dollar" && hk === "braceless") continue;
+    LIFT_FIXTURES.push([`${sk}-${hk}`, LO + sf(h) + TOG + LP]);
+  }
+}
+LIFT_FIXTURES.push(["reviewer-repro", `<c> = true\n<o> = { a: { b: 1 } }\nconst Panel = <div>\${ if (@c) { lift <button class="bb" onclick={ if (@c) { @o.a.b = 5 } else { @o.a.b = 9 } }>b</button> } }</div>\n<Panel/>\n<p id="o">\${@o.a.b}</p>\n`]);
+
+describe("S462 r4 — markup lifted in a component body / `<match>` arm ships its helpers", () => {
+  for (const [name, src] of LIFT_FIXTURES) {
+    test(name, () => {
+      const { errors, files } = build(src, `r4-${name}`);
+      expect(errors).toEqual([]);
+      expect(Object.keys(files).some((f) => f.endsWith(".client.js"))).toBe(true);
+      expect(undefinedHelperCalls(files)).toEqual([]);
+    });
+  }
+});
+
+describe("S462 r4 — the runtime helper index is derived, complete and unambiguous", () => {
+  test("no `_scrml_*` name is declared at top level in two non-stdlib chunks", () => {
+    expect([...RUNTIME_HELPER_AMBIGUOUS]).toEqual([]);
+  });
+
+  test("every top-level `_scrml_*` function a non-stdlib chunk declares maps back to that chunk", () => {
+    let checked = 0;
+    for (const [chunk, src] of Object.entries(RUNTIME_CHUNKS)) {
+      if (chunk.startsWith("stdlib-")) continue;
+      for (const m of src.matchAll(/(?:^|\n)(?:async\s+)?function\*?\s+(_scrml_\w+)/g)) {
+        expect([m[1], RUNTIME_HELPER_DEFINING_CHUNK.get(m[1])]).toEqual([m[1], chunk]);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(150);
+    expect(RUNTIME_HELPER_DEFINING_CHUNK.get("_scrml_deep_set")).toBe("utilities");
+  });
+
+  test("chunksForEmittedHelpers: a reference ships its chunk; typeof / string / client-declared / member do not", () => {
+    const run = (text) => { const s = new Set(["core"]); chunksForEmittedHelpers(text, s); return [...s].sort(); };
+    expect(run(`_scrml_deep_set(_scrml_reactive_get("o"), ["a"], 1);`)).toEqual(["core", "utilities"]);
+    expect(run(`if (typeof _scrml_deep_set === "function") _x();`)).toEqual(["core"]);
+    // The guarded use on the guard's own line is part of the optional-helper idiom (the
+    // corpus emits both spellings: `_scrml_register_rehydrator`, `_scrml_chunk_loading`).
+    expect(run(`if (typeof _scrml_deep_set === "function") _scrml_deep_set(o, ["a"], 1);`)).toEqual(["core"]);
+    expect(run(`if (typeof _scrml_deep_set !== "undefined" && _scrml_deep_set) {}`)).toEqual(["core"]);
+    expect(run(`if (typeof _scrml_deep_set === "function") _x();\n_scrml_deep_set(o, ["a"], 1);`)).toEqual(["core", "utilities"]);
+    expect(run(`const k = "_scrml_deep_set";`)).toEqual(["core"]);
+    expect(run(`function _scrml_deep_set(a) { return a; }\n_scrml_deep_set(1);`)).toEqual(["core"]);
+    expect(run(`obj._scrml_deep_set(1);`)).toEqual(["core"]);
+    expect(run(`_scrml_deep_set_x(1);`)).toEqual(["core"]);
+  });
+});
+
+// The broad guard: the dangling-helper invariant over a large fixed compiled set, so the
+// next position a walk misses is caught here rather than by a reviewer. Every top-level
+// `examples/*.scrml` and `samples/compilation-tests/*.scrml`, compiled one file at a time
+// (the way a page loads against its own pruned runtime). The full corpus (examples/,
+// samples/, conformance/cases/, stdlib/, benchmarks/) is measured by the round-4 corpus
+// differential (docs/changes/s462-braceless-if-else-dropped/progress.md).
+const REPO = join(import.meta.dir, "..", "..", "..");
+function topLevelScrml(dir) {
+  const abs = join(REPO, dir);
+  if (!existsSync(abs)) return [];
+  return readdirSync(abs)
+    .filter((f) => f.endsWith(".scrml") && statSync(join(abs, f)).isFile())
+    .sort()
+    .map((f) => join(abs, f));
+}
+describe("S462 r4 — broad set: no emitted `_scrml_*(` call without a shipped definition", () => {
+  const sources = [...topLevelScrml("examples"), ...topLevelScrml("samples/compilation-tests")];
+  test("every compiled page ships every helper it calls", () => {
+    expect(sources.length).toBeGreaterThan(300);
+    const dangling = [];
+    let pages = 0;
+    for (const file of sources) {
+      const rel = file.slice(REPO.length + 1);
+      const outDir = join(TMP, "broad", rel.replace(/[\\/]/g, "__"));
+      try {
+        compileScrml({ inputFiles: [file], outputDir: outDir, write: true, verbose: false, log: () => {} });
+      } catch { continue; }
+      if (!existsSync(outDir)) continue;
+      const files = {};
+      for (const f of readdirSync(outDir)) if (f.endsWith(".js")) files[f] = readFileSync(join(outDir, f), "utf8");
+      if (!Object.keys(files).some((f) => f.endsWith(".client.js"))) continue;
+      pages++;
+      const missing = undefinedHelperCalls(files);
+      if (missing.length) dangling.push(`${rel}: ${missing.join(", ")}`);
+    }
+    expect(pages).toBeGreaterThan(200);
+    if (dangling.length) console.log("dangling runtime helper calls:\n  " + dangling.join("\n  "));
+    expect(dangling).toEqual([]);
+  }, 900000);
 });

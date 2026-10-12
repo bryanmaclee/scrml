@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 4 |
-| MED | 602 | 6 |
+| MED | 603 | 6 |
 | LOW | 360 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -63,6 +63,12 @@ Loud on both implementations, so no program is miscompiled — but the bootstrap
 ### g-match-nested-in-match-arm-inner-arm-never-renders-s465 — a `<match>` placed inside another `<match>`'s arm body mounts its own `data-scrml-match-mount` slot but NEVER renders the inner arm: `<match on=@col><Red><match on=@col><Red><button id="b">…</button></>…</match></>…</match>` leaves `#b` absent from the DOM (Chromium + happy-dom), at exit 0 — `NEW S465; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-match-nested-in-match-arm-inner-arm-never-renders-s465 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(buildMatchArms re-parses the outer arm body; the inner match-block it yields is rendered as a mount slot but is not reached by collectMatchBlocks(fileAST) for its render fn + dispatcher — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r3 -->
+
+### g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 — a braceless same-line if/else handler in the `onclick=${…}` spelling, on markup LIFTED inside a component body (`const Panel = <div>${ lift <button onclick=${ if (@c) @o.a.b = 5 else @o.a.b = 9 }>b</button> }</div>`), fails the component body re-parse: E-COMPONENT-021 ("Parse error: expected ';' or a newline to end the statement") cascading into E-COMPONENT-020 / -035 at the use site — `NEW S465; MED; open (pre-existing on cf4b0a6e)`
+
+<!-- @gap id=g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 sev=MED status=open locus=compiler/src/component-expander.ts(reparseSynthesizedFile → native parser; the message is compiler/native-parser/parse-stmt.js's — PA-LOCATED-NOT-TRACED) prov=review:s465-braceless-r4 -->
+
+Loud, so nothing is miscompiled. The same handler compiles and runs at top level, in a non-lifted component child, in `${ lift … }` outside a component, and in the `{…}` spelling inside the component's lift (Chromium, s462 round 4); only the `${…}` + braceless + component-lift combination reaches the native-parser re-parse that rejects the same-line `else`. The native parser is frozen (#1240), so the fix belongs with whichever path the CE re-parse is moved to.
 
 Found by the s462 round-3 sweep (S465). Identical on origin/main `1c1e9eee5` and the s462 head: the outer arm renders `<div data-scrml-match-mount="match_…"></div>` for the inner match and nothing fills it. Silent non-render. The round-3 chunk walk does reach the inner match's arm bodies (the helper-shipping guard `m-match-in-match` passes), so this is a render-dispatch gap, not a chunk gap.
 

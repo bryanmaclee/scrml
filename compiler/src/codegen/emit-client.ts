@@ -6,7 +6,7 @@ import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } fro
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, chunksForEmittedHelpers } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
@@ -214,6 +214,18 @@ function gateChunksByEmittedReference(texts: Iterable<unknown>, chunks: Set<stri
   // The chunks whose own helpers report through `_scrml_error_boundary_log`
   // pull 'errors' by CHUNK_DEPENDENCIES edge (runtime-chunks.ts), closed by the caller.
   if (!chunks.has("errors") && strs.some((t) => ERRORS_CHUNK_REFERENCE.test(t))) add("errors");
+
+  // s462 review round 4 (S465) — THE AUTHORITY for every `_scrml_*` runtime helper.
+  // The table above and the pre-emit walk both PREDICT which helpers some emitter
+  // will write; three review rounds measured them missing a position each time
+  // (handler statement lists, `<match>` arm bodies, engine arms, markup LIFTED in a
+  // component body / `<match>` arm → `_scrml_deep_set is not defined`). This reads
+  // the emitted text against the index DERIVED from the runtime chunk sources
+  // (runtime-chunks.ts RUNTIME_HELPER_DEFINING_CHUNK): every helper the client names
+  // ships its defining chunk, whichever emitter wrote the call. The entries above
+  // remain for the non-`_scrml_` names (error classes, `animationFrame`) and as
+  // early, cheaper hits; anything they miss this catches.
+  if (chunksForEmittedHelpers(strs.join("\n"), chunks)) added = true;
   return added;
 }
 
