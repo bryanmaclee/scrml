@@ -168,3 +168,39 @@
       host-global-scan --check exit 0, 0 violations · facts (regen) / state / spec-index / bootstrap-conformance / severity
       --check PASS · types-gate OK 182 unchanged · snippet-gate 128/0 · corpus-compile-floor PASS · conflict-marker PASS ·
       delta-lint PASS.
+
+## Review round 4 (S239 re-review of cf4b0a6e, S465 — owner absent)
+- [x] 2026-10-11 brief archived verbatim (01d30d11c); worktree reset to cf4b0a6e6 (asserted); merged origin/main 41af4153a (docs-only) → 620d91424.
+- [x] [HIGH] reproduced in Chromium on cf4b0a6e: the reviewer repro + 36 of 43 lifted shapes (component `${ if … { lift } }`,
+      `onclick=${…}`, `${ lift }`, `${ for … { lift } }`; `<match>` arm bare / if-wrapped lift) × (if/else, braceless, multi-line,
+      `;`-seq, index set, delete) → `_scrml_deep_set is not defined`. (compound `+=`/`-=` used another lowering and worked on base.)
+- [x] ROOT fix per PA direction (no fifth walk case). Registration at the ~1,400 helper-call emit sites across 85 files was judged
+      the same "remember it at every site" failure mode, so the authority is the EMITTED TEXT read against an index DERIVED from
+      the runtime itself: runtime-chunks.ts `RUNTIME_HELPER_DEFINING_CHUNK` (every column-0 `_scrml_*` declaration of every
+      non-stdlib chunk → that chunk; ambiguity refused, pinned empty) + `chunksForEmittedHelpers(text, chunks)` (word-bounded
+      references; quoted / member / `typeof`-guarded-on-the-same-line / client-declared names excluded). emit-client
+      `gateChunksByEmittedReference` applies it at both existing call sites (emitted lines, then the FINAL body before the late
+      re-assembly), so any emitter that writes a helper call ships its chunk — including emitters added later. The pre-emit walk
+      and the POST_EMIT table stay (non-`_scrml_` triggers: error classes, `animationFrame`; non-helper chunk choices).
+- [x] first cut over-included (`utilities` on 800 runtimes, `ifmount` on 76) via the second use in
+      `typeof _scrml_x !== "undefined" && _scrml_x` / `if (typeof _scrml_x === "function") _scrml_x(…)`; refined to treat a use on
+      its guard's own line as part of the idiom (pinned).
+- [x] Chromium (playwright chromium, file://, pruned runtime): r4 matrix 43/43 correct on head (both arms), 36 dangled on base;
+      reviewer rv/ c1–c17 (227 cases, re-run on the refined head): 227/227 identical outcomes head vs base; c5's 15 page
+      errors are file:// CORS on server fetches, SAME on base.
+- [x] Corpus inertness (base = git archive cf4b0a6e6, head = same + the two codegen files; roots examples,samples,conformance,
+      stdlib,benchmarks; 2816 sources / 8481 artifacts each; ext/giti + ext/flogence NOT in this container — skipped): after
+      normalizing the capture dir names and runtime hash, 8480 / 8481 byte-identical; the ONE difference is
+      stdlib/data/form-for's runtime gaining `messages` — its client calls `_scrml_labels_register(map)` unguarded (a previously
+      missing chunk). 0 newly failing / 0 newly passing / 0 diagnostic-code changes / 0 syntax delta. An offline re-run of the
+      helper index over every head client.js finds 0 runtime helpers referenced without their chunk.
+- [x] NEW gap g-component-lift-dollar-braceless-else-ce-reparse-rejects-s465 (MED, pre-existing on cf4b0a6e): braceless
+      `onclick=${ if (c) a else b }` on lifted markup inside a component is E-COMPONENT-021 (native-parser CE re-parse).
+- [x] code + tests committed 93b60f7af (pre-commit suite: 32926 pass / 10 fail / 132 skip — the known env-only set:
+      dev-db-no-side-file ×5, tenant-floor-project-set ×3 (24/24 alone), promote-safety-harness ×1, headless-serve-bind-host ×1).
+- [x] FINAL gates on 93b60f7af + this entry: pre-commit as above · tracking tiers (after pretest) 2498 / 0 · types-gate OK 182
+      unchanged · s34-census --check-new --base origin/main PASS · host-global-scan --check exit 0 · facts (regenerated in
+      93b60f7af) / state / spec-index / bootstrap-conformance / severity --check PASS · snippet-gate 128/0 · corpus-compile-floor
+      PASS · conflict-marker PASS · delta-lint PASS. browser-baseline --check: "PARSER DISAGREES" ×3 (49 vs 48 — the interleave
+      flake); a direct tier run diffed against FAILURE-BASELINE.json: 1 new = each-alias-in-lifted-markup nested-each (the same
+      order-dependent env failure as r2/r3; 8/8 alone), 0 gone. Baseline NOT re-recorded.
