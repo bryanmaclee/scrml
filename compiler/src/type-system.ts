@@ -76,6 +76,7 @@ import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
@@ -11194,10 +11195,13 @@ function annotateNodes(
         // not inside `${...}`). A text child whose trimmed value begins with
         // `match ` or `partial match ` indicates the author wrote control flow
         // outside any logic context.
+        // Decided by PROVENANCE, never by the text: a raw-content body (`<pre>` / `<code>`, §4.17 —
+        // display text, S462 Q21) and a lowered `<md>` text node (`_mdText`, §67.6) are text by
+        // construction, so a line starting `match ` there is prose or a code sample.
         const markupChildrenForMatch = n.children as ASTNodeLike[] | undefined;
-        if (Array.isArray(markupChildrenForMatch)) {
+        if (Array.isArray(markupChildrenForMatch) && !isRawContentElement(n)) {
           for (const child of markupChildrenForMatch) {
-            if (child && typeof child === "object" && child.kind === "text") {
+            if (child && typeof child === "object" && child.kind === "text" && typeof (child as { _mdText?: unknown })._mdText !== "string") {
               const textVal = (child as { value?: unknown }).value;
               if (typeof textVal === "string" && /(?:^|\n)\s*(?:partial\s+)?match\s+/.test(textVal)) {
                 const mSpan = (child.span as Span | undefined) ?? (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };

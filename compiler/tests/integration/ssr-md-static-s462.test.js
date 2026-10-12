@@ -81,3 +81,37 @@ describe("SSR row renderer — static <md>", () => {
     expect(firstPaint).not.toContain(`<b>`);
   });
 });
+
+const SRC_LINK = `<program db="sqlite:./test.db">
+\${
+  < Account authority="server" table="users">
+    id: number
+    name: string
+    url: string
+  </>
+  <Account> @accounts
+}
+<ul><each in=@accounts key=@.id><li><md>
+    [site](\${@.url} "by \${@.name}") ![pic \${@.name}](/img/\${@.id}.png)
+</md></li></each></ul>
+</program>`;
+
+describe("SSR row renderer — a data-led <md> destination (review MED-C)", () => {
+  test("the list keeps its server first paint; a javascript: value is about:blank, the title is text", async () => {
+    const { serverJs, html, errors } = compileBundles(SRC_LINK);
+    expect(errors.filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+    expect(serverJs).toContain("_scrml_ssr_render_each_");
+    const firstPaint = await composeFirstPaint(serverJs, html, [
+      { id: 1, name: '"q <b>', url: "javascript:alert(1)" },
+      { id: 2, name: "ok", url: "/ok" },
+      { id: 3, name: "x", url: " JaVa\tScript:a" },
+    ]);
+    expect(firstPaint).toContain(`<a href="about:blank" title="by &quot;q &lt;b&gt;">site</a>`);
+    expect(firstPaint).toContain(`<a href="/ok" title="by ok">site</a>`);
+    expect(firstPaint).toContain(`<img src="/img/2.png" alt="pic ok">`);
+    expect(firstPaint.match(/href="about:blank"/g)?.length).toBe(2);
+    const list = firstPaint.slice(firstPaint.indexOf("<ul>"), firstPaint.indexOf("</ul>"));
+    expect(list).not.toContain("javascript:");
+    expect(list).not.toContain("<b>");
+  });
+});

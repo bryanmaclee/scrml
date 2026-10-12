@@ -433,6 +433,8 @@ export function lowerMdBlock(block: any, attrs: any[], span: Span, ctx: MdLowerC
     // `[lit, (slot), lit].join("")`: one evaluation per slot; a `not` value joins as "" (§7.4.2).
     const parts: string[] = [];
     const refs: string[] = [];
+    // the same value as segments, for an emitter that builds it piecewise (SSR rows)
+    const mdSegs: Array<{ lit: string } | { slot: string }> = [];
     let anchor = -1;
     let lead = 1; // the `[` before the first part
     for (const s of segs) {
@@ -440,6 +442,7 @@ export function lowerMdBlock(block: any, attrs: any[], span: Span, ctx: MdLowerC
         const lit = exprStringLiteral(String(s.data.text));
         if (anchor < 0) lead += lit.length + 2;
         parts.push(lit);
+        mdSegs.push({ lit: String(s.data.text) });
         continue;
       }
       const sl = slotOf(s.data.index);
@@ -447,11 +450,12 @@ export function lowerMdBlock(block: any, attrs: any[], span: Span, ctx: MdLowerC
       const inner = sl.source.slice(2, -1);
       if (anchor < 0) anchor = sl.start + 2 - (lead + 1); // align the first slot's text with its file offset
       parts.push("(" + inner + ")");
+      mdSegs.push({ slot: inner });
       for (const m of inner.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g)) if (!refs.includes(m[1])) refs.push(m[1]);
     }
     const raw = "[" + parts.join(", ") + "].join(\"\")";
     const exprNode = ctx.parseExpr(raw, anchor >= 0 ? anchor : span.start);
-    return { name, value: { kind: "expr", raw, refs, exprNode, span }, span, _md: true, _mdDataLed: true };
+    return { name, value: { kind: "expr", raw, refs, exprNode, span, mdSegs }, span, _md: true, _mdDataLed: true };
   };
 
   const urlSchemeError = (name: string, value: string, ownerTag: string, prefixOnly: boolean): void => {

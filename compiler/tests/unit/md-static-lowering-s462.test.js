@@ -388,6 +388,35 @@ describe("§67.11 — diagnostics", () => {
   });
 });
 
+describe("E-TYPE-026 is decided by provenance (review MED-A)", () => {
+  test("a line starting `match ` in an <md> body or a <pre>/<code> raw body is text, not control flow", () => {
+    const r = compile(P(`<div>
+    <md>
+        match the order to the invoice
+
+        \`\`\`scrml
+        match x {
+        }
+        \`\`\`
+    </md>
+</div>
+<pre>
+match y {
+}
+</pre>
+<code>match z {</code>`));
+    expect(r.codes).not.toContain("E-TYPE-026");
+    expect(r.codes).toEqual([]);
+  });
+  test("markup text outside those still reports it", () => {
+    const r = compile(P(`<div>
+    match x {
+    }
+</div>`));
+    expect(r.codes).toContain("E-TYPE-026");
+  });
+});
+
 describe("§67.6 — heading ids", () => {
   test("slugs keep Unicode letters, dedupe page-wide against author ids and earlier headings", () => {
     const r = compile(P(`<div id="intro">author</div>
