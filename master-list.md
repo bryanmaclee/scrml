@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `0c185b644` — Merge wrap/s465 into land/s464-batch — **LOCAL-ONLY**
+- `0c185b644` — Merge wrap/s465 into land/s464-batch — **pushed**
 - `980cb3001` — wrap(S461 AUTO): 7 PRs landed; 3 questions for bryan; 6 review findings filed (#1383) — **pushed**
 - `5a895f378` — wrap(s460): 8 PRs landed (#1367–#1374); one presence test ruled and built; copy-in at LAND (#1375); AUTO queue for the first unattended run (#1376) — **pushed**
 - `b4b94f3d6` — wrap(s459): 8 PRs landed (#1359 #1176 #1360–#1365); three arcs in flight; five dPA verdicts await bryan; 15 gaps filed (#1366) — **pushed**
