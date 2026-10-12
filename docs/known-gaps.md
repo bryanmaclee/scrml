@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 249 | 5 |
 | MED | 599 | 6 |
-| LOW | 358 | 0 |
+| LOW | 359 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -97,6 +97,10 @@ TAB already built.
 <!-- @gap id=g-md-list-marker-tab-column-s462 sev=LOW status=open locus=stdlib/md/index.scrml(readList: spaces = indentOf(after); stripCols on `after` from column 0) prov=review:S239-s462-md-phase1-delta(nit 3) -->
 
 CommonMark expands a tab to the next multiple of 4 counted from the start of the LINE (2.2): after `-` at column 0 a tab reaches column 4 (3 columns of space), so the content column is 2 and the item's continuation lines need 2 columns. `readList` re-counts `after` from column 0, so the tab counts as 4 columns, the content column becomes 5, and with "5+ means 1" the rule flips the item's width. Output differs from CommonMark with no W-MD lint. Tabs in md indentation are rare in practice, and a static body that mixes tabs and spaces in its common prefix is already E-MD-INDENT-MIXED. Fix direction: measure the post-marker whitespace from the marker's absolute column (an `indentFrom(s, col)` helper) and strip continuation lines the same way — or lint a tab after a list marker (W-MD-BULLET-MARKER-style, "write spaces"), which fits "one way to do it".
+
+### g-md-slot-regex-rule-misreads-division-after-keyword-member-s465 — the `<md>` slot lexer reads `/` after a keyword-named member (`.in` `.of` `.for` `.new` …) or after postfix `++`/`--` as a regex start → false E-MD-INTERP-UNCLOSED; and re-tokenizing per `/` makes slot lexing quadratic — `NEW S465; LOW; open`
+<!-- @gap id=g-md-slot-regex-rule-misreads-division-after-keyword-member-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(mdRegexLiteralEnd → tokenizeLogic.isRegexContext treats KEYWORD/OPERATOR as regex context) prov=review:s465-md-r2 -->
+Found by the S465 round-2 review of `<md>` phase 2. `<trip> = { in: 90, out: 3 }` + `<md>Speed ${ @trip.in / @trip.out } km/h</md>` → E-MD-INTERP-UNCLOSED (the `<p>` twin compiles and renders "Speed 30 km/h"); also `${ @o.of / 2 } it's / …` and `${ @a++ / 2 } it's / …`. Always a compile error, never a miscompile. Separately, `mdRegexLiteralEnd` re-tokenizes from the slot's `${` to the line end for every `/`: 2,000 divisions in one slot take 32 s (4,000 → 105 s), against 2.5 s for the `<p>` twin. Fix direction: treat a keyword after `.` as an identifier and `++`/`--` as value-ending; tokenize once per slot line.
 
 ### g-md-prose-backtick-dollar-brace-one-slot-s465 — in `<md>` prose, "Write `${` to open a slot and `}` to close it." is read as ONE slot: inside the slot the backtick opens a template literal, so the `${`'s extent runs through the code span to the later `}` (§67.2 token-depth extent) — the author meant two code spans — `NEW S465; LOW; open (record)`
 
