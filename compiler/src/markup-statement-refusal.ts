@@ -22,6 +22,7 @@ export function markupNotRenderedMessage(tag: string): string {
     `Markup written as a statement in a logic block renders only as the single element of an ` +
     `\`if\` / \`given\` branch (§17.6.10); \`lift\` is the explicit way to render from logic (§10.1). ` +
     `If the element's text holds a \`<\` or a quoted closing tag, put that text in an interpolation ` +
-    `(\`\${"a < b"}\`). In a \`function\` body, \`return\` the markup instead (§10.4).`
+    `(\`\${"a < b"}\`). In a \`function\` body, \`return\` the markup and render the call in markup, ` +
+    `\`\${f()}\` (\`lift\` is not valid there, §10.4).`
   );
 }

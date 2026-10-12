@@ -16774,7 +16774,7 @@ that neither way reaches is not rendered, and the compiler SHALL NOT drop it sil
   body without `lift`; a logic `match` arm `{ <p>…</p> }`; a branch whose text the compiler cannot
   read back as exactly one element (`a < b`, or a quoted closing tag, in its text — put such text in
   an interpolation, `${"a < b"}`); and markup in statement position in a `function` body (`return` it
-  instead — `lift` is not valid there, §10.4).
+  and render the call in markup, `${f()}` — `lift` is not valid there, §10.4).
 - When a cascade declines as a whole (an arm outside the value-form grammar keeps every sibling arm
   from converting, so nothing half-renders), each element it leaves unrendered SHALL be reported.
 - A single-element branch is a value-form in every markup `${…}` position, including a `${ if … }`
