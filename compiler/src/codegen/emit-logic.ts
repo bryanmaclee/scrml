@@ -8,6 +8,7 @@ import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMer
 import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
+import { splitFnValueText } from "./fn-valued-bindings.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock, lexicalCallInText } from "../brace-pair.ts";
@@ -1303,28 +1304,11 @@ function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
  * for a head it cannot read (type annotations, a call in a default) or a body the
  * parser refuses. Returns the JS function text, or null.
  */
-export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext): string | null {
-  const t = String(raw ?? "").trim();
-  let head: string;
-  let body: string;
-  const fnM = /^function\b\s*([A-Za-z_$][\w$]*)?\s*\(/.exec(t);
-  if (fnM) {
-    const open = fnM[0].length - 1;
-    let depth = 0;
-    let close = -1;
-    for (let j = open; j < t.length; j++) {
-      if (t[j] === "(") depth++;
-      else if (t[j] === ")") { depth--; if (depth === 0) { close = j; break; } }
-    }
-    if (close < 0) return null;
-    head = t.slice(0, close + 1);
-    body = t.slice(close + 1).trim();
-  } else {
-    const arrow = t.indexOf("=>");
-    if (arrow < 0) return null;
-    head = t.slice(0, arrow).trim();
-    body = t.slice(arrow + 2).trim();
-  }
+export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opts: { async?: boolean } = {}): string | null {
+  const split = splitFnValueText(raw);
+  if (!split) return null;
+  const { head, body } = split;
+  const fnM = split.isFunctionKeyword;
   // The head is kept as written: only a plain parameter list (no annotation, no call).
   if (!/^[\s\w$,()[\]{}.=]*$/.test(head.replace(/^function\b/, "")) || lexicalCallInText(head) !== null) return null;
   if (!isWholeBraceBlock(body)) return null;
@@ -1358,9 +1342,12 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext): st
   // be written in it (null — the caller refuses). Decided on the emitted JS's own
   // syntax, not its text (S465 r5: a `/\bawait\b/` test refused `"await " + x`): the
   // body must parse as a plain function in a module, where `await` is reserved.
-  if (!parsesAsSyncFunctionBody(out)) return null;
+  // S465 r6 — `opts.async`: the value is an async-coloured binding
+  // (fn-valued-bindings.ts), emitted `async` so its body may await.
+  if (!opts.async && !parsesAsSyncFunctionBody(out)) return null;
   const inner = lines.map((l: string) => "  " + l).join("\n");
-  return fnM ? `${head} {\n${inner}\n}` : `${head} => {\n${inner}\n}`;
+  const asyncKw = opts.async ? "async " : "";
+  return fnM ? `${asyncKw}${head} {\n${inner}\n}` : `${asyncKw}${head} => {\n${inner}\n}`;
 }
 
 /** S465 r5 — true when `body` parses as the body of a NON-async function in a module. */

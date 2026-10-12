@@ -57,6 +57,7 @@ import {
   isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners, DEFAULT_HOST,
 } from "../commands/listen.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -148,7 +149,7 @@ function resolveFileAST(ctxOrFileAST: CompileContext | ASTNode): {
 }
 
 /** Collect the top-level logic-block body statements, in source order. */
-function collectTopLevelStatements(fileAST: ASTNode): ASTNode[] {
+export function collectTopLevelStatements(fileAST: ASTNode): ASTNode[] {
   const stmts: ASTNode[] = [];
   const nodes = getNodes(fileAST as never) as unknown as ASTNode[];
   const visit = (node: unknown): void => {
@@ -486,7 +487,10 @@ export function collectAsyncFnNamesFromFile(
   // `seedAsync` carries this file's OWN async IMPORTED locals (a fn calling an
   // async fn imported from ANOTHER lib is async), so the transitive coloring is
   // cross-file-complete (the caller resolves it recursively + memoized).
-  const fns = collectTopLevelStatements(fileAST).filter(isFunctionDecl);
+  const _top = collectTopLevelStatements(fileAST);
+  // S465 r6 — a function-valued top-level binding (`const inner = (p, h) => …`) is a
+  // function for the coloring: its colour flows to the exports that call it.
+  const fns = [..._top.filter(isFunctionDecl), ...fnValuedBindingsOf(_top).map((b) => b.pseudoFn as unknown as ASTNode)];
   // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
   // fn calling `safeCallAsync` (or a `scrml:auth`/`http` async export) is
   // recognized async in the cross-module fixpoint too (else the importing file's

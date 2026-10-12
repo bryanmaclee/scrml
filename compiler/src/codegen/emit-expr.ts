@@ -5060,6 +5060,14 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
       const structured = emitTaggedTemplateFromText(node.raw, ctx);
       if (structured !== null) return structured;
     }
+    // S465 r6 — an async-coloured function-valued binding (fn-valued-bindings.ts):
+    // lowered from the tree as an `async` function, its calls awaited. A body that
+    // cannot be read that way falls to the guarded text path below (refused when it
+    // holds a call — never shipped sync).
+    if (isArrowOrFn && (node as { _asyncFnValue?: boolean })._asyncFnValue === true) {
+      const fn = emitServerFnValueFromText(node.raw, ctx, { async: true });
+      if (fn !== null) return fn;
+    }
     // Everything else on this path is lowered from text: refused when it calls
     // anything (server-text-guard.ts).
     return serverTextLowering(node.raw, ctx, isArrowOrFn ? "a server function value" : "a server expression", {

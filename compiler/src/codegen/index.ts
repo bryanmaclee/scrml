@@ -70,7 +70,10 @@ import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering
 import { dropCascadeOnlyErrors } from "./server-text-guard.ts";
 import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
 import { compilationHasDatabase } from "../tenant-undeclared.ts";
-import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
+import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile, collectTopLevelStatements } from "./emit-tool.ts";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
+import { computeAsyncFnNames } from "./emit-library-shared.ts";
+import { buildCalleeImportMap } from "./scheduling.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -2665,6 +2668,38 @@ export function runCG(input: CgInput): CgOutput {
         if (_inner && typeof _inner === "object" && _inner !== fileAST) {
           _inner._asyncImportedLocals = (fileAST as any)._asyncImportedLocals;
         }
+      }
+      // S465 r6 — the file's ASYNC function-valued top-level bindings (`const w = (a, b) =>
+      // check(a, b)`): coloured by the same fixpoint as function declarations (seeded by the
+      // async imports above, the Promise-returning stdlib imports, `?{}` bodies and this
+      // file's server functions). Stashed beside `_asyncImportedLocals` — the server
+      // callee map awaits a call to one (`buildServerCalleeImportMap`), and the server
+      // module emits the binding `async` (emitReferencedModuleConstLines).
+      {
+        const _top = collectTopLevelStatements(fileAST as never);
+        const _bindings = fnValuedBindingsOf(_top);
+        let _asyncBindings = new Set<string>();
+        if (_bindings.length > 0) {
+          const _serverFnNames = new Set<string>();
+          for (const st of _top as any[]) {
+            if (st && st.kind === "function-decl" && typeof st.name === "string" && st.span) {
+              const r = safeRouteMap.functions.get(`${filePath}::${st.span.start}`) as { boundary?: string } | undefined;
+              if (st.isServer === true || r?.boundary === "server") _serverFnNames.add(st.name);
+            }
+          }
+          const _colored = computeAsyncFnNames(
+            [..._top.filter((st: any) => st && st.kind === "function-decl"), ..._bindings.map((b) => b.pseudoFn)] as any[],
+            null,
+            (fileAST as any)._asyncImportedLocals as Set<string> | undefined,
+            buildCalleeImportMap(fileAST as never),
+            (exportRegistryInput ?? null) as never,
+            _serverFnNames,
+          );
+          _asyncBindings = new Set(_bindings.filter((b) => _colored.has(b.name)).map((b) => b.name));
+        }
+        (fileAST as any)._asyncLocalBindings = _asyncBindings;
+        const _inner = (fileAST as any).ast;
+        if (_inner && typeof _inner === "object" && _inner !== fileAST) _inner._asyncLocalBindings = _asyncBindings;
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's

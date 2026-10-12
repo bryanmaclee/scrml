@@ -133,8 +133,21 @@ export function asyncImportedLocalsOfFile(fileAST: ASTNode | null | undefined): 
 export function buildServerCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
   const out = buildCalleeImportMap(fileAST);
   const locals = asyncImportedLocalsOfFile(fileAST);
-  if (locals.size > 0) out.asyncImportedLocals = locals;
+  // S465 r6 — plus this file's async function-valued top-level bindings
+  // (`const w = (a, b) => check(a, b)`, codegen/index.ts `_asyncLocalBindings`): a
+  // call to one is awaited exactly like a call to an async import.
+  const bindings = asyncLocalBindingsOfFile(fileAST);
+  const all = bindings.size > 0 ? new Set<string>([...locals, ...bindings]) : locals;
+  if (all.size > 0) out.asyncImportedLocals = all;
   return out;
+}
+
+/** S465 r6 — the file's async function-valued top-level bindings (stashed by codegen/index.ts). */
+export function asyncLocalBindingsOfFile(fileAST: ASTNode | null | undefined): Set<string> {
+  if (!fileAST) return new Set();
+  const v = (fileAST as { _asyncLocalBindings?: unknown })._asyncLocalBindings
+    ?? ((fileAST as { ast?: { _asyncLocalBindings?: unknown } }).ast)?._asyncLocalBindings;
+  return v instanceof Set ? (v as Set<string>) : new Set();
 }
 
 /**
