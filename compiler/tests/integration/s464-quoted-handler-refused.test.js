@@ -1,6 +1,6 @@
 /**
  * S464 ruling — SPEC §5.2 rule 1: a QUOTED event-handler attribute with no `${…}`
- * (`onclick="alert(1)"`) is a compile error (E-ATTR-QUOTED-HANDLER, provisional name). The
+ * (`onclick="alert(1)"`) is a compile error (E-ATTR-QUOTED-HANDLER, owner-ruled S464). The
  * browser would run its text as raw JavaScript, unchecked by scrml. The name test is rule 1's
  * (`isExecutableEventHandlerAttrName` — every `on…` name except the exact words `one` /
  * `online` / `onboarding`), the same reader as E-ATTR-INTERP-EXECUTABLE.

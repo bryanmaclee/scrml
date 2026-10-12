@@ -335,8 +335,8 @@ export const ATTR_INTERP_EXECUTABLE_CODE = "E-ATTR-INTERP-EXECUTABLE";
 
 /**
  * SPEC §5.2 rule 1 (S464) — a QUOTED event-handler attribute with no `${…}` (`onclick="alert(1)"`).
- * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name provisional —
- * the owner's call.)
+ * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name owner-ruled,
+ * S464.)
  */
 export const ATTR_QUOTED_HANDLER_CODE = "E-ATTR-QUOTED-HANDLER";
 
