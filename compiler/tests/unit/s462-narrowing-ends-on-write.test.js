@@ -471,7 +471,7 @@ describe("S462 fix round 1 — fail-open holes closed", () => {
     expect(n046(`
     function wipe() -> string { @user = not
         return "" }
-    function show() { if (@user is given) { const s = String({ toString: wipe })
+    function show() { if (@user is given) { String({ toString: wipe })
             @out = @user.name } }`)).toBe(1);
     expect(n046(`
     function wipe() -> string { @user = not

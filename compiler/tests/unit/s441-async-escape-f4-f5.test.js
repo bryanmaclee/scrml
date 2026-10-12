@@ -464,8 +464,9 @@ server function check(n) {
     expect(o.codes).not.toContain(ESCAPE);
   });
 
-  test("not an escape: a plain helper route inference placed on the server (#284 dispatch)", () => {
-    // S464 migration: the dispatch chooses by CALLING, not by indexing a stored map.
+  test("not an escape: a plain helper a server fn CALLS directly (was the #284 dispatch-table shape)", () => {
+    // S464 migration: the server fn chooses by CALLING the helper, not by indexing a stored table;
+    // the table shape itself is the E-VALUE-FUNCTION-STORED negative below.
     const o = compileFile(`<program>
 \${
   function doubleIt(n) { return n * 2 }
@@ -829,11 +830,11 @@ ${attr}
     expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
   });
   test("round 3 (N3): an inner `(event) => event.preventDefault()` parameter is not the handler's event", () => {
-    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; const objs = [{ preventDefault: () => 0 }]; objs.forEach((event) => event.preventDefault()) }}><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; const objs = window.mockEvents; objs.forEach((event) => event.preventDefault()) }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   test("round 3 (N3): a block-local `const event` is not the handler's event", () => {
-    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; if (true) { const event = { preventDefault: () => 0 }; event.preventDefault() } }}><button>s</button></form>`);
+    const o = app(`<form onsubmit=\${(event) => { @v = isOk(1) ? "a" : "r"; if (true) { const event = window.mockEvent; event.preventDefault() } }}><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
   // round 4 — the event binding is POISONED after the first await (review round 3, finding 3)

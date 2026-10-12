@@ -369,7 +369,10 @@ describe("S441 fix round — the reviewer's negative list stays clean", () => {
 // handler. The runtime exchanges need bun's native Request.
 const domPolluted = () => typeof globalThis.document !== "undefined";
 
-async function serveAndCall(src, argsJson, { realHash = false } = {}) {
+// `refusedWith` (S464): the compile is EXPECTED to be refused with exactly these codes. A refused
+// compile writes no file (SPEC §2.2.1), so the run-time floor — defense in depth PAST the refusal —
+// is driven from the refused compile's in-memory server codegen (protect-error-egress round 6e).
+async function serveAndCall(src, argsJson, { realHash = false, refusedWith = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-protect-scalar-run-"));
   const outDir = join(dir, "dist");
   mkdirSync(outDir, { recursive: true });
@@ -382,6 +385,12 @@ async function serveAndCall(src, argsJson, { realHash = false } = {}) {
   db.close();
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
   const serverJsPath = join(outDir, "app.server.js");
+  if (refusedWith) {
+    const fatal = (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
+    expect([...new Set(fatal)].sort()).toEqual([...refusedWith].sort());
+    expect(existsSync(serverJsPath)).toBe(false);
+    writeFileSync(serverJsPath, result.outputs.get(file).serverJs);
+  }
   expect(existsSync(serverJsPath)).toBe(true);
   // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
   assertOpensDb(serverJsPath, dbPath);
@@ -538,10 +547,27 @@ describe("S447 round 7 — `this` writes and implicit invocation are E-PROTECT-0
 });
 
 const R7_CLEAN = {
-  "a method writing a clean column through this": fnBody([ONE, 'u.greet = function () { this.label = "hi " + this.name }', "u.greet()", "return u"]),
-  "a counter object mutated through this": fnBody([ONE, "const c = { n: 0 }", "c.inc = function () { this.n = this.n + 1 }", "c.inc()", "return { id: u.id, n: c.n }"]),
   "a tag over clean values": fnBody([ONE, "const tag = (s, v) => s[0] + v", "return tag`id ${u.id}`"]),
 };
+
+// S464 fix round 1 — these two were R7_CLEAN too. Each writes a function INTO a value
+// (`u.greet = function …`, `c.inc = function …`), which E-VALUE-FUNCTION-STORED now refuses.
+// Converted to negatives with EXACT codes (still not charged with E-PROTECT-006); the executed
+// case below still drives the run-time floor from the refused compile's in-memory server codegen.
+const R7_CLEAN_METHOD_WRITES = {
+  "a method writing a clean column through this": fnBody([ONE, 'u.greet = function () { this.label = "hi " + this.name }', "u.greet()", "return u"]),
+  "a counter object mutated through this": fnBody([ONE, "const c = { n: 0 }", "c.inc = function () { this.n = this.n + 1 }", "c.inc()", "return { id: u.id, n: c.n }"]),
+};
+
+describe("S447 round 7 — a method written onto a value is now E-VALUE-FUNCTION-STORED (S464), not E-PROTECT-006", () => {
+  for (const [name, body] of Object.entries(R7_CLEAN_METHOD_WRITES)) {
+    test(name, () => {
+      const { result } = compileMem(prog(body));
+      const codes = (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
+      expect(codes).toEqual(["E-VALUE-FUNCTION-STORED"]);
+    });
+  }
+});
 
 // S464 — these two were R7_CLEAN (no false E-PROTECT-006) cases. Each needs a value that HOLDS a
 // function (a host-protocol hook in an object literal), which S462/S464 refuse outright
@@ -572,7 +598,7 @@ describe("S447 round 7 — no false positives", () => {
 
   test("EXECUTED: a clean write through this serves the row, stripped", async () => {
     if (domPolluted()) return;
-    const { status, body } = await serveAndCall(prog(R7_CLEAN["a method writing a clean column through this"]), "{}");
+    const { status, body } = await serveAndCall(prog(R7_CLEAN_METHOD_WRITES["a method writing a clean column through this"]), "{}", { refusedWith: ["E-VALUE-FUNCTION-STORED"] });
     expect(status).toBe(200);
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", label: "hi ada" });
   }, EXECUTED_DB_TIMEOUT_MS);
@@ -616,7 +642,6 @@ describe("S449 round 9 — the session store the emitter writes is the one the f
 // this IS how adopters build types). Each MUST compile.
 describe("S449 r9 fix round — the program's own prototypes compile", () => {
   const MUST_COMPILE = {
-    "a method on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.norm = function () { return this.x * 2 }", "const p = new Pt(u.id)", "return { v: p.norm() }"]),
     "data on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.kind = \"pt\"", "return { v: new Pt(1).kind, id: u.id }"]),
     "new o.constructor() of a program object": fnBody([ONE, "const o = { a: 1 }", "const c = new o.constructor()", "return { id: u.id }"]),
     "a global cache key with a static prefix": fnBody([ONE, "globalThis[\"cache_\" + u.id] = { n: 1 }", "return { id: u.id }"]),
@@ -628,4 +653,11 @@ describe("S449 r9 fix round — the program's own prototypes compile", () => {
       expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
     });
   }
+  // S464 fix round 1 — a METHOD written onto a prototype stores a function in a value
+  // (E-VALUE-FUNCTION-STORED); converted from MUST_COMPILE to a negative with exact codes — it is
+  // still not charged with any protect code. Data on a prototype (above) still compiles.
+  test("a method on a function's prototype is E-VALUE-FUNCTION-STORED (S464), not a protect code", () => {
+    const { result } = compileMem(prog(fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.norm = function () { return this.x * 2 }", "const p = new Pt(u.id)", "return { v: p.norm() }"])));
+    expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code)).toEqual(["E-VALUE-FUNCTION-STORED"]);
+  });
 });

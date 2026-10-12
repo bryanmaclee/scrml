@@ -195,11 +195,11 @@ function run(src) {
 function __proto__(u) { return "P" + u }
 function get(u) { return "G" + u }
 function shape() {
-    return Object.keys({ __proto__, get }).length + "|" + (typeof Object.getPrototypeOf({ __proto__, get }).call)
+    console.log(Object.keys({ __proto__, get }).length)
+    console.log(Object.getPrototypeOf({ __proto__, get }))
 }
-@out = ""
 }
-<button onclick=\${ @out = shape() }>go</button>
+<button onclick=\${ shape() }>go</button>
 </program>
 `);
 
@@ -492,7 +492,9 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     expect(js).toMatch(/Object\.keys\(\{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\}\)/);
     expect(js).toMatch(/Object\.getPrototypeOf\(\{\["__proto__"\]: _scrml___proto___\d+, get: _scrml_get_\d+\}\)/);
 
-    // EXECUTED: TWO own keys, nothing inherited, and both keys hold the functions.
+    // EXECUTED: TWO own keys, and the prototype is NOT set (it is Object.prototype). S464 fix
+    // round 1: the literals are handed to host calls in STATEMENT position (a kept host result
+    // holding a function is E-VALUE-FUNCTION-STORED), so the run reads what `console.log` saw.
     const lift = (prefix) => {
       const m = js.match(new RegExp(`^function ${prefix}\\d+\\([^)]*\\) \\{`, "m"));
       expect(m).not.toBeNull();
@@ -500,8 +502,11 @@ describe("§2c NEGATIVE DEPENDENCY — the cross-file module registry footer", (
     };
     const src = ["_scrml___proto___", "_scrml_get_", "_scrml_shape_"].map(lift).join("\n");
     const shapeName = js.match(/function (_scrml_shape_\d+)\(/)[1];
-    const shape = new Function(`${src}\n; return ${shapeName};`)();
-    expect(shape()).toBe("2|undefined");
+    const seen = [];
+    const shape = new Function("console", `${src}\n; return ${shapeName};`)({ log: (v) => seen.push(v) });
+    shape();
+    expect(seen[0]).toBe(2);
+    expect(seen[1]).toBe(Object.prototype);
   });
 
   test("§2f the former RESIDUAL MAP — every shape is now expanded (s457 scope-aware rename)", () => {
