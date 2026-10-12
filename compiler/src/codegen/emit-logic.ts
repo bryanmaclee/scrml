@@ -2209,6 +2209,30 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     case "html-fragment":
       // Phase 4: HTML fragment tokens are not JS — drop them in logic context.
       // In lift context, emit-lift handles them for tag reconstruction.
+      //
+      // S462 (s462-given-body-text-as-code fix round 1; ruling Q24 (a)) — an element
+      // written at statement position whose text the parser read as markup
+      // (ast-builder collectMarkupTextRun, `_markupLead` on its first run) and that
+      // NO lowering rendered (not the §17.6.10 implied lift of a single-markup arm —
+      // e.g. that pass's source re-parse declined it) reaches here. Dropping it
+      // would render nothing at exit 0, so it is refused: fail closed, once per
+      // element. (The full Q24 refusal of every unrendered statement-position
+      // element is separate, queued work; this covers the elements this reader arms.)
+      // Recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts):
+      // the control-flow emitters rebuild `opts` field by field and do not thread
+      // `opts.errors` into an `if` / loop body, which is exactly where this lands.
+      if ((node as any)._markupLead) {
+        const lead = (node as any)._markupLead as { tag: string; span: object };
+        recordRefusedLowering(new CGError(
+          "E-MARKUP-STATEMENT-NOT-RENDERED",
+          `E-MARKUP-STATEMENT-NOT-RENDERED: this \`<${lead.tag}>\` element is written as a statement in a logic ` +
+          `block, and it is not rendered here — the compiler does not drop markup silently. ` +
+          `Write \`lift <${lead.tag}>…</${lead.tag}>\` to render it, or make it the single element of an ` +
+          `\`if\` / \`given\` branch (§17.6.10, §10.1). If the element's text holds a \`<\` or a closing tag ` +
+          `in quotes, put that text in an interpolation instead: \`\${"a < b"}\`.`,
+          lead.span ?? node.span ?? { start: 0, end: 0 },
+        ), lead);
+      }
       return "";
     case "bare-expr": {
       // S458 slice 2 — a refined parameter's guard statement (prepended to the
