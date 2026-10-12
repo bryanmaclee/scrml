@@ -392,10 +392,11 @@ function scanMdSlots(source, start, end) {
 
 /**
  * The offset just past the `}` balancing the `${` at `at`, or -1 when the body
- * ends first. A frame stack tracks code (brace depth) and template-literal
- * text; `"…"` / `'…'` strings end at their quote or at a line end (a JS string
- * holds no raw newline — an unterminated quote must not swallow the rest of
- * the body); `//` and block comments are skipped.
+ * ends first — or when a `"…"` / `'…'` string reaches a line end unclosed (a
+ * JS string holds no raw newline: that quote is a lexing failure, so the `${`
+ * has no balancing `}` and is never given an extent built from the prose after
+ * it). A frame stack tracks code (brace depth) and template-literal text;
+ * `//` and block comments are skipped.
  */
 function mdSlotExtent(source, at, end) {
   const stack = [{ tpl: false, depth: 1 }];
@@ -416,6 +417,12 @@ function mdSlotExtent(source, at, end) {
         if (source[i] === "\\") i++;
         i++;
       }
+      // A quote that reaches a line end (or the body's end) unclosed is not a string token —
+      // the lexing fails, so this `${` has no balancing `}` (§4.18.1b: the extent is found over
+      // the token stream). Scanning on would invent an extent out of the prose after it: a code
+      // span `${"}` …` would run through its closing backtick to the next `}`, lines later, and
+      // the text between would vanish into an expression (review MED-B, s462-md-phase2).
+      if (i >= end || source[i] !== c) return -1;
       i++;
       continue;
     }

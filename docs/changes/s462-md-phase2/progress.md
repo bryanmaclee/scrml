@@ -68,3 +68,25 @@ run after TAB and again after CE (component instances).
   pursued as a separate gap; `<md>` bodies no longer depend on the tokenized form.
 - host-global-scan reported "a shard failed" once under memory pressure (other suites running); see
   gates.
+
+## S465 resume — fix round 1 (cloud, AUTO)
+- 2026-10-12T01:25Z reset to wip/s464-md-phase2 @ bc9e44455; archived BRIEF-resume-S465.md (9585c8180);
+  applied + committed the S462 salvage patch verbatim (68f5cb369: MED-A provenance, MED-C SSR md attrs).
+- 2026-10-12T01:40Z MED-A verified by execution: with the type-system hunk reverted, the salvage's test
+  fails (4× E-TYPE-026 on `<md>` prose / `<pre>` / `<code>`); with it, passes. §18.9 row "Markup context
+  (direct) — E-TYPE-026" fits a plain markup body; an `<md>` body is not markup context (§67.2 text-mode
+  production), so prose there is text; a `<div>` body line `match x {` still reports E-TYPE-026.
+- 2026-10-12T01:45Z MED-C (SSR data-led md attrs) verified: its test fails with the hunk reverted.
+- 2026-10-12T01:55Z MED-B: the brief's example (`` `${x}` `` in a code span) does NOT reproduce — it
+  renders verbatim in static HTML, `<each>` rows (client + SSR), `<match>` arms, `if=` and components.
+  The swallow that does reproduce: a quote inside a code-span slot that reaches its line end unclosed
+  (`` `${"}` `` then a `}` on a later line). The scanner ended the string at the line end and kept
+  going, so the slot ran through the code span's closing backtick to the later `}`; the reader placed
+  it in prose, the prose was parsed as an expression and vanished (E-CTX-001). Fix (block-splitter
+  `mdSlotExtent`): an unterminated quote is a lexing failure → the `${` is unclosed →
+  E-MD-INTERP-UNCLOSED (names `<pre>`). §67.4 decides the rendering: "the slot is restored to its exact
+  source text, so `${…}` is shown literally". SPEC §67.2 sentence added (PA reading, MED-B).
+  Tests: unit (4), conformance md/interp-unclosed-quote-in-code-span, Chromium case.
+- 2026-10-12T02:05Z Chromium: Playwright's expected headless build (1223) is not installed in this
+  container; ran md-static-chromium-s462 against /opt/pw-browsers/chromium_headless_shell-1194 via a
+  scratch copy with `executablePath` — 4/4 pass (closed set, URL guard, heading ids, MED-B).

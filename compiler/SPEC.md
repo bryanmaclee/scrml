@@ -48393,7 +48393,14 @@ a third, orthogonal one. **An `<md>` body is a fourth production.**
   places slots and restores the source text of those that land in code — is LANDED in phase 1; the
   splitter's deferred extent and the parse-after-placement are phase 2.)*
 - A `${` with no balanced closing `}` before `</md>` is `E-MD-INTERP-UNCLOSED`; the message names
-  `<pre>` (raw content, §4.17) as the way to show such text. *(Phase 2, Nominal.)*
+  `<pre>` (raw content, §4.17) as the way to show such text. *(Phase 2, Nominal.)* A `"` or `'` inside
+  the extent that reaches its line end without its closing quote is not a string token, so the lexing
+  fails and that `${` has no balanced `}`: it is `E-MD-INTERP-UNCLOSED` — the scan SHALL NOT continue
+  past that line end to a `}` further on (that would carry the prose between, a code span's closing
+  backtick included, into an expression, and the text would vanish). So `` `${it's}` `` or
+  `` `${"}` `` in a code span is `E-MD-INTERP-UNCLOSED`, as `` `${` `` is. *(PA reading,
+  s462-md-phase2 review fix MED-B, following §4.18.1b's "lexing the interpolation body" and §67.4's
+  "the slot is restored to its exact source text".)*
 - The closing tag is `</md>` (ASCII case-insensitive, as §4.17). Consequently a literal `</md>` cannot
   appear in an `<md>` body, not even in a code span; a document about `<md>` shows it with `<pre>`.
 - End of file before `</md>` is `E-CTX-001` against the opener, recovered as §4.17 does.

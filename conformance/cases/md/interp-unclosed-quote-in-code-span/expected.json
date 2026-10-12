@@ -1,0 +1,20 @@
+{
+  "id": "md-interp-unclosed-quote-in-code-span",
+  "description": "A `${` whose body holds a quote that reaches its line end unclosed has no balanced `}`: it is E-MD-INTERP-UNCLOSED, never a slot stitched through the code span's closing backtick to a `}` on a later line (which would swallow that prose into an expression).",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY) · ruling:user-voice-scrml.md S462 Q21 \"I like a.\" (what you type is what is shown)",
+  "rationale": "§67.2: the splitter takes the §4.18.1b token-depth extent, found by lexing the interpolation body; a quote with no closing quote on its line is not a string token, so the `${` has no balanced closing `}` before `</md>` — E-MD-INTERP-UNCLOSED, whose message names `<pre>`. §67.4: a slot inside a code span is shown literally; no text of the body is ever consumed as an expression.",
+  "expect": {
+    "codes": [
+      "E-MD-INTERP-UNCLOSED"
+    ],
+    "notCodes": [
+      "E-CTX-001",
+      "E-SCOPE-001"
+    ],
+    "severity": {
+      "E-MD-INTERP-UNCLOSED": "error"
+    }
+  }
+}

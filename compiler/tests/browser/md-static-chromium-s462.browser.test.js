@@ -127,6 +127,29 @@ describe("Chromium — static <md>", () => {
     await page.close();
   });
 
+  test("review MED-B: a `${` in a code span shows literally (§67.4 inert) beside a live slot", async () => {
+    if (!ready()) { console.warn(`[md-chromium] skipped: ${launchError}`); return; }
+    const { errors, url } = build(`<program>
+<who> = "Ann"
+<article>
+    <md id="doc">
+        ## Use \`\${x}\` here
+
+        Write \`\${name}\` or \`\`\${ "}" }\`\` — hello \${@who}.
+    </md>
+</article>
+</program>`);
+    expect(errors).toEqual([]);
+    const { page, dialogs } = await open(url);
+    const t = await page.evaluate(`(${TREE_FN})(document.getElementById("doc"))`);
+    expect(t).toContain(`h2[id=use-x-here]{"Use ",code{"\${x}"}," here"}`);
+    expect(t).toContain(`code{"\${name}"}`);
+    expect(t).toContain(`code{"\${ \\"}\\" }"}`);
+    expect(await page.evaluate(`document.getElementById("doc").textContent.includes("hello Ann.")`)).toBe(true);
+    expect(dialogs).toEqual([]);
+    await page.close();
+  });
+
   test("dog-food: a published-draft article (samples/md-article-browser-language.scrml) renders as its markdown", async () => {
     if (!ready()) { console.warn(`[md-chromium] skipped: ${launchError}`); return; }
     const { readFileSync } = await import("fs");

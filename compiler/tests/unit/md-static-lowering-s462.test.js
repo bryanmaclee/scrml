@@ -417,6 +417,66 @@ match y {
   });
 });
 
+describe("a `${` in a code span never swallows text (review MED-B)", () => {
+  // §67.4: "Where an atom is inert — inside a code span and inside a fenced code block …: the slot is
+  // restored to its exact source text, so `${…}` is shown literally". The extent is found by lexing
+  // (§4.18.1b), so a quote that reaches its line end unclosed is a lexing failure — the `${` has no
+  // balancing `}` — never an extent stitched out of the prose after it.
+  test("a code-span `${` in every inline position renders verbatim and is never scope-checked", () => {
+    const r = compile(P(`<div>
+    <md>
+        # Head \`\${h}\` tail
+
+        [link \`\${y}\` text](/u) and **bold \`\${z}\`** and \`\${ "}" }\` and \`\`\${w}\`\`
+
+        - item \`\${i}\`
+    </md>
+</div>`));
+    expect(r.codes).toEqual([]);
+    expect(r.allCodes).not.toContain("E-SCOPE-001");
+    const h = body(r.html);
+    for (const s of ["h", "y", "z", "w", "i"]) expect(h).toContain(`<code>&#36;{${s}}</code>`);
+    expect(h).toContain(`<code>&#36;{ &quot;}&quot; }</code>`);
+  });
+
+  test("an unclosed quote inside a code-span slot is E-MD-INTERP-UNCLOSED, and the prose after it stays text", () => {
+    const r = compile(P(`<div>
+    <md>
+        A \`\${"}\` x.
+
+        next } line
+    </md>
+</div>`));
+    expect(r.allCodes).toContain("E-MD-INTERP-UNCLOSED");
+    expect(r.allCodes).not.toContain("E-CTX-001");
+    expect(body(r.html)).toContain("next } line");
+  });
+
+  test("an apostrophe inside a code-span slot is E-MD-INTERP-UNCLOSED, not a slot running to a later `}`", () => {
+    const r = compile(P(`<div>
+    <md>
+        A \`\${it's}\` value.
+
+        Later } here.
+    </md>
+</div>`));
+    const e = r.all.find((x) => x.code === "E-MD-INTERP-UNCLOSED");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("<pre>");
+    expect((e.span ?? e.tabSpan ?? {}).line).toBe(4);
+    expect(body(r.html)).toContain("Later } here.");
+  });
+
+  test("the splitter: a quote closed on its line balances; one reaching the line end leaves the `${` unclosed", () => {
+    const ok = '<div><md>x ${"}"} y ${ \'a\' } z</md></div>';
+    const a = mdBlock(ok).md.mdBody.slots;
+    expect(a.map((s) => ok.slice(s.start, s.end))).toEqual(['${"}"}', "${ 'a' }"]);
+    const bad = '<div><md>A `${"}` x.\nnext } line\n</md></div>';
+    const b = mdBlock(bad).md;
+    expect(b.mdBody.slots).toEqual([{ start: bad.indexOf("${"), end: b.mdBody.end, closed: false }]);
+  });
+});
+
 describe("§67.6 — heading ids", () => {
   test("slugs keep Unicode letters, dedupe page-wide against author ids and earlier headings", () => {
     const r = compile(P(`<div id="intro">author</div>
