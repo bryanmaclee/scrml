@@ -90,3 +90,16 @@ run after TAB and again after CE (component instances).
 - 2026-10-12T02:05Z Chromium: Playwright's expected headless build (1223) is not installed in this
   container; ran md-static-chromium-s462 against /opt/pw-browsers/chromium_headless_shell-1194 via a
   scratch copy with `executablePath` — 4/4 pass (closed set, URL guard, heading ids, MED-B).
+- 2026-10-12T02:50Z merged origin/main 41af4153a (#1405, docs-only; no conflicts; master-list.md == main).
+- 2026-10-12T05:10Z gates on the merged head: pre-commit 35091 pass / 11 fail / 132 skip — the 11 are the
+  container's env set (dev-db-no-side-file ×5, promote-safety-harness ×1, headless-serve-bind-host ×1,
+  identical on origin/main) plus load flakes (tenant-floor-project-set ×3, parser-conformance-corpus ×1;
+  both pass on a solo re-run). lsp+commands: 11 fail, identical set on origin/main. browser-baseline
+  --check: 1 NEW name (each-alias-in-lifted-markup nested-each, a leaked "JSON Parse error bad" console
+  error from another file) — identical on origin/main, passes solo; not re-recorded. s34-census
+  --check-new, host-global-scan, facts, spec-index, bootstrap-conformance (regenerated), severity,
+  state, types-gate, snippet-gate, corpus-compile-floor, gen-md-shim, conflict-marker, delta-lint: PASS.
+- Corpus differential (examples, samples, conformance, stdlib, gauntlet-r25; ../giti and ../flogence are
+  not cloned here): 0 newly failing, 0 newly passing, 0 diagnostic-code changes; 165 differing artifacts
+  and 4 gauntlet diagnostic texts all differ ONLY by the checkout path (base built from a nested
+  worktree) — 0 real emit changes. 17 added sources = this branch's 16 md cases + the dog-food sample.
