@@ -1326,6 +1326,23 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opt
     }
     return null;
   }
+  // S465 r6 (review MED-2) — the type checker never sees a function VALUE's body (the
+  // expression parser keeps it as text), so a `match` on enum variants in it has no
+  // subject type: lowered from here it compared the variant OBJECT to a string and left
+  // the payload binding unbound — `undefined` at exit 0. SPEC §18: `match` requires a
+  // typed subject (E-TYPE-025, what the same body gets in a `function`). Refused.
+  const variantMatch = variantMatchIn(r.stmts);
+  if (variantMatch) {
+    recordRefusedLowering(new CGError(
+      "E-TYPE-025",
+      "E-TYPE-025: a `match` on enum variants inside a function value (`(r) => { … match r { .Found(n) :> … } }`) " +
+        "has no typed subject — the body of a function value is not type-checked, so the compiler cannot tell which " +
+        "enum the variants belong to or bind their payloads. Declare the helper as a `function` with a typed " +
+        "parameter (`function label(r: R) { … }`) and call it.",
+      currentLoweringSpanForFnValue(),
+    ), null);
+    return REFUSED_SERVER_TEXT;
+  }
   const base = _logicOptsFromExprCtx(ctx);
   const params = new Set<string>();
   for (const m of head.replace(/^function\s*[A-Za-z_$][\w$]*/, "").matchAll(/[A-Za-z_$][\w$]*/g)) params.add(m[0]);
@@ -1348,6 +1365,31 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opt
   const inner = lines.map((l: string) => "  " + l).join("\n");
   const asyncKw = opts.async ? "async " : "";
   return fnM ? `${asyncKw}${head} {\n${inner}\n}` : `${asyncKw}${head} => {\n${inner}\n}`;
+}
+
+/** S465 r6 — the first `match` in `stmts` whose arms name enum variants (`.X`, `T::X`, `T.X(`), or null. */
+function variantMatchIn(stmts: unknown): unknown {
+  const seen = new Set<unknown>();
+  let found: unknown = null;
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const k = (n as { kind?: unknown }).kind;
+    if (k === "match-stmt" || k === "match-expr") {
+      const text = JSON.stringify(n, (key, v) => (key === "span" ? undefined : v));
+      if (/(^|[^\w$])\.\s*[A-Z]|::\s*[A-Z]/.test(text)) { found = n; return; }
+    }
+    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Record<string, unknown>)[key]);
+  };
+  walk(stmts);
+  return found;
+}
+
+function currentLoweringSpanForFnValue(): object {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { currentLoweringSpan } = require("./sql-one-statement-guard.ts") as { currentLoweringSpan: () => object | null };
+  return currentLoweringSpan() ?? {};
 }
 
 /** S465 r5 — true when `body` parses as the body of a NON-async function in a module. */

@@ -76,7 +76,7 @@ function fnValueBody(e: AnyNode): unknown[] | null {
   if (!split.body.startsWith("{")) {
     // An expression body the parser kept as a hatch only because of the head.
     try {
-      const n = parseExprToNode(split.body, "<fn-value>", 0) as AnyNode | null;
+      const n = parseExprToNode(split.body, "<fn-value>", 0) as unknown as AnyNode | null;
       return n && n.kind !== "escape-hatch" ? [n] : null;
     } catch { return null; }
   }
@@ -100,7 +100,7 @@ export function fnValuedBindingsOf(topStmts: unknown[]): FnValuedBinding[] {
       keyword = s.kind === "let-decl" ? "let" : "const";
       init = (s.initExpr as AnyNode | undefined) ?? null;
       if (!init && typeof s.init === "string") {
-        try { init = parseExprToNode(s.init, "<fn-value>", 0) as AnyNode | null; } catch { init = null; }
+        try { init = parseExprToNode(s.init, "<fn-value>", 0) as unknown as AnyNode | null; } catch { init = null; }
       }
     } else if (s.kind === "export-decl" && (s.exportKind === "const" || s.exportKind === "let" || s.exportKind === "var") &&
       typeof s.exportedName === "string" && !s.reExportSource) {
@@ -109,7 +109,7 @@ export function fnValuedBindingsOf(topStmts: unknown[]): FnValuedBinding[] {
       name = s.exportedName;
       keyword = String(s.exportKind);
       exported = true;
-      try { init = parseExprToNode(m[1].trim(), "<fn-value>", 0) as AnyNode | null; } catch { init = null; }
+      try { init = parseExprToNode(m[1].trim(), "<fn-value>", 0) as unknown as AnyNode | null; } catch { init = null; }
     }
     if (!name || !isFnValueExpr(init)) continue;
     const body = fnValueBody(init as AnyNode);

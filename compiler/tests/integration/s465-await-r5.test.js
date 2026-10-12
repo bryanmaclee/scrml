@@ -88,13 +88,15 @@ const RUN_SHAPES = {
 
 // name -> [body, expected diagnostic code]
 const REFUSE_SHAPES = {
-  // F1 — a ParseError hatch that holds a call (the `.Found(name: …)` element keeps the
-  // array a hatch); each was WELCOME for a wrong password on 55cdda9d8.
-  hatchCalleeOf: [`const r = [of(pass, row.pw), .Found(name: "c")]
+  // F1 — a ParseError hatch that holds a call; each was WELCOME for a wrong password on
+  // 55cdda9d8. (S465 r6: a well-formed named-argument variant `.Found(name: "c")` is now
+  // read structurally — those shapes run, awaited, in s465-await-r6.test.js — so the
+  // hatch here is one r6 cannot positionalize: `nope` is not a field of `Found`.)
+  hatchCalleeOf: [`const r = [of(pass, row.pw), .Found(nope: "c")]
     if (!r[0]) { return "REJECTED" }
     return "WELCOME"`, "E-CODEGEN-INVALID-LOGIC"],
   hatchCallAfterPostfix: [`let i = 0
-    const r = [i++ / 1 + (check(pass, row.pw) ? 1 : 0) / 1, .Found(name: "c")]
+    const r = [i++ / 1 + (check(pass, row.pw) ? 1 : 0) / 1, .Found(nope: "c")]
     if (r[0] == 0) { return "REJECTED" }
     return "WELCOME"`, "E-CODEGEN-INVALID-LOGIC"],
   // F2b — §7.2.1 constructs in a block-bodied server function value: the front-end code.

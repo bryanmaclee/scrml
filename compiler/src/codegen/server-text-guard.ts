@@ -56,7 +56,8 @@ export function refuseServerTextCall(text: string, what = "this server expressio
   const err = new CGError(
     "E-CODEGEN-INVALID-LOGIC",
     `${what} \`${excerpt(text)}\` cannot be lowered in server code: the ` +
-      `compiler could not read it as a scrml expression or statement, and it calls \`${callee || "a function"}\`. ` +
+      `compiler could not read it as a scrml expression or statement, and its text holds what may be a call ` +
+      `(at \`${callee || "…"}(\`; S465 r6 — the check is lexical, so a \`(\` inside a string counts too). ` +
       "A call in server code must be read from the tree so the compiler can await it (§13.2) — lowered " +
       "from text it would run un-awaited. Rewrite it as ordinary statements (one expression per " +
       "statement, each block on its own line), or move the call into its own `const` first.",

@@ -399,20 +399,23 @@ describe("S465 r3 — server expressions that cannot be read structurally are co
 // ---------------------------------------------------------------------------
 
 describe("S465 r3 — an escape hatch carries its own text, not the enclosing expression's", () => {
-  test("`(0, \"x\") + \"y\"` — the sequence hatch is `(0, \"x\")` and the client lowering evaluates to \"xy\"", () => {
+  // S465 r6 (ruling S464 cfor-comma "b") — the comma operator is refused in every VALUE
+  // position on the client too; the hatch still carries ITS OWN text (the r3 fix), and
+  // the client lowering is the refusal placeholder (the compile fails).
+  test("`(0, \"x\") + \"y\"` — the sequence hatch is `(0, \"x\")`, refused on the client", () => {
     const node = parseExprToNode(`(0, "x") + "y"`, "t.scrml", 0);
     expect(node.kind).toBe("binary");
     expect(node.left.kind).toBe("escape-hatch");
     expect(node.left.raw.replace(/\s+/g, "")).toBe(`(0,"x")`);
     const js = emitExpr(node, { mode: "client" });
-    // eslint-disable-next-line no-new-func
-    expect(new Function(`return (${js});`)()).toBe("xy");
+    expect(js).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(js).not.toContain(`"y" + "y"`);
   });
 
-  test("a sequence in a ternary test keeps its parens and evaluates its LAST operand", () => {
+  test("a sequence in a ternary test is refused on the client (its own text, not the ternary's)", () => {
     const node = parseExprToNode(`(0, 1 == 2) ? "A" : "B"`, "t.scrml", 0);
+    expect(node.condition.raw.replace(/\s+/g, "")).toBe("(0,1==2)");
     const js = emitExpr(node, { mode: "client" });
-    // eslint-disable-next-line no-new-func
-    expect(new Function(`return (${js});`)()).toBe("B");
+    expect(js).toContain("E-CODEGEN-INVALID-LOGIC");
   });
 });

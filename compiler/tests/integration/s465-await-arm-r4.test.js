@@ -275,8 +275,10 @@ const REFUSED = [
   ["a nested server function's parameter default that must await", `function inner({ ok = check(pass, row.pw) }) { return ok }
     if (inner({})) { return "WELCOME" }
     return "REJECTED"`, "E-CODEGEN-INVALID-LOGIC", "a parameter default cannot await"],
-  ["a C-style `for` comma update (no comma operator, §40.8)", `let j = 5
-    for (let i = 0; i < 2; i++, j--) { j = j }
+  // S465 r6 — ruling S464 cfor-comma "b": a C-style `for` header's init / update comma
+  // LIST is legal (s465-await-r6.test.js runs it); a comma in a VALUE position is not.
+  ["a comma sequence in a value position (no comma operator, §40.8)", `let j = 5
+    const v = (j = 2, j + 1)
     return "WELCOME"`, "E-CODEGEN-INVALID-LOGIC", "§40.8"],
 ];
 

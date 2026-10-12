@@ -793,6 +793,42 @@ function _loopPatternDefaultLowerer(opts: any): (text: string, n: unknown) => st
   } as EmitExprContext);
 }
 
+/**
+ * S465 r6 (review LOW-3; ruling S464 cfor-comma "b") — a C-style `for` header's init /
+ * update may be a comma LIST (`i = 0, j = n` / `i++, j--`): the one position scrml
+ * admits commas between expressions. The parser keeps it as a comma-sequence hatch
+ * (refused in every VALUE position, §40.8 / §4.18.2); here each element is read as its
+ * own expression and emitted from the tree, joined with `, `. A list with an element the
+ * parser cannot read falls to the ordinary (guarded) lowering.
+ */
+function emitCForHeaderList(exprNode: any, fallback: string, ctx: EmitExprContext): string {
+  const n = exprNode as { kind?: string; nativeKind?: string; raw?: string } | null | undefined;
+  if (n && n.kind === "escape-hatch" && n.nativeKind === "SequenceExpression" && typeof n.raw === "string") {
+    let raw = n.raw.trim();
+    if (raw.startsWith("(") && raw.endsWith(")")) {
+      let depth = 0;
+      let enclosesAll = true;
+      for (let i = 0; i < raw.length; i++) {
+        if (raw[i] === "(") depth++;
+        else if (raw[i] === ")") { depth--; if (depth === 0 && i < raw.length - 1) { enclosesAll = false; break; } }
+      }
+      if (enclosesAll) raw = raw.slice(1, -1);
+    }
+    const parts = splitTopLevelCommas(raw).map((x) => x.trim()).filter((x) => x.length > 0);
+    if (parts.length >= 2) {
+      const out: string[] = [];
+      for (const part of parts) {
+        let t: any = null;
+        try { t = parseExprToNode(part, "<for-header>", 0); } catch { t = null; }
+        if (!t || t.kind === "escape-hatch") { out.length = 0; break; }
+        out.push(emitExpr(t, ctx));
+      }
+      if (out.length === parts.length) return out.join(", ");
+    }
+  }
+  return emitExprField(exprNode, fallback, ctx);
+}
+
 export function emitForStmt(
   node: any,
   opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
@@ -883,9 +919,9 @@ function _emitForStmtInner(
       const _cDecl = cStyleInitDeclaration(_cParts?.initExpr);
       const init = _cDecl
         ? `${_cDecl.keyword} ${_cDecl.declarators.map((d: any) => emitExpr(d, _cCtx)).join(", ")}`
-        : emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+        : emitCForHeaderList(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitConditionField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
-      const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+      const update = emitCForHeaderList(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`${forLabelPrefix(node)}for (${init}; ${cond}; ${update}) {`);
 
       // S465 r3 — the header's declared loop variables are in scope in the body:

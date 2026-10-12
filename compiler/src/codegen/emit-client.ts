@@ -1,3 +1,4 @@
+import { tokenizer as acornTokenizer } from "acorn";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
@@ -4513,8 +4514,13 @@ export function generateClientJs(ctx: CompileContext): string {
     /\bbun\.eval\s*\(/,
     /\?\{`/,
   ];
+  // S465 r6 (review LOW-1) — a `?{` sigil inside a STRING / template-text literal of
+  // the client JS is text the program carries (`const s = "?{\`SELECT pw\`}"`), not a
+  // query; the sigil pattern reads the code with literal contents blanked (by acorn's
+  // tokenizer — a bundle it cannot tokenize is read raw: fail closed).
+  const _sigilCode = blankStringLiteralContents(clientCode);
   for (const pattern of SQL_LEAK_PATTERNS) {
-    if (pattern.test(clientCode)) {
+    if (pattern.test(pattern.source === "\\?\\{`" ? _sigilCode : clientCode)) {
       errors.push(new CGError(
         "E-CG-006",
         `E-CG-006: Server-only pattern (${pattern}) detected in client JS output. ` +
@@ -5031,4 +5037,28 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
   }
 
   return lines;
+}
+
+
+/**
+ * S465 r6 — `code` with the CONTENTS of every string literal and template-literal text
+ * replaced by spaces (delimiters, `${ … }` substitutions and all other code kept), read
+ * with acorn's tokenizer. On a tokenizer error the code is returned unchanged (the
+ * caller's scan then reads everything — fail closed).
+ */
+function blankStringLiteralContents(code: string): string {
+  try {
+    const chars = code.split("");
+    for (const tok of acornTokenizer(code, { ecmaVersion: "latest", sourceType: "module" })) {
+      const label = (tok.type as { label?: string }).label;
+      if (label === "string") {
+        for (let i = tok.start + 1; i < tok.end - 1; i++) if (chars[i] !== "\n") chars[i] = " ";
+      } else if (label === "template") {
+        for (let i = tok.start; i < tok.end; i++) if (chars[i] !== "\n") chars[i] = " ";
+      }
+    }
+    return chars.join("");
+  } catch {
+    return code;
+  }
 }

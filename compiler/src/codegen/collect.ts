@@ -674,6 +674,30 @@ function collectMetaExprStrings(body: Node[]): string[] {
  * expression nesting depth (small in practice). Defensive against cycles via a
  * visited set is unnecessary — the AST is a tree.
  */
+/**
+ * S465 r6 (review LOW-1) — the text the `?{` sigil test reads. With a parsed tree, a real
+ * query is a `sql-ref` node (`exprTreeContainsSqlRef` answers for it structurally), and a
+ * `?{` inside a STRING literal is text, not SQL (`const s = "?{\`SELECT pw\`}"` was read
+ * as server-only — E-CG-006 in a client function). Only the parts the parser kept as
+ * TEXT (escape hatches) can hide a query from the tree, so only their text is tested.
+ * Without a tree, the whole fallback text is (as before).
+ */
+function sqlSigilText(tree: unknown, fallback: string): string {
+  if (!tree || typeof tree !== "object") return fallback;
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (!v || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const c of v) walk(c); return; }
+    const o = v as Record<string, unknown>;
+    if (o.kind === "escape-hatch" && typeof o.raw === "string") parts.push(o.raw);
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(tree);
+  return parts.join("\n");
+}
+
 function exprTreeContainsSqlRef(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   const n = node as Record<string, unknown>;
@@ -825,7 +849,7 @@ export function isServerOnlyNode(node: unknown): boolean {
   // Phase 4d: ExprNode-first, string fallback
   if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "state-decl") {
     const init = (n as any).initExpr ? emitStringFromTree((n as any).initExpr) : (typeof n.init === "string" ? n.init : "");
-    if (SQL_SIGIL_PATTERN.test(init)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).initExpr, init))) return true;
     // S465 — structurally, as for bare-expr below: a query in the initializer
     // (`?{SELECT …}.get().name` — no backtick, so the sigil regex misses it) is
     // server-only; it used to reach the client as `null /* sql-ref unresolved */.get()`.
@@ -854,7 +878,7 @@ export function isServerOnlyNode(node: unknown): boolean {
     // `kind:"sql"` upstream (translate-stmt.js, PRIMARY).
     if ((n as any).exprNode && exprTreeContainsSqlRef((n as any).exprNode)) return true;
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof n.expr === "string" ? n.expr : "");
-    if (SQL_SIGIL_PATTERN.test(expr)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).exprNode, expr))) return true;
     if (ENV_PATTERN.test(expr)) return true;
   }
 
@@ -870,7 +894,7 @@ export function isServerOnlyNode(node: unknown): boolean {
   if (n.kind === "return-stmt" || n.kind === "throw-stmt") {
     if ((n as any).sqlNode && (n as any).sqlNode.kind === "sql") return true;
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof (n as any).expr === "string" ? (n as any).expr : "");
-    if (SQL_SIGIL_PATTERN.test(expr)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).exprNode, expr))) return true;
     if (ENV_PATTERN.test(expr)) return true;
     // GITI-038 (E-CG-006 defense-in-depth) — a returned function expression
     // (`return function name(){…}`) lives on `fnExprNode`. Scan its direct body so a

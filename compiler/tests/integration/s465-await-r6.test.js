@@ -68,6 +68,51 @@ const RUN = {
   function w(a, b) { return w0(a, b) }`, body: W },
   syncLambdaStaysSync: { top: `const dbl = (x) => x * 2`, body: `if (dbl(2) != 4) { return "bad" }
     ${G}` },
+  // MED-1 — a regex literal holds no call (refused on dcbbd64d7 as "it calls `/[A-Z]`").
+  regexInFnDecl: { top: `function isCode(s) { return /[A-Z](\\d)/.test(s) }`, body: `if (!isCode("A1")) { return "bad" }
+    ${G}` },
+  regexInline: { body: `if (!/b(o)b/.test(name)) { return "bad" }
+    ${G}` },
+  regexReplace: { body: `const z = name.replace(/o(b)/g, "x")
+    if (z != "bx") { return "bad:" + z }
+    ${G}` },
+  regexDecl: { body: `const re = /b(o)b/
+    if (!re.test(name)) { return "bad" }
+    ${G}` },
+  regexInArrow: { body: `const t = (s) => /\\d(\\d)/.test(s)
+    if (!t("12")) { return "bad" }
+    ${G}` },
+  regexLookahead: { body: `if (!/[0-9](?=b)/.test("1b")) { return "bad" }
+    ${G}` },
+  // LOW-2 — named-argument variants lowered from the tree (a `(` in a string, a call).
+  namedVariantStringParen: { top: `type R:enum = { Found(name:string), Missing }`, body: `const r = .Found(name: "a (b)")
+    ${G}` },
+  namedVariantCall: { top: `type R:enum = { Found(name:string), Missing }`, body: `const r = .Found(name: name.trim())
+    ${G}` },
+  namedVariantAwaitedArg: { imports: `import { check, of } from "./lib.scrml"`, top: `type R:enum = { Found(name:string), Missing }`,
+    lib: lib(`export function check(p, h) { return verifyPassword(p, h) }
+  export function of(p, h) { return verifyPassword(p, h) }`),
+    body: `const r = [of(pass, row.pw), .Found(name: "c")]
+    if (!r[0]) { return "REJECTED" }
+    return "WELCOME"` },
+  namedVariantMixed: { top: `type P:enum = { Pair(a:int, b:int), None }`, body: `const r = .Pair(1, b: 2)
+    ${G}` },
+  // MED-2 — a string-literal match in a function value still lowers.
+  stringMatchInArrow: { body: `const lab = (k) => { return match k { "a" :> "A"
+      else :> "Z" } }
+    if (lab("a") != "A") { return "badstr" }
+    ${G}` },
+  // LOW-3 — a C-style \`for\` header comma list (ruling S464 cfor-comma "b").
+  forHeaderCommaUpdate: { body: `let s = 0
+    for (let i = 0, j = 3; i < j; i++, j--) { s = s + 1 }
+    if (s != 2) { return "badfor:" + s }
+    ${G}` },
+  forHeaderCommaInit: { body: `let s = 0
+    let i = 0
+    let j = 0
+    for (i = 0, j = 4; i < j; i++, j--) { s = s + 1 }
+    if (s != 2) { return "badfor:" + s }
+    ${G}` },
 };
 
 // name -> [spec, code]  (must be a compile error)
@@ -84,6 +129,24 @@ const REFUSE = {
   bodyPassToUserFn: [{ top: `const w = (a, b) => check(a, b)
   function apply(fn, a, b) { return fn(a, b) }`, body: `if (!apply(w, pass, row.pw)) { return "REJECTED" }
     return "WELCOME"` }, "E-ASYNC-FN-ESCAPES-AS-VALUE"],
+  // MED-2 — a variant match in a function value has no typed subject (was `undefined`
+  // at exit 0 on dcbbd64d7: the variant object compared to a string, `n` unbound).
+  variantMatchInArrow: [{ top: `type R:enum = { Found(name:string), Missing }`, body: `const label = (r) => { return match r { .Found(n) :> "found " + n
+      .Missing :> "missing" } }
+    const l = label(R.Found(name))
+    if (l != "found bob") { return "badmatch:" + l }
+    ${G}` }, "E-TYPE-025"],
+  variantMatchStmtInArrow: [{ top: `type R:enum = { Found(name:string), Missing }`, body: `const label = (r) => { let s = "none"
+      match r { .Found(n) :> { s = "found " + n }
+        .Missing :> { s = "missing" } }
+      return s }
+    const l = label(R.Found(name))
+    if (l != "found bob") { return "badmatch:" + l }
+    ${G}` }, "E-TYPE-025"],
+  // LOW-3 — a comma in a VALUE position stays refused.
+  valueComma: [{ body: `let a = 0
+    const v = (a = 2, a + 1)
+    ${G}` }, "E-CODEGEN-INVALID-LOGIC"],
 };
 
 const dirs = [];
@@ -151,4 +214,40 @@ describe("S465 r6 HIGH-1 — an async-coloured binding used as a value is refuse
       expect(u.errors.map((e) => e.split(":")[0])).toContain(code);
     }, T);
   }
+});
+
+describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
+  const clientCompile = (body) => {
+    const dir = mkdtempSync(join(tmpdir(), "s465-r6-client-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "app.scrml"), `<program>
+\${
+  <out> = ""
+  function h() {
+    ${body}
+  }
+}
+<button onclick=h()>go</button>
+<p>\${@out}</p>
+</program>
+`);
+    const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, gather: true, log: () => {} });
+    let clientJs = "";
+    for (const o of r.outputs?.values() ?? []) if (o?.clientJs) clientJs += o.clientJs;
+    return { codes: (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code), clientJs };
+  };
+  test("a `?{` inside a string literal in a client function is text (was E-CG-006)", () => {
+    const r = clientCompile("const s = \"?{`SELECT pw FROM users`}\"\n    @out = s");
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toContain("\"?{`SELECT pw FROM users`}\"");
+  });
+  test("a C-style `for` header comma list compiles on the client", () => {
+    const r = clientCompile("let s = 0\n    for (let i = 0, j = 3; i < j; i++, j--) { s = s + 1 }\n    @out = String(s)");
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toMatch(/i\+\+, j--/);
+  });
+  test("a comma in a client VALUE position is refused", () => {
+    const r = clientCompile("let a = 0\n    const v = (a = 2, a + 1)\n    @out = String(v)");
+    expect(r.codes).toContain("E-CODEGEN-INVALID-LOGIC");
+  });
 });

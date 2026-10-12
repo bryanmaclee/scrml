@@ -39,6 +39,7 @@ import type {
   MapLitExpr,
   MarkupValueExpr,
 } from "../types/ast.ts";
+import { parseExpressionAt as acornParseExpressionAt } from "acorn";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived, setRewriteCurrentUserAmbientActive } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { isRefineCall } from "../refinement-obligations.ts";
@@ -1055,9 +1056,11 @@ function serverTextLowering(
   // `checkText`: the part of `text` that is author TEXT, when the rest was already
   // emitted from a tree (the `match` shim's subject). `noReparse`: the text is the
   // shim of an emitter the tree would route straight back to.
-  opts: { arrowBody?: boolean; span?: object | null; defaultDb?: boolean; checkText?: string; noReparse?: boolean } = {},
+  opts: { arrowBody?: boolean; span?: object | null; defaultDb?: boolean; checkText?: string; noReparse?: boolean; literal?: boolean } = {},
 ): string {
-  if (!opts.noReparse && lexicalCallInText(opts.checkText ?? text) !== null) {
+  // S465 r6 — `literal`: the caller proved (by parsing) that the text is ONE literal
+  // token (a regex / BigInt literal): no call can be in it, so the guard is skipped.
+  if (!opts.literal && !opts.noReparse && lexicalCallInText(opts.checkText ?? text) !== null) {
     if (opts.arrowBody) {
       const fn = emitServerFnValueFromText(text, ctx);
       if (fn !== null) return fn;
@@ -1066,7 +1069,7 @@ function serverTextLowering(
       if (tree) return emitExpr(tree, ctx);
     }
   }
-  if (refuseServerTextCall(opts.checkText ?? text, what, opts.span ?? null)) return REFUSED_SERVER_TEXT;
+  if (!opts.literal && refuseServerTextCall(opts.checkText ?? text, what, opts.span ?? null)) return REFUSED_SERVER_TEXT;
   const dbVar = opts.defaultDb ? undefined : ctx.dbVar;
   return opts.arrowBody
     ? rewriteServerExprArrowBody(text, dbVar, ctx.errors)
@@ -1090,6 +1093,107 @@ export function emitExprFromText(node: ExprNode | null | undefined, text: string
  * root, nothing dropped. (Hatches deeper in the tree are lowered — and guarded — on
  * their own.) Null otherwise.
  */
+/** S465 r6 — true when `text` is exactly ONE JavaScript literal token (regex, BigInt, …). */
+function isSingleJsLiteral(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (!t) return false;
+  try {
+    const n = acornParseExpressionAt(t, 0, { ecmaVersion: "latest" }) as { type?: string; end?: number };
+    return n.type === "Literal" && n.end === t.length;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * S465 r6 — rewrite every named-argument payload variant `.Found(name: x, n: y)` in
+ * `text` into its POSITIONAL form in the declared field order (`.Found(x, y)`), so the
+ * expression parser reads it. Null when there is none, or when one cannot be rewritten
+ * exactly: an unknown / ambiguous variant, a name that is not a field, a missing or
+ * repeated field, a positional argument after a named one, or text this scan does not
+ * understand (a template literal). The result is only ever used through the parser — a
+ * text it cannot read is not lowered from here.
+ */
+function positionalizeNamedVariantCalls(text: string): string | null {
+  const t = String(text ?? "");
+  if (t.includes("`")) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
+    getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
+  };
+  const NAMED = /^\s*([A-Za-z_$][\w$]*)\s*:(?!:)\s*([\s\S]+?)\s*$/;
+  let out = "";
+  let changed = false;
+  let i = 0;
+  while (i < t.length) {
+    const c = t[i];
+    if (c === "\"" || c === "'") {
+      let j = i + 1;
+      while (j < t.length && t[j] !== c) j += t[j] === "\\" ? 2 : 1;
+      if (j >= t.length) return null;
+      out += t.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    const prev = out.replace(/\s+$/, "").slice(-1);
+    const m = c === "." && !/[\w$.)\]]/.test(prev) ? /^\.\s*([A-Z][\w]*)\s*\(/.exec(t.slice(i)) : null;
+    if (!m) { out += c; i++; continue; }
+    // Balanced argument list (strings skipped).
+    const open = i + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let j = open; j < t.length; j++) {
+      const ch = t[j];
+      if (ch === "\"" || ch === "'") {
+        let k = j + 1;
+        while (k < t.length && t[k] !== ch) k += t[k] === "\\" ? 2 : 1;
+        if (k >= t.length) return null;
+        j = k;
+        continue;
+      }
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") { depth--; if (depth === 0) { close = j; break; } }
+    }
+    if (close < 0) return null;
+    const argsText = t.slice(open + 1, close);
+    const args = splitTopLevelCommas(argsText);
+    const named = args.map((a) => NAMED.exec(a));
+    if (args.length === 0 || named.every((n) => n === null)) {
+      // Positional (or no) arguments — not this rewrite's shape; keep, but its
+      // arguments may hold named variants too.
+      const inner = positionalizeNamedVariantCalls(argsText);
+      out += `.${m[1]}(${inner ?? argsText})`;
+      if (inner !== null) changed = true;
+      i = close + 1;
+      continue;
+    }
+    const fields = getVariantFieldSchemaFromRewriter(m[1]);
+    if (!fields) return null;
+    // Positional arguments first (field order), then named ones (§18.7 — the same
+    // pairing the text rewriter applies); a positional one after a named one is refused.
+    const byName = new Map<string, string>();
+    let sawNamed = false;
+    for (let a = 0; a < args.length; a++) {
+      const n = named[a];
+      if (n === null) {
+        if (sawNamed || a >= fields.length) return null;
+        const inner = positionalizeNamedVariantCalls(args[a]);
+        byName.set(fields[a], inner ?? args[a]);
+        continue;
+      }
+      sawNamed = true;
+      if (!fields.includes(n[1]) || byName.has(n[1])) return null;
+      const inner = positionalizeNamedVariantCalls(n[2]);
+      byName.set(n[1], inner ?? n[2]);
+    }
+    if (byName.size !== fields.length) return null;
+    out += `.${m[1]}(${fields.map((f) => byName.get(f)).join(", ")})`;
+    changed = true;
+    i = close + 1;
+  }
+  return changed ? out : null;
+}
+
 function readableExprTree(text: string): ExprNode | null {
   const t = String(text ?? "").trim();
   if (!t) return null;
@@ -5029,6 +5133,24 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     (node as any).kind === "Function" ||
     node.nativeKind === "ArrowFunctionExpression" ||
     node.nativeKind === "FunctionExpression";
+  // S465 r6 (review LOW-3; ruling S464 cfor-comma "b") — the comma operator is refused
+  // in every VALUE position on the client too (the one admitted comma list, a C-style
+  // `for` header's init / update, is lowered before it reaches here —
+  // emit-control-flow `emitCForHeaderList`).
+  if (ctx.mode !== "server" && node.nativeKind === "SequenceExpression") {
+    // cascadeOnly: dropped when the compile already holds a more precise error for the
+    // same text (`defer [1, 2].forEach(f)` outside a function is E-DEFER-OUTSIDE-FUNCTION).
+    const seqErr = new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      `a comma sequence \`${excerptRaw(node.raw)}\` is not a scrml expression — scrml has no comma ` +
+        "operator (§40.8, S441; §4.18.2); a comma list is admitted only in a C-style `for` header's init " +
+        "and update. Write each expression as its own statement, and use the value you need directly.",
+      (node as { span?: object }).span ?? {},
+    );
+    (seqErr as CGError & { cascadeOnly?: boolean }).cascadeOnly = true;
+    recordRefusedLowering(seqErr, node as object);
+    return "null /* E-CODEGEN-INVALID-LOGIC */";
+  }
   if (ctx.mode === "server") {
     // S465 r3 — a comma SEQUENCE is not a scrml expression (SPEC §40.8, the S441
     // bullet: "A comma sequence … is not a scrml expression — §4.18.2 lists what a
@@ -5059,6 +5181,25 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     if (node.nativeKind === "TaggedTemplateExpression") {
       const structured = emitTaggedTemplateFromText(node.raw, ctx);
       if (structured !== null) return structured;
+    }
+    // S465 r6 (review MED-1) — a LITERAL the expression parser keeps as a hatch (a
+    // regular-expression literal `/[A-Z](\d)/`, a BigInt `10n`) holds no call: its
+    // text is one literal token. Decided by parsing it (acorn — the whole text must be
+    // ONE Literal node), never by scanning it; the lexical guard would read `](` in a
+    // regex as a call.
+    if (node.nativeKind === "Literal" && isSingleJsLiteral(node.raw)) {
+      return serverTextLowering(node.raw, ctx, "a server literal", { literal: true });
+    }
+    // S465 r6 (review LOW-2) — a named-argument payload variant (`.Found(name: x)`) is a
+    // parse-error hatch (`name:` is not an argument). Its arguments are put in the
+    // declared field order (`.Found(x)`) and the result is lowered from the tree, so a
+    // call in an argument is classified (awaited) like any other.
+    if (node.nativeKind === "ParseError") {
+      const positional = positionalizeNamedVariantCalls(node.raw);
+      if (positional !== null) {
+        const tree = readableExprTree(positional);
+        if (tree) return emitExpr(tree, ctx);
+      }
     }
     // S465 r6 — an async-coloured function-valued binding (fn-valued-bindings.ts):
     // lowered from the tree as an `async` function, its calls awaited. A body that
