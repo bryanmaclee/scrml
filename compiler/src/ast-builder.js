@@ -104,6 +104,7 @@ function escapeRawHasEffect(raw) {
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
+import { isRawContentElement } from "./raw-content-encode.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -7484,6 +7485,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
 
+    // §4.17 (S465) — malformed lifted markup collected as a string: its `<pre>` /
+    // `<code>` bodies are raw content too. Rewrite them to one TEXT token each
+    // before the run is collected (parseLiftTag may have declined before reaching
+    // them), so no body token is read as code.
+    if (startTok.kind === "PUNCT" && startTok.text === "<" && peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) {
+      _normalizeLiftRawBodiesInRun(i);
+    }
+
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
@@ -7578,6 +7587,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // Consume the token — including `/` which collectExpr would stop at for operators
       lastTok = consume();
+      // §4.17 (S465) — a raw-content body (and its close tag) is written into the
+      // string EXACTLY as in source, glued to the opener's `>`: `<pre …>BODY</pre>`
+      // with no joiner spacing, so the string emitter (and a re-read of this text
+      // as markup) finds the same body by the same rule — the first `</pre>`.
+      if ((lastTok.kind === "TEXT" && lastTok._rawContent === true) || lastTok._rawCloser === true) {
+        let body = "";
+        if (lastTok.kind === "TEXT") body = lastTok.text;
+        else i--; // the close tag's `<` — re-read below with the rest of the close tag
+        const c0 = peek(), c1 = peek(1), c2 = peek(2), c3 = peek(3);
+        if (c0.text === "<" && c1.text === "/" && (c2.kind === "IDENT" || c2.kind === "KEYWORD")) {
+          consume(); consume(); consume();
+          if (c3.kind === "PUNCT" && c3.text === ">") consume();
+          lastTok = c3.kind === "PUNCT" && c3.text === ">" ? c3 : c2;
+          // (the TEXT case: this close tag was not seen by the angle tracking above)
+          if (body !== "" && angleDepth > 0) angleDepth--;
+          const glued = body + "</" + c2.text + ">";
+          if (parts.length > 0) parts[parts.length - 1] += glued;
+          else { parts.push(glued); partLines.push(lastTok.span?.line ?? 0); }
+          continue;
+        }
+        if (lastTok.kind !== "TEXT") lastTok = consume();
+        parts.push(body !== "" ? body : lastTok.text);
+      } else
       // Re-quote STRING tokens so their delimiters are preserved
       if (lastTok.kind === "STRING") {
         // A4: preserve backtick templates so `${...}` interpolations
@@ -7629,6 +7661,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     consume(); // tag name
     const tag = nameTok.text;
     const isComponent = /^[A-Z]/.test(tag);
+    // §4.17 (S465) — a lowercase-first `<pre>` / `<code>` is a raw-content element
+    // here exactly as in the block splitter (isRawContentElement — the one test).
+    const isRaw = isRawContentElement({ kind: "markup", tag });
+    // The offset of the raw body's first character (set when the opener closes).
+    let rawBodyStart = -1;
 
     // Parse attributes until > or /> or </> (malformed)
     const attrs = [];
@@ -7647,6 +7684,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Opening tag closer: >
       if (t.kind === "PUNCT" && t.text === ">") {
         consume();
+        if (isRaw && t.span && typeof t.span.start === "number") rawBodyStart = t.span.start + 1;
+        break;
+      }
+      // §4.17 (S465) — a raw body that begins with `=` / `>` (`<code>=</code>`): the
+      // logic tokenizer lexed the opener's `>` together with it (`>=`, `>>`). The
+      // opener closes at the `>`; the rest of the token is body text, captured from
+      // source with the rest of the body.
+      if (isRaw && (t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text.length > 1 && t.text.charAt(0) === ">" && t.span && typeof t.span.start === "number") {
+        consume();
+        rawBodyStart = t.span.start + 1;
         break;
       }
       // Attribute
@@ -7738,6 +7785,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isComponent: false, // void elements are HTML, never components
         span: spanOf(startTok, peek()),
       };
+    }
+
+    // §4.17 (S465, g-lift-pre-code-not-raw-content-s462) — a raw-content body is ONE
+    // text run to the matching `</pre>` / `</code>`, read from SOURCE: no `${…}`, no
+    // tag, no string token is recognized inside it. Its single text child reaches the
+    // same emitter rule as every other raw body (encodeRawContentBody).
+    if (isRaw && rawBodyStart >= 0) {
+      return _parseLiftRawContentBody(startTok, nameTok, tag, attrs, rawBodyStart);
     }
 
     // Parse children until </> or </tagname> or EOF
@@ -7832,6 +7887,252 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     // EOF without closer on non-component — malformed
     return null;
+  }
+
+  /**
+   * §4.17 (S465, g-lift-pre-code-not-raw-content-s462) — the body of a `<pre>` /
+   * `<code>` written in lifted / logic-context markup. The opener has been parsed
+   * (attributes included) and its `>` consumed; `bodyStart` is the offset of the
+   * body's first character.
+   *
+   * The logic tokenizer has already lexed the body as CODE (a `${…}` became a
+   * BLOCK_REF, `<img …>` became tag tokens, the `'` of `don't` opened a string that
+   * can run past the closer). `_normalizeLiftRawBody` rewrites the token stream at
+   * the cursor to what the body IS: one TEXT token (`_rawContent`) holding the
+   * source text up to the matching close tag — the block splitter's rule: the
+   * first `</pre>` / `</code>`, ASCII case-insensitive — then that close tag as
+   * `<` `/` name `>`, then the tokens after it (re-lexed from source when a token
+   * of the old lexing straddles the close tag). The rewrite is idempotent (a
+   * caller that resets its cursor and re-parses meets the same tokens), and a
+   * caller that declines the markup and collects it as a string reads the same
+   * corrected tokens (collectLiftExpr keeps the TEXT token whole).
+   *
+   * Returns the element with ONE `text` child (none for an empty body), or null
+   * when no close tag follows — the caller's malformed-markup path.
+   */
+  function _parseLiftRawContentBody(startTok, nameTok, tag, attrs, bodyStart) {
+    if (!_normalizeLiftRawBody(startTok, nameTok, tag.toLowerCase(), bodyStart)) return null;
+    const children = [];
+    if (peek().kind === "TEXT" && peek()._rawContent === true) {
+      const b = consume();
+      children.push({ id: ++counter.next, kind: "text", value: b.text, span: tokenSpan(b, filePath) });
+    }
+    // The close tag `_normalizeLiftRawBody` verified: `<` `/` name `>`.
+    consume(); consume(); consume();
+    if (peek().kind === "PUNCT" && peek().text === ">") consume();
+    return {
+      id: ++counter.next, kind: "markup", tag, attrs, children,
+      selfClosing: false, closerForm: "explicit", isComponent: false,
+      span: spanOf(startTok, peek()),
+    };
+  }
+
+  /** The text the token offsets index, when it can be found and is verified at the opener. */
+  function _liftRawSourceText(startTok, nameTok) {
+    const verify = (text, base) => {
+      const lt = startTok.span.start - base;
+      const nm = nameTok.span.start - base;
+      return lt >= 0 && text.charAt(lt) === "<" && nm >= 0 && text.startsWith(nameTok.text, nm);
+    };
+    if (!startTok.span || !nameTok.span || typeof startTok.span.start !== "number" || typeof nameTok.span.start !== "number") return null;
+    const s = tokens._s441Src;
+    if (s && typeof s.text === "string" && typeof s.offset === "number" && verify(s.text, s.offset)) {
+      return { text: s.text, base: s.offset };
+    }
+    if (parentBlock && typeof parentBlock.raw === "string" && parentBlock.span && typeof parentBlock.span.start === "number"
+        && verify(parentBlock.raw, parentBlock.span.start)) {
+      return { text: parentBlock.raw, base: parentBlock.span.start };
+    }
+    return null;
+  }
+
+  /** line/col of `text[relTo]`, counted from `text[relFrom]` at (line, col). */
+  function _lineColAt(text, relFrom, relTo, line, col) {
+    const seg = text.slice(relFrom, relTo);
+    const nl = seg.lastIndexOf("\n");
+    if (nl < 0) return { line, col: col + seg.length };
+    return { line: line + (seg.match(/\n/g)?.length ?? 0), col: seg.length - nl };
+  }
+
+  function _normalizeLiftRawBody(startTok, nameTok, lowerTag, bodyStart) {
+    const isCloserAt = (k) => {
+      const a = tokens[k], b = tokens[k + 1], c = tokens[k + 2];
+      return !!(a && b && c && a.kind === "PUNCT" && a.text === "<" && b.kind === "PUNCT" && b.text === "/"
+        && (c.kind === "IDENT" || c.kind === "KEYWORD") && c.text.toLowerCase() === lowerTag);
+    };
+    // Already normalized (a caller re-parsing the same tokens): the TEXT token or the
+    // close tag sits exactly at the body start.
+    const t0 = tokens[i];
+    if (t0 && t0.span && t0.span.start === bodyStart) {
+      if (t0.kind === "TEXT" && t0._rawContent === true && isCloserAt(i + 1)) return true;
+      if (t0._rawCloser === true && isCloserAt(i)) return true;
+    }
+    const needle = `</${lowerTag}>`;
+    const src = _liftRawSourceText(startTok, nameTok);
+    // The opener's `>` lexed together with the body's first characters (`>=`): that
+    // token becomes the `>` alone; its remaining characters are body text.
+    const prevTok = tokens[i - 1];
+    const mergedGt = !!(prevTok && prevTok.span && prevTok.span.end > bodyStart && (prevTok.kind === "PUNCT" || prevTok.kind === "OPERATOR") && prevTok.text.charAt(0) === ">");
+
+    const bodyLine = prevTok && prevTok.span ? prevTok.span.line : startTok.span.line;
+    const bodyCol = (prevTok && prevTok.span ? prevTok.span.col : startTok.span.col) + 1;
+    const mk = (kind, text, start, end, lc) => ({ kind, text, span: { start, end, line: lc.line, col: lc.col } });
+
+    let bodyText, closeStart, closeEnd, tailFrom, relexTail = null;
+    if (src) {
+      const rel = bodyStart - src.base;
+      let k = rel;
+      for (;;) {
+        k = src.text.indexOf("<", k);
+        if (k < 0) return false; // no close tag in this logic text — malformed
+        if (src.text.slice(k, k + needle.length).toLowerCase() === needle) break;
+        k++;
+      }
+      bodyText = src.text.slice(rel, k);
+      closeStart = src.base + k;
+      closeEnd = closeStart + needle.length;
+      // The first old token at or after the close tag's end.
+      let j = i;
+      let maxEnd = 0;
+      let straddles = false;
+      for (let m = i; m < tokens.length; m++) {
+        const tk = tokens[m];
+        if (!tk || tk.kind === "EOF" || !tk.span) continue;
+        if (tk.span.end > maxEnd) maxEnd = tk.span.end;
+      }
+      while (j < tokens.length && tokens[j].kind !== "EOF" && tokens[j].span && tokens[j].span.start < closeEnd) {
+        if (tokens[j].span.end > closeEnd) straddles = true;
+        j++;
+      }
+      tailFrom = j;
+      if (straddles) {
+        // The old lexing read across the close tag (a string opened in the body):
+        // every token after it is re-lexed from source.
+        const relEnd = Math.min(src.text.length, Math.max(maxEnd - src.base, k + needle.length));
+        const lc = _lineColAt(src.text, rel, k + needle.length, bodyLine, bodyCol);
+        const kids = Array.isArray(childBlocks) ? childBlocks.filter((c) => c && c.span && c.span.start >= closeEnd) : [];
+        let tail = tokenizeLogic(src.text.slice(k + needle.length, relEnd), closeEnd, lc.line, lc.col, kids);
+        if (parentBlock && parentBlock._bodyTop === true) {
+          tail = coverUnknownBodyTopChars(tail, src.text.slice(k + needle.length, relEnd), closeEnd, lc.line, lc.col);
+        }
+        const hadEof = tokens.length > 0 && tokens[tokens.length - 1].kind === "EOF";
+        if (!hadEof && tail.length > 0 && tail[tail.length - 1].kind === "EOF") tail.pop();
+        relexTail = tail;
+      }
+    } else {
+      // No source text indexes these tokens: rebuild the body from the tokens at
+      // their own offsets (whitespace preserved) up to the close tag's tokens.
+      let m = i;
+      while (m < tokens.length && tokens[m].kind !== "EOF" && !isCloserAt(m)) m++;
+      if (!isCloserAt(m)) return false;
+      let out = mergedGt ? prevTok.text.slice(bodyStart - prevTok.span.start) : "";
+      let at = bodyStart + out.length;
+      for (let q = i; q < m; q++) {
+        const tk = tokens[q];
+        const txt = tk.kind === "STRING"
+          ? (tk.isTemplate ? "`" + tk.text + "`" : (tk.delim ? tk.delim + tk.text + tk.delim : reemitJsStringLiteral(tk.text)))
+          : (tk.kind === "BLOCK_REF" && tk.block && typeof tk.block.raw === "string" ? tk.block.raw : tk.text);
+        if (tk.span && typeof tk.span.start === "number" && tk.span.start > at) out += " ".repeat(tk.span.start - at);
+        out += txt;
+        at = tk.span && typeof tk.span.end === "number" ? Math.max(at, tk.span.end) : at + txt.length;
+      }
+      bodyText = out;
+      const lt = tokens[m];
+      closeStart = lt.span.start;
+      const gt = tokens[m + 3];
+      closeEnd = gt && gt.kind === "PUNCT" && gt.text === ">" ? gt.span.end : tokens[m + 2].span.end;
+      tailFrom = gt && gt.kind === "PUNCT" && gt.text === ">" ? m + 4 : m + 3;
+    }
+
+    // The replacement run: [TEXT body]? `<` `/` name `>`.
+    const run = [];
+    if (bodyText.length > 0) {
+      const tt = mk("TEXT", bodyText, bodyStart, closeStart, { line: bodyLine, col: bodyCol });
+      tt._rawContent = true;
+      run.push(tt);
+    }
+    const clc = src
+      ? _lineColAt(src.text, bodyStart - src.base, closeStart - src.base, bodyLine, bodyCol)
+      : { line: bodyLine, col: bodyCol };
+    const nameText = src ? src.text.slice(closeStart - src.base + 2, closeEnd - src.base - 1) : lowerTag;
+    const ltTok = mk("PUNCT", "<", closeStart, closeStart + 1, clc);
+    if (bodyText.length === 0) ltTok._rawCloser = true;
+    run.push(ltTok);
+    run.push(mk("PUNCT", "/", closeStart + 1, closeStart + 2, { line: clc.line, col: clc.col + 1 }));
+    run.push(mk("IDENT", nameText, closeStart + 2, closeEnd - 1, { line: clc.line, col: clc.col + 2 }));
+    run.push(mk("PUNCT", ">", closeEnd - 1, closeEnd, { line: clc.line, col: clc.col + 2 + nameText.length }));
+
+    if (relexTail) tokens.splice(i, tokens.length - i, ...run, ...relexTail);
+    else tokens.splice(i, tailFrom - i, ...run);
+    if (mergedGt) {
+      tokens[i - 1] = { ...prevTok, kind: "PUNCT", text: ">", span: { ...prevTok.span, end: prevTok.span.start + 1 } };
+    }
+    return true;
+  }
+
+  /**
+   * §4.17 (S465) — the malformed-markup string path: walk the markup run that
+   * starts at token `from` the way parseLiftTag nests tags (opener `<name … >`,
+   * self-close `/>`, void elements, closer `</…>`), tolerating what parseLiftTag
+   * declined, and normalize every raw-content body met (`_normalizeLiftRawBody`).
+   * Stops when the run's tag depth returns to zero, or at a statement end outside
+   * any tag. The cursor `i` is restored.
+   */
+  function _normalizeLiftRawBodiesInRun(from) {
+    const saved = i;
+    let k = from;
+    let depth = 0;
+    try {
+      while (k < tokens.length) {
+        const t = tokens[k];
+        if (!t || t.kind === "EOF") break;
+        if (t.kind === "PUNCT" && t.text === "<") {
+          const n = tokens[k + 1];
+          if (n && n.kind === "PUNCT" && n.text === "/") {
+            // A closer: `</>` or `</name>`.
+            depth--;
+            k += 2;
+            if (tokens[k] && (tokens[k].kind === "IDENT" || tokens[k].kind === "KEYWORD")) k++;
+            if (tokens[k] && tokens[k].kind === "PUNCT" && tokens[k].text === ">") k++;
+            if (depth <= 0) break;
+            continue;
+          }
+          if (n && (n.kind === "IDENT" || n.kind === "KEYWORD")) {
+            // An opener: find its `>` / `/>`.
+            let m = k + 2;
+            let end = -1, selfClose = false;
+            while (m < tokens.length) {
+              const x = tokens[m];
+              if (!x || x.kind === "EOF") break;
+              if (x.kind === "PUNCT" && x.text === "/" && tokens[m + 1] && tokens[m + 1].kind === "PUNCT" && tokens[m + 1].text === ">") { end = m + 1; selfClose = true; break; }
+              if ((x.kind === "PUNCT" || x.kind === "OPERATOR") && x.text.charAt(0) === ">") { end = m; break; }
+              if (x.kind === "PUNCT" && (x.text === "<" || x.text === ";" || x.text === "}")) break;
+              m++;
+            }
+            if (end < 0) break;
+            if (selfClose || HTML_VOID_ELEMENTS.has(n.text.toLowerCase())) { k = end + 1; if (depth === 0) break; continue; }
+            if (isRawContentElement({ kind: "markup", tag: n.text }) && tokens[end].span && typeof tokens[end].span.start === "number") {
+              i = end + 1;
+              if (_normalizeLiftRawBody(t, n, n.text.toLowerCase(), tokens[end].span.start + 1)) {
+                // Past the TEXT body (if any) and the four close-tag tokens.
+                let q = end + 1;
+                if (tokens[q] && tokens[q].kind === "TEXT" && tokens[q]._rawContent === true) q++;
+                k = q + 4;
+                if (depth === 0) break;
+                continue;
+              }
+            }
+            depth++;
+            k = end + 1;
+            continue;
+          }
+        }
+        if (depth === 0) break;
+        k++;
+      }
+    } finally {
+      i = saved;
+    }
   }
 
   /**
