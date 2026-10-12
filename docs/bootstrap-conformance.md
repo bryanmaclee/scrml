@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1784 of 1784 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1786 of 1786 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1784 of 1784 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 74 | 4.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 671 | 37.6% |
-| UNSUPPORTED | 850 | 47.6% |
+| NOT-TWINNED | 672 | 37.6% |
+| UNSUPPORTED | 851 | 47.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,19 +26,19 @@ Scope: **1784 of 1784 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 34 of 74; the other 40 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 584 · parse-reject 266.
+UNSUPPORTED by reason: bootstrap-unsupported 584 · parse-reject 267.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **788** — PASS 104 · FAIL 59 · UNSUPPORTED 625. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **789** — PASS 104 · FAIL 59 · UNSUPPORTED 626. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (672 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 73 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- 66 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- 67 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 58 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 51 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
@@ -76,7 +76,6 @@ NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 - 2 — engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
 - 2 — excluded by dialect.s66
 - 2 — program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `…` unwrapped
-- 2 — rhs-decl: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
 - 1 — const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 1 — engine-simple: `…` impl#1's front end did not surface as an engine declaration (left untouched)
 - 1 — engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
@@ -89,6 +88,7 @@ NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-LOOP-006) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL) — not restructured, no `…` unwrapped
 - 1 — program-wrap: the restructured file does not parse to one top-level `…` (malformed source) — not restructured, no `…` unwrapped
+- 1 — rhs-decl: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
 - 1 — rhs-decl: opener attribute `…` has no mechanical §66 spelling
 - 1 — unwrap-logic: impl#1 reads the restructured file differently (+E-TYPE-046) — not restructured, no `…` unwrapped
 - 1 — unwrap-logic: impl#1 reads the restructured file differently (+W-INTERP-IN-RAW-CONTENT) — not restructured, no `…` unwrapped
@@ -108,7 +108,7 @@ NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 2 | · | 65 | 1 | · | · |
 | condition | 36 | 23 | · | · | · | 8 | 5 | · | · |
-| control-flow | 73 | 14 | · | 3 | · | 19 | 37 | · | · |
+| control-flow | 75 | 14 | · | 3 | · | 20 | 38 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -558,7 +558,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (850)
+### UNSUPPORTED (851)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -717,6 +717,7 @@ none
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/lift-two-in-value-arm-e-lift-002-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `control-flow/markup-if-arm-reads-rerender-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
+- `control-flow/markup-statement-not-rendered-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `{`
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
@@ -1415,7 +1416,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (671)
+### NOT-TWINNED (672)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1573,6 +1574,7 @@ none
 - `control-flow/loop-007-while-as-expr-no-lift-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/loop-007-while-as-expr-pos` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `let-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/markup-if-presence-arm-reads-rerender-pos` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `control-flow/markup-statement-not-rendered-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `defer/later-shadow-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `const-decl` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `defer/outside-function-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `defer-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
@@ -1631,7 +1633,7 @@ none
 - `engine/derived-engine-no-initial-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - `engine/derived-engine-no-rules-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - `engine/derived-engine-no-rules-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-engine-statechild-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface) · rhs-decl: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
+- `engine/derived-engine-statechild-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - `engine/derived-machine-no-projection-rules-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
 - `engine/derived-machine-no-projection-rules-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
 - `engine/derived-machine-unprojected-variant-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
