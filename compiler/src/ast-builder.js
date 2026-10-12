@@ -6341,6 +6341,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // statement-level propagation-then-SQL (`foo()? ` then a separate `?{}` stmt)
     // has no depth-0 `=>` and keeps its statement boundary.
     let sawArrowGlyphAtDepth0 = false;
+    // S465 r3 — a depth-0 word whose construct takes a `{ … }` body that may open
+    // on the next line; read by the bare-block boundary (BUG-ASI-NEWLINE below).
+    let sawBraceHeadAtDepth0 = false;
+    const BRACE_HEAD_WORDS = new Set(["function", "fn", "match", "if", "else", "for", "while", "do", "switch", "try", "catch", "finally", "given", "when", "class", "partial", "transaction", "server",
+      // not a body, but a `{ … }` that continues the statement on its next line:
+      // `import:host⏎{ tok } from "./h.js"`, a `type` / `use` declaration's shape.
+      "import", "type", "use"]);
+    // A caller that consumed the statement's head word before collecting (the
+    // `import` handler collects `:host⏎{ … } from …` after eating `import`).
+    { const _h = peek(-1); if (_h && (_h.kind === "KEYWORD" || _h.kind === "IDENT") && BRACE_HEAD_WORDS.has(_h.text)) sawBraceHeadAtDepth0 = true; }
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
     const DECL_KEYWORDS = new Set(["const", "let", "type", "function", "fn"]);
@@ -7054,6 +7064,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             tok.kind === "AT_IDENT"
           );
           if (lastEndsValue && tokStartsStmt) break;
+          // S465 r3 — a `{` on a later line after a value OPENS A BARE BLOCK
+          // STATEMENT (SPEC §7.2.2 "Terms": a bare block is a statement list).
+          // JS reads `a⏎{ … }` the same way (`a {` is not an expression, so ASI
+          // ends the statement). Pre-r3 the block was SWALLOWED into the
+          // previous statement's text (`let r = 0⏎{ r = 5 }` → init
+          // `0 { r = 5 }`; `{ A }⏎{ B }` → one bare-expr `{A}{B}`) and the
+          // expression parser read only the prefix — the block (a guard, in
+          // the S465 r3 finding) was silently dropped. NOT a boundary when the
+          // statement so far holds a depth-0 head that takes a brace body on
+          // its next line (`const f = function (x)⏎{`, `const v = match x⏎{`,
+          // `const v = if (c)⏎{`): there the `{` is that construct's body.
+          if (lastEndsValue && tok.kind === "PUNCT" && tok.text === "{" && !sawBraceHeadAtDepth0) break;
           // Phase A1a Step 11.0b — newline-as-statement-separator for state-decls.
           // When a newline crosses, lastTok ends a value, and the current token
           // is `<` PUNCT followed by IDENT, peek further to see if this opens a
@@ -7109,6 +7131,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
       }
+      // S465 r3 — see the bare-block boundary (BUG-ASI-NEWLINE) above.
+      if (depth === 0 && (tok.kind === "KEYWORD" || tok.kind === "IDENT") && BRACE_HEAD_WORDS.has(tok.text)) sawBraceHeadAtDepth0 = true;
       // Track brace / paren depth
       if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === "(" || tok.text === "[")) depth++;
       if (tok.kind === "PUNCT" && (tok.text === "}" || tok.text === ")" || tok.text === "]")) {
@@ -13065,6 +13089,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
           return { id: ++counter.next, kind: "html-fragment", content: expr, span };
+        }
+        // S465 r3 — a statement directly at a `match` body's arm level that holds
+        // an arm arrow is an ARM (`"a" :> { … }`): codegen reads it from its text
+        // (parseMatchArm), so the expression view of it — which acorn reads only
+        // up to the arrow — loses nothing, and the "statement boundary not
+        // detected — trailing content would be silently dropped" warning it
+        // raised was false. Hold it. (The node keeps its dropped-content stamp,
+        // so a server emitter that ever reached it would still refuse it.)
+        if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth && /:>|=>/.test(expr)) {
+          const { result: _armView } = captureTrailingContentWarnings(() => safeParseExprToNode(expr, 0));
+          return { id: ++counter.next, kind: "bare-expr", expr, exprNode: _armView, span };
         }
         return { id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span };
       } else {

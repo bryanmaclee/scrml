@@ -52,7 +52,7 @@ import { isServerAmbientSession, refuseServerAmbientSession } from "./server-ses
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
-import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -770,6 +770,30 @@ function navigateExplicitVariant(arg: any): "Hard" | "Soft" | null {
  * Emit a JavaScript expression string from an ExprNode tree.
  */
 export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
+  // S465 r3 — an expression the parser read only by DROPPING a following
+  // statement (it warned "statement boundary not detected — trailing content
+  // would be silently dropped") never reaches server output: that statement
+  // (a guard, in the S465 r3 finding) would silently not run. Compile error.
+  // The warning's own test (a newline plus a word in the tail) misses a dropped
+  // tail such as `let ok = 1⏎!(r = guard())` (measured: wrong password →
+  // WELCOME, no warning), so any expression read by dropping content counts.
+  if (ctx.mode === "server" && node && typeof node === "object") {
+    const dropped = droppedStatementTextOf(node) ??
+      (hasLostTrailingContent(node) ? String((node as Record<string, unknown>)._s441TrailingText ?? "") : null);
+    if (dropped !== null) {
+      const one = dropped.replace(/\s+/g, " ").trim();
+      const shown = one.length > 80 ? one.slice(0, 77) + "..." : one;
+      recordRefusedLowering(new CGError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        `unexpected token — no statement begins at \`${shown}\` in server code. ` +
+          "The statement grammar read the expression before it and could not find where the next statement " +
+          "starts, so this text would be silently dropped (it would never run). End the previous statement with " +
+          "`;`, or put each statement on its own line.",
+        (node as { span?: object }).span ?? {},
+      ), node as object);
+      return "null /* E-STMT-UNEXPECTED-TOKEN */";
+    }
+  }
   switch (node.kind) {
     case "ident":       return emitIdent(node, ctx);
     case "lit":         return emitLit(node, ctx);
@@ -4767,6 +4791,11 @@ function emitInputStateRef(node: InputStateRefExpr, ctx: EmitExprContext): strin
 // Escape hatch — falls back to string rewrite pipeline
 // ---------------------------------------------------------------------------
 
+function excerptRaw(t: string): string {
+  const one = String(t ?? "").replace(/\s+/g, " ").trim();
+  return one.length > 60 ? one.slice(0, 57) + "..." : one;
+}
+
 function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
   // The string pipeline handles whatever the structured parser couldn't parse.
   // This path disappears when all escape hatches are eliminated (Phase 3.5).
@@ -4786,6 +4815,25 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     node.nativeKind === "ArrowFunctionExpression" ||
     node.nativeKind === "FunctionExpression";
   if (ctx.mode === "server") {
+    // S465 r3 — a comma SEQUENCE is not a scrml expression (SPEC §4.18: "scrml
+    // has no comma operator"). On the server its text fallback was also never
+    // awaited (`(0, check(p, h))` shipped a Promise — truthy — so a wrong
+    // password passed), so it is refused rather than lowered as text.
+    // (Measured r3: refusing EVERY non-arrow hatch on the server also rejects
+    // legal scrml the text rewriter is the designed lowering for — a named-arg
+    // payload variant `.Found(name: "carol")` (ParseError hatch), a §14.8 tagged
+    // template — so only the sequence, which is not scrml at all, is refused here.
+    // See progress.md r3 for the recorded residue.)
+    if (node.nativeKind === "SequenceExpression") {
+      recordRefusedLowering(new CGError(
+        "E-CODEGEN-INVALID-LOGIC",
+        `a comma sequence \`${excerptRaw(node.raw)}\` is not a scrml expression — scrml has no comma ` +
+          "operator (§4.18) — and it cannot be lowered in server code. Write each expression as its own " +
+          "statement, and use the value you need directly.",
+        (node as { span?: object }).span ?? {},
+      ), node as object);
+      return "null /* E-CODEGEN-INVALID-LOGIC */";
+    }
     return isArrowOrFn
       ? rewriteServerExprArrowBody(node.raw, ctx.dbVar, ctx.errors)
       : rewriteServerExpr(node.raw, ctx.dbVar, ctx.errors);

@@ -3322,13 +3322,26 @@ export function esTreeToExprNode(
 
 /** Create an EscapeHatchExpr for an unsupported ESTree node type. */
 function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): EscapeHatchExpr {
+  // S465 r3 — the hatch carries the text of THIS node, not of the whole
+  // expression it sits in. Pre-r3 `raw` was the entire source, so a hatch nested
+  // in a larger expression re-emitted its siblings: `(0, "x") + "y"` lowered to
+  // `(0, "x") + "y" + "y"` ("xyy"). acorn's span of a parenthesized node omits
+  // the parens; a sequence keeps them (its commas would otherwise bind to the
+  // enclosing context).
+  const s = (node as { start?: number }).start;
+  const e = (node as { end?: number }).end;
+  let text = rawSource;
+  if (typeof s === "number" && typeof e === "number" && s >= 0 && e <= rawSource.length && e > s) {
+    text = rawSource.slice(s, e);
+    if (node.type === "SequenceExpression") text = "(" + text + ")";
+  }
   return {
     kind: "escape-hatch",
     span,
     nativeKind: node.type,
     // S454 — an opaque region carries the author's `?{}` / `!{}` source, not
     // the extractHandledOperands placeholders.
-    raw: restoreHandledOperands(rawSource),
+    raw: restoreHandledOperands(text),
   } satisfies EscapeHatchExpr;
 }
 
@@ -3421,6 +3434,18 @@ export function parseScrmlTextToEstree(raw: string, asProgram: boolean): ESNode 
   return r.ast;
 }
 
+/**
+ * S465 r3 — the trailing text the parser dropped when it warned "statement
+ * boundary not detected — trailing content would be silently dropped" for this
+ * node, or null. A server emitter that reaches such a node refuses it
+ * (emit-expr.ts `emitExpr`): the dropped text is a statement that would not run.
+ */
+export function droppedStatementTextOf(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const t = (node as Record<string, unknown>)._s465DroppedStatement;
+  return typeof t === "string" ? t : null;
+}
+
 export function hasLostTrailingContent(node: unknown): boolean {
   return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
 }
@@ -3449,6 +3474,15 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
     // position instead of dropping it.
     Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
     Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
+  }
+  if (_node && typeof _node === "object" && typeof (_detector as { droppedStatementText?: string }).droppedStatementText === "string") {
+    // S465 r3 — the "statement boundary not detected — trailing content would be
+    // silently dropped" warning fired for this expression. Non-enumerable (like
+    // `_s441Trailing`); read through `droppedStatementTextOf`.
+    Object.defineProperty(_node, "_s465DroppedStatement", {
+      value: (_detector as { droppedStatementText?: string }).droppedStatementText,
+      enumerable: false, configurable: true, writable: true,
+    });
   }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
@@ -3559,6 +3593,9 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
     if (_trailingWarningSink) _trailingWarningSink.push(msg);
     else console.warn(msg);
+    // S465 r3 — the returned node is stamped (see parseExprToNode) so a SERVER
+    // emitter that reaches it fails the compile instead of shipping the prefix.
+    if (_notDetector) (_notDetector as { droppedStatementText?: string }).droppedStatementText = trailingContent.trim();
   }
 
   if (!estree) {

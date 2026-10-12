@@ -16,6 +16,7 @@
 // `_emitNestedGuardedArmBody` precedent): a static import of emit-control-flow
 // from a validator closes an import cycle through the codegen modules.
 import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
+import { isWholeBraceBlock } from "../brace-pair.ts";
 /* eslint-disable @typescript-eslint/no-require-imports */
 function splitBlocks(filePath: string, source: string): unknown {
   return (require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => unknown }).splitBlocks(filePath, source);
@@ -92,13 +93,19 @@ export function parseStatementTextDetailed(
 ): DetailedParsedBody {
   const checkTrailing = opts.lostTrailing !== false;
   let body = text.trim();
-  // A handler / arm BLOCK body `{ … }` — codegen treats the braces as the
-  // block delimiters (not an object literal); strip exactly that outer pair.
-  if (body.startsWith("{") && body.endsWith("}")) body = body.slice(1, -1);
-  const source = "${\nfunction " + PROBE_FN + "() {\n" + body + "\n}\n}";
   const refuse = (code: string | null, message: string, t: string): DetailedParsedBody =>
     ({ ok: false, refusal: { code, message, text: t } });
   const unparsed = "the body did not parse as a statement list";
+  // A handler / arm BLOCK body `{ … }` — codegen treats the braces as the
+  // block delimiters (not an object literal); strip exactly that outer pair.
+  // S465 r3 — only when a depth scan PROVES the first `{` closes at the last `}`:
+  // `{ A }⏎{ B }` is two blocks, and stripping its ends handed the probe
+  // ` A }⏎{ B ` — which closed the probe function after A and dropped B.
+  if (body.startsWith("{") && body.endsWith("}")) {
+    if (!isWholeBraceBlock(body)) return refuse(null, unparsed, body.trim());
+    body = body.slice(1, -1);
+  }
+  const source = "${\nfunction " + PROBE_FN + "() {\n" + body + "\n}\n}";
   try {
     const bs = splitBlocks(filePath + "#defer-probe", source) as { errors?: Array<{ code?: string; message?: string }> };
     if (Array.isArray(bs.errors) && bs.errors.length > 0) {
@@ -124,7 +131,13 @@ export function parseStatementTextDetailed(
       }
       for (const k of Object.keys(nn)) if (k !== "span") find(nn[k]);
     };
-    find(built.ast);
+    // S465 r3 — the probe source is ONE logic block holding ONE node, the probe
+    // function. Anything else (a body that closed the probe early, leaving a
+    // sibling statement after it) means the body was not read as written:
+    // refuse rather than return the probe's partial body.
+    const probeFn = soleProbeFunction(built.ast);
+    if (probeFn === null) return refuse(null, unparsed, body.trim());
+    find(probeFn);
     if (!found) return refuse(null, unparsed, body.trim());
     const bad = unreadableContentIn(found, filePath, checkTrailing);
     if (bad !== null) return refuse(null, unparsed, bad);
@@ -132,6 +145,32 @@ export function parseStatementTextDetailed(
   } catch {
     return refuse(null, unparsed, body.trim());
   }
+}
+
+/**
+ * S465 r3 — the probe function node when the probe source built to exactly one
+ * top-level `logic` node whose body is exactly that function; otherwise null.
+ */
+function soleProbeFunction(ast: unknown): Node | null {
+  const a = ast as { nodes?: unknown } | null;
+  const nodes = (a && Array.isArray(a.nodes)) ? a.nodes as unknown[] : Array.isArray(ast) ? ast as unknown[] : null;
+  if (!nodes) return null;
+  const real = nodes.filter((n) => !isBlankText(n));
+  if (real.length !== 1) return null;
+  const logic = real[0] as Node;
+  if (!logic || logic.kind !== "logic" || !Array.isArray(logic.body)) return null;
+  const inner = (logic.body as unknown[]).filter((n) => !isBlankText(n));
+  if (inner.length !== 1) return null;
+  const fn = inner[0] as Node;
+  if (!fn || fn.kind !== "function-decl" || fn.name !== PROBE_FN || !Array.isArray(fn.body)) return null;
+  return fn;
+}
+
+function isBlankText(n: unknown): boolean {
+  if (!n || typeof n !== "object") return false;
+  const nn = n as Node;
+  if (nn.kind === "comment") return true;
+  return nn.kind === "text" && typeof nn.value === "string" && !(nn.value as string).trim();
 }
 
 /**
@@ -195,7 +234,8 @@ export function bareBlockText(n: unknown): string | null {
   const nn = n as Node;
   if (nn.kind !== "bare-expr" || typeof nn.expr !== "string") return null;
   const t = (nn.expr as string).trim();
-  if (!(t.startsWith("{") && t.endsWith("}"))) return null;
+  // S465 r3 — a bare-expr `{ A } { B }` is NOT one block (see isWholeBraceBlock).
+  if (!isWholeBraceBlock(t)) return null;
   const en = nn.exprNode as Node | undefined;
   if (!en || en.kind !== "escape-hatch" || en.nativeKind !== "ParseError") return null;
   return t;

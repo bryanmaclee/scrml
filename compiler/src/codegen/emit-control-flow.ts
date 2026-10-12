@@ -6,7 +6,7 @@ import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
 import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
-import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -753,6 +753,31 @@ function forLabelPrefix(node: any): string {
   return typeof node?.label === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(node.label) ? `${node.label}: ` : "";
 }
 
+/**
+ * S465 r3 — the names a C-style `for` header DECLARES (`for (let i = 0, j = n; …)`
+ * → i, j), read from the structured declarators when the init was read
+ * (`cStyleInitDeclaration`), else from the header's init text. Empty when the
+ * init is not a declaration (`for (i = 0; …)` assigns an outer name).
+ */
+function cStyleDeclaredLoopNames(decl: { declarators: any[] } | null, initText: string): string[] {
+  const out: string[] = [];
+  if (decl) {
+    for (const d of decl.declarators) {
+      const t = d?.target ?? d?.left;
+      if (t && t.kind === "ident" && typeof t.name === "string") out.push(t.name);
+    }
+    if (out.length === decl.declarators.length) return out;
+    out.length = 0;
+  }
+  const m = /^\s*(?:let|const|var)\s+([\s\S]+)$/.exec(initText ?? "");
+  if (!m) return out;
+  for (const part of splitTopLevelCommas(m[1])) {
+    const id = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)/.exec(part);
+    if (id) out.push(id[1]);
+  }
+  return out;
+}
+
 export function emitForStmt(
   node: any,
   opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
@@ -848,8 +873,14 @@ function _emitForStmtInner(
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`${forLabelPrefix(node)}for (${init}; ${cond}; ${update}) {`);
 
+      // S465 r3 — the header's declared loop variables are in scope in the body:
+      // a body assignment `i = i + 4` is a reassignment, not an implicit
+      // declaration (pre-r3 it emitted `const i = i + 4` — a shadowing TDZ
+      // ReferenceError / a loop that never advances).
+      const _cBodyNames = blockScopedDeclaredNames(opts?.declaredNames);
+      if (_cBodyNames) for (const n of cStyleDeclaredLoopNames(_cDecl, cStyleMatch[1])) _cBodyNames.add(n);
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: _cBodyNames, insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
