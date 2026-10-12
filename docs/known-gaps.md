@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 253 | 4 |
-| MED | 607 | 6 |
-| LOW | 371 | 0 |
+| MED | 611 | 6 |
+| LOW | 382 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
