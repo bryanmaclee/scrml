@@ -1,0 +1,27 @@
+<program>
+<article id="post">
+    <md class="prose">
+        ## Filing a good bug report
+
+        Before you file, **search the board**. Duplicates get *closed*.
+
+        - Say what you *expected* and what ~~broke~~ happened.
+        - Paste the exact error in `backticks`.
+        - Read the [triage guide](/docs/triage "Triage").
+
+        3. three
+        4. four
+
+        > Quote me.
+
+        ---
+
+        | name | count |
+        | :--- | ----: |
+        | a    | 1     |
+
+        Line one\
+        line two ![logo](/logo.png)
+    </md>
+</article>
+</program>

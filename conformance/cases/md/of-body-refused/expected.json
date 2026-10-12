@@ -1,0 +1,16 @@
+{
+  "id": "md-of-body-refused",
+  "description": "An `<md of=…>` that also has a body is E-MD-OF-BODY.",
+  "language-version": "1.0",
+  "spec": "§67.7",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F2 \"yes a.\" (same closed element/attribute set, same §5.2 URL guard)",
+  "rationale": "§67.7: `<md of=expr/>` is self-closing; an `of=` `<md>` with a body is E-MD-OF-BODY.",
+  "expect": {
+    "codes": [
+      "E-MD-OF-BODY"
+    ],
+    "severity": {
+      "E-MD-OF-BODY": "error"
+    }
+  }
+}

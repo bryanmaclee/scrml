@@ -26879,33 +26879,35 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENDPOINT-NOT-EXHAUSTIVE | §61.4, §61.9 | (S219 W3 — wired by the `<endpoint>` typer, `endpoint-primitive-2026-06-25`.) An `<endpoint>` declaration (SPEC §61.4) whose per-variant arms are NOT exhaustive against the `accepts=` enum — an `accepts=` enum variant has no matching arm. This is the inbound-honesty guarantee (§61.1): because scrml owns the inbound decode (§61.3) the unhandled-variant hole is visible, so it is loud — adding a variant to the `accepts=` enum without its arm fails the build rather than silently 404/500-ing the new method at runtime (the serve-side dual of §60.3). Reuses the §18.0.1 / §51 exhaustiveness machinery (`checkEnumExhaustiveness`); a wildcard `<_>` arm satisfies exhaustiveness. Fires once per `<endpoint>` decl, naming the missing variant(s), anchored at the opener span. Emitted by `checkEndpointDeclarations` in `compiler/src/type-system.ts`. (A dead/duplicate arm reuses the §18.0.1 arm-validity diagnostics — `E-MATCH-SUBSET-DEAD-ARM` / `E-TYPE-023` — NOT an `E-ENDPOINT-*` code.) Resolution: add an arm for each missing variant, or add a wildcard `<_>` arm. Partitions into `result.errors`. | Error |
 | E-ENDPOINT-ACCEPTS-NOT-ENUM | §61.3, §61.9 | (S219 W3 — wired by the `<endpoint>` typer, `endpoint-primitive-2026-06-25`.) An `<endpoint>` declaration (SPEC §61.3) whose `accepts=` attribute resolves to a CONCRETE non-`:enum` type (a struct / primitive / refinement). Per §61.3 `accepts=` SHALL resolve to a `:enum` type — the request body decodes into it via `parseVariant` (§41.13), a tagged-variant decoder that cannot decode against a non-enum, so there is nothing to dispatch. Unlike the §60.5 RESPONSE half's `W-API-RESPONSE-NOT-VARIANT` (an Info-lint — the wire body is still raw-passable into `.data`), a non-enum INBOUND `accepts=` is a HARD Error: there is no recoverable raw path. Fires once per `<endpoint>` decl when `accepts=` RESOLVES to a concrete non-enum; an UNDECLARED `accepts=` ref instead reuses `E-TYPE-UNKNOWN-NAME` (the §14.1.2 machinery — no double-report), and `asIs` is the sanctioned untyped escape hatch. Emitted by `checkEndpointDeclarations` in `compiler/src/type-system.ts`. Resolution: declare an `:enum` accepts type, or use `handle()` for a raw inbound shape. Partitions into `result.errors`. | Error |
 | E-ENDPOINT-MULTI-STATEMENT-ARM | §61.10, §61.9 | (ss34 W4-followup — wired by the `<endpoint>` codegen, `g-endpoint-multi-statement-arm-diagnostic-2026-06-26`.) An `<endpoint>` arm (SPEC §61.2) has a BARE body (`<Variant>…</>`) containing TWO OR MORE statements. Per §61.10 a multi-statement bare body is a future wave — NOT yet lowered: an arm body is emitted as a single value-expression the compiler envelopes as the JSON response (§61.5), so a 2+-statement body has no parsable single-expression lowering. W4 detects this BEFORE wrapping the arm as `await (<expr>)` (the lowered expr does not parse as one JS expression consuming the whole string — reusing the §2.2.1 emit-gate acorn via `isSingleJsExpression`) and fires this clean, adopter-actionable diagnostic INSTEAD of letting the malformed `await (…)` trip the generic `E-CODEGEN-INVALID-LOGIC` gate with a cryptic "compiler defect" message. The three SUPPORTED forms are unaffected: the `:`-shorthand single-expression arm, the single-expression bare body (a value-expression that legitimately spans multiple source lines is still ONE expression), and the self-closing no-op arm (→ 204). The wildcard `<_>` arm with a multi-statement body fires identically (same envelope path). Fires once per offending arm, anchored at the arm's `<endpoint>` decl span, naming the variant. Emitted by `emitEndpointArmEnvelope` in `compiler/src/codegen/emit-server.ts`. Resolution: reduce the arm to a single expression, or extract the logic into a server function and call it from the arm (e.g. `<Variant : computeResult(...)>`). Partitions into `result.errors`. | Error |
-| W-MD-RAW-HTML | §67.3, §67.11 | (S462 `<md>` phase 1 — produced as data by the reader `stdlib/md/index.scrml`; the compiler's surfacing for a static `<md>` body is Nominal and lands with the phase-2 impl.) Raw HTML in an `<md>` body — a tag, closing tag, comment, declaration or CDATA start. It is shown as text (Q21: what you type is what is shown). The message names the markdown spelling (`**bold**`, `*emphasis*`) or closing `</md>` to write the element. | Warning |
-| W-MD-ENTITY | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A character reference (`&copy;`, `&#97;`, `&#x61;`) in an `<md>` body. It is not decoded — shown as typed; type the character itself. | Warning |
-| W-MD-AUTOLINK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An angle autolink (`<https://…>`, `<a@b.c>`) in an `<md>` body: shown as text; write `[text](url)`. | Warning |
-| W-MD-REFERENCE-LINK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A reference link (`[t][r]`, `[t][]`) or a link reference definition (`[r]: url`): shown as text; write the link inline, `[text](url)`. | Warning |
-| W-MD-FOOTNOTE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A footnote reference `[^n]` or definition `[^n]: …`: shown as text; write the note inline or as a list. | Warning |
-| W-MD-TASK-LIST | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A task-list item (`- [ ] x`, `- [x] x`): a plain list item whose text starts `[ ]`; no form control is ever built (§67.6). | Warning |
-| W-MD-SETEXT | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A setext underline under a paragraph: `===` stays paragraph text, `---` is a thematic break. Write `# Title` / `## Title`. | Warning |
-| W-MD-INDENTED-CODE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A paragraph that starts indented 4+ columns (a CommonMark indented code block): read as paragraph text; write a backtick fence. | Warning |
-| W-MD-EMPHASIS-UNDERSCORE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) `_`/`__` delimiters that CommonMark would match as emphasis: the underscores stay text; write `*em*` / `**strong**`. Intraword `_` (`snake_case`) is never reported. | Warning |
-| W-MD-STRIKETHROUGH | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A matched single-tilde pair `~x~`: text; write `~~x~~`. | Warning |
-| W-MD-BULLET-MARKER | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A `*` or `+` list marker: the line is paragraph text; write `- item`. | Warning |
-| W-MD-ORDERED-MARKER | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An `N)` list marker: paragraph text; write `1. item`. | Warning |
-| W-MD-THEMATIC-BREAK | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) `***`, `___` or a spaced break (`- - -`): paragraph text; write `---`. | Warning |
-| W-MD-FENCE-TILDE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A `~~~` fence line: paragraph text; write a backtick fence. | Warning |
-| W-MD-HEADING-CLOSE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A closing `#` sequence on an ATX heading: the `#`s are heading text; write the heading with no trailing `#`. | Warning |
-| W-MD-HARD-BREAK-SPACES | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) Two or more trailing spaces before a line end: a soft break; end the line with `\` for a hard break. | Warning |
-| W-MD-LINK-TITLE | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A link title in single quotes or parentheses: the link is text; write the title in double quotes. | Warning |
-| W-MD-LINK-DESTINATION | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An angle-bracketed link destination `[t](<u>)`: the link is text; write the destination bare, a space as `%20`. | Warning |
-| W-MD-TABLE-PIPES | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) A GFM table written without a row's leading or trailing `\|`: paragraph text; write every row as `\| a \| b \|`. | Warning |
-| W-MD-LAZY-CONTINUATION | §67.3, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) An unprefixed line that CommonMark would read as a lazy continuation of a quote's or list item's paragraph: it starts a new paragraph after the container; prefix it with `>` or indent it to the content column. | Warning |
-| W-MD-DEPTH-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) Nesting past 32 levels (quotes / lists / inline) or a 33rd open link bracket: the deeper markers are text. | Warning |
-| W-MD-SCAN-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 1 — produced by `stdlib/md/index.scrml`; compiler surfacing Nominal, phase 2.) The block's link-tail scan budget (4 × length + 1024) is used up: the remaining brackets are text. | Warning |
-| E-MD-INDENT-MIXED | §67.2, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl. The rule is computed by `dedent` in `stdlib/md/index.scrml` as its `mixed` field.) The leading whitespace removed from the counted lines of a static `<md>` body is not the same characters on every line (a tab on one, spaces on another). | Error |
-| E-MD-IN-PHRASING | §67.2, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) An `<md>` element whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …): its block output would be reparented by the HTML parser. | Error |
-| E-MD-URL-SCHEME | §67.6, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-2 impl.) A literal link destination or image source in a static `<md>` body whose scheme §5.2 rule 2's test does not admit (`javascript:`, `data:text/html`, `data:image/svg+xml`, …). | Error |
-| E-MD-OF-BODY | §67.7, §67.11 | (S462 — Nominal / spec-ahead; lands with the phase-3 impl.) An `<md of=…>` that also has a body. | Error |
-| E-MD-INTERP-UNCLOSED | §67.2, §67.11 | (S462 review fix MED-2 — Nominal / spec-ahead; lands with the phase-2 impl.) A `${` in a static `<md>` body with no balanced closing `}` before `</md>`. The splitter takes `${…}` extents without parsing them (§67.2), so an unclosed one has no extent; the message names `<pre>` as the way to show a literal `${` that does not close. | Error |
+| W-MD-RAW-HTML | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) Raw HTML in an `<md>` body — a tag, closing tag, comment, declaration or CDATA start. It is shown as text (Q21: what you type is what is shown). The message names the markdown spelling (`**bold**`, `*emphasis*`) or closing `</md>` to write the element. | Warning |
+| W-MD-ENTITY | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A character reference (`&copy;`, `&#97;`, `&#x61;`) in an `<md>` body. It is not decoded — shown as typed; type the character itself. | Warning |
+| W-MD-AUTOLINK | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) An angle autolink (`<https://…>`, `<a@b.c>`) in an `<md>` body: shown as text; write `[text](url)`. | Warning |
+| W-MD-REFERENCE-LINK | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A reference link (`[t][r]`, `[t][]`) or a link reference definition (`[r]: url`): shown as text; write the link inline, `[text](url)`. | Warning |
+| W-MD-FOOTNOTE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A footnote reference `[^n]` or definition `[^n]: …`: shown as text; write the note inline or as a list. | Warning |
+| W-MD-TASK-LIST | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A task-list item (`- [ ] x`, `- [x] x`): a plain list item whose text starts `[ ]`; no form control is ever built (§67.6). | Warning |
+| W-MD-SETEXT | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A setext underline under a paragraph: `===` stays paragraph text, `---` is a thematic break. Write `# Title` / `## Title`. | Warning |
+| W-MD-INDENTED-CODE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A paragraph that starts indented 4+ columns (a CommonMark indented code block): read as paragraph text; write a backtick fence. | Warning |
+| W-MD-EMPHASIS-UNDERSCORE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) `_`/`__` delimiters that CommonMark would match as emphasis: the underscores stay text; write `*em*` / `**strong**`. Intraword `_` (`snake_case`) is never reported. | Warning |
+| W-MD-STRIKETHROUGH | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A matched single-tilde pair `~x~`: text; write `~~x~~`. | Warning |
+| W-MD-BULLET-MARKER | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A `*` or `+` list marker: the line is paragraph text; write `- item`. | Warning |
+| W-MD-ORDERED-MARKER | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) An `N)` list marker: paragraph text; write `1. item`. | Warning |
+| W-MD-THEMATIC-BREAK | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) `***`, `___` or a spaced break (`- - -`): paragraph text; write `---`. | Warning |
+| W-MD-FENCE-TILDE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A `~~~` fence line: paragraph text; write a backtick fence. | Warning |
+| W-MD-HEADING-CLOSE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A closing `#` sequence on an ATX heading: the `#`s are heading text; write the heading with no trailing `#`. | Warning |
+| W-MD-HARD-BREAK-SPACES | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) Two or more trailing spaces before a line end: a soft break; end the line with `\` for a hard break. | Warning |
+| W-MD-LINK-TITLE | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A link title in single quotes or parentheses: the link is text; write the title in double quotes. | Warning |
+| W-MD-LINK-DESTINATION | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) An angle-bracketed link destination `[t](<u>)`: the link is text; write the destination bare, a space as `%20`. | Warning |
+| W-MD-TABLE-PIPES | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) A GFM table written without a row's leading or trailing `\|`: paragraph text; write every row as `\| a \| b \|`. | Warning |
+| W-MD-LAZY-CONTINUATION | §67.3, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) An unprefixed line that CommonMark would read as a lazy continuation of a quote's or list item's paragraph: it starts a new paragraph after the container; prefix it with `>` or indent it to the content column. | Warning |
+| W-MD-DEPTH-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) Nesting past 32 levels (quotes / lists / inline) or a 33rd open link bracket: the deeper markers are text. | Warning |
+| W-MD-SCAN-LIMIT | §67.9, §67.11 | (S462 `<md>` phase 2 — produced by `stdlib/md/index.scrml`; surfaced for a static body, at its source position, by `compiler/src/md-lower.ts` `lowerMdBlock`.) The block's link-tail scan budget (4 × length + 1024) is used up: the remaining brackets are text. | Warning |
+| E-MD-INDENT-MIXED | §67.2, §67.11 | (S462 `<md>` phase 2 — the rule is computed by `dedent` in `stdlib/md/index.scrml` as its `mixed` field; emitted at `compiler/src/md-lower.ts` `lowerMdBlock`.) The leading whitespace removed from the counted lines of a static `<md>` body is not the same characters on every line (a tab on one, spaces on another). | Error |
+| E-MD-IN-PHRASING | §67.2, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `checkMdInPhrasing`, called for every element's children by the ast-builder.) An `<md>` element whose parent is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, …): its block output would be reparented by the HTML parser. | Error |
+| E-MD-URL-SCHEME | §67.6, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`, judged by the §5.2 reader `compiler/src/runtime-url-guard.js`.) A literal link destination or image source in a static `<md>` body whose scheme §5.2 rule 2's test does not admit (`javascript:`, `data:text/html`, `data:image/svg+xml`, …), or a data-led one whose literal text before its first `${…}` already commits to such a scheme. | Error |
+| E-MD-OF-BODY | §67.7, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`.) An `<md of=…>` that also has a body. | Error |
+| E-MD-IN-LOGIC-NOMINAL | §67.2, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `refuseUnreadMdElements`, called from `buildAST`; retired when impl#1 reads an `<md>` in logic markup.) An `<md>` inside `lift` markup or a markup value in an expression (`const x = <div><md>…</md></div>`): impl#1 parses that markup from logic tokens, which lose the markdown's lines, so the element is refused by name — never rendered as an unknown element — and the message names the markup-body positions where a static `<md>` works. (A component definition `const C = <… props=…>` is a markup body here: its `<md>` is read.) | Error |
+| E-MD-OF-NOMINAL | §67.7, §67.11 | (S462 `<md>` phase 2 — emitted at `compiler/src/md-lower.ts` `lowerMdBlock`; retired when phase 3 builds `of=`.) `<md of=expr/>` is specified (§67.7) but not built in impl#1 yet; the element is refused rather than rendered as an empty host. | Error |
+| E-MD-INTERP-UNCLOSED | §67.2, §67.11 | (S462 review fix MED-2; phase 2 — the extent is taken by `compiler/src/block-splitter.js` `scanMdSlots`, the error emitted at `compiler/src/md-lower.ts` `lowerMdBlock`.) A `${` in a static `<md>` body with no balanced closing `}` before `</md>`. The splitter takes `${…}` extents without parsing them (§67.2), so an unclosed one has no extent; the message names `<pre>` as the way to show a literal `${` that does not close. | Error |
 
 ---
 
@@ -48305,14 +48307,17 @@ and lowered to a closed set of elements whose content is only text (§67.6).
   shim `compiler/runtime/stdlib/md.js` is GENERATED from it by `scripts/gen-md-shim.ts`, §67.8). The
   reader implements §67.3, §67.5, §67.9, the §67.2 dedent rule, the reader's half of the §67.2 / §67.4
   slot rule (`parseSlots`) and the §67.6 heading slugs, and returns the §67.11 W-MD diagnostics as data.
-- **Phase 2 — Nominal / spec-ahead:** the static `<md>` body (§67.2, §67.4) — the block-splitter
-  production, the compile-time call into `scrml:md`, the lowering to §67.6 elements, the compiler
-  surfacing of W-MD codes and the four `E-MD-*` errors. impl#1 gains this hook per ruling F4 (below).
+- **Phase 2 — LANDED in impl#1 (S462, change-id `s462-md-phase2`):** the static `<md>` body (§67.2,
+  §67.4) — the block-splitter production (`compiler/src/block-splitter.js`, slots taken not parsed),
+  the compile-time call into `scrml:md` through its generated shim and the lowering to §67.6 elements
+  as ordinary markup nodes (`compiler/src/md-lower.ts`), the compiler surfacing of the W-MD codes and
+  the `E-MD-*` errors (§67.11). impl#1 gains this hook per ruling F4 (below). The bootstrap (impl#2)
+  has no `<md>` yet (known gap `g-bootstrap-md-static-owed-s462`).
 - **Phase 3 — Nominal / spec-ahead:** `<md of=expr/>` (§67.7).
 
 **Scope.** Language-wide: a new element any markup body may contain, and a new body production.
 
-> **Provenance (the five rulings this section implements; every normative statement below cites one):**
+> **Provenance (the six rulings this section implements; every normative statement below cites one):**
 > - ruling:user-voice-scrml.md S462 Q21 — *"I like a. but it gives me an idea can scrml add a firstclass
 >   <md> for so that an author can have **the affect** without <b>"* ("affect" ~> "effect"). (a) = raw
 >   `<pre>`/`<code>` bodies render as TEXT: what you type is what is shown. The `<md>` idea in the same
@@ -48325,8 +48330,12 @@ and lowered to a closed set of elements whose content is only text (§67.6).
 > - ruling:user-voice-scrml.md S462 `<md>` F4 — *"a"*: one md reader, written in scrml (`scrml:md`), used
 >   by BOTH compilers.
 >
-> Rules the rulings did not settle are marked **(PA reading, s462-md-phase1)** where they appear; each is
-> listed for confirmation in `docs/changes/s462-md-phase1/progress.md`.
+> - ruling:user-voice-scrml.md S462 Q22 — *"c is good"*: a second spelling is text plus its lint in a
+>   static body, and renders as its canonical construct in `of=` (§67.3).
+>
+> Rules the rulings did not settle are marked **(PA reading, s462-md-phase1)** or **(PA reading,
+> s462-md-phase2)** where they appear; each is listed for confirmation in that change's
+> `docs/changes/<change-id>/progress.md`.
 
 ### 67.1 Overview
 
@@ -48384,7 +48393,14 @@ a third, orthogonal one. **An `<md>` body is a fourth production.**
   places slots and restores the source text of those that land in code — is LANDED in phase 1; the
   splitter's deferred extent and the parse-after-placement are phase 2.)*
 - A `${` with no balanced closing `}` before `</md>` is `E-MD-INTERP-UNCLOSED`; the message names
-  `<pre>` (raw content, §4.17) as the way to show such text. *(Phase 2, Nominal.)*
+  `<pre>` (raw content, §4.17) as the way to show such text. *(Phase 2, Nominal.)* A `"` or `'` inside
+  the extent that reaches its line end without its closing quote is not a string token, so the lexing
+  fails and that `${` has no balanced `}`: it is `E-MD-INTERP-UNCLOSED` — the scan SHALL NOT continue
+  past that line end to a `}` further on (that would carry the prose between, a code span's closing
+  backtick included, into an expression, and the text would vanish). So `` `${it's}` `` or
+  `` `${"}` `` in a code span is `E-MD-INTERP-UNCLOSED`, as `` `${` `` is. *(PA reading,
+  s462-md-phase2 review fix MED-B, following §4.18.1b's "lexing the interpolation body" and §67.4's
+  "the slot is restored to its exact source text".)*
 - The closing tag is `</md>` (ASCII case-insensitive, as §4.17). Consequently a literal `</md>` cannot
   appear in an `<md>` body, not even in a code span; a document about `<md>` shows it with `<pre>`.
 - End of file before `</md>` is `E-CTX-001` against the opener, recovered as §4.17 does.
@@ -48407,13 +48423,23 @@ a third, orthogonal one. **An `<md>` body is a fourth production.**
   > three leading spaces). The deep-dive's own §6f example expects the content at column 0. The closer's
   > line can only lower the minimum when it is LEFT of the content — the harmful case — so it is not
   > counted. Candidate question #1 in `docs/changes/s462-md-phase1/progress.md`.
+- **Where impl#1 reads it (S462 phase 2).** A static `<md>` is read in every markup body: a page or
+  element body, a component body (including a `const C = <…>` component definition), an `<each>` row,
+  a `<match>` arm and an `if=` gate. Inside `lift` markup or a markup value in an expression, impl#1
+  refuses it with `E-MD-IN-LOGIC-NOMINAL` (known gap `g-md-in-logic-markup-s462`) *(PA reading,
+  s462-md-phase2: that markup is parsed from logic tokens, which lose the lines markdown is made of)*.
 - **Placement.** `<md>` produces block content inside its host element (§67.6). An `<md>` whose parent
   is phrasing content (`p`, `span`, `a`, `button`, `label`, `h1`–`h6`, `em`, `strong`, `code`, any other
   element whose content model is phrasing) is `E-MD-IN-PHRASING` *(PA reading, s462-md-phase1: block
   content in a phrasing parent is reparented by the browser's HTML parser, so the emitted tree would
-  not be the tree scrml built)*.
+  not be the tree scrml built)*. The parent is the `<md>`'s enclosing element in the source; impl#1
+  checks it at the element (an `<md>` reached through a component, `<each>` or `<match>` wrapper is not
+  checked against the element around that wrapper — known gap `g-md-in-phrasing-through-wrapper-s462`).
 - **Attributes.** A static `<md>` accepts `class=`, `id=` and `style=`, which go to the host element and
-  never into the markdown; any other attribute is `W-ATTR-001` (§4.15).
+  never into the markdown; any other attribute is `W-ATTR-001` (§4.15) and is dropped. The §17 render
+  gates `if=`, `else-if=`, `else` and `show=` apply to an `<md>` as to any element (they put nothing into
+  the host's attributes or content) *(PA reading, s462-md-phase2: the rule above is silent on them, and
+  dropping an `if=` with a warning would show content the author gated)*.
 
 ### 67.3 The dialect — scrml-md
 
@@ -48479,6 +48505,23 @@ the per-spelling codes are a PA reading, s462-md-phase1)*:
 | `[t](<u v>)` | `W-MD-LINK-DESTINATION` | `[t](u%20v)` |
 | a table row without its outer pipes; a plain line right after a table (GFM reads it as a row; here it is a paragraph) | `W-MD-TABLE-PIPES` | `\| a \| b \|` |
 | lazy continuation (an unprefixed line continuing a quote's or list item's paragraph) | `W-MD-LAZY-CONTINUATION` (the line starts a new paragraph after the container) | `>` on every line / indent to the content column |
+
+**Strict for a static body, forgiving for `of=` (S462 Q22).** In a static `<md>` body a second
+spelling is TEXT plus its `W-MD-*` lint, as the table says — the author's lints reach the author at
+build time, so one spelling is enforced. `<md of=…/>` (§67.7) reads the same text FORGIVINGLY: a second
+spelling renders as its canonical construct (`* item` as a list item, `_em_` as emphasis), because
+lints on data reach no one and a user who typed `* item` meant a list. It is the same reader with a
+forgiving mode used only for `of=`; the closed element set (§67.6) and the §5.2 guard are unchanged, so
+safety does not depend on the mode. Identical markdown text therefore renders differently by source —
+an accepted cost. The forgiving mode is built with `of=` (phase 3); the strict mode is the reader's
+current behaviour and is what phase 2 surfaces.
+> **Provenance:** ruling:user-voice-scrml.md S462 Q22 — bryan: *"c is good"*, answering the PA's option
+> (c) as recorded there: *"**static `<md>`** (author-written, lints reach the author at build time): a
+> second spelling renders as literal TEXT plus a `W-MD-*` lint naming the canonical form (one way,
+> enforced). **`<md of=…/>`** (data — lints reach no one): second spellings RENDER as their canonical
+> construct (forgiving), so user-typed `* item` / `_em_` displays as intended. Same reader; a forgiving
+> mode used only for `of=`. Safety unchanged (same closed vocabulary, same §5.2 guard). Accepted cost:
+> identical markdown text renders differently by source."* · settles candidate question #2 of `docs/changes/s462-md-phase1/progress.md`.
 
 `_` between word characters was never emphasis (`snake_case_word`) and is not reported. A bare URL
 (`https://x.y`) is plain text: GFM's extended autolinks are not part of the dialect and nothing is
@@ -48592,7 +48635,10 @@ execute; the deep-dive §7 rule MD-SAFE.)*
   static and not a safety boundary, and an ASCII-only rule turned every non-Latin heading into
   `section-N`.)* A slot contributes nothing to a slug; a slug already used on the page (by another heading or an author
   `id=`) gets the first free `-1`, `-2`, … suffix, in document order. (`scrml:md`'s `headingSlugs`
-  implements the rule; the compiler passes the page's taken ids.) A slug is NOT Unicode-normalised (a
+  implements the rule; the compiler passes the page's taken ids.) Each component instance's `<md>`
+  headings are headings of the page and are deduped like any other; a heading inside an `<each>` row is
+  written once in the row's template, so every row carries the same id *(PA reading, s462-md-phase2 —
+  as an author `id=` in a row template does)*. A slug is NOT Unicode-normalised (a
   composed and a decomposed `é` give two different ids), and it may start with a digit or a `-`; a
   stylesheet or script that selects one by id SHALL escape it (`CSS.escape`, or an attribute selector),
   and a link to one uses the slug exactly as emitted. `<md of=…/>` gives headings **no id**
@@ -48608,7 +48654,12 @@ shipped only on pages that use `of=`. No auto heading ids … Build order: stati
 second; both designed together (one dialect, one safety model)." **Nominal / spec-ahead.**)*
 
 - `<md of=expr/>` is self-closing; `class=`, `id=`, `style=` go to the host as in §67.2. An `of=` `<md>`
-  with a body is `E-MD-OF-BODY` *(PA reading)*.
+  with a body is `E-MD-OF-BODY` *(PA reading)*. Until phase 3 is built, impl#1 refuses `<md of=…/>`
+  with `E-MD-OF-NOMINAL` rather than render an empty host *(PA reading, s462-md-phase2 — the
+  `E-WASM-NOMINAL` / `E-FOREIGN-SIDECAR-NOMINAL` precedent: an honest diagnostic, never a silent
+  no-op)*.
+- The value is read FORGIVINGLY: a second spelling of an IN construct renders as its canonical construct
+  (§67.3, S462 Q22 *"c is good"*).
 - `expr` is a `string` or `string | not`. `not` renders an empty host *(PA reading, s462-md-phase1:
   §7.4.2 "`${not}` renders NOTHING")*.
 - The value is read with the same reader and the same dialect as a static body, with no dedent (data is
@@ -48683,15 +48734,17 @@ as LF.
 
 | Code | Severity | Fires |
 |---|---|---|
-| `W-MD-*` (the 20 codes of §67.3, plus `W-MD-DEPTH-LIMIT`, `W-MD-SCAN-LIMIT`) | Warning | on a static body, at the construct's position (offset, line, column in the body, mapped to the source by the compiler) |
-| `E-MD-INDENT-MIXED` | Error | §67.2 dedent: the removed prefixes differ (Nominal — lands with the phase-2 impl) |
-| `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent (Nominal — lands with the phase-2 impl) |
-| `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body (Nominal — lands with the phase-2 impl) |
-| `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together (Nominal — lands with the phase-3 impl) |
-| `E-MD-INTERP-UNCLOSED` | Error | §67.2: a `${` with no balanced `}` before `</md>`; the message names `<pre>` (Nominal — lands with the phase-2 impl) |
+| `W-MD-*` (the 20 codes of §67.3, plus `W-MD-DEPTH-LIMIT`, `W-MD-SCAN-LIMIT`) | Warning | on a static body, at the construct's position (offset, line, column in the body, mapped to the source by the compiler) — Implemented (phase 2) |
+| `E-MD-INDENT-MIXED` | Error | §67.2 dedent: the removed prefixes differ — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-IN-PHRASING` | Error | §67.2: `<md>` in a phrasing parent — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-URL-SCHEME` | Error | §67.6: a literal destination with an unadmitted scheme in a static body, or a data-led one whose literal prefix already commits to one — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-OF-BODY` | Error | §67.7: `of=` and a body together — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-OF-NOMINAL` | Error | §67.7: `<md of=…/>` before phase 3 is built (impl#1's honest not-yet diagnostic) — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`); retired when phase 3 lands |
+| `E-MD-INTERP-UNCLOSED` | Error | §67.2: a `${` with no balanced `}` before `</md>`; the message names `<pre>` — Implemented (phase 2; emitted at `compiler/src/md-lower.ts`) |
+| `E-MD-IN-LOGIC-NOMINAL` | Error | an `<md>` inside `lift` markup or a markup value in an expression — impl#1's honest not-yet diagnostic for a position phase 2 does not read (emitted at `compiler/src/md-lower.ts`); retired when that position is built |
 
 The W-MD codes are produced by `scrml:md` (data: `MdDoc.diags`) and surfaced by the compiler for a
-static body in phase 2; the E-MD codes are compiler checks, phase 2 / phase 3. Every message names the
+static body (phase 2, `compiler/src/md-lower.ts`); the E-MD codes are compiler checks (phase 2). Every message names the
 scrml-md spelling to write instead.
 
 ### 67.12 Cross-references

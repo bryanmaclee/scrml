@@ -1,0 +1,31 @@
+{
+  "id": "md-component-body-md",
+  "description": "A static `<md>` in a component body keeps its markdown lines (a `###` heading, a blank line) and renders once per instance; each instance's heading gets its own id.",
+  "language-version": "1.0",
+  "spec": "§67.6",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY) · ruling:user-voice-scrml.md S462 `<md>` F2 \"yes a.\" (same closed element/attribute set, same §5.2 URL guard)",
+  "rationale": "§67.2: the body is read as written (dedent only); §67.6: heading ids are deduped page-wide — a slot contributes nothing to a slug, so `### ${title}` slugs to `section` and the second instance gets `section-1`.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "dom": "<section class=\"note\" data-scrml=\"Note\"><div><h3 id=\"section\">First</h3><p>Read <em>carefully</em>.</p></div></section><section class=\"note\" data-scrml=\"Note\"><div><h3 id=\"section-1\">Second</h3><p>Read <em>carefully</em>.</p></div></section>",
+    "domAnchored": [
+      {
+        "selector": "section.note h3",
+        "text": "First",
+        "attr": {
+          "id": "section"
+        }
+      },
+      {
+        "selector": "section.note + section.note h3",
+        "text": "Second",
+        "attr": {
+          "id": "section-1"
+        }
+      }
+    ]
+  }
+}

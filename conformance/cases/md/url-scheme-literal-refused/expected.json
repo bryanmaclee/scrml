@@ -1,0 +1,19 @@
+{
+  "id": "md-url-scheme-literal-refused",
+  "description": "A literal link destination or image source with a scheme §5.2 does not admit (`javascript:`, `data:image/svg+xml`) in a static `<md>` body is E-MD-URL-SCHEME.",
+  "language-version": "1.0",
+  "spec": "§67.6",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F2 \"yes a.\" (same closed element/attribute set, same §5.2 URL guard)",
+  "rationale": "§67.6: a literal destination with an unadmitted scheme in a static body (`[x](javascript:…)`, `![x](data:image/svg+xml,…)`) is E-MD-URL-SCHEME.",
+  "expect": {
+    "codes": [
+      "E-MD-URL-SCHEME"
+    ],
+    "severity": {
+      "E-MD-URL-SCHEME": "error"
+    },
+    "codeCounts": {
+      "E-MD-URL-SCHEME": 2
+    }
+  }
+}

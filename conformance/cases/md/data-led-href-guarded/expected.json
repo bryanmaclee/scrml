@@ -1,0 +1,38 @@
+{
+  "id": "md-data-led-href-guarded",
+  "description": "A link destination holding a `${…}` is data-led: written through the §5.2 rule 3 runtime guard, so a `javascript:` value becomes `about:blank`; a literal prefix that proves a relative path keeps the value from choosing a scheme.",
+  "language-version": "1.0",
+  "spec": "§67.4",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F2 \"yes a.\" (same closed element/attribute set, same §5.2 URL guard)",
+  "rationale": "§67.4: a destination holding an atom is data-led — written through §5.2 rule 3 at run time (an unadmitted scheme becomes `about:blank`), exactly as a non-literal `href=` is; when the literal text before the first atom proves a relative URL, the value cannot change the scheme.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "input": [
+      {
+        "click": "#evil"
+      }
+    ],
+    "state": {
+      "u": "javascript:window.pwned=1"
+    },
+    "dom": "<div id=\"w\"><div><p><a href=\"about:blank\">go</a> or <a href=\"/users/javascript:window.pwned=1\">profile</a></p></div></div><button id=\"evil\">evil</button>",
+    "domAnchored": [
+      {
+        "selector": "#w a",
+        "text": "go",
+        "attr": {
+          "href": "about:blank"
+        }
+      },
+      {
+        "selector": "#w a + a",
+        "attr": {
+          "href": "/users/javascript:window.pwned=1"
+        }
+      }
+    ]
+  }
+}

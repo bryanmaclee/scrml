@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 4 |
-| MED | 605 | 6 |
-| LOW | 365 | 0 |
+| MED | 607 | 6 |
+| LOW | 370 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -123,12 +123,96 @@ Probed S462 through `slice-m2/lowered.js` `frontEnd`. Loud. Makes `markup-handle
 <!-- @gap id=g-match-arm-braceless-if-body-refused-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(match arm-body collectExpr — an `if` arm body is carried as text, so its braceless consequent is never statement-parsed) prov=dispatch:s462-braceless-if-else-dropped -->
 
 Loud, identical on base and after the S462 fix (which keeps the braced arm form's emit byte-identical). Workaround: brace the arm body, `.A :> { if (c) a.push(1) else a.push(2) }` — that form compiles and runs both branches (pinned in `braceless-if-else-not-dropped.test.js`).
+| HIGH | 249 | 5 |
+| MED | 599 | 6 |
+| LOW | 359 | 0 |
+| Nominal (spec-ahead-of-impl) | 7 | 0 |
+<!-- @generated:gap-counts END -->
+
+### g-bootstrap-md-static-owed-s462 — the bootstrap (impl#2, `compiler/self-host-v2/`) has no `<md>`: it reads `<md>` as an ordinary element with a free-text body, so a static `<md>` renders its markdown source as page text (`## Title` shown with the `#`s, no `h2`), and none of the §67 checks exists — `NEW S462; MED; open (bootstrap twin of s462-md-phase2)`
+
+<!-- @gap id=g-bootstrap-md-static-owed-s462 sev=MED status=open locus=searched:compiler/self-host-v2/*.scrml(grep `md>` / `"md"` / `E-MD-` / `W-MD-` / `parseSlots` — zero hits; lex.scrml + parse.scrml treat `<md>` as a generic element) prov=empirical:s462-md-phase2-bootstrap-conformance--filter-md -->
+
+impl#1 implements §67 phase 2 (change-id `s462-md-phase2`): `compiler/src/block-splitter.js` (the fourth
+text-mode production — the body ends at the first `</md>`; `${…}` extents taken, not parsed, by
+`scanMdSlots`), `compiler/src/md-lower.ts` (slots → U+FFFC, the reader's `dedent`, `parseSlots`, W-MD
+position mapping, lowering to the §67.6 closed set, heading ids, every `E-MD-*`). Measured with
+`bun scripts/bootstrap-conformance.ts --filter md/` on the 15 `conformance/cases/md/*` cases: 7 FAIL
+(`heading-ids-page-wide`, `in-phrasing-refused`, `indent-mixed`, `of-body-refused`, `second-spelling-strict`,
+`static-tree`, `url-scheme-literal-refused` — the `<md>` renders as a plain element, the codes never
+fire), 6 UNSUPPORTED (the bootstrap's free-text body parses `${…}` as logic: `${HOME:-/tmp}` is
+E-PARSE-EXPECTED, an unclosed `${` E-PARSE-EXPR, and the §66 twins of the slot cases reject at
+parse), 2 NOT-TWINNED. What the bootstrap owes, in order: (1) the `<md>` body production in
+`lex.scrml`/`parse.scrml` — exits `${` and `</md>` only, the slot extent by token-depth WITHOUT parsing
+(§67.2); (2) a compile-time call into the SAME reader (F4: "the bootstrap uses the same module" —
+`stdlib/md/index.scrml`, imported, never re-written); (3) parse-after-placement of non-code slots
+(§67.4); (4) lowering to the §67.6 set in `lower.scrml` / `print.scrml` (text nodes only; data-led
+URLs through the bootstrap's §5.2 rule 3 guard); (5) E-MD-URL-SCHEME, E-MD-INTERP-UNCLOSED,
+E-MD-INDENT-MIXED, E-MD-IN-PHRASING, E-MD-OF-BODY and the W-MD surfacing with source positions;
+(6) page-wide heading ids. `<md of=…/>` (phase 3) is owed by both implementations.
+
+### g-md-in-logic-markup-s462 — impl#1 does not read an `<md>` inside `lift` markup or a markup value in an expression (`${ @on ? <div><md>…</md></div> : … }`, `for (…) { lift <li><md>…</md></li> }`); it refuses it with E-MD-IN-LOGIC-NOMINAL — `NEW S462; MED; open (Nominal position)`
+
+<!-- @gap id=g-md-in-logic-markup-s462 sev=MED status=open locus=compiler/src/ast-builder.js(parseLiftTag / the markup-value expression parser build markup from LOGIC tokens — whitespace joined, so the markdown's lines are gone),compiler/src/md-lower.ts(refuseUnreadMdElements — the refusal) prov=agent:s462-md-phase2 -->
+
+Before the refusal (found while testing this phase), a markup value holding an `<md>` compiled at exit 0
+and rendered `<md>**yes**</md>` — the markdown source as text inside an unknown element; a `lift` one
+reported a misleading E-MARKUP-001 ("not a known HTML element"). Both are now E-MD-IN-LOGIC-NOMINAL,
+which names the markup-body positions where a static `<md>` works. Fix direction: when lift / markup-
+value markup holds an `<md>`, take the element's VERBATIM source from the enclosing logic block's
+`raw` (as `mdComponentVerbatimRaw` does for a `const C = <…>` component) and build it through the
+block splitter + `lowerMdBlock`; the slots then resolve in the lift's scope. A component definition
+is not affected (its `<md>` is read).
+
+### g-md-in-phrasing-through-wrapper-s462 — E-MD-IN-PHRASING is checked against the `<md>`'s direct parent element only: an `<md>` that reaches a phrasing parent through a component root, an `<each>` / `<match>` wrapper or an `if=` chain (`<p><each in=@xs><md>…</md></each></p>`) is not refused, and the browser reparents its blocks — `NEW S462; LOW; open`
+
+<!-- @gap id=g-md-in-phrasing-through-wrapper-s462 sev=LOW status=open locus=compiler/src/md-lower.ts(checkMdInPhrasing — called by ast-builder.js for each element's built children; structural nodes between are not looked through) prov=agent:s462-md-phase2 -->
+
+§67.2 Placement: "An `<md>` whose parent is phrasing content … is `E-MD-IN-PHRASING`". impl#1 checks the
+parent markup node of the lowered host. A structural wrapper (`each-block`, `match-block`, an
+if-chain, a component use whose root holds the `<md>`) is not a markup parent, so the check does not
+see the element around it. Fix direction: run the check after CE over the expanded tree, looking
+through structural nodes to the nearest element ancestor. No corpus program uses `<md>`.
+
+### g-md-heading-ids-match-arm-codegen-reparse-s462 — heading ids of an `<md>` inside a `<match>` arm (and an engine state-child) are deduped only within that arm: the arm body is re-parsed at codegen (emit-match.ts / emit-engine.ts), after the page-wide heading-id pass, so an arm heading can repeat an id used elsewhere on the page — `NEW S462; LOW; open`
+
+<!-- @gap id=g-md-heading-ids-match-arm-codegen-reparse-s462 sev=LOW status=open locus=compiler/src/codegen/emit-match.ts(bare-body arm re-parse — `buildAST(splitBlocks(…))` for an `<md>`-bearing arm),compiler/src/api.js(assignMdHeadingIds runs after CE, before codegen) prov=agent:s462-md-phase2 -->
+
+§67.6: a slug already used on the page gets the first free `-1`, `-2`, … suffix. impl#1 assigns ids
+page-wide twice (after TAB, and after CE for component instances); `<match>` arm bodies are re-parsed
+from their raw text during codegen, so their headings get ids local to the arm. Only one arm is
+mounted at a time, but an arm heading can still collide with a heading outside the match. Fix
+direction: pass the page's taken ids into the codegen re-parse, or stop re-parsing arm bodies that
+TAB already built.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
 <!-- @gap id=g-md-list-marker-tab-column-s462 sev=LOW status=open locus=stdlib/md/index.scrml(readList: spaces = indentOf(after); stripCols on `after` from column 0) prov=review:S239-s462-md-phase1-delta(nit 3) -->
 
 CommonMark expands a tab to the next multiple of 4 counted from the start of the LINE (2.2): after `-` at column 0 a tab reaches column 4 (3 columns of space), so the content column is 2 and the item's continuation lines need 2 columns. `readList` re-counts `after` from column 0, so the tab counts as 4 columns, the content column becomes 5, and with "5+ means 1" the rule flips the item's width. Output differs from CommonMark with no W-MD lint. Tabs in md indentation are rare in practice, and a static body that mixes tabs and spaces in its common prefix is already E-MD-INDENT-MIXED. Fix direction: measure the post-marker whitespace from the marker's absolute column (an `indentFrom(s, col)` helper) and strip continuation lines the same way — or lint a tab after a list marker (W-MD-BULLET-MARKER-style, "write spaces"), which fits "one way to do it".
+
+### g-md-slot-regex-rule-misreads-division-after-keyword-member-s465 — the `<md>` slot lexer reads `/` after a keyword-named member (`.in` `.of` `.for` `.new` …) or after postfix `++`/`--` as a regex start → false E-MD-INTERP-UNCLOSED; and re-tokenizing per `/` makes slot lexing quadratic — `NEW S465; LOW; open`
+<!-- @gap id=g-md-slot-regex-rule-misreads-division-after-keyword-member-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(mdRegexLiteralEnd → tokenizeLogic.isRegexContext treats KEYWORD/OPERATOR as regex context) prov=review:s465-md-r2 -->
+Found by the S465 round-2 review of `<md>` phase 2. `<trip> = { in: 90, out: 3 }` + `<md>Speed ${ @trip.in / @trip.out } km/h</md>` → E-MD-INTERP-UNCLOSED (the `<p>` twin compiles and renders "Speed 30 km/h"); also `${ @o.of / 2 } it's / …` and `${ @a++ / 2 } it's / …`. Always a compile error, never a miscompile. Separately, `mdRegexLiteralEnd` re-tokenizes from the slot's `${` to the line end for every `/`: 2,000 divisions in one slot take 32 s (4,000 → 105 s), against 2.5 s for the `<p>` twin. Fix direction: treat a keyword after `.` as an identifier and `++`/`--` as value-ending; tokenize once per slot line.
+
+### g-md-prose-backtick-dollar-brace-one-slot-s465 — in `<md>` prose, "Write `${` to open a slot and `}` to close it." is read as ONE slot: inside the slot the backtick opens a template literal, so the `${`'s extent runs through the code span to the later `}` (§67.2 token-depth extent) — the author meant two code spans — `NEW S465; LOW; open (record)`
+
+<!-- @gap id=g-md-prose-backtick-dollar-brace-one-slot-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(mdSlotExtent — a backtick inside a slot opens a template-literal frame) prov=review:s465-md -->
+
+§67.2 takes each `${` by its token-depth extent, found by lexing the interpolation body, before the
+markdown reader places anything; a code span is the reader's, so it cannot stop the splitter. The
+reading is consistent with §67.2 as written (review S239 of `3e3991c3`, finding 3, record only). An
+author documenting slot syntax puts that text in a fenced block, where a slot is inert. If a future ruling wants
+code spans to bound slots, the splitter would need the reader's code-span rule before slot extents.
+
+### g-raw-body-skip-dollar-brace-regex-quote-s465 — inside an `<each>` / `<match>` body, a `${…}` holding a regex literal with a quote (`${ @.t.replace(/'/g, "") }`) makes the raw-body scanner read the quote as a string opener, so the row never closes: E-CTX-001 "Unclosed <each>" plus E-CTX-003 for every enclosing element — `NEW S465; LOW; open`
+
+<!-- @gap id=g-raw-body-skip-dollar-brace-regex-quote-s465 sev=LOW status=open locus=compiler/src/block-splitter.js(skipDollarBrace — tracks `"`/`'` strings, no regex literal) prov=agent:s462-md-phase2 -->
+
+Found while pinning review finding 2 (S465). Not `<md>`-specific: `<li><strong>${ @.t.replace(/'/g, "") }</strong></li>`
+in an `<each>` row fails the same way; outside a raw-body element the same expression compiles. The
+diagnostic is loud (compile fails), not silent. Fix direction: give `skipDollarBrace` the logic
+tokenizer's regex decision, as `mdSlotExtent` now does (`mdRegexLiteralEnd`), or share one slot lexer.
 
 ### g-stdlib-client-chunks-not-minified-md-s462 — stdlib client chunks ship unminified; the `stdlib-md` chunk (the scrml:md reader, §67.7) is 87 KB raw / 22.5 KB gzip as shipped, 32 KB / 11 KB gzip minified — `NEW S462; LOW; open (phase-3 item)`
 

@@ -1,0 +1,15 @@
+<program>
+<rows> = [{ id: 1, t: "One" }, { id: 2, t: "Two" }]
+const Row = <section props={ t: string, k: string }>
+    <md>
+        ## ${t}
+
+        **${k}** row ${t}
+    </md>
+</section>
+<div id="w">
+    <each in=@rows key=@.id>
+        <Row t=@.t k="kind"/>
+    </each>
+</div>
+</program>

@@ -1,0 +1,12 @@
+<program>
+<div id="w">
+    <md>
+        Set the directory with `${DIR}`:
+
+        ```sh
+        export TMP=${HOME:-/tmp}
+        echo "${TMP}/cache"
+        ```
+    </md>
+</div>
+</program>

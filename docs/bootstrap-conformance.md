@@ -7,37 +7,37 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1765 of 1765 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1776 of 1776 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 189 | 10.7% |
+| PASS | 186 | 10.5% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 67 | 3.8% |
+| FAIL | 72 | 4.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 668 | 37.8% |
-| UNSUPPORTED | 841 | 47.6% |
+| NOT-TWINNED | 671 | 37.8% |
+| UNSUPPORTED | 847 | 47.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 256; of those, 189 hold (73.8%). Runtime half executed on the bootstrap for 68 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 258; of those, 186 hold (72.1%). Runtime half executed on the bootstrap for 68 case(s).
 
-- **Vacuous** passes: 11 of 189 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **178**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 29 of 67; the other 38 are implemented checks that answered wrong.
+- **Vacuous** passes: 11 of 186 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **175**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 72; the other 39 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 583 · parse-reject 258.
+UNSUPPORTED by reason: bootstrap-unsupported 584 · parse-reject 263.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **781** — PASS 104 · FAIL 58 · UNSUPPORTED 619. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **780** — PASS 101 · FAIL 57 · UNSUPPORTED 622. Twin holds 101 (non-vacuous 93). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 
-- 105 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 71 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 73 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 66 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 58 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -108,7 +108,7 @@ NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 2 | · | 65 | 1 | · | · |
 | condition | 36 | 23 | · | · | · | 8 | 5 | · | · |
-| control-flow | 73 | 14 | · | 3 | · | 19 | 37 | · | · |
+| control-flow | 70 | 12 | · | 2 | · | 19 | 37 | · | · |
 | defer | 51 | 8 | · | 4 | · | 4 | 35 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -130,11 +130,12 @@ NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 89 | 7 | · | 4 | · | 36 | 42 | · | · |
+| markup-handler | 85 | 6 | · | 3 | · | 36 | 40 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 45 | 11 | · | · | · | 9 | 25 | · | · |
+| md | 18 | · | · | 7 | · | 3 | 8 | · | · |
 | meta | 66 | · | · | · | · | 1 | 65 | · | · |
 | middleware | 4 | 1 | · | · | · | · | 3 | · | · |
 | module | 45 | 1 | · | 13 | · | 8 | 23 | · | · |
@@ -162,7 +163,7 @@ NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (67)
+### FAIL (72)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -173,8 +174,6 @@ NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
   - severity: E-CTRL-004 did not fire (expected error)
 - `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-ERROR-012, E-SCOPE-001)
-- `control-flow/s462-else-without-if-pos` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
-  - missing E-STMT-UNEXPECTED-TOKEN
 - `defer/deferred-server-call-completes` (twin · codes+runtime)
   - forbidden family E-DEFER-* fired: E-DEFER-UNHANDLED-FAILABLE
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
@@ -247,10 +246,41 @@ NOT-TWINNED by reason (668 cases; a case counts once per distinct reason):
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
-- `markup-handler/s462-handler-while-body-if-else` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
+- `md/heading-ids-page-wide` (runtime)
+  - dom (whole-tree) mismatch: expected "<section id=\"setup\">Author-owned id.</section><div id=\"a\"><div><h1 id=\"setup-1\">Setup</h1><h2 id=\"setup-2\">Setup</h2><h2 id=\"快速入门\">快速入门</h2></div></div><div id=\"b\"><div><h2 id=\"setup-3\">Setup</h2></div></div>" got "<section id=\"setup\">Author-owned…
+  - domAnchored: selector #a h1: no match
+  - domAnchored: selector #b h2: no match
+- `md/in-phrasing-refused` (codes; not in the bootstrap: E-MD-IN-PHRASING)
+  - missing E-MD-IN-PHRASING
+  - severity: E-MD-IN-PHRASING did not fire (expected error)
+- `md/indent-mixed` (codes; not in the bootstrap: E-MD-INDENT-MIXED)
+  - missing E-MD-INDENT-MIXED
+  - severity: E-MD-INDENT-MIXED did not fire (expected error)
+- `md/of-body-refused` (twin · codes; not in the bootstrap: E-MD-OF-BODY)
+  - missing E-MD-OF-BODY
+  - severity: E-MD-OF-BODY did not fire (expected error)
+- `md/second-spelling-strict` (codes+runtime; not in the bootstrap: W-MD-BULLET-MARKER, W-MD-EMPHASIS-UNDERSCORE)
+  - missing W-MD-EMPHASIS-UNDERSCORE
+  - missing W-MD-BULLET-MARKER
+  - severity: W-MD-EMPHASIS-UNDERSCORE did not fire (expected warning)
+  - severity: W-MD-BULLET-MARKER did not fire (expected warning)
+  - dom (whole-tree) mismatch: expected "<div id=\"w\"><div><p>This is __not strong__ and _not em_.</p><p>* not a list item</p></div></div>" got "<div id=\"w\"><md> This is __not strong__ and _not em_. * not a list item </md></div>"
+  - domAnchored: selector #w p: no match
+- `md/static-tree` (runtime)
+  - dom (whole-tree) mismatch: expected "<article id=\"post\"><div class=\"prose\"><h2 id=\"filing-a-good-bug-report\">Filing a good bug report</h2><p>Before you file, <strong>search the board</strong>. Duplicates get <em>closed</em>.</p><ul><li>Say what you <em>expected</em> and what <del>broke</del> h…
+  - domAnchored: selector #post > div: expected count 1, got 0
+  - domAnchored: selector #post > div: no match
+  - domAnchored: selector #post h2: no match
+  - domAnchored: selector #post ol: no match
+  - domAnchored: selector #post a: no match
+  - domAnchored: selector #post td + td: no match
+  - domAnchored: selector #post img: no match
+- `md/url-scheme-literal-refused` (codes; not in the bootstrap: E-MD-URL-SCHEME)
+  - missing E-MD-URL-SCHEME
+  - severity: E-MD-URL-SCHEME did not fire (expected error)
+  - count: E-MD-URL-SCHEME fired 0 time(s), expected exactly 2
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
 - `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
@@ -332,7 +362,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (189)
+### PASS / CODES-ONLY (186)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -397,8 +427,6 @@ none
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
-- `control-flow/s462-braceless-else-if-chain-dangling` — PASS · TWIN
-- `control-flow/s462-braceless-if-else-same-line` — PASS · TWIN
 - `defer/handled-failable-ok` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
@@ -462,7 +490,6 @@ none
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
-- `markup-handler/s462-handler-nested-if-else` — PASS · TWIN
 - `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN
 - `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN
 - `match-leave/dpa068-failable-stmt-bare-return` — PASS · TWIN
@@ -524,7 +551,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (841)
+### UNSUPPORTED (847)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -956,8 +983,6 @@ none
 - `markup-handler/s457-unquoted-member-chain-condition` — twin · bootstrap-unsupported: member access `.ok` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `markup-handler/s457-unquoted-operator-non-handler-neg` — twin · parse-reject: E-PARSE-TAG: unexpected `+` in the tag `<p`
 - `markup-handler/s457-user-function-named-event-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
-- `markup-handler/s462-handler-if-else-template-cell-false` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `x `
-- `markup-handler/s462-handler-if-else-template-cell-true` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `x `
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/inline-markup-match` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `match-block/member-access-complete-clean` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
@@ -1016,6 +1041,18 @@ none
 - `match-leave/stmt-arm-braced-fail-propagates` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/stmt-arm-braced-return-leaves-fn` — twin · bootstrap-unsupported: a `match` over this expression — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `?{}` 
 - `match-leave/value-arm-leave-word-in-string-not-a-leave` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
+- `md/data-led-href-guarded` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `md/fence-shell-interp-inert` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `:`
+- `md/in-logic-markup-refused` — twin · parse-reject: E-DECL-ILLEGAL-FIELD-NAME: `on` cannot name a declaration or field — it is reserved for namespaced attributes (`on:…`, §66.2.3)
+- `md/interp-unclosed` — parse-reject: E-PARSE-EXPR: expected an expression, found ` to see it.
+    </md>
+</div>
+</program>
+`
+- `md/interp-unclosed-quote-in-code-span` — parse-reject: E-PARSE-EXPECTED: expected `}`, found ``
+- `md/slot-hostile-values-are-text` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `md/slot-regex-literal-quote` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `md/slot-text-reactive` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/meta-allow-list-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1368,7 +1405,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (668)
+### NOT-TWINNED (671)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1801,6 +1838,9 @@ none
 - `match-leave/top-level-if-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `if-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-match-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `match-leave/top-level-raw-and-handler-arm-return-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `match-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
+- `md/component-body-md` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `md/component-text-slot-in-each` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `md/each-row-md` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `module/e-import-001-export-outside-logic-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
 - `module/e-import-008-host-import-no-manifest-reject` — not mechanical: program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `${}` unwrapped
