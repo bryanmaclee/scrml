@@ -142,6 +142,9 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
   let i = 0;
   const n = input.length;
   let unbalanced: { offset: number; message: string } | undefined;
+  // S465 r5 — the lexical context OUTSIDE a `?{` block: template text, or the code of a
+  // `${ … }` substitution (with its brace depth). Empty = top-level code.
+  const outer: Array<{ kind: "tpl" } | { kind: "code"; depth: number }> = [];
 
   // Mode stack — top of stack is the current lexical context.
   //   "js"        : JS expression context. `{`/`}` track block/object depth.
@@ -158,6 +161,18 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
 
   while (i < n) {
     const ch = input[i];
+
+    // S465 r5 — template-literal TEXT outside a `?{` block is copied as text (see the
+    // string case below).
+    const top = outer.length > 0 ? outer[outer.length - 1] : null;
+    if (top && top.kind === "tpl") {
+      if (ch === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if (ch === "`") { outer.pop(); out += ch; i++; continue; }
+      if (ch === "$" && input[i + 1] === "{") { outer.push({ kind: "code", depth: 1 }); out += "${"; i += 2; continue; }
+      out += ch;
+      i++;
+      continue;
+    }
 
     // Look for `?{` SQL block opener.
     if (ch === "?" && input[i + 1] === "{") {
@@ -225,11 +240,22 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
       out += PH_SQL_PLACEHOLDER();
       continue;
     }
-    // S465 r5 — a `?{` inside a quoted string is text, not a SQL block (the S457 one
-    // reader's reading: `x == "?{`…`}"` keeps its string). Pre-r5 the string's
-    // content was replaced by the placeholder — `const s = "?{`SELECT 1`}"` emitted
-    // `"__scrml_sql_placeholder__"`, silently. A string ends at its closing quote or
-    // at a newline (an unterminated quote masks nothing further on its line).
+    // S465 r5 — a `?{` inside a quoted string or a template literal's TEXT is text,
+    // not a SQL block (the S457 one reader's reading: `x == "?{`…`}"` keeps its
+    // string). Pre-r5 the string's content was replaced by the placeholder —
+    // `const s = "?{`SELECT 1`}"` emitted `"__scrml_sql_placeholder__"`, silently.
+    // Template text is tracked so a quote character in it (`it's ${?{…}}`) opens no
+    // string; a `${ … }` substitution is code again (its `?{` is a query).
+    if (ch === "`") { outer.push({ kind: "tpl" }); out += ch; i++; continue; }
+    if (top && top.kind === "code" && (ch === "{" || ch === "}")) {
+      top.depth += ch === "{" ? 1 : -1;
+      if (top.depth === 0) outer.pop();
+      out += ch;
+      i++;
+      continue;
+    }
+    // A string ends at its closing quote or at a newline (an unterminated quote masks
+    // nothing further on its line).
     if (ch === "\"" || ch === "'") {
       let j = i + 1;
       while (j < n && input[j] !== ch && input[j] !== "\n") j += input[j] === "\\" ? 2 : 1;

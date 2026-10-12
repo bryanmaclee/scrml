@@ -77,6 +77,10 @@ const RUN_SHAPES = {
   // (silently, on origin/main too).
   stringHoldsSqlBlock: [`const v = "?{\`SELECT 1\`}"`, "?{`SELECT 1`}"],
   stringHoldsSqlBlockSingle: [`const v = '?{ x }' + "!"`, "?{ x }!"],
+  templateTextHoldsSqlBlock: [`const v = \`?{ text }\``, "?{ text }"],
+  // …while a query in a template SUBSTITUTION is still a query, quotes in the text or not.
+  templateApostropheThenQuery: [`const v = \`it's \${?{\`SELECT name FROM users WHERE name = \${name}\`}.get().name}\``, "it's bob"],
+  templateQuoteAroundQuery: [`const v = \`say "x \${?{\`SELECT name FROM users WHERE name = \${name}\`}.get().name} y"\``, "say \"x bob y\""],
   // F1 — the variant hatch with no call still lowers from text.
   variantHatchNoCall: [`const r = .Found(name: "c")
     const v = "ok"`, "ok"],
