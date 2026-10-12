@@ -3415,11 +3415,11 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number, r
     // carries no `pattern`; the emitter refuses it.
     const out: LambdaParam = { name: "__destructured__", boundNames: boundNamesOf(p) };
     let target = p;
-    if (p.type === "RestElement") { out.isRest = true; target = (p as { argument: ESNode }).argument; }
+    if (p.type === "RestElement") { out.isRest = true; target = (p as unknown as { argument: ESNode }).argument; }
     let paramDefault: ESNode | null = null;
     if (target.type === "AssignmentPattern") {
-      paramDefault = (target as { right: ESNode }).right;
-      target = (target as { left: ESNode }).left;
+      paramDefault = (target as unknown as { right: ESNode }).right;
+      target = (target as unknown as { left: ESNode }).left;
     }
     const pattern = destructurePatternFromESTree(target, filePath, baseOffset, rawSource);
     if (pattern) out.pattern = pattern;
@@ -3457,7 +3457,7 @@ function destructurePatternFromESTree(
       if (el.type === "RestElement") { const r = restName(el); if (r === null) return null; rest = r; continue; }
       let t = el;
       let def: { default: string; defaultExpr: ExprNode } | null = null;
-      if (t.type === "AssignmentPattern") { def = defaultOf((t as { right: ESNode }).right); t = (t as { left: ESNode }).left; }
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as unknown as { right: ESNode }).right); t = (t as unknown as { left: ESNode }).left; }
       if (t.type === "Identifier") { elements.push({ kind: "name", name: t.name as string, ...(def ?? {}) }); continue; }
       const nested = destructurePatternFromESTree(t, filePath, baseOffset, rawSource);
       if (!nested) return null;
@@ -3480,7 +3480,7 @@ function destructurePatternFromESTree(
       else return null;
       let t = prop.value as ESNode;
       let def: { default: string; defaultExpr: ExprNode } | null = null;
-      if (t.type === "AssignmentPattern") { def = defaultOf((t as { right: ESNode }).right); t = (t as { left: ESNode }).left; }
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as unknown as { right: ESNode }).right); t = (t as unknown as { left: ESNode }).left; }
       if (t.type === "Identifier") {
         properties.push({ kind: "name", fieldName, bindName: t.name as string, ...(def ?? {}) });
         continue;
