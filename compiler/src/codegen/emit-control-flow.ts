@@ -2,6 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
+import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
 import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
@@ -741,6 +742,17 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
  *
  * Non-reactive iterables use the plain for-loop path.
  */
+/**
+ * SPEC §49.2.2 / §49.4.2 — a loop label (`outer: for (…) { … continue outer }`) is
+ * a statement-level annotation on the loop; `break label` / `continue label` name
+ * it. The front-end keeps it on the `for-stmt` (`node.label`) as on `while` /
+ * `do`; every plain `for` header emits it (S465 r2 — it was dropped, so the
+ * labelled `continue` was a JS syntax error).
+ */
+function forLabelPrefix(node: any): string {
+  return typeof node?.label === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(node.label) ? `${node.label}: ` : "";
+}
+
 export function emitForStmt(
   node: any,
   opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
@@ -824,10 +836,17 @@ function _emitForStmtInner(
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
       const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", ...hostAsyncFacts(opts), serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null, logicOpts: opts };
-      const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+      // S465 r2 — a declaration init (`let i = 0`, `let i = 0, j = n`) is carried as a
+      // parse-error hatch (a declaration is not an expression); its declarators are
+      // read and lowered through the expression emitter like any other expression,
+      // so a call in them is awaited / classified as anywhere else.
+      const _cDecl = cStyleInitDeclaration(_cParts?.initExpr);
+      const init = _cDecl
+        ? `${_cDecl.keyword} ${_cDecl.declarators.map((d: any) => emitExpr(d, _cCtx)).join(", ")}`
+        : emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitConditionField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
-      lines.push(`for (${init}; ${cond}; ${update}) {`);
+      lines.push(`${forLabelPrefix(node)}for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
       for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
@@ -1024,7 +1043,7 @@ function _emitForStmtInner(
   // loop's head is unchanged.
   const _headKw = forHeadKeyword(node);
   const _plainNames = loopBodyDeclaredNames(opts?.declaredNames, node, bodyIsRender);
-  lines.push(`for (${_headKw} ${varName} of ${iterable}) {`);
+  lines.push(`${forLabelPrefix(node)}for (${_headKw} ${varName} of ${iterable}) {`);
 
   const body: any[] = node.body ?? [];
 
@@ -1406,7 +1425,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: any): s
   // `let row` an assignment (it used to re-declare `row` — E-CODEGEN-INVALID-LOGIC).
   const _hoistHeadKw = forHeadKeyword(node);
   const _hoistNames = loopBodyDeclaredNames(opts?.declaredNames, node, false);
-  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${itemsVar}) {`);
+  lines.push(`${forLabelPrefix(node)}for (${_hoistHeadKw} ${loopVar} of ${itemsVar}) {`);
   for (const code of emitLogicBody(rewrittenBody, { /* S415 */ declaredNames: blockScopedDeclaredNames(_hoistNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...hostAsyncFacts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }

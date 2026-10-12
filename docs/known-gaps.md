@@ -36,6 +36,12 @@
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
+### g-client-match-arm-text-body-skips-statement-checks-s465 — a CLIENT literal / alternation / product `match` arm body or `!{}` handler arm carried as text is never read by the statement parser, so `switch` / `try` / `throw` / `for … in` inside it compile and ship as raw JS (each is a compile error at function top level) — `NEW S465; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-client-match-arm-text-body-skips-statement-checks-s465 sev=MED status=open locus=compiler/src/ast-builder.js(literal / alternation / product arm `{ … }` bodies kept as raw text — no match-arm-block form) + compiler/src/codegen/emit-logic.ts(_emitBlockArmValueFromString / emitArmBody client text path, rewriteBlockBody) prov=review:s465-await-r2 -->
+
+Found in s465 fix round 2 (executed): `function cl(k) { … match (k) { "a" :> { switch (k) { case "a": r = "sw" } } else :> { r = "n" } } … }` (a client fn) compiles exit 0 and the client bundle carries `switch ( k ) { case "a" : r = "sw" };`. At function top level the same `switch` is E-SWITCH-FORBIDDEN. Since s465 r2 the SERVER side of every such arm is read by the function-top-level statement parser and a refused body is a compile error with the top-level code (`codegen/arm-structure.ts`); the client keeps its text lowering (no await is at stake there, and r2 is server-scoped). Fix direction (the one-reader fix for both sides): the AST builder reads a literal / alternation / product arm `{ … }` body as statements at stage 1 (as it already does for `.Variant :> { … }` arms), so every stage-1/type check sees it.
+
 ### g-server-match-arm-same-file-peer-call-not-defined-s465 — a same-file server fn called from another server fn's `match` arm body throws `ReferenceError: <peer> is not defined` at run time: the call is lowered (`await peer(…)`) but no in-process peer callable is emitted for it — `NEW S465; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-server-match-arm-same-file-peer-call-not-defined-s465 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(peer-callable registration ~:4000 / "some server-fn body actually calls" harvest does not see a match-arm body carried as text) prov=review:s465-await -->
@@ -17152,6 +17158,7 @@ closure nodes, and it should be narrowed the same way or deleted.
 
 <!-- @gap id=g-bare-block-statement-is-silently-dropped sev=HIGH status=open locus=searched:ast-builder.js(parseOneStatement/parseRecursiveBody),emit-logic.ts,emit-control-flow.ts — the drop was isolated by execution with two controls but the deciding site was NOT traced, so this locus is recorded as a SEARCH, not a claim prov=review:S414-peter-third-adversarial-pass-on-the-loop-head-arc-isolated-by-a-clean-control -->
 > **S440 reconfirmed (JS-WAT gauntlet C25, finder-executed at `7e4bc8155`):** `let r = 0` / `{ r = 5 }` renders `"0"` — block deleted, exit 0, no diagnostic.
+> **S465 r2 (deciding site traced):** the block is not dropped by codegen — the statement collector (`ast-builder.js` `collectExpr`, the BUG-ASI-NEWLINE boundary) does not end a statement at a line break before `{`, so the block is SWALLOWED into the previous statement's text (`let r = 0⏎{ r = 5 }` → `init: "0\n{ r = 5 }"`) and the expression parser reads `0`, dropping the rest (`_s441Trailing`). Violates §7.2.2 rule 1 ("a line break ends a statement" — `0` is not a continuation token). A block that is the FIRST statement of a list survives as a `bare-expr` carrying the block text; on the server it is now read and lowered structurally (s465 r2), and inside a server arm body the swallowed form is a compile error (E-STMT-UNEXPECTED-TOKEN) rather than a silent drop. The top-level swallow remains.
 
 A bare block statement — `{ … }` used as a statement rather than as some construct's body — is
 **silently removed from the emitted JS**. No diagnostic, exit 0.

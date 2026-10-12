@@ -5,8 +5,9 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { armBodyStatementsFromText } from "../arm-body-statements.ts";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
+import { bareBlockText } from "../validators/defer-structure.ts";
+import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -840,14 +841,22 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   // literal — the text path below reads it the same way), so `{}` stays an empty
   // block (`resultVar = null`), not the value `{}`.
   const isBraced = handler.startsWith("{") && handler.endsWith("}");
-  if (opts?.boundary === "server" && !(isBraced && !handler.slice(1, -1).trim())) {
-    const stmts = isBraced ? armBodyStatementsFromText(handler) : null;
-    if (stmts && stmts.length > 0) return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
-    const node = isBraced ? null : serverArmExprNode(handler, "server", arm.handlerExpr);
-    if (node) {
-      const code = emitExpr(node, _makeExprCtx(opts)).trim();
-      return code.endsWith(";") ? code : code + ";";
+  // S465 r2 — FAIL CLOSED: on the server both readers return a tree for every
+  // non-empty body (a refused one is a compile error, arm-structure.ts), so the
+  // client text lowerings below are never reached with server code.
+  if (opts?.boundary === "server") {
+    if (isBraced) {
+      if (!handler.slice(1, -1).trim()) return "";
+      const stmts = serverArmBlockStatements(handler, "server", arm, { alwaysBlock: true }) ?? [];
+      return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
     }
+    // An unbraced §18.2 leave statement (`_ :> return 7`, `_ :> fail E::X`) is a
+    // statement, not a value: read it as one.
+    const leave = armBlockStatementsDetailed(handler);
+    if (leave && leave.ok) return emitLogicBody(leave.stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
+    const node = serverArmExprNode(handler, "server", arm.handlerExpr, arm);
+    const code = emitExpr(node, _makeExprCtx(opts)).trim();
+    return code.endsWith(";") ? code : code + ";";
   }
   if (handler.startsWith("{") && handler.endsWith("}")) {
     const inner = handler.slice(1, -1).trim();
@@ -2214,6 +2223,20 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if ((node as any).refineParamGuard) {
         const g = (node as any).refineParamGuard as { name: string; judge: any; fn: string };
         return emitParamGuardStatement(g.name, g.judge, g.fn, opts.boundary === "server" ? "throw-server" : "throw").join("\n");
+      }
+      // S465 r2 — a bare `{ … }` block statement (SPEC §7.2.2 "Terms") reaches here
+      // as a `bare-expr` carrying the block TEXT (the front-end does not structure
+      // bare blocks). On the SERVER its body is read by the function-body statement
+      // parser and lowered through this emitter — the text rewriter never awaits —
+      // and a body the parser refuses is a compile error (arm-structure.ts).
+      if (opts.boundary === "server" && bareBlockText(node) !== null) {
+        const stmts = serverArmBlockStatements(bareBlockText(node) as string, "server", node, {
+          alwaysBlock: true,
+          where: "in a server block statement",
+        }) ?? [];
+        const inner = emitLogicBody(stmts, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) })
+          .filter((l: string) => l.trim() !== "");
+        return ["{", ...inner.map((l: string) => "  " + l), "}"].join("\n");
       }
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {

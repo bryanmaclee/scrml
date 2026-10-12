@@ -113,3 +113,33 @@
   sql-handled-split-write-rt), 0 newly failing. browser tier: head 49 fail ⊂ origin/main-tree 51 fail (main's extra
   two: TodoMVC dist not built in that tree) — the name set is environmental (browser-baseline --check refuses: its
   parser counts 50 of 51 on this box); corpus-compile-floor PASS; facts regenerated.
+
+## Fix round 2 (S239 re-review of afc77f87)
+
+- 2026-10-12T00:20Z r2: worktree reset to afc77f87; brief archived as BRIEF-fix-round-2.md; origin/main 41af4153a
+  merged (merge commit). Maps (`primary.map.md`, stamp 8ce6d61b5) read; its #1106 headline ("a multi-statement handler
+  value is PARSED with the function-body statement parser") pointed at `parseStatementText` — verified in source: the
+  arm reader IS the function-top-level parser (body wrapped in a probe function).
+- 2026-10-12T00:30Z r2 REPRODUCED (reviewer probes s5/s6 on afc77f87): wCForPP / wCForStd / wCForVal / wBlock / wMulti /
+  wForIn — wrong password → WELCOME; xLabelLoopArm + xLabelLoopTop E-CODEGEN-INVALID-LOGIC (`continue outer`
+  unsyntactic); xLabelArm runtime `ReferenceError: blk`.
+- Root causes: (1) `serverArmBlockStatements` / `serverArmExprNode` returned null on any refusal and every caller kept
+  its raw-token path (fail open). (2) the parser refused two forms the front-end carries with a parse-error hatch BY
+  DESIGN at top level too: a C-style `for` declaration init (`cStyleParts.initExpr` = hatch `let i = 0`) and a bare
+  block statement (`bare-expr` whose text is the block). Every other refusal (switch / try / throw / for…in / `let a =
+  1, b = 2` / `var`) is a fatal front-end diagnostic — the same one top level gets. (3) the for-stmt emitter dropped
+  `node.label` (the front-end keeps it, as on while/do) — same at top level.
+- Fix: `defer-structure.ts` `parseStatementTextDetailed` (the one reader; `parseStatementText` delegates) returns the
+  refusal reason (front-end code + message, or the unreadable text); accepts the C-for declaration init when its
+  declarators read (`cStyleInitDeclaration`) and a bare block whose body reads (recursively); strict mode (codegen)
+  also refuses lost trailing content. `arm-structure.ts`: on the server both readers return a tree for every non-empty
+  body; a refusal is recorded in the run-wide refused-lowering sink (top-level code, else E-STMT-UNEXPECTED-TOKEN) and
+  reads as an inert `null` placeholder — the raw server arm path is unreachable (emitArmBody's server branch returns
+  unconditionally). emit-control-flow: C-for declaration init lowered through emitExpr; `forLabelPrefix` on all
+  three plain `for` headers. emit-logic: a server bare block is lowered structurally (top level too).
+- Tests: NEW integration/s465-await-arm-r2.test.js (57): 12 shapes × {check, verifyPassword} × wrong/right executed,
+  a raw-token scan over every bundle the file produces, 8 compile-error tests (switch / try / throw / for…in /
+  multi-declarator at top level AND in an arm — same code; switch in a `!{}` arm and in a value arm; labelled block).
+  On afc77f87: 37 fail (every wrong-password case, both label shapes, the handler shape, the scan, all 8 error tests).
+- Gaps: filed g-client-match-arm-text-body-skips-statement-checks-s465 (client arm `switch` ships raw JS); annotated
+  g-bare-block-statement-is-silently-dropped with the traced deciding site (collectExpr swallows a next-line block).
