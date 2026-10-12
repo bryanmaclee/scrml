@@ -66,7 +66,8 @@ import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShad
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
-import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
+import { resetRefusedLowerings, drainRefusedLowerings, recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { refuseUnrenderedStatementMarkup, markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
 import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
@@ -1408,6 +1409,17 @@ export function runCG(input: CgInput): CgOutput {
   // §2.2.1 (S456) — the run-wide refused-lowering sink (refused-lowering-errors.ts):
   // a site that declines to lower records here, whatever opts reached it.
   resetRefusedLowerings();
+  // §17.6.10.1 (S464 Q24) — every statement-position element no lowering renders, in
+  // every logic body, before any emitter (several re-parse or special-case bodies).
+  for (const fileAST of files ?? []) {
+    refuseUnrenderedStatementMarkup((fileAST as any).ast ?? fileAST, (lead, context) => {
+      recordRefusedLowering(new CGError(
+        "E-MARKUP-STATEMENT-NOT-RENDERED",
+        markupNotRenderedMessage(lead.tag, context),
+        (lead.span as any) ?? { start: 0, end: 0 },
+      ), lead);
+    });
+  }
   // §14.8.10 item (1) (S457) — the program-body statement refusals codegen records at the
   // lowering point (sql-one-statement-guard.ts); same reset / drain discipline.
   resetProgramStatementRefusals();

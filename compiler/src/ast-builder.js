@@ -5715,6 +5715,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     const t0 = tokens[from];
     const t1 = tokens[from + 1];
+    // S464 r1 — a bare nested block `{ <p>…</p> }` reaches here as ONE fragment run
+    // that begins with `{`: its first well-formed element is the one reported.
+    if (t0 && t0.kind === "PUNCT" && t0.text === "{") {
+      for (let k = from + 1; k < i; k++) {
+        const a = tokens[k];
+        const b = tokens[k + 1];
+        if (a && a.kind === "PUNCT" && a.text === "<" && b && (b.kind === "IDENT" || b.kind === "KEYWORD") &&
+            a.span && b.span && a.span.end === b.span.start && scanMarkupElementEnd(k) > k) {
+          return { tag: String(b.text), span: tokenSpan(a, filePath) };
+        }
+      }
+      return null;
+    }
     if (!(t0 && t0.kind === "PUNCT" && t0.text === "<" && t1 && (t1.kind === "IDENT" || t1.kind === "KEYWORD"))) return null;
     return { tag: String(t1.text), span: tokenSpan(t0, filePath) };
   }
@@ -5762,31 +5775,104 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * a `lift <…>` operand, a markup value) is skipped WHOLE, so its interior is never
    * inspected.
    */
+  /**
+   * S464 r1 — does the `{` at token `j` open a JS ARROW function's block body? `=>`
+   * also separates a legacy `match` arm (`.A => { … }`) and a deprecated `given`
+   * head (`given @u => { … }`) from their bodies, which their own statement loops
+   * parse; those are not arrows. An arrow's `=>` follows its parameter list `)`, or a
+   * single parameter name that itself follows an expression-start token.
+   */
+  function isJsArrowBrace(j) {
+    const sig = (k) => { while (k >= 0 && tokens[k] && tokens[k].kind === "COMMENT") k--; return k; };
+    const a = sig(j - 1);
+    const at = tokens[a];
+    if (!(at && (at.kind === "OPERATOR" || at.kind === "PUNCT") && at.text === "=>")) return false;
+    const b = sig(a - 1);
+    const bt = tokens[b];
+    if (!bt) return false;
+    if (bt.kind === "PUNCT" && bt.text === ")") return true;
+    if (bt.kind !== "IDENT") return false;
+    const ct = tokens[sig(b - 1)];
+    if (!ct) return false;
+    if (ct.kind === "KEYWORD") return ct.text === "return";
+    return (ct.kind === "PUNCT" || ct.kind === "OPERATOR") &&
+      ["=", "(", ":", "?", "=>", "||", "&&", "??", "["].includes(ct.text);
+  }
+
+  /**
+   * S464 r1 #8 — is token `k` inside a `function` or arrow BODY (in this token
+   * stream)? Decides the refusal's fix: `return` the markup there (§10.4 — `lift` in a
+   * bare `function` body is E-SYNTAX-002), `lift` it in a `${ }` body.
+   */
+  function insideFunctionBodyAt(k) {
+    let depth = 0;
+    for (let j = k - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (!t || t.kind !== "PUNCT") continue;
+      if (t.text === "}") { depth++; continue; }
+      if (t.text !== "{") continue;
+      if (depth > 0) { depth--; continue; }
+      // `t` is a brace enclosing `k`: what opened it?
+      let p = j - 1;
+      while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
+      const pt = tokens[p];
+      if (isJsArrowBrace(j)) return true;
+      if (pt && pt.kind === "PUNCT" && pt.text === ")") {
+        let pd = 0;
+        let q = p;
+        for (; q >= 0; q--) {
+          const u = tokens[q];
+          if (!u || u.kind !== "PUNCT") continue;
+          if (u.text === ")") pd++;
+          else if (u.text === "(" && --pd === 0) break;
+        }
+        const n1 = tokens[q - 1];
+        const n2 = tokens[q - 2];
+        // `fn` bodies are NOT included: `lift` is valid there (§48.5), so the `lift` fix stands.
+        const isFnKw = (u) => !!u && (u.kind === "KEYWORD" || u.kind === "IDENT") && u.text === "function";
+        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) return true;
+      }
+    }
+    return false;
+  }
+
   function refuseSwallowedStatementMarkup(from, to) {
     if (blockContext === "meta") return; // see takeStatementMarkupLead
     if (!(to > from + 1)) return;
+    // A postfix `++` / `--` and a regex literal end an operand too (S464 r1: `@n++⏎<p>q</p>`
+    // and `const r = /ab/⏎<p>…</p>` were read into the statement as code).
     const endsOperand = (t) => !!t && (
       t.kind === "IDENT" || t.kind === "AT_IDENT" || t.kind === "NUMBER" || t.kind === "STRING" ||
+      t.kind === "REGEX" ||
       (t.kind === "KEYWORD" && (t.text === "true" || t.text === "false" || t.text === "not" || t.text === "this")) ||
-      (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}"))
+      (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) ||
+      ((t.kind === "OPERATOR" || t.kind === "PUNCT") && (t.text === "++" || t.text === "--"))
     );
+    // A brace opened right after `=>` is an arrow function's BLOCK body. No statement
+    // loop reads it — the arrow is part of this statement's expression — so an
+    // element in it is checked here, at any depth inside it, and also when it starts
+    // a statement there (after `{` / `;`), not only after an operand (S464 r1:
+    // `const g = () => { <p>arrow</p> }` reached codegen as E-CODEGEN-INVALID-LOGIC).
+    // Any other nested `{ … }` body is checked by its own statement loop.
+    const braces = []; // true = an arrow block body
     let prev = null;
-    let depth = 0; // a nested `{ … }` body is checked by its own statement loop
     for (let k = from; k < to; k++) {
       const t = tokens[k];
       if (!t || t.kind === "EOF") return;
       if (t.kind === "COMMENT") continue;
-      if (t.kind === "PUNCT" && t.text === "{") depth++;
-      else if (t.kind === "PUNCT" && t.text === "}") depth--;
-      if (depth === 0 && t.kind === "PUNCT" && t.text === "<") {
+      if (t.kind === "PUNCT" && t.text === "{") braces.push(isJsArrowBrace(k) || braces.includes(true));
+      else if (t.kind === "PUNCT" && t.text === "}") braces.pop();
+      const inArrowBody = braces.length > 0 && braces[braces.length - 1] === true;
+      if ((braces.length === 0 || inArrowBody) && t.kind === "PUNCT" && t.text === "<") {
         const n1 = tokens[k + 1];
         if (n1 && (n1.kind === "IDENT" || n1.kind === "KEYWORD") && t.span && n1.span && t.span.end === n1.span.start) {
           const end = scanMarkupElementEnd(k);
           if (end > k) {
-            if (k > from && endsOperand(prev) && !openerIsDeclaration(k)) {
+            const startsArrowStatement = inArrowBody && !!prev && prev.kind === "PUNCT" && (prev.text === "{" || prev.text === ";");
+            if (k > from && (endsOperand(prev) || startsArrowStatement) && !openerIsDeclaration(k)) {
               errors.push(new TABError(
                 "E-MARKUP-STATEMENT-NOT-RENDERED",
-                markupNotRenderedMessage(String(n1.text)),
+                markupNotRenderedMessage(String(n1.text), insideFunctionBodyAt(k) ? "function" : "logic"),
                 tokenSpan(t, filePath),
               ));
               return;

@@ -54,6 +54,11 @@
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
+import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+
+/** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
+const _engineSynthRefusalAnchors: Map<string, object> = new Map();
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -913,6 +918,19 @@ function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null 
     const wrapped = "${\n" + src + "\n}";
     const bsOut = bs.runBlockSplitter({ filePath, source: wrapped });
     const built = tab.buildAST(bsOut);
+    // §17.6.10.1 (S464 r1 #4) — this re-parse is the only parse an engine body gets,
+    // so the TAB's refusal of an element a statement read in as code (`effect=${
+    // @note = "x"⏎<p>eff</p> }`) would be thrown away with the rest of its errors.
+    // Carry it to the run-wide sink, once per body text (the body is re-parsed per
+    // emitter). (A statement-leading element is refused by the html-fragment case of
+    // emit-logic when the parsed statements are lowered.)
+    for (const e of (built?.errors ?? []) as any[]) {
+      if (e?.code !== "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
+      const key = filePath + "\u0000" + src + "\u0000" + String(e.span?.start ?? 0);
+      let anchor = _engineSynthRefusalAnchors.get(key);
+      if (!anchor) { anchor = {}; _engineSynthRefusalAnchors.set(key, anchor); }
+      recordRefusedLowering(new CGError(e.code, String(e.message ?? e.code), e.span ?? { start: 0, end: 0 }), anchor);
+    }
     const nodes: any[] = built?.ast?.nodes ?? [];
     for (const n of nodes) {
       if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) return n.body;

@@ -74,6 +74,16 @@ const REFUSED = {
   "markup in statement position in a `function` body": `${D} function f() { <p>fnbody</p> } }`,
   "a second element after a `lift` on the same line": `${D} lift <p>a</p> <p>b</p> }`,
   "an element on the line after a `lift`": `${D} lift <p>a</p>\n<p>b</p> }`,
+  // S464 fix round 1 (review of a0d464f1f)
+  "r1 #2: an element after a postfix `++` in an arm": `${D} if (@n > 0) { @n++\n<p>q</p> } }`,
+  "r1 #2: an element after a postfix `--` in an arm": `${D} if (@n > 0) { @n--\n<p>q</p> } }`,
+  "r1 #2: an element after a postfix `++` at the top of `${}`": `${D} @n++\n<p>top</p> }`,
+  "r1 #2: an element after `a++` in a function (the `a++` was deleted)": `${D} function f() { let a = 1\na++\n<p>q</p>\nreturn a } }`,
+  "r1 #7: an element after a regex literal": `${D} if (@n > -1) { const r = /ab/\n<p>after-regex</p> } }`,
+  "r1 #7: an element in an arrow function's block body": `${D} const g = () => { <p>arrow</p> } }`,
+  "r1 #7: an element after a statement in an arrow block body": `${D} const g = () => { let z = 1; <p>arrow</p> } }`,
+  "r1 #5: a bare nested block `${ { <p>…</p> } }`": `${D} { <p>blk</p> } }`,
+  "r1 #5: a bare nested block inside an `if` arm": `${D} if (@n > 0) { { <p>blk</p> } } }`,
 };
 
 const ACCEPTED = {
@@ -94,6 +104,9 @@ const ACCEPTED = {
   "a compound state declaration in a logic body": `${D}\n <form>\n <name default="a"> = "b"\n <email default="c"> = "d"\n </>\n }`,
   "a compound with typed children": `${D} <formRes><name>: string = ""<email>: string = ""</> }`,
   "a comparison continued on the next line": `${D} let a = 1\n let b = a\n < 2\n lift b }`,
+  "r1: an arrow returning a markup value from a block body": `${D} const sn = (x) => { return <p>${D}x}</p> } } <div>${D}sn(1)}</div>`,
+  "r1: an arrow with an expression body of markup": `${D} const sn = (x) => <p>${D}x}</p> } <div>${D}sn(1)}</div>`,
+  "r1: a postfix `++` statement with no markup after it": `${D} function f() { let a = 1\na++\nreturn a } } <div>${D}f()}</div>`,
 };
 
 describe("E-MARKUP-STATEMENT-NOT-RENDERED (S464 Q24) — refused shapes", () => {
