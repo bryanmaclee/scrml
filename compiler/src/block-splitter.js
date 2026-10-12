@@ -396,10 +396,11 @@ function scanMdSlots(source, start, end) {
  * JS string holds no raw newline: that quote is a lexing failure, so the `${`
  * has no balancing `}` and is never given an extent built from the prose after
  * it). A frame stack tracks code (brace depth) and template-literal text;
- * `//` and block comments are skipped.
+ * `//` and block comments are skipped, and a regex literal is skipped whole
+ * (`mdRegexLiteralEnd`), so a quote or brace inside one is pattern text.
  */
 function mdSlotExtent(source, at, end) {
-  const stack = [{ tpl: false, depth: 1 }];
+  const stack = [{ tpl: false, depth: 1, codeStart: at + 2 }];
   let i = at + 2;
   while (i < end) {
     const c = source[i];
@@ -407,7 +408,7 @@ function mdSlotExtent(source, at, end) {
     if (top.tpl) {
       if (c === "\\") { i += 2; continue; }
       if (c === "`") { stack.pop(); i++; continue; }
-      if (c === "$" && source[i + 1] === "{") { stack.push({ tpl: false, depth: 1 }); i += 2; continue; }
+      if (c === "$" && source[i + 1] === "{") { stack.push({ tpl: false, depth: 1, codeStart: i + 2 }); i += 2; continue; }
       i++;
       continue;
     }
@@ -436,6 +437,10 @@ function mdSlotExtent(source, at, end) {
       i = stop < 0 || stop + 2 > end ? end : stop + 2;
       continue;
     }
+    if (c === "/") {
+      const reEnd = mdRegexLiteralEnd(source, top.codeStart, i, end);
+      if (reEnd > 0) { i = reEnd; continue; }
+    }
     if (c === "{") { top.depth++; i++; continue; }
     if (c === "}") {
       top.depth--;
@@ -447,6 +452,35 @@ function mdSlotExtent(source, at, end) {
       continue;
     }
     i++;
+  }
+  return -1;
+}
+
+/**
+ * SPEC §67.2 (S465 review round 2) — the end of the regex literal that opens with the `/` at
+ * `slash` inside an `<md>` slot, or -1 when that `/` is division (or the literal is unclosed).
+ * The decision is the LOGIC TOKENIZER's (`tokenizeLogic`: its `isRegexContext` reads the
+ * preceding token, `readRegex` reads the literal, character classes and escapes included), so
+ * the slot lexer and the expression reader cannot disagree about it. The tokenizer reads this
+ * slot's code from the frame's start (`codeStart`: just past its `${`) to the end of the line —
+ * a regex literal holds no raw newline. A NUL sentinel after the line separates a literal that
+ * closes at the line end (it stops at its `/`) from one that runs to it unclosed (it eats the NUL).
+ * Without this a quote inside a regex (`${ @v.replace(/'/g, "") }`) read as an unterminated
+ * string and the slot as unclosed (E-MD-INTERP-UNCLOSED) — the same expression in `<p>` compiles.
+ */
+function mdRegexLiteralEnd(source, codeStart, slash, end) {
+  let lineEnd = source.indexOf("\n", slash);
+  if (lineEnd < 0 || lineEnd > end) lineEnd = end;
+  let toks;
+  try {
+    toks = tokenizeLogic(source.slice(codeStart, lineEnd) + "\u0000", codeStart, 1, 1, []);
+  } catch {
+    return -1;
+  }
+  for (const t of toks) {
+    if (!t || !t.span || t.span.start < slash) continue;
+    if (t.span.start > slash) return -1;
+    return t.kind === "REGEX" && t.span.end <= lineEnd ? t.span.end : -1;
   }
   return -1;
 }

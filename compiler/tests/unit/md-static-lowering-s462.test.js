@@ -477,6 +477,80 @@ describe("a `${` in a code span never swallows text (review MED-B)", () => {
   });
 });
 
+describe("a regex literal in a slot is pattern text (review round 2, finding 2)", () => {
+  // The slot lexer asks the logic tokenizer whether a `/` opens a regex literal (the expression
+  // reader's own rule), so a quote or brace inside the pattern is not a string or a brace.
+  const slotsOf = (src) => mdBlock(src).md.mdBody.slots.map((s) => (s.closed ? src.slice(s.start, s.end) : "UNCLOSED"));
+
+  test("the review's probe compiles exactly as the same expression in <p> does", () => {
+    const md = compile(P(`<v> = "it's"
+<div id="w">
+    <md>
+        A \${ @v.replace(/'/g, "") } B
+    </md>
+</div>`));
+    const p = compile(P(`<v> = "it's"
+<div id="w">
+    <p>A \${ @v.replace(/'/g, "") } B</p>
+</div>`));
+    expect(md.allCodes).not.toContain("E-MD-INTERP-UNCLOSED");
+    expect(md.codes).toEqual([]);
+    expect(p.codes).toEqual([]);
+    expect(md.clientJs).toContain(`.replace(/'/g, "")`);
+  });
+
+  test("the splitter: quotes, braces and slashes inside a regex; division stays division", () => {
+    const cases = [
+      ['<div><md>a ${ s.replace(/"/g, "") } b</md></div>', ['${ s.replace(/"/g, "") }']],
+      ['<div><md>a ${ s.replace(/\\}/g, "") } b</md></div>', ['${ s.replace(/\\}/g, "") }']],
+      ['<div><md>a ${ s.replace(/[/\'{]/g, "") } b</md></div>', ['${ s.replace(/[/\'{]/g, "") }']],
+      ['<div><md>a ${ /\'/.test(s) ? 1 : 2 } b</md></div>', ["${ /'/.test(s) ? 1 : 2 }"]],
+      // division: `a / b` then a later `/` — no regex is read across the slot's `}`
+      ["<div><md>a ${ n / 2 } it's ${ m / 4 } b</md></div>", ["${ n / 2 }", "${ m / 4 }"]],
+      ["<div><md>a ${ (n + 1) / 2 } b / c</md></div>", ["${ (n + 1) / 2 }"]],
+      // a regex inside a template literal's own `${…}`
+      ['<div><md>a ${ `[${ s.replace(/\'/g, "") }]` } b</md></div>', ['${ `[${ s.replace(/\'/g, "") }]` }']],
+    ];
+    for (const [src, want] of cases) expect([src, slotsOf(src)]).toEqual([src, want]);
+  });
+
+  test("a genuinely unterminated quote is still E-MD-INTERP-UNCLOSED (MED-B kept)", () => {
+    expect(slotsOf('<div><md>A `${"}` x.\nnext } line\n</md></div>')).toEqual(["UNCLOSED"]);
+    // a regex earlier in the slot does not excuse a later unterminated string
+    expect(slotsOf("<div><md>A ${ s.replace(/x/g, 'y) } x.\nnext } line\n</md></div>")).toEqual(["UNCLOSED"]);
+    const r = compile(P(`<div>
+    <md>
+        A \${ s.replace(/x/g, 'y) } x.
+
+        next } line
+    </md>
+</div>`));
+    expect(r.allCodes).toContain("E-MD-INTERP-UNCLOSED");
+  });
+
+  // (An `<each>` / `<match>` row is not exercised here: the raw-body scanner that finds the row's
+  // extent, `skipDollarBrace`, reads a quote inside a regex as a string for ANY `${…}` — `<li>` or
+  // `<md>` alike. Pre-existing and not md's; recorded in progress.md as a gap.)
+  test("a regex slot in an if= gated <md> and beside a component prop compiles", () => {
+    const r = compile(P(`<v> = "a'b"
+<on> = true
+const Note = <div props={ t: string }>
+    <md>
+        **\${ t.replace(/'/g, "") }** and \${ @v.replace(/[{'}]/g, "") }
+    </md>
+</div>
+<div id="w" if=@on>
+    <md>
+        x \${ @v.replace(/'/g, "") } y
+    </md>
+</div>
+<Note t="it's"/>`));
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toContain(`.replace(/'/g, "")`);
+    expect(r.allCodes).not.toContain("E-MD-INTERP-UNCLOSED");
+  });
+});
+
 describe("§67.6 — heading ids", () => {
   test("slugs keep Unicode letters, dedupe page-wide against author ids and earlier headings", () => {
     const r = compile(P(`<div id="intro">author</div>
