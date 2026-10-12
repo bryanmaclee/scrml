@@ -2,6 +2,21 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S465 — 2026-10-11/12 (AUTO, unattended cloud run) — 7 PRs ready, none merged (merge refused to AUTO); a P0 found live on main
+
+**Ready to land (each `gate` green; code PRs with a CLEAN S239 review on a frozen commit):**
+- **#1407 (P0):** `?{SELECT name, pw …}.get().name` returned the whole row, password hash included. Tails now apply to the result; a tailed query keeps its `!{}` handler; tailed server cells load only their value.
+- **#1409:** `lift <pre><img onerror=…></pre>` ran the handler; lifted `<pre>`/`<code>` bodies are now raw text (§4.17, Q21).
+- **#1408:** a brace-less `if (c) a else b` dropped its `else`. Fixed, and runtime helpers are now shipped from what the client code actually calls.
+- **#1410:** `<md>` phase 2 — static lowering through the one md reader.
+- **#1411:** 237 `:> { return }` arms → `:> return` (emit byte-identical).
+- **#1412:** PRIMER and kickstarter teach `is given` and the if-forms; maps refreshed.
+- **#1406:** `attr=@cell` unquoted renders the cell's NAME on every attribute — gap raised to HIGH.
+
+**In progress:** P0 — an async helper imported from another `.scrml` file is not awaited on the server (wrong password accepted), live on main; branch `auto/s465-await-imported-server-fn`.
+
+**Blocked on bryan:** the CPS P0 (control-flow guards, §19.9.9.8 rule 3), markup display text (error-code name), E-VALUE-FUNCTION-STORED (6 corpus files newly refused). Questions in `handOffs/auto-questions.md`.
+
 ## S462 — 2026-10-10/11 (bryan · ASUS) — 20 PRs; four security holes closed on main; `<md>` designed and its reader landed
 
 **Security (all on main before S462, all S239-reviewed and executed in Chromium or real routes):**
