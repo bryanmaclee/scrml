@@ -5,7 +5,7 @@ ${
         return ?{`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`}.all() !{ _ :> [] }
     }
     function onLoad() {
-        @totals = regionTotals() !{ .Transport(_) :> { return } }
+        @totals = regionTotals() !{ .Transport(_) :> return }
     }
 }
 <button id="load" onclick=onLoad()>Region totals</>
