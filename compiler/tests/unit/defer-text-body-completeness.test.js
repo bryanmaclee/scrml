@@ -124,6 +124,7 @@ const CLASSIFIED = {
   "switch-stmt.header": "notStatement",
   "try-stmt.header": "notStatement",
   "markup.shorthandBodyRaw": "notStatement", // `<li : expr>` — a code-default EXPRESSION body (§4.14), not statements
+  "text._mdText": "notStatement", // S462 md phase 2 — the plain DISPLAY text of a lowered `<md>` text node (§67.6), never logic: an `<md>` body is markdown and its `${…}` slots are separate logic nodes
   "markup._matchArmBodyForm": "notStatement", // a form tag ("block" / "inline")
   "html-fragment.content": "notStatement", // markup text a statement position could not structure; a `${}` in it is not a statement body
   "meta.parentContext": "notStatement",

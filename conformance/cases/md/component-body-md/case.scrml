@@ -1,0 +1,11 @@
+<program>
+const Note = <section class="note" props={ title: string }>
+    <md>
+        ### ${title}
+
+        Read *carefully*.
+    </md>
+</section>
+<Note title="First"/>
+<Note title="Second"/>
+</program>

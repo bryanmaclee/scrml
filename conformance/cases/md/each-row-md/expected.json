@@ -1,0 +1,41 @@
+{
+  "id": "md-each-row-md",
+  "description": "A static `<md>` inside an `<each>` row renders per row with the row's value as text (never markdown) and the soft line break kept as text; a row added later renders the same way.",
+  "language-version": "1.0",
+  "spec": "§67.4",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY)",
+  "rationale": "§67.4: an atom's value is text; §67.3: a soft line break is a line end inside a paragraph (text). The row's `${@.name}` holding `**a**` shows the asterisks.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "input": [
+      {
+        "click": "#add"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#list li",
+        "count": 3
+      },
+      {
+        "selector": "#list li p",
+        "text": "Row **a** wrapped here"
+      },
+      {
+        "selector": "#list li strong",
+        "text": "Row"
+      },
+      {
+        "selector": "#list li:nth-child(3) p",
+        "text": "Row c wrapped here"
+      },
+      {
+        "selector": "#list li p strong strong, #list em",
+        "count": 0
+      }
+    ]
+  }
+}

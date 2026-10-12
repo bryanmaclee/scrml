@@ -1,0 +1,29 @@
+{
+  "id": "md-fence-shell-interp-inert",
+  "description": "A `${…}` inside a code span or a fenced code block (`${HOME:-/tmp}`, `${DIR}`) is inert: it compiles with no scope error and is shown exactly as typed.",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY) · ruling:user-voice-scrml.md S462 Q21 \"I like a.\" (what you type is what is shown)",
+  "rationale": "§67.2 / §67.4: a slot the reader places inside a code span or a fenced code block (its body or its info string) is restored to its exact source text and is never parsed, name-resolved or scope-checked — a shell fence holding `${HOME:-/tmp}` compiles; no E-SCOPE-001.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCOPE-001",
+      "E-MD-INTERP-UNCLOSED"
+    ],
+    "dom": "<div id=\"w\"><div><p>Set the directory with <code>${DIR}</code>:</p><pre><code class=\"language-sh\">export TMP=${HOME:-/tmp} echo \"${TMP}/cache\" </code></pre></div></div>",
+    "domAnchored": [
+      {
+        "selector": "#w p code",
+        "text": "${DIR}"
+      },
+      {
+        "selector": "#w pre code",
+        "text": "export TMP=${HOME:-/tmp} echo \"${TMP}/cache\"",
+        "attr": {
+          "class": "language-sh"
+        }
+      }
+    ]
+  }
+}

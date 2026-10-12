@@ -16,6 +16,7 @@ import { isSomeDeprecationDiagnostics } from "./is-some-deprecation.ts";
 import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
+import { assignMdHeadingIds } from "./md-lower.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
 import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
 import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
@@ -2576,6 +2577,13 @@ function _compileScrmlImpl(options = {}) {
       }
     }
     ceResults.push(...result.files);
+  }
+
+  // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide, AFTER component expansion:
+  // a component's `<md>` headings are lowered once per instance, so the file-wide dedupe
+  // against author `id=`s and earlier headings runs again on the expanded tree.
+  for (const ceFile of ceResults) {
+    try { assignMdHeadingIds(ceFile?.ast?.nodes ?? ceFile?.nodes ?? []); } catch { /* ids stay as lowered */ }
   }
 
   // Stage 3.3 — Post-CE Validators (Unified Validation Bundle / W1)

@@ -1,0 +1,16 @@
+<r> = ""
+${
+    function word(n: number) {
+        if (n == 1) return "one" else if (n == 2) return "two" else return "many"
+    }
+    function nest(a: boolean, b: boolean) {
+        let out = ""
+        if (a) if (b) out = "ab" else out = "a"
+        return out
+    }
+    function go() {
+        @r = word(1) + word(2) + word(3) + "/" + nest(true, true) + nest(true, false) + nest(false, true) + nest(false, false)
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@r}</p>

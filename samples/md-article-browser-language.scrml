@@ -1,0 +1,88 @@
+// S462 <md> phase 2 dog-food — a published-draft article rendered by a static <md>.
+// Source: docs/articles/why-programming-for-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md
+// (the body verbatim; the dev.to front matter is metadata and is not part of the page).
+<program>
+<article class="prose">
+    <md>
+        *authored by claude, rubber stamped by Bryan MacLee*
+
+        **TL;DR: JavaScript wasn't built for today's browser. scrml is.**
+
+        I am part owner of a small trucking outfit based in northeastern Utah, mostly oil and gas. I drive one of the trucks. I also program. Never professionally, but I love solving puzzles. Not an experienced framework developer. I can hobble through React if I HAVE TO. I've spent quite some time thinking about what a language designed *for the browser* would actually look like. First in my head, then on paper and whiteboards, then through about twenty compiler attempts before the current one started landing.
+
+        That one is public now. People are starting to look. So I want to write down what I have come to believe.
+
+        ## The browser has shape
+
+        When you sit down to write a browser app, you commit to a specific set of things. Reactive state. A server boundary. SQL. Scoped styles. Forms. WebSocket. Workers. Routing. Authentication. Validation.
+
+        JavaScript was not designed for any of these. JavaScript was a scripting language for a 1995 page-with-a-form. The browser grew up. The language did not.
+
+        So the ecosystem grew up around the language instead. React for components. Redux or Zustand for state. React-router for routing. Prisma or Drizzle for SQL. Zod for validation. Styled-components or Tailwind for styling. Socket.IO for sockets. Vite for the build. Each one is a *library* that retrofits a piece of the browser's shape onto a language that does not model it. The seams between those libraries are where most of the bugs live. The compiler does not own the whole picture, because the language does not model the whole picture.
+
+        That is the gap. Everything else in this article is what closes when the language does model the picture.
+
+        ## Six things a browser-language should own
+
+        ### 1. State as a type
+
+        In most frameworks, state lives in a hook or a binding (`useState`, `ref`, `createSignal`), each with rules you have to follow: call it the same way every render, do not put it in a conditional, follow the dependency-tracking conventions. The rules are not enforced by the language. You learn them by hitting them.
+
+        What if state were a type? An `<input>` is already a state. It has a value, it changes over time, the user interacts with it. Make user-defined state work the same way. `< Card>` declares a state type. `<Card>` instantiates one. `@count` is reactive; the compiler tracks reactivity through `fn` signatures, through `match` arms, across the server boundary. Errors that frameworks catch at runtime, or never, become compile errors here. There is no conceptual gap between "the input element is a state" and "the user-defined Card is a state."
+
+        ### 2. The server boundary as a type-system question
+
+        In framework land, where-this-runs is your problem to remember. The compiler cannot help.
+
+        Mark a function `server fn` and the compiler does the rest. It partitions everything that function touches as server-only, generates the route, generates the `fetch` stub on the client, and fails compile if you try to read a server-only `@var` on the client. You stop writing API routes. You stop writing fetch wrappers. You stop having to remember which file runs where.
+
+        ### 3. SQL as a primitive
+
+        ORMs are tempting because the noise around SQL strings in JS is real. But ORMs trade one kind of noise for another: query DSLs that approximate SQL but never *are* SQL, schema files that drift from your database, runtime errors when the generated query does not match the live schema.
+
+        If the compiler owns the SQL block, you do not need an ORM. `?{SELECT * FROM users WHERE id = ${@id}}.get()` writes a parameterized query. The compiler reads your schema. When it sees a query inside a loop, it pre-fetches with `WHERE id IN (...)` and rebinds the loop body to a `Map` lookup. No DataLoader. No manual batching. The loop body looks like the loop body should look.
+
+        ### 4. CSS without a build step
+
+        Native CSS shipped `@scope` while we were not looking. A browser-language designed today should compile its scoped styles to that, not to a runtime mangler. One spec change in the browser closed a feature most frameworks still ship as a library.
+
+        ### 5. Validation as the type
+
+        Zod is genuinely impressive engineering. But what Zod cannot do (what no library can do, because it is structurally outside the language) is fail your build.
+
+        If the type system supports inline predicates (`let amount: number(>0 && <10000)`), then validation IS the type. Violations are `E-CONTRACT-001` at compile time. Named shapes (`email`, `url`, `uuid`) are first-class. There is no schema file separate from the type. There is no validate-on-the-edge boilerplate.
+
+        This is what I mean by "mutability contracts." Value predicates are the contract on every write. Presence life-cycle (`not`, `is some`, `lin`) is the contract on read order. State machine transitions are the contract on what comes next. Layer them as you need them. Leave them off where you do not. When you do declare one, a `fn` can mutate through it and remain provably pure.
+
+        > **Correction, May 2026:** `not` and `is some` ship today; `lin` (linear types, SPEC §35) is SPEC-ratified but not yet implemented in the compiler.
+
+        ### 6. Realtime and workers as syntax
+
+        A `<channel>` declares a WebSocket endpoint. The compiler generates the upgrade route, the client connection manager, auto-reconnect, and pub/sub topic routing. Reactive cells declared inside a channel body sync across every connected client — no `@shared` marker required (v0.2.0+).
+
+        A nested `<program>` compiles to a Web Worker, a WASM module, or a foreign-language sidecar, with typed RPC, supervised restarts, and `when message from <#name>` event hooks on the parent side. No `new WebSocket()`. No `postMessage` plumbing. No worker-loader config. Almost every nontrivial browser app reaches for sockets and workers eventually; the language can either treat them as primitives or watch you write the same plumbing every time.
+
+        > **Correction, May 2026:** the Web Worker target ships today; the WASM and foreign-language sidecar targets are spec-defined but not yet implemented in the compiler.
+
+        ## What you give up
+
+        A language without npm cannot pretend to have npm's ecosystem on day one. I am still convinced npm is evil, but "npm is evil" is a position about ecosystem dynamics, not a feature parity claim. The vendoring story is rough. The `scrml vendor add <url>` CLI is on the roadmap and not shipped. Until it ships, ingesting an arbitrary client-side bundle is more work than it should be. That is real. I would rather you know than find out the hard way.
+
+        When you enumerate the npm packages a typical scrml app would actually want, the list collapses. The framework tier, the routing tier, the styling tier, the validation tier, the SQL tier, the realtime tier: all of them are subsumed by the language. What is left is heavyweight client-side widgets (CodeMirror, three.js, Leaflet) and the rounding error of small utility libraries the stdlib will absorb over time.
+
+        ## What you gain
+
+        The biggest single win is not a faster runtime. It is moving the work the runtime is doing into the compiler. A reactive system that wires its dependencies at compile time does no work at runtime to figure out what to update. A query that batches itself at compile time does not need a DataLoader. A boundary that is enforced at compile time does not need a validator on the wire. The runtime does less because the compiler did more.
+
+        That is the design. It is not anti-framework; frameworks are solving the problems available to libraries. It is not framework fatigue. It is just that when a language is shaped for the problem the browser actually poses, the resulting code is shorter, faster, and provably correct in places where the framework path is "hope your tests catch it."
+
+        I am sure I am wrong about plenty. But the more I build, the more it feels like the *shape* was always there waiting for someone to build the language for it. A little short of perfect is still pretty awesome.
+
+        ## Further reading
+
+        - [What npm package do you actually need in scrml?](./npm-myth-devto-2026-04-28.md). The package-list-collapses argument worked through one tier at a time.
+        - [What scrml's LSP can do that no other LSP can, and why giti follows from the same principle](./lsp-and-giti-advantages-devto-2026-04-28.md). What vertical-integration unlocks, in two pieces of the ecosystem.
+        - **scrml on GitHub:** [github.com/bryanmaclee/scrmlTS](https://github.com/bryanmaclee/scrmlTS). The working compiler, examples, spec, benchmarks.
+    </md>
+</article>
+</program>
