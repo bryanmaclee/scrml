@@ -30,11 +30,23 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 249 | 5 |
-| MED | 597 | 6 |
+| HIGH | 251 | 5 |
+| MED | 598 | 6 |
 | LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-imported-async-server-fn-not-awaited-s465 — a server function calling an `async` server function IMPORTED from another `.scrml` file emits the call without `await`, so `if (!check(pass, hash))` tests a Promise and a wrong password is accepted — `NEW S465; HIGH; open (fix in flight)`
+<!-- @gap id=g-imported-async-server-fn-not-awaited-s465 sev=HIGH status=open locus=compiler/src/codegen/scheduling.ts(server callee map knew same-file functionIndex only)+compiler/src/codegen/emit-expr.ts(server text lowering) prov=review:s465-cps-r1 -->
+Found by the S465 S239 review of the P0 CPS branch and reproduced on main `1c1e9eee` (route `x1`: wrong password → "WELCOME"). Same-file helpers are awaited; #1399 fixed the same class for `scrml:` stdlib. Governing §13.2: "It MAY be called directly (the compiler awaits the call)". Fix branch `auto/s465-await-imported-server-fn` (5 S239 rounds at S465; round 5 on `55cdda9d` still FIX: `firstCallInText` misses a callee named `of` and calls after a postfix `++`/`--` division; block-bodied server function values regress — see that branch's progress.md and the S465 hand-off).
+
+### g-destructure-string-default-loses-quotes-s465 — a string-literal default in a destructuring pattern loses its quotes: `const { r = "user" } = {}` emits `{ r = user }` and binds whatever `user` is in scope (client and server) — `NEW S465; HIGH; open`
+<!-- @gap id=g-destructure-string-default-loses-quotes-s465 sev=HIGH status=open locus=compiler/src/codegen/emit-destructure-pattern.ts(default emission) prov=review:s465-await-r5 -->
+Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mjs` sGuardStr/sObjStr); identical on main. With an in-scope `user = "admin"`, `const { role = "user" } = {}; if (role == "admin") …` takes the admin branch; without one it throws ReferenceError. Silent wrong value — security-relevant wherever a default seeds a role or permission. Fix: emit the default from its parsed node (the await branch does this for the server; the client path needs the same).
+
+### g-tree-path-destructured-arrow-param-s465 — an arrow with a destructured parameter emitted through the tree path becomes `(__destructured__) => k + v` → ReferenceError at run time — `NEW S465; MED; open`
+<!-- @gap id=g-tree-path-destructured-arrow-param-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(arrow param emission on the tree path) prov=review:s465-await-r5 -->
+`[[s, 1]].map(([k, v]) => k + v)` and `({ k }) =>` at server function top level throw on main (probe rv7/g.mjs dTop/dTopObj). The await branch routes block-bodied server function values through this path, so it newly breaks shapes that worked on main — fix this before that branch lands.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
