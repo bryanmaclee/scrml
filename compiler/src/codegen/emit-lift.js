@@ -13,7 +13,7 @@ import { isDestructurePattern, emitDestructurePatternText } from "./emit-destruc
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
-import { isRawContentElement, rawContentDomLines } from "../raw-content-encode.ts";
+import { isRawContentElement, rawContentDomLines, sealRawContentBody, unsealRawContentBody } from "../raw-content-encode.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { dynamicUrlAttrNeedsGuard, quotedUrlAttrNeedsGuard, refuseExecutableDataWrite, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
 import * as acorn from "acorn";
@@ -2086,6 +2086,12 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       if (!child) continue;
 
       if (child.kind === "text") {
+        // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: its plain text as a text
+        // node, never parsed and never interpolated (whitespace kept — a soft break is text).
+        if (typeof child._mdText === "string") {
+          if (child._mdText !== "") lines.push(`${elVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify(child._mdText)}));`);
+          continue;
+        }
         const text = child.value ?? child.text ?? "";
         // §4.17 (S462 Q21) — a raw-content body is DISPLAY TEXT: never interpolated,
         // `<` / `>` encoded, parsed through an inert <template> so the author's entities
@@ -2389,6 +2395,54 @@ function parseTagExprString(expr) {
  * @param {string} expr — raw tokenizer string like `< li > ${item} /`
  * @returns {{ lines: string[], varName: string } | null}
  */
+/**
+ * §4.17 (S465, g-lift-pre-code-not-raw-content-s462) — in a lift STRING (malformed lifted
+ * markup the tag parser declined, collected by collectLiftExpr), every `<pre …>` / `<code …>`
+ * body is written exactly as in source up to its close tag (the block splitter's rule: the
+ * first `</pre>` / `</code>`, ASCII case-insensitive). Replace each body with its sealed
+ * transport form (sealRawContentBody, raw-content-encode.ts) so the string reader below cannot read it as tags,
+ * closers or `${…}`; emitCreateElementFromExprString unseals it for the raw element.
+ * Quoted strings outside raw bodies are stepped over (a `<pre` inside an attribute value is
+ * not an opener).
+ */
+function sealLiftStringRawBodies(s) {
+  if (!/<\s*(?:pre|code)\b/i.test(s)) return s;
+  let out = "";
+  let k = 0;
+  while (k < s.length) {
+    const ch = s[k];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      let e = k + 1;
+      while (e < s.length && s[e] !== ch) { if (s[e] === "\\") e++; e++; }
+      out += s.slice(k, e + 1);
+      k = e + 1;
+      continue;
+    }
+    if (ch === "<") {
+      const m = /^<\s*([A-Za-z][A-Za-z0-9-]*)/.exec(s.slice(k, k + 64));
+      if (m && isRawContentElement({ kind: "markup", tag: m[1] })) {
+        // The opener: to its `>`, stepping over quoted attribute values.
+        let e = k + m[0].length;
+        while (e < s.length && s[e] !== ">") {
+          if (s[e] === '"' || s[e] === "'") { const q = s[e]; e++; while (e < s.length && s[e] !== q) e++; }
+          e++;
+        }
+        if (e >= s.length || /\/\s*$/.test(s.slice(k, e))) { out += s.slice(k, e + 1); k = e + 1; continue; }
+        const needle = `</${m[1].toLowerCase()}>`;
+        const close = s.toLowerCase().indexOf(needle, e + 1);
+        if (close < 0) { out += s.slice(k); break; }
+        // The close tag is written as the string reader's element closer, a bare `/`.
+        out += s.slice(k, e + 1) + sealRawContentBody(s.slice(e + 1, close)) + " /";
+        k = close + needle.length;
+        continue;
+      }
+    }
+    out += ch;
+    k++;
+  }
+  return out;
+}
+
 function emitCreateElementFromExprString(expr) {
   const parsed = parseTagExprString(expr);
   if (!parsed) return null;
@@ -2410,6 +2464,18 @@ function emitCreateElementFromExprString(expr) {
     const attrs = parseAttrs(attrsStr);
     const attrLines = emitSetAttrs(elVar, attrs, null, tag);
     for (const l of attrLines) lines.push(l);
+  }
+
+  // §4.17 (S465) — a `<pre>` / `<code>` here holds a raw body, sealed by the lift
+  // collector (sealRawContentBody): it is display text written by the one raw-body
+  // rule, never split into tags or interpolations.
+  if (!isVoid && isRawContentElement({ kind: "markup", tag })) {
+    const sealed = content ? unsealRawContentBody(content) : null;
+    const body = sealed !== null
+      ? sealed
+      : (content || "").replace(/<\s*\/\s*[A-Za-z]*\s*>\s*$/, "").replace(/\s*\/\s*$/, "");
+    if (body !== "") for (const l of rawContentDomLines(body, elVar, () => genVar("lift_raw"))) lines.push(l);
+    return { lines, varName: elVar };
   }
 
   // Emit content
@@ -3812,7 +3878,9 @@ export function emitLiftExpr(node, opts = {}) {
     // the first group and never reached for the second. Deleted.
 
     // Bare/short-form tag (e.g. `< ComponentName >` without closer) — string parser.
-    const result = emitCreateElementFromExprString(expr);
+    // §4.17 (S465) — raw-content bodies are sealed first, so the string reader never
+    // splits them into tags, closers or interpolations.
+    const result = emitCreateElementFromExprString(sealLiftStringRawBodies(expr));
     if (result) {
       const { lines, varName } = result;
       const factoryBody = lines.join("\n  ");

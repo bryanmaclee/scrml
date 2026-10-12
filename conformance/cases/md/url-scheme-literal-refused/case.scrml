@@ -1,0 +1,7 @@
+<program>
+<div>
+    <md>
+        [click](javascript:alert(1)) and ![pic](data:image/svg+xml,x)
+    </md>
+</div>
+</program>

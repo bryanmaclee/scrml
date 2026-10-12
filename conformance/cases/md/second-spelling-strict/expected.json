@@ -1,0 +1,32 @@
+{
+  "id": "md-second-spelling-strict",
+  "description": "In a static `<md>`, a second spelling of an IN construct (`__x__`, `_x_`, `* item`) renders as literal text and is reported with its W-MD lint (a Warning).",
+  "language-version": "1.0",
+  "spec": "§67.3",
+  "provenance": "ruling:user-voice-scrml.md S462 Q22 \"c is good\" (static `<md>` is strict: a second spelling is text plus its lint) · ruling:user-voice-scrml.md S462 `<md>` F3 \"a works. one way to do it with lints to guide\"",
+  "rationale": "§67.3 (Q22): static `<md>` is strict — a second spelling renders as text plus a `W-MD-*` lint naming the canonical form. W-MD codes are Warnings (§67.11).",
+  "expect": {
+    "codes": [
+      "W-MD-EMPHASIS-UNDERSCORE",
+      "W-MD-BULLET-MARKER"
+    ],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "severity": {
+      "W-MD-EMPHASIS-UNDERSCORE": "warning",
+      "W-MD-BULLET-MARKER": "warning"
+    },
+    "dom": "<div id=\"w\"><div><p>This is __not strong__ and _not em_.</p><p>* not a list item</p></div></div>",
+    "domAnchored": [
+      {
+        "selector": "#w strong, #w em, #w ul, #w li",
+        "count": 0
+      },
+      {
+        "selector": "#w p",
+        "text": "This is __not strong__ and _not em_."
+      }
+    ]
+  }
+}

@@ -18,10 +18,10 @@
     }
     <count> = "init"
     function refresh() {
-        const c = countNotes() !{ .Transport(_) :> { return } }
+        const c = countNotes() !{ .Transport(_) :> return }
         @count = c is not ? "none" : "n=" + c.n
     }
-    <button id="add" onclick={ addNote() !{ .Transport(_) :> { return } } }>add</button>
+    <button id="add" onclick={ addNote() !{ .Transport(_) :> return } }>add</button>
     <button id="refresh" onclick=refresh()>refresh</button>
     <p id="status">${@status}</p>
     <p id="count">${@count}</p>

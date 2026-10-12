@@ -47,7 +47,7 @@ import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
-import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard } from "./url-attr-guard.ts";
+import { quotedUrlAttrNeedsGuard, urlGuardTarget, wrapUrlGuard, dynamicUrlAttrNeedsGuard } from "./url-attr-guard.ts";
 import { URL_GUARD_RUNTIME_SOURCE } from "../runtime-template.js";
 import { aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 
@@ -192,6 +192,19 @@ function interpText(logicNode: any): string {
  */
 function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name = "", attrs: any[] = []): string[] {
   if (valNode == null) return [JSON.stringify("")];
+  // SPEC §67.4 (S462 md phase 2) — an `<md>` attribute holding `${…}` atoms (a data-led link
+  // destination, image source, title or alt): built from its segments exactly as the quoted
+  // `href="${@.url}"` form below is — each atom a row read (`not` joins as ""), a URL attribute
+  // judged by the §5.2 rule 3 guard on the whole value, escaped once.
+  if (valNode && typeof valNode === "object" && valNode.kind === "expr" && Array.isArray(valNode.mdSegs)) {
+    const segs: string[] = valNode.mdSegs.map((sg: any) =>
+      typeof sg.lit === "string" ? JSON.stringify(sg.lit) : `_scrml_g.String((${resolveRowRead(String(sg.slot), iterVarName)}) ?? "")`);
+    const joined = segs.length > 0 ? segs.join(" + ") : JSON.stringify("");
+    if (name && urlGuardTarget(tag, name, attrs) === null && dynamicUrlAttrNeedsGuard(tag, name, attrs)) {
+      return [`_scrml_esc_attr(${wrapUrlGuard("null", name, joined, null)})`];
+    }
+    return [`_scrml_esc_attr(${joined})`];
+  }
   if (typeof valNode !== "object" || valNode.kind !== "string-literal" || typeof valNode.value !== "string") {
     throw new SsrUnsupported("non-literal attribute value");
   }
@@ -297,6 +310,9 @@ function nodeToParts(
   // non-empty literal must be plain text (interpolations are separate logic
   // nodes), so a stray `@`/`${` means an unhandled shape → fall back.
   if (node.kind === "text") {
+    // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: its plain text, HTML-escaped
+    // (never an interpolation; whitespace kept — a soft break is text).
+    if (typeof node._mdText === "string") return node._mdText === "" ? [] : [JSON.stringify(escapeHtmlText(node._mdText))];
     const txt = String(node.value ?? node.text ?? "");
     if (!txt.trim()) return [];
     if (txt.includes("${") || txt.includes("@")) {
@@ -346,6 +362,7 @@ function nodeToParts(
       // literal characters, not interpolation, so they do not force the fallback.
       for (const c of Array.isArray(node.children) ? node.children : []) {
         if (c && c.kind === "text") {
+          if (typeof c._mdText === "string") { if (c._mdText !== "") parts.push(JSON.stringify(escapeHtmlText(c._mdText))); continue; }
           const txt = String(c.value ?? c.text ?? "");
           if (txt.trim()) parts.push(JSON.stringify(encodeRawContentBody(txt)));
           continue;

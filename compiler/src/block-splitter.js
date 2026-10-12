@@ -360,6 +360,132 @@ function skipDollarBrace(source, startPos) {
 }
 
 /**
+ * SPEC §67.2 — the slots of an `<md>` body `source[start, end)`. Each `${` is
+ * TAKEN, not parsed: its extent runs to the `}` that balances it, found by
+ * lexing just enough to keep a brace inside a string, a template literal
+ * (and its own `${…}`), or a comment from counting (§4.18.1b: never a raw
+ * byte count — `${"}"}` is one slot). The scan never runs past `end` (the
+ * body's `</md>`): a `${` with no balancing `}` before it is returned with
+ * `closed: false` and ends the scan (its text runs to the body's end).
+ *
+ * Returns `[{ start, end, closed }]`, absolute offsets; `end` is just past the
+ * closing `}` (or `end` of the body when unclosed).
+ */
+function scanMdSlots(source, start, end) {
+  const slots = [];
+  let i = start;
+  while (i < end - 1) {
+    if (source[i] === "$" && source[i + 1] === "{") {
+      const close = mdSlotExtent(source, i, end);
+      if (close < 0) {
+        slots.push({ start: i, end, closed: false });
+        break;
+      }
+      slots.push({ start: i, end: close, closed: true });
+      i = close;
+      continue;
+    }
+    i++;
+  }
+  return slots;
+}
+
+/**
+ * The offset just past the `}` balancing the `${` at `at`, or -1 when the body
+ * ends first — or when a `"…"` / `'…'` string reaches a line end unclosed (a
+ * JS string holds no raw newline: that quote is a lexing failure, so the `${`
+ * has no balancing `}` and is never given an extent built from the prose after
+ * it). A frame stack tracks code (brace depth) and template-literal text;
+ * `//` and block comments are skipped, and a regex literal is skipped whole
+ * (`mdRegexLiteralEnd`), so a quote or brace inside one is pattern text.
+ */
+function mdSlotExtent(source, at, end) {
+  const stack = [{ tpl: false, depth: 1, codeStart: at + 2 }];
+  let i = at + 2;
+  while (i < end) {
+    const c = source[i];
+    const top = stack[stack.length - 1];
+    if (top.tpl) {
+      if (c === "\\") { i += 2; continue; }
+      if (c === "`") { stack.pop(); i++; continue; }
+      if (c === "$" && source[i + 1] === "{") { stack.push({ tpl: false, depth: 1, codeStart: i + 2 }); i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < end && source[i] !== c && source[i] !== "\n") {
+        if (source[i] === "\\") i++;
+        i++;
+      }
+      // A quote that reaches a line end (or the body's end) unclosed is not a string token —
+      // the lexing fails, so this `${` has no balancing `}` (§4.18.1b: the extent is found over
+      // the token stream). Scanning on would invent an extent out of the prose after it: a code
+      // span `${"}` …` would run through its closing backtick to the next `}`, lines later, and
+      // the text between would vanish into an expression (review MED-B, s462-md-phase2).
+      if (i >= end || source[i] !== c) return -1;
+      i++;
+      continue;
+    }
+    if (c === "`") { stack.push({ tpl: true, depth: 0 }); i++; continue; }
+    if (c === "/" && source[i + 1] === "/") {
+      while (i < end && source[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && source[i + 1] === "*") {
+      const stop = source.indexOf("*/", i + 2);
+      i = stop < 0 || stop + 2 > end ? end : stop + 2;
+      continue;
+    }
+    if (c === "/") {
+      const reEnd = mdRegexLiteralEnd(source, top.codeStart, i, end);
+      if (reEnd > 0) { i = reEnd; continue; }
+    }
+    if (c === "{") { top.depth++; i++; continue; }
+    if (c === "}") {
+      top.depth--;
+      i++;
+      if (top.depth === 0) {
+        stack.pop();
+        if (stack.length === 0) return i;
+      }
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * SPEC §67.2 (S465 review round 2) — the end of the regex literal that opens with the `/` at
+ * `slash` inside an `<md>` slot, or -1 when that `/` is division (or the literal is unclosed).
+ * The decision is the LOGIC TOKENIZER's (`tokenizeLogic`: its `isRegexContext` reads the
+ * preceding token, `readRegex` reads the literal, character classes and escapes included), so
+ * the slot lexer and the expression reader cannot disagree about it. The tokenizer reads this
+ * slot's code from the frame's start (`codeStart`: just past its `${`) to the end of the line —
+ * a regex literal holds no raw newline. A NUL sentinel after the line separates a literal that
+ * closes at the line end (it stops at its `/`) from one that runs to it unclosed (it eats the NUL).
+ * Without this a quote inside a regex (`${ @v.replace(/'/g, "") }`) read as an unterminated
+ * string and the slot as unclosed (E-MD-INTERP-UNCLOSED) — the same expression in `<p>` compiles.
+ */
+function mdRegexLiteralEnd(source, codeStart, slash, end) {
+  let lineEnd = source.indexOf("\n", slash);
+  if (lineEnd < 0 || lineEnd > end) lineEnd = end;
+  let toks;
+  try {
+    toks = tokenizeLogic(source.slice(codeStart, lineEnd) + "\u0000", codeStart, 1, 1, []);
+  } catch {
+    return -1;
+  }
+  for (const t of toks) {
+    if (!t || !t.span || t.span.start < slash) continue;
+    if (t.span.start > slash) return -1;
+    return t.kind === "REGEX" && t.span.end <= lineEnd ? t.span.end : -1;
+  }
+  return -1;
+}
+
+/**
  * Skip past an HTML comment `<!-- ... -->` starting at `startPos` (which
  * SHALL be the `<` byte; caller has confirmed `<!--` prefix). Returns the
  * position immediately after the closing `-->`.
@@ -3927,6 +4053,67 @@ export function splitBlocks(filePath, source) {
             closerForm,
             isComponent: isComp,
             openerHadSpaceAfterLt: false,
+          });
+        } else if (!isComp && lowerTagName === "md") {
+          // SPEC §67.2 — the `<md>` body, the FOURTH text-mode production. The
+          // body is one text run with exactly two exits: a text-only `${…}`
+          // (§67.4) and the closing tag `</md>` (ASCII case-insensitive, as
+          // §4.17). Nothing else is active: `<tag>`, `//`, `#{`, `?{`, … are
+          // markdown text.
+          //
+          // The body's END is found first — the first `</md>` — so no byte
+          // inside the body (a slot included) can move it (§4.18.1b pin 3).
+          // Then each `${` inside the body is TAKEN, not parsed: its balanced
+          // extent is recorded as a slot (§67.2, MED-2) and nothing else is
+          // decided here. Whether a slot is an expression is decided only after
+          // `scrml:md` has placed it (md-lower.ts): a slot in code is restored
+          // to its source text and never parsed. An unbalanced `${` is recorded
+          // `closed: false`; the TAB lowering reports E-MD-INTERP-UNCLOSED
+          // (every md diagnostic is raised in one place, md-lower.ts, so the
+          // error-forwarding sub-builds — `<each>` bodies — carry them too).
+          const contentStart = pos;
+          const contentStartLine = line;
+          const contentStartCol = col;
+          const mdClose = "</md>";
+          let contentEnd = len;
+          for (let k = pos; k + mdClose.length <= len; k++) {
+            if (source[k] === "<" && source.slice(k, k + mdClose.length).toLowerCase() === mdClose) {
+              contentEnd = k;
+              break;
+            }
+          }
+          const mdSlots = scanMdSlots(source, contentStart, contentEnd);
+          while (pos < contentEnd) step();
+          let closerForm = "explicit";
+          if (contentEnd < len) {
+            advance(mdClose.length);
+          } else {
+            errors.push(new BSError(
+              "E-CTX-001",
+              `Unclosed <${tagName}> element (expected '</md>'). Add the closing tag — an <md> body ends only at '</md>' (SPEC §67.2).`,
+              { start: curPos, end: pos, line: curLine, col: curCol }
+            ));
+            closerForm = "inferred";
+          }
+          targetChildren().push({
+            type: "markup",
+            raw: source.slice(curPos, pos),
+            span: { start: curPos, end: pos, line: curLine, col: curCol },
+            depth: depth(),
+            // The body is NOT exposed as a text child: it is markdown, read by
+            // `scrml:md` in the TAB lowering, never markup text.
+            children: [],
+            name: tagName,
+            closerForm,
+            // (no component marker: this branch is reached only for a lowercase-first `md`)
+            openerHadSpaceAfterLt: false,
+            mdBody: {
+              start: contentStart,
+              end: contentEnd,
+              line: contentStartLine,
+              col: contentStartCol,
+              slots: mdSlots,
+            },
           });
         } else if (!isComp && RAW_CONTENT_ELEMENTS.has(lowerTagName)) {
           // SPEC §4.17 — raw-content element. Inside `<pre>` / `<code>`, scrml

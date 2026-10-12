@@ -64,6 +64,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
+import { sourceHasMdElement } from "../md-lower.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
 // (called 2–3× per match block) does not re-walk the whole AST each time.
@@ -198,7 +199,8 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
   // mount slot because it receives the node directly from emit-html's walk)
   // — the dispatcher + render fns were silently never emitted. Match
   // block-form Phase 5 integration gap; see docs/changes/match-block-form-scoping/.
-  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST);
+  // Top level: not inside an each (every reader tests `typeof === "string"`).
+  walk(fileAST.nodes ?? fileAST.ast?.nodes ?? fileAST.children ?? fileAST, null);
   return found;
 }
 
@@ -929,7 +931,10 @@ function buildMatchArms(
         // arm-body branch below.
         try {
           const synthLabel = `<match:${matchBlock.id}:${tag}>`;
-          const synthResult = nativeParseFile(synthLabel, trimmed);
+          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
+          const synthResult = sourceHasMdElement(trimmed)
+            ? buildAST(splitBlocks(synthLabel, trimmed))
+            : nativeParseFile(synthLabel, trimmed);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
           }
@@ -988,7 +993,8 @@ function buildMatchArms(
         // that generateHtml renders as literal text + leaks `${@.}`). Cheap
         // pre-check on the raw text gates the heavier re-parse to the each case
         // only — every other arm body keeps the M6.3 native-parser route.
-        if (/<\s*each\b/.test(synthSrc)) {
+        // `<md>` (SPEC §67) takes the same live route: the native parser has no `<md>` production.
+        if (/<\s*each\b/.test(synthSrc) || sourceHasMdElement(synthSrc)) {
           const bsOutput = splitBlocks(synthLabel, synthSrc);
           const tabResult = buildAST(bsOutput);
           const tabNodes = tabResult?.ast?.nodes;
@@ -1090,6 +1096,27 @@ function buildMatchArms(
   // each-block node refs + ids.
   (matchBlock as any).__scrmlCachedArms = arms;
   return arms;
+}
+
+/**
+ * s462 r3 — the lowered arm bodies of a `<match>` block, EXACTLY the node lists
+ * codegen emits (the memoized `buildMatchArms` result — same object refs the
+ * HTML-mount pass and the client-render pass consume).
+ *
+ * A match body is a structural raw-body element: at TAB it is `armsRaw` text,
+ * and its arm bodies only become AST here, at CG time. `detectRuntimeChunks`
+ * (emit-client.ts) must walk these bodies like any other markup — before this
+ * it text-probed `armsRaw` for `<each` and never saw an arm's event-handler
+ * statement lists, so `onclick={ if (@c) { @o.a.b = 5 } … }` in an arm emitted
+ * `_scrml_deep_set(...)` against a runtime that pruned the `utilities` chunk
+ * (ReferenceError per click). Calling this before the render passes is safe:
+ * the result is cached on the node, so every later caller sees the same arms
+ * and the same each-block ids.
+ */
+export function matchBlockArmBodies(matchBlock: MatchBlockAstNode, fileAST: any): any[][] {
+  const arms = buildMatchArms(matchBlock, fileAST);
+  if (!arms) return [];
+  return arms.map((a) => (Array.isArray(a.body) ? a.body : []));
 }
 
 // ---------------------------------------------------------------------------

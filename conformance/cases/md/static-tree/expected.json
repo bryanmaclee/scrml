@@ -1,0 +1,62 @@
+{
+  "id": "md-static-tree",
+  "description": "A realistic static `<md>` body renders as exactly the §67.6 closed element tree inside one host `div` (author `class` on the host): headings with slug ids, paragraphs, strong/em/del/code, links with title, an ordered list starting at 3, a quote, a rule, an aligned table, a hard break and an image.",
+  "language-version": "1.0",
+  "spec": "§67.6",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F2 \"yes a.\" (same closed element/attribute set, same §5.2 URL guard) · ruling:user-voice-scrml.md S462 `<md>` F3 \"a works. one way to do it with lints to guide\"",
+  "rationale": "§67.6 (MD-SAFE): an `<md>` produces only the elements of the §67.6 table, each with only its listed attributes; content reaches the DOM only as text or a listed attribute; a static heading gets a slug id; `ol` writes `start` only when it is not 1; `th`/`td` alignment is one of three `text-align` constants.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-",
+      "W-MD-"
+    ],
+    "dom": "<article id=\"post\"><div class=\"prose\"><h2 id=\"filing-a-good-bug-report\">Filing a good bug report</h2><p>Before you file, <strong>search the board</strong>. Duplicates get <em>closed</em>.</p><ul><li>Say what you <em>expected</em> and what <del>broke</del> happened.</li><li>Paste the exact error in <code>backticks</code>.</li><li>Read the <a href=\"/docs/triage\" title=\"Triage\">triage guide</a>.</li></ul><ol start=\"3\"><li>three</li><li>four</li></ol><blockquote><p>Quote me.</p></blockquote><hr><table><thead><tr><th style=\"text-align:left\">name</th><th style=\"text-align:right\">count</th></tr></thead><tbody><tr><td style=\"text-align:left\">a</td><td style=\"text-align:right\">1</td></tr></tbody></table><p>Line one<br> line two <img alt=\"logo\" src=\"/logo.png\"></p></div></article>",
+    "domAnchored": [
+      {
+        "selector": "#post > div",
+        "count": 1,
+        "attr": {
+          "class": "prose"
+        }
+      },
+      {
+        "selector": "#post h2",
+        "text": "Filing a good bug report",
+        "attr": {
+          "id": "filing-a-good-bug-report"
+        }
+      },
+      {
+        "selector": "#post ol",
+        "attr": {
+          "start": "3"
+        }
+      },
+      {
+        "selector": "#post a",
+        "attr": {
+          "href": "/docs/triage",
+          "title": "Triage"
+        }
+      },
+      {
+        "selector": "#post td + td",
+        "attr": {
+          "style": "text-align:right"
+        }
+      },
+      {
+        "selector": "#post img",
+        "attr": {
+          "src": "/logo.png",
+          "alt": "logo"
+        }
+      },
+      {
+        "selector": "#post script, #post span, #post input, #post iframe",
+        "count": 0
+      }
+    ]
+  }
+}

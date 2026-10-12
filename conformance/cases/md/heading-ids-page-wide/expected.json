@@ -1,0 +1,26 @@
+{
+  "id": "md-heading-ids-page-wide",
+  "description": "Static `<md>` heading ids are slugs, deduped page-wide in document order against every author `id=` and every earlier heading (`-1`, `-2`, …); non-Latin letters are kept.",
+  "language-version": "1.0",
+  "spec": "§67.6",
+  "provenance": "PA direction, s462-md-phase1 review (§67.6 Heading ids)",
+  "rationale": "§67.6: every heading of a static `<md>` gets a GitHub-style slug; a slug already used on the page (by another heading or an author `id=`) gets the first free `-1`, `-2`, … suffix, in document order; Unicode letters are kept.",
+  "expect": {
+    "codes": [],
+    "dom": "<section id=\"setup\">Author-owned id.</section><div id=\"a\"><div><h1 id=\"setup-1\">Setup</h1><h2 id=\"setup-2\">Setup</h2><h2 id=\"快速入门\">快速入门</h2></div></div><div id=\"b\"><div><h2 id=\"setup-3\">Setup</h2></div></div>",
+    "domAnchored": [
+      {
+        "selector": "#a h1",
+        "attr": {
+          "id": "setup-1"
+        }
+      },
+      {
+        "selector": "#b h2",
+        "attr": {
+          "id": "setup-3"
+        }
+      }
+    ]
+  }
+}

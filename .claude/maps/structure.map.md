@@ -1,6 +1,29 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
+# S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
+# whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
+# `meta.emit` gate (#1367), one presence reader / declared props off the root (#1369), channel handler bindings (#1370),
+# ONE presence test §42.4 (#1372), refinement copy-in (#1376); S461 — `given @cell` reads the cell (#1380), runtime
+# tree-shake (#1382), E-CHANNEL-006 (#1379/#1384); S462 — `is some` -> `is given` through §63 (#1385), message templates not
+# functions (#1387), Rule enum (#1389), in-place `given` guard deprecated (#1392), stdlib closure factories -> structs
+# (#1393), E-IMPORT-004 on `scrml:` imports (#1394), statement-match inline + E-STMT-RETURN-OUTSIDE-FUNCTION (#1395),
+# presence narrowing ends on write (#1396), `<script>`/`<style>` refused + `<pre>`/`<code>` raw text (#1398/#1400/#1402),
+# async stdlib awaited (#1399/#1401), §67 `<md>` + `scrml:md` (#1403), `scrml fix` markup given guards (#1404).
+# Incremental refresh in an isolated worktree on branch `s465-docs-currency` = `origin/main` `41af4153a` + 3 docs-only
+# commits (docs/PA-SCRML-PRIMER.md, docs/articles/llm-kickstarter-v2-2026-05-04.md, docs/changes/s465-docs-currency/).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 54 commits behind HEAD (watermark 8ce6d61b5, HEAD
+# fe859fd07)` = `git log --oneline 8ce6d61b5..origin/main` (51) + the 3 docs-only branch commits.
+# ⛑ FIGURES AT `41af4153a` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **324,230 lines / 286 files**
+# (+29 files: 25 `.ts`/`.js` modules + 4 `.d.ts` — see structure.map.md S465; `git ls-tree` incl. `.d.ts` = 287) ·
+# test files **1,718** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+63; FACTS says 1,703 by
+# its own rule) · `compiler/SPEC.md` **48,704** lines (+1,642; NEW §67 `<md>`) · conformance **1758** `case.scrml` (+335) ·
+# `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (+2: `fix-given-presence`, `fix-verify-shared` —
+# FACTS counts files in `commands/`; `fix-is-some` also new) · **14 new diagnostic code literals** in `compiler/src` (see
+# error.map.md S465) · known-gaps heading/marker drift **72** (was 68) · `state.ts --check` @generated sections PASS.
+# Conformance suite NOT re-run this pass. `../giti` / `../flogence` NOT cloned in this container — not consulted.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `8ce6d61b5`), CARRIED. ━━━━━━━
 # ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
 # user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
 # event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
@@ -988,6 +1011,44 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S465 — STRUCTURE DELTA (`8ce6d61b5..41af4153a`)
+
+New `compiler/src` modules (one-line purpose from each file's header; locate by SYMBOL):
+| file | purpose | key symbols |
+|---|---|---|
+| `presence-narrowing.ts` | THE §42 presence-narrowing reader (S459 D1 r7) | `narrowingEndedAt` :150, `findEndCause` :179, `mayWriteWithin` :257 |
+| `narrowing-write-set.ts` | what a node WRITES — §42.3.5 "a write ends the narrowing" | `UNKNOWN_SHAPE` :65, `PRIM_SHAPE` :67 |
+| `is-some-deprecation.ts` | §42.2.2a / §55.1 / §63 `is some` lint sites | `IS_SOME_LINT` :23, `confirmIsSomeSites` :45; fired from `ast-builder.js` (~:864) |
+| `element-refusal.ts` | §4.17 — `<script>` / `<style>` refused at every position | `REFUSED_ELEMENTS` :36, `refusedElementCode` :46 |
+| `raw-content-encode.ts` | §4.17 — `<pre>` / `<code>` raw body is display text | `isRawContentElement` :44, `encodeRawContentBody` :64 |
+| `meta-allow-list.ts` | §22.12 closed allow-list for `^{}` bodies | `META_REFUSED_MEMBERS` :47, `META_RUNTIME_MEMBERS` :67 |
+| `unquoted-attr-value.ts` | THE reader for an unquoted attribute value | `isEventHandlerAttrName` :36, `isConditionAttrName` :332 |
+| `arm-body-statements.ts` | ONE reader of match / `!{}` / message arm bodies | `armBodyStatementsFromText` :32, `leaveInStatements` :63 |
+| `binding-names.ts` | names a binding position binds | `boundNamesOf` :120, `declareIn` :127 |
+| `refinement-obligations.ts` | §53 refinement obligations (S458 slice 2) | `structJudgeDef` :81, `enumJudgeDef` :88 |
+| `component-prop-js-substitute.ts` | component prop substitution inside source text | — |
+| `escalation-reason-text.ts` | ONE phrase for why §12.2 placed code on the server | — |
+| `escape-hatch-body.ts` | check-time reading of a block-bodied arrow / function | — |
+| `markup-attr-allow-list.js` (+`.d.ts`) | markup attribute allow-list | — |
+| `runtime-message-templates.js` (+`.d.ts`) | §41.12 / §55.8 message templates (not functions) | — |
+| `runtime-meta-emit-gate.js` | §22.4.1 runtime `meta.emit` gate | — |
+| `dom-named-property-members.js` (+`.d.ts`) | generated by `scripts/gen-dom-named-property-members.cjs` | — |
+| `path-canonical.d.ts` | types for the existing `path-canonical` module | — |
+| `codegen/ship-strip.ts` | behaviour-neutral strip of SHIPPED browser JS (§47.9.9) | `shipStrip` :232, `shipStripFallbackWarning` :275 |
+| `codegen/host-global-alias.ts` | compiler host-global refs via `_scrml_g` | `HOST_GLOBAL_ALIAS` :70, `HOST_GLOBAL_NAMES` :80 |
+| `codegen/listener-event-check.ts` | E-EVENT-UNBOUND on the executed text | `findUnboundEventListeners` :105 |
+| `codegen/meta-capture-rewrite.ts` | emitted-text boundary for a runtime `^{}` body | — |
+| `codegen/detached-listener.ts` | listener attached to an element runs only while attached | — |
+| `commands/fix-is-some.js` | `scrml fix` rule `is-some` | — |
+| `commands/fix-given-presence.js` | `scrml fix` rule `given-presence` (verifies each site by compiling) | — |
+| `commands/fix-verify-shared.js` | shared compile-before/after verify for fix rules | — |
+
+Runtime: `compiler/runtime/stdlib/{auth,data,store}/` split into sub-modules (`auth/{flows,jwt,password}.js`,
+`data/{form-for,messages,parse,schema-for,table-for,transform,validate}.js`, `store/kv.js`); NEW `runtime/stdlib/md.js`
+(GENERATED from `stdlib/md/index.scrml` by `scripts/gen-md-shim.ts`). NEW stdlib module `stdlib/md/` (§67).
+New scripts: `host-global-scan.ts` (+ `.known-throws.txt`), `gen-md-shim.ts`, `sync-bootstrap-url-guard.ts`,
+`gen-dom-named-property-members.cjs`. New docs dirs: `docs/readme/` (9 pages), `docs/readme-snippets/` (+6 files).
 
 ## S458 — STRUCTURE DELTA (`125486345..8ce6d61b5`; 8 commits, source-bearing #1345 #1351 #1352 #1354)
 

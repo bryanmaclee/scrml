@@ -1,6 +1,29 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
+# S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
+# whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
+# `meta.emit` gate (#1367), one presence reader / declared props off the root (#1369), channel handler bindings (#1370),
+# ONE presence test §42.4 (#1372), refinement copy-in (#1376); S461 — `given @cell` reads the cell (#1380), runtime
+# tree-shake (#1382), E-CHANNEL-006 (#1379/#1384); S462 — `is some` -> `is given` through §63 (#1385), message templates not
+# functions (#1387), Rule enum (#1389), in-place `given` guard deprecated (#1392), stdlib closure factories -> structs
+# (#1393), E-IMPORT-004 on `scrml:` imports (#1394), statement-match inline + E-STMT-RETURN-OUTSIDE-FUNCTION (#1395),
+# presence narrowing ends on write (#1396), `<script>`/`<style>` refused + `<pre>`/`<code>` raw text (#1398/#1400/#1402),
+# async stdlib awaited (#1399/#1401), §67 `<md>` + `scrml:md` (#1403), `scrml fix` markup given guards (#1404).
+# Incremental refresh in an isolated worktree on branch `s465-docs-currency` = `origin/main` `41af4153a` + 3 docs-only
+# commits (docs/PA-SCRML-PRIMER.md, docs/articles/llm-kickstarter-v2-2026-05-04.md, docs/changes/s465-docs-currency/).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 54 commits behind HEAD (watermark 8ce6d61b5, HEAD
+# fe859fd07)` = `git log --oneline 8ce6d61b5..origin/main` (51) + the 3 docs-only branch commits.
+# ⛑ FIGURES AT `41af4153a` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **324,230 lines / 286 files**
+# (+29 files: 25 `.ts`/`.js` modules + 4 `.d.ts` — see structure.map.md S465; `git ls-tree` incl. `.d.ts` = 287) ·
+# test files **1,718** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+63; FACTS says 1,703 by
+# its own rule) · `compiler/SPEC.md` **48,704** lines (+1,642; NEW §67 `<md>`) · conformance **1758** `case.scrml` (+335) ·
+# `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (+2: `fix-given-presence`, `fix-verify-shared` —
+# FACTS counts files in `commands/`; `fix-is-some` also new) · **14 new diagnostic code literals** in `compiler/src` (see
+# error.map.md S465) · known-gaps heading/marker drift **72** (was 68) · `state.ts --check` @generated sections PASS.
+# Conformance suite NOT re-run this pass. `../giti` / `../flogence` NOT cloned in this container — not consulted.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `8ce6d61b5`), CARRIED. ━━━━━━━
 # ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
 # user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
 # event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
@@ -872,6 +895,10 @@
 #
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
+
+## S465 — INFRA DELTA (`8ce6d61b5..41af4153a`)
+
+- CI +2 gate steps (host-global scan, md shim) — see build.map.md S465. No deploy/infra change.
 
 ## S458 — INFRA DELTA (`125486345..8ce6d61b5`)
 

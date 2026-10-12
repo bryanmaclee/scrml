@@ -31,9 +31,9 @@
             _ :> not
         }
     }
-    <button id="a" onclick={ loadHit() !{ .Transport(_) :> { return } } }>a</button>
-    <button id="b" onclick={ loadMiss() !{ .Transport(_) :> { return } } }>b</button>
-    <button id="c" onclick={ loadFailed() !{ .Transport(_) :> { return } } }>c</button>
+    <button id="a" onclick={ loadHit() !{ .Transport(_) :> return } }>a</button>
+    <button id="b" onclick={ loadMiss() !{ .Transport(_) :> return } }>b</button>
+    <button id="c" onclick={ loadFailed() !{ .Transport(_) :> return } }>c</button>
     <p id="hit">${@hit is not ? "none" : @hit.body}</p>
     <p id="miss">${@miss is not ? "none" : @miss.body}</p>
     <p id="failed">${@failed}</p>
