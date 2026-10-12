@@ -1,0 +1,5 @@
+${
+    function twice(x) { return x * 2 }
+    const ops = { double: twice }
+}
+<program><p id="p">${ops.double(2)}</></>
