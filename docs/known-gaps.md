@@ -518,6 +518,8 @@ Reported by the S239 review of 58e601693, reproduced in Chromium (pre-existing; 
 
 Nothing executable is written (the braced value becomes `attr=""`; the quoted handler becomes a listener that does nothing), so no sink is open — but the author's text is dropped with no diagnostic. impl#1 writes a quoted static `onclick="…"` as the author's static string (§5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string"). Either reading should be a diagnostic in the bootstrap rather than a silent drop (`feedback_dont_soft_classify_bugs`).
 
+**S464 — handler half CLOSED** (`s464-quoted-handler-refused`): the S464 ruling made a quoted event attribute with no `${…}` a compile error in both implementations (§5.2 "Quoted event-handler attributes (S464)", `E-ATTR-QUOTED-HANDLER`); the bootstrap now refuses it in `analyze.scrml` `attrCaseDiags` (any case; tests in `slice-m4/sink-guards.test.js`). The braced-non-handler-value half (`srcdoc={@doc}` → `""`) stays OPEN.
+
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
 <!-- @gap id=g-component-block-lambda-emits-empty-body-s458 sev=HIGH status=open locus=compiler/src/codegen/emit-expr.ts(structured lambda block body printed as a comment)+compiler/native-parser re-parse of component bodies prov=review:s458-d1-r3 -->
