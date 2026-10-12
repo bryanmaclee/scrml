@@ -1,3 +1,57 @@
+# scrml — Session 462 (bryan · ASUS) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S461 below. Rulings: `scrml-support/user-voice-scrml.md` §S462 (Q1–Q24 plus `<md>` F1–F4). Board `S462-bryan.md`. A thin sibling (S463, XPS) registered mid-session and did not touch S462 work.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. In flight at wrap — each anchored by a LOCAL branch on the ASUS + progress.md (resume via SendMessage-by-name in a new session is not possible; re-dispatch a fresh agent pointing at the branch). Backups: `wip/s462-{p0-sql-chain,braceless-else,markup-text-not-code,md-phase2}` on origin. The two P0 CPS branches were refused by the pre-push hook (a test mid-round), so they are saved as patches in `scrml-support/handOffs/s462-wip-patches/` (README there).
+| work | branch (local + `wip/` copy) | state at wrap |
+|---|---|---|
+| **P0 CPS: server logic + password hash on the client** — H1 helper-call bypass · H2 derived-local leak · H3 cross-batch forged trust (a forged `role` ran a DELETE) · H4 silent login break · M1 crypto browser-safe chunk | `worktree-agent-a06a11ac003248013` (round 1, resumed after a context-overflow crash; base work `worktree-agent-aaf433dac5f8224df` a466175f9; WIP patch `scratchpad/cps-round1-wip.patch`) | fix round 1 running. Review verdict on 533609165: FIX (H1–H4). **Do not land without re-review.** |
+| **P0 SQL chain truncation** — `?{…}.get().name` returns the WHOLE row → hash leak | `worktree-agent-a1a75d1c0988a788f` | running |
+| **brace-less `else` drop** (silent miscompile) | `worktree-agent-aa155c755ea34011f` | fix round 1 (handler template-literal regression) |
+| **markup display text parsed as code** | `worktree-agent-ab499a58703c346b4` | fix round 1 (drop collectExpr hunk; fail-closed on desugar decline) |
+| **`<md>` phase 2** (static lowering) | `worktree-agent-a68b98aae5ab9517d` | fix round 1 (MED-A `match` prose → E-TYPE-026; MED-B code-span `${` swallow) |
+| **S462 gap filing** | `worktree-agent-a2214e9573c113571` | running — PR when done |
+
+### 1. Queued (ruled, not started)
+- **Q23** braces required: §63 retirement — W-lint + `scrml fix` brace rule + SPEC §50.2.1/§49.2/§34 + reserved E-; then a separate corpus-migration PR (2,363 bootstrap sites + stdlib/examples/conformance); then notify giti/flogence maintainers. Start AFTER the brace-less-else fix lands (same parser code).
+- **Q24** statement-position markup in a logic body → compile ERROR naming `lift` (never silently dropped). MEASURE the corpus first; if not small, back to bryan. Start AFTER the display-text fix lands.
+- **`<md>` phase 3** — `<md of=…/>` with the Q22 forgiving mode (second spellings render canonical); md chunk minification; size target.
+- **`<md>` in `lift` / markup-value positions** (currently E-MD-IN-LOGIC-NOMINAL).
+- **E-VALUE-FUNCTION-STORED** refusal (Q15/Q16) — stdlib, registerMessages and scrml:data have migrated; the refusal itself never landed.
+- **Narrowing checker simplification** after no-function-in-value lands.
+- **Lift `<pre>` raw content** (`g-lift-pre-code-not-raw-content-s462`) — same class impl#1 allows everywhere; MED.
+- **Migration pass:** 234 `.Transport(_) :> { return }` sites → bare `:> return` (README.md:109 included).
+- **Doc pass:** the website and kickstarter still teach `is some`.
+- **X build** (attribute forwarding, `...attrs:button`).
+
+### 2. Open questions for bryan (not yet asked)
+- impl#1 runs author-written QUOTED event handlers (`<img onerror="js">`) everywhere; the bootstrap silently empties them. Refuse, neutralise, or allow?
+- ParseError: implicit built-in, or import-only?
+- `scrml fix`: should client-server-call / sql-failable / s66 also refuse files that already fail to compile?
+- Pre-commit hook: add the guarded `gen-md-shim --check` line to the machine-local `.git/hooks/pre-commit`? (install.sh would drop the S228/S242 local additions — do NOT run it.)
+
+## What landed (20 PRs, every code PR S239-reviewed on a frozen commit)
+#1384 E-CHANNEL-006 · #1385 `is some`→`is given` (§63) · #1386 bootstrap URL/srcdoc/handler sinks · #1387 registerMessages templates + `<errors>` XSS · #1388 dpa-069 undeclared attrs, O46, X spec · #1389 scrml:data rules as data · #1390 dpa-065 own-value inference · #1392 in-place `given` retired (§63) · #1393 stdlib factories → structs · #1394 E-IMPORT-004 for `scrml:` imports + Q19 re-exports · #1395 statement-match inline + arm leaves · #1396 narrowing ends on write + Q18 gated handlers + render-gates-first scheduler · #1397 markup if-arm re-render · #1398 bootstrap `<script>`/`<style>` refusal + printer escape · **#1399 P0 auth: aliased/optional async stdlib calls awaited** · #1400 impl#1 `<script>`/`<style>` everywhere (lift ran data as JS) · #1401 Q20 server Promise trap · #1402 Q21 raw bodies render as text · #1403 `<md>` phase 1 (§67 + scrml:md) · #1404 `scrml fix` markup-given migration + bare `:> return`.
+
+## 🔭 DURABLE
+- **Security holes cluster where TWO READERS decide the same thing.** S462's P0s were all of that shape: the await classifier keyed on local vs imported name; the CPS tier classifier was a narrower copy of the escalation walker; the raw-content scanner tokenised what the browser does not; the `scrml fix` handler predicate disagreed with the compiler's. The fix every time: ONE reader, shared.
+- **Fail-closed allow-lists, never deny-lists** — the Q18 event exemption (user-input allow-list, after Chromium showed blur/focusout fire during removal), `<md>`'s closed element set, the URL allow-list.
+- **Reviews found real holes in every security PR this session**, several in branches whose own gates were all green. Several fixes took 3–8 review rounds (narrowing: 9). Do not relax S239.
+- **The reviewer that found a bug is the best reviewer of its fix** (resume it by name).
+
+## ⚑ MISSES (mine)
+1. A brief I wrote overreached the SPEC (`server` keyword "must never run on the client"); the agent correctly followed §52.10. Check briefs against the SPEC before dispatch.
+2. Parallel agents repeatedly clobbered the shared scratchpad (`scratchpad/base` overwritten 3×) — briefs now name a unique subdir; keep doing that.
+3. One agent died of context overflow mid-fix (P0 CPS); salvaged via patch. Long security rounds need "keep tool output small" in the brief from the start.
+4. `gh pr merge` once ran from scrml-support's CWD and failed; use `--repo bryanmaclee/scrml`.
+
+## Worktrees (6b)
+In-flight agent branches pushed to origin as `wip/s462-<topic>` backups (not PRs; no CI). 67 review copies + 12 landed agent worktrees removed this session. ~70 worktrees from S451–S460 remain (9 dirty) — not this session's to judge; list them for bryan.
+
+---
+
 # scrml — Session 461 (AUTO — unattended cloud run; bryan absent) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S460 below. The first real AUTO run (contract `../scrml-support/pa-auto.md`). Board `S461-auto.md`. Changelog §S461. Delta-log `[3972]`–`[3980]`. Solo; no live sibling at any point. Rulings: none (AUTO cannot rule).
