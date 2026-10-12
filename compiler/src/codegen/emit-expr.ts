@@ -779,7 +779,7 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
   // WELCOME, no warning), so any expression read by dropping content counts.
   if (ctx.mode === "server" && node && typeof node === "object") {
     const dropped = droppedStatementTextOf(node) ??
-      (hasLostTrailingContent(node) ? String((node as Record<string, unknown>)._s441TrailingText ?? "") : null);
+      (hasLostTrailingContent(node) ? String((node as unknown as Record<string, unknown>)._s441TrailingText ?? "") : null);
     if (dropped !== null) {
       const one = dropped.replace(/\s+/g, " ").trim();
       const shown = one.length > 80 ? one.slice(0, 77) + "..." : one;
