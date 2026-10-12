@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 255 | 4 |
-| MED | 611 | 6 |
-| LOW | 383 | 0 |
+| MED | 615 | 6 |
+| LOW | 384 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -533,6 +533,36 @@ Reproduced on the s464 branch: `bun compiler/bin/scrml.js compile samples/compil
 <!-- @gap id=g-component-in-each-row-in-match-arm-unexpanded-s464 sev=HIGH status=open locus=compiler/src/codegen/emit-match.ts(the arm body is re-parsed in codegen, after component expansion)+compiler/src/codegen/emit-each.ts(row element built from the unexpanded call node) prov=review:s464-quoted-handler-refused-S239-F1+empirical:PA-agent-reproduced-on-s464-branch -->
 
 Reproduced on the s464 branch (component defined, used once in the row, no attributes): the client JS builds `createElement("Btn")`. The sibling unresolved-component case is [[g-match-arm-unresolved-component-phantom]]. With an undeclared call-site attribute (`<Btn onclick="pwn()"/>`) the attribute was written onto that `<Btn>` element, where a browser runs it. S464 closes the handler half (the codegen backstop `refuseQuotedHandlerWrite` refuses the write whatever the tag), but not the missing expansion.
+
+### g-codegen-backstop-refusal-span-is-synthetic-label-s464 — a refusal raised by a codegen backstop over markup re-parsed in codegen (a `<match>` arm body, an engine state-child) points at the synthetic label, not the source: `<match:8:Idle>:1:39`, `<engine:light:Green>:1:1` — `NEW S464; LOW; open (pre-existing pattern)`
+
+<!-- @gap id=g-codegen-backstop-refusal-span-is-synthetic-label-s464 sev=LOW status=open locus=compiler/src/codegen/emit-match.ts(arm bodies re-parsed with synthLabel `<match:${id}:${tag}>` and body-relative offsets)+compiler/src/codegen/emit-engine.ts(state-child re-parse label) prov=review:s464-quoted-handler-refused-S239-r1-N3 -->
+
+Every codegen backstop that refuses a node inside a re-parsed arm (E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE via `refuseStaticAttrWrite`, E-ATTR-INTERP-EXECUTABLE via the `<each>` row check, E-SCRIPT-001 via `refuseElementLowering`) inherits the re-parse's span: file = the synthetic label, offsets relative to the arm body text. The compile still fails (the error is real), but the author is pointed at a location that does not exist. Fix: carry the arm body's source start offset into the re-parse (or rebase every span of the re-parsed nodes onto it) so `file` / `line` / `col` are the source file's.
+
+### g-single-quoted-attr-in-each-row-in-match-arm-written-empty-s464 — a single-quoted attribute (`title='hello'`) on an element in an `<each>` row inside a `<match>` arm compiles at exit 0 and is written as `setAttribute("title", "")`; elsewhere a single-quoted value is E-ATTR-001 — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-single-quoted-attr-in-each-row-in-match-arm-written-empty-s464 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(the arm body re-parse in codegen; its parse errors are not surfaced)+compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs writes the dropped value as "") prov=review:s464-quoted-handler-refused-S239-r1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: `<match for=Phase on=@phase><Idle><each in=@items as it><b title='hello'>x</b></each></>…</match>` → exit 0, client JS `setAttribute("title", "")`. The author's value is silently dropped; the same attribute at top level is refused (E-ATTR-001, `"` is the only attribute-string delimiter, §5.1).
+
+### g-each-in-shorthand-match-arm-dropped-s464 — an `<each>` inside a `:`-shorthand `<match>` arm (`<Ready : <ul><each in=@items as it><li>…</li></each></ul>>`) is dropped from the output — exit 0, no diagnostic — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-each-in-shorthand-match-arm-dropped-s464 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(the `:`-shorthand arm body takes the native-parser route, which has no each-block transform; the bare-body route checks for `<each` and re-splits) prov=review:s464-quoted-handler-refused-S239-r1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: the row element (`<li id="shorthand-row">`) appears nowhere in the client JS or HTML. The bare-body arm route re-splits a body holding `<each>` through splitBlocks+buildAST (S153); the shorthand route (`looksLikeMarkupStart`) goes straight to `nativeParseFile`.
+
+### g-markup-text-apostrophe-in-logic-lambda-renders-as-text-s464 — markup in a logic-context lambda whose TEXT holds an apostrophe (`${ const mk = (x) => <span>it's <button>y</button> that's</span> }`) is emitted as ONE text node — `createTextNode("its <button …>y</button> thats")`: the child elements become literal text and the apostrophes are dropped — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-markup-text-apostrophe-in-logic-lambda-renders-as-text-s464 sev=MED status=open locus=compiler/src/ast-builder.js(markup value in a logic expression — text lexed as JS; the apostrophe opens a string) prov=review:s464-quoted-handler-refused-S239-r1(probes f3/logic_lambda*)+empirical:reproduced-on-main-and-s464-branch -->
+
+Reproduced with main's compiler and on the s464 branch (same output). Fail-safe for handlers (a text node never runs), but the author's markup is silently turned into text. A `//` in the text (`a // b`) does the same.
+
+### g-bootstrap-static-executable-values-not-refused-s464 — the BOOTSTRAP does not implement S464 "(a) Refuse both": a static `srcdoc` and a static `href="javascript:…"` are written as the author wrote them (impl#1 refuses both, E-ATTR-STATIC-EXECUTABLE) — `NEW S464; MED; open`
+
+<!-- @gap id=g-bootstrap-static-executable-values-not-refused-s464 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(attrCaseDiags / the srcdoc data-form check — no static-value judgment; the scheme reader lives only in compiler/src/runtime-url-guard.js) prov=dispatch:s464-quoted-handler-refused-round-2 -->
+
+`compiler/self-host-v2/slice-m4/sink-guards.test.js` still pins "a static `srcdoc` is written as the author wrote it" (the pre-S464 rule). The bootstrap needs the rule 2/3 scheme reader and safe set in scrml (one definition — mirror `runtime-url-guard.js`) and a static-value refusal beside its quoted-handler refusal.
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
