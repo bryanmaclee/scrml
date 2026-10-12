@@ -243,9 +243,11 @@ export function lexicalCallInText(text: string): string | null {
     if (before === "." && t[b - 1] !== ".") {
       // A member call — unless it is a payload variant constructor `.Found(…)`: a
       // capitalised name after a dot that follows no value.
-      if (/^[A-Z]/.test(word)) {
+      // An optional member (`x?.Check(…)`) is a call; so is a member of a closed object
+      // literal or block-ending value (`{ A: f }.A(…)` — `}` counts as a value: fail closed).
+      if (/^[A-Z]/.test(word) && t[b - 1] !== "?") {
         const d = skipWsBack(b - 1);
-        if (d < 0 || !/[A-Za-z0-9_$)\]`'"]/.test(t[d])) continue;
+        if (d < 0 || !/[A-Za-z0-9_$)\]}`'"]/.test(t[d])) continue;
         // `return .Found(…)`, `case .A(…)` — a reserved word is not a value.
         if (isWord(t[d]) && RESERVED_HEAD_WORDS.has(wordEndingAt(d).word)) continue;
       }

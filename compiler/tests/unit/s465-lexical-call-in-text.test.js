@@ -30,6 +30,11 @@ describe("lexicalCallInText — calls are found", () => {
     ["`a`(x)", null],
     ["x.if(y)", "x.if"],
     ["new a.B(x)", "a.B"],
+    // An optional member call and a member of a closed object literal are calls, even
+    // when the name is capitalised like a variant constructor.
+    ["x?.Check(a)", "Check"],
+    ["{ A: f }.A(x)", "A"],
+    ["[{ A: f }][0].A(x)", "A"],
   ];
   for (const [text, callee] of CALLS) {
     test(`${text}`, () => {
