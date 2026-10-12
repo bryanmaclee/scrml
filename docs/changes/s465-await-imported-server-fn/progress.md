@@ -109,3 +109,7 @@
     pinned by the `handlerEmpty` test.
 - Gate after the fix (33037): 10 fail, the same env set; dev-db-no-side-file ×5 / promote-safety / headless-serve
   -bind-host fail identically in the origin/main tree (7/7); tenant-floor 24/24 alone.
+- 2026-10-12 r1 final: head re-captured after the `{}` fix → 7 real emit changes (the list above minus
+  sql-handled-split-write-rt), 0 newly failing. browser tier: head 49 fail ⊂ origin/main-tree 51 fail (main's extra
+  two: TodoMVC dist not built in that tree) — the name set is environmental (browser-baseline --check refuses: its
+  parser counts 50 of 51 on this box); corpus-compile-floor PASS; facts regenerated.
