@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 250 | 5 |
-| MED | 599 | 6 |
+| MED | 600 | 6 |
 | LOW | 354 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -41,6 +41,14 @@
 <!-- @gap id=g-server-text-hatch-unawaited-call-s465 sev=HIGH status=open locus=compiler/src/codegen/emit-expr.ts(emitEscapeHatch server branch → rewriteServerExpr(node.raw)) + compiler/src/expression-parser.ts(esTreeToExprNode default / TaggedTemplateExpression → makeEscapeHatch) prov=review:s465-await-r3 -->
 
 Measured in s465 fix round 3 (executed, origin/main 41af4153a and r3 head alike): in a server fn, `const v = String.raw\`${check(pass, row.pw)}\`` ships `check(…)` un-awaited inside the template (the value is `"[object Promise]"`; a guard comparing it with `!=` would pass for any password). r3 refuses the comma SEQUENCE hatch on the server (scrml has no comma operator, §4.18 — E-CODEGEN-INVALID-LOGIC), but refusing EVERY non-arrow hatch on the server was measured to reject legal scrml whose designed lowering is the text rewriter: `.Found(name: "carol")` named-arg payload variants (g-server-fn-bare-dot-payload-variant, a ParseError hatch) and the §14.8 tagged-template protect tests. The fix is structural: a TaggedTemplate ExprNode (tag + quasis + substitutions) and a structured named-arg variant constructor, so their sub-expressions reach `emitCall`'s await classification — then the server text fallback can be removed.
+
+**S465 r4 — the un-awaited half is CLOSED; the structural half stays open.** (1) A server tagged template is lowered from its parts (`emitTaggedTemplateFromText`, emit-expr.ts: the tag and each `${ … }` substitution are read by the expression parser and emitted from the tree — executed: `String.raw\`a${check(pass, row.pw)}b\`` → wrong password REJECTED). (2) EVERY server text lowering now passes one guard (`serverTextLowering` → `codegen/server-text-guard.ts`): a text holding a call is E-CODEGEN-INVALID-LOGIC, so no other hatch shape can ship an un-awaited call (pinned by `s465-server-text-guard.test.js`). Residue (why this stays open): the tagged template is split from TEXT in codegen, not carried as a TaggedTemplate ExprNode from the front-end; and a named-arg payload variant whose argument calls something (`.Found(name: lookup(x))`) is REFUSED on the server rather than lowered — it needs the structured named-arg variant constructor.
+
+### g-client-bare-block-text-lowered-s465 — a CLIENT bare `{ … }` block statement is lowered from its TEXT (`rewriteBlockBody`), never read by the statement parser: a block holding `@x = …`, a `match`, or two statements on two lines ships broken or wrong JS, and a server-fn call in it is refused with the wrong code — `NEW S465 r4; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-client-bare-block-text-lowered-s465 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(bare-expr: server bare blocks are read structurally since s465 r2/r4; the client keeps the exprNode/text path) + compiler/src/validators/defer-structure.ts(bareBlockText / bareBlockSequenceTexts) prov=review:s465-await-r4 -->
+
+Measured in s465 fix round 4 (S239 probes c1 / cl3, client functions): `{ @out = "A" }` → the bundle's function does not parse (`SyntaxError: Unexpected token ')'`); `{ r = match x { 1 :> "one" else :> "other" } }` → E-CODEGEN-INVALID-LOGIC; `{ const q = x == 1⏎r = q ? 1 : 2 }` → one line `const q = x === 1 r = q ? 1 : 2`; `{ r = sv(x) }` (a server fn) → E-SERVER-FN-IN-SYNC-CALLBACK ("called inside a synchronous callback" — there is no callback). On the SERVER the same blocks are read by the function-body statement parser and lowered through the statement emitter (s465 r2 one block, r4 several on one line), and any server text holding a call is refused (`server-text-guard.ts`). Fix direction: the client takes the same route — `bareBlockText` / `bareBlockSequenceTexts` → `armBlockStatementsDetailed` → `emitLogicBody` with the client opts (or, the one-reader fix, the AST builder structures a bare block at stage 1). Direction of change: client output changes for every bare block (formatting), and the broken shapes above start compiling correctly.
 
 ### g-client-match-arm-text-body-skips-statement-checks-s465 — a CLIENT literal / alternation / product `match` arm body or `!{}` handler arm carried as text is never read by the statement parser, so `switch` / `try` / `throw` / `for … in` inside it compile and ship as raw JS (each is a compile error at function top level) — `NEW S465; MED; open (pre-existing on BASE)`
 

@@ -206,3 +206,130 @@
   scan, facts (regen), state (regen, +1 HIGH gap), spec-index, s34-census --check-new --base origin/main,
   bootstrap-conformance, severity, conflict-marker, delta-lint, gen-md-shim, lint-no-default-arm, snippet-gate
   128/128, corpus-compile-floor: PASS.
+
+## Fix round 4 (S239 re-review of 41df4784) — close the CLASS
+- 2026-10-12T06:40Z r4 start: worktree reset to 41df4784 (origin/main 41af4153a already merged); brief archived as
+  BRIEF-fix-round-4.md; node_modules symlinked (package.json unchanged vs origin/main); pretest OK.
+- 2026-10-12T06:55Z r4 REPRODUCED on 41df4784 (rv6 probes, copied to .tmp/rv6, W= fixed): wrong password → WELCOME for
+  s12 zPos/zPosVP, s8 xTwo/xTwoFirst/xThree/xBlkPos/xIfBody/xForBody, s7 bTwoSameLine, s2 pObjDef…pNegObjDef (8),
+  s3 vObjDef…vNegObjDef (8), s1 sDestrDefault + sNegGuard (tagged template); xFirstStmt ReferenceError. s4 qGiven
+  WELCOME/WELCOME is CORRECT (`given ok` is a presence test; `ok` is `await check(…)` = false, present).
+- Server text-lowering call sites (inventory; every one now passes ONE guard):
+  * emit-expr.ts:1044 `serverTextLowering` — NEW, the only caller of `rewriteServerExpr` /
+    `rewriteServerExprArrowBody` (the server string rewriters, rewrite.ts:3095/3213). It asks
+    `refuseServerTextCall` (NEW codegen/server-text-guard.ts → brace-pair.ts `firstCallInText`) first: a text that
+    holds a call is E-CODEGEN-INVALID-LOGIC and lowers to `null /* E-CODEGEN-INVALID-LOGIC */`.
+  * emit-expr.ts:1076 `emitExprField(null, text)` server branch → serverTextLowering. Through it: rewriteBlockBody in
+    server mode (emit-control-flow.ts:2513, its every statement goes `lowerExpr` → emitExprField(null)) — reached
+    from emit-logic.ts:4670/4722/4747 (`when … changes` / worker `when message` bodies, server boundary) and
+    emit-control-flow.ts:3051/3054/3532 (server matchMode arm text — r1/r2 structure every server arm first, so
+    only a residue can reach here).
+  * emit-expr.ts:4722 `emitMatchExpr` server shim → serverTextLowering (guard on the arms text; the subject is
+    already emitted from the tree).
+  * emit-expr.ts:4933 `emitEscapeHatch` server branch (ParseError hatches, arrow/function values, every other
+    hatch kind) → serverTextLowering; a SequenceExpression stays refused first (r3).
+  * emit-expr.ts:4851 `emitTaggedTemplateFromText` — NEW: a server TaggedTemplateExpression hatch is lowered from
+    its parts (tag + each `${…}` read by parseExprToNode, emitted by emitExpr; quasis verbatim) — tagged
+    templates are now STRUCTURAL on the server (g-server-text-hatch-unawaited-call-s465 un-awaited half closed).
+  * emit-destructure-pattern.ts:55-69 destructuring defaults (`el.default` / `prop.default` TEXT pasted verbatim on
+    BOTH sides) — now `emitDestructurePatternText(p, lowerDefault)`; callers pass a lowerer that emits
+    `defaultExpr` (the builder's parse) through emitExpr (`emitExprFromText`, emit-expr.ts:1065, parses the text
+    when the builder kept none; an unreadable text takes the guarded text path): emit-logic.ts:2489/2583 (let /
+    const), :4260 (guarded decl), :5393/:5879 (for with ~), emit-control-flow.ts:853/1339 (for-of, hoisted
+    for). emit-lift.js:2934 (client lift `for`) keeps text — client-only.
+  * utils.ts:404 `paramSignature(p, i, lowerDefault?)` — parameter defaults (`defaultValue` TEXT, also pattern
+    defaults in a destructured param) were pasted verbatim. emit-logic.ts:5125 (nested function-decl) passes
+    `serverParamDefaultLowerer` on the SERVER: lowered from the tree; a default that needs `await` is
+    E-CODEGEN-INVALID-LOGIC ("a parameter default cannot await" — `await` is a SyntaxError in a parameter list).
+    Probe paramDefPat (`function inner({ ok = check(…) })`) shipped `check ( pass , row . pw )` raw on 41df4784
+    (it "worked" only because `return ok` re-awaited the Promise). Client callers (emit-functions.ts:1550,
+    emit-library-shared.ts:1140, emit-tool.ts:206) and emit-server.ts:1443 (a client-boundary session helper)
+    are unchanged.
+  * Client-only rewriteBlockBody callers (emit-event-wiring 1103/1202, emit-each 2269/4182, emit-variant-guard
+    1217/1244, emit-logic 874/6321) — client mode, never server; see g-client-bare-block-text-lowered-s465.
+  * The unused `rewriteServerExprArrowBody` import in emit-event-wiring.ts:2 is removed; the structural test pins
+    that only emit-expr.ts imports / calls the server rewriters.
+- F1: emit-logic.ts:2269 a server bare-expr that is SEVERAL whole blocks on one line (`{ A } { B }` / `{ A }; { B }`,
+  NEW defer-structure.ts `bareBlockSequenceTexts`) lowers each block as its own bare block; the arm reader
+  (`parseStatementTextDetailed` scan) accepts the same sequence, so `{A} {B}` in a server match arm reads too.
+- F2: as above (destructuring defaults through emitExpr, both sides; param defaults server-side).
+- F3: ast-builder.js collectExpr — (a) `sawBraceHeadAtDepth0` is cleared when a `}` closes back to depth 0 (the head's
+  body is over); (b) a head word counts only when it is not a property name (after `.` / `?.`) and, for a
+  statement-only head (`type`, `import`, `use`, `class`, `server`, `partial`, `transaction`), only when it LEADS
+  the collection (NEW `EXPR_BRACE_HEAD_WORDS` for the expression-construct heads); (c) a keyword-spelled property
+  (`row.type`) now ENDS A VALUE for the newline bare-block boundary (it did not: KEYWORD was not a value). u1
+  uType/uUse/…/uClass, mType/mDo, s4 qBlkAfterTypeProp: E-STMT-UNEXPECTED-TOKEN → run (REJECTED/WELCOME);
+  c4 kFnExpr / kTypeProp (CLIENT): the `{ r = 5 }` block was silently DROPPED (r = 0) → now runs (5).
+- F4: client bare blocks are still lowered from text (c1 cAt SyntaxError, cMatch E-CODEGEN-INVALID-LOGIC, cMulti one
+  line, cl3 E-SERVER-FN-IN-SYNC-CALLBACK) — not covered cheaply (every client bare block's output would change);
+  filed g-client-bare-block-text-lowered-s465 (MED, prov=review:s465-await-r4).
+- F5: the comma refusal now cites SPEC §40.8 (the S441 bullet, SPEC.md:29931: "A comma sequence … is not a scrml
+  expression — §4.18.2 lists what a bare run may be, and scrml has no comma operator") + §4.18.2. C-for header
+  commas (`for (i = 0, j = 5; …; i++, j--)`): the SPEC names no exception for a `for` header — the sentence is a
+  general statement that scrml has no comma operator — so the server keeps refusing them (executed: E-CODEGEN-
+  INVALID-LOGIC citing §40.8). FOR THE OWNER: confirm a C-style `for` header comma is out (the client still lowers
+  it from text, as JS).
+- 2026-10-12T08:30Z r4 MEASURE 1 (corpus-emit-differential, head working tree vs origin/main 41af4153a, base tree =
+  an archive of origin/main; 3556 sources: examples, samples, conformance, stdlib, benchmarks, docs; ../giti and
+  ../flogence NOT cloned — skipped): **21 newly failing** — every one a READABLE expression reaching the text path
+  with a call, not an unreadable one: `emitExprField(null, "Date.now()")` (readme-snippets tasks ×2,
+  postgres-program-driver), `consumeMarker.substring(8)` (23-trucking-dispatch ×3), `norm(name)`,
+  `{ echo: handleDispatch(…) }` (endpoint arm), compiler-emitted `(await _scrml_batch_read_N(it.id))` (11
+  hoisted-loop conformance cases + 1 repro), and two block-bodied arrows `x => { return o.m(x) }` (s441 repros).
+  Not migrated — the guard was made to LOWER these structurally instead (the brief's first option), then
+  re-measured:
+  * `serverTextLowering` reads a text that holds a call with the expression parser first; a readable tree is
+    emitted by emitExpr (classified, awaited). A block-bodied arrow / function value is lowered by NEW emit-logic
+    `emitServerFnValueFromText` (body read by the function-body statement parser, emitted by the statement
+    emitter in the server ctx; a body needing `await` — a sync callback cannot — or a head with an annotation /
+    call is refused). Only text NEITHER reads is refused.
+  * `firstCallInText`: a call directly under `await` that ends its chain (`await f(x)`, `(await f(x))`) is
+    already awaited — not a finding (`await f(x).g()` still reports `f`). The callee excerpt no longer joins
+    words across whitespace (`returno.m` → `o.m`).
+  All 21 recompile clean on head.
+- 2026-10-12T09:40Z r4 gate run 1 (33333 tests): 21 fail — 10 on the known env list (dev-db-no-side-file ×5,
+  tenant-floor-project-set ×3, promote-safety read-only, headless-serve-bind-host) and 11 of mine, all fixed:
+  * duplicate diagnostics (server-fn-calls-server-fn C1 + callback matrix, sql-in-arrow-body ss19 #12, sql-one-
+    statement F4): the precise code (E-SERVER-FN-IN-SYNC-CALLBACK / E-SQL-009 / E-SQL-QUERY-NOT-READABLE) PLUS the
+    guard's E-CODEGEN-INVALID-LOGIC. The guard's refusal is now a BACKSTOP (`cascadeOnly`): runCG drops it when the
+    compile already holds another error (`dropCascadeOnlyErrors`, codegen/index.ts) — nothing ships either way.
+    And `firstCallInText` treats a `?{ … }` query's driver chain (`.get()`, `.acrossTenants()`) and unbackticked
+    SQL text (`count(*)`) as the SQL lowering's, not author calls (rewriteSqlRefs emits the driver call awaited).
+  * serve-target-tool FIX 8 ×2 + R26: an `<endpoint>` arm `{ …: compute() }` is now lowered from the tree with
+    `await compute()`; `isSingleJsExpression` (validate-emit.ts) parsed without `allowAwaitOutsideFunction` and
+    called it E-ENDPOINT-MULTI-STATEMENT-ARM. Fixed (the arm is emitted inside `await (…)` in an async handler).
+  * protect-scalar-egress charCode + conformance protect/scalar-encoding-e006: `String.fromCharCode(...Array.from(h,
+    …))` was a ParseError hatch — expression-parser's bare-variant mask read the third dot of `...Array` as the
+    variant `.Array`. The mask's lookbehind now excludes a preceding `.` (spread of a capitalised name reads:
+    `[...Ab]`, `{...A}`, `f(...A.b(x))`); the protect gate sees the tree again → E-PROTECT-006 as before.
+  * is-predicate-in-function-expression-1333 C (server) and sql-one-reader-s457 (1): output-TEXT assertions on a
+    statement now lowered from the tree (`filter(function ( v ) {⏎ return … })`, `${g("if(") / 2}`) — same
+    semantics; assertions relaxed to the shape (whitespace) with an S465 r4 note.
+- Tests (r4): NEW integration/s465-server-text-guard.test.js (26: the structural pin — only emit-expr imports / calls
+  the server rewriters, and serverTextLowering asks the guard first — plus 22 fixture files =
+  fixtures/s465-server-shapes/ (rv6 s1–s12, t1–t6, u1; rv3 s5/s6; r4) compiled shape by shape, every compiled
+  app.server.js scanned with acorn: no `check` / `verifyPassword` call outside an `await`, no `x ( ` / `a . b`
+  raw-token spacing; ≥150 shapes must compile). NEW integration/s465-await-arm-r4.test.js (98: 23 shapes ×
+  {check, verifyPassword} × wrong/right executed vs bun:sqlite, a raw-token/un-awaited scan, 3 compile-error
+  tests, 2 client F3 tests). NEW unit/s465-first-call-in-text.test.js (52). On 41df4784 (tests copied into an
+  archive of it): guard 9 fail (both structural + 7 fixture files: r4, s1, s2, s3, s7, s8, s12), r4 file 56 fail.
+- 2026-10-12T11:30Z r4 MEASURE 2 (head e74ceea7b vs origin/main 41af4153a, same 3556 sources, same roots): **0 newly
+  failing, 0 newly passing, 0 diagnostic-code changes** (3555 text-only = the absolute tree path in messages);
+  220 artifacts differ, 208 only by the absolute project root; 12 real: r1's 7 (sql-handled-match-scrutinee-rt,
+  08-chat, 19-lin-token, status-picker, driver-card ×2, gauntlet-r10-rails-blog) + 5 from r4 —
+  endpoint/arm-body-valid-scope-clean (`{ echo: … }` → `{echo: …}`, spacing), s441 repros fp1b / fp1d (block
+  arrow `x => { return o . m ( x ) }` → statement-emitted `return o.m(x);`), blast-fnbody2.client.js (`await
+  _scrml_fetch_isOk_5 ( 1 )` → `(1)`), and **blast-fnbody2.server.js: `const { d = verifyPassword ( pw , h ) } =
+  {}` → `const { d = await verifyPassword(pw, h) } = {}` — a corpus instance of F2, un-awaited on main.**
+  ../giti and ../flogence are NOT cloned in this container — skipped.
+- Gates (head e74ceea7b + docs): pre-commit full 33338: 10 fail — exactly the known env list (dev-db-no-side-file
+  ×5, tenant-floor-project-set ×3, promote-safety read-only, headless-serve-bind-host); root-level 2239/0;
+  e2e-render-map 259/0; self-host + parser-conformance 2192/0; lsp+commands 713/11 (all `scrml dev`/`serve`
+  bind/watch/HTTP, same count as r1–r3); browser-baseline --check: 1 NEW name (nested <each> in a lifted row) —
+  IDENTICAL in the origin/main tree (ran there) → environmental; types-gate OK (180, unchanged); host-global-scan
+  0 violations; facts + state regenerated (gap counts: +1 MED); spec-index OK; s34-census --check-new --base
+  origin/main PASS; bootstrap-conformance exit 0; severity current; conflict-marker PASS; delta-lint PASS;
+  gen-md-shim current; lint-no-default-arm 0; snippet-gate 128/128; corpus-compile-floor PASS.
+- Maps: primary.map.md (stamp 8ce6d61b5) read for routing; NOT load-bearing — no row covers the server text-
+  lowering surface (rewriteServerExpr / emitEscapeHatch / destructure defaults); every locus here was found by
+  grep in source.
