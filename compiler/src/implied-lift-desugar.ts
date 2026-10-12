@@ -191,9 +191,10 @@ function recoverMarkupNode(
   if (!despace(slice).startsWith(despace(leadContent))) return null;
 
   let parsed: { ast?: { nodes?: unknown[] }; errors?: unknown[] };
+  const reparseSource = `<program>\n${slice}\n</program>\n`;
   try {
     const { splitBlocks, buildAST } = parsers();
-    parsed = buildAST(splitBlocks(filePath, `<program>\n${slice}\n</program>\n`)) as typeof parsed;
+    parsed = buildAST(splitBlocks(filePath, reparseSource)) as typeof parsed;
   } catch {
     return null;
   }
@@ -220,6 +221,14 @@ function recoverMarkupNode(
   // text, is not a value-form arm and is not desugared.
   if (significant.length !== 1) return null;
   if (significant[0].kind !== "markup") return null;
+  // S464 Q24 — §17.6.10 reaches "every markup `${…}` interpolation position", so a
+  // `${ if … { <b>…</b> } }` INSIDE the recovered element is itself a value-form arm.
+  // The outer pass cannot plan it: the recovered node's spans are relative to this
+  // re-parse, not to the file. So desugar the recovered subtree against the text it
+  // was parsed from. Before this, the inner element was dropped at exit 0 (now it
+  // would be refused as E-MARKUP-STATEMENT-NOT-RENDERED, which names a fix the author
+  // already wrote).
+  desugarImpliedLiftMarkupArms(significant[0], reparseSource, filePath);
   return significant[0];
 }
 

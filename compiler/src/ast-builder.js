@@ -105,6 +105,7 @@ function escapeRawHasEffect(raw) {
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
+import { markupNotRenderedMessage } from "./markup-statement-refusal.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -5692,6 +5693,130 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * S464 Q24 — the `_markupLead` for an html-fragment built by a default statement
+   * path from the token run that began at `from`: the element's tag + opener span
+   * when that run is a statement-leading markup element (`<` + name), else null.
+   * An element armed by `armMarkupTextRuns` hands over its lead here (its FIRST run
+   * is this one), so its later text runs carry none — one lead per element.
+   *
+   * The lead is what makes the element refusable: codegen reports a lead-carrying
+   * fragment that no lowering rendered (E-MARKUP-STATEMENT-NOT-RENDERED, emit-logic.ts).
+   * A run that does not begin with an element opener (a closer, attribute or text
+   * continuation of a fragmented `lift`) carries none.
+   */
+  function takeStatementMarkupLead(from) {
+    if (_markupArmLead) {
+      const lead = _markupArmLead;
+      _markupArmLead = null;
+      return lead;
+    }
+    const t0 = tokens[from];
+    const t1 = tokens[from + 1];
+    if (!(t0 && t0.kind === "PUNCT" && t0.text === "<" && t1 && (t1.kind === "IDENT" || t1.kind === "KEYWORD"))) return null;
+    return { tag: String(t1.text), span: tokenSpan(t0, filePath) };
+  }
+
+  /**
+   * True when the opener at `k` is followed by `=` or `:` — `<name …> = value` /
+   * `<name>: type = value`, a state declaration (a compound's field line
+   * `<email default="x"> = "y"`), not markup.
+   */
+  function openerIsDeclaration(k) {
+    let depth = 0;
+    for (let j = k + 2; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (!t || t.kind === "EOF") return false;
+      if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[")) depth++;
+      else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]")) depth--;
+      else if (depth === 0 && t.kind === "PUNCT" && t.text === ">") {
+        const n = tokens[j + 1];
+        return !!n && n.kind === "PUNCT" && (n.text === "=" || n.text === ":");
+      }
+    }
+    return false;
+  }
+
+  /**
+   * S464 Q24 — a markup element that a statement's expression collection read into
+   * itself as CODE (`let k = 1⏎<p>…</p>` collects `1 < p > …`; `@k = 1 <p>A</p>`
+   * likewise): the author wrote an element in statement position, after a statement,
+   * but no lowering can render it, and its display text may even run as code
+   * (g-statement-markup-after-statement-text-runs-s462). Refused here, at the TAB,
+   * because no html-fragment exists for codegen to find.
+   *
+   * Checked over the token range [from, to) of each statement both statement loops
+   * produced, at the statement's own brace depth (a nested body is checked by its own
+   * loop). A token `<` is such an element when ALL of:
+   *   - a name follows it with no space (`<p`, §4.18.1b exit (3)), so `a < b` is not;
+   *   - the significant token before it ends an operand (a name, a literal, `)`, `]`,
+   *     `}`), so the `<` was read as a less-than — after `(`, `=`, `,`, `return`, `?`,
+   *     `:`, `=>` it opens a markup VALUE, which renders where it is used;
+   *   - the tokens from it are a well-formed, CLOSED element (`scanMarkupElementEnd`,
+   *     the one reader of an element's extent) — a closed `<p>…</p>` after an operand
+   *     is never an expression;
+   *   - its opener is not followed by `=` / `:` (`<name> = value` is a state declaration).
+   * An element that is itself well-formed markup (the statement's own leading element,
+   * a `lift <…>` operand, a markup value) is skipped WHOLE, so its interior is never
+   * inspected.
+   */
+  function refuseSwallowedStatementMarkup(from, to) {
+    if (!(to > from + 1)) return;
+    const endsOperand = (t) => !!t && (
+      t.kind === "IDENT" || t.kind === "AT_IDENT" || t.kind === "NUMBER" || t.kind === "STRING" ||
+      (t.kind === "KEYWORD" && (t.text === "true" || t.text === "false" || t.text === "not" || t.text === "this")) ||
+      (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}"))
+    );
+    let prev = null;
+    let depth = 0; // a nested `{ … }` body is checked by its own statement loop
+    for (let k = from; k < to; k++) {
+      const t = tokens[k];
+      if (!t || t.kind === "EOF") return;
+      if (t.kind === "COMMENT") continue;
+      if (t.kind === "PUNCT" && t.text === "{") depth++;
+      else if (t.kind === "PUNCT" && t.text === "}") depth--;
+      if (depth === 0 && t.kind === "PUNCT" && t.text === "<") {
+        const n1 = tokens[k + 1];
+        if (n1 && (n1.kind === "IDENT" || n1.kind === "KEYWORD") && t.span && n1.span && t.span.end === n1.span.start) {
+          const end = scanMarkupElementEnd(k);
+          if (end > k) {
+            if (k > from && endsOperand(prev) && !openerIsDeclaration(k)) {
+              errors.push(new TABError(
+                "E-MARKUP-STATEMENT-NOT-RENDERED",
+                markupNotRenderedMessage(String(n1.text)),
+                tokenSpan(t, filePath),
+              ));
+              return;
+            }
+            prev = tokens[end - 1];
+            k = end - 1;
+            continue;
+          }
+        }
+      }
+      prev = t;
+    }
+  }
+
+  /**
+   * S464 Q24 — runs `refuseSwallowedStatementMarkup` over each statement a statement
+   * loop produced: `step()` at the top of every iteration checks the PREVIOUS
+   * iteration's token range, `finish()` after the loop checks the last. A range that
+   * began inside an armed markup element (a text run of that element) is skipped —
+   * its tokens are the element's own text and tags.
+   */
+  function swallowedMarkupTracker() {
+    let from = -1;
+    let skip = false;
+    const check = () => {
+      if (from >= 0 && !skip && i > from) refuseSwallowedStatementMarkup(from, i);
+    };
+    return {
+      step() { check(); from = i; skip = _markupTextEnd > i; },
+      finish() { check(); from = -1; },
+    };
+  }
+
+  /**
    * Inside an armed markup element (`i < _markupTextEnd`), the run of tokens up to
    * the next BLOCK_REF (or the element's end) is markup — display text, a nested
    * tag, the closer — never a statement. Returns that run as an `html-fragment`
@@ -5723,6 +5848,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // §4.17 (S462) — a `<script>` / `<style>` opener in the run is refused exactly
     // as in any other markup in a logic body.
     refuseFragmentElementTokens(tokens.slice(from, i), filePath, errors);
+    // Only an armed element's own lead — a nested `<b>` inside the element's text is
+    // part of the element, not a statement of its own.
     const lead = _markupArmLead;
     _markupArmLead = null;
     return {
@@ -9196,7 +9323,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
   function _parseRecursiveBodyInner() {
     const stmts = [];
+    const _swallowed = swallowedMarkupTracker(); // S464 Q24
     while (true) {
+      _swallowed.step();
       const tok = peek();
       if (tok.kind === "EOF") break;
       // S462 — inside a markup element begun at statement position, a run of
@@ -13863,8 +13992,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          const _errsBefore = errors.length;
           refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
-          return { id: ++counter.next, kind: "html-fragment", content: expr, span };
+          // S464 Q24 — a statement-leading element carries its lead (see takeStatementMarkupLead).
+          // A misplaced structural element or a refused `<script>` / `<style>` already has
+          // its own error (above), which names the real problem.
+          const _lead0 = takeStatementMarkupLead(_fragFrom);
+          const _lead = errors.length > _errsBefore ||
+            (_seName && Object.prototype.hasOwnProperty.call(STRUCTURAL_ELEMENT_PLACEMENT, _seName)) ? null : _lead0;
+          return { id: ++counter.next, kind: "html-fragment", content: expr, span, ...(_lead ? { _markupLead: _lead } : {}) };
         }
         return { id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span };
       } else {
@@ -15007,7 +15143,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     _covI0 = -1;
   };
 
+  const _swallowed = swallowedMarkupTracker(); // S464 Q24
   while (true) {
+    _swallowed.step();
     if (_covTrack) {
       _covFlush();
       _covI0 = i;
@@ -18183,8 +18321,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          const _errsBefore = errors.length;
           refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
-          nodes.push({ id: ++counter.next, kind: "html-fragment", content: expr, span });
+          // S464 Q24 — a statement-leading element carries its lead (see takeStatementMarkupLead).
+          // A misplaced structural element or a refused `<script>` / `<style>` already has
+          // its own error (above), which names the real problem.
+          const _lead0 = takeStatementMarkupLead(_fragFrom);
+          const _lead = errors.length > _errsBefore ||
+            (_seName && Object.prototype.hasOwnProperty.call(STRUCTURAL_ELEMENT_PLACEMENT, _seName)) ? null : _lead0;
+          nodes.push({ id: ++counter.next, kind: "html-fragment", content: expr, span, ...(_lead ? { _markupLead: _lead } : {}) });
         } else {
           nodes.push({ id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span });
         }
@@ -18219,6 +18364,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
   }
+  _swallowed.finish();
   if (_covTrack) _covFlush();
 
   return nodes;

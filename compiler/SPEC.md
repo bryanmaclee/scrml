@@ -9611,6 +9611,8 @@ Plain `.css` files placed alongside `.scrml` source files are valid CSS. scrml's
 
 In both modes, a `lift` call initializes `~` to the lifted value (§32.2).
 
+`lift` is the one explicit way to render from logic. Markup written as a statement in a logic body that no `lift` names renders only as the single element of an `if` / `given` branch (§17.6.10); anywhere else it is not rendered and is a compile error, E-MARKUP-STATEMENT-NOT-RENDERED (§17.6.10.1 — ruling:user-voice-scrml.md S462 Q24 "a"), never a silent drop.
+
 `lift` was chosen over `yield` to avoid collision with JavaScript generator function semantics. JavaScript `yield` works only inside generator functions; scrml logic contexts accept real JS generators. Having two different `yield` behaviors in the same `${ }` block would be a footgun. `lift` is unambiguous.
 
 #### 10.1.1 `lift` under the markup-as-value pillar (Stage 0b D4 — L1)
@@ -16744,6 +16746,42 @@ Renders `YES` when `@shown`, and nothing when not. Before this amendment the com
 form, emitted the branch value as a dangling no-op statement, and rendered an empty slot on both
 paths with zero diagnostics — silent-wrong against §17.6.4, which had already ruled the false path
 to be `not`.
+
+#### 17.6.10.1 Statement-position markup that would not render is an error
+
+**Date added:** 2026-10-12 (S464).
+
+> **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a" — *"such markup is a compile ERROR whose
+> message says it is not rendered and names the fix (`lift <…>`, or make it the arm's single
+> element). `lift` stays the one explicit way to render from logic; nothing vanishes silently."* ·
+> ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED" (the code name and message). ·
+> Direction of change: **newly-rejecting** (before: exit 0, the element rendered nothing). Measured
+> (S464) by compiling: 2836 `.scrml` files under `samples/`, `examples/`, `stdlib/`, `conformance/`,
+> `benchmarks/` plus 114 in `giti` / `flogence` — 2 conformance fixtures newly refused (migrated),
+> 1 sample that already failed to compile gains the code, 0 elsewhere.
+
+A markup element written as a STATEMENT in a logic body — `${ … }`, an `if` / `given` / loop /
+`match` arm body, a function body — renders in exactly two ways: as the single element of an `if` /
+`given` branch (the implied `lift` above), or named by a `lift` (§10.1). Markup in statement position
+that neither way reaches is not rendered, and the compiler SHALL NOT drop it silently:
+
+- A markup element in statement position in a logic body that no `lift` names and that is not the
+  single-element branch of a value-form (this section) SHALL be a compile error,
+  E-MARKUP-STATEMENT-NOT-RENDERED. Its message SHALL say the markup is not rendered and SHALL name the
+  fix: `lift <tag>…</tag>`, or making it the branch's single element.
+- The shapes this reaches include: `${ <p>hello</p> }`; two elements in one branch; an element after
+  a statement in a branch or block (`let k = 1⏎<p>…</p>`, `@k = 1 <p>…</p>`); a `for` / `while`
+  body without `lift`; a logic `match` arm `{ <p>…</p> }`; a branch whose text the compiler cannot
+  read back as exactly one element (`a < b`, or a quoted closing tag, in its text — put such text in
+  an interpolation, `${"a < b"}`); and markup in statement position in a `function` body (`return` it
+  instead — `lift` is not valid there, §10.4).
+- When a cascade declines as a whole (an arm outside the value-form grammar keeps every sibling arm
+  from converting, so nothing half-renders), each element it leaves unrendered SHALL be reported.
+- A single-element branch is a value-form in every markup `${…}` position, including a `${ if … }`
+  nested inside the element of an enclosing single-element branch (`${ if (a) { <div>${ if (b) {
+  <b>x</b> } }</div> } }` renders the inner `<b>`).
+- Markup in a VALUE position is not in statement position and is unaffected: an initializer
+  (`const m = <p/>`), a `return` operand, a ternary arm, a call argument, a `lift` operand.
 
 ### 17.7 Iteration (`<each>`)
 
@@ -26114,7 +26152,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
-| E-MARKUP-STATEMENT-NOT-RENDERED | §4.18.1, §10.1, §17.6.10 | A markup element written as a STATEMENT in a logic body (`${ … }`, an `if` / `given` / loop / `match` body) that no lowering renders — it is not the single element of an `if` / `given` branch (the §17.6.10 implied `lift`), and no `lift` names it: two elements in one branch, an element after a statement, a `for` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a branch the implied-lift pass could not read back as exactly one element (its text holds `a < b`, or a closing tag inside quotes). Such markup is a compile error, never silently dropped. The message names the fixes: `lift <tag>…</tag>`, make it the branch's single element, or put a `<` / quoted closing tag in an interpolation (`${"a < b"}`). **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a" — *"such markup is a compile ERROR whose message says it is not rendered and names the fix (`lift <…>`, or make it the arm's single element) … nothing vanishes silently"* (the code name is the PA-dispatch reading, bryan's veto window). **Direction of change: newly-rejecting** (before: exit 0, the element rendered nothing). **Partial (S462):** emitted only for an element whose text impl#1's statement-position markup reader read as markup — one holding a `${…}` (`compiler/src/ast-builder.js` `collectMarkupTextRun`); an element with no interpolation is not yet refused (the full Q24 build is queued). Corpus measured at the fix: 0 sites in 3692 tracked `.scrml` files. Emitted at `compiler/src/codegen/emit-logic.ts:2200` (the `html-fragment` case, through the run-wide refused-lowering sink). | Error |
+| E-MARKUP-STATEMENT-NOT-RENDERED | §17.6.10.1, §10.1, §4.18.1 | A markup element written as a STATEMENT in a logic body (`${ … }`, an `if` / `given` / loop / `match` body, a function body) that no lowering renders — it is not the single element of an `if` / `given` branch (the §17.6.10 implied `lift`), and no `lift` names it: `${ <p>hello</p> }`, two elements in one branch, an element after a statement (also when the statement's expression read it in as code: `let k = 1⏎<p>…</p>`), a `for` / `while` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a branch the compiler could not read back as exactly one element (`a < b` or a quoted closing tag in its text), markup in statement position in a `function` body. Message: *"this markup is in statement position and is not rendered — write `lift <p>…</p>`"*, plus the single-element and interpolation fixes. **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a"; code + message ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED". **Direction of change: newly-rejecting** (before: exit 0, the element rendered nothing). Corpus measured at S464: see §17.6.10.1. Emitted at `compiler/src/codegen/emit-logic.ts` (the `html-fragment` case, through the run-wide refused-lowering sink) and `compiler/src/ast-builder.js` `refuseSwallowedStatementMarkup` (an element a statement read in as code); message `compiler/src/markup-statement-refusal.ts`. | Error |
 | ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |

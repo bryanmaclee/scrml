@@ -20,6 +20,7 @@ import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
@@ -2210,14 +2211,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // Phase 4: HTML fragment tokens are not JS — drop them in logic context.
       // In lift context, emit-lift handles them for tag reconstruction.
       //
-      // S462 (s462-given-body-text-as-code fix round 1; ruling Q24 (a)) — an element
-      // written at statement position whose text the parser read as markup
-      // (ast-builder collectMarkupTextRun, `_markupLead` on its first run) and that
-      // NO lowering rendered (not the §17.6.10 implied lift of a single-markup arm —
-      // e.g. that pass's source re-parse declined it) reaches here. Dropping it
-      // would render nothing at exit 0, so it is refused: fail closed, once per
-      // element. (The full Q24 refusal of every unrendered statement-position
-      // element is separate, queued work; this covers the elements this reader arms.)
+      // S462 Q24 "a" / S464 (E-MARKUP-STATEMENT-NOT-RENDERED) — a markup element
+      // written at statement position in a logic body (`_markupLead`, set by the TAB on
+      // the fragment a statement-leading element became: ast-builder
+      // takeStatementMarkupLead) that NO lowering rendered reaches here — it is not the
+      // §17.6.10 implied lift of a single-markup arm (that pass replaces the fragment
+      // with a `lift-expr`), and no `lift` names it. Dropping it would render nothing at
+      // exit 0, so it is refused: fail closed, once per element.
       // Recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts):
       // the control-flow emitters rebuild `opts` field by field and do not thread
       // `opts.errors` into an `if` / loop body, which is exactly where this lands.
@@ -2225,11 +2225,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const lead = (node as any)._markupLead as { tag: string; span: object };
         recordRefusedLowering(new CGError(
           "E-MARKUP-STATEMENT-NOT-RENDERED",
-          `E-MARKUP-STATEMENT-NOT-RENDERED: this \`<${lead.tag}>\` element is written as a statement in a logic ` +
-          `block, and it is not rendered here — the compiler does not drop markup silently. ` +
-          `Write \`lift <${lead.tag}>…</${lead.tag}>\` to render it, or make it the single element of an ` +
-          `\`if\` / \`given\` branch (§17.6.10, §10.1). If the element's text holds a \`<\` or a closing tag ` +
-          `in quotes, put that text in an interpolation instead: \`\${"a < b"}\`.`,
+          markupNotRenderedMessage(lead.tag),
           lead.span ?? node.span ?? { start: 0, end: 0 },
         ), lead);
       }

@@ -359,7 +359,24 @@ function rewriteOneChain(source, ch) {
     armChunks.join("\n") + "\n" +
     `${headIndent}</>`;
 
-  const rewritten = source.slice(0, headStart) + matchBlock + source.slice(lastEnd);
+  // S464 Q24 — a `<match>` element renders only in MARKUP position. When the chain
+  // is the sole content of a `${ … }` block (`${ if (@p is .A) { <p>a</p> } else … }`),
+  // the block is replaced whole, so the `<match>` lands where the `${}` stood. Left
+  // inside the `${}` it would be statement-position markup that renders nothing —
+  // E-MARKUP-STATEMENT-NOT-RENDERED, which the sanity parse below refuses.
+  let from = headStart;
+  let to = lastEnd;
+  {
+    let a = headStart - 1;
+    while (a >= 0 && /\s/.test(source[a])) a--;
+    let b = lastEnd;
+    while (b < source.length && /\s/.test(source[b])) b++;
+    if (a >= 1 && source[a] === "{" && source[a - 1] === "$" && source[b] === "}") {
+      from = a - 1;
+      to = b + 1;
+    }
+  }
+  const rewritten = source.slice(0, from) + matchBlock + source.slice(to);
   return { ok: true, rewritten };
 }
 

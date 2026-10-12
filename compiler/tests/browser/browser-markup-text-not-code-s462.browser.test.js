@@ -204,6 +204,33 @@ describe("fix round 1 — fail closed, no new silent drops, no expression split 
     expect(squash(text("#d"))).toBe("33 tail");
   });
 
+  // S464 Q24 — g-statement-markup-after-statement-text-runs-s462 (HIGH): an element on the
+  // line after a statement was read into that statement's expression, and its text after
+  // the first interpolation was parsed as statements — `track(@n)` RAN (base: compiled
+  // clean, emitted `let k = 1 < b > b; _scrml_track_…(…)`). Now refused.
+  test("refused: an element after a statement whose text would run as code", () => {
+    const { errors } = compileAndMount(PRE + `<div id="host">\${ if (@u is given) { const b = 2
+  let k = 1
+  <b>b \${@n} track(@n) \${@n}</b> } }</div>` + POST, "after-stmt-runs");
+    expect(errors).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
+  });
+
+  // S464 Q24 — §17.6.10 reaches every markup `${…}` position, so a single-element
+  // `${ if }` nested inside the element of an enclosing single-element arm renders
+  // (base: the inner `<b>` was dropped at exit 0 — "33 tail" rendered as "3 tail").
+  test("a nested single-element `${ if }` inside an implied-lift element renders and reacts", async () => {
+    const { errors } = compileAndMount(PRE + `<div id="host">\${ if (@n > 1) { <div id="d">\${@n} \${ if (@n > 2) { <b>\${@n}</b> } } tail</div> } }</div>` + POST, "nested-implied");
+    expect(errors).toEqual([]);
+    await flush();
+    expect(squash(text("#d"))).toBe("33 tail");
+    globalThis.__mtc_set("n", 2);
+    await flush();
+    expect(squash(text("#d"))).toBe("2 tail");
+    globalThis.__mtc_set("n", 5);
+    await flush();
+    expect(squash(text("#d"))).toBe("55 tail");
+  });
+
   // LOW-3: an HTML comment in the element's text is skipped; its `</p>` closes nothing.
   test("an HTML comment holding `</p>` inside the element renders as on base", async () => {
     await runCase("html-comment", `<div id="host">\${ if (@u is given) { <p id="p">\${@n} <!-- </p> --> track(@n) \${@n}</p> } }</div>`,

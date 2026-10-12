@@ -116,19 +116,26 @@ describe("g-if-chain-promotable-lints-blind", () => {
       expect(codes(ifElse, "I-MATCH-PROMOTABLE")).toBe(codes(loneIf, "I-MATCH-PROMOTABLE"));
     });
 
+    // The site is FOUND (the walker fix this file guards). Since S464 Q24 the rewrite
+    // is refused: the chain is a `return` chain inside a `function` body, and the
+    // rewrite puts a `<match>` ELEMENT there — statement-position markup that renders
+    // nothing (and the rewrite also swallowed the trailing `return`), so the sanity
+    // parse fails it with E-MARKUP-STATEMENT-NOT-RENDERED and the file is left
+    // untouched. (Before Q24 the dry run reported count 1 for that broken rewrite.)
     test("promote --match finds the site (was status:no-sites)", () => {
       const res = withTmp(ifElse, (file, dir) =>
         promoteMatchOnFile(file, null, { dryRun: true }, dir));
       expect(res.status).not.toBe("no-sites");
-      expect(res.count).toBe(1);
+      expect(res.status).toBe("failed");
+      expect(res.reason).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
     });
 
     test("PARITY: promote --match agrees across all three shapes", () => {
       const run = (s) => withTmp(s, (file, dir) =>
-        promoteMatchOnFile(file, null, { dryRun: true }, dir).count);
-      expect(run(plain)).toBe(1);
-      expect(run(loneIf)).toBe(1);
-      expect(run(ifElse)).toBe(1);
+        promoteMatchOnFile(file, null, { dryRun: true }, dir).status);
+      expect(run(plain)).toBe("failed");
+      expect(run(loneIf)).toBe("failed");
+      expect(run(ifElse)).toBe("failed");
     });
   });
 

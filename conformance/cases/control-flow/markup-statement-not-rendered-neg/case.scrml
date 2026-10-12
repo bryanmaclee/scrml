@@ -1,0 +1,15 @@
+<program>
+<n> = 3
+<xs> = ["a", "b"]
+<main>
+<div>${ if (@n > 1) { <p>single element arm</p> } else { <p>other</p> } }</div>
+<div>${ if (@n > 1) { lift <p>one</p>
+  lift <p>two</p> } }</div>
+<div>${ if (@n > 1) {
+  let k = 1
+  lift <p>after a statement ${k}</p>
+} }</div>
+<ul>${ for (const x of @xs) { lift <li>${x}</li> } }</ul>
+<div>${ if (@n > 1) { <div>outer ${ if (@n > 2) { <b>inner</b> } } tail</div> } }</div>
+</main>
+</program>
