@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1784 of 1784 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1785 of 1785 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,7 +15,7 @@ Scope: **1784 of 1784 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 74 | 4.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 671 | 37.6% |
+| NOT-TWINNED | 672 | 37.6% |
 | UNSUPPORTED | 850 | 47.6% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
@@ -34,10 +34,10 @@ Legacy-dialect cases graded on their generated §66 twin: **788** — PASS 104 �
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (672 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 73 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 66 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 58 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -99,7 +99,7 @@ NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | api | 10 | · | · | · | · | · | 10 | · | · |
 | apply | 7 | · | · | · | · | · | 7 | · | · |
-| attr-executable-sink | 21 | 5 | · | · | · | 9 | 7 | · | · |
+| attr-executable-sink | 22 | 5 | · | · | · | 10 | 7 | · | · |
 | auth | 65 | 7 | · | · | · | 12 | 46 | · | · |
 | block-grammar | 13 | 9 | · | · | · | 1 | 3 | · | · |
 | body-top | 27 | · | · | · | · | 2 | 25 | · | · |
@@ -324,9 +324,9 @@ NOT-TWINNED by reason (671 cases; a case counts once per distinct reason):
 - `parse-variant/single-field-payload-bind` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-SCOPE-001)
 - `raw-content/active-html-displays-as-text` (runtime)
-  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+  - runtime: no artifact — the compile reported an error (E-ATTR-QUOTED-HANDLER, E-SCOPE-001)
 - `raw-content/each-row-raw-body-displays-as-text` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+  - runtime: no artifact — the compile reported an error (E-ATTR-QUOTED-HANDLER, E-SCOPE-001)
 - `raw-content/entity-display-unchanged` (runtime)
   - domAnchored: selector #e: text expected "<b>bold?</b> a && b", got "&lt;b&gt;bold?&lt;/b&gt; a &amp;&amp; b"
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
@@ -1415,11 +1415,12 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (671)
+### NOT-TWINNED (672)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/on-attr-lift-each-plain-listener-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `attr-executable-sink/quoted-handler-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/srcdoc-each-lift-plain-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/srcdoc-row-data-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `attr-executable-sink/svg-animation-url-runtime-guard` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
