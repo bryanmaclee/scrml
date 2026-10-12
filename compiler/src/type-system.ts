@@ -10533,7 +10533,8 @@ function annotateNodes(
   // §14.3 / §15.11.5 (S462 "no value holds a function") — an object / array / map literal (or a
   // spread into one) or a state cell that STORES a function value is refused. A literal written
   // directly as a host-JS call argument is at the boundary and allowed. See value-function-stored.ts.
-  for (const d of checkValueFunctionStored(_allTopNodes, filePath, importedFnDecls?.keys() ?? [])) {
+  const _vfsSource = (fileAST as { _sourceText?: unknown })._sourceText ?? ((fileAST as { ast?: { _sourceText?: unknown } }).ast?._sourceText);
+  for (const d of checkValueFunctionStored(_allTopNodes, filePath, importedFnDecls?.keys() ?? [], typeof _vfsSource === "string" ? _vfsSource : undefined)) {
     errors.push(new TSError(d.code, d.message, d.span as Span));
   }
 

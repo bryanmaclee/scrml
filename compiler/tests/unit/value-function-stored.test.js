@@ -193,4 +193,143 @@ describe("E-VALUE-FUNCTION-STORED — maps (§59.3 / §59.7)", () => {
     const d = stored(compile(prog(`  function twice(x) { return x * 2 }\n  let xs = []\n  xs.push(twice)`, `<p>\${xs.length}</p>`)));
     expect(d.length).toBe(1);
   });
+
+  test("`.update(k, f)` on a map CALLS its updater — not a store", () => {
+    const src = `\${\n}\n<fares> = ["a": 1]\n<program><button onclick=\${ @fares = @fares.update("a", (v) => v + 1) }>x</button></>\n`;
+    expect(stored(compile(src)).length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S464 fix round 1 (adversarial review of 5e1ae5ed5). Each case below compiled clean, or was
+// wrongly refused, under the round-0 check.
+// ---------------------------------------------------------------------------
+const TWICE = `  function twice(x) { return x * 2 }\n`;
+const cellProg = (logic, cells, markup) => `\${\n${logic}}\n${cells}\n<program>${markup}</>\n`;
+
+describe("fix round 1 — F1: block-bodied arrow / function expression bodies are read", () => {
+  test("`onclick=${ () => { @fs.push(twice) } }` (e03)", () => {
+    const d = stored(compile(cellProg(TWICE, "<fs> = []", `<button onclick=\${ () => { @fs.push(twice) } }>x</button><p>\${@fs.length}</p>`)));
+    expect(d.length).toBe(1);
+  });
+  test("a block arrow assigning a function-holding literal to a cell (d02)", () => {
+    const d = stored(compile(cellProg(TWICE, "<o> = {}", `<button onclick=\${ () => { @o = { f: twice } } }>x</button><p>\${@o}</p>`)));
+    expect(d.length).toBe(1);
+  });
+  test("a `function` expression body pushing a function (e05)", () => {
+    const d = stored(compile(cellProg(`${TWICE}  function add() { const h = function () { @fs.push(twice) }\n    h() }\n`, "<fs> = []", `<button onclick=add()>x</button><p>\${@fs.length}</p>`)));
+    expect(d.length).toBe(1);
+  });
+  test("a block arrow RETURNING a function-holding literal (d01, d07)", () => {
+    expect(stored(compile(prog(`  const mk = () => { return { f: (x) => x } }\n  const o = mk()`, `<p>\${o.f(1)}</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`${TWICE}  const mk = () => { return { f: twice } }`, `<p>\${mk().f(1)}</p>`))).length).toBe(1);
+  });
+  test("a block-bodied callback building a function-holding literal (d05)", () => {
+    const d = stored(compile(prog(`${TWICE}  const xs = [1, 2].map((v) => { return { v: v, f: twice } })`, `<p>\${xs.length}</p>`)));
+    expect(d.length).toBe(1);
+  });
+});
+
+describe("fix round 1 — F2: a function hidden behind a name", () => {
+  test("`const g = twice; { d: g }` (b01)", () => {
+    expect(stored(compile(prog(`${TWICE}  const g = twice\n  const ops = { d: g }`, `<p>\${ops.d(2)}</p>`))).length).toBe(1);
+  });
+  test("`<f> = g` with `g` an alias declared in another logic block (c01)", () => {
+    expect(stored(compile(cellProg(`${TWICE}  const g = twice\n`, "<f> = g", `<p>\${@f(2)}</p>`))).length).toBe(1);
+  });
+  test("`@fs.push(g)` with `g` an alias (c12)", () => {
+    expect(stored(compile(cellProg(`${TWICE}  const g = twice\n`, "<fs> = []", `<button onclick=\${ @fs.push(g) }>x</button><p>\${@fs.length}</p>`))).length).toBe(1);
+  });
+  test("an alias of a const arrow (c10)", () => {
+    expect(stored(compile(prog(`  const inc = (x) => x + 1\n  const g = inc\n  const xs = [g]`, `<p>\${xs.length}</p>`))).length).toBe(1);
+  });
+  test("a binding REASSIGNED a function (`let g = 1; g = twice`) (b19)", () => {
+    expect(stored(compile(prog(`${TWICE}  let g = 1\n  g = twice\n  const ops = { d: g }`, `<p>x</p>`))).length).toBe(1);
+  });
+  test("a server fn returning `{ n, h }` with `h` an alias of a lambda (c09 — was silently dropped from JSON)", () => {
+    const src = `\${\n  server function get() { const u = { n: 1 }\n    const g = (x) => x\n    const h = g\n    return { n: u.n, h: h } }\n}\n<r> = ""\n<program><button onclick=\${ @r = get() }>x</button><p>\${@r}</p></>\n`;
+    expect(stored(compile(src)).length).toBe(1);
+  });
+});
+
+describe("fix round 1 — a function written INTO a value (field / index write, any storing method)", () => {
+  test("`o.f = twice` / `o[\"g\"] = twice` on a plain local", () => {
+    const d = stored(compile(prog(`${TWICE}  function go() {\n    const o = { n: 1 }\n    o.f = twice\n    o["g"] = twice\n    return o.n\n  }`, `<p>\${go()}</p>`)));
+    expect(d.length).toBe(2);
+  });
+  test("`u.toJSON = () => …` on a value", () => {
+    expect(stored(compile(prog(`  function go() {\n    const u = { n: 1 }\n    u.toJSON = () => 1\n    return u.n\n  }`, `<p>\${go()}</p>`))).length).toBe(1);
+  });
+  test("`@o[\"k\"] = twice` and `@fs[0] = twice` (b12, b17)", () => {
+    expect(stored(compile(cellProg(TWICE, "<o> = {}", `<button onclick=\${ @o["k"] = twice }>x</button>`))).length).toBe(1);
+    expect(stored(compile(cellProg(TWICE, "<fs> = [1]", `<button onclick=\${ @fs[0] = twice }>x</button>`))).length).toBe(1);
+  });
+  test("`.concat(twice)`, `.with(0, twice)`, `[].concat(twice)` (b11, b16, b07)", () => {
+    expect(stored(compile(cellProg(TWICE, "<fs> = []", `<button onclick=\${ @fs = @fs.concat(twice) }>x</button>`))).length).toBe(1);
+    expect(stored(compile(cellProg(TWICE, "<fs> = [1]", `<button onclick=\${ @fs = @fs.with(0, twice) }>x</button>`))).length).toBe(1);
+    expect(stored(compile(prog(`${TWICE}  const xs = [].concat(twice)`, `<p>\${xs.length}</p>`))).length).toBe(1);
+  });
+  test("a host-rooted target is the host boundary (`el.onclick = tick`)", () => {
+    expect(stored(compile(prog(`  function tick() { }\n  const el = document.body\n  el.onclick = tick`, `<p>x</p>`))).length).toBe(0);
+  });
+});
+
+describe("fix round 1 — F4: enum payloads, defaults, laundering through parameters and returns", () => {
+  test("`Op.Apply(twice)` / `Op.Apply((x) => x)` (c08, e01)", () => {
+    expect(stored(compile(prog(`  type Op:enum = { Apply(f: number) }\n${TWICE}  const op = Op.Apply(twice)`, `<p>x</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`  type Op:enum = { Apply(f: string) }\n  const op = Op.Apply((x) => x)`, `<p>x</p>`))).length).toBe(1);
+  });
+  test("a function-declaration default parameter `o = { d: twice }` (b03)", () => {
+    expect(stored(compile(prog(`${TWICE}  function mk(o = { d: twice }) { return o }\n  const ops = mk()`, `<p>\${ops.d(2)}</p>`))).length).toBe(1);
+  });
+  test("a destructuring default `const { f = twice } = {}; { f }` (b18)", () => {
+    expect(stored(compile(prog(`${TWICE}  const { f = twice } = {}\n  const ops = { f }`, `<p>x</p>`))).length).toBe(1);
+  });
+  test("a parameter handed a function and stored (`function wrap(cb) { return { cb: cb } }`) (b08)", () => {
+    expect(stored(compile(prog(`${TWICE}  function wrap(cb) { return { cb: cb } }\n  const ops = wrap(twice)`, `<p>\${ops.cb(2)}</p>`))).length).toBe(1);
+  });
+  test("a function laundered through a returning helper (`{ d: id(twice) }`) (b02)", () => {
+    expect(stored(compile(prog(`${TWICE}  function id(x) { return x }\n  const ops = { d: id(twice) }`, `<p>\${ops.d(2)}</p>`))).length).toBe(1);
+  });
+  test("the same helper returning DATA is not a function (`{ d: id(5) }`)", () => {
+    expect(stored(compile(prog(`${TWICE}  function id(x) { return x }\n  const a = id(twice)\n  const ops = { d: id(5) }`, `<p>\${ops.d}\${a(1)}</p>`))).length).toBe(0);
+  });
+  test("a function-TYPED parameter stored into a value", () => {
+    expect(stored(compile(prog(`  fn keep(cb: () -> void) { return { cb: cb } }`, `<p>x</p>`))).length).toBe(1);
+  });
+});
+
+describe("fix round 1 — S464 \"(a) Close it\": a kept host-call result", () => {
+  test("`const o = Object.freeze({ f: twice })` / `Object.fromEntries([[\"d\", twice]])` (c13)", () => {
+    expect(stored(compile(prog(`${TWICE}  const o = Object.freeze({ f: twice })`, `<p>x</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`${TWICE}  const o = Object.fromEntries([["d", twice]])`, `<p>\${o.d(2)}</p>`))).length).toBe(1);
+  });
+  test("statement-position host calls stay legal", () => {
+    const res = compile(prog(`  function tick() { }\n  function go() { console.log({ f: tick }); document.addEventListener("x", tick, { once: true }); setTimeout(tick, 1) }`, `<button onclick=go()>x</button>`));
+    expect(stored(res).length).toBe(0);
+  });
+});
+
+describe("fix round 1 — F5: binders that shadow a file function are not that function", () => {
+  test("a statement-`match` arm payload binder (g03)", () => {
+    const src = `\${\n  type E:enum = { Bad(email: string), Ok }\n  function email(x) { return x }\n  function show(e: E) {\n    match e {\n      .Bad(email) :> { return [email] }\n      .Ok :> { return [] }\n    }\n  }\n}\n<program><p>\${show(E.Ok)}</p></>\n`;
+    expect(stored(compile(src)).length).toBe(0);
+  });
+  test("an `<each … as it>` binder", () => {
+    const src = `\${\n  function it(x) { return x }\n}\n<rows> = [1, 2]\n<program><ul><each in=@rows as it><li>\${ JSON.stringify([it]) }</li></each></ul></>\n`;
+    expect(stored(compile(src)).length).toBe(0);
+  });
+});
+
+describe("fix round 1 — F6: each stored function is reported at its own position with its path", () => {
+  test("two literals in one call are two reports; a nested field names its path and line", () => {
+    const src = `\${\n${TWICE}  function take(a, b) { return a }\n  const r = take({ a: twice }, { a: twice })\n  const p = {\n    n: 1,\n    deep: { f: twice }\n  }\n}\n<program><p>\${r}\${p.n}</p></>\n`;
+    const d = stored(compile(src));
+    expect(d.length).toBe(3);
+    const lines = d.map((x) => x.span.line).sort();
+    expect(lines).toEqual([4, 4, 7]);
+    const cols = d.filter((x) => x.span.line === 4).map((x) => x.span.col).sort((a, b) => a - b);
+    expect(cols[0]).not.toBe(cols[1]);
+    expect(d.find((x) => x.span.line === 7).message).toContain("`deep.f`");
+  });
 });
