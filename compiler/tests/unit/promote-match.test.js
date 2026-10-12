@@ -350,3 +350,64 @@ describe("§7 Near-miss — not rewritten", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// S464 Q24 fix round 1 — a `<match>` arm is MARKUP, so the rewrite is sound only
+// when the chain is the sole content of a `${…}` and every arm is ONE element.
+// Review repro (a0d464f1f): lift arms were rewritten to `<A> lift <p>a</p> </>`
+// (`lift` rendered as display text) and logic arms `{ @x = 10 }` to display text —
+// both compiled clean, so the compile gate could not catch them.
+// ---------------------------------------------------------------------------
+
+describe("§10 S464 Q24 — only single-element arms in a sole-content `${…}` are rewritten", () => {
+  const HEADQ = [
+    "<program>",
+    "type M:enum = { A, B }",
+    "<m>: M = .A",
+    "<x> = 0",
+  ].join("\n");
+  const run = async (body) => {
+    const { promoteMatchOnFile } = await import("../../src/commands/promote.js");
+    const src = HEADQ + "\n" + body + "\n</program>\n";
+    const { dir, filePath } = makeTmpFile("q24.scrml", src);
+    try {
+      const res = promoteMatchOnFile(filePath, null, {}, dir);
+      return { res, src, after: readFileSync(filePath, "utf8") };
+    } finally {
+      cleanup(dir);
+    }
+  };
+
+  test("`lift <el>` arms are rewritten with the `lift` dropped (it would be display text in a markup arm)", async () => {
+    const { res, after } = await run(
+      `<div id="host">${D} if (@m is .A) { lift <p>a</p> } else if (@m is .B) { lift <p>b</p> } }</div>`);
+    expect(res.status).toBe("promoted");
+    expect(after).toContain("<match for=M on=@m>");
+    expect(after).toContain("<p>a</p>");
+    expect(after).toContain("<p>b</p>");
+    expect(after).not.toContain("lift");
+    expect(after).not.toContain(D);
+  });
+
+  test("logic arms (`{ @x = 10 }`) are NOT rewritten — the file is untouched", async () => {
+    const { res, src, after } = await run(
+      `${D}\n  if (@m is .A) { @x = 10 } else if (@m is .B) { @x = 20 }\n}\n<p id="host">${D}@x}</p>`);
+    expect(res.status).not.toBe("promoted");
+    expect(after).toBe(src);
+    expect(JSON.stringify(res.skipped)).toContain("not exactly one markup element");
+  });
+
+  test("an arm with two elements is NOT rewritten", async () => {
+    const { res, src, after } = await run(
+      `<div>${D} if (@m is .A) { <p>a</p> } else if (@m is .B) { lift <p>b</p>\n lift <p>b2</p> } }</div>`);
+    expect(res.status).not.toBe("promoted");
+    expect(after).toBe(src);
+  });
+
+  test("a chain that is one statement among others in `${…}` is NOT rewritten", async () => {
+    const { res, src, after } = await run(
+      `<div>${D} let k = 1\n if (@m is .A) { lift <p>a</p> } else if (@m is .B) { lift <p>b</p> } }</div>`);
+    expect(res.status).not.toBe("promoted");
+    expect(after).toBe(src);
+  });
+});

@@ -46,6 +46,8 @@ import { compileScrml } from "../api.js";
 import { findPromotableChains } from "../lint-i-match-promotable.js";
 import { parseMatchArms } from "../match-statechild-parser.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
+import { splitBlocks } from "../block-splitter.js";
+import { buildAST } from "../ast-builder.js";
 
 const isTTY = process.stderr.isTTY && process.stdout.isTTY;
 
@@ -339,33 +341,20 @@ function rewriteOneChain(source, ch) {
   const armIndent = headIndent + oneStep;
   const innerIndent = armIndent + oneStep;
 
-  // Build arm source for each branch.
-  const armChunks = [];
-  for (let i = 0; i < ch.branches.length; i++) {
-    const b = ch.branches[i];
-    const variantTag = ch.variantTagsInOrder[i];
-    const bodySrc = extractBranchBody(source, b);
-    if (bodySrc == null) {
-      return { ok: false, reason: `branch ${i + 1} body span not extractable` };
-    }
-    const bodyTrimmed = bodySrc.trim();
-    // Re-indent body to the inner level
-    const reIndented = reindent(bodyTrimmed, innerIndent);
-    armChunks.push(`${armIndent}<${variantTag}>\n${reIndented}\n${armIndent}</>`);
-  }
-
-  const matchBlock =
-    `<match for=${ch.enumName} on=@${stripAtPrefix(ch.cellName)}>\n` +
-    armChunks.join("\n") + "\n" +
-    `${headIndent}</>`;
-
-  // S464 Q24 — a `<match>` element renders only in MARKUP position. When the chain
-  // is the sole content of a `${ … }` block (`${ if (@p is .A) { <p>a</p> } else … }`),
-  // the block is replaced whole, so the `<match>` lands where the `${}` stood. Left
-  // inside the `${}` it would be statement-position markup that renders nothing —
-  // E-MARKUP-STATEMENT-NOT-RENDERED, which the sanity parse below refuses.
-  let from = headStart;
-  let to = lastEnd;
+  // S464 Q24 (fix round 1) — a `<match>` element renders only in MARKUP position,
+  // and its arm bodies are MARKUP (free text), not logic. So the rewrite is sound
+  // only when (a) the chain is the sole content of a `${ … }` block, which is
+  // replaced whole so the `<match>` lands where the `${}` stood, and (b) every arm
+  // is exactly ONE markup element — written bare (the §17.6.10 implied lift) or as
+  // `lift <el>…</el>` (the `lift` is dropped: in a markup arm it would be display
+  // text). Anything else — a logic arm (`{ @x = 10 }`), two elements, a statement
+  // before the element, a chain that is one statement among others — is REFUSED:
+  // rewriting it would turn code into display text or leave markup in statement
+  // position (E-MARKUP-STATEMENT-NOT-RENDERED), and the compile gate cannot see the
+  // first of those (display text compiles clean). Under (a)+(b) each arm's element
+  // is carried verbatim, so what renders is unchanged by construction.
+  let from = -1;
+  let to = -1;
   {
     let a = headStart - 1;
     while (a >= 0 && /\s/.test(source[a])) a--;
@@ -376,8 +365,68 @@ function rewriteOneChain(source, ch) {
       to = b + 1;
     }
   }
+  if (from < 0) {
+    return {
+      ok: false,
+      reason: "the chain is not the sole content of a `${ … }` block — a `<match>` element renders only in markup position (E-MARKUP-STATEMENT-NOT-RENDERED), so it is left as is",
+    };
+  }
+
+  // Build arm source for each branch.
+  const armChunks = [];
+  for (let i = 0; i < ch.branches.length; i++) {
+    const b = ch.branches[i];
+    const variantTag = ch.variantTagsInOrder[i];
+    const bodySrc = extractBranchBody(source, b);
+    if (bodySrc == null) {
+      return { ok: false, reason: `branch ${i + 1} body span not extractable` };
+    }
+    const element = singleMarkupArmElement(bodySrc);
+    if (element == null) {
+      return {
+        ok: false,
+        reason: `branch ${i + 1} (\`${variantTag}\`) is not exactly one markup element — a \`<match>\` arm is markup, so its logic would become display text; left as is`,
+      };
+    }
+    // Re-indent body to the inner level
+    const reIndented = reindent(element, innerIndent);
+    armChunks.push(`${armIndent}<${variantTag}>\n${reIndented}\n${armIndent}</>`);
+  }
+
+  const matchBlock =
+    `<match for=${ch.enumName} on=@${stripAtPrefix(ch.cellName)}>\n` +
+    armChunks.join("\n") + "\n" +
+    `${headIndent}</>`;
+
   const rewritten = source.slice(0, from) + matchBlock + source.slice(to);
   return { ok: true, rewritten };
+}
+
+/**
+ * S464 Q24 (fix round 1) — the arm body as ONE markup element's source, or null.
+ * Accepts `<el>…</el>` (optionally `;`-terminated) and `lift <el>…</el>` (the
+ * `lift` is dropped). Decided by parsing the text as markup — exactly one
+ * significant node, an element, and no errors — never by a text pattern.
+ */
+function singleMarkupArmElement(bodySrc) {
+  let t = bodySrc.trim().replace(/;\s*$/, "").trim();
+  const lifted = /^lift\s+(?=<)/.exec(t);
+  if (lifted) t = t.slice(lifted[0].length);
+  if (!t.startsWith("<")) return null;
+  let parsed;
+  try {
+    parsed = buildAST(splitBlocks("promote-arm.scrml", `<program>\n${t}\n</program>\n`));
+  } catch {
+    return null;
+  }
+  for (const e of parsed.errors ?? []) {
+    if ((e?.severity ?? "error") === "error") return null;
+  }
+  const prog = (parsed.ast?.nodes ?? []).find((n) => n?.kind === "markup" && n?.tag === "program");
+  const kids = (prog?.children ?? []).filter((k) => k && k.kind !== "comment" &&
+    !(k.kind === "text" && typeof k.value === "string" && k.value.trim() === ""));
+  if (kids.length !== 1 || kids[0].kind !== "markup") return null;
+  return t;
 }
 
 /**
