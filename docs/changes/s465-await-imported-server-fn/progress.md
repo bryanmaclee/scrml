@@ -197,3 +197,12 @@
   differ, 164 only by the absolute project root; the 7 real changes are exactly r1's list (sql-handled-match-
   scrutinee-rt, 08-chat, 19-lin-token, status-picker, driver-card ×2, gauntlet-r10-rails-blog). r3 changes no corpus
   artifact. (Verdict line says "NOT A VALID COMPARISON" only because the base tree has no .git — same as r2.)
+- Gates (head 6cf88812b): pre-commit full 33170: 10 fail — dev-db-no-side-file ×5, tenant-floor-project-set ×3
+  (pass alone), promote-safety read-only, headless-serve-bind-host (known env list). An earlier run (pre-regex-fix)
+  also had emit-block-analysis determinism, conf-MARKUP-001 and expr-node-corpus-invariant 12-snippets 5 s timeouts —
+  pass alone / identical timeout on base (load). root 2239/0; e2e-render-map 259/0; lsp+commands 713/11 (all
+  `scrml dev`/`serve` bind/watch, same as r1/r2); browser-baseline --check: 1 NEW name (nested <each> in lifted row)
+  — IDENTICAL in the origin/main tree → environmental; types-gate (180, unchanged — after a cast fix), host-global-
+  scan, facts (regen), state (regen, +1 HIGH gap), spec-index, s34-census --check-new --base origin/main,
+  bootstrap-conformance, severity, conflict-marker, delta-lint, gen-md-shim, lint-no-default-arm, snippet-gate
+  128/128, corpus-compile-floor: PASS.
