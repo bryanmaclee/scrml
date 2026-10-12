@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 253 | 4 |
+| HIGH | 255 | 4 |
 | MED | 611 | 6 |
 | LOW | 383 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -521,6 +521,18 @@ Reported by the S239 review of 58e601693, reproduced in Chromium (pre-existing; 
 Nothing executable is written (the braced value becomes `attr=""`; the quoted handler becomes a listener that does nothing), so no sink is open — but the author's text is dropped with no diagnostic. impl#1 writes a quoted static `onclick="…"` as the author's static string (§5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string"). Either reading should be a diagnostic in the bootstrap rather than a silent drop (`feedback_dont_soft_classify_bugs`).
 
 **S464 — handler half CLOSED** (`s464-quoted-handler-refused`): the S464 ruling made a quoted event attribute with no `${…}` a compile error in both implementations (§5.2 "Quoted event-handler attributes (S464)", `E-ATTR-QUOTED-HANDLER`); the bootstrap now refuses it in `analyze.scrml` `attrCaseDiags` (any case; tests in `slice-m4/sink-guards.test.js`). The braced-non-handler-value half (`srcdoc={@doc}` → `""`) stays OPEN.
+
+### g-parametric-snippet-render-in-for-lift-unbound-s464 — a parametric snippet rendered inside a `for … lift` row (`${ for (i of items) { lift <div>${render row(i)}</> } }`, `row: snippet(item: Item)`) is emitted as a text node reading `row(i)` — `row` is bound nowhere in the client JS, so the row throws (ReferenceError) at runtime and the caller's lambda markup is dropped — `NEW S464; HIGH; open (silent at compile)`
+
+<!-- @gap id=g-parametric-snippet-render-in-for-lift-unbound-s464 sev=HIGH status=open locus=compiler/src/component-expander.ts(the parametric-snippet render limb does not reach a `render` inside a for-lift body)+compiler/src/codegen/emit-lift.js(the interpolation is lowered as `_scrml_g.String((row(i)) ?? "")`) prov=review:s464-quoted-handler-refused-S239-F3+empirical:samples/compilation-tests/snippet-002-parametric.scrml-compiles-exit-0-client-has-row(i)-unbound -->
+
+Reproduced on the s464 branch: `bun compiler/bin/scrml.js compile samples/compilation-tests/snippet-002-parametric.scrml` → exit 0; the client JS holds `_scrml_lift_tn_8.textContent = _scrml_g.String((row(i)) ?? "");` with no `row` binding. Found by the S239 review of s464-quoted-handler-refused (F3): a quoted handler in such a lambda (`row={ (item) => <span onclick="…">…</span> }`) reached no output only because the lambda's markup is dropped. The S464 fix judges that markup anyway (`collectEscapeHatchQuotedHandlerErrors`, E-ATTR-QUOTED-HANDLER), so it stays closed when this lowering is fixed.
+
+### g-component-in-each-row-in-match-arm-unexpanded-s464 — a DEFINED component used in an `<each>` row inside a `<match>` arm (`const Btn = <button>b</button>` · `<Idle><each in=@items as it><Btn/></each></>`) is emitted unexpanded, as `document.createElement("Btn")` — exit 0, no diagnostic — `NEW S464; HIGH; open (silent)`
+
+<!-- @gap id=g-component-in-each-row-in-match-arm-unexpanded-s464 sev=HIGH status=open locus=compiler/src/codegen/emit-match.ts(the arm body is re-parsed in codegen, after component expansion)+compiler/src/codegen/emit-each.ts(row element built from the unexpanded call node) prov=review:s464-quoted-handler-refused-S239-F1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch (component defined, used once in the row, no attributes): the client JS builds `createElement("Btn")`. The sibling unresolved-component case is [[g-match-arm-unresolved-component-phantom]]. With an undeclared call-site attribute (`<Btn onclick="pwn()"/>`) the attribute was written onto that `<Btn>` element, where a browser runs it. S464 closes the handler half (the codegen backstop `refuseQuotedHandlerWrite` refuses the write whatever the tag), but not the missing expansion.
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
