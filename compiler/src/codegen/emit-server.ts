@@ -1417,6 +1417,7 @@ function emitEndpointServerHelperLines(
   filePath: string,
   helperIds: Set<string>,
   assembledBody: string,
+  header: string = "// --- §61 <endpoint> private server-side arm helpers (server-only; NOT bundled to client, §61.6) ---",
 ): string[] {
   if (!helperIds || helperIds.size === 0) return [];
   // Already-declared guard (mirrors emitModuleValueExportLines) — a helper that
@@ -1462,7 +1463,7 @@ function emitEndpointServerHelperLines(
   if (blocks.length === 0) return [];
   const out: string[] = [];
   out.push("");
-  out.push("// --- §61 <endpoint> private server-side arm helpers (server-only; NOT bundled to client, §61.6) ---");
+  out.push(header);
   for (let i = 0; i < blocks.length; i++) {
     out.push(blocks[i]);
     if (i < blocks.length - 1) out.push("");
@@ -6849,6 +6850,25 @@ function generateServerJsImpl(
     );
     setVarCounter(_epSnapshot);
     for (const _l of _epHelperLines) lines.push(_l);
+  }
+
+  // s464-pure-fn-placement — plain pure `fn`s a server-placed body reaches. A
+  // plain `fn` has no client or server classification (§12.4), is never a route
+  // (§13.4) and is always synchronous (§48.3.5), so the server bundle carries its
+  // body as an ordinary synchronous function — the same emitter and lowering as
+  // the §61 endpoint helpers above. Additive (var-counter restored); the
+  // `.client.js` skip for server-only ones is RouteMap.pureFnClientSkipIds.
+  if (routeMap.pureFnServerHelperIds && routeMap.pureFnServerHelperIds.size > 0) {
+    const _pfSnapshot = getVarCounter();
+    const _pfHelperLines = emitEndpointServerHelperLines(
+      fnNodes,
+      filePath,
+      routeMap.pureFnServerHelperIds,
+      lines.join("\n"),
+      "// --- pure `fn` helpers called by server code (synchronous; never a route — §12.4, §13.4) ---",
+    );
+    setVarCounter(_pfSnapshot);
+    for (const _l of _pfHelperLines) lines.push(_l);
   }
 
   // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When

@@ -353,6 +353,19 @@ export interface RouteMap {
    * the handler) but NOT here (still emitted client-side for the markup use).
    */
   endpointClientSkipIds?: Set<string>;
+  /**
+   * s464-pure-fn-placement — fnNodeIds of file-scope, non-exported plain pure
+   * `fn`s that a server-placed body reaches (directly or through other `fn`s).
+   * emit-server emits each as a plain synchronous `function` in the `.server.js`;
+   * none of them is a route (§12.4, §13.4, §48.3.5). See
+   * `computePureFnSidePlacement`.
+   */
+  pureFnServerHelperIds?: Set<string>;
+  /**
+   * The subset of `pureFnServerHelperIds` that no client code reaches —
+   * emit-functions leaves their bodies out of the `.client.js`.
+   */
+  pureFnClientSkipIds?: Set<string>;
 }
 
 /** Per-function analysis record (used during transitive escalation). */
@@ -1425,6 +1438,191 @@ function rewriteIfServerBlockStub(node: any): void {
  */
 function makeFunctionNodeId(filePath: string, fnNode: FunctionDeclNode): string {
   return `${filePath}::${fnNode.span.start}`;
+}
+
+/**
+ * s464-pure-fn-placement — a plain pure function: `fn` (or the deprecated
+ * `pure function`) WITHOUT the `server` pin. §12.4 gives such a function "no
+ * client or server classification"; it is never a route and never async
+ * (§13.4, §48.3.5). `server fn` is the explicit pin and is excluded here.
+ */
+export function isPlainPureFn(fnNode: unknown): boolean {
+  if (!fnNode || typeof fnNode !== "object") return false;
+  const n = fnNode as Record<string, unknown>;
+  if (n.kind !== undefined && n.kind !== "function-decl") return false;
+  if (n.isServer === true) return false;
+  if (n.isGenerator === true) return false;
+  if (n.isAsync === true) return false;
+  if (n.isHandleEscapeHatch === true) return false;
+  return n.fnKind === "fn" || n.isPure === true;
+}
+
+/**
+ * s464-pure-fn-placement — decide which bundle(s) carry each plain pure `fn`.
+ *
+ * A plain `fn` is placed wherever it is called (§12.4: "MAY be called from both
+ * server-escalated and client-only functions without restriction"). Route
+ * inference no longer promotes it to a route (Step 5c), so this pass supplies
+ * the other half: when a server-placed body reaches it — directly, inside a
+ * lambda, inside a `?{}` interpolation, or through another `fn` — its body must
+ * be emitted into the `.server.js` as a plain synchronous function, or the
+ * server code references an undefined name. When NO client code reaches it, it
+ * is also left out of the `.client.js` (a server-only helper's body has no
+ * business in the browser).
+ *
+ * Reachability is by IDENTIFIER TOKEN over the whole AST subtree (every string
+ * field at any depth), not by the structured callee list, which stops at lambda
+ * bodies and `?{}` text. Both directions of error are safe: an over-collected
+ * server helper is dead code in the server bundle; an over-collected client
+ * reference keeps the body in the client bundle (the behaviour before this
+ * pass). Only under-collection could break a program, which is why the scan is
+ * token-based and walks everything.
+ *
+ * Scope: file-scope (not nested) non-exported plain `fn`s whose route boundary
+ * is `client`. An exported `fn` reaches the server through the value-export
+ * path; a nested one is emitted inside its parent.
+ */
+function computePureFnSidePlacement(
+  files: FileAST[],
+  functions: Map<string, FunctionRoute>,
+  exportedFnNames: Set<string>,
+  serverHelperIds: Set<string>,
+  clientSkipIds: Set<string>,
+): void {
+  const IDENT_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+  const tokensOf = (text: string, out: Set<string>): void => {
+    IDENT_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = IDENT_RE.exec(text)) !== null) out.add(m[0]);
+  };
+  // Every identifier-like token in a subtree (all string fields, any depth).
+  const collectTokens = (node: unknown, out: Set<string>, seen: Set<unknown>): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") { tokensOf(node, out); return; }
+    if (typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const c of node) collectTokens(c, out, seen); return; }
+    for (const key of Object.keys(node as object)) {
+      if (key === "span") continue;
+      collectTokens((node as Record<string, unknown>)[key], out, seen);
+    }
+  };
+
+  for (const fileAST of files) {
+    const filePath = fileAST.filePath;
+    const nodes: unknown[] =
+      (fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : [])) ?? [];
+    const idOf = (fn: any): string | null =>
+      fn && fn.span && typeof fn.span.start === "number" ? `${filePath}::${fn.span.start}` : null;
+
+    // Pass 1 — file-scope function-decls (not nested inside another function).
+    const fileScopeFns: any[] = [];
+    const allFns: any[] = [];
+    const findFns = (node: unknown, insideFn: boolean, seen: Set<unknown>): void => {
+      if (!node || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) findFns(c, insideFn, seen); return; }
+      const n = node as Record<string, unknown>;
+      let inner = insideFn;
+      if (n.kind === "function-decl") {
+        allFns.push(n);
+        if (!insideFn) fileScopeFns.push(n);
+        inner = true;
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span") continue;
+        const v = n[key];
+        if (v && typeof v === "object") findFns(v, inner, seen);
+      }
+    };
+    findFns(nodes, false, new Set());
+
+    // Candidate plain pure fns, by name.
+    const candidateIdsByName = new Map<string, string[]>();
+    const candidateNodeById = new Map<string, any>();
+    for (const fn of fileScopeFns) {
+      if (!isPlainPureFn(fn)) continue;
+      const id = idOf(fn);
+      const name = fn.name;
+      if (!id || typeof name !== "string" || !name) continue;
+      if (exportedFnNames.has(name) || fn.fromExport === true || fn.exported === true) continue;
+      const route = functions.get(id);
+      if (!route || route.boundary !== "client") continue;
+      if (!candidateIdsByName.has(name)) candidateIdsByName.set(name, []);
+      candidateIdsByName.get(name)!.push(id);
+      candidateNodeById.set(id, fn);
+    }
+    if (candidateNodeById.size === 0) continue;
+
+    const closeOver = (rootTokens: Set<string>): Set<string> => {
+      const reached = new Set<string>();
+      const stack: string[] = [];
+      const push = (tokens: Set<string>): void => {
+        for (const t of tokens) {
+          const ids = candidateIdsByName.get(t);
+          if (!ids) continue;
+          for (const id of ids) if (!reached.has(id)) { reached.add(id); stack.push(id); }
+        }
+      };
+      push(rootTokens);
+      while (stack.length > 0) {
+        const id = stack.pop()!;
+        const toks = new Set<string>();
+        collectTokens((candidateNodeById.get(id) as any).body, toks, new Set());
+        collectTokens((candidateNodeById.get(id) as any).params, toks, new Set());
+        push(toks);
+      }
+      return reached;
+    };
+
+    // Server roots — every function the route map places off the client
+    // (server / middleware, CPS-split included: its server half runs there).
+    const serverTokens = new Set<string>();
+    for (const fn of allFns) {
+      const id = idOf(fn);
+      if (!id || candidateNodeById.has(id)) continue;
+      const route = functions.get(id);
+      if (!route || route.boundary === "client") continue;
+      collectTokens(fn, serverTokens, new Set());
+    }
+    if (serverTokens.size === 0) continue;
+    const serverReached = closeOver(serverTokens);
+    if (serverReached.size === 0) continue;
+
+    // Client roots — everything in the file EXCEPT the bodies of functions placed
+    // only off the client and the candidate fns themselves (reached via closure).
+    // A CPS-split function keeps a client half, so it stays a client root.
+    const clientTokens = new Set<string>();
+    const walkClient = (node: unknown, seen: Set<unknown>): void => {
+      if (node === null || node === undefined) return;
+      if (typeof node === "string") { tokensOf(node, clientTokens); return; }
+      if (typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) walkClient(c, seen); return; }
+      const n = node as Record<string, unknown>;
+      if (n.kind === "function-decl") {
+        const id = idOf(n);
+        if (id && candidateNodeById.has(id)) {
+          // Its own name is not a reference; its body is followed by closure.
+          return;
+        }
+        const route = id ? functions.get(id) : undefined;
+        if (route && route.boundary !== "client" && !route.cpsSplit) return;
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span") continue;
+        walkClient(n[key], seen);
+      }
+    };
+    walkClient(nodes, new Set());
+    const clientReached = closeOver(clientTokens);
+
+    for (const id of serverReached) {
+      serverHelperIds.add(id);
+      if (!clientReached.has(id)) clientSkipIds.add(id);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -5738,6 +5936,19 @@ export function runRI(input: RIInput): RIOutput {
       // §39.3: handle() escape hatch is middleware, not server. Skip.
       if ((record.fnNode as any).isHandleEscapeHatch === true) continue;
 
+      // s464-pure-fn-placement — a plain (non-`server`) `fn` is NEVER promoted by
+      // caller context. §12.4: a pure function has "no client or server
+      // classification" and "MAY be called from both server-escalated and
+      // client-only functions without restriction"; §13.4: a callee "SHALL NOT
+      // generate an additional HTTP route when called from a server-escalated
+      // caller"; §48.3.5: "`fn` is always synchronous". Promoting it here made
+      // it its own public route with a client fetch stub and an `async` server
+      // body. It stays unclassified; `computePureFnSidePlacement` (below) decides
+      // which bundle(s) carry its body — the server one when a server-placed
+      // body reaches it, the client one when client code does. `server fn` is
+      // the explicit pin (Trigger 4) and never reaches this point unpromoted.
+      if (isPlainPureFn(record.fnNode)) continue;
+
       // #284 — the DIRECT caller counting is BASELINE-IDENTICAL (from
       // `inverseCallerMap` only): a direct client caller keeps the fn ambient, a
       // direct server caller adds promotion pressure. The SEPARATE indirect-callee
@@ -7373,8 +7584,16 @@ export function runRI(input: RIInput): RIOutput {
     }
   }
 
+  // s464-pure-fn-placement — the bundle(s) each plain pure `fn` lands in.
+  const pureFnServerHelperIds = new Set<string>();
+  const pureFnClientSkipIds = new Set<string>();
+  computePureFnSidePlacement(files, functions, exportedFnNames, pureFnServerHelperIds, pureFnClientSkipIds);
+
   return {
-    routeMap: { functions, pages, authMiddleware, endpointServerHelperIds, endpointClientSkipIds },
+    routeMap: {
+      functions, pages, authMiddleware, endpointServerHelperIds, endpointClientSkipIds,
+      pureFnServerHelperIds, pureFnClientSkipIds,
+    },
     errors,
   };
 }
