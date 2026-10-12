@@ -1,6 +1,29 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-08T07:19:32-06:00  commit: 8ce6d61b5
+# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
+# S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
+# whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
+# `meta.emit` gate (#1367), one presence reader / declared props off the root (#1369), channel handler bindings (#1370),
+# ONE presence test §42.4 (#1372), refinement copy-in (#1376); S461 — `given @cell` reads the cell (#1380), runtime
+# tree-shake (#1382), E-CHANNEL-006 (#1379/#1384); S462 — `is some` -> `is given` through §63 (#1385), message templates not
+# functions (#1387), Rule enum (#1389), in-place `given` guard deprecated (#1392), stdlib closure factories -> structs
+# (#1393), E-IMPORT-004 on `scrml:` imports (#1394), statement-match inline + E-STMT-RETURN-OUTSIDE-FUNCTION (#1395),
+# presence narrowing ends on write (#1396), `<script>`/`<style>` refused + `<pre>`/`<code>` raw text (#1398/#1400/#1402),
+# async stdlib awaited (#1399/#1401), §67 `<md>` + `scrml:md` (#1403), `scrml fix` markup given guards (#1404).
+# Incremental refresh in an isolated worktree on branch `s465-docs-currency` = `origin/main` `41af4153a` + 3 docs-only
+# commits (docs/PA-SCRML-PRIMER.md, docs/articles/llm-kickstarter-v2-2026-05-04.md, docs/changes/s465-docs-currency/).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 54 commits behind HEAD (watermark 8ce6d61b5, HEAD
+# fe859fd07)` = `git log --oneline 8ce6d61b5..origin/main` (51) + the 3 docs-only branch commits.
+# ⛑ FIGURES AT `41af4153a` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **324,230 lines / 286 files**
+# (+29 files: 25 `.ts`/`.js` modules + 4 `.d.ts` — see structure.map.md S465; `git ls-tree` incl. `.d.ts` = 287) ·
+# test files **1,718** by `git ls-tree -r --name-only HEAD compiler/tests | grep -c '\.test\.'` (+63; FACTS says 1,703 by
+# its own rule) · `compiler/SPEC.md` **48,704** lines (+1,642; NEW §67 `<md>`) · conformance **1758** `case.scrml` (+335) ·
+# `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (+2: `fix-given-presence`, `fix-verify-shared` —
+# FACTS counts files in `commands/`; `fix-is-some` also new) · **14 new diagnostic code literals** in `compiler/src` (see
+# error.map.md S465) · known-gaps heading/marker drift **72** (was 68) · `state.ts --check` @generated sections PASS.
+# Conformance suite NOT re-run this pass. `../giti` / `../flogence` NOT cloned in this container — not consulted.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `8ce6d61b5`), CARRIED. ━━━━━━━
 # ⛑ **S458 STAMP — `125486345` -> `8ce6d61b5`. 8 COMMITS (#1349 S457 wrap, #1350 the S457 maps refresh, #1345 scope-aware
 # user-fn rename + compiler locals in `_scrml_` + unquoted handler call chains read whole, #1351 srcdoc / SVG animation /
 # event-text executable sinks, #1352 `.scrml` re-exports reach server/client/page + `scrml dev` runs the tenant startup
@@ -1481,6 +1504,36 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
 
+## S465 — READ FIRST (facts at `41af4153a`; supersedes the S458 block below where it conflicts)
+
+- ⛑ **Presence has ONE test** (§42.4): a bare `T | not` as a whole condition is presence; `x is given` / `x is not` are
+  the explicit pair and narrow. `is some` and the in-place `given x :>` guard are §63 soft-deprecated (W-IS-SOME-DEPRECATED,
+  W-GIVEN-PRESENCE-DEPRECATED; `scrml fix` rules `is-some` / `given-presence`). Narrowing reader: `presence-narrowing.ts`;
+  write-ends-narrowing: `narrowing-write-set.ts`.
+- ⛑ **impl#1 lifecycle gap (S465 measured):** on a `(not to T)` function-return binding, `if (u is given) { u.x }` fires
+  E-TYPE-001; only `given u :>` / `if (u is not) return` transition. The E-TYPE-001 message still names `given u =>`.
+- ⛑ **`<script>` / `<style>` are refused everywhere** (`element-refusal.ts`); `<pre>`/`<code>` bodies are text
+  (`raw-content-encode.ts`).
+- ⛑ **`compiler/runtime/stdlib/md.js` is GENERATED** — edit `stdlib/md/index.scrml`, run `bun scripts/gen-md-shim.ts`
+  (pre-commit + CI check it).
+- ⛑ **Host globals in emitted code go through `_scrml_g`** (`codegen/host-global-alias.ts`); `host-global-scan.ts --check` in CI.
+
+## Map Index (counts refreshed at `41af4153a`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | updated | +29 src files (286 FACTS files): presence reader, write-set, element refusal, raw content, ship-strip, host-global alias, fix rules |
+| dependencies.map.md  | updated | 0 npm changes (`private: true`); edges to the new modules; stdlib runtime split |
+| schema.map.md        | updated | `NarrowEnds`, `ValueShape`, `REFUSED_ELEMENTS`, `ShipStripResult`, stdlib `Rule` / `OAuthStore` enums |
+| config.map.md        | updated | no new key; `scrml fix` +2 default rules |
+| build.map.md         | updated | CI +2 gate steps; pre-commit md-shim guard; ship-strip |
+| error.map.md         | updated | 14 new code literals (W/E-IS-SOME-DEPRECATED, W-GIVEN-PRESENCE-DEPRECATED, E-STMT-RETURN-OUTSIDE-FUNCTION, E-EVENT-UNBOUND, …) |
+| test.map.md          | updated | 1,718 test files (+63); conformance 1758 (+335) |
+| auth.map.md          | updated | script/style refusal, raw text, host-global alias, async stdlib fail-closed, meta allow-list |
+| domain.map.md        | updated | §42.4, §42.2.2a/§42.2.3 deprecations, §42.3.5, §4.17, §67 |
+| infra.map.md         | updated | CI gate steps only |
+| migrations.map.md    | updated | zero diff |
+| non-compliance.report.md | updated | S465 pass (2 findings) |
+
 ## S458 — READ FIRST (facts at `8ce6d61b5`; supersedes the S457 block below where it conflicts)
 
 - ⛑ **Refinements have ONE reader** (§53): `type-system.ts` reads the whole annotation and STAMPS it (`param.refinement`, `returnRefinement`, decl `predicateCheck`); codegen reads only the stamp via `emit-predicates.ts` `refinementOf` :574 -> `judgeExpr` :168. The codegen regex mirror `parsePredicateAnnotation` is DELETED — never re-parse annotation text in codegen. The judge checks the BASE type first and REFUSES what it cannot judge; malformed predicates are E-CONTRACT-002 at the declaring site in every zone. Enum-subset params are now checked.
@@ -2592,6 +2645,12 @@ that is precisely why they went stale twice in a row.** non-compliance.report.md
 
 | If your task is about… | Read |
 |---|---|
+| **⛑ S465 — `is some` / `is given` / `is not` / bare `if (x)` presence tests, narrowing that should (or should not) end, W-IS-SOME-DEPRECATED** | `presence-narrowing.ts` (`narrowingEndedAt` :150, `findEndCause` :179, `mayWriteWithin` :257); `narrowing-write-set.ts`; lint sites `is-some-deprecation.ts` (`confirmIsSomeSites` :45) fired from `ast-builder.js` ~:864; codemod `commands/fix-is-some.js`. SPEC §42.2.2a, §42.4, §42.3.5. |
+| **⛑ S465 — the in-place `given x :>` guard, W-GIVEN-PRESENCE-DEPRECATED, `scrml fix` `given-presence`, E-SYNTAX-044** | `type-system.ts` `given-guard` case ~:14241; `commands/fix-given-presence.js` + `fix-verify-shared.js`. SPEC §42.2.3, §63.7. Lifecycle tracker (E-TYPE-001, message ~:31070) does NOT credit `if (x is given)` — S465 finding. |
+| **⛑ S465 — `<script>` / `<style>` refused (E-SCRIPT-001 / E-STYLE-001), `<pre>`/`<code>` raw text** | `element-refusal.ts` `refusedElementCode` :46; `raw-content-encode.ts` `encodeRawContentBody` :64. SPEC §4.17. |
+| **⛑ S465 — `<md>` / `scrml:md`, a stale `runtime/stdlib/md.js`** | `stdlib/md/index.scrml` (source of truth) -> `bun scripts/gen-md-shim.ts` -> `compiler/runtime/stdlib/md.js`. SPEC §67. |
+| **⛑ S465 — shipped browser JS differs from the compile output, W-CG-SHIP-STRIP-FALLBACK** | `codegen/ship-strip.ts` `shipStrip` :232. SPEC §47.9.9. |
+| **⛑ S465 — `return` at top level of `${ }` (E-STMT-RETURN-OUTSIDE-FUNCTION), statement-match arms / `leave`** | `type-system.ts` ~:23526; `symbol-table.ts` ~:7711; `arm-body-statements.ts`. SPEC §18.2, §19. |
 | **⛑ S458 — a user function name (`id`, `el`, `event`, `total`, `get`, …) renamed where it should not be, a compiler local hijacked, or `fnNameMap` call-site rewriting** | `codegen/fn-name-rename.ts` `renameUserFnRefsScoped` :86 (scope-aware; Acorn; splices ranges); single caller `codegen/emit-client.ts:3365` with regex fallback `regexMangle` :3356 only when a segment does not parse. Compiler-emitted locals MUST be spelled `_scrml_…` (§47.1.1) — a new emitter introducing a bare local re-opens the class. Host-global names (`document`, `fetch`) are NOT handled (open ruling gap). |
 | **⛑ S458 — an UNQUOTED `onclick=` value truncated or leaking junk attributes (`.then(…)`, `?.`, `[…]`)** | `tokenizer.ts` `isPostfixContinuation` :399 (callers :1031/:1038). Known open: `onclick=@count = @count + 1` drops `+ 1` (g-unquoted-handler-assignment-rhs-dropped-s457). |
 | **⛑ S458 — `srcdoc`, SVG `<set>/<animate>` `to/from/by/values`, or `on…` handler text built from data** | Compile side: `attr-injection-sink.ts` `executableDataWriteSink` :348, `animationUrlTarget` :191, `classifyInterpolatedAttrSink` :297; emit side `codegen/url-attr-guard.ts` `refuseExecutableDataWrite` :99 / `urlGuardTarget` :53 (callers `emit-html.ts:3640`, `emit-each.ts:2714`, `emit-lift.js` :1396/:1714/:1761/:1880/:3349); runtime `runtime-url-guard.js` `_scrml_safe_url` :239 (4-arg), SVG sets :208/:214. Lift listener wiring `emit-lift.js:388`. |

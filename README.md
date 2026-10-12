@@ -106,7 +106,7 @@ const <left> = @tasks.filter(isActive).length
 type Phase:enum = { Loading, Editing, Saving, Saved, Rejected(msg: string) }
 
 function load() {
-    @tasks = loadTasks() !{ .Transport(_) :> { return } }
+    @tasks = loadTasks() !{ .Transport(_) :> return }
     @phase = .Editing
 }
 

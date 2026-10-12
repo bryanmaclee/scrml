@@ -16,13 +16,5 @@
         "text": "total is 3 units"
       }
     ]
-  },
-  "xfail": {
-    "impl1-ts": {
-      "gap": "g-client-template-interpolation-lowering-needs-a-structural-emitter",
-      "fails": {
-        "runtime": "sha256:2c4d204a6cb1283b"
-      }
-    }
   }
 }

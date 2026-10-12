@@ -1302,6 +1302,15 @@ function renderTemplateChildToJs(
 
   // Text children are typically whitespace-only — skip empty / WS-only runs.
   if (child.kind === "text") {
+    // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: `_mdText` is its plain text,
+    // written as a text node, never parsed and never interpolated. Kept even when it is only
+    // whitespace — a soft break is the `\n` between two words.
+    if (typeof (child as any)._mdText === "string") {
+      if ((child as any)._mdText !== "") {
+        lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify((child as any)._mdText)}));`);
+      }
+      return;
+    }
     const txt = String((child as any).value ?? (child as any).text ?? "");
     if (!txt.trim()) return;
     // SPEC §4.17 raw-content (`<pre>`/`<code>`) — emit the body VERBATIM. The

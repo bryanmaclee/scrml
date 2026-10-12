@@ -1,0 +1,16 @@
+{
+  "id": "md-indent-mixed",
+  "description": "An `<md>` body whose lines are indented with different characters (a tab on one, spaces on another) is E-MD-INDENT-MIXED.",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "PA reading, s462-md-phase1 (§67.2 Dedent)",
+  "rationale": "§67.2 dedent step 4: the removed prefixes SHALL be the same characters on every counted line; a body where they differ is E-MD-INDENT-MIXED.",
+  "expect": {
+    "codes": [
+      "E-MD-INDENT-MIXED"
+    ],
+    "severity": {
+      "E-MD-INDENT-MIXED": "error"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "md-interp-unclosed",
+  "description": "A `${` with no balanced `}` before `</md>` is E-MD-INTERP-UNCLOSED (even inside a code span: the splitter takes extents before the reader runs).",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY)",
+  "rationale": "§67.2: a `${` with no balanced closing `}` before `</md>` is E-MD-INTERP-UNCLOSED; the message names `<pre>` as the way to show such text.",
+  "expect": {
+    "codes": [
+      "E-MD-INTERP-UNCLOSED"
+    ],
+    "severity": {
+      "E-MD-INTERP-UNCLOSED": "error"
+    }
+  }
+}

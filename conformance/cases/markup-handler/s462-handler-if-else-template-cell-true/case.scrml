@@ -1,0 +1,22 @@
+<c> = true
+<n> = 7
+<a> = "-"
+<b> = "-"
+<d> = "-"
+<e> = "-"
+<f> = "-"
+<g> = "-"
+<button id="b1" onclick={ if (@c) { @a = `x ${@n}` } else { @a = 'y' } }>1</button>
+<button id="b2" onclick={ if (@c) @b = `x ${@n}` else @b = 'y' }>2</button>
+<button id="b3" onclick=${ if (@c) { @d = `x ${@n}` } else { @d = 'y' } }>3</button>
+<button id="b4" onclick=${ if (@c) @e = `x ${@n}` else @e = 'y' }>4</button>
+<button id="b5" onclick={
+    if (@c) { @f = `x ${@n}` } else { @f = 'y' }
+}>5</button>
+<button id="b6" onclick={ @g = `n=${@n}`; @n = @n + 1 }>6</button>
+<p id="oa">${@a}</p>
+<p id="ob">${@b}</p>
+<p id="od">${@d}</p>
+<p id="oe">${@e}</p>
+<p id="of">${@f}</p>
+<p id="og">${@g}</p>

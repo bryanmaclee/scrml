@@ -2806,7 +2806,21 @@ export function esTreeToExprNode(
         // `quasis.length === 1` IS the no-interpolation case, by ESTree
         // construction. Stamp it so no consumer has to re-derive it from
         // `raw`/`value` — see `LitExpr.hasInterpolation`.
-        return { kind: "lit", span, raw, value: cooked, litType: "template", hasInterpolation: false } satisfies LitExpr;
+        const single = { kind: "lit", span, raw, value: cooked, litType: "template", hasInterpolation: false } satisfies LitExpr;
+        // S462 — the SOURCE text (escapes intact: `\${`, `` \` ``). `raw` above is
+        // rebuilt from the COOKED value, which loses them; the structural client
+        // template emitter (emit-expr `emitTemplateLitStructured`) needs the source.
+        // Non-enumerable: invisible to walkers, clones and serialization.
+        const sStart = (node as unknown as { start?: number }).start;
+        const sEnd = (node as unknown as { end?: number }).end;
+        if (typeof sStart === "number" && typeof sEnd === "number" && rawSource
+            && sStart >= 0 && sEnd <= rawSource.length && sStart < sEnd) {
+          const src = restoreHandledOperands(rawSource.slice(sStart, sEnd));
+          if (src.startsWith("`") && src.endsWith("`")) {
+            Object.defineProperty(single, "_tplSourceRaw", { value: src, enumerable: false, configurable: true, writable: true });
+          }
+        }
+        return single;
       }
       // Multi-quasi template — reconstruct the original backtick source from
       // the ESTree node's start/end offsets within `rawSource` (which is the
@@ -2844,13 +2858,33 @@ export function esTreeToExprNode(
       // downstream from `raw`, because `templateRaw` may have degraded to
       // "``" through the last-resort fallback above — indistinguishable from a
       // genuinely empty template in `(raw, value)`. See `LitExpr.hasInterpolation`.
-      return {
+      const multi = {
         kind: "lit", span,
         raw: templateRaw,
         value: "",
         litType: "template",
         hasInterpolation: true,
       } satisfies LitExpr;
+      // S462 — the template's STRUCTURE, for the structural client template
+      // emitter (g-client-template-interpolation-lowering-needs-a-structural-emitter):
+      // each quasi's SOURCE text (sliced by its own offsets — escapes intact) and
+      // each `${…}` as a parsed ExprNode (acorn consumed it whole: a quote inside a
+      // regex or comment cannot mis-bound it). Non-enumerable, like `_tplSourceRaw`.
+      const exprsES = (node.expressions as ESNode[]) ?? [];
+      const quasiRaws: string[] = [];
+      let structOk = rawSource != null && quasis.length === exprsES.length + 1;
+      for (const q of quasis) {
+        const qs = (q as unknown as { start?: number }).start;
+        const qe = (q as unknown as { end?: number }).end;
+        if (!structOk || typeof qs !== "number" || typeof qe !== "number" || qs < 0 || qe > (rawSource as string).length || qs > qe) { structOk = false; break; }
+        quasiRaws.push(restoreHandledOperands((rawSource as string).slice(qs, qe)));
+      }
+      if (structOk) {
+        const exprs = exprsES.map((e) => esTreeToExprNode(e, filePath, baseOffset, rawSource));
+        Object.defineProperty(multi, "_tplQuasiRaws", { value: quasiRaws, enumerable: false, configurable: true, writable: true });
+        Object.defineProperty(multi, "_tplExprs", { value: exprs, enumerable: false, configurable: true, writable: true });
+      }
+      return multi;
     }
 
     // ---- Unary ----

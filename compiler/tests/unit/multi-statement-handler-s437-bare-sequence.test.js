@@ -778,7 +778,10 @@ describe("§10a F1 — a COMMENT between a braced `}` and `else` is whitespace (
 // (docs/known-gaps.md). The template-in-handler regression it leaves is pinned
 // as XFAIL in conformance (markup-handler/s437-r5-template-cell-read-*,
 // reactive/s437-r5-template-cell-read-*). Only the base-true control stays here.
-describe("§10b the client template path is unchanged (base behaviour)", () => {
+// S462: RESOLVED by the STRUCTURAL emitter (emit-expr `emitTemplateLitStructured`,
+// from the parsed quasis + expressions — no text re-scan); the five XFAIL cases now
+// pass and their marks are removed. A template with no `@` still keeps its raw bytes.
+describe("§10b a template with no cell read keeps its raw bytes", () => {
   test("a template with no cell is emitted unchanged", () => {
     const r = compileSource(`<program>\n<s> = ""\n\${ function f() { const k = 2\n @s = \`k=\${k + 1}\` } }\n<button onclick=f()>x</button>\n</program>\n`);
     expect(codesOf(r)).toEqual([]);
