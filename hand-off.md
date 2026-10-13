@@ -1,3 +1,52 @@
+# scrml — Session 464 (bryan · ASUS) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE** of S465 (AUTO) below. S464 ran IN PARALLEL with the S465 cloud run, then landed its work. Rulings: `scrml-support/user-voice-scrml.md` §S464 (~20 rulings + 2 PA readings). Board `S464-bryan.md`.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Finish landing — check BRANCH TIPS and PR state FIRST (reports went missing all session; read branches, never wait on notifications)
+| work | where | state at wrap | next |
+|---|---|---|---|
+| **AWAIT P0 (wrong password accepted — LIVE ON MAIN)** gap `g-imported-async-server-fn-not-awaited-s465` | branch `s465-await-r5` (agent worktree `agent-abcf0e48a556b9bd9`); round 6 DONE at `d3bf7000e` (HIGH-1 lambda-wrapped colouring, MED-1 literal hatches, MED-2 variant match in fn values) | the agent was told at wrap to MERGE origin/main (#1416 + #1419 touched emit-server.ts / route-inference.ts / at-refs.ts), run ALL gates (pre-commit + types + bootstrap + commands/lsp) and push. Check the branch tip — it may have pushed the merge after wrap. | freeze the merged tip → S239 review (re-run the round-5 reviewer harness `~/.cache/scrml-review-await-r5/` incl. HIGH-1 `probes/pa-verify.mjs`) → land. Then the CPS fix round (§19.9.9.8 + the S464 guard rule) on top. |
+| **#1417 Q24 + emitted-JS parse floor** | `s464-markup-text-q24` @ `2ac1a1e84` (merged main 351c11b7c; all local gates green) | CI running, auto-merge ON | if it merged: nothing. If gate failed: read the log (types/bootstrap/commands are the usual CI-only surprises). |
+| **#1418 no-value-holds-a-function + scrml:time struct API** | `s465-value-fn-land` @ `18443bd91` (types fix) | CI was green but **DIRTY** vs main (main moved: #1419) | merge origin/main (union the gap ledger, regenerate FACTS/SPEC-INDEX/bootstrap-conformance/§0), run pre-commit + types + bootstrap + commands/lsp, push; auto-merge is already on. If #1417 lands first, do this after it. |
+| CPS P0 (server logic + hash to the client) | `wip/s464-p0-cps-r1` @ S465 round-2 commits; rulings S464 §19.9.9.8 "Ratify" + guard rule "(a) Guards stay server" | waits on the await branch (shared history, same 8 files) | fix round carrying the guard rule → review → land |
+
+### 1. Queued (ruled, not started)
+- **HIGH: server-function parameter defaults dropped everywhere** (`server fn g(m, k = "zz")` → `k` is null in-process and over HTTP) — `g-server-function-param-default-calling-fn-returns-null-s464` (rescoped HIGH).
+- **HIGH: server-only helper `function`s get public routes nobody calls** (anyone can POST) — `g-trigger5-server-only-function-helper-still-a-public-route-s464`; route suppression, not the fn mechanism.
+- **MED: `==` emitted as `===` outside typed fn bodies** (`@a == {x:1}` always false) — `g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464`.
+- **MED: timer-struct field write from a function body throws** (advice yields a dead copy) — `g-timer-struct-field-write-from-function-body-throws-s464`.
+- Q23 braces-required (§63 retirement) — now unblocked (brace-less-else fix landed in #1414).
+- Small ruled builds: `for`-header comma lists legal both sides (S464 "b"); enum-cell inference from initializer (S464 "(a)"); `ParseError` import-only (S464); `scrml fix` refuses files that don't compile (S464).
+- Design items banked (deliberation, not builds): by-TYPE enforcement of no-value-holds-a-function (`g-value-function-stored-by-type-design-s465`); replace the escape-hatch markup scanner with the real parser BEFORE snippet-lambda markup is emitted (`g-escape-hatch-markup-judged-by-scanner-not-parser-s464`).
+- `scrml-support/voice/articles/let-it-leak-purity-DRAFT-2026-10-13.md` — bryan's purity piece; the pure-fn fix it depended on has LANDED (#1419), so the hold comment can go.
+
+### 2. Open questions for bryan
+None outstanding — every S465 AUTO question and every S462 open question was ruled this session.
+
+## What landed
+#1407 P0 SQL chain (`.get().name` whole-row hash leak) · #1409 lift `<pre>` raw · #1414 batch (#1408 brace-less else, #1410 `<md>` phase 2, #1411 `:> return` migration, #1406 gaps, #1412 PRIMER+maps, #1413 S465 wrap) · #1415 S462 gap list (recovered from the ASUS scratchpad) · **#1416 E-ATTR-QUOTED-HANDLER + E-ATTR-STATIC-EXECUTABLE + codegen backstop on every attribute writer** · **#1419 a plain `fn` is never a route/async; server-bundle binding closure in dependency order** (fixed trucking-dispatch HOS transitions; found by bryan's purity demo). Also merged #1405 (S462 wrap).
+
+## 🔭 DURABLE
+- **Reports go missing; branches don't.** Five agent hand-backs never reached the PA this session; the await round-6 branch sat finished for ~22 h unnoticed. Poll branch tips on a timer; never infer state from the last notification (the S460 lesson, repeated).
+- **CI runs four gates the pre-commit hook does not:** the bootstrap suite (`compiler/self-host-v2`), `compiler/tests/commands` + `lsp`, the TypeScript types gate, and the browser tier. Three bit landings this session (`_parentTag`, test-fixture quoted handlers, `import.meta.dir`). Run them locally before every PR.
+- **Six review rounds on one heuristic = stop and change the boundary.** The quoted-handler escape-hatch scanner and the value-fn position list both kept leaking in new positions; the fix that held each time was a root/class fix (codegen backstop on every attribute writer; emitted-JS parse floor; one `@`-reader). Positional fixes were the bug generator. Two design items banked.
+- **Parallel AUTO + live PA works** once the live session does the merging: the cloud's permission classifier refuses unreviewed merges; AUTO builds and reviews, the live PA lands. `pa-auto.md` §6 updated.
+- **Strict branch protection serializes landings:** every merge sends the other PRs back through CI. A batch branch with real merge commits (#1414) cut six CI cycles to one.
+
+## ⚑ MISSES (mine)
+1. ★★ Misread "run an auto session" as hand-off-and-step-back; bryan wanted parallel sessions. Hours of the S465 run's output sat un-landed.
+2. ★★ The await round-6 branch sat finished ~22 h (report lost; I didn't poll the branch).
+3. ★ Sent one brief with a literal `$(F4)` placeholder instead of the path-discipline block (corrected by message before the agent wrote anything).
+4. ★ Opened #1416 without running the bootstrap/commands suites — CI caught `_parentTag`; the agent found the second breakage.
+5. ★ My ruling-entry attribute list for the static-URL narrowing was an incomplete enumeration of bryan's premise; recorded a PA reading to complete it.
+
+## Worktrees + /tmp (6b / 6b′)
+Removed 24: all 21 frozen review trees (`rev-*`), `s462-wrap` (#1405 merged), the #1416 and #1419 agent worktrees. Retained (in flight): `agent-abcf0e48a556b9bd9` (await, s465-await-r5), `agent-a9608ead9a0054a2a` (value-fn, #1418), `agent-a4632d8420569a14f` (Q24, #1417), `land-s464` (PA landing tree; disposable once #1417/#1418 land). ~100 worktrees remain in total — most predate S464 (S451–S462 agent trees); list for bryan, dry-run before removing. 6b′: /tmp top-level entries newer than boot = 2,169; `/tmp/claude-1000` = 515,488 files (accumulated session scratchpads + task outputs across sessions — rising; worth a dedicated cleanup, dry-run first). Reviewer scratch under `~/.cache/scrml-review-*` (not /tmp) holds every probe referenced above.
+
+---
+
 # scrml — Session 465 (AUTO — unattended cloud run; bryan absent) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE** of S462 below. Second AUTO run (contract `../scrml-support/pa-auto.md`). Board `S465-auto.md`. Rulings: none (AUTO cannot rule). bryan merged #1405 by hand mid-run; no live session of his appeared.
