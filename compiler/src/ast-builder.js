@@ -5803,6 +5803,58 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * S464 r3 (R2-3/R2-4) — a `when … changes { … }` body runs for its effects and
+   * renders nothing. It is captured as TEXT (`_captureWhenHandlerBody`) and lowered from
+   * that text, so its statements are never parsed as statements — an element after a
+   * statement (`let z = 1⏎<p>chg</p>`) compiled to invalid JS. Parse the body's own
+   * tokens [from, to) — file-true spans — framed as the event-handler block, and refuse
+   * its statement-position markup with the handler ("effect") fix, at the element.
+   */
+  function refuseEffectBodyMarkup(from, to) {
+    if (!(to > from)) return;
+    const inner = tokens.slice(from, to);
+    const span0 = inner[0]?.span ?? tokens[from - 1]?.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const frame = (kind, text) => ({ kind, text, span: span0 });
+    const framed = [
+      frame("KEYWORD", "function"), frame("IDENT", HANDLER_BLOCK_FRAME_NAME),
+      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
+      ...inner,
+      frame("PUNCT", "}"), frame("EOF", ""),
+    ];
+    const errs = [];
+    let stmts = null;
+    try {
+      const top = parseLogicBody(framed, filePath, [], parentBlock, counter, errs, "logic");
+      stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" ? top[0].body : null;
+    } catch {
+      return;
+    }
+    refuseHandlerMarkup(stmts, errs.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), errors);
+  }
+
+  /**
+   * S464 r3 (R2-6) — a `${ … }` that is the value of an event-handler attribute on an
+   * element written inside this logic body (`<button onclick=${ @n = 1⏎<p>a</p> }>`) is
+   * built as a child logic block, whose statement-position markup refusals name the
+   * `lift` fix. A handler renders nothing: re-issue those refusals (the ones the child
+   * build added, from `errsBefore`) with the handler fix. Recognized by the tokens
+   * before the BLOCK_REF at `refIdx`: `on<name>` `=`.
+   */
+  function rescopeHandlerBlockRefusals(refIdx, errsBefore) {
+    const eq = tokens[refIdx - 1];
+    const nm = tokens[refIdx - 2];
+    if (!(eq && eq.kind === "PUNCT" && eq.text === "=" && nm && (nm.kind === "IDENT" || nm.kind === "KEYWORD") &&
+      isEventHandlerAttrName(String(nm.text)))) return;
+    for (let k = errsBefore; k < errors.length; k++) {
+      const e = errors[k];
+      if (!e || e.code !== "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
+      if (!/write `lift </.test(String(e.message))) continue; // a function-value fix stays
+      const tag = (/`lift <([A-Za-z][A-Za-z0-9:-]*)>…/.exec(String(e.message)) ?? [])[1] ?? "p";
+      errors[k] = new TABError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(tag, "effect"), e.tabSpan ?? e.span);
+    }
+  }
+
+  /**
    * S464 r2 — does the `{` at token `j` open a FUNCTION VALUE's body: an arrow's
    * (`isJsArrowBrace`) or a function EXPRESSION's (`function (…) {` / `function name(…) {`
    * whose `function` keyword is not the first token of the statement at `stmtFrom` — that
@@ -5848,7 +5900,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let p = j - 1;
       while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
       const pt = tokens[p];
-      if (isJsArrowBrace(j)) return "function";
+      if (isJsArrowBrace(j)) return "function-value";
       if (pt && pt.kind === "PUNCT" && pt.text === ")") {
         let pd = 0;
         let q = p;
@@ -5867,7 +5919,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // engine `effect=` body reuses it): that frame is not a function the author wrote,
         // and its body runs for effects — the "effect" fix.
         if (n1 && n1.kind === "IDENT" && n1.text === HANDLER_BLOCK_FRAME_NAME && isFnKw(n2)) return "effect";
-        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) return "function";
+        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) {
+          // A `function` keyword in expression position (after `=`, `(`, `,`, `:`, `?`,
+          // `return`, `=>`, `&&`, `||`, `??`) is a function EXPRESSION — a value.
+          const kwAt = isFnKw(n1) ? q - 1 : q - 2;
+          let b = kwAt - 1;
+          while (b >= 0 && tokens[b] && (tokens[b].kind === "COMMENT" || (tokens[b].kind === "KEYWORD" && tokens[b].text === "async"))) b--;
+          const bt = tokens[b];
+          const exprPos = !!bt && ((bt.kind === "KEYWORD" && bt.text === "return") ||
+            ((bt.kind === "PUNCT" || bt.kind === "OPERATOR") && ["=", "(", ",", ":", "?", "=>", "&&", "||", "??", "["].includes(bt.text)));
+          return exprPos ? "function-value" : "function";
+        }
       }
     }
     return "logic";
@@ -11669,10 +11731,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     // BLOCK_REF — embedded child block
     if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
+      const _refIdx = i;
+      const _errsBefore = errors.length;
       consume();
       const child = tok.block;
       if (child) {
         const childNode = buildBlock(child, filePath, parentBlock.type, counter, errors);
+        rescopeHandlerBlockRefusals(_refIdx, _errsBefore);
         if (childNode) {
           childNode.span = fullSpan(child.span, filePath);
           // §SQL: collect chained method calls (.run(), .all(), .get()) from parent token stream.
@@ -15348,11 +15413,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     // BLOCK_REF — embedded child block from the block splitter
     if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
+      const _refIdx = i;
+      const _errsBefore = errors.length;
       consume();
       const child = tok.block;
       if (child) {
         // Build the child AST node — pass the parent block's type as context
         const childNode = buildBlock(child, filePath, parentBlock.type, counter, errors);
+        rescopeHandlerBlockRefusals(_refIdx, _errsBefore);
         if (childNode) {
           childNode.span = fullSpan(child.span, filePath);
           // §SQL: collect chained method calls (.run(), .all(), .get()) from parent token stream.
@@ -18037,7 +18105,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (shared _captureWhenHandlerBody — see its doc). Fixes the multi-statement drop
         // (g-when-message-parent-handler-drops-all-but-the-first-statement, S372).
         if (peek().text === "{") {
+          const _whenBodyFrom = i;
           const { bodyRaw: _whenWorkerBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+          refuseEffectBodyMarkup(_whenBodyFrom + 1, i - 1); // S464 r3 (R2-3/R2-4)
           nodes.push({
             id: ++counter.next,
             kind: workerName ? "when-worker-" + eventType : "when-message",
@@ -18081,7 +18151,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // (g-when-effect-multi-statement-body-drops-all-but-first, S372) — the same bug
       // the worker-handler branch above had.
       if (peek().text === "{") {
+        const _whenBodyFrom = i;
         const { bodyRaw: _whenEffectBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+        refuseEffectBodyMarkup(_whenBodyFrom + 1, i - 1); // S464 r3 (R2-3/R2-4)
         nodes.push({
           id: ++counter.next,
           kind: "when-effect",
@@ -20635,7 +20707,7 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   // S464 r2 — the refusals of statement-position markup in the arrow's body (see
   // refuseHandlerMarkup); carried separately because `fatal` is only a flag.
   const markup = bodyRes.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED");
-  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal, markup };
+  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal, markup, braced: !!split.braced };
 }
 
 /** Does a statement list hold a `!{}` guard anywhere (not inside a nested function)? */
@@ -20928,22 +21000,129 @@ function checkAttrMultiStatement(name, value, filePath, errors, delimited = fals
  * Before: such a handler emitted the element into an expression (E-CODEGEN-INVALID-LOGIC,
  * a "compiler defect" message) or dropped it at exit 0.
  */
-function refuseHandlerMarkup(stmts, tabRefusals, errors) {
-  if (!Array.isArray(errors)) return;
+function refuseHandlerMarkup(stmts, tabRefusals, errors, opts = {}) {
+  if (!Array.isArray(errors)) return [];
+  // S464 r3 (R2-7) — an EXPRESSION-bodied arrow handler (`onclick=${ () => <p/> }`):
+  // the body is the arrow's return operand, a VALUE position (§17.6.10.1), not a
+  // statement — not this refusal. (If impl#1 cannot lower it, the emitted-JS parse
+  // floor refuses the compile.)
+  if (opts.valueBody) {
+    // Its element is the arrow's value: mark it so no later pass reports it either.
+    if (Array.isArray(stmts)) refuseUnrenderedStatementMarkup(stmts, (lead) => { lead._reportedAtTab = true; }, "effect");
+    stmts = [];
+    tabRefusals = [];
+  }
   const seen = new Set(errors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED")
     .map((e) => (e.tabSpan ?? e.span)?.start));
+  const found = [];
   const push = (e) => {
+    found.push(e);
     const st = (e.tabSpan ?? e.span)?.start;
     if (seen.has(st)) return;
     seen.add(st);
     errors.push(e);
   };
   for (const e of tabRefusals) push(e);
-  if (!Array.isArray(stmts) || stmts.length === 0) return;
+  if (!Array.isArray(stmts) || stmts.length === 0) return found;
   refuseUnrenderedStatementMarkup(stmts, (lead, context, cause) => {
     lead._reportedAtTab = true;
     push(new TABError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(lead.tag, context, cause), lead.span));
   }, "effect");
+  return found;
+}
+
+/**
+ * S464 r3 (R2-1) — the handler-markup check for a handler value that was not parsed by
+ * attachHandlerStatementList with an error list: an `<each>` row's / a `<match>` arm's
+ * body (re-parsed into the tree without one), a component body (re-parsed by CE). Parses
+ * the value fresh (its own id range, never emitted) at the value's own span, and returns
+ * the refusals (TABErrors). Marks the value checked.
+ */
+export function handlerMarkupRefusals(value, filePath) {
+  const out = [];
+  if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return out;
+  if (Array.isArray(value._markupRefusals)) return value._markupRefusals;
+  const sp = value.span ?? {};
+  const base = [typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1];
+  try {
+    const arrow = parseArrowHandlerStatements(value, filePath, _handlerCheckStmtIds, null, ...base);
+    if (arrow !== undefined) {
+      refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], out, { valueBody: arrow.braced === false });
+    } else {
+      const res = parseHandlerStatementListCore(value, filePath, _handlerCheckStmtIds, null, ...base);
+      if (res) refuseHandlerMarkup(res.stmts, res.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), out);
+    }
+  } catch {
+    // An unparseable value has its own diagnostics; nothing to add here.
+  }
+  Object.defineProperty(value, "_markupRefusals", { value: out, enumerable: false, configurable: true, writable: true });
+  return out;
+}
+
+/**
+ * S464 r3 (R2-1) — every event-handler value in the finished tree that no TAB parse
+ * checked (an `<each>` row / `<match>` arm body is re-parsed into the tree without an
+ * error list): run the handler-markup check on it.
+ */
+function refuseUncheckedHandlerMarkup(ast, filePath, errors, bsOutput) {
+  // The file text, rebuilt from the root blocks (each carries its raw text at its
+  // span) — to put a handler value whose span is relative to a re-parsed body (an
+  // `<each>` row, a `<match>` arm) back at its file position.
+  let source = "";
+  for (const b of Array.isArray(bsOutput?.blocks) ? bsOutput.blocks : []) {
+    if (b && typeof b.raw === "string" && typeof b.span?.start === "number") {
+      if (source.length < b.span.start) source += " ".repeat(b.span.start - source.length);
+      source = source.slice(0, b.span.start) + b.raw + source.slice(b.span.start + b.raw.length);
+    }
+  }
+  const lineColAt = (off) => {
+    let line = 1, last = -1;
+    for (let k = 0; k < off && k < source.length; k++) if (source.charCodeAt(k) === 10) { line++; last = k; }
+    return { line, col: off - last };
+  };
+  const fileTrue = (v) => {
+    const sp = v.span;
+    if (!source || !sp || typeof sp.start !== "number" || typeof sp.end !== "number") return true;
+    return source.slice(sp.start, Math.max(sp.end, sp.start + v.raw.length + 4)).includes(v.raw.trim());
+  };
+  const seen = new Set();
+  const walk = (n, anchorStart) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) walk(x, anchorStart); return; }
+    if ((n.kind === "each-block" || n.kind === "match-block" || n.kind === "engine-decl") && typeof n.span?.start === "number") {
+      anchorStart = n.span.start;
+    }
+    if (n.kind === "markup" && Array.isArray(n.attrs)) {
+      for (const a of n.attrs) {
+        if (a && typeof a.name === "string" && isEventHandlerAttrName(a.name) && a.value) {
+          const orig = a.value;
+          if (typeof orig.raw !== "string" || orig.raw.trim() === "") continue;
+          // Check a FILE-POSITIONED copy: the value's span may be relative to a re-parsed
+          // body (an `<each>` row, a `<match>` arm), and its own span starts at the `${`,
+          // not at the text. The refusals an earlier parse recorded on the value — and,
+          // for a re-parsed body, merged into this file's errors at relative positions —
+          // are replaced by the copy's.
+          const from = fileTrue(orig) ? (orig.span?.start ?? 0) : Math.max(0, anchorStart);
+          const at = source ? source.indexOf(orig.raw, from) : -1;
+          let value = orig;
+          if (at >= 0) {
+            const lc = lineColAt(at);
+            value = { kind: orig.kind, raw: orig.raw, span: { file: filePath, start: at, end: at + orig.raw.length, line: lc.line, col: lc.col } };
+            const stale = Array.isArray(orig._markupRefusals) ? orig._markupRefusals : [];
+            for (const st of stale) { const ix = errors.indexOf(st); if (ix >= 0) errors.splice(ix, 1); }
+          }
+          for (const e of handlerMarkupRefusals(value, filePath)) {
+            const st = (e.tabSpan ?? e.span)?.start;
+            if (errors.some((x) => x && x.code === e.code && (x.tabSpan ?? x.span)?.start === st)) continue;
+            errors.push(e);
+          }
+        }
+      }
+    }
+    for (const k of Object.keys(n)) if (k !== "span" && !k.startsWith("_")) walk(n[k], anchorStart);
+  };
+  walk(ast, 0);
 }
 
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
@@ -20954,8 +21133,11 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   // Such an arrow lowers through its body's statement list instead (S440 ruling:
   // "check it the same way and emit its guard").
   const arrow = parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  // S464 r3 — the refusals are recorded ON THE VALUE as well: a re-parse into the tree
+  // (an `<each>` row, a `<match>` arm) runs this with an error list that is discarded, so
+  // the final pass (refuseUncheckedHandlerMarkup) reports them from the finished tree.
   if (arrow !== undefined) {
-    refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], errors);
+    Object.defineProperty(value, "_markupRefusals", { value: refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], Array.isArray(errors) ? errors : [], { valueBody: arrow.braced === false }), enumerable: false, configurable: true, writable: true });
     if (!arrow.fatal && arrow.stmts.length > 0 && handlerStmtsContainGuard(arrow.stmts)) {
       value.handlerBlock = { stmts: arrow.stmts };
       if (Array.isArray(errors)) for (const e of arrow.nonFatal) { e.fromHandlerStatementList = true; errors.push(e); }
@@ -20965,7 +21147,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
   if (!res) return;
   const { tokens, stmts, parseErrors } = res;
-  refuseHandlerMarkup(stmts, parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), errors);
+  Object.defineProperty(value, "_markupRefusals", { value: refuseHandlerMarkup(stmts, parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), Array.isArray(errors) ? errors : []), enumerable: false, configurable: true, writable: true });
   const count = Array.isArray(stmts) ? stmts.length : 0;
   // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
   // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
@@ -25244,6 +25426,8 @@ function refuseScriptStyleElements(result, bsOutput) {
     ));
   }
   refuseEscapeHatchMarkup(result.ast, result.filePath, result.errors, reported);
+  // §17.6.10.1 (S464 r3, R2-1) — handler values no TAB parse checked.
+  refuseUncheckedHandlerMarkup(result.ast, result.filePath, result.errors, bsOutput);
 }
 
 function _buildASTImpl(bsOutput, tokenizerOverrides) {

@@ -26,12 +26,15 @@
 /**
  * Where the markup sits — decides which fix the message names:
  *   - "logic":    a `${ }` body or an `fn` body — `lift` it (§10.1, §48.5);
- *   - "function": a `function` / arrow / function-expression body — `return` it (§10.4:
- *                 `lift` in a bare `function` body is E-SYNTAX-002);
+ *   - "function": a `function` declaration body — `return` it (§10.4: `lift` in a bare
+ *                 `function` body is E-SYNTAX-002);
+ *   - "function-value": an arrow / function-expression BLOCK body — return it from an
+ *                 expression-bodied arrow or a `function` declaration (a markup `return`
+ *                 from a block body does not lower yet);
  *   - "effect":   an event handler, a `when … changes` body, an engine `effect=` — code
  *                 run for its effects, which renders nothing at all.
  */
-export type MarkupStatementContext = "logic" | "function" | "effect";
+export type MarkupStatementContext = "logic" | "function" | "function-value" | "effect";
 
 /**
  * Why a single-element branch did not render: a SIBLING branch of the same `if` / `given`
@@ -58,6 +61,20 @@ export function markupNotRenderedMessage(
       `an event handler, a \`when\` body or an engine \`effect=\` runs for its effects and renders nothing: ` +
       `change state here and render the markup from that state in markup ` +
       `(\`@shown = true\` here, \`<${t} if=@shown>…</${t}>\` in the page).`
+    );
+  }
+  if (context === "function-value") {
+    // S464 r3 (R2-5) — `return <p>…</p>` from an arrow / function-expression BLOCK body
+    // does not lower today (it is emitted as raw markup and refused by the emitted-JS
+    // parse floor — g-arrow-block-body-markup-return-codegen-invalid-s464), so the advice
+    // names the two forms that compile and render (verified): an expression-bodied arrow,
+    // or a `function` declaration that returns the markup.
+    return (
+      HEAD +
+      `a function body does not render markup: return it from an expression-bodied arrow, ` +
+      `\`const f = () => <${t}>…</${t}>\`, or from a \`function\` declaration, ` +
+      `\`function f() { return <${t}>…</${t}> }\`, and render the call in markup, \`\${f()}\`. ` +
+      TEXT_HINT
     );
   }
   if (context === "function") {
@@ -197,9 +214,9 @@ export function refuseUnrenderedStatementMarkup(
     // A `fn` body is NOT a function context: `lift` is valid in it (§48.5).
     if (rec.kind === "function-decl") next = rec.fnKind === "fn" ? "logic" : "function";
     else if (rec.kind === "when-effect") {
+      // S464 r3 — a `when` body is checked at the TAB from its own tokens (ast-builder
+      // refuseEffectBodyMarkup), at the element's position; nothing to add here.
       next = "effect";
-      const be = rec.bodyExpr as Record<string, unknown> | undefined;
-      if (be && be.kind === "markup-value") emit(leadFor(rec, be, rec.span), "effect");
     }
     if (CASCADE_KINDS.has(rec.kind as string)) {
       const arms = cascadeArms(rec);

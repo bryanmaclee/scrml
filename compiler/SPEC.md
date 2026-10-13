@@ -228,7 +228,7 @@ The compiler SHALL generate all output from a single `.scrml` source. The develo
 
 The compiler SHALL NOT emit JavaScript that fails to parse. A successful compile (exit 0) guarantees that every emitted JavaScript artifact (`.client.js`, `.server.js`, library `.js`, per-route chunk, runtime chunk) is at least syntactically valid JavaScript. A codegen path that cannot lower a construct SHALL emit a hard diagnostic (e.g. `E-CG-003`) rather than a silent stub that yields malformed output.
 
-This invariant is enforced by an in-process parse gate: after codegen produces the final artifacts, the compiler parses each one and, on any parse failure, aborts the compile with `E-CODEGEN-INVALID-LOGIC` (§34) and writes no codegen output artifacts. The gate is a backstop: it catches malformed (unparseable) emission and un-lowered compiler placeholders (below), not other semantically-incorrect-but-parseable emission. The gate is **active by default** (S142): every compile parses its emitted artifacts unless the operational opt-out below is supplied. (Ratified S141; default-ON S142; implemented by `compiler/src/codegen/validate-emit.ts`, mirroring the `E-META-EVAL-002` reparse-emitted precedent of §22.4.)
+This invariant is enforced by an in-process parse gate: after codegen produces the final artifacts, the compiler parses each one and, on any parse failure, aborts the compile with `E-CODEGEN-INVALID-LOGIC` (§34) and writes no codegen output artifacts. The gate runs on EVERY compile, whether or not the compile writes output: an in-process compile that writes nothing (an editor, a checker, an API caller) reports the same `E-CODEGEN-INVALID-LOGIC` a writing compile does, judged on the artifacts as emitted (import re-basing and production stripping change specifiers and comments, never whether the JS parses). (S464 — impl#1 conforms; before, the gate ran only inside the write phase and a non-writing compile reported exit 0 for artifacts that do not parse.) The gate is a backstop: it catches malformed (unparseable) emission and un-lowered compiler placeholders (below), not other semantically-incorrect-but-parseable emission. The gate is **active by default** (S142): every compile parses its emitted artifacts unless the operational opt-out below is supplied. (Ratified S141; default-ON S142; implemented by `compiler/src/codegen/validate-emit.ts`, mirroring the `E-META-EVAL-002` reparse-emitted precedent of §22.4.)
 
 **Un-lowered placeholders (S457).** The gate SHALL also refuse, with `E-CODEGEN-INVALID-LOGIC`, an artifact that contains an identifier of the form `__scrml_<name>__` in any position: reference, binding, property name or object key. A string or comment that contains such a word is not an identifier and does not count. The compiler writes such identifiers as internal placeholders, for example `__scrml_is_some__(x)` for `x is given`, so its parser can read scrml operators. Every one must be lowered before emission, and none exists at run time. An artifact that still contains one parses, but it is a construct the compiler did not lower, and at run time it throws ReferenceError (or, behind a `.catch`, silently never runs). The test is by shape alone, with no exemptions. Every compiler placeholder carries a per-compilation unguessable token (§47.1.1), and only that form is recognised and lowered, so an author cannot spell one. A `__scrml_<name>__` an author writes is an ordinary identifier that nothing lowers. §47.1.1 refuses it where the reservation check inspects it. Anywhere else, for example an object key or opaque `_{}` foreign code, this gate refuses it once it reaches an artifact. When the name the gate found also appears in the author's source text, the diagnostic says so and asks for a rename. Otherwise it reports an un-lowered compiler placeholder, spelled without its token so the message is the same on every run, and asks for a bug report. The compiler's own locals use the `__scrml_<name>` form without the trailing `__` (e.g. `__scrml_is_v`) and do not match.
 > **Provenance:** ruling:user-voice-scrml.md S457 "a for __scrml_" (the reservation that makes a pure shape test sound) · supersedes: "The gate is a syntactic backstop only — it catches malformed (unparseable) emission, not semantically-incorrect-but-parseable emission." (narrowed to name the placeholder refusal). Adopter issue #1333. Direction of change: **newly-rejecting** for programs whose emission leaked a placeholder. Measured (S457): 0 of the 2361 `.scrml` files under `samples/`, `examples/` and `conformance/` are refused by it. Known live leak now refused rather than shipped: a `[:]` map literal inside a block-bodied function expression (`__scrml_map_lit__`).
@@ -16778,10 +16778,14 @@ function or a function expression (`const h = function() { … }`).
   single-element branch of a value-form (this section) SHALL be a compile error,
   E-MARKUP-STATEMENT-NOT-RENDERED. Its message SHALL say the markup is not rendered and SHALL name the
   fix that works where it stands: `lift <tag>…</tag>` (or making it the branch's single element) in a
-  `${ }` or `fn` body; `return` it and render the call in markup (`${f()}`) in a `function`, arrow or
-  function-expression body, where `lift` is not valid (§10.4); and, in an event handler, a `when`
-  body or an engine `effect=` / message arm — code run for its effects, which renders nothing at all
-  — change state there and render the markup from that state in markup.
+  `${ }` or `fn` body; `return` it and render the call in markup (`${f()}`) in a `function`
+  declaration body, where `lift` is not valid (§10.4); in an arrow or function-expression BLOCK body,
+  return it from an expression-bodied arrow (`() => <p/>`) or a `function` declaration instead (a
+  markup `return` from a block body is not lowered by impl#1 yet — the parse floor of §2.2.1 refuses
+  it); and, in an event handler (on any element, including one in an `<each>` row, a `<match>` arm
+  or a component body), a `when` body or an engine `effect=` / message arm — code run for its
+  effects, which renders nothing at all — change state there and render the markup from that state
+  in markup.
 - When the element is the single element of its branch but a SIBLING branch of the same `if` /
   `given` is not (it uses `lift`, or holds statements), the message SHALL name that cause: a
   single-element branch renders only when every branch is one, so the fix is to make every branch a
@@ -16805,7 +16809,10 @@ function or a function expression (`const h = function() { … }`).
   nested inside the element of an enclosing single-element branch (`${ if (a) { <div>${ if (b) {
   <b>x</b> } }</div> } }` renders the inner `<b>`).
 - Markup in a VALUE position is not in statement position and is unaffected: an initializer
-  (`const m = <p/>`), a `return` operand, a ternary arm, a call argument, a `lift` operand.
+  (`const m = <p/>`), a `return` operand, the body of an expression-bodied arrow (`() => <p/>`,
+  including an arrow that is an event-handler value — its body is its return operand), a ternary
+  arm, a call argument, a `lift` operand. Where impl#1 cannot lower such a value, the emitted-JS
+  parse floor (§2.2.1) refuses the compile with E-CODEGEN-INVALID-LOGIC; this error does not apply.
 - A `^{ }` meta body is outside this rule: it renders through `emit(…)` and is governed by §22.
 
 ### 17.7 Iteration (`<each>`)

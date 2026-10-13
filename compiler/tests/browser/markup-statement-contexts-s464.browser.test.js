@@ -80,6 +80,16 @@ const ROWS = [
   ["event handler, arrow value", [ENUM, `<button onclick=${D} () => { @n = 1\n<p>arrow</p> } }>b</button>`], null, null],
   ["event handler, statement then element then statement", [ENUM, `<button onclick=${D} let q = 1\n<p>x</p>\n@n = q }>b</button>`], null, null],
   ["`when … changes` body", [ENUM, `${D} when @n changes { <p>chg</p> } }`], null, null],
+  ["`when … changes` body, element after a statement (r3)", [ENUM, `${D} when @n changes { let z = 1\n<p>chg</p> } }`], null, null],
+  // S464 fix round 3 (R2-1) — handlers whose bodies are re-parsed (an `<each>` row, a
+  // `<match>` arm, a component body) were exit 0 with invalid client JS.
+  ["event handler in an `<each>` row", [ENUM, `<ul><each in=@rows key=@.id><li><button onclick=${D} @n = 1\n<p>x</p> }>b</button></li></each></ul>`],
+    [ENUM, `<ul><each in=@rows key=@.id><li><button onclick=${D} @n = 1 }>b</button></li></each></ul>`], "bb"],
+  ["event handler in an `<each>` row, bare element", [ENUM, `<ul><each in=@rows key=@.id><li><button onclick=${D} <p>x</p> }>b</button></li></each></ul>`], null, null],
+  ["event handler in a `<match>` arm", [ENUM, `<match for=M on=@m>\n<A><button onclick=${D} @n = 1\n<p>a</p> }>a</button></>\n<B><p>b</p></>\n</>`],
+    [ENUM, `<match for=M on=@m>\n<A><button onclick=${D} @n = 1 }>a</button></>\n<B><p>b</p></>\n</>`], "a"],
+  ["event handler in a component body", [ENUM + `\nconst Card = <div class="c">\n  <button onclick=${D} @n = 2\n  <em>z</em> }>go</button>\n</div>`, `<Card/>`],
+    [ENUM + `\nconst Card = <div class="c">\n  <button onclick=${D} @n = 2 }>go</button>\n</div>`, `<Card/>`], "go"],
   ["function expression body", [ENUM, `${D} const h = function() { <i>x</i> } }<button onclick=h()>x</button>`], null, null],
   ["function expression body, element after a statement", [ENUM, `${D} const h = function() { let a = 1\n<i>x</i>\nreturn a } }<p>${D}h()}</p>`], null, null],
 ];

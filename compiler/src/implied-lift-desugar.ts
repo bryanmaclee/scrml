@@ -202,6 +202,10 @@ function recoverMarkupNode(
   // markup; decline rather than emit something they did not write.
   for (const e of parsed.errors ?? []) {
     const sev = (e as { severity?: string })?.severity ?? "error";
+    // S464 r3 (R2-6) — a statement-position-markup refusal INSIDE the element (in a
+    // handler on it, a function in it) is reported by the file's own parse; it does not
+    // mean the element was misread, and declining here would refuse the element too.
+    if ((e as { code?: string })?.code === "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
     if (sev === "error") return null;
   }
   const prog = (parsed.ast?.nodes ?? []).find(

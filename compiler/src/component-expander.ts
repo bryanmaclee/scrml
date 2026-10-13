@@ -47,7 +47,7 @@ import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { sourceHasMdElement } from "./md-lower.ts";
-import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck, handlerMarkupRefusals } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
@@ -1534,6 +1534,7 @@ function parseComponentDef(
       return [at, stop];
     };
     const seenNodes = new WeakSet<object>();
+    const seenHandlerRefusals = new Set<string>();
     const visit = (n: unknown): void => {
       if (!n || typeof n !== "object" || seenNodes.has(n as object)) return;
       seenNodes.add(n as object);
@@ -1545,6 +1546,46 @@ function parseComponentDef(
       } else if (rec.kind === "bare-expr" && rec.exprNode?.kind === "markup-value") {
         const [s0, s1] = elementAt(String(rec.exprNode?.node?.tag ?? ""), rec.span?.start, rec.span?.end);
         rec._refusalSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      }
+      // S464 Q24 r3 (R2-1) — an event handler in the body (`<button onclick=${ @n = 2⏎
+      // <em>z</em> }>`) renders nothing: refuse its statement-position markup with the
+      // handler fix, checked on a copy positioned at the handler text in the FILE (the
+      // re-parse's spans address the normalized body).
+      if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
+        const src = _currentFileSource;
+        for (const a of rec.attrs) {
+          if (!a || typeof a.name !== "string" || !isEventHandlerAttrName(a.name)) continue;
+          const v = a.value;
+          if (!v || v.kind !== "expr" || typeof v.raw !== "string" || v.raw.trim() === "") continue;
+          if (!src || (defSpan.file && defSpan.file !== src.path)) continue;
+          let raw = v.raw;
+          let at = src.text.indexOf(raw, typeof defSpan.start === "number" ? defSpan.start : 0);
+          if (at < 0) {
+            // The normalized body re-spaced the value: map the value's own span to the
+            // source, and read the handler text there (between its `${` and matching `}`).
+            const mapped = bodyDiagnosticSourceSpan(defSpan, normalizedBody, v.span?.start, v.span?.end) as any;
+            const open = typeof mapped?.start === "number" ? src.text.indexOf("${", mapped.start) : -1;
+            if (open < 0 || open > (mapped.end ?? open) + 2) continue;
+            let depth = 0;
+            let k = open + 1;
+            for (; k < src.text.length; k++) {
+              const c = src.text[k];
+              if (c === "{") depth++;
+              else if (c === "}" && --depth === 0) break;
+            }
+            if (k >= src.text.length) continue;
+            at = open + 2;
+            raw = src.text.slice(at, k);
+          }
+          const lc = lineColAt(src.text, at);
+          const copy = { kind: "expr", raw, span: { file: filePath, start: at, end: at + raw.length, line: lc.line, col: lc.col } };
+          for (const e of handlerMarkupRefusals(copy, filePath) as any[]) {
+            const key = `${e.code}@${(e.tabSpan ?? e.span)?.start}`;
+            if (seenHandlerRefusals.has(key)) continue;
+            seenHandlerRefusals.add(key);
+            ceErrors.push(makeCEError(e.code, String(e.message).replace(/ \(line \d+, col \d+\)$/, ""), (e.tabSpan ?? e.span) as Span));
+          }
+        }
       }
       for (const k of Object.keys(rec)) if (k !== "span" && k !== "_markupLead") visit(rec[k]);
     };

@@ -51,8 +51,19 @@ function mount(filePath) {
 function snapshot() {
   // The whole body: a parser restructure moves content OUT of #host.
   const c = document.body.cloneNode(true);
+  // S464 r3 (review R2-2) — the mount wrappers are NOT unwrapped wholesale (that is how
+  // round 2 missed `<span>x</span>${…}`: the inline `<span>` wrapper and the block `<div>`
+  // compared equal). A wrapper is layout-neutral ONLY when it is the sole content of its
+  // parent (no sibling element or non-blank text): there its box type cannot move any
+  // sibling. Such a wrapper is unwrapped; any other is kept, tag and all, so a span → div
+  // change beside siblings shows as a difference.
+  const significant = (n) => n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim() !== "");
   for (const sel of ["span[data-scrml-logic]", "[data-scrml-match-mount]"]) {
-    for (const el of [...c.querySelectorAll(sel)]) el.replaceWith(...el.childNodes);
+    for (const el of [...c.querySelectorAll(sel)]) {
+      const parent = el.parentNode;
+      const sole = parent && [...parent.childNodes].filter(significant).length === 1;
+      if (sole) el.replaceWith(...el.childNodes);
+    }
   }
   return c.innerHTML.replace(/<!--[\s\S]*?-->/g, "").replace(/ data-scrml[a-z-]*="[^"]*"/g, "").replace(/\s+/g, " ").trim();
 }
@@ -79,8 +90,8 @@ const ACCEPTED = {
     ["A, B", `<section id="host">\n  ${D} if (@m is .A) { lift <p>a</p> } else if (@m is .B) { lift <p>b</p> } }\n</section>`],
   "sole content of a `<div>`, bare arms, redundant else":
     ["A, B", `<div id="host">${D} if (@m is .A) { <p>a</p> } else if (@m is .B) { <p>b</p> } else { <p>never</p> } }</div>`],
-  "block arms beside a sibling heading":
-    ["A, B", `<div id="host">\n  <h1>t</h1>\n  ${D} if (@m is .A) { <p>a</p> } else if (@m is .B) { <p>b</p> } }\n</div>`],
+  "sole content of a `<td>`":
+    ["A, B", `<table><tbody><tr><td id="host">${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } }</td></tr></tbody></table>`],
 };
 
 const REFUSED = {
@@ -90,6 +101,20 @@ const REFUSED = {
     ["A, B", `<span id="host">${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } }</span>`],
   "inline arms beside sibling text in a `<div>`":
     ["A, B", `<div id="host">${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } } tail</div>`],
+  // S464 r3 (review R2-2): a sibling's closer / a self-closed sibling before the `${…}`.
+  "inline arms after a sibling element (`<span>x</span>${…}`)":
+    ["A, B", `<div id="host"><span>x</span>${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } }</div>`],
+  "inline arms after a self-closed sibling (`<img/>${…}`)":
+    ["A, B", `<div id="host"><img src="x.png"/>${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } }</div>`],
+  "block arms beside a sibling heading (the wrapper changes span → div)":
+    ["A, B", `<div id="host">\n  <h1>t</h1>\n  ${D} if (@m is .A) { <p>a</p> } else if (@m is .B) { <p>b</p> } }\n</div>`],
+  // Restricted content models: a `<div>` child is invalid (moved out of a table; changes a list).
+  "sole content of a `<ul>`":
+    ["A, B", `<ul id="host">${D} if (@m is .A) { <li>a</li> } else if (@m is .B) { <li>b</li> } }</ul>`],
+  "sole content of a `<select>`":
+    ["A, B", `<select id="host">${D} if (@m is .A) { <option>a</option> } else if (@m is .B) { <option>b</option> } }</select>`],
+  "sole content of a `<tbody>`":
+    ["A, B", `<table id="host"><tbody>${D} if (@m is .A) { <tr><td>a</td></tr> } else if (@m is .B) { <tr><td>b</td></tr> } }</tbody></table>`],
   "duplicate variant arms (the source runs the first)":
     ["A, B", `<div id="host">${D} if (@m is .B) { <p>b</p> } else if (@m is .A) { <p>a1</p> } else if (@m is .A) { <p>a2</p> } }</div>`],
 };

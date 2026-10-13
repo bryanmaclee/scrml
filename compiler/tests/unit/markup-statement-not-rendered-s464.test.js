@@ -104,7 +104,6 @@ const ACCEPTED = {
   "a compound state declaration in a logic body": `${D}\n <form>\n <name default="a"> = "b"\n <email default="c"> = "d"\n </>\n }`,
   "a compound with typed children": `${D} <formRes><name>: string = ""<email>: string = ""</> }`,
   "a comparison continued on the next line": `${D} let a = 1\n let b = a\n < 2\n lift b }`,
-  "r1: an arrow returning a markup value from a block body": `${D} const sn = (x) => { return <p>${D}x}</p> } } <div>${D}sn(1)}</div>`,
   "r1: an arrow with an expression body of markup": `${D} const sn = (x) => <p>${D}x}</p> } <div>${D}sn(1)}</div>`,
   "r1: a postfix `++` statement with no markup after it": `${D} function f() { let a = 1\na++\nreturn a } } <div>${D}f()}</div>`,
 };
@@ -148,4 +147,68 @@ describe("E-MARKUP-STATEMENT-NOT-RENDERED (S464 Q24) — controls compile clean"
       expect(codes).toEqual([]);
     });
   }
+});
+
+// S464 Q24 fix round 3 (re-review of 537ac9d8c).
+describe("E-MARKUP-STATEMENT-NOT-RENDERED (S464 Q24) — fix round 3", () => {
+  const firstMsg = (body) => compile(body).errors.find((e) => e.code === CODE)?.message ?? "";
+
+  // R2-3 / R2-4 — a `when` body's element after a statement compiled to invalid JS; the
+  // refusal now points at the ELEMENT (not the `when` keyword).
+  for (const [label, body] of Object.entries({
+    "`when` body: element after `let`": `${D} when @n changes { let z = 1\n<p>chg</p> } }`,
+    "`when` body: element after an assignment on the same line": `${D} when @n changes { @hits = 1 <p>x</p> } }`,
+    "`when` body: element after a postfix `++`": `${D} when @n changes { @hits++\n<p>x</p> } }`,
+  })) {
+    test(`R2-3 refused: ${label}`, () => {
+      expect(compile(body).codes).toContain(CODE);
+    });
+  }
+  test("R2-4: a `when` refusal names the element's line:col", () => {
+    const { errors } = compile(`${D} when @n changes {\n<p>chg</p>\n} }`);
+    const e = errors.find((x) => x.code === CODE);
+    // PRE ends on line 12 (`<div id="host">`); the `when` is on line 13, the element at 14:1.
+    expect([e.span.line, e.span.col]).toEqual([14, 1]);
+  });
+
+  // R2-5 — a function VALUE's block body: the message names the forms that compile and
+  // render (an expression-bodied arrow; a `function` declaration), not `return` in place.
+  test("R2-5: a function-expression body names the working forms", () => {
+    const m = firstMsg(`${D} const h = function() { <i>x</i> } }<button onclick=h()>x</button>`);
+    expect(m).toContain("`const f = () => <i>…</i>`");
+    expect(m).toContain("`function f() { return <i>…</i> }`");
+  });
+  test("R2-5: the forms the message names compile clean", () => {
+    expect(compile(`${D} const f = () => <i>x</i> }<p>${D}f()}</p>`).codes).toEqual([]);
+    expect(compile(`${D} function f() { return <i>x</i> } }<p>${D}f()}</p>`).codes).toEqual([]);
+  });
+  test("R2-5: a markup `return` from an arrow block body is refused by the emitted-JS parse floor (it does not lower yet)", () => {
+    expect(compile(`${D} const sn = (x) => { return <p>${D}x}</p> } } <div>${D}sn(1)}</div>`).codes)
+      .toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+  });
+
+  // R2-7 — an expression-bodied arrow handler's markup is its return operand: a VALUE,
+  // not this refusal. impl#1 does not lower it; the parse floor refuses the compile.
+  for (const [label, body] of Object.entries({
+    "`onclick=${ () => <p/> }`": `<button onclick=${D} () => <p/> }>b</button>`,
+    "`onclick=${ (e) => <p>x</p> }`": `<button onclick=${D} (e) => <p>x</p> }>b</button>`,
+    "`onclick=${ () => (<p/>) }`": `<button onclick=${D} () => (<p/>) }>b</button>`,
+  })) {
+    test(`R2-7 value position, not this code: ${label}`, () => {
+      expect(compile(body).codes).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+    });
+  }
+  test("R2-7: a BLOCK-bodied arrow handler's element is still statement markup", () => {
+    expect(compile(`<button onclick=${D} () => { <p/> } }>b</button>`).codes).toEqual([CODE]);
+  });
+
+  // R2-6 — a handler with statement markup on an element inside an `if` arm: ONE error,
+  // the handler fix (the `<button>` itself renders as the arm's single element).
+  test("R2-6: handler markup on an element in an `if` arm is one refusal, with the handler fix", () => {
+    const { errors } = compile(`${D} if (@n > 0) { <button onclick=${D} @hits = 1\n<p>a</p> }>a</button> } }`);
+    const mine = errors.filter((e) => e.code === CODE);
+    expect(mine.length).toBe(1);
+    expect(mine[0].message).toContain("an event handler, a `when` body or an engine `effect=` runs for its effects");
+    expect(errors.map((e) => e.code)).toEqual([CODE]);
+  });
 });
