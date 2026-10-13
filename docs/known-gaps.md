@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
-| MED | 615 | 6 |
-| LOW | 390 | 0 |
+| MED | 617 | 6 |
+| LOW | 392 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -25412,3 +25412,27 @@ Confirmed on main (S464): `rawHtml` is named only in the lint's correction text 
 <!-- @gap id=g-module-resolver-literal-nul-byte-hides-file-from-grep-s464 sev=LOW status=open locus=compiler/src/module-resolver.js(seedKey join, byte offset ~25888) prov=empirical:s464-file-s462-gaps-agent-note+PA-verified -->
 
 PA-verified by execution (S464): `python3` finds byte 0x00 at offset 25888 inside `[...seed].sort().join("\x00")`; `grep -c` returns 0 matches for patterns present in the file unless `-a` is passed. Behaviour is fine at run time; the hazard is investigative — a grep-based probe silently answers "absent" about a live compiler file (the indistinguishable-failure probe shape). Fix: write the separator as the escape `"\0"` (byte-identical string value; inert).
+
+### g-standalone-component-module-emits-raw-markup-export-s464 — a component module compiled ON ITS OWN (library mode) copies its logic text through raw (`export const AddressForm = <fieldset …`) → JS that never parses; the whole-program build of the same file is valid — `NEW S464; MED; open (pre-existing)`
+
+<!-- @gap id=g-standalone-component-module-emits-raw-markup-export-s464 sev=MED status=open locus=compiler/src/codegen/emit-library.ts(library-mode export of a markup-valued const) prov=review:s464-q24-r3-S239 -->
+
+Surfaced by the S464 emitted-JS parse floor (now on every compile): `examples/23-trucking-dispatch/components/*` (8), `examples/22-multifile/components.scrml`, conformance `module/e-export-002/003`, … now report E-CODEGEN-INVALID-LOGIC ("compiler defect") when compiled per file. Base's WRITING CLI refused them identically; no program breaks (the whole-program build emits valid JS). Cost lands on per-file tooling: `scrml promote` (compiles `gather: false`) now fails these 4 components with "compiler defect" (was "unchanged"). Fix: lower library-mode markup-valued exports.
+
+### g-markup-value-in-handler-and-when-body-not-lowered-s464 — a markup VALUE in an event-handler or `when` body (`@lst = [<p>a</p>]`, `{ m: <p/> }`, `keep(<p/>)`, `@v = c ? <b>y</b> : <i>n</i>`) does not lower (refused by the parse floor as E-CODEGEN-INVALID-LOGIC); the same value at top level works — `NEW S464; MED; open (pre-existing)`
+
+<!-- @gap id=g-markup-value-in-handler-and-when-body-not-lowered-s464 sev=MED status=open locus=searched:emit-event-wiring.ts,emit-logic.ts(handler/when body lowering) prov=review:s464-q24-r3-S239 -->
+
+§17.6.10.1 lists these as VALUE positions (legal). Base: exit 0 with invalid JS on write:false, refused on write:true; head refuses everywhere (fails closed). Needs the lowering.
+
+### g-parse-floor-errors-carry-no-source-location-s464 — E-CODEGEN-INVALID-LOGIC from the emitted-JS parse floor reports `file::` with no line/col (CLI too) — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-parse-floor-errors-carry-no-source-location-s464 sev=LOW status=open locus=compiler/src/api.js(validateEmittedArtifacts error construction) prov=review:s464-q24-r3-S239 -->
+
+Map the emitted-JS parse position back to the source span that produced it (or at least the nearest statement).
+
+### g-conformance-clean-case-passes-when-compile-fails-s464 — a `codes: []` ("clean") conformance case passes even when its compile emits E-CODEGEN-INVALID-LOGIC (superset matching) — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-conformance-clean-case-passes-when-compile-fails-s464 sev=LOW status=open locus=conformance/run.ts(code matching) prov=review:s464-q24-r3-S239 -->
+
+Now visible: `module/e-export-002-component-single-root-clean`, `e-export-003-attr-distinct-clean`, `channel/same-source-two-aliases`. A clean case should fail if ANY error fires (the other half of g-conformance-adapter-skips-the-emitted-js-gate…). Also: `g-emitted-js-invalid-shapes-surfaced-by-floor-s464` lists 27 files; the review's corpus found 36 (adds `compiler/self-host-v2/{analyze,check,lower,print}.scrml` — type annotations leak into JS — plus `compiler/tests/integration/fixtures/a5/cross-file/components/header.scrml`, `docs/changes/m6.4a/exemplars/cross-file/components.scrml`, several `docs/changes/*/repro`, `samples/match-001-nested-with-call.scrml`).
