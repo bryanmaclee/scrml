@@ -1,0 +1,11 @@
+<program>
+<items> = [{ name: "a" }]
+${ function go(n) { log(n) } }
+<button id="top" onclick="go(1)">top</button>
+<ul>
+  <each in=@items as it>
+    <li><button ONCLICK="go(2)">row</button></li>
+  </each>
+</ul>
+<pre><button onclick="alert(3)">display text, not an attribute</button></pre>
+</program>

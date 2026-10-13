@@ -8514,7 +8514,14 @@ ${
         if (e.star) tag = "*" + e.tag
         for (const a of e.attrs) {
             const lower: string = a.name.toLowerCase()
-            if (lower != a.name && eventName(lower) != "" && (parenValue(a.value) || quotedHasInterp(a.value))) {
+            if (eventName(lower) != "" && quotedNoInterp(a.value)) {
+                // s464 — §5.2 "Quoted event-handler attributes (S464)": a quoted
+                // value with no `${…}` on an event-handler attribute (any case)
+                // "SHALL be a compile error (E-ATTR-QUOTED-HANDLER)". The
+                // bootstrap lowered the lowercase form to an empty listener with
+                // no diagnostic (a case variant was E-BOOTSTRAP-UNSUPPORTED).
+                st = addDiag(st, env.file, a.span, "E-ATTR-QUOTED-HANDLER", "the quoted `" + a.name + "=\"…\"` attribute on `<" + tag + ">` is an event handler written as a string. scrml does not hand quoted text to the browser to run as JavaScript — an event attribute takes logic, unquoted: a call `" + a.name + "=fn()`, an inline block `" + a.name + "={ … }`, or an expression `" + a.name + "=$" + "{…}` (§5.2, §5.2.3).")
+            } else if (lower != a.name && eventName(lower) != "" && (parenValue(a.value) || quotedHasInterp(a.value))) {
                 // s462 — §5.2 rule 2 "Event-handler text from data": a case
                 // variant of an `on…` name with an EXPRESSION value
                 // (`ONCLICK=(@code)`) is a value written as handler text, not a
@@ -9165,6 +9172,17 @@ ${
     fn quotedHasInterp(v: AAttrValue) -> boolean {
         return match v {
             .Quoted(v: s) :> s.indexOf("$" + "{") >= 0
+            .Bare(e: e) :> false
+            .Paren(e: e) :> false
+            .NoValue :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    // s464 — a quoted value holding no `${…}` (a static string).
+    fn quotedNoInterp(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: s) :> s.indexOf("$" + "{") < 0
             .Bare(e: e) :> false
             .Paren(e: e) :> false
             .NoValue :> false
