@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 255 | 4 |
-| MED | 615 | 6 |
+| MED | 616 | 6 |
 | LOW | 385 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -577,6 +577,12 @@ Raised by the S239 review of ae1924b95. Decided LEGAL in round 3 and stated in S
 <!-- @gap id=g-iframe-src-raster-data-image-admitted-s464 sev=LOW status=open locus=compiler/src/runtime-url-guard.js(_SCRML_IMAGE_SOURCE_ATTRS / _scrml_url_scheme_admitted — name-only) prov=review:s464-quoted-handler-refused-S239-r4 -->
 
 Inert: a frame showing a raster image decodes it, it never runs it. Recorded because the S464 "(a) Narrow attrs, allow-list" wording admits a raster `data:image` on attributes that LOAD AN IMAGE, and an `<iframe>` loads a document. Not changed in s464 (owner/PA call whether the image-source set should become element-scoped, in both the static rule and rule 3).
+
+### g-xlink-href-cell-emitted-as-literal-name-s464 — `<a xlink:href=@t>` is emitted as the literal attribute `xlink:href="t"` (the cell NAME), not the cell's value — exit 0, no diagnostic — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-xlink-href-cell-emitted-as-literal-name-s464 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(a namespaced `xlink:` attribute with a variable-ref value takes the static path) prov=review:s464-quoted-handler-refused-S239-r5(side-note)+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: `<t> = "/x"` · `<svg><a xlink:href=@t><text>t</text></a></svg>` → the HTML holds `xlink:href="t"`, and no reactive wiring. The author's value is replaced by the cell's name. Found by the S239 review of cb67d17ea while probing an animation-element `xlink:href=@t` spoof (that refusal is closed in s464 round 6).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 

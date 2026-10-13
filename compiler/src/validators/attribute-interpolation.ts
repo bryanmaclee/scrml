@@ -378,7 +378,40 @@ const VOID_TAGS: ReadonlySet<string> = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
 ]);
 
+/**
+ * Round 6 (review NEW-1) — a `<` + letter right after an OPERAND (an identifier, a number, a literal,
+ * `)`, `]`) is AMBIGUOUS: `f(x) <g ? "a" : "b"` is a comparison, `if (c) <b …>` is markup, and either
+ * misreading changes how the strings after it pair up — so committing to one reading can hide a real
+ * sink. The text is therefore scanned under several readings and the sink hits are UNIONED: every
+ * ambiguous `<` read as markup, every one read as a comparison, and — for each ambiguous position —
+ * each of those with that one position flipped. After an operator, or after a markup-introducing
+ * keyword (`lift`, `return`, …), `<` + letter is always markup (no ambiguity).
+ */
 function markupTextSinks(raw: string): MarkupTextSinkHit[] {
+  const seen = new Set<string>();
+  const out: MarkupTextSinkHit[] = [];
+  const add = (hs: MarkupTextSinkHit[]) => {
+    for (const h of hs) {
+      const key = `${h.offset}|${h.name}|${h.code}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(h);
+    }
+  };
+  const ambig = new Set<number>();
+  add(markupTextSinksOnce(raw, () => true, ambig));
+  add(markupTextSinksOnce(raw, () => false, ambig));
+  // One flip per ambiguous position, against each uniform reading (bounded: the positions found by the
+  // two uniform runs, capped so a pathological text cannot blow up the compile).
+  const positions = [...ambig].slice(0, 64);
+  for (const pos of positions) {
+    add(markupTextSinksOnce(raw, (at) => at !== pos, new Set()));
+    add(markupTextSinksOnce(raw, (at) => at === pos, new Set()));
+  }
+  return out;
+}
+
+function markupTextSinksOnce(raw: string, asMarkup: (pos: number) => boolean, ambig: Set<number>): MarkupTextSinkHit[] {
   const hits: MarkupTextSinkHit[] = [];
   const n = raw.length;
   const isLetter = (c: string | undefined) => !!c && /[A-Za-z]/.test(c);
@@ -427,11 +460,10 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
     // after which `/` divides — or "operator" (anything else, and the start) — after which `/`
     // opens a regex.
     let prev: "operand" | "operator" = "operator";
-    // Round 5 (review F1a): `<` + letter opens an ELEMENT after an operator, after a markup-introducing
-    // keyword (`lift`, which reads as an operand), and after `)` (`if (c) <b …>`, `(x) => <b …>`) — when
-    // in doubt, markup (fail closed). Only after a plain identifier / number / literal / `]` is it a
-    // comparison (`a<b`).
-    let markupMayFollow = true;
+    // `<` + letter is markup after an operator or a markup-introducing keyword (`lift`, `return`, …,
+    // which read as operands for the `/` rule); after any other operand it is AMBIGUOUS and decided
+    // by `asMarkup` (the caller unions the readings — see `markupTextSinks`).
+    let afterMarkupWord = false;
     while (k < n) {
       const c = raw[k];
       if (/\s/.test(c)) { k++; continue; }
@@ -439,31 +471,33 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
       if (c === "/" && raw[k + 1] === "/") { while (k < n && raw[k] !== "\n") k++; continue; }
       if (c === "/" && raw[k + 1] === "*") { const e = raw.indexOf("*/", k + 2); k = e < 0 ? n : e + 2; continue; }
       if (c === "/" && prev === "operator") { k = skipRegex(k); prev = "operand"; continue; }
-      if (c === "<" && isLetter(raw[k + 1]) && (prev === "operator" || markupMayFollow)) {
-        k = readElement(k); prev = "operand"; markupMayFollow = false; continue;
+      if (c === "<" && isLetter(raw[k + 1])) {
+        let markup = prev === "operator" || afterMarkupWord;
+        if (!markup) { ambig.add(k); markup = asMarkup(k); }
+        if (markup) { k = readElement(k); prev = "operand"; afterMarkupWord = false; continue; }
       }
       if (/[A-Za-z0-9_$@]/.test(c)) {
         const at = k;
         while (k < n && /[A-Za-z0-9_$@.]/.test(raw[k])) k++;
         const word = raw.slice(at, k);
         prev = REGEX_AFTER_WORDS.has(word) ? "operator" : "operand";
-        markupMayFollow = MARKUP_AFTER_WORDS.has(word);
+        afterMarkupWord = MARKUP_AFTER_WORDS.has(word);
         continue;
       }
-      if (c === "{" || c === "(" || c === "[") { depth++; k++; prev = "operator"; markupMayFollow = true; continue; }
+      if (c === "{" || c === "(" || c === "[") { depth++; k++; prev = "operator"; afterMarkupWord = false; continue; }
       if ((c === "}" || c === ")" || c === "]")) {
         if (depth === 0 && close !== null && c === close) return k + 1;
         depth--; k++;
         prev = c === "}" ? "operator" : "operand";
-        markupMayFollow = c !== "]";
+        afterMarkupWord = false;
         continue;
       }
       // Round 5 (review F1b): a POSTFIX `++` / `--` / `!` (non-null) after an operand leaves an operand
       // — `x.n++ / 2` divides, it does not open a regex.
-      if (prev === "operand" && (c === "+" || c === "-") && raw[k + 1] === c) { k += 2; markupMayFollow = false; continue; }
-      if (prev === "operand" && c === "!" && raw[k + 1] !== "=") { k++; markupMayFollow = false; continue; }
+      if (prev === "operand" && (c === "+" || c === "-") && raw[k + 1] === c) { k += 2; afterMarkupWord = false; continue; }
+      if (prev === "operand" && c === "!" && raw[k + 1] !== "=") { k++; afterMarkupWord = false; continue; }
       prev = "operator";
-      markupMayFollow = true;
+      afterMarkupWord = false;
       k++;
     }
     return n;

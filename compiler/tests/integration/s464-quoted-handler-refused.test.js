@@ -692,3 +692,46 @@ describe("Round 5 F2 — image-loading `<link rel>` is an explicit token set; an
     expect(r.all.filter((d) => d.code === SE)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 6 — review NEW-1 (ambiguous `<` read both ways) and NEW-2 (animation with a dynamic href)
+// ---------------------------------------------------------------------------
+
+describe("Round 6 NEW-1 — an ambiguous `<` after an operand is read BOTH ways; the sink hits are unioned", () => {
+  const lam = (body) => `<program>\n<items> = [{ name: "a" }]\nconst List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>\n<List items=@items row={ (x) => ${body} }/>\n</program>\n`;
+  const codesOf = (r) => r.all.map((d) => d.code).filter((c) => /^E-ATTR-(QUOTED-HANDLER|STATIC-EXECUTABLE|INTERP-EXECUTABLE)$/.test(c));
+  test("`f(x) <g ? \"x>\" : \"</b>\"` does not hide the handler after it", () => {
+    expect(codesOf(compile("r6-sw1", lam(`<span>\${ f(x) <g ? "x>" : "</b>" }<b onclick="p()">y</b></span>`)))).toEqual(["E-ATTR-QUOTED-HANDLER"]);
+  });
+  test("the same with an href and after an identifier", () => {
+    expect(codesOf(compile("r6-sw2", lam(`<span>\${ f(x) <g ? "x>" : "</a>" }<a href="javascript:p()">y</a></span>`)))).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
+    expect(codesOf(compile("r6-sw3", lam(`<span>\${ x.n <g ? "x>" : "</b>" }<b onclick="p()">y</b></span>`)))).toEqual(["E-ATTR-QUOTED-HANDLER"]);
+  });
+  test("legit comparisons stay clean", () => {
+    for (const [i, body] of [
+      `<span>\${ f(x) <g ? "a" : "b" }</span>`,
+      `<span>\${ x.ys.indexOf(1) <x.n }</span>`,
+      `<span>\${ (x.n)<b }</span>`,
+    ].entries()) {
+      expect(codesOf(compile(`r6-ok${i}`, lam(body)))).toEqual([]);
+    }
+  });
+  test("markup after `)` is still judged (`if (c) <b …>`)", () => {
+    expect(codesOf(compile("r6-ifm", lam(`<span>\${ if (x.n > 1) { lift <b onclick="p()">y</b> } }</span>`)))).toEqual(["E-ATTR-QUOTED-HANDLER"]);
+  });
+});
+
+describe("Round 6 NEW-2 — an animation with an href in ANY form targets another element (no parent-<image> admission)", () => {
+  const SE = "E-ATTR-STATIC-EXECUTABLE";
+  const se = (name, src) => compile(name, src).all.filter((d) => d.code === SE).length;
+  const PNG = "data:image/png;base64,AAAA";
+  test("a computed `href=${…}` on the animation", () => {
+    expect(se("r6-dynhref", `<program>\n<svg><a id="l" href="/x">t</a><image href="/a.png"><set attributeName="href" href=\${"#l"} to="${PNG}"/></image></svg>\n</program>\n`)).toBe(1);
+  });
+  test("a cell `xlink:href=@t` on the animation", () => {
+    expect(se("r6-cellxl", `<program>\n<t> = "#l"\n<svg><a id="l" href="/x">t</a><image href="/a.png"><set attributeName="href" xlink:href=@t to="${PNG}"/></image></svg>\n</program>\n`)).toBe(1);
+  });
+  test("control: no href on the animation — still admitted", () => {
+    expect(se("r6-noh", `<program>\n<svg><image href="/a.png"><animate attributeName="href" to="${PNG}"/></image></svg>\n</program>\n`)).toBe(0);
+  });
+});

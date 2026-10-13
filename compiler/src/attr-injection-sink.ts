@@ -396,6 +396,20 @@ export const STATIC_NAV_LOAD_URL_ATTRS: ReadonlySet<string> = new Set([
   "imagesrcset", "archive", "codebase", "classid", "dynsrc", "lowsrc", "manifest", "icon",
 ]);
 
+/**
+ * Does `attrs` carry attribute `name` (case-insensitive) in ANY form — static, an expression, a
+ * variable, a presence attribute? (S464 round 6, review NEW-2: an animation element with a computed
+ * `href=${"#l"}` / `xlink:href=@t` targets ANOTHER element, so the parent-`<image>` admission must not
+ * apply.)
+ */
+function hasAttr(attrs: ReadonlyArray<unknown> | null | undefined, name: string): boolean {
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown } | null;
+    if (attr && typeof attr.name === "string" && attr.name.toLowerCase() === name) return true;
+  }
+  return false;
+}
+
 /** The STATIC string value of attribute `name` in `attrs` (AST or lift-string form), or null. */
 function staticAttrValue(attrs: ReadonlyArray<unknown> | null | undefined, name: string): string | null {
   for (const a of attrs ?? []) {
@@ -461,13 +475,13 @@ export function classifyStaticExecutableAttr(
     // An animation value writes the attribute `attributeName` names: judged only when that is a
     // navigate / load attribute, or is computed ("" — any attribute may be animated: fail closed).
     if (target !== "" && !STATIC_NAV_LOAD_URL_ATTRS.has(target)) return null;
-    // S464 round 5 (review F2): an animation inside SVG `<image>` / `<feImage>` (with no `href` of its
-    // own naming another target) animates that element's `href` — an image load, judged as an image
+    // S464 round 5 (review F2): an animation inside SVG `<image>` / `<feImage>` (with no `href` /
+    // `xlink:href` of its own in ANY form — round 6 — which would name another target) animates that element's `href` — an image load, judged as an image
     // source (raster `data:image/…` admitted).
     const parent = element && typeof element.parentTag === "string" ? element.parentTag.toLowerCase() : "";
     const animatesImageHref = (target === "href" || target === "xlink:href") &&
       (parent === "image" || parent === "feimage") &&
-      staticAttrValue(element?.attrs, "href") === null && staticAttrValue(element?.attrs, "xlink:href") === null;
+      !hasAttr(element?.attrs, "href") && !hasAttr(element?.attrs, "xlink:href");
     const judgedTarget = animatesImageHref ? "src" : target;
     if (_scrml_animation_value_admitted(lower, value, judgedTarget)) return null;
     const bad = (lower === "values" ? value.split(";") : [value])
