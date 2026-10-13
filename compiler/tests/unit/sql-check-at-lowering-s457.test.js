@@ -35,11 +35,21 @@ const EXECUTED_DB_TIMEOUT_MS = 30_000;
 
 const BT = "`";
 
-/** Compile one server function body `stmt` (with `decl` before it) in a database program. */
+/**
+ * Compile one server function body `stmt` (with `decl` before it) in a database program.
+ *
+ * s464 fix round 3 (owner ruling S464 "(a) Close it"): a cell read in a template
+ * interpolation of a WHOLLY-server function is E-REACTIVE-003 (it is always
+ * `undefined` there). When `decl` declares a cell, the host function therefore also
+ * writes a client cell, which makes it CPS-split: its `@cell` reads are MARSHALLED
+ * into the request body and lowered through the same `_scrml_body["cell"]` text path
+ * these fixtures exist to exercise.
+ */
 function compileFn(stmt, decl = "") {
   const dir = mkdtempSync(join(tmpdir(), "s457-lowering-"));
   try {
     const file = join(dir, "app.scrml");
+    const cps = /@\w/.test(decl);
     const src = `<program db="./app.db">
   <schema>
     notes {
@@ -48,9 +58,9 @@ function compileFn(stmt, decl = "") {
     }
   </schema>
   \${
-    ${decl}
+    ${decl}${cps ? "\n    @s457done = 0" : ""}
     function f(x) {
-      ${stmt}
+      ${stmt}${cps ? "\n      @s457done = 1" : ""}
       return 1
     }
   }
