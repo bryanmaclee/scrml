@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
-| MED | 613 | 6 |
-| LOW | 386 | 0 |
+| MED | 617 | 6 |
+| LOW | 391 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -202,6 +202,42 @@ Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mj
 ### g-tree-path-destructured-arrow-param-s465 — an arrow with a destructured parameter emitted through the tree path becomes `(__destructured__) => k + v` → ReferenceError at run time — `NEW S465; MED; open`
 <!-- @gap id=g-tree-path-destructured-arrow-param-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(arrow param emission on the tree path) prov=review:s465-await-r5 -->
 `[[s, 1]].map(([k, v]) => k + v)` and `({ k }) =>` at server function top level throw on main (probe rv7/g.mjs dTop/dTopObj). The await branch routes block-bodied server function values through this path, so it newly breaks shapes that worked on main — fix this before that branch lands.
+
+### g-value-function-stored-by-type-design-s465 — DESIGN ITEM: E-VALUE-FUNCTION-STORED is POSITION-ENUMERATED (a retrofit that lists the places a function can be put into a value); enforce it BY TYPE instead — a value's type may not contain a function type — `NEW S465; MED; open (design item — owner ruled S464 "(a) Fix + land + type rule" to bank it)`
+<!-- @gap id=g-value-function-stored-by-type-design-s465 sev=MED status=open locus=compiler/src/value-function-stored.ts(position enumeration)+compiler/src/type-system.ts(no function-in-value-type rule) prov=ruling:user-voice-scrml.md S464 "(a) Fix + land + type rule" -->
+Three adversarial review rounds of s465-value-fn-land each found new positions the enumeration missed (block-bodied lambdas, aliases, field writes, enum payloads, host stores, closure-returning callbacks, imports, re-exports, match arms…). Positions still open when the branch landed (evidence for the by-type design): `reduceRight` with a function accumulator (`g-vfs-reduceright-s465`), `Array.prototype.map.call(xs, () => g)` (`g-vfs-proto-call-s465`), `Array(g)` / `new Array(g)` (`g-vfs-array-ctor-s465`), `Object.setPrototypeOf(o, { f: g })` and an aliased `const d = Object.defineProperty` (`g-vfs-host-store-alias-s465`), a function read off host data (`g-host-value-callable-unknown-s465`), a function passed to an imported function that stores its parameter (`g-cross-module-param-store-unjudged-s465`), a value-form `if` inside an expression (`g-value-form-if-in-expression-invalid-js-s465`), a namespace import's members. A type rule closes the class by construction: every value position has a type; refuse any whose type (deep) contains a function type, with the passed/called positions (argument, callback, prop, handler, local binding) typed as such.
+
+### g-vfs-reduceright-s465 — `xs.reduceRight((a, x) => twice, thrice)` — a reducer whose accumulator is a function is not judged as storing (the result is a function bound to a local; storing it later is refused) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-reduceright-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(callMayFn reduce/reduceRight) prov=review:s465-value-fn-r3 (ca/h28) -->
+Filed per S464 "(a) Fix + land + type rule" (round 3 files remaining position holes rather than fixing them). Closed by the by-type design item.
+
+### g-vfs-proto-call-s465 — `Array.prototype.map.call(xs, () => twice)` builds an array of functions without E-VALUE-FUNCTION-STORED (the closure-array rule reads `.map` on a receiver, not `.call` on the prototype method) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-proto-call-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(builtFromCallback) prov=review:s465-value-fn-r3 (ca/h13) -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-array-ctor-s465 — `Array(twice)` / `new Array(twice)` kept as a value builds an array holding a function without E-VALUE-FUNCTION-STORED — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-array-ctor-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(kept host results judge storing METHODS, not constructors) prov=review:s465-value-fn-r3 -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-host-store-alias-s465 — `Object.setPrototypeOf(o, { f: twice })` and an aliased host store (`const d = Object.defineProperty; d(o, "f", { value: twice })`) put a function into a scrml value without E-VALUE-FUNCTION-STORED — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-host-store-alias-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(WRITES_INTO_FIRST names a fixed set by spelling) prov=review:s465-value-fn-r3 -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-fixpoint-quadratic-s465 — the E-VALUE-FUNCTION-STORED fact solver re-walks the whole file each pass, so a reverse-ordered chain of N bindings costs O(N²) (synthetic 2500-binding files take seconds; real-corpus files converge in a few passes) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-fixpoint-quadratic-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(analyze fixpoint loop) prov=review:s465-value-fn-r3 (perf/) -->
+No corpus file is affected (measured). Fix direction: a worklist over the binding-dependency graph instead of whole-file passes, or the by-type design item (types are solved once).
+
+### g-export-list-registers-first-name-only-s465 — a local export list `export { adder2, inc2 }` registers only the FIRST name in the client module registry (`_scrml_modules`): the importer's `inc2` is `undefined` at run time, compiled clean — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-export-list-registers-first-name-only-s465 sev=MED status=open locus=compiler/src/codegen/emit-client.ts(buildModuleRegistryFooter — export-decl exportedName "adder2, inc2" read as one name) prov=review:s465-value-fn-r3 (xi/y01-exportlist) -->
+The export-decl carries `exportedName: "adder2, inc2"` and a `renames` list; the registry footer reads the former. Found by the round-3 review of s465-value-fn-land; not caused by it.
+
+### g-value-form-if-in-expression-invalid-js-s465 — a value-form `if` written INSIDE an expression (`{ f: if (c) { a } else { b } }`, `xs.map((x) => if x > 1 { a } else { b })`) compiles clean and emits it verbatim — invalid JS (`{ f : if ( … ) { … } }`) — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-value-form-if-in-expression-invalid-js-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(ParseError escape hatch kept)+codegen(emits the raw text) prov=review:s465-value-fn-r3 (ca/j01, ca/i08) -->
+The expression parser keeps the text as a ParseError escape hatch and codegen emits it as-is; no diagnostic. The value-form `if` is specified for the declaration initializer (`const a = if (c) { lift v }`), which E-VALUE-FUNCTION-STORED now reads. Fix direction: refuse a value-form `if` in expression position with a named diagnostic (or lower it); until then E-VALUE-FUNCTION-STORED cannot see the arm values there.
+
+### g-match-arm-lambda-value-misread-s465 — a `match` arm whose VALUE is an arrow (`1 => (y) => y, _ => (y) => y + 1`) is split by the shared arm reader as a presence arm `(y) => y`; codegen emits invalid JS (`else { const y = …; return y; }` with no `if`), compiled clean — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-match-arm-lambda-value-misread-s465 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString / parseMatchArm presence-arm form) prov=review:s465-value-fn-r3 (ca/j03) -->
+E-VALUE-FUNCTION-STORED reads arms with the same splitter and fails closed on the unreadable `1 =>` piece, so the stored case is refused; the invalid emission for a non-stored lambda-valued match remains. Fix direction: the arm splitter must not start a presence arm inside an arm's result.
 
 ### g-enum-payload-type-accepts-function-s465 — an enum variant whose payload field is typed `string` (`type Op:enum = { Apply(f: string) }`) accepts a FUNCTION argument (`Op.Apply(twice)`, `.Apply(twice)`) with no type error; only E-VALUE-FUNCTION-STORED (the value rule) refuses it — `NEW S465; MED; open (pre-existing on BASE)`
 <!-- @gap id=g-enum-payload-type-accepts-function-s465 sev=MED status=open locus=searched:compiler/src/type-system.ts(enum constructor argument vs declared payload field type) prov=review:s465-value-fn-r2 -->
