@@ -156,24 +156,34 @@ export function diffTime(a, b, unit) {
 // debounce / throttle — S464 "(a) Struct + free fns". A Debouncer / Throttler is
 // DATA ({ id, delay } / { id, limit }); the timed function is kept here in the
 // timer table and driven by run / cancel / flush. Mirrors stdlib/time/index.scrml.
-// id -> { kind, fn, wait, timer, pendingArgs, cooling }; entries are never removed,
-// so `size + 1` is a fresh id.
-const timerState = new Map();
+// The table is a WeakMap keyed by the struct OBJECT: a dropped timer is collected
+// with its struct (nothing to dispose), and only the struct debounce / throttle
+// returned drives its function — a hand-built or copied value drives nothing.
+// The struct's delay / limit IS the wait run uses.
+// struct -> { kind, fn, timer, pendingArgs, cooling }
+const timerState = new WeakMap();
+const timerIds = { next: 0 };
+
+function stateOf(t) {
+  return t !== null && typeof t === "object" ? timerState.get(t) : undefined;
+}
 
 export function debounce(fn, delay) {
-  const id = timerState.size + 1;
-  timerState.set(id, { kind: "debounce", fn, wait: delay, timer: null, pendingArgs: null, cooling: false });
-  return { id, delay };
+  timerIds.next = timerIds.next + 1;
+  const d = { id: timerIds.next, delay };
+  timerState.set(d, { kind: "debounce", fn, timer: null, pendingArgs: null, cooling: false });
+  return d;
 }
 
 export function throttle(fn, limit) {
-  const id = timerState.size + 1;
-  timerState.set(id, { kind: "throttle", fn, wait: limit, timer: null, pendingArgs: null, cooling: false });
-  return { id, limit };
+  timerIds.next = timerIds.next + 1;
+  const t = { id: timerIds.next, limit };
+  timerState.set(t, { kind: "throttle", fn, timer: null, pendingArgs: null, cooling: false });
+  return t;
 }
 
 export function run(t, ...args) {
-  const st = timerState.get(t && t.id);
+  const st = stateOf(t);
   if (!st) return;
   if (st.kind === "debounce") {
     if (st.timer !== null) clearTimeout(st.timer);
@@ -183,7 +193,7 @@ export function run(t, ...args) {
       const pending = st.pendingArgs;
       st.pendingArgs = null;
       st.fn(...pending);
-    }, st.wait);
+    }, t.delay);
     return;
   }
   if (!st.cooling) {
@@ -197,14 +207,14 @@ export function run(t, ...args) {
         st.pendingArgs = null;
         st.fn(...pending);
       }
-    }, st.wait);
+    }, t.limit);
   } else {
     st.pendingArgs = args;
   }
 }
 
 export function cancel(t) {
-  const st = timerState.get(t && t.id);
+  const st = stateOf(t);
   if (!st) return;
   if (st.timer !== null) clearTimeout(st.timer);
   st.timer = null;
@@ -213,7 +223,7 @@ export function cancel(t) {
 }
 
 export function flush(t) {
-  const st = timerState.get(t && t.id);
+  const st = stateOf(t);
   if (!st) return;
   if (st.timer !== null) clearTimeout(st.timer);
   st.timer = null;

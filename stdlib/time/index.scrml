@@ -245,11 +245,18 @@ ${
     // function it times is PASSED once, to debounce / throttle, and kept in this
     // module's timer table; the caller drives it with the free functions run /
     // cancel / flush, passing the struct. Same shape as scrml:auth's RateLimiter.
+    //
+    // The table is keyed by the struct OBJECT (a WeakMap), so (a) a timer the
+    // program has dropped is collected with its struct — nothing to dispose — and
+    // (b) only the struct debounce / throttle returned drives its function: a
+    // hand-built or copied `{ id, delay }` is not in the table and drives nothing.
+    // The struct's `delay` / `limit` IS the wait `run` uses.
     // ---------------------------------------------------------------------------
 
-    // id -> { kind, fn, wait, timer, pendingArgs, cooling }. Entries are never
-    // removed, so `size + 1` is a fresh id.
-    const timerState = new Map()
+    // struct -> { kind, fn, timer, pendingArgs, cooling }
+    const timerState = new WeakMap()
+    // id source: distinguishes two debouncers with the same wait under `==`.
+    const timerIds = { next: 0 }
 
     export type Debouncer:struct = {
         id: number,
@@ -274,10 +281,11 @@ ${
      *   <input oninput=${ (e) => run(searchLater, e.target.value) }/>
      *   // cancel(searchLater) — drop the pending call; flush(searchLater) — run it now
      */
-    export function debounce(fn, delay) {
-        const id = timerState.size + 1
-        timerState.set(id, { kind: "debounce", fn: fn, wait: delay, timer: not, pendingArgs: not, cooling: false })
-        return { id: id, delay: delay }
+    export function debounce(fn, delay) -> Debouncer {
+        timerIds.next = timerIds.next + 1
+        const d = { id: timerIds.next, delay: delay }
+        timerState.set(d, { kind: "debounce", fn: fn, timer: not, pendingArgs: not, cooling: false })
+        return d
     }
 
     /**
@@ -290,17 +298,19 @@ ${
      *   <div onscroll=${ run(onScrollLimited) }>…</div>
      *   // later: cancel(onScrollLimited)
      */
-    export function throttle(fn, limit) {
-        const id = timerState.size + 1
-        timerState.set(id, { kind: "throttle", fn: fn, wait: limit, timer: not, pendingArgs: not, cooling: false })
-        return { id: id, limit: limit }
+    export function throttle(fn, limit) -> Throttler {
+        timerIds.next = timerIds.next + 1
+        const t = { id: timerIds.next, limit: limit }
+        timerState.set(t, { kind: "throttle", fn: fn, timer: not, pendingArgs: not, cooling: false })
+        return t
     }
 
     /**
      * Drive a Debouncer or Throttler with these arguments (see debounce / throttle).
+     * A value that debounce / throttle did not return drives nothing.
      */
     export function run(t, ...args) {
-        const st = timerState.get(t.id)
+        const st = timerState.get(t)
         if (st is not) return
         if (st.kind == "debounce") {
             if (st.timer is given) clearTimeout(st.timer)
@@ -310,7 +320,7 @@ ${
                 const pending = st.pendingArgs
                 st.pendingArgs = not
                 st.fn(...pending)
-            }, st.wait)
+            }, t.delay)
             return
         }
         if (!st.cooling) {
@@ -324,7 +334,7 @@ ${
                     st.pendingArgs = not
                     st.fn(...pending)
                 }
-            }, st.wait)
+            }, t.limit)
         } else {
             st.pendingArgs = args
         }
@@ -335,7 +345,7 @@ ${
      * throttle: the trailing call, and the window).
      */
     export function cancel(t) {
-        const st = timerState.get(t.id)
+        const st = timerState.get(t)
         if (st is not) return
         if (st.timer is given) clearTimeout(st.timer)
         st.timer = not
@@ -348,7 +358,7 @@ ${
      * Nothing pending → nothing runs.
      */
     export function flush(t) {
-        const st = timerState.get(t.id)
+        const st = timerState.get(t)
         if (st is not) return
         if (st.timer is given) clearTimeout(st.timer)
         st.timer = not

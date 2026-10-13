@@ -57,6 +57,41 @@ describe("scrml:time debounce — a Debouncer struct driven by run / cancel / fl
   });
 });
 
+describe("scrml:time — state is keyed by the struct's identity (S464 round 3)", () => {
+  test("a hand-built or copied struct drives nothing (unforgeable)", async () => {
+    const seen = [];
+    const a = debounce((x) => seen.push("a" + x), 10);
+    run({ id: a.id, delay: 0 }, "forged");
+    run({ ...a }, "copy");
+    await wait(30);
+    expect(seen).toEqual([]);
+    run(a, "real");
+    await wait(30);
+    expect(seen).toEqual(["areal"]);
+  });
+
+  test("the struct's own delay is the wait run uses", async () => {
+    const seen = [];
+    const fast = debounce((x) => seen.push(x), 5);
+    const slow = debounce((x) => seen.push(x), 60);
+    run(slow, "slow"); run(fast, "fast");
+    await wait(30);
+    expect(seen).toEqual(["fast"]);
+    await wait(60);
+    expect(seen).toEqual(["fast", "slow"]);
+  });
+
+  test("a dropped debouncer is collectable (no table entry outlives its struct)", async () => {
+    if (typeof Bun === "undefined" || typeof Bun.gc !== "function") return;
+    Bun.gc(true);
+    const before = process.memoryUsage().heapUsed;
+    for (let i = 0; i < 500; i++) { const big = new Array(10000).fill(i); debounce(() => big.length, 10); }
+    Bun.gc(true);
+    const grownMB = (process.memoryUsage().heapUsed - before) / 1e6;
+    expect(grownMB).toBeLessThan(10); // 500 × ~80 KB = ~40 MB if the table kept them
+  });
+});
+
 describe("scrml:time throttle — a Throttler struct", () => {
   test("leading call at once, the last call inside the window runs at its end", async () => {
     const seen = [];
