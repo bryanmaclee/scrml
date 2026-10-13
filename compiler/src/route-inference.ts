@@ -97,6 +97,8 @@ import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
+import { isPlainPureFn, forEachAtRef, parsedParamDefaults, fnReachesAtName } from "./at-refs.ts";
+export { isPlainPureFn, forEachAtRef, parsedParamDefaults } from "./at-refs.ts";
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
 
@@ -1440,132 +1442,6 @@ function makeFunctionNodeId(filePath: string, fnNode: FunctionDeclNode): string 
   return `${filePath}::${fnNode.span.start}`;
 }
 
-/**
- * s464-pure-fn-placement — a plain pure function: `fn` (or the deprecated
- * `pure function`) WITHOUT the `server` pin. §12.4 gives such a function "no
- * client or server classification"; it is never a route and never async
- * (§13.4, §48.3.5). `server fn` is the explicit pin and is excluded here.
- */
-export function isPlainPureFn(fnNode: unknown): boolean {
-  if (!fnNode || typeof fnNode !== "object") return false;
-  const n = fnNode as Record<string, unknown>;
-  if (n.kind !== undefined && n.kind !== "function-decl") return false;
-  if (n.isServer === true) return false;
-  if (n.isGenerator === true) return false;
-  if (n.isAsync === true) return false;
-  if (n.isHandleEscapeHatch === true) return false;
-  return n.fnKind === "fn" || n.isPure === true;
-}
-
-/**
- * s464 fix round 2 — THE reader of `@`-references (cells, derived values, channel
- * cells, `@session` / `@currentUser`) in a function's code. Both decisions that
- * need it read it HERE, from the parsed expression tree, never by regex over
- * source text: the placement decision (a plain `fn` that reaches `@`-state keeps
- * its prior path, `fnReachesAtName`) and E-REACTIVE-003
- * (`detectServerFreeClientCellReads`). Before this they were two readers of one
- * text and disagreed — a `"@n"` string default counted for one and not the other.
- *
- * What counts:
- *   - an `ident` node whose name starts with `@`;
- *   - a `?{}` query's text (`${@x}` interpolations), as before;
- *   - with `opaqueCode: true` ONLY: a template literal's `${…}` interpolations and
- *     an `escape-hatch` node's code (a block-body lambda), which the expression
- *     tree keeps as raw text — read only after `blankLiteralTextInSource` has
- *     blanked every string literal, template quasi and comment.
- * What never counts: string / template text, regex literals, comments.
- *
- * `opaqueCode` is a COVERAGE choice, not a second parser. The placement decision
- * turns it on because over-detection is its safe direction (the `fn` keeps its
- * prior path). E-REACTIVE-003 leaves it off — it has never read template
- * interpolations or escape-hatch code, and turning it on is a newly-rejecting
- * change that needs its own ruling (g-template-literal-cell-read-in-fn-undefined-on-server-s464).
- */
-const AT_REF_RE = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
-function forEachAtRefInCode(code: string, cb: (bare: string) => void): void {
-  const blanked = blankLiteralTextInSource(code);
-  const re = new RegExp(AT_REF_RE.source, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(blanked)) !== null) {
-    const prev = m.index > 0 ? blanked[m.index - 1] : "";
-    if (prev && /[A-Za-z0-9_$.]/.test(prev)) continue; // `a@b` / `x.@y` are not refs
-    cb(m[1]);
-  }
-}
-export function forEachAtRef(
-  root: unknown,
-  cb: (bare: string, span: Span | undefined) => void,
-  opts: { descendNestedFns: boolean; opaqueCode: boolean },
-  inheritedSpan?: Span,
-): void {
-  const visited = new WeakSet<object>();
-  const visit = (node: any, stmtSpan: Span | undefined): void => {
-    if (!node || typeof node !== "object" || visited.has(node)) return;
-    visited.add(node);
-    if (Array.isArray(node)) { for (const c of node) visit(c, stmtSpan); return; }
-    if (node.kind === "function-decl" && !opts.descendNestedFns) return;
-    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : stmtSpan;
-    if (node.kind === "ident" && typeof node.name === "string"
-        && node.name.length > 1 && node.name.charCodeAt(0) === 0x40 /* @ */) {
-      cb(node.name.slice(1), sp);
-    }
-    if (node.kind === "sql" && typeof node.query === "string") {
-      const re = new RegExp(AT_REF_RE.source, "g");
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(node.query)) !== null) cb(m[1], sp);
-    }
-    if (opts.opaqueCode && node.kind === "lit" && node.litType === "template" && node.hasInterpolation === true && typeof node.raw === "string") {
-      forEachAtRefInCode(node.raw, (b) => cb(b, sp));
-    }
-    if (opts.opaqueCode && node.kind === "escape-hatch" && node.nativeKind !== "Literal" && typeof node.raw === "string") {
-      forEachAtRefInCode(node.raw, (b) => cb(b, sp));
-    }
-    for (const key of Object.keys(node)) {
-      if (key === "span") continue;
-      const val = node[key];
-      if (val && typeof val === "object") visit(val, sp);
-    }
-  };
-  visit(root, inheritedSpan);
-}
-
-/**
- * A function's parameter defaults as PARSED expressions. The parser keeps a
- * default as raw text (`defaultValue`); it is parsed here so the `@`-reader sees
- * the same tree shape as the body.
- */
-const _parsedDefaultsCache = new WeakMap<object, ExprNode[]>();
-export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode[] {
-  if (!fnNode || typeof fnNode !== "object") return [];
-  const hit = _parsedDefaultsCache.get(fnNode as object);
-  if (hit) return hit;
-  const out: ExprNode[] = [];
-  const params = (fnNode as any).params;
-  for (const p of (Array.isArray(params) ? params : [])) {
-    if (p && typeof p === "object" && typeof p.defaultValue === "string" && p.defaultValue.trim()) {
-      try { out.push(parseExprToNode(p.defaultValue, filePath, 0)); }
-      catch { out.push({ kind: "escape-hatch", raw: p.defaultValue } as unknown as ExprNode); }
-    }
-  }
-  _parsedDefaultsCache.set(fnNode as object, out);
-  return out;
-}
-
-/**
- * s464-pure-fn-placement — does this function reference any `@`-name in its body
- * (nested functions included) or its parameter defaults? Such a `fn` keeps its
- * prior placement path, so a server body that reaches it still meets the
- * fail-closed diagnostics (E-REACTIVE-003, E-CHANNEL-SERVER-CELL-READ,
- * E-SESSION-AMBIENT-SERVER) instead of shipping a client-cell read into the
- * server bundle.
- */
-function fnReachesAtName(fnNode: unknown, filePath: string): boolean {
-  let found = false;
-  const hit = (): void => { found = true; };
-  forEachAtRef((fnNode as any)?.body, hit, { descendNestedFns: true, opaqueCode: true });
-  if (!found) forEachAtRef(parsedParamDefaults(fnNode, filePath), hit, { descendNestedFns: true, opaqueCode: true });
-  return found;
-}
 
 /**
  * s464-pure-fn-placement — decide which bundle(s) carry each plain pure `fn`.
