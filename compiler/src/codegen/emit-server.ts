@@ -49,9 +49,11 @@ import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHODS } from "./async-co
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { asyncValueUsesIn } from "./fn-valued-bindings.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
-import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
+import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
+import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
+import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
-import { extractCalleeNames, buildServerCalleeImportMap, injectHandleRequestAwaits, asyncLocalBindingsOfFile } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits, asyncLocalBindingsOfFile } from "./scheduling.ts";
 import type { CalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1029,6 +1031,9 @@ function emitModuleValueExportLines(
   assembledBody: string,
   errors?: CGError[],
   exportRegistry?: ServerExportRegistry | null,
+  /** s464 fix round 3 (N1): when given, `export const/let/var` values go HERE (for the
+   *  D-5 closure to place in dependency order) instead of into the returned lines. */
+  outValues?: ExportedModuleValue[],
 ): string[] {
   // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
   // collectLogicBlocks — exported value decls live in the file's logic body.
@@ -1195,7 +1200,11 @@ function emitModuleValueExportLines(
         const initNode = parseExprToNode(init, filePath, 0);
         const lowered = emitExprField(initNode, init, { mode: "server" });
         const _kw = kind === "var" ? "var" : (kind === "let" ? "let" : "const");
-        constLines.push(`export ${_kw} ${name} = ${lowered};`);
+        if (outValues) {
+          outValues.push({ name, text: `export ${_kw} ${name} = ${lowered};`, order: (stmt.span?.start ?? 0), initNode });
+        } else {
+          constLines.push(`export ${_kw} ${name} = ${lowered};`);
+        }
         continue;
       }
 
@@ -1284,72 +1293,256 @@ function emitModuleValueExportLines(
 }
 
 /**
- * D-5 (adopter report, S293) — emit a MODULE-LEVEL `const` / `let` VALUE binding
- * that the server bundle CLOSES OVER.
+ * D-5 (adopter report, S293) + s464 fix round 2 — the module-level bindings the
+ * server bundle CLOSES OVER, as a transitive closure, emitted in dependency order.
  *
- * THE BUG. A `fn` declaration crosses the server/client boundary fine (route
- * inference promotes it and `emitEndpointServerHelperLines` / the peer-callable
- * loop re-emit its body server-side). A module-level `const` did NOT:
+ * THE BUG (S293). `${ const ROLES = [...]  fn labelFor(i) { return ROLES[i] }
+ * server fn describe(i) { return labelFor(i) } }` emitted `return ROLES[i];` into
+ * `.server.js` with no `const ROLES` in that bundle — a runtime ReferenceError
+ * with zero diagnostics. The S293 pass fixed the one-hop case only.
  *
- *     ${ const ROLES = ["admin", "editor", "viewer"]
- *        fn labelFor(i) { return ROLES[i] }
- *        server fn describe(i) -> string { return labelFor(i) } }
+ * WHAT ROUND 2 ADDS (the bindings a server body needs are a CLOSURE, not a list):
+ *   - a const derived from another const (`const BASE = 5; const RATE = BASE * 2`);
+ *   - a const whose initializer calls a plain pure `fn` (`const RATE = dbl(4)`) —
+ *     the `fn` is emitted too (as a synchronous helper, like every pure-`fn` helper);
+ *   - member reads (`const TOTAL = LIST.length`) and destructuring declarations
+ *     (`const { a, b } = …` / `const [p, q] = …`);
+ *   - a plain `fn` the bundle needs only through a module value (`export const
+ *     V = f(2)`).
+ * Each binding is emitted once, values in SOURCE ORDER (a `const` can only read an
+ * earlier one), functions hoisted.
  *
- * emitted `return ROLES[i];` into `.server.js` with NO `const ROLES` anywhere in
- * that bundle — a runtime `ReferenceError`, with ZERO compile errors and ZERO
- * warnings. (The declaration ships to the CLIENT bundle, where nothing on the
- * server path can reach it.) The reporter said this cost them the most debugging
- * time in their slice.
+ * ORDER (the TDZ fix). Exported values (`export const A = BASE + 1`) are emitted by
+ * the value-export block and RUN AT MODULE LOAD, so what they read must already be
+ * initialized. The caller therefore places this block's `before` lines ahead of
+ * the value-export block; only a binding that itself reads an exported value goes
+ * in `after` (emitted after the value exports).
  *
- * WHAT THIS IS NOT. It does NOT move anything out of the client bundle — the
- * declaration still ships to the client exactly as before, so the §14.8.9
- * protect-floor surface is untouched. It only ADDS the binding to the server
- * bundle, alongside the server-side code that already references it.
+ * REFUSAL (never a dangling reference). A needed binding that cannot run on the
+ * server — its initializer reads `@`-state, a browser-only global, or a name the
+ * server bundle does not have — is E-ROUTE-002 (§12.4: a server-escalated function
+ * SHALL NOT reach client-only code; the message names the chain). The refusal is
+ * raised only on PRECISE evidence: a link through an initializer's parsed
+ * identifiers, from a server-body use that is not a property access, an object
+ * key, or a name the body declares itself. A token that might be a shadowing local
+ * still gets the binding emitted when it is emittable (harmless), but never a
+ * refusal. Bindings the route path owns (`?{}` / server-only inits), markup
+ * components, and declarations without a parsed initializer are skipped as before.
  *
- * FILTERS (each one keeps a non-value out of the server bundle):
- *   - `isServerOnlyNode` — a `?{}` / transaction / server-meta init is not a
- *     module value; the route path owns it.
- *   - markup-component consts (`const Card = <div>…`) — not a runtime value.
- *   - already declared in the assembled body — no double declaration.
- *   - NOT referenced by the assembled server body — a client-only const stays
- *     client-only, so a program with no closure across the boundary emits
- *     byte-identically to before this fix.
- *   - the initializer's free identifiers must ALL resolve at server module scope
- *     (an earlier emitted const, something already declared in the bundle, or a
- *     host global). A `const X = compute()` whose `compute` is not in the server
- *     bundle is SKIPPED rather than emitted: a module-load `ReferenceError` is
- *     strictly worse than the call-time one, and the honest answer for that
- *     shape is a diagnostic, not a guess.
- *
- * Emission is in SOURCE ORDER so a const that reads an earlier const resolves.
- * Placement at the END of the bundle is safe: every reference is inside a
- * function body (a route handler or an in-process peer), evaluated at call time,
- * never during module init.
+ * Nothing leaves the client bundle: every line here is an ADDITIONAL server-side
+ * declaration (the §14.8.9 protect-floor surface is untouched).
  */
-function emitReferencedModuleConstLines(
+const D5_SERVER_HOST_GLOBALS = new Set<string>([
+  "Math", "JSON", "Date", "Object", "Array", "String", "Number", "Boolean", "RegExp",
+  "Map", "Set", "WeakMap", "WeakSet", "WeakRef", "BigInt", "Symbol", "Promise", "Reflect",
+  "Proxy", "Intl", "Error", "TypeError", "RangeError", "SyntaxError", "ReferenceError",
+  "ArrayBuffer", "DataView", "Uint8Array", "Uint16Array", "Uint32Array", "Int8Array",
+  "Int16Array", "Int32Array", "Float32Array", "Float64Array", "BigInt64Array",
+  "BigUint64Array", "Uint8ClampedArray", "Infinity", "NaN", "undefined", "globalThis",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "decodeURIComponent",
+  "encodeURI", "decodeURI", "URL", "URLSearchParams", "TextEncoder", "TextDecoder",
+  "structuredClone", "atob", "btoa", "console", "crypto",
+]);
+const D5_CLIENT_ONLY_GLOBALS = new Set<string>([
+  "document", "window", "localStorage", "sessionStorage", "navigator", "location", "history",
+]);
+
+/**
+ * `text` with every string literal, template quasi and comment blanked (cached).
+ * s464 fix round 3 (N4): every module-scope / free-use question below is asked of
+ * THIS text, so a column-0 `const LIM = 9` inside a multi-line template literal is
+ * literal text, not a declaration.
+ */
+const _blankedCache = new Map<string, string>();
+function blankedOf(text: string): string {
+  let b = _blankedCache.get(text);
+  if (b === undefined) {
+    b = blankLiteralTextInSource(text, { blankRegex: true });
+    if (_blankedCache.size > 64) _blankedCache.clear();
+    _blankedCache.set(text, b);
+  }
+  return b;
+}
+
+/** Is `name` declared at MODULE scope of `body` (column-0 declaration or a named import)? */
+function moduleScopeDeclares(body: string, name: string): boolean {
+  const code = blankedOf(body);
+  const moduleScope = code.split("\n").filter((l) => !/^\s/.test(l)).join("\n");
+  if (topLevelBindingExists(moduleScope, name)) return true;
+  const re = /^import\s*\{([^}]*)\}\s*from\b/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(code)) !== null) {
+    for (const spec of m[1].split(",")) {
+      const parts = spec.trim().split(/\s+as\s+/);
+      if ((parts[1] ?? parts[0]).trim() === name) return true;
+    }
+  }
+  return false;
+}
+
+/** Identifier tokens of CODE in `text` (literal text and property names excluded). */
+function codeTokens(text: string): Set<string> {
+  const out = new Set<string>();
+  const blanked = blankedOf(text);
+  const re = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blanked)) !== null) {
+    const i = m.index;
+    if (i > 0 && blanked[i - 1] === "." && !(i > 2 && blanked.slice(i - 3, i) === "...")) continue;
+    if (i > 0 && /[0-9]/.test(blanked[i - 1])) continue;
+    out.add(m[0]);
+  }
+  return out;
+}
+
+/**
+ * Precise-evidence test for a REFUSAL: does `body` use `name` as a free reference —
+ * not only as a property key / object key — in a MODULE-SCOPE UNIT (a top-level
+ * function, handler or statement) that does not declare the same name itself?
+ *
+ * s464 fix round 3 (N4): the shadow test is per unit, not bundle-wide — a local
+ * `const W` in an unrelated `server fn other()` no longer hides a free `W` in the
+ * function that needs the module binding. Units are split on column-0 lines of the
+ * literal-blanked text (a template's column-0 line is literal text, not a unit).
+ */
+function bodyHasFreeUse(body: string, name: string): boolean {
+  const blanked = blankedOf(body);
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const local = new RegExp(
+    `(?:\\b(?:const|let|var)\\s+(?:[\\[{][^=;]*\\b)?${esc}\\b)|(?:\\bfunction\\*?\\s*[A-Za-z0-9_$]*\\s*\\([^)]*\\b${esc}\\b[^)]*\\))|(?:\\(([^()]*\\b${esc}\\b[^()]*)\\)\\s*=>)|(?:\\b${esc}\\s*=>)|(?:\\bcatch\\s*\\(\\s*${esc}\\s*\\))`,
+  );
+  const use = new RegExp(`(?<![.$\\w])${esc}(?![$\\w])(?!\\s*:(?!:))`);
+  // Module-scope units: a new unit starts at each column-0 line that is not a
+  // closing bracket.
+  const units: string[] = [];
+  let cur: string[] = [];
+  for (const line of blanked.split("\n")) {
+    if (line.length > 0 && !/^[\s})\]]/.test(line) && cur.length > 0) { units.push(cur.join("\n")); cur = []; }
+    cur.push(line);
+  }
+  if (cur.length > 0) units.push(cur.join("\n"));
+  for (const u of units) {
+    if (!use.test(u)) continue;
+    if (local.test(u)) continue;
+    return true;
+  }
+  return false;
+}
+
+interface D5Binding {
+  kind: "value" | "fn";
+  names: string[];
+  node: any;
+  order: number;
+  /** An `export const` the value-export pass lowered (already chosen to emit). */
+  exported?: boolean;
+}
+
+/** An `export const/let/var` the value-export pass lowered, handed to the D-5 closure (N1). */
+interface ExportedModuleValue { name: string; text: string; order: number; initNode: any }
+
+/** s464 fix round 3 (N3) — a non-deterministic call in a module value's initializer, if any. */
+function nonDeterministicCallIn(fileAST: any, initText: string): string | null {
+  for (const call of FN_NON_DET_CALLS) {
+    const pat = call.split(".").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*\\.\\s*");
+    const re = call.startsWith("new ")
+      ? new RegExp(`\\bnew\\s+${call.slice(4)}\\b`)
+      : new RegExp(`(?<![.$\\w])${pat}\\s*\\(`);
+    if (re.test(initText)) return call;
+  }
+  // Non-deterministic `scrml:` stdlib members, by their LOCAL binding (an `as`
+  // alias included) — the same registry E-FN-004 uses.
+  const astImports = (fileAST?.ast?.imports ?? fileAST?.imports ?? []) as any[];
+  for (const imp of (Array.isArray(astImports) ? astImports : [])) {
+    const src = String(imp?.source ?? "");
+    const members = FN_NONDET_STDLIB[src];
+    if (!members) continue;
+    const specs: Array<{ local: string; imported: string }> = Array.isArray(imp?.specifiers) && imp.specifiers.length > 0
+      ? imp.specifiers.map((sp: any) => ({ local: String(sp?.local ?? sp?.imported ?? ""), imported: String(sp?.imported ?? sp?.local ?? "") }))
+      : (Array.isArray(imp?.names) ? imp.names.map((n: string) => ({ local: n, imported: n })) : []);
+    for (const { local, imported } of specs) {
+      if (!local || !members.includes(imported)) continue;
+      if (new RegExp(`(?<![.$\\w])${local.replace(/[$]/g, "\\$")}\\s*\\(`).test(initText)) return `${src}.${imported}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * s464 fix round 3 (N3) — identifier tokens of the code this file runs on the
+ * CLIENT: everything except server-placed function bodies (a CPS-split function
+ * keeps its client half), pure `fn` helpers kept out of the client bundle, and the
+ * module value declarations themselves (their client use is followed through the
+ * closure's dependency walk instead).
+ */
+function clientSideTokens(fileAST: any, filePath: string, routeMap: any): Set<string> {
+  const out = new Set<string>();
+  const skipFn = (n: any): boolean => {
+    const id = `${filePath}::${n?.span?.start}`;
+    const r = routeMap?.functions?.get?.(id);
+    if (r && r.boundary !== "client" && !r.cpsSplit) return true;
+    if (routeMap?.pureFnClientSkipIds?.has?.(id)) return true;
+    if (routeMap?.endpointClientSkipIds?.has?.(id)) return true;
+    return false;
+  };
+  const seen = new Set<unknown>();
+  const visit = (node: unknown, topLogicStmt: boolean): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") { for (const t of codeTokens(node)) out.add(t); return; }
+    if (typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const c of node) visit(c, topLogicStmt); return; }
+    const n = node as any;
+    if (n.kind === "function-decl" && skipFn(n)) return;
+    if (topLogicStmt && (n.kind === "const-decl" || n.kind === "let-decl" || n.kind === "export-decl")) return;
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      visit(n[key], n.kind === "logic" && key === "body");
+    }
+  };
+  visit(getNodes(fileAST), false);
+  return out;
+}
+
+function planModuleBindingClosure(
   fileAST: any,
+  filePath: string,
   assembledBody: string,
+  errors?: CGError[],
+  exportedValues: ExportedModuleValue[] = [],
+  /** Identifier tokens of the code this file runs CLIENT-side (N3). */
+  clientTokens: Set<string> = new Set(),
+  // S465 r6 — the server await facts: an ASYNC function-valued binding (codegen/index.ts
+  // `_asyncLocalBindings`: `const w = (a, b) => check(a, b)`) is emitted `async`, every
+  // call in its body classified (awaited), exactly as a function declaration with the
+  // same body; its callers await it (buildServerCalleeImportMap).
   asyncCalleeMap: CalleeImportMap | null = null,
   asyncExportRegistry: ServerExportRegistry | null = null,
-): string[] {
-  // S465 r6 — an ASYNC function-valued binding (codegen/index.ts `_asyncLocalBindings`:
-  // `const w = (a, b) => check(a, b)`) is emitted `async`, every call in its body
-  // classified (awaited), exactly as a function declaration with the same body; its
-  // callers await it (buildServerCalleeImportMap). A body it cannot lower that way is
-  // refused, never shipped sync.
+): { before: string[]; after: string[]; decls: UserModuleDecl[] } {
   const asyncBindings = asyncLocalBindingsOfFile(fileAST);
-  const candidates: any[] = [];
+  // 1. File-scope bindings, in source order.
+  const bindings: D5Binding[] = [];
+  const byName = new Map<string, D5Binding>();
+  let order = 0;
   const collectLogic = (nodeList: any[]): void => {
     for (const node of (Array.isArray(nodeList) ? nodeList : [])) {
       if (!node || typeof node !== "object") continue;
       if (node.kind === "logic" && Array.isArray(node.body)) {
         for (const stmt of node.body) {
-          if (
-            stmt && typeof stmt === "object" &&
-            (stmt.kind === "const-decl" || stmt.kind === "let-decl") &&
-            typeof stmt.name === "string" && stmt.name
-          ) {
-            candidates.push(stmt);
+          if (!stmt || typeof stmt !== "object") continue;
+          if (stmt.kind === "const-decl" || stmt.kind === "let-decl") {
+            const names: string[] = typeof stmt.name === "string" && stmt.name
+              ? [stmt.name]
+              : (isDestructurePattern(stmt.name) ? [...iterDestructuredNames(stmt.name)] : []);
+            if (names.length === 0) continue;
+            const b: D5Binding = { kind: "value", names, node: stmt, order: order++ };
+            bindings.push(b);
+            for (const n of names) if (!byName.has(n)) byName.set(n, b);
+          } else if (stmt.kind === "function-decl" && typeof stmt.name === "string" && stmt.name
+              && stmt.fromExport !== true) {
+            const b: D5Binding = { kind: "fn", names: [stmt.name], node: stmt, order: order++ };
+            bindings.push(b);
+            if (!byName.has(stmt.name)) byName.set(stmt.name, b);
           }
         }
       }
@@ -1357,108 +1550,310 @@ function emitReferencedModuleConstLines(
     }
   };
   collectLogic(getNodes(fileAST));
-  if (candidates.length === 0) return [];
+  // N1 — exported values join the SAME graph (already chosen to emit).
+  for (const ev of exportedValues) {
+    const b: D5Binding = { kind: "value", names: [ev.name], node: { span: { start: ev.order } }, order: ev.order, exported: true };
+    bindings.push(b);
+    if (!byName.has(ev.name)) byName.set(ev.name, b);
+  }
+  if (bindings.length === 0) return { before: [], after: [], decls: [] };
+  // Source order is the tiebreak of the dependency order: the declaration's offset.
+  for (const b of bindings) {
+    const st = b.node?.span?.start;
+    if (typeof st === "number") b.order = st;
+  }
+  // N2 — names the server bundle gets on its own when the emitted code references
+  // them: imports (the import pass keeps a referenced specifier) and types (the
+  // enum objects are injected when referenced).
+  const importedNames = new Set<string>((buildCalleeImportMap(fileAST) as Map<string, unknown>).keys());
+  const typeNames = new Set<string>();
+  for (const d of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
+    if (d && typeof d.name === "string") typeNames.add(d.name);
+  }
 
-  const esc = (n: string): string => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const isDeclared = (name: string): boolean =>
-    new RegExp(`^(?:export\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var)\\s+${esc(name)}\\b`, "m")
-      .test(assembledBody);
-  const isReferenced = (name: string): boolean =>
-    new RegExp(`(?<![.$\\w])${esc(name)}(?![$\\w])`).test(assembledBody);
+  // 2. Closure. `strong` = precise evidence for a refusal (see the docblock).
+  type Need = { via: string[]; strong: boolean };
+  const needed = new Map<D5Binding, Need>();
+  const stack: D5Binding[] = [];
+  const need = (b: D5Binding, via: string[], strong: boolean): void => {
+    const prev = needed.get(b);
+    if (prev) { if (strong && !prev.strong) { prev.strong = true; prev.via = via; stack.push(b); } return; }
+    needed.set(b, { via, strong });
+    stack.push(b);
+  };
+  const declaredInBody = (n: string): boolean => moduleScopeDeclares(assembledBody, n);
+  for (const t of codeTokens(assembledBody)) {
+    const b = byName.get(t);
+    if (!b || declaredInBody(t)) continue;
+    need(b, [t], bodyHasFreeUse(assembledBody, t));
+  }
 
-  // Host globals a module-value initializer may legitimately reach for. Kept
-  // deliberately small — anything not here makes the candidate unresolvable and
-  // therefore skipped, which is the fail-closed direction.
-  const HOST_GLOBALS = new Set<string>([
-    "Math", "JSON", "Date", "Object", "Array", "String", "Number", "Boolean",
-    "RegExp", "Map", "Set", "BigInt", "Symbol", "Infinity", "NaN", "globalThis",
-  ]);
+  const emittedValue = new Map<D5Binding, string>();
+  const fnIds = new Set<string>();
+  const fnNodes: any[] = [];
+  const refused = new Set<D5Binding>();
+  const refuse = (b: D5Binding, why: string, fix: string): void => {
+    refused.add(b);
+    const n = needed.get(b)!;
+    if (!n.strong || !errors) return;
+    const chain = ["server code", ...n.via].map((s) => `\`${s}\``).join(" → ").replace("`server code`", "server code");
+    errors.push(new CGError(
+      "E-ROUTE-002",
+      `E-ROUTE-002: server code needs the module-level \`${b.names.join(", ")}\` (${chain}), but it ` +
+      `cannot run on the server: ${why}. A value the server bundle closes over must be computable ` +
+      `on the server (§12.4). Resolution: ${fix}`,
+      (b.node?.span ?? {}),
+      "error",
+    ));
+  };
+  const FIX_CLIENT_VALUE = "read the value on the client and pass it to the server function as an argument.";
+  // N3 — is a module value used by CLIENT code (directly, or through another module
+  // value whose initializer reads it)?
+  const clientUsed = (b: D5Binding): boolean => {
+    const seenB = new Set<D5Binding>();
+    const visit = (x: D5Binding): boolean => {
+      if (seenB.has(x)) return false;
+      seenB.add(x);
+      if (x.names.some((n) => clientTokens.has(n))) return true;
+      for (const y of bindings) {
+        if (y.kind !== "value" || y === x || y.exported) continue;
+        const t = typeof y.node?.init === "string" ? y.node.init : "";
+        if (x.names.some((n) => new RegExp(`(?<![.$\\w])${n.replace(/[$]/g, "\\$")}(?![$\\w])`).test(t)) && visit(y)) return true;
+      }
+      return false;
+    };
+    return visit(b);
+  };
+  // N1 — exported values are pre-chosen: record their text and seed their deps.
+  for (const ev of exportedValues) {
+    const b = byName.get(ev.name)!;
+    needed.set(b, { via: [ev.name], strong: true });
+    emittedValue.set(b, ev.text);
+    if (ev.initNode) {
+      forEachIdentInExprNode(ev.initNode, (id: any) => {
+        const n: string = typeof id?.name === "string" ? id.name : "";
+        const dep = n ? byName.get(n) : undefined;
+        if (dep && dep !== b && !declaredInBody(n)) need(dep, [ev.name, n], true);
+      });
+    }
+    for (const t of codeTokens(ev.text)) {
+      const dep = byName.get(t);
+      if (dep && dep !== b && !declaredInBody(t)) need(dep, [ev.name, t], false);
+    }
+  }
+  const deps = new Map<D5Binding, Set<D5Binding>>();
+  const addDep = (from: D5Binding, to: D5Binding): void => {
+    if (!deps.has(from)) deps.set(from, new Set());
+    deps.get(from)!.add(to);
+  };
 
-  // S465 r6 — "referenced" is transitive: a binding read only by ANOTHER emitted
-  // binding (`const a = …; const b = (p) => a(p)`, `b` used by a server function) is
-  // closed over too — pre-r6 `a` was skipped and `b` threw `ReferenceError: a`.
-  const referenced = new Set<string>();
-  {
-    const textOf = (d: any): string => typeof d.init === "string" ? d.init : "";
-    let grew = true;
-    while (grew) {
-      grew = false;
-      for (const d of candidates) {
-        if (referenced.has(d.name)) continue;
-        const re = new RegExp(`(?<![.$\\w])${esc(d.name)}(?![$\\w])`);
-        if (isReferenced(d.name) || candidates.some((o) => o !== d && referenced.has(o.name) && re.test(textOf(o)))) {
-          referenced.add(d.name);
-          grew = true;
+  while (stack.length > 0) {
+    const b = stack.pop()!;
+    if (refused.has(b) || emittedValue.has(b) || (b.kind === "fn" && fnIds.has(`${filePath}::${b.node?.span?.start}`))) continue;
+    const via = needed.get(b)!.via;
+    const strong = needed.get(b)!.strong;
+    if (b.kind === "value") {
+      const decl = b.node;
+      if (isServerOnlyNode(decl)) continue;
+      const initStr: string = typeof decl.init === "string" ? decl.init : "";
+      if (initStr.trim().startsWith("<") || initStr.includes("?{")) continue;
+      if (!decl.initExpr) continue;
+      let cellRef: string | null = null;
+      forEachAtRef(decl.initExpr, (bare) => { if (!cellRef) cellRef = bare; }, { descendNestedFns: true, opaqueCode: true });
+      if (cellRef) { refuse(b, `its initializer reads \`@${cellRef}\`, which lives in the browser`, FIX_CLIENT_VALUE); continue; }
+      let bad: string | null = null;
+      forEachIdentInExprNode(decl.initExpr, (id: any) => {
+        const n: string = typeof id?.name === "string" ? id.name : "";
+        if (!n || bad) return;
+        const dep = byName.get(n);
+        if (dep && dep !== b) {
+          if (!declaredInBody(n)) { addDep(b, dep); need(dep, [...via, n], strong); }
+          return;
+        }
+        if (D5_SERVER_HOST_GLOBALS.has(n) || declaredInBody(n) || importedNames.has(n) || typeNames.has(n)) return;
+        if (D5_CLIENT_ONLY_GLOBALS.has(n)) { bad = `its initializer reads the browser-only global \`${n}\``; return; }
+        bad = `its initializer reads \`${n}\`, which is not declared in this file and not imported`;
+      });
+      if (bad) { refuse(b, bad, FIX_CLIENT_VALUE); continue; }
+      // N3 — a non-deterministic initializer evaluated in BOTH bundles holds two
+      // different values; refuse when client code also uses the binding.
+      {
+        let initText = typeof decl.init === "string" ? decl.init : "";
+        if (!initText.trim()) { try { initText = emitStringFromTree(decl.initExpr); } catch { initText = ""; } }
+        // Literal-blanked (s464 fix round 4): `"call Date.now() later"` is text.
+        const nd = nonDeterministicCallIn(fileAST, blankedOf(initText));
+        if (nd && clientUsed(b)) {
+          refuse(b,
+            `its initializer calls \`${nd}\`, which is non-deterministic, and client code also uses ` +
+            `\`${b.names.join(", ")}\` — the client and server bundles would each evaluate it and hold ` +
+            `DIFFERENT values`,
+            "produce the value on one side and pass it to the other (an argument to the server " +
+            "function, or a value the server function returns).");
+          continue;
         }
       }
+      // S465 r6 — SPEC §13.2: an async-coloured function SHALL NOT be used as a value.
+      // A module value that aliases / stores / returns one (`const w = w0`, `const o = {
+      // w: w0 }`, `const z = () => w0`), or that CALLS one at module init (`const v =
+      // w0(1)` — it would hold the Promise), is refused rather than shipped un-awaited.
+      {
+        const _isAsyncName = (n: string): boolean =>
+          asyncBindings.has(n) || isPromiseReturningImportedCallee(n, asyncCalleeMap, asyncExportRegistry);
+        const _isFnValue = decl.initExpr.kind === "lambda" ||
+          (decl.initExpr.kind === "escape-hatch" && /^(Arrow|Function)/.test(String(decl.initExpr.nativeKind ?? "")));
+        const _bad: string[] = [];
+        for (const u of asyncValueUsesIn(decl.initExpr, _isAsyncName, ASYNC_COMBINATOR_METHODS)) _bad.push(u.name);
+        if (!_isFnValue) {
+          forEachIdentInExprNode(decl.initExpr, (id: any) => {
+            if (typeof id?.name === "string" && _isAsyncName(id.name) && !_bad.includes(id.name)) _bad.push(id.name);
+          });
+        }
+        if (_bad.length > 0) {
+          refused.add(b);
+          recordRefusedLowering(new CGError(
+            "E-ASYNC-FN-ESCAPES-AS-VALUE",
+            `E-ASYNC-FN-ESCAPES-AS-VALUE: the module value \`${b.names.join(", ")}\` uses \`${_bad[0]}\`, which the compiler emits ` +
+              "`async`, as a value (or calls it while the module loads): whoever reads it would get an un-awaited " +
+              "Promise, which is always truthy (§13.2). Call the function directly where the result is needed — " +
+              `\`${_bad[0]}(…)\` inside a function body — or declare the helper with \`function\`.`,
+            decl.span ?? {},
+          ), decl);
+          continue;
+        }
+      }
+      const _isAsyncBinding = b.names.length === 1 && asyncBindings.has(b.names[0]);
+      const code = emitLogicNode(_isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
+        boundary: "server" as const,
+        insideFunctionBody: true,
+        declaredNames: new Set<string>(byName.keys()),
+        ...(_isAsyncBinding ? { asyncCalleeMap, asyncExportRegistry } : {}),
+      } as any);
+      if (!code) continue;
+      const text = serverRewriteEmitted(code);
+      emittedValue.set(b, text);
+      // Lambda bodies are not in the identifier walk; their module reads are deps too.
+      for (const t of codeTokens(text)) {
+        const dep = byName.get(t);
+        if (dep && dep !== b && !declaredInBody(t)) { addDep(b, dep); need(dep, [...via, t], false); }
+      }
+    } else {
+      const fn = b.node;
+      const id = `${filePath}::${fn?.span?.start}`;
+      // A function named DIRECTLY by server code is route inference's to place (a
+      // server function, a peer, a pure-`fn` helper); one it did not place is a
+      // separate, pre-existing defect class (g-mounthydrate-client-scope-loader-s465,
+      // g-cell-reading-fn-called-inline-from-server-undefined-no-diagnostic-s464),
+      // not refused here. Only a function reached THROUGH a module value's
+      // initializer is this pass's to emit or refuse.
+      if ((!isPlainPureFn(fn) || fnReachesAtName(fn, filePath)) && via.length <= 1) {
+        refused.add(b);
+        continue;
+      }
+      if (!isPlainPureFn(fn)) {
+        refuse(b, `\`${b.names[0]}\` is a client-side \`function\` (only a pure \`fn\` can be copied to the server)`,
+          `declare \`${b.names[0]}\` as a pure \`fn\`, or compute the value inside the server function.`);
+        continue;
+      }
+      if (fnReachesAtName(fn, filePath)) {
+        refuse(b, `\`fn ${b.names[0]}\` reads \`@\`-state, which lives in the browser`, FIX_CLIENT_VALUE);
+        continue;
+      }
+      fnIds.add(id);
+      fnNodes.push(fn);
+      const one = emitEndpointServerHelperLines([fn], filePath, new Set([id]), "", null);
+      for (const t of codeTokens(one.join("\n"))) {
+        const dep = byName.get(t);
+        if (dep && dep !== b && !declaredInBody(t)) { addDep(b, dep); need(dep, [...via, t], false); }
+      }
     }
   }
 
-  const available = new Set<string>();
-  const emitted: string[] = [];
-  for (const decl of candidates) {
-    const name: string = decl.name;
-    if (isDeclared(name)) { available.add(name); continue; }
-    if (isServerOnlyNode(decl)) continue;
-    const initStr: string = typeof decl.init === "string" ? decl.init : "";
-    if (initStr.trim().startsWith("<") || initStr.includes("?{")) continue;
-    if (!referenced.has(name)) continue;
-    if (!decl.initExpr) continue;
-    let resolvable = true;
-    forEachIdentInExprNode(decl.initExpr, (id: any) => {
-      const n: string = typeof id?.name === "string" ? id.name : "";
-      if (!n || n.startsWith("@")) { resolvable = false; return; }
-      if (HOST_GLOBALS.has(n) || available.has(n) || isDeclared(n)) return;
-      resolvable = false;
-    });
-    if (!resolvable) continue;
-    // S465 r6 — SPEC §13.2: an async-coloured function SHALL NOT be used as a value.
-    // A module value that aliases / stores / returns one (`const w = w0`, `const o = {
-    // w: w0 }`, `const z = () => w0`), or that CALLS one at module init (`const v =
-    // w0(1)` — it would hold the Promise), is refused rather than shipped un-awaited.
-    {
-      const _isAsyncName = (n: string): boolean =>
-        asyncBindings.has(n) || isPromiseReturningImportedCallee(n, asyncCalleeMap, asyncExportRegistry);
-      const _isFnValue = !!decl.initExpr && (decl.initExpr.kind === "lambda" ||
-        (decl.initExpr.kind === "escape-hatch" && /^(Arrow|Function)/.test(String(decl.initExpr.nativeKind ?? ""))));
-      const _bad: string[] = [];
-      for (const u of asyncValueUsesIn(decl.initExpr, _isAsyncName, ASYNC_COMBINATOR_METHODS)) _bad.push(u.name);
-      if (!_isFnValue) {
-        forEachIdentInExprNode(decl.initExpr, (id: any) => {
-          if (typeof id?.name === "string" && _isAsyncName(id.name) && !_bad.includes(id.name)) _bad.push(id.name);
-        });
-      }
-      if (_bad.length > 0) {
-        recordRefusedLowering(new CGError(
-          "E-ASYNC-FN-ESCAPES-AS-VALUE",
-          `E-ASYNC-FN-ESCAPES-AS-VALUE: the module value \`${name}\` uses \`${_bad[0]}\`, which the compiler emits ` +
-            "`async`, as a value (or calls it while the module loads): whoever reads it would get an un-awaited " +
-            "Promise, which is always truthy (§13.2). Call the function directly where the result is needed — " +
-            `\`${_bad[0]}(…)\` inside a function body — or declare the helper with \`function\`.`,
-          decl.span ?? {},
-        ), decl);
-        continue;
-      }
+  // 3. Order (N1): ONE dependency-ordered sequence of every module value the bundle
+  //    carries — exported or not — with source order as the tiebreak. Every value
+  //    is initialized at module load, so a value must follow everything it reads.
+  for (const [b, text] of emittedValue) {
+    for (const t of codeTokens(text)) {
+      const d = byName.get(t);
+      if (d && d !== b && emittedValue.has(d)) addDep(b, d);
     }
-    const isAsyncBinding = asyncBindings.has(name);
-    const code = emitLogicNode(isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
-      boundary: "server" as const,
-      insideFunctionBody: true,
-      declaredNames: new Set<string>(available),
-      ...(isAsyncBinding ? { asyncCalleeMap, asyncExportRegistry } : {}),
-    } as any);
-    if (!code) continue;
-    emitted.push(serverRewriteEmitted(code));
-    available.add(name);
   }
-  if (emitted.length === 0) return [];
-  const out: string[] = [];
-  out.push("");
-  out.push("// --- module-level values the server bundle closes over (D-5) ---");
-  out.push("// Also present in the client bundle; this is an ADDITIONAL declaration for");
-  out.push("// the server side, not a relocation — nothing leaves the client output.");
-  for (const l of emitted) out.push(l);
-  out.push("");
+  const pending = new Set<D5Binding>(emittedValue.keys());
+  const orderedVals: D5Binding[] = [];
+  while (pending.size > 0) {
+    const ready = [...pending]
+      .filter((b) => ![...(deps.get(b) ?? [])].some((d) => pending.has(d) && d !== b))
+      .sort((x, y) => x.order - y.order);
+    // A cycle (should not happen in valid scrml): fall back to source order.
+    const next = ready.length > 0 ? ready[0] : [...pending].sort((x, y) => x.order - y.order)[0];
+    pending.delete(next);
+    orderedVals.push(next);
+  }
+  const beforeVals = orderedVals.map((b) => emittedValue.get(b)!);
+  const fnBlock = fnIds.size > 0 ? emitEndpointServerHelperLines(fnNodes, filePath, fnIds, "", null) : [];
+
+  const block = (vals: string[], fns: string[]): string[] => {
+    if (vals.length === 0 && fns.length === 0) return [];
+    const out: string[] = [""];
+    out.push("// --- module-level values, in dependency order (exports + what the server code closes over, D-5) ---");
+    out.push("// The non-exported ones are also in the client bundle; these are ADDITIONAL");
+    out.push("// declarations for the server side, not a relocation.");
+    for (const l of vals) out.push(l);
+    for (const l of fns) out.push(l);
+    out.push("");
+    return out;
+  };
+  const decls: UserModuleDecl[] = [];
+  for (const [b, text] of emittedValue) if (!b.exported) for (const n of b.names) decls.push({ name: n, node: b.node, text });
+  for (const fn of fnNodes) decls.push({ name: fn.name, node: fn, text: null });
+  return { before: block(beforeVals, fnBlock), after: [], decls };
+}
+
+/** A module-scope declaration the user's code puts into the server bundle under its own name. */
+interface UserModuleDecl { name: string; node: any; text: string | null }
+
+/**
+ * s464 fix round 2 (item 5) — the COMPLETE collision check. Run on the fully
+ * assembled server bundle, so every compiler-injected binding is visible however
+ * late it is added (`import { SQL } from "bun"`, `_SCRML_TENANT_DECLARED`, the
+ * enum objects, `routes` / `fetch`). A user declaration (a pure-`fn` helper or a
+ * D-5 module binding) whose name the bundle declares more than once is E-CG-016;
+ * the user's copy is removed so the only diagnostic is the actionable one, not a
+ * generic "compiler defect" from the emit-validation gate.
+ */
+function checkUserModuleDeclCollisions(
+  emitted: string,
+  decls: UserModuleDecl[],
+  errors: CGError[],
+): string {
+  let out = emitted;
+  const seen = new Set<string>();
+  for (const d of decls) {
+    if (!d.name || seen.has(d.name)) continue;
+    seen.add(d.name);
+    const esc = d.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const declRe = new RegExp(`^(?:export\\s+)?(?:const|let|var|(?:async\\s+)?function\\*?|class)\\s+${esc}\\b`, "gm");
+    // Count on the literal-blanked text (N4): a column-0 `const K = 9` inside a
+    // template literal is text, not a declaration.
+    let count = (blankedOf(out).match(declRe) ?? []).length;
+    if (moduleScopeDeclares(out.replace(declRe, "// "), d.name)) count++;
+    if (count <= 1) continue;
+    errors.push(new CGError(
+      "E-CG-016",
+      `E-CG-016: \`${d.name}\` is declared by your code in the server bundle (it is reached by server ` +
+      `code), but \`${d.name}\` is also a binding the compiler declares in that bundle (e.g. the ` +
+      `\`import { SQL } from "bun"\` runtime handle, a compiler-generated table, the \`routes\` / ` +
+      `\`fetch\` WinterCG exports, or a page-local enum). The bundle cannot declare it twice. ` +
+      `Resolution: rename it.`,
+      (d.node?.span ?? {}),
+      "error",
+    ));
+    if (d.text !== null) {
+      const i = out.indexOf(d.text);
+      if (i >= 0) out = out.slice(0, i) + out.slice(i + d.text.length);
+    } else {
+      out = out.replace(new RegExp(`^function ${esc}\\([^\\n]*\\n(?:[^\\n]*\\n)*?\\}\\n`, "m"), "");
+    }
+  }
   return out;
 }
 
@@ -1501,6 +1896,7 @@ function emitEndpointServerHelperLines(
   filePath: string,
   helperIds: Set<string>,
   assembledBody: string,
+  header: string | null = "// --- §61 <endpoint> private server-side arm helpers (server-only; NOT bundled to client, §61.6) ---",
 ): string[] {
   if (!helperIds || helperIds.size === 0) return [];
   // Already-declared guard (mirrors emitModuleValueExportLines) — a helper that
@@ -1544,9 +1940,11 @@ function emitEndpointServerHelperLines(
     blocks.push(out.join("\n"));
   }
   if (blocks.length === 0) return [];
+  // header === null: just the function blocks (the D-5 closure frames them itself).
+  if (header === null) return blocks.join("\n\n").split("\n");
   const out: string[] = [];
   out.push("");
-  out.push("// --- §61 <endpoint> private server-side arm helpers (server-only; NOT bundled to client, §61.6) ---");
+  out.push(header);
   for (let i = 0; i < blocks.length; i++) {
     out.push(blocks[i]);
     if (i < blocks.length - 1) out.push("");
@@ -1631,10 +2029,23 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   // `errors` is threaded so the value-export pass's diagnostics reach the live stream —
   // its own, and (via the drain in `generateValueOnlyServerJs`) the run-wide refused-lowering
   // sink's, e.g. E-SQL-006 for a `.prepare()` in an exported async fn (g-esql006, s456 F3).
-  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
+  const _veValues: ExportedModuleValue[] = [];
+  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, undefined, _veValues);
   setVarCounter(_veSnapshot);
-  if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
+  if (veLines.length === 0 && _veValues.length === 0) return ""; // nothing server-importable → emit nothing.
+  const _veInsertAt = lines.length;
   for (const l of veLines) lines.push(l);
+  // s464 fix rounds 1-2 (F1, D-5 closure) — the module bindings the exported
+  // values / fns close over (`const RATE = 7; export fn mul(n) { return n * RATE }`),
+  // transitively. `before` lands AHEAD of the value exports (they run at module
+  // load — the TDZ fix); `after` holds only bindings that read an exported value.
+  {
+    const _mcSnapshot = getVarCounter();
+    const _mc = planModuleBindingClosure(fileAST, filePath, lines.join("\n"), errors, _veValues);
+    setVarCounter(_mcSnapshot);
+    lines.splice(_veInsertAt, 0, ..._mc.before);
+    for (const l of _mc.after) lines.push(l);
+  }
 
   let emitted = lines.join("\n");
 
@@ -6901,38 +7312,19 @@ function generateServerJsImpl(
   // / SQL) also see references the exported helpers introduce. Additive — the
   // route content stays byte-stable; the mangling counter is snapshotted +
   // restored so no OTHER file's `_scrml_*_<N>` suffix shifts.
+  // s464 fix round 2 (TDZ) — where the D-5 closure's `before` lines go: ahead of
+  // the value exports, which run at module load.
+  const _d5InsertAt = lines.length;
+  // s464 fix round 3 (N1) — the `export const` values, handed to the D-5 closure.
+  const _d5ExportedValues: ExportedModuleValue[] = [];
+  // s464 fix round 2 (item 5) — every user declaration this bundle carries under
+  // its own name; checked against the COMPLETE bundle at the end.
+  const _userModuleDecls: UserModuleDecl[] = [];
   {
     const _veSnapshot = getVarCounter();
-    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry);
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry, _d5ExportedValues);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
-  }
-
-  // D-5 (adopter report, S293) — a module-level `const` / `let` VALUE binding the
-  // server bundle closes over. `fn` declarations already cross the boundary (the
-  // peer-callable loop above + the §61 endpoint-helper path below); a module const
-  // did not, so `return ROLES[i];` reached `.server.js` with no `ROLES` in scope —
-  // a runtime ReferenceError with ZERO errors and ZERO warnings. Emitted AFTER the
-  // value exports so an already-exported binding wins the already-declared guard,
-  // and BEFORE `finalEmitted` is joined so the helper-inline scans see it. The
-  // client bundle is UNCHANGED — this ADDS a server-side declaration, it does not
-  // relocate one, so the §14.8.9 protect-floor surface is untouched.
-  {
-    const _mcSnapshot = getVarCounter();
-    const _mcSinkStart = _syncStdlibAsyncCalls.length;
-    const _mcLines = emitReferencedModuleConstLines(fileAST, lines.join("\n"), _asyncCalleeMap, _asyncExportRegistry);
-    setVarCounter(_mcSnapshot);
-    for (const _l of _mcLines) lines.push(_l);
-    // S465 r6 — the module values are lowered after the sync-callback drain above; an
-    // async call one of them could not await (a nested sync lambda — `const mk = (h) =>
-    // (p) => check(p, h)`) fails closed here the same way.
-    const _mcSeen = new Set<string>();
-    for (const _sac of _syncStdlibAsyncCalls.slice(_mcSinkStart)) {
-      const _key = `${_sac.name}@${((_sac.span ?? {}) as { start?: number }).start ?? -1}`;
-      if (_mcSeen.has(_key)) continue;
-      _mcSeen.add(_key);
-      _diagAsyncStdlibSyncCb(_sac.name, _sac.span);
-    }
   }
 
   // §61 <endpoint> private-arm reachability — retain endpoint-only private server
@@ -6958,6 +7350,102 @@ function generateServerJsImpl(
     setVarCounter(_epSnapshot);
     for (const _l of _epHelperLines) lines.push(_l);
   }
+
+  // s464-pure-fn-placement — plain pure `fn`s a server-placed body reaches. A
+  // plain `fn` has no client or server classification (§12.4), is never a route
+  // (§13.4) and is always synchronous (§48.3.5), so the server bundle carries its
+  // body as an ordinary synchronous function — the same emitter and lowering as
+  // the §61 endpoint helpers above. Additive (var-counter restored); the
+  // `.client.js` skip for server-only ones is RouteMap.pureFnClientSkipIds.
+  if (routeMap.pureFnServerHelperIds && routeMap.pureFnServerHelperIds.size > 0) {
+    // s464 fix round 1 (F2) — a helper is emitted under its OWN name, so one named
+    // like a binding the bundle already declares (`routes` / `fetch`, an import, a
+    // peer, a value export) or a page-local enum the compiler injects later would
+    // be a second declaration. Never skip it silently: fail closed with E-CG-016,
+    // exactly as the peer-callable path does for a server fn.
+    const _pfBodySoFar = lines.join("\n");
+    // Module scope only (`moduleScopeDeclares`): a route handler's local
+    // `const a = …` is not a clash.
+    const _pfEnumNames = new Set<string>();
+    for (const _decl of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
+      if (_decl && _decl.kind === "type-decl" && _decl.typeKind === "enum" && typeof _decl.name === "string") {
+        _pfEnumNames.add(_decl.name);
+      }
+    }
+    const _pfIds = new Set<string>();
+    for (const _fn of fnNodes) {
+      const _start = (_fn?.span as any)?.start;
+      const _id = `${filePath}::${_start}`;
+      if (typeof _start !== "number" || !routeMap.pureFnServerHelperIds.has(_id)) continue;
+      const _name: string = _fn.name;
+      if (_name === "routes" || _name === "fetch" || _pfEnumNames.has(_name) || moduleScopeDeclares(_pfBodySoFar, _name)) {
+        errors.push(new CGError(
+          "E-CG-016",
+          `E-CG-016: \`fn ${_name}\` is called by server code, so the server bundle declares it — but ` +
+          `\`${_name}\` is already a top-level server-bundle binding (e.g. the \`routes\` / \`fetch\` ` +
+          `WinterCG exports, a page-local enum, an import, or the \`import { SQL } from "bun"\` runtime ` +
+          `handle). The bundle cannot declare \`${_name}\` twice. Resolution: rename the \`fn\`.`,
+          (_fn.span ?? {}),
+          "error",
+        ));
+        continue;
+      }
+      _pfIds.add(_id);
+      _userModuleDecls.push({ name: _name, node: _fn, text: null });
+    }
+    const _pfSnapshot = getVarCounter();
+    const _pfHelperLines = emitEndpointServerHelperLines(
+      fnNodes,
+      filePath,
+      _pfIds,
+      _pfBodySoFar,
+      "// --- pure `fn` helpers called by server code (synchronous; never a route — §12.4, §13.4) ---",
+    );
+    setVarCounter(_pfSnapshot);
+    for (const _l of _pfHelperLines) lines.push(_l);
+  }
+
+  // D-5 (adopter report, S293) — a module-level `const` / `let` VALUE binding the
+  // server bundle closes over. `fn` declarations already cross the boundary (the
+  // peer-callable loop above + the §61 endpoint-helper path below); a module const
+  // did not, so `return ROLES[i];` reached `.server.js` with no `ROLES` in scope —
+  // a runtime ReferenceError with ZERO errors and ZERO warnings. Emitted AFTER the
+  // value exports so an already-exported binding wins the already-declared guard,
+  // and BEFORE `finalEmitted` is joined so the helper-inline scans see it.
+  // s464 fix round 1 (F1): this is ONE pass after EVERY function body the bundle
+  // carries has been emitted — route handlers, peer callables, value exports, the
+  // §61 endpoint helpers and the pure-`fn` helpers. It used to run before the two
+  // helper blocks, so a const read only by a helper body (`fn labelFor(i) {
+  // return ROLES[i] }`) was never declared server-side. The
+  // client bundle is UNCHANGED — this ADDS a server-side declaration, it does not
+  // relocate one, so the §14.8.9 protect-floor surface is untouched.
+  // s464 fix round 2 — a transitive CLOSURE (consts of consts, the pure fns a
+  // const calls, destructuring), in dependency order; `before` is spliced in ahead
+  // of the value exports (TDZ), `after` appended. See planModuleBindingClosure.
+  {
+    const _mcSnapshot = getVarCounter();
+    const _mcSinkStart = _syncStdlibAsyncCalls.length;
+    const _mc = planModuleBindingClosure(
+      fileAST, filePath, lines.join("\n"), errors, _d5ExportedValues,
+      clientSideTokens(fileAST, filePath, routeMap),
+      _asyncCalleeMap, _asyncExportRegistry,
+    );
+    setVarCounter(_mcSnapshot);
+    lines.splice(_d5InsertAt, 0, ..._mc.before);
+    for (const _l of _mc.after) lines.push(_l);
+    for (const _d of _mc.decls) _userModuleDecls.push(_d);
+    // S465 r6 — the module values are lowered after the sync-callback drain above; an
+    // async call one of them could not await (a nested sync lambda — `const mk = (h) =>
+    // (p) => check(p, h)`) fails closed here the same way.
+    const _mcSeen = new Set<string>();
+    for (const _sac of _syncStdlibAsyncCalls.slice(_mcSinkStart)) {
+      const _key = `${_sac.name}@${((_sac.span ?? {}) as { start?: number }).start ?? -1}`;
+      if (_mcSeen.has(_key)) continue;
+      _mcSeen.add(_key);
+      _diagAsyncStdlibSyncCb(_sac.name, _sac.span);
+    }
+  }
+
 
   // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When
   // `_scrml_idempotency_lookup(` / `_scrml_idempotency_store(` callsites
@@ -7834,6 +8322,9 @@ function generateServerJsImpl(
   // called by another is a module-scope `async function <name>`, so a bare
   // `Response` could be the author's); declare the alias first, above every helper
   // that reads it at load (codegen/host-global-alias.ts).
+  if (_userModuleDecls.length > 0) {
+    finalEmitted = checkUserModuleDeclCollisions(finalEmitted, _userModuleDecls, errors);
+  }
   return withHostGlobalAlias(finalEmitted) as string;
 }
 

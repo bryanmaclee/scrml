@@ -555,6 +555,9 @@ export function computeClientAsyncSets(
     // helper (§61.6, retained server-side, tree-shaken from .client.js).
     if ((fn as { isHandleEscapeHatch?: boolean }).isHandleEscapeHatch) return false;
     if (_endpointClientSkipIds && _endpointClientSkipIds.has(id)) return false;
+    // s464-pure-fn-placement — a plain pure `fn` only server code reaches is
+    // emitted server-side only (no client body to color).
+    if ((ctx.routeMap as { pureFnClientSkipIds?: Set<string> }).pureFnClientSkipIds?.has(id)) return false;
     // A user-source `async function` is FORBIDDEN (§19.9.8, E-ASYNC-NOT-IN-SCRML)
     // — a hard error, not compiler-managed async. Excluded so it neither colors
     // nor peer-awaits: compiler-managed async is INFERRED (stdlib/server/CPS),
@@ -1536,6 +1539,10 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // bundled into `.client.js`. (A helper ALSO used client-side is not in this
     // set, so it still emits here.)
     if ((routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds?.has(fnNodeId)) continue;
+    // s464-pure-fn-placement — a plain pure `fn` reached ONLY from server-placed
+    // bodies is emitted into the `.server.js` (emit-server) and NOT bundled here.
+    // One that client code also reaches is not in this set and still emits.
+    if ((routeMap as { pureFnClientSkipIds?: Set<string> }).pureFnClientSkipIds?.has(fnNodeId)) continue;
 
     const name = (fnNode.name as string) ?? "anon";
     const params = (fnNode.params as Param[]) ?? [];

@@ -319,7 +319,9 @@ function main(args: string[]): number {
     expect(errCodes(result)).not.toContain("E-LIFT-002");
   });
 
-  test("§5.2 rule 1 — a QUOTED event attribute in an `<each>` row is a static attribute, as outside one (not a dropped listener)", () => {
+  // S464 (§5.2 rule 1, superseding "a quoted event attribute with no `${…}` stays a static
+  // string"): a quoted handler is refused the same way in an `<each>` row as outside one.
+  test("§5.2 rule 1 — a QUOTED event attribute in an `<each>` row is refused, as outside one (E-ATTR-QUOTED-HANDLER, not a dropped listener)", () => {
     const { result, dist } = compileTo("eachq", `<program>
 <items> = [1, 2]
 <button onclick="go(0)">top</button>
@@ -330,10 +332,8 @@ function main(args: string[]): number {
 </ul>
 </program>
 `);
-    expect(errCodes(result)).toEqual([]);
-    const client = require("fs").readFileSync(join(dist, "eachq.client.js"), "utf8");
-    expect(client).toContain(`.setAttribute("onclick", "go(it)")`);
-    expect(client).not.toContain("unsupported event handler shape");
+    expect(errCodes(result)).toEqual(["E-ATTR-QUOTED-HANDLER", "E-ATTR-QUOTED-HANDLER"]);
+    expect(require("fs").existsSync(join(dist, "eachq.client.js"))).toBe(false);
   });
 
   test("review round 3 — the refusal is case-insensitive (ONCLICK / OnClick / oNcLiCk), and unquoted ONCLICK= / onClick= wire a `click` listener", () => {

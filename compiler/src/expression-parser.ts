@@ -4144,11 +4144,19 @@ function blankRange(chars: string[], start: number, end: number): void {
  * template's `${ … }` interpolations) is preserved. A `?{ … }` SQL block is
  * preserved as `?{}` (its presence is itself a server signal). Returns `raw`
  * unchanged when it cannot be lexed (fail-closed — see the section header).
+ *
+ * `opts.blankRegex` (s464 fix round 4): ALSO blank the body of every regular-
+ * expression literal, as the tokenizer reads it (`/@n\b/g` → `/    /g`; the slashes
+ * and flags stay). Opt-in so the existing callers are unchanged; the `@`-reference
+ * reader (at-refs.ts) and the server bundle's module-scope reads turn it on, because a
+ * regex body is literal text, not a cell read or a declaration (SPEC §6.6.9).
  */
-export function blankLiteralTextInSource(raw: string): string {
+export function blankLiteralTextInSource(raw: string, opts?: { blankRegex?: boolean }): string {
   if (!raw || typeof raw !== "string") return raw;
-  // Fast path: no quote / backtick / comment opener → nothing to blank.
-  if (!/["'`]|\/\/|\/\*/.test(raw)) return raw;
+  const blankRegex = opts?.blankRegex === true;
+  // Fast path: no quote / backtick / comment opener (and, when regex bodies are
+  // blanked, no `/` at all) → nothing to blank.
+  if (blankRegex ? !/["'`/]/.test(raw) : !/["'`]|\/\/|\/\*/.test(raw)) return raw;
   const sqlScan = replaceSqlBlockPlaceholder(raw);
   if (sqlScan.unbalanced) return raw;
   const processed = sqlScan.result;
@@ -4174,6 +4182,10 @@ export function blankLiteralTextInSource(raw: string): string {
         }
       } else if (tok.type === acorn.tokTypes.template || tok.type === acorn.tokTypes.invalidTemplate) {
         blankRange(chars, tok.start, tok.end);
+      } else if (blankRegex && tok.type === acorn.tokTypes.regexp) {
+        // `/body/flags` — blank the body between the opening and the closing slash.
+        const close = processed.lastIndexOf("/", tok.end - 1);
+        if (processed[tok.start] === "/" && close > tok.start) blankRange(chars, tok.start + 1, close);
       }
     }
   } catch {

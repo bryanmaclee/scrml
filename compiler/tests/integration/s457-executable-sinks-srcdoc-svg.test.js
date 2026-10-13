@@ -100,17 +100,18 @@ describe("§1 `srcdoc` takes data in any form → E-ATTR-INTERP-EXECUTABLE", () 
 });
 
 describe("§2 `srcdoc` controls", () => {
-  test("a static string, a bare presence attribute, and a component prop named `srcdoc` compile clean", () => {
+  // S464 "(a) Refuse both": a STATIC `srcdoc` string is no longer admitted (E-ATTR-STATIC-EXECUTABLE,
+  // s464-quoted-handler-refused.test.js); the bare presence attribute and a component prop stay clean.
+  test("a bare presence attribute and a component prop named `srcdoc` compile clean", () => {
     const { codes, html } = compile("srcdoc-ok", `<program>
 <u> = "x"
-<iframe srcdoc="<p>hi</p>"></iframe>
 <iframe srcdoc></iframe>
 const Frame = <div props={ srcdoc: string }><p>\${srcdoc}</p></div>
 <Frame srcdoc=@u/>
 </program>
 `);
     expect(codes).toEqual([]);
-    expect(html).toContain('<iframe srcdoc="&lt;p&gt;hi&lt;/p&gt;"></iframe>');
+    expect(html).toContain('<iframe srcdoc></iframe>');
   });
 });
 
@@ -272,9 +273,10 @@ describe("§5 rule 2: an unsafe literal scheme before `${…}` in an animation v
     expect(client).not.toContain("_scrml_safe_url");
   });
 
-  test("a static literal value (no `${…}`) is the author's static string, as on href", () => {
+  // S464 "(a) Refuse both" superseded "a static literal value is the author's static string, as on href".
+  test("a static literal value (no `${…}`) with an unadmitted scheme is E-ATTR-STATIC-EXECUTABLE (S464)", () => {
     const { codes } = compile("r2-static", `<program>\n<svg><a><set attributeName="href" to="javascript:void(0)"/><text>t</text></a></svg>\n</program>\n`);
-    expect(codes).toEqual([]);
+    expect(codes).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
   });
 });
 

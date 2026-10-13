@@ -249,3 +249,40 @@ ${body}
     expect($("#w").getAttribute("onboarding")).toBe("yes");
   });
 });
+
+// s464 — §5.2 "Quoted event-handler attributes (S464)": "A quoted value with no
+// `${…}` on an event-handler attribute … SHALL be a compile error
+// (E-ATTR-QUOTED-HANDLER)". The bootstrap lowered `onclick="alert(1)"` to an
+// empty listener with no diagnostic; a case variant (`ONCLICK="…"`) was
+// E-BOOTSTRAP-UNSUPPORTED (gap g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462, handler half).
+describe("§5.2 (S464) — a quoted event-handler attribute with no `${…}` is refused", () => {
+  const prog = (body, extra = "") => `${extra}<program>
+    let <code:string="x"/>
+    <rows:Row[]=([{ id: 1 }])/>
+    function go(s: string) { @code = s }
+    <main>
+${body}
+    </main>
+</program>
+`;
+  const ROW = "type Row:struct = { id: int }\n";
+  const QH = "E-ATTR-QUOTED-HANDLER";
+  test("lowercase `onclick=\"…\"` (was an empty listener)", () => {
+    expect(codes(prog(`        <button onclick="go(\\"y\\")">x</button>`, ROW))).toEqual([QH]);
+  });
+  test("a case variant `ONCLICK=\"…\"` (was E-BOOTSTRAP-UNSUPPORTED)", () => {
+    expect(codes(prog(`        <button ONCLICK="alert(1)">x</button>`, ROW))).toEqual([QH]);
+  });
+  test("an empty quoted value, and SVG `onbegin`", () => {
+    expect(codes(prog(`        <button onclick="">x</button>\n        <svg><animate onbegin="alert(1)"/></svg>`, ROW))).toEqual([QH, QH]);
+  });
+  test("an <each> row", () => {
+    expect(codes(prog(`        <each in=@rows key=@.id as r><button onclick="alert(1)">x</button></each>`, ROW))).toEqual([QH]);
+  });
+  test("a declaration's body — once, at the definition, however many uses", () => {
+    expect(codes(prog(`        <btn t="a"/>\n        <btn t="b"/>`, ROW + `<btn t:string>\n</>\nrenders <button onclick="alert(1)">b</button>\n\n`))).toEqual([QH]);
+  });
+  test("the unquoted forms and the exempt words stay clean", () => {
+    clean(prog(`        <button onclick=go("y")>a</button>\n        <button onclick={ go("y") }>b</button>\n        <div one="1" online="2" onboarding="3"></div>`, ROW));
+  });
+});

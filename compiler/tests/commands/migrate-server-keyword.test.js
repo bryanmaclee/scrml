@@ -93,7 +93,7 @@ describe("§1 SQL-body server function → `server` stripped", () => {
     return ?{ select id from users }.all()
   }
 }
-<div onclick="getRows()">x</>
+<div onclick=getRows()>x</>
 </program>`;
     const path = stage("sql.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
@@ -264,7 +264,7 @@ describe("§7 idempotency", () => {
     return ?{ select id from users }.all()
   }
 }
-<div onclick="getRows()">x</>
+<div onclick=getRows()>x</>
 </program>`;
     const path = stage("idem.scrml", source);
 
@@ -303,7 +303,7 @@ describe("§8 composition with M1/M2/M3 via migrateFile --fix", () => {
   .Idle => .Done
 </>
 
-<div onclick="getRows()">\${double(2)}</>
+<div onclick=getRows()>\${double(2)}</>
 </program>`;
     const path = stage("compose.scrml", source);
     const r = migrateFile(path, { dryRun: true, check: false, fix: true }, tmpDir);
@@ -337,7 +337,7 @@ describe("§8 composition with M1/M2/M3 via migrateFile --fix", () => {
   .Idle => .Done
 </>
 
-<div onclick="loadRows()">\${triple(2)}</>
+<div onclick=loadRows()>\${triple(2)}</>
 </program>`;
     const path = stage("compose-inplace.scrml", source);
     const r = migrateFile(path, { dryRun: false, check: false, fix: true }, tmpDir);
@@ -394,7 +394,7 @@ describe("§9 no-client-flip — stripped server stays server-side", () => {
     return ?{ select secretcol from users }.all()
   }
 }
-<div onclick="getSecret()">x</>
+<div onclick=getSecret()>x</>
 </program>`;
     const path = stage("flip-sql.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
@@ -499,7 +499,7 @@ describe("§10 bare-decl shape (Gaps A+B) — lift-SQL + handle strip, lift-pure
   server function loadContacts() {
     lift ?{ select id, name from contacts }.all()
   }
-  <div onclick="loadContacts()">x</>
+  <div onclick=loadContacts()>x</>
 </program>`;
     const path = stage("bare-liftsql.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
@@ -528,7 +528,7 @@ describe("§10 bare-decl shape (Gaps A+B) — lift-SQL + handle strip, lift-pure
   server function pureLift(label) {
     lift <span>$\{label}</span>
   }
-  <div onclick="pureLift('hi')">x</>
+  <div onclick=pureLift(\"hi\")>x</>
 </program>`;
     const path = stage("bare-liftpure.scrml", source);
     const r = rewriteServerFunctionKeyword(source, path);
@@ -569,7 +569,7 @@ describe("§11 integration — migrate --fix reaches the SQL-lift + handle class
     lift <span>$\{label}</span>
   }
 
-  <div onclick="loadContacts()">$\{pinnedPure()}</>
+  <div onclick=loadContacts()>$\{pinnedPure()}</>
 </program>`;
     const path = stage("integration-4class.scrml", source);
 
