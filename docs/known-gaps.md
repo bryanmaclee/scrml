@@ -30,11 +30,41 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 253 | 4 |
-| MED | 611 | 6 |
-| LOW | 383 | 0 |
+| HIGH | 254 | 4 |
+| MED | 615 | 6 |
+| LOW | 384 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-trigger5-server-only-function-helper-still-a-public-route-s464 — a plain `function` called only from server functions is promoted by §12.2 Trigger 5 and gets its OWN public route + client fetch stub + async body, against §13.4 ("The callee SHALL NOT generate an additional HTTP route when called from a server-escalated caller") — `NEW S464; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-trigger5-server-only-function-helper-still-a-public-route-s464 sev=HIGH status=open locus=compiler/src/route-inference.ts(runRI Step 5c caller-context promotion)+compiler/src/codegen/emit-server.ts(route handler + client stub emitted for every server-boundary fn) prov=dispatch:s464-pure-fn-placement -->
+Executed S464: `function helper(n: int) -> int { return n * 2 }` called only by `function save(n) { ?{…}.run(); const r = helper(n) … }` → `.server.js` exports `__ri_route_helper`, and `POST /_scrml/__ri_route_helper {"n":5}` answers `200 10`. That is a public HTTP endpoint for a helper no client calls, plus `async function helper` and a dead client fetch stub. s464-pure-fn-placement fixed this for plain `fn` only (a `fn` is never promoted). **Not a small extension of the `fn` mechanism.** That path emits the helper as a SYNCHRONOUS, client-lowered body, which is correct only because a `fn` is pure. A `function` body may call server functions (peers that must be awaited) or reach `?{}`, so it must keep its server-mode, async-coloured peer callable. The fix is ROUTE SUPPRESSION instead: keep the 5c promotion and the in-process peer callable, and emit no route handler or client stub for a server function that has no client caller and no explicit `route=`. That is the same shape as the `isChannelWsHandler` and §12.6 library-mode suppressions. Measure the corpus first (trucking-dispatch and flogence had such helpers).
+
+### g-fn-called-from-server-cell-initializer-undefined-in-hydrate-s464 — a plain `fn` called from a `<x server> = …` initializer is not emitted server-side: mount hydrate / SSR throws `dbl is not defined` — `NEW S464; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-fn-called-from-server-cell-initializer-undefined-in-hydrate-s464 sev=MED status=open locus=compiler/src/route-inference.ts(computePureFnSidePlacement — server roots are function-decls only) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 (S464 review case c3 `servercell`): `fn dbl(n) { return n * 2 }` + `<total server> = dbl(?{\`SELECT COUNT(*) AS c FROM t\`}.get().c)` → `__mountHydrate` throws `dbl is not defined` on base AND head. Fix direction: count §52 server-cell initializers as server roots in `computePureFnSidePlacement` (token reachability, like the function bodies).
+
+### g-cell-reading-fn-called-inline-from-server-undefined-no-diagnostic-s464 — an `@`-reading `fn` that server code calls only from a lambda / `?{}` position is never promoted and never emitted server-side: `f is not defined` at request time, no E-REACTIVE-003 — `NEW S464; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-cell-reading-fn-called-inline-from-server-undefined-no-diagnostic-s464 sev=MED status=open locus=compiler/src/route-inference.ts(Step 5c caller edges come from record.callees, which stop at lambdas and ?{} text) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 (S464 review case c7 `lambda` / `chainInline`): `fn f(n) { return [1].map((q) => q + @n)[0] + n }` called as `[n].map((k) => f(k))` from a server function → `THREW f is not defined` on base and head. The reviewer reports the same class for a channel `@messages` read and for `@currentUser` reached through a `fn` in `?{}`. s464 deliberately left `@`-reading fns on the old path, so E-REACTIVE-003 keeps firing where a caller edge exists; the hole is the missing edge. Fix direction: §12.4 R2 E-ROUTE-002 with the chain (`g-impl1-route-002-reactive-cell-chain-s451`), using the token reachability `computePureFnSidePlacement` already computes.
+
+### g-template-literal-cell-read-in-fn-undefined-on-server-s464 — `fn f(k) { return \`${@n}-${k}\` }` reached from a server function returns `"undefined-3"`; E-REACTIVE-003 misses a cell read inside a template literal — `NEW S464; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-template-literal-cell-read-in-fn-undefined-on-server-s464 sev=MED status=open locus=compiler/src/route-inference.ts(detectServerFreeClientCellReads — visits ident nodes + sql text, not template-literal interpolation text) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 (S464 review case c12 `tpl`): base and head both answer `200 "undefined-3"`. The `"x" + @n + k` and `if (@n > 1)` spellings DO fire E-REACTIVE-003; only the template interpolation is missed.
+
+### g-aliased-import-of-cell-reading-exported-fn-ships-reactive-get-to-server-s464 — `import { f as g }` of an exported `fn f(k) { return k + @n }`, called from server code, emits `_scrml_reactive_get("n")` into `m.server.js` → `_scrml_reactive_get is not defined` — `NEW S464; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-aliased-import-of-cell-reading-exported-fn-ships-reactive-get-to-server-s464 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(emitModuleValueExportLines lowers exported fns client-boundary; no cell-read gate) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 (`m.scrml`: `<n> = 5` + `export fn f(k: int) -> int { return k + @n }`; app imports `{ f as g }` and calls `g(n)` in a server function): base and head identical — `m.server.js` carries `return k + _scrml_reactive_get("n");` and the server call throws. It should be refused at compile time (E-REACTIVE-003 / E-ROUTE-002 class), not emitted.
+
+### g-server-function-param-default-calling-fn-returns-null-s464 — `function inner(k = a(5)) { return k }` called as `inner()` from server code answers `null` — `NEW S464; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-server-function-param-default-calling-fn-returns-null-s464 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(peer/param-default lowering — not root-caused) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 (S464 review case c2 `defparam`): `fn a(n) { return n + 1 }` + `function inner(k = a(5)) { return k }` + `return inner()` in a server function → `200 null` on base and head (expected 6). Not root-caused.
 
 ### g-braceless-if-same-line-else-dropped-s462 — a braceless `if (c) a else b` with the `else` on the SAME line silently dropped the else branch (client, server and library mode) — `NEW S462; HIGH; RESOLVED S462`
 
