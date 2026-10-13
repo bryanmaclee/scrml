@@ -42,6 +42,8 @@ import {
   _scrml_is_url_attr,
   _scrml_read_url_scheme,
   _scrml_url_scheme_admitted,
+  _scrml_url_value_admitted,
+  _scrml_animation_value_admitted,
 } from "./runtime-url-guard.js";
 import { jsInterpolationEnd } from "./codegen/sql-lex.ts";
 
@@ -169,6 +171,11 @@ export function quotedUrlAttrNeedsRuntimeGuard(name: string, value: string): boo
 export interface AttrElementContext {
   tag?: string | null;
   attrs?: ReadonlyArray<unknown> | null;
+  /**
+   * The enclosing element's tag, when the caller knows it (S464 round 5): an SVG animation element
+   * inside `<image>` / `<feImage>` animates that element's `href` — an image load.
+   */
+  parentTag?: string | null;
 }
 
 /**
@@ -334,6 +341,194 @@ export function attrSinkKey(
 export const ATTR_INTERP_EXECUTABLE_CODE = "E-ATTR-INTERP-EXECUTABLE";
 
 /**
+ * SPEC §5.2 rule 1 (S464) — a QUOTED event-handler attribute with no `${…}` (`onclick="alert(1)"`).
+ * The browser would run its text as raw JavaScript, unchecked by scrml. (Code name owner-ruled,
+ * S464.)
+ */
+export const ATTR_QUOTED_HANDLER_CODE = "E-ATTR-QUOTED-HANDLER";
+
+/**
+ * §5.2 rule 1 (S464) — is the QUOTED `name="value"` a static event-handler text? True when `name` is
+ * an event-handler attribute by rule 1's name test (`isExecutableEventHandlerAttrName` — the one
+ * reader) and `value` holds no `${…}` (a value with `${…}` is `classifyInterpolatedAttrSink`'s
+ * `event-handler` refusal instead).
+ */
+export function isQuotedStaticHandler(name: string, value: string): boolean {
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  if (value.indexOf("${") >= 0) return false;
+  return isExecutableEventHandlerAttrName(name);
+}
+
+/**
+ * §5.2 (S464 "(a) Refuse both") — a STATIC attribute value (no `${…}`) the browser would EXECUTE:
+ * any `srcdoc`, or a URL-valued attribute (element-scoped as rule 3 scopes it; an SVG animation value
+ * when `attributeName` names a URL attribute or is not static) whose scheme rule 2's safe set does not
+ * admit (`<a href="javascript:…">`, `vbscript:`, `data:text/html`). (Code name owner-ruled,
+ * S464.)
+ */
+export const ATTR_STATIC_EXECUTABLE_CODE = "E-ATTR-STATIC-EXECUTABLE";
+
+export type StaticExecutableSink =
+  | { kind: "srcdoc" }
+  | { kind: "url-scheme"; scheme: string | null };
+
+/**
+ * Is the STATIC `name="value"` (a value holding no `${…}`) on the element `element` an executable
+ * sink? The URL judgment is the RUNTIME guard's, applied to the literal value — the value written is
+ * exactly the author's text (HTML output escapes `&`, so no entity is decoded): `_scrml_url_value_admitted`
+ * (srcset / ping / archive lists judged per entry) and `_scrml_animation_value_admitted` (`values` per
+ * `;` entry), with rule 2's safe set and scheme reader — one definition. A relative URL or a value with
+ * no scheme is admitted. When the element is not known the URL-attribute set is read element-insensitive
+ * (fail closed).
+ */
+/**
+ * S464 "(a) Narrow attrs, allow-list" — the attributes the STATIC rule judges: only those the browser
+ * NAVIGATES to or LOADS. Metadata URL attributes (`itemid`, `itemtype`, `cite`, `longdesc`, `profile`,
+ * …) are not judged by the static rule. Each is still element-scoped as rule 3 scopes it
+ * (`_scrml_is_url_attr`: `data` only on `<object>`, `action` only on `<form>`, …). The RUNTIME guard
+ * (rule 3) is not narrowed: it judges the whole rule-2 list.
+ */
+export const STATIC_NAV_LOAD_URL_ATTRS: ReadonlySet<string> = new Set([
+  "href", "src", "action", "formaction", "data", "poster", "srcset", "ping", "xlink:href", "background",
+  // Round 4 (PA reading of the same ruling — "attributes the browser NAVIGATES to or LOADS"): the
+  // remaining load attributes of rule 2's list. `usemap` is left OUT: it names a same-document
+  // `<map>` (`#map`) and loads nothing.
+  "imagesrcset", "archive", "codebase", "classid", "dynsrc", "lowsrc", "manifest", "icon",
+]);
+
+/**
+ * Does `attrs` carry attribute `name` (case-insensitive) in ANY form — static, an expression, a
+ * variable, a presence attribute? (S464 round 6, review NEW-2: an animation element with a computed
+ * `href=${"#l"}` / `xlink:href=@t` targets ANOTHER element, so the parent-`<image>` admission must not
+ * apply.)
+ */
+function hasAttr(attrs: ReadonlyArray<unknown> | null | undefined, name: string): boolean {
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown } | null;
+    if (attr && typeof attr.name === "string" && attr.name.toLowerCase() === name) return true;
+  }
+  return false;
+}
+
+/** The STATIC string value of attribute `name` in `attrs` (AST or lift-string form), or null. */
+function staticAttrValue(attrs: ReadonlyArray<unknown> | null | undefined, name: string): string | null {
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown; value?: unknown } | null;
+    if (!attr || typeof attr.name !== "string" || attr.name.toLowerCase() !== name) continue;
+    const v = attr.value as { kind?: string; value?: unknown } | string | null | undefined;
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && v.kind === "string-literal" && typeof v.value === "string") return v.value;
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Does `name` on `element` LOAD AN IMAGE? Then a raster `data:image/…` is admitted (S464 "(a) Narrow
+ * attrs, allow-list" — "on EVERY image-loading attribute"): the image-source attributes rule 2 names
+ * (`src`, `srcset`, `imagesrcset`, `poster`), plus `background`, `<img>` `dynsrc` / `lowsrc`, an SVG `<image>` / `<feImage>`
+ * `href` / `xlink:href`, and a `<link>` `href` whose `rel` names an icon (`icon`, `shortcut icon`,
+ * `apple-touch-icon`, `apple-touch-icon-precomposed`, `apple-touch-startup-image`, `mask-icon`,
+ * `fluid-icon` — `IMAGE_LINK_REL_TOKENS`; EVERY token of the `rel` must be one of them or `shortcut`, so
+ * `rel="stylesheet icon"` is not an image load).
+ */
+function loadsAnImage(lowerName: string, element?: AttrElementContext | null): boolean {
+  if (_SCRML_IMAGE_SOURCE_ATTRS.has(lowerName) || lowerName === "background" ||
+      lowerName === "dynsrc" || lowerName === "lowsrc") return true;
+  const tag = element && typeof element.tag === "string" ? element.tag.toLowerCase() : "";
+  if ((lowerName === "href" || lowerName === "xlink:href") && (tag === "image" || tag === "feimage")) return true;
+  if (lowerName === "href" && tag === "link") {
+    const rel = staticAttrValue(element?.attrs, "rel");
+    if (rel === null) return false;
+    const tokens = rel.toLowerCase().split(/[\t\n\f\r ]+/).filter(Boolean);
+    return tokens.some((t) => IMAGE_LINK_REL_TOKENS.has(t)) &&
+      tokens.every((t) => t === "shortcut" || IMAGE_LINK_REL_TOKENS.has(t));
+  }
+  return false;
+}
+
+/**
+ * The `<link rel>` tokens whose `href` the browser loads AS AN IMAGE (an icon / touch icon / startup
+ * image). An explicit set (S464 round 5, review F2) — not a `*-icon` pattern, which admitted made-up
+ * tokens (`x-icon`, `noticon`) and missed `apple-touch-icon-precomposed` / `apple-touch-startup-image`.
+ * `shortcut` is admitted only beside one of these (`shortcut icon`).
+ */
+export const IMAGE_LINK_REL_TOKENS: ReadonlySet<string> = new Set([
+  "icon", "apple-touch-icon", "apple-touch-icon-precomposed", "apple-touch-startup-image", "mask-icon", "fluid-icon",
+]);
+
+export function classifyStaticExecutableAttr(
+  name: string,
+  value: string,
+  element?: AttrElementContext | null,
+): StaticExecutableSink | null {
+  if (typeof name !== "string" || typeof value !== "string") return null;
+  if (value.indexOf("${") >= 0) return null; // the interpolated form is classifyInterpolatedAttrSink's
+  const lower = name.toLowerCase();
+  if (lower === "srcdoc") return { kind: "srcdoc" };
+  const schemeOf = (text: string): string | null => {
+    const r = _scrml_read_url_scheme(text, false) as { kind: string; scheme?: string };
+    return r.kind === "scheme" && typeof r.scheme === "string" ? r.scheme : null;
+  };
+  const target = element ? animationUrlTarget(element.tag, name, element.attrs) : null;
+  if (target !== null) {
+    // An animation value writes the attribute `attributeName` names: judged only when that is a
+    // navigate / load attribute, or is computed ("" — any attribute may be animated: fail closed).
+    if (target !== "" && !STATIC_NAV_LOAD_URL_ATTRS.has(target)) return null;
+    // S464 round 5 (review F2): an animation inside SVG `<image>` / `<feImage>` (with no `href` /
+    // `xlink:href` of its own in ANY form — round 6 — which would name another target) animates that element's `href` — an image load, judged as an image
+    // source (raster `data:image/…` admitted).
+    const parent = element && typeof element.parentTag === "string" ? element.parentTag.toLowerCase() : "";
+    const animatesImageHref = (target === "href" || target === "xlink:href") &&
+      (parent === "image" || parent === "feimage") &&
+      !hasAttr(element?.attrs, "href") && !hasAttr(element?.attrs, "xlink:href");
+    const judgedTarget = animatesImageHref ? "src" : target;
+    if (_scrml_animation_value_admitted(lower, value, judgedTarget)) return null;
+    const bad = (lower === "values" ? value.split(";") : [value])
+      .find((v) => !_scrml_url_value_admitted(judgedTarget, v));
+    return { kind: "url-scheme", scheme: bad !== undefined ? schemeOf(bad) : null };
+  }
+  if (!STATIC_NAV_LOAD_URL_ATTRS.has(lower)) return null;
+  const tag = element && typeof element.tag === "string" ? element.tag : "";
+  if (!_scrml_is_url_attr(tag, lower)) return null;
+  // The scheme test and safe set are rule 2's (`_scrml_url_value_admitted` — one definition). On an
+  // image-loading attribute the value is judged as an image source (raster `data:image/…` admitted).
+  const judgedAs = loadsAnImage(lower, element) && !_SCRML_IMAGE_SOURCE_ATTRS.has(lower) ? "src" : lower;
+  if (_scrml_url_value_admitted(judgedAs, value)) return null;
+  return { kind: "url-scheme", scheme: schemeOf(value) };
+}
+
+/** The author-facing message for a static executable attribute value (S464). */
+export function staticExecutableMessage(
+  sink: StaticExecutableSink,
+  name: string,
+  tag: string,
+  where = "",
+): string {
+  const on = (tag ? ` on \`<${tag}>\`` : "") + (where ? ` ${where}` : "");
+  const head = `${ATTR_STATIC_EXECUTABLE_CODE}: the \`${name}="…"\` attribute` + on;
+  if (sink.kind === "srcdoc") {
+    return head + " is an inline HTML document (`srcdoc`), which the browser runs — script included — " +
+      "without scrml checking it. Point the frame at a page with `src=` instead (§5.2).";
+  }
+  return head + " navigates to / loads a URL" +
+    (sink.scheme ? ` whose scheme (\`${sink.scheme}:\`) is not admitted` : " whose scheme is not admitted") +
+    ". Such an attribute may name `http:`, `https:`, `ftp:`, `mailto:`, `tel:` or `sms:` (and, on an " +
+    "attribute that loads an image, a raster `data:image/…`), or be relative; any other scheme " +
+    "(`javascript:`, `vbscript:`, `data:text/html`, …) can run code scrml never checked. For behaviour, " +
+    "use an event handler (`onclick=fn()`) (§5.2).";
+}
+
+/** The author-facing message for a quoted static event-handler attribute (S464). */
+export function quotedHandlerMessage(name: string, tag: string, where = ""): string {
+  const on = (tag ? ` on \`<${tag}>\`` : "") + (where ? ` ${where}` : "");
+  return `${ATTR_QUOTED_HANDLER_CODE}: the quoted \`${name}="…"\` attribute` + on +
+    " is an event handler written as a string. scrml does not hand quoted text to the browser to " +
+    "run as JavaScript — an event attribute takes logic, unquoted: a call `" + name + "=fn()`, an " +
+    "inline block `" + name + "={ … }`, or an expression `" + name + "=${…}` (§5.2, §5.2.3).";
+}
+
+/**
  * §5.2 (S457) — a value that is not a static string, written into an attribute the browser EXECUTES
  * in every form: `srcdoc` (an HTML document — script included) and an event-handler attribute
  * (handler text). `srcdoc=${@doc}`, `srcdoc=@doc`, `srcdoc=fn()`, an `<each>` row's `srcdoc=it.html`
@@ -371,8 +566,8 @@ export function interpolatedAttrSinkMessage(
       " takes its value from data (an expression, a variable, a call or a component prop)";
     if (sink.kind === "srcdoc") {
       return head + ", and `srcdoc` is an HTML document — data written there can carry script. " +
-        "A `srcdoc` value is a static string only (`srcdoc=\"<p>…</p>\"`, no `${…}`). Build the frame " +
-        "from a URL (`src=`) or render the content as markup in the page (§5.2).";
+        "scrml admits no `srcdoc` value at all (S464 — a static one is E-ATTR-STATIC-EXECUTABLE). Build the " +
+        "frame from a URL (`src=`) or render the content as markup in the page (§5.2).";
     }
     // The spelling every emitter wires as a listener: `on` + the lowercase event name.
     const wired = "on" + name.slice(2).replace(/^[:\-]/, "").toLowerCase();
@@ -386,8 +581,7 @@ export function interpolatedAttrSinkMessage(
     case "event-handler":
       return head + " into event-handler text. JavaScript is never built from interpolated text " +
         "— a value can close a string and run code on the event. Pass the value as data: the " +
-        `unquoted call form \`${name}=f(x)\` or an expression handler \`${name}=\${() => f(x)}\`. ` +
-        "A quoted event attribute with no `${…}` stays a static string (§5.2).";
+        `unquoted call form \`${name}=f(x)\` or an expression handler \`${name}=\${() => f(x)}\` (§5.2).`;
     case "srcdoc":
       return head + " into an iframe `srcdoc`, which is an HTML document — interpolated text " +
         "there can carry script. Build the frame from a URL (`src=`) or render the content as " +

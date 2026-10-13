@@ -1,0 +1,13 @@
+<program>
+<items> = [{ name: "a" }]
+<a id="js" href="javascript:doThing()">run</a>
+<iframe id="doc" srcdoc="<p>inline</p>"></iframe>
+<ul>
+  <each in=@items as it>
+    <li><a href="vbscript:x">row</a></li>
+  </each>
+</ul>
+<svg><a><set attributeName="href" to="javascript:alert(1)"/></a></svg>
+<a id="rel" href="/docs">relative stays legal</a>
+<img src="data:image/png;base64,AAAA">
+</program>

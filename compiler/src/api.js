@@ -19,7 +19,7 @@ import { runCE } from "./component-expander.ts";
 import { assignMdHeadingIds } from "./md-lower.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
 import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
-import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
+import { ATTR_INTERP_EXECUTABLE_CODE, ATTR_QUOTED_HANDLER_CODE, ATTR_STATIC_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
@@ -1595,9 +1595,14 @@ function _compileScrmlImpl(options = {}) {
         // (`attrSinkKey`) + where it is reported (two instances of one component are two
         // reports). The `<each>` row lowering asks the same question as a backstop (CG stage);
         // its report is dropped when that attribute was already refused anywhere.
-        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE) {
+        // S464 — the quoted static event-handler refusal (E-ATTR-QUOTED-HANDLER) and the static
+        // executable-value refusal (E-ATTR-STATIC-EXECUTABLE, S464 "(a) Refuse both") are decided by the
+        // same walk (VP-3, post-ME, CE definitions) and deduped the same way; keys carry the code
+        // so the two refusals never shadow each other.
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE || enriched.code === ATTR_QUOTED_HANDLER_CODE || enriched.code === ATTR_STATIC_EXECUTABLE_CODE) {
           const sp = enriched.span && typeof enriched.span === "object" ? enriched.span : {};
-          const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          const codeTag = enriched.code === ATTR_QUOTED_HANDLER_CODE ? "QH|" : enriched.code === ATTR_STATIC_EXECUTABLE_CODE ? "SE|" : "";
+          const attrKey = codeTag + (e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`);
           const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
           // S457 — a codegen backstop that re-lowers markup from a COPY (a `<match>` arm body is
@@ -1606,7 +1611,7 @@ function _compileScrmlImpl(options = {}) {
           // attribute in the same file: the compile fails either way. Only those stages record the
           // name — codegen refusals never shadow each other, so two distinct `<button ONCLICK=${…}>`
           // the backstop alone refuses are two reports (identity = their own spans, `attrKey`).
-          const nameKey = e.attrSinkName ? `${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
+          const nameKey = e.attrSinkName ? `${codeTag}${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
           if (stageName === "CG" && nameKey !== null && _attrInterpExecutableSeen.has(nameKey)) continue;
           if (stageName !== "CG" && nameKey !== null) _attrInterpExecutableSeen.add(nameKey);
           _attrInterpExecutableSeen.add(attrKey);

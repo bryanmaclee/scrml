@@ -12,7 +12,7 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -3249,6 +3249,15 @@ export function generateHtml(
         if (!attr) continue;
         const name: string = attr.name;
         const val = armNameAttrAsExpr(registry, name, attr.value, node, tag);
+
+        // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is
+        // never written into HTML (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`).
+        if (attr.value && attr.value.kind === "string-literal" &&
+            refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs,
+              (node as { _parentTag?: string })._parentTag ??
+              (markupParentStack.length > 0 ? markupParentStack[markupParentStack.length - 1] : null))) {
+          continue;
+        }
 
         if (name.startsWith("transition:") || name.startsWith("in:") || name.startsWith("out:")) {
           continue;

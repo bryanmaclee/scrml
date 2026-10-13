@@ -265,7 +265,7 @@ describe("§6 non-channel `server function` → Migration 5 leaves it (no E-CHAN
     return ?{ select id from users }.all()
   }
 }
-<div onclick="getRows()">x</>
+<div onclick=getRows()>x</>
 </program>`;
     const path = stage("nonchannel.scrml", source);
     const r = rewriteChannelServerPublisher(source, path);
@@ -361,7 +361,7 @@ describe("§9 composition — Migration 4 (SQL server fn) + Migration 5 (channel
       @count = @count + 1
     } }
   </>
-<div onclick="getRows()">x</>
+<div onclick=getRows()>x</>
 </program>`;
     const path = stage("compose.scrml", source);
     const r = migrateFile(path, { dryRun: false, check: false, fix: true }, tmpDir);

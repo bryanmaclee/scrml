@@ -34,6 +34,10 @@
 
 import { CGError } from "./errors.ts";
 import { refusedElementCode, refusedElementMessage, scanRawContentForRefusedTags } from "../element-refusal.ts";
+import {
+  isQuotedStaticHandler, quotedHandlerMessage, ATTR_QUOTED_HANDLER_CODE, attrSinkKey,
+  ATTR_STATIC_EXECUTABLE_CODE, classifyStaticExecutableAttr, staticExecutableMessage,
+} from "../attr-injection-sink.ts";
 
 let _errors: CGError[] = [];
 let _seenByAnchor: WeakMap<object, Set<string>> = new WeakMap();
@@ -127,4 +131,82 @@ export function refuseRawContentLowering(node: { tag?: unknown; children?: unkno
     }
   }
   return refused;
+}
+
+/**
+ * §5.2 (S464) — the codegen backstop for a QUOTED event-handler attribute with no `${…}`
+ * (`onclick="pwn()"`). VP-3, the post-ME re-run and component expansion refuse it
+ * (E-ATTR-QUOTED-HANDLER) for every markup node they reach; a codegen path that lowers markup
+ * from a COPY (a `<match>` arm body re-parsed in codegen, with the `<each>` rows inside it) is
+ * never seen by them. So every codegen site that WRITES a user attribute's quoted value into
+ * output — an HTML attribute, a `setAttribute`, an SSR row template — asks here first, with the
+ * one predicate (`isQuotedStaticHandler`, rule 1's name test). The emit path fails closed
+ * whichever validator saw the node.
+ *
+ * Returns true when the attribute is refused: the caller MUST NOT write it. The refusal is
+ * recorded once per attribute (`recordRefusedLowering`); api.js drops it when an earlier stage
+ * already refused the same attribute in the same file. `tag` only names the element in the
+ * message: at codegen the attribute IS being written onto an element, whatever its tag's case (an
+ * unexpanded `<Btn onclick="…">` is still built as an element whose handler the browser runs), so
+ * no tag is exempt here — fail closed.
+ */
+/**
+ * §5.2 (S464) — the ONE codegen backstop every attribute writer asks before writing a user
+ * attribute's STATIC (quoted / literal) value: a quoted event handler (E-ATTR-QUOTED-HANDLER,
+ * `refuseQuotedHandlerWrite`) and, per S464 "(a) Refuse both", a static `srcdoc` or a static URL whose
+ * scheme rule 2 does not admit (E-ATTR-STATIC-EXECUTABLE, `classifyStaticExecutableAttr` — the runtime
+ * guard's judgment on the literal). `attrs` is the element's attribute list (an SVG animation value is
+ * judged against its `attributeName`). An `<md>`-built attribute (`_md`) is §67.6's (E-MD-URL-SCHEME).
+ * Returns true when refused: the caller MUST NOT write the attribute.
+ */
+export function refuseStaticAttrWrite(
+  name: unknown,
+  value: unknown,
+  anchor: { span?: unknown; _md?: unknown } | null | undefined,
+  tag?: unknown,
+  attrs?: ReadonlyArray<unknown> | null,
+  parentTag?: string | null,
+): boolean {
+  if (refuseQuotedHandlerWrite(name, value, anchor, tag)) return true;
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  if (anchor && typeof anchor === "object" && anchor._md === true) return false;
+  const sink = classifyStaticExecutableAttr(name, value,
+    { tag: typeof tag === "string" ? tag : null, attrs: attrs ?? null, parentTag: parentTag ?? null });
+  if (sink === null) return false;
+  const span = (anchor && typeof anchor === "object" && anchor.span && typeof anchor.span === "object")
+    ? anchor.span as { file?: unknown; start?: unknown; end?: unknown }
+    : { start: 0, end: 0, line: 1, col: 1 };
+  const err = new CGError(
+    ATTR_STATIC_EXECUTABLE_CODE,
+    staticExecutableMessage(sink, name, typeof tag === "string" ? tag : ""),
+    span,
+    "error",
+  );
+  (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(span, name);
+  (err as { attrSinkName?: string }).attrSinkName = name.toLowerCase();
+  recordRefusedLowering(err, anchor && typeof anchor === "object" ? anchor as object : null);
+  return true;
+}
+
+export function refuseQuotedHandlerWrite(
+  name: unknown,
+  value: unknown,
+  anchor: { span?: unknown } | null | undefined,
+  tag?: unknown,
+): boolean {
+  if (typeof name !== "string" || typeof value !== "string") return false;
+  if (!isQuotedStaticHandler(name, value)) return false;
+  const span = (anchor && typeof anchor === "object" && anchor.span && typeof anchor.span === "object")
+    ? anchor.span as { file?: unknown; start?: unknown; end?: unknown }
+    : { start: 0, end: 0, line: 1, col: 1 };
+  const err = new CGError(
+    ATTR_QUOTED_HANDLER_CODE,
+    quotedHandlerMessage(name, typeof tag === "string" ? tag : ""),
+    span,
+    "error",
+  );
+  (err as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(span, name);
+  (err as { attrSinkName?: string }).attrSinkName = name.toLowerCase();
+  recordRefusedLowering(err, anchor && typeof anchor === "object" ? anchor as object : null);
+  return true;
 }
