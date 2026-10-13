@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
-| MED | 614 | 6 |
+| MED | 615 | 6 |
 | LOW | 390 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -78,11 +78,29 @@ Fix round 2 moved the engine OPENER `effect=` refusal to the TAB at the body's r
 
 Reported by the round-2 review (probe comp2/comp3); same on the pre-Q24 base. The program is rejected either way; the diagnostic names the wrong cause.
 
-### g-arrow-block-body-markup-return-codegen-invalid-s464 — a markup value RETURNED from an arrow function's block body (`const g = () => { return <p>x</p> }`) fails as E-CODEGEN-INVALID-LOGIC, while the expression-bodied arrow (`() => <p>x</p>`) and a `function` returning markup compile and render — `NEW S464; LOW; open (pre-existing on BASE)`
+### g-emitted-js-invalid-shapes-surfaced-by-floor-s464 — pre-existing codegen shapes that emit JS that does not parse; the CLI (a writing compile) already refused each, and since the S464 round-3 parse floor every compile does — `NEW S464; MED; open (pre-existing; now fail-closed everywhere)`
+
+<!-- @gap id=g-emitted-js-invalid-shapes-surfaced-by-floor-s464 sev=MED status=open locus=compiler/src/codegen(per shape — see list) prov=dispatch:s464-markup-text-q24(fix round 3) -->
+
+Surfaced when the parse floor reached `write: false` compiles (unit tests and a single-file corpus compile, `base 71a4a27ee` vs head; every one is also refused by a `write: true` compile — verified file by file). Each is a lowering defect, reported only as the generic E-CODEGEN-INVALID-LOGIC:
+- a regex literal as an `is` LHS: `String(/a/.test(x) is not)` → `(. test ( x ))` (is-predicate-regex-comment-literal-blind);
+- a function-EXPRESSION handler value `onclick=${function (e) { … }}` → the statement `function (e) { … }` inside the listener (s462-narrowing-ends-on-write);
+- a snippet prop's markup-returning arrow `row={ (item) => <span>…</span> }` → raw markup (value-attr-binding-i81);
+- a match arm calling a function named `fn` (`.A => fn(1)`) → `function ( 1 )` (match-arm-inline, gauntlet-s27);
+- a `key=` lambda's template literal keeps `${@prefix}` unlowered (each-opener-expr-undeclared-read);
+- a file-top `const m = <main>…</>` → `const m;` (c22-bare-variant-codegen);
+- a computed `debounced=${@delay}ms` → `() => (@delay) * 1` (debounce-throttle-attribute);
+- a braced `!{}` inside a one-statement `if` in a handler (g-guard-in-one-line-if-for-emits-raw-bang-brace);
+- a component LIBRARY module compiled on its own (`export const Card = <div …>` emitted raw: examples/23-trucking-dispatch/components/*.scrml ×8, examples/22-multifile/components.scrml, samples gauntlet-s19 `_helper-component` / `phase1-export-component-010`, conformance module/e-export-00{2,3} and engine/mount-not-engine-neg/lib) — the multi-file program builds clean (corpus-compile-floor PASS);
+- stdlib `host/index.scrml` (`await` in a non-async helper), `data/index.scrml` + `data/transform.scrml` (`function ( a )` with no body), conformance channel/same-source-two-aliases (`_scrml_route_ws_chat` declared twice), and gauntlet negative samples (nested `when`, `for … else` lift, labelled `break`, `with`, `let` in an expression, `match` as a `return` operand, `error-004-in-logic`, ctrl-010 lift in a match arm).
+
+### g-arrow-block-body-markup-return-codegen-invalid-s464 — a markup value RETURNED from an arrow function's or a function EXPRESSION's block body (`const g = () => { return <p>x</p> }`, `const h = function() { return <i>x</i> }`) fails as E-CODEGEN-INVALID-LOGIC, while the expression-bodied arrow (`() => <p>x</p>`) and a `function` returning markup compile and render — `NEW S464; LOW; open (pre-existing on BASE)`
 
 <!-- @gap id=g-arrow-block-body-markup-return-codegen-invalid-s464 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(arrow block body statements re-parsed as JS; markup not lowered) prov=dispatch:s464-markup-text-q24(fix round 1) -->
 
 Found while writing the §17.6.10.1 context table (S464 fix round 1): identical on base `7e90f6ff0` and head. The error names the wrong cause (a codegen defect) for valid source; the statement-position case in the same body (`() => { <p>x</p> }`) is now E-MARKUP-STATEMENT-NOT-RENDERED.
+
+**S464 fix round 3 (re-review R2-5):** the function-expression form fails the same way (`return < i > x < / i >` emitted; reviewer probes fx1–fx3). Since the round-3 parse floor, every compile refuses it (E-CODEGEN-INVALID-LOGIC), `write: false` included; and E-MARKUP-STATEMENT-NOT-RENDERED in a function-value block body now advises the two forms that compile and render (an expression-bodied arrow, a `function` declaration — verified by compile + render), not the `return` that does not lower.
 
 ### g-lift-of-markup-value-renders-escaped-source-s464 — `lift` of a markup VALUE that is not written inline renders the element as escaped TEXT: `const m = <p>val</p>; lift m`, `lift mk()` (a function returning `<p>…</p>`), `lift @c ? <p>a</p> : <p>b</p>`, and `${m}` inside lifted markup all render `&lt;p&gt;val&lt;/p&gt;` at exit 0 — `NEW S464; HIGH; open (pre-existing on BASE)`
 
@@ -7633,6 +7651,8 @@ directory, not only "genuinely nested multi-segment flat routes".**
 ## §S262 — gaps filed S262 (2026-07-16/17, Peter)
 
 ### g-codegen-unit-tests-blind-to-emitted-js — every codegen unit test is structurally blind to whether the emitted JS parses. `compiler/src/api.js:2576` is `if (write && outputDir) {` and the **S141 emitted-JS acorn gate is nested INSIDE it**; every codegen unit test calls `compileScrml({ write: false })`, so the gate **never runs in unit tests**. `expect(r.errors).toEqual([])` returns `[]` while the emitted bundle is a `SyntaxError`. PA-verified at source (S262). **This is the mechanism that let 8 real bugs — 2 of them page-killers — pass a green suite on the #81 dispatch** (a template-literal `@` emitting an unparseable bundle scored 0 diagnostics). Pre-existing and repo-wide: it silently weakens the tests-as-gate contract for the whole codegen surface, which is freeze-relevant (a conformance case pinning a codegen surface inherits the same blindness if it asserts only `errors == []`). Fix shape: hoist the acorn validation out of the `write` branch (validate the emitted artifact regardless of whether it is written to disk), or have the unit-test harness parse-check. Found while landing the #81 S239 fix round; NOT fixed there (freeze-surface). — `NEW S262; HIGH (gate integrity); open`
+
+**RESOLVED S464** (branch `s464-markup-text-q24`, fix round 3): the §2.2.1 parse gate now runs on EVERY compile, `write: false` included (`compiler/src/api.js`, before the write phase: the same artifacts — client / server / library / tool / worker, runtime, chunks, chunk boot — judged as emitted). A codegen unit test's `expect(r.errors).toEqual([])` now fails when the emitted JS does not parse. The 9 tests that had pinned exit-0-with-invalid-JS were re-pointed at the refusal; the shapes are listed in g-emitted-js-invalid-shapes-surfaced-by-floor-s464.
 
 ### g-value-attr-dropped-outside-each — dynamic VALUE attributes (`class=`/`style=`/`title=`/`data-*`) are silently dropped outside an `<each>` (adopter issue #81, `pjoliver11/assetManagement`; PA-reproduced on `caf50487`). Root cause: `emit-html.ts`'s `val.kind==="expr"` attribute chain runs directive → event → bool-attr (`REACTIVE_BOOL_ATTRS` = a 3-element allowlist) and **ends with NO final `else`**, so a dynamic value attr matches no branch and evaporates — clean compile, 0 diagnostics, and the CSS written against those classes becomes dead code that reviews as correct. Inside `<each>` all wire (`emit-each.ts` builds elements imperatively). **HELD on a DESIGN FORK, not a patch:** two S239 rounds found **16 confirmed correctness bugs**, and round 2 repeats round 1's shape — **patching instances, not classes** (a `style`-only clobber guard left the identical `class=` vs `class:`/transition clobber unguarded; a `_componentPropNames` stamp gated on `propsDecl.length > 0` leaves #81 **still live, silently, for every propless component**). **Root cause of the non-convergence: the lowering adds a NEW writer competing for DOM surface that already has writers (`class:` · transitions · the `show=`/`if=` display toggle · `bind:value`) with NO ownership/arbitration model.** ⇒ **R2 design Q for bryan: who OWNS an attribute when multiple reactive writers target it?** (touches the reactivity contract). Options: (A) per-collision guards [unbounded tail] · (B) an arbitration model [single-writer + a merge protocol for the composite `class`/`style`] · (C) narrow to non-composite attrs, fail-closed on `class`/`style`/`value`. Work checkpointed: `fix/i81-value-attr-emitter` @ `bcf85c29` (pushed; worktree `../scrml-i81-attrs` retained; 17 commits + 487L progress.md) — **a checkpoint, NOT a base to trust** (its guards are instance-shaped). — `RESOLVED S268 (#81 Axiom ① build): bryan ruled Axiom ① (option B/C hybrid — exclusive wholesale-owner per surface + compile error). Built as analyzeWriterConflict + E-ATTR-WRITER-CONFLICT (docs/changes/i81-writer-ownership/); the arbitration model IS the ownership answer. Residual surfaces filed as §S268 gaps (loop-context enforcement, bool-attr silent drop, component-root class/style, template-lit owner, duplicate wholesale).`
 
@@ -21464,6 +21484,8 @@ absence check, so `codes: []` places no constraint on codes it does not name —
 when its runtime half holds (relayed from the review). Fix direction: run `validateEmittedArtifact` on every adapter
 compile (or compile with the gate on), and make any unlisted fatal (`E-*`, severity error) fail a case unless the case
 lists it.
+
+**Half (1) closed S464** (branch `s464-markup-text-q24`, fix round 3): the emitted-JS gate now runs on a `write: false` compile, so the adapter observes E-CODEGEN-INVALID-LOGIC and `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` can fail. Half (2) — `codes: []` passing a case that emits an unlisted fatal error (the superset rule) — is still open.
 
 ### g-is-event-handler-attr-name-matches-one-once-only — `isEventHandlerAttrName` treats any `on[a-z]+` name as an event handler, so `one=` / `once=` / `only=` / `onward=` are handled as event attributes — `NEW S437; LOW; open`
 <!-- @gap id=g-is-event-handler-attr-name-matches-one-once-only sev=LOW status=open locus=compiler/src/multi-statement-scan.ts(isEventHandlerAttrName — /^on[a-z]+$/i) and its inlined copy compiler/src/tokenizer.ts(isEventHandlerAttrName) prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->

@@ -83,7 +83,7 @@ NOT-TWINNED by reason (672 cases; a case counts once per distinct reason):
 - 1 — program-move: impl#1 reads the restructured file differently (-E-CONTRACT-001, +E-CONTRACT-002, +E-CTX-001, +W-WHITESPACE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-LIFECYCLE-001) — not restructured, no `…` unwrapped
 - 1 — program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `…` unwrapped
-- 1 — program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-INTERP-WRAPPED, +W-DERIVED-001) — not restructured, no `…` unwrapped
+- 1 — program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-INTERP-WRAPPED, +E-CODEGEN-INVALID-LOGIC, +W-DERIVED-001) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-FOREIGN-LANG-DUPLICATE, +E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-LOOP-006) — not restructured, no `…` unwrapped
 - 1 — program-wrap: impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL) — not restructured, no `…` unwrapped
