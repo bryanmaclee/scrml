@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 254 | 4 |
+| HIGH | 255 | 4 |
 | MED | 615 | 6 |
 | LOW | 384 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -54,17 +54,22 @@ Executed S464 (S464 review case c7 `lambda` / `chainInline`): `fn f(n) { return 
 ### g-template-literal-cell-read-in-fn-undefined-on-server-s464 — `fn f(k) { return \`${@n}-${k}\` }` reached from a server function returns `"undefined-3"`; E-REACTIVE-003 misses a cell read inside a template literal — `NEW S464; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-template-literal-cell-read-in-fn-undefined-on-server-s464 sev=MED status=open locus=compiler/src/route-inference.ts(detectServerFreeClientCellReads — visits ident nodes + sql text, not template-literal interpolation text) prov=dispatch:s464-pure-fn-placement -->
-Executed S464 (S464 review case c12 `tpl`): base and head both answer `200 "undefined-3"`. The `"x" + @n + k` and `if (@n > 1)` spellings DO fire E-REACTIVE-003; only the template interpolation is missed.
+Executed S464 (S464 review case c12 `tpl`): base and head both answer `200 "undefined-3"`. The `"x" + @n + k` and `if (@n > 1)` spellings DO fire E-REACTIVE-003; only the template interpolation is missed. **S464 fix round 2 — the one-reader change (`compiler/src/at-refs.ts` `forEachAtRef`) can read template interpolations (and escape-hatch code such as a block-body lambda) with `opaqueCode: true`; placement uses it, E-REACTIVE-003 does NOT.** Turning it on for E-REACTIVE-003 was measured: it rejects 10 existing test fixtures that read a cell inside a template in a wholly-server function (`peer-call-in-template-interp-awaited` ss22 #4 (c), `sql-check-at-lowering-s457` ×8, `nested-template-raw-mangle`). Those programs read `undefined` at request time today, so the rejection is right by the rule — but it is newly-rejecting and needs its own ruling + fixture migration. Fix = flip `opaqueCode` to `true` in `detectServerFreeClientCellReads`.
 
 ### g-aliased-import-of-cell-reading-exported-fn-ships-reactive-get-to-server-s464 — `import { f as g }` of an exported `fn f(k) { return k + @n }`, called from server code, emits `_scrml_reactive_get("n")` into `m.server.js` → `_scrml_reactive_get is not defined` — `NEW S464; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-aliased-import-of-cell-reading-exported-fn-ships-reactive-get-to-server-s464 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(emitModuleValueExportLines lowers exported fns client-boundary; no cell-read gate) prov=dispatch:s464-pure-fn-placement -->
 Executed S464 (`m.scrml`: `<n> = 5` + `export fn f(k: int) -> int { return k + @n }`; app imports `{ f as g }` and calls `g(n)` in a server function): base and head identical — `m.server.js` carries `return k + _scrml_reactive_get("n");` and the server call throws. It should be refused at compile time (E-REACTIVE-003 / E-ROUTE-002 class), not emitted.
 
-### g-server-function-param-default-calling-fn-returns-null-s464 — `function inner(k = a(5)) { return k }` called as `inner()` from server code answers `null` — `NEW S464; LOW; open (pre-existing on BASE)`
+### g-server-function-param-default-calling-fn-returns-null-s464 — a server-placed function's PARAMETER DEFAULTS are dropped everywhere: `server fn g(m, k: string = "zz")` answers `null` (in process and over HTTP), so does `function inner(k = a(5))` called as `inner()` — a silent wrong value — `NEW S464; HIGH; open (pre-existing on BASE; RESCOPED S464 fix round 2)`
 
-<!-- @gap id=g-server-function-param-default-calling-fn-returns-null-s464 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(peer/param-default lowering — not root-caused) prov=dispatch:s464-pure-fn-placement -->
-Executed S464 (S464 review case c2 `defparam`): `fn a(n) { return n + 1 }` + `function inner(k = a(5)) { return k }` + `return inner()` in a server function → `200 null` on base and head (expected 6). Not root-caused.
+<!-- @gap id=g-server-function-param-default-calling-fn-returns-null-s464 sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(route handler binds `const k = _scrml_body["k"]` with no default; the in-process peer callable is emitted `async function f(m, k)` with the default dropped) prov=dispatch:s464-pure-fn-placement -->
+**Root (S464 fix round 2, reviewer-located, executed):** every server-placed function loses its parameter defaults. The route handler binds each parameter as `const k = _scrml_body["k"]` (no `?? <default>`), and the in-process peer callable is emitted as `async function f(m, k)` with the default dropped. So `server fn g(m, k: string = "zz") { return k + m }` called as `g(x)` answers `200 null` both in process and over HTTP (reviewer case `sd.scrml`; base and head identical). The original symptom — `fn a(n) { return n + 1 }` + `function inner(k = a(5)) { return k }` + `return inner()` in a server function → `200 null` (expected 6) — is this root. A plain `fn` that stays a plain helper keeps its default (s464 emits `function f(m, k = "zz")`, which executes `"zz3"`), so the hole is only on the server-function paths. **Also:** a default that calls an `@`-reading fn (`fn rd() { return @n }` + `fn f(m, k = rd())`) gets no E-REACTIVE-003 — `f` takes the server-function path (it reaches `@`-state through `rd`), the default is dropped, and the answer is `null` (reviewer case `r5.scrml`).
+
+### g-pure-fn-helper-name-collision-false-and-missed-s464 — two LOW edges of the pure-`fn` helper E-CG-016 check: a column-0 line inside a server function's TEMPLATE LITERAL is read as a module-scope declaration (false positive), and `fn __ri_route_save_1` collides with a compiler route binding — `NEW S464; LOW; open`
+
+<!-- @gap id=g-pure-fn-helper-name-collision-false-and-missed-s464 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(moduleScopeDeclares — column-0 line heuristic over emitted text) prov=dispatch:s464-pure-fn-placement -->
+Executed S464 fix round 2 (reviewer case `fp1.scrml`): `fn f(n) { … }` + `server fn go(n) { const s = \`\nconst f = 1\n\` … return f(n) … }` → E-CG-016 on `f`, because the template literal's `const f = 1` line starts at column 0 of the emitted bundle (main reports E-CG-016 too, from the peer path). And `fn __ri_route_save_1` reached by server code → E-CG-016 (correct refusal of a real clash with a compiler route name; LOW because the `__ri_route_` prefix is compiler-internal and the message could say so). Fix direction: decide module scope from the emitted bundle's parse (top-level statements), not column 0.
 
 ### g-braceless-if-same-line-else-dropped-s462 — a braceless `if (c) a else b` with the `else` on the SAME line silently dropped the else branch (client, server and library mode) — `NEW S462; HIGH; RESOLVED S462`
 
