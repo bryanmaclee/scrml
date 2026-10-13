@@ -198,6 +198,13 @@ function walkEveryMarkupNode(
       ctx = { anchor, component: rec._expandedFrom as string };
     }
     if (rec.kind === "markup" && typeof rec.tag === "string" && Array.isArray(rec.attrs)) {
+      // S464 round 5 — each markup child learns its parent's tag (an SVG animation inside `<image>`
+      // animates an image load). The stamp is on the AST node, so codegen reads the same value.
+      if (Array.isArray(rec.children)) {
+        for (const c of rec.children as Array<Record<string, unknown>>) {
+          if (c && typeof c === "object" && c.kind === "markup") c._parentTag = rec.tag;
+        }
+      }
       visit(cur as unknown as MarkupNode, ctx);
     }
     for (const key of Object.keys(rec)) {
@@ -266,7 +273,8 @@ export function collectExecutableSinkErrors(
                  // An `<md>`-built `a href` / `img src` is judged by §67.6 (E-MD-URL-SCHEME) with the
                  // same scheme test — one report per destination.
                  (attr as { _md?: boolean })._md !== true &&
-                 (staticSink = classifyStaticExecutableAttr(attr.name, v.value, { tag: node.tag, attrs: node.attrs })) !== null) {
+                 (staticSink = classifyStaticExecutableAttr(attr.name, v.value,
+                   { tag: node.tag, attrs: node.attrs, parentTag: (node as { _parentTag?: string })._parentTag ?? null })) !== null) {
         // S464 "(a) Refuse both" — a STATIC `srcdoc`, or a static URL attribute whose scheme rule 2's
         // safe set does not admit (`href="javascript:…"`): text the browser runs, unchecked.
       } else if (v.kind === "string-literal" && typeof v.value === "string") {
@@ -396,6 +404,8 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
     "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else",
     "yield", "await", "is", "not", "and", "or",
   ]);
+  // Keywords after which `<` + letter is markup (they read as operands for the `/` rule).
+  const MARKUP_AFTER_WORDS: ReadonlySet<string> = new Set(["lift", "return", "yield", "await", "else", "do"]);
   const skipRegex = (i: number): number => {
     let k = i + 1;
     let inClass = false;
@@ -417,6 +427,11 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
     // after which `/` divides — or "operator" (anything else, and the start) — after which `/`
     // opens a regex.
     let prev: "operand" | "operator" = "operator";
+    // Round 5 (review F1a): `<` + letter opens an ELEMENT after an operator, after a markup-introducing
+    // keyword (`lift`, which reads as an operand), and after `)` (`if (c) <b …>`, `(x) => <b …>`) — when
+    // in doubt, markup (fail closed). Only after a plain identifier / number / literal / `]` is it a
+    // comparison (`a<b`).
+    let markupMayFollow = true;
     while (k < n) {
       const c = raw[k];
       if (/\s/.test(c)) { k++; continue; }
@@ -424,28 +439,37 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
       if (c === "/" && raw[k + 1] === "/") { while (k < n && raw[k] !== "\n") k++; continue; }
       if (c === "/" && raw[k + 1] === "*") { const e = raw.indexOf("*/", k + 2); k = e < 0 ? n : e + 2; continue; }
       if (c === "/" && prev === "operator") { k = skipRegex(k); prev = "operand"; continue; }
-      if (c === "<" && isLetter(raw[k + 1]) && prev === "operator") { k = readElement(k); prev = "operand"; continue; }
+      if (c === "<" && isLetter(raw[k + 1]) && (prev === "operator" || markupMayFollow)) {
+        k = readElement(k); prev = "operand"; markupMayFollow = false; continue;
+      }
       if (/[A-Za-z0-9_$@]/.test(c)) {
         const at = k;
         while (k < n && /[A-Za-z0-9_$@.]/.test(raw[k])) k++;
         const word = raw.slice(at, k);
         prev = REGEX_AFTER_WORDS.has(word) ? "operator" : "operand";
+        markupMayFollow = MARKUP_AFTER_WORDS.has(word);
         continue;
       }
-      if (c === "{" || c === "(" || c === "[") { depth++; k++; prev = "operator"; continue; }
+      if (c === "{" || c === "(" || c === "[") { depth++; k++; prev = "operator"; markupMayFollow = true; continue; }
       if ((c === "}" || c === ")" || c === "]")) {
         if (depth === 0 && close !== null && c === close) return k + 1;
         depth--; k++;
         prev = c === "}" ? "operator" : "operand";
+        markupMayFollow = c !== "]";
         continue;
       }
+      // Round 5 (review F1b): a POSTFIX `++` / `--` / `!` (non-null) after an operand leaves an operand
+      // — `x.n++ / 2` divides, it does not open a regex.
+      if (prev === "operand" && (c === "+" || c === "-") && raw[k + 1] === c) { k += 2; markupMayFollow = false; continue; }
+      if (prev === "operand" && c === "!" && raw[k + 1] !== "=") { k++; markupMayFollow = false; continue; }
       prev = "operator";
+      markupMayFollow = true;
       k++;
     }
     return n;
   }
   // Read one element starting at its `<`; returns the index after its closer (or after `/>`).
-  function readElement(i: number): number {
+  function readElement(i: number, parentTag: string | null = null): number {
     let k = i + 1;
     const tagStart = k;
     while (k < n && isNameCh(raw[k])) k++;
@@ -507,7 +531,7 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
           message: quotedHandlerMessage(a.name, tag, "in markup held by an expression") });
         continue;
       }
-      const st = classifyStaticExecutableAttr(a.name, v, { tag, attrs });
+      const st = classifyStaticExecutableAttr(a.name, v, { tag, attrs, parentTag });
       if (st) {
         hits.push({ code: ATTR_STATIC_EXECUTABLE_CODE, name: a.name, tag, offset: a.offset,
           message: staticExecutableMessage(st, a.name, tag, "in markup held by an expression") });
@@ -530,7 +554,7 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
         depth--;
         continue;
       }
-      if (c === "<" && isLetter(raw[k + 1])) { k = readElement(k); continue; }
+      if (c === "<" && isLetter(raw[k + 1])) { k = readElement(k, tag); continue; }
       if (c === "{" || (c === "$" && raw[k + 1] === "{")) { k = skipCode(c === "$" ? k + 2 : k + 1, "}"); continue; }
       k++;
     }

@@ -171,6 +171,11 @@ export function quotedUrlAttrNeedsRuntimeGuard(name: string, value: string): boo
 export interface AttrElementContext {
   tag?: string | null;
   attrs?: ReadonlyArray<unknown> | null;
+  /**
+   * The enclosing element's tag, when the caller knows it (S464 round 5): an SVG animation element
+   * inside `<image>` / `<feImage>` animates that element's `href` — an image load.
+   */
+  parentTag?: string | null;
 }
 
 /**
@@ -409,7 +414,9 @@ function staticAttrValue(attrs: ReadonlyArray<unknown> | null | undefined, name:
  * attrs, allow-list" — "on EVERY image-loading attribute"): the image-source attributes rule 2 names
  * (`src`, `srcset`, `imagesrcset`, `poster`), plus `background`, `<img>` `dynsrc` / `lowsrc`, an SVG `<image>` / `<feImage>`
  * `href` / `xlink:href`, and a `<link>` `href` whose `rel` names an icon (`icon`, `shortcut icon`,
- * `apple-touch-icon`, `apple-touch-icon-precomposed`, `mask-icon`).
+ * `apple-touch-icon`, `apple-touch-icon-precomposed`, `apple-touch-startup-image`, `mask-icon`,
+ * `fluid-icon` — `IMAGE_LINK_REL_TOKENS`; EVERY token of the `rel` must be one of them or `shortcut`, so
+ * `rel="stylesheet icon"` is not an image load).
  */
 function loadsAnImage(lowerName: string, element?: AttrElementContext | null): boolean {
   if (_SCRML_IMAGE_SOURCE_ATTRS.has(lowerName) || lowerName === "background" ||
@@ -418,10 +425,23 @@ function loadsAnImage(lowerName: string, element?: AttrElementContext | null): b
   if ((lowerName === "href" || lowerName === "xlink:href") && (tag === "image" || tag === "feimage")) return true;
   if (lowerName === "href" && tag === "link") {
     const rel = staticAttrValue(element?.attrs, "rel");
-    if (rel !== null && rel.toLowerCase().split(/\s+/).some((r) => /(^|-)icon$/.test(r))) return true;
+    if (rel === null) return false;
+    const tokens = rel.toLowerCase().split(/[\t\n\f\r ]+/).filter(Boolean);
+    return tokens.some((t) => IMAGE_LINK_REL_TOKENS.has(t)) &&
+      tokens.every((t) => t === "shortcut" || IMAGE_LINK_REL_TOKENS.has(t));
   }
   return false;
 }
+
+/**
+ * The `<link rel>` tokens whose `href` the browser loads AS AN IMAGE (an icon / touch icon / startup
+ * image). An explicit set (S464 round 5, review F2) — not a `*-icon` pattern, which admitted made-up
+ * tokens (`x-icon`, `noticon`) and missed `apple-touch-icon-precomposed` / `apple-touch-startup-image`.
+ * `shortcut` is admitted only beside one of these (`shortcut icon`).
+ */
+export const IMAGE_LINK_REL_TOKENS: ReadonlySet<string> = new Set([
+  "icon", "apple-touch-icon", "apple-touch-icon-precomposed", "apple-touch-startup-image", "mask-icon", "fluid-icon",
+]);
 
 export function classifyStaticExecutableAttr(
   name: string,
@@ -441,9 +461,17 @@ export function classifyStaticExecutableAttr(
     // An animation value writes the attribute `attributeName` names: judged only when that is a
     // navigate / load attribute, or is computed ("" — any attribute may be animated: fail closed).
     if (target !== "" && !STATIC_NAV_LOAD_URL_ATTRS.has(target)) return null;
-    if (_scrml_animation_value_admitted(lower, value, target)) return null;
+    // S464 round 5 (review F2): an animation inside SVG `<image>` / `<feImage>` (with no `href` of its
+    // own naming another target) animates that element's `href` — an image load, judged as an image
+    // source (raster `data:image/…` admitted).
+    const parent = element && typeof element.parentTag === "string" ? element.parentTag.toLowerCase() : "";
+    const animatesImageHref = (target === "href" || target === "xlink:href") &&
+      (parent === "image" || parent === "feimage") &&
+      staticAttrValue(element?.attrs, "href") === null && staticAttrValue(element?.attrs, "xlink:href") === null;
+    const judgedTarget = animatesImageHref ? "src" : target;
+    if (_scrml_animation_value_admitted(lower, value, judgedTarget)) return null;
     const bad = (lower === "values" ? value.split(";") : [value])
-      .find((v) => !_scrml_url_value_admitted(target, v));
+      .find((v) => !_scrml_url_value_admitted(judgedTarget, v));
     return { kind: "url-scheme", scheme: bad !== undefined ? schemeOf(bad) : null };
   }
   if (!STATIC_NAV_LOAD_URL_ATTRS.has(lower)) return null;

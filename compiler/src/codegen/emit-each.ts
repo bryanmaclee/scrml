@@ -1393,6 +1393,11 @@ function renderTemplateChildToJs(
     }
 
     const elVar = `_scrml_el_${nextLocalId()}`;
+    // S464 round 5 — each markup child learns its parent's tag (`refuseStaticAttrWrite`: an SVG
+    // animation inside `<image>` animates an image load).
+    for (const gc of ((child as any).children ?? []) as any[]) {
+      if (gc && typeof gc === "object" && gc.kind === "markup") gc._parentTag = tagName;
+    }
     // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built, nor a
     // raw-content body holding their start-tag text (pre-Q21 this path asked only the
     // element rule, so such a body in an `<each>` re-parsed at codegen was a silent accept).
@@ -2366,7 +2371,8 @@ function renderTemplateAttrToJs(
   // reached VP-3; this is the backstop (one backstop, `refuseStaticAttrWrite`, which also refuses a static executable value).
   if (valKind === "string-literal" &&
       refuseStaticAttrWrite(aName, val.value, attr, elNode && typeof elNode.tag === "string" ? elNode.tag : "",
-        elNode && Array.isArray(elNode.attrs) ? elNode.attrs : null)) {
+        elNode && Array.isArray(elNode.attrs) ? elNode.attrs : null,
+        elNode && typeof elNode._parentTag === "string" ? elNode._parentTag : null)) {
     lines.push(`${indent}/* E-ATTR-QUOTED-HANDLER: quoted "${aName}" handler refused */`);
     return;
   }

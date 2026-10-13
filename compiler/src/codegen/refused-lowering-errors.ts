@@ -165,11 +165,13 @@ export function refuseStaticAttrWrite(
   anchor: { span?: unknown; _md?: unknown } | null | undefined,
   tag?: unknown,
   attrs?: ReadonlyArray<unknown> | null,
+  parentTag?: string | null,
 ): boolean {
   if (refuseQuotedHandlerWrite(name, value, anchor, tag)) return true;
   if (typeof name !== "string" || typeof value !== "string") return false;
   if (anchor && typeof anchor === "object" && anchor._md === true) return false;
-  const sink = classifyStaticExecutableAttr(name, value, { tag: typeof tag === "string" ? tag : null, attrs: attrs ?? null });
+  const sink = classifyStaticExecutableAttr(name, value,
+    { tag: typeof tag === "string" ? tag : null, attrs: attrs ?? null, parentTag: parentTag ?? null });
   if (sink === null) return false;
   const span = (anchor && typeof anchor === "object" && anchor.span && typeof anchor.span === "object")
     ? anchor.span as { file?: unknown; start?: unknown; end?: unknown }

@@ -3253,7 +3253,9 @@ export function generateHtml(
         // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is
         // never written into HTML (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`).
         if (attr.value && attr.value.kind === "string-literal" &&
-            refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs)) {
+            refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs,
+              (node as { _parentTag?: string })._parentTag ??
+              (markupParentStack.length > 0 ? markupParentStack[markupParentStack.length - 1] : null))) {
           continue;
         }
 

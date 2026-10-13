@@ -1693,6 +1693,8 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     return elVar;
   }
   lines.push(`const ${elVar} = _scrml_g.document.createElement(${JSON.stringify(tag)});`);
+  // S464 round 5 — each markup child learns its parent's tag (`refuseStaticAttrWrite`).
+  for (const c of children) if (c && typeof c === "object" && c.kind === "markup") c._parentTag = tag;
 
   // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
   // the element itself; for a SOLE reconciled item root carrying a per-item `if=`
@@ -1709,7 +1711,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
 
     // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is never
     // written (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`).
-    if (val && val.kind === "string-literal" && refuseStaticAttrWrite(name, val.value, attr, tag, attrs)) continue;
+    if (val && val.kind === "string-literal" && refuseStaticAttrWrite(name, val.value, attr, tag, attrs, node._parentTag ?? null)) continue;
 
     // LIFT-2 fix (S88) — bind:* two-way wiring (parity with top-level §5.4.1).
     // Recognized before kind-dispatch because the wiring is name-driven, not

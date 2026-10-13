@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 255 | 4 |
 | MED | 615 | 6 |
-| LOW | 384 | 0 |
+| LOW | 385 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -571,6 +571,12 @@ Reproduced with main's compiler and on the s464 branch (same output). Fail-safe 
 <!-- @gap id=g-bare-srcdoc-no-value-s464 sev=LOW status=resolved resolved-by=s464-quoted-handler-refused-round-3 locus=compiler/src/attr-injection-sink.ts(classifyStaticExecutableAttr judges string values only; a presence attribute has no value) prov=review:s464-quoted-handler-refused-S239-r2 -->
 
 Raised by the S239 review of ae1924b95. Decided LEGAL in round 3 and stated in SPEC §5.2 "Static executable values (S464)" item 1: a bare `srcdoc` is an empty document and runs nothing — there is no text for the browser to execute, so the S464 purpose ("JS scrml never checks") does not reach it. Pinned by `s464-quoted-handler-refused.test.js` (narrow-ok) and `s457-executable-sinks-srcdoc-svg.test.js` (§2 controls).
+
+### g-iframe-src-raster-data-image-admitted-s464 — `<iframe src="data:image/png;…">` is admitted by both the static rule and the runtime guard: rule 2's image-source set (`src`, `srcset`, `imagesrcset`, `poster`) is attribute-name based, not element based — `NEW S464; LOW; open (pre-existing, inert)`
+
+<!-- @gap id=g-iframe-src-raster-data-image-admitted-s464 sev=LOW status=open locus=compiler/src/runtime-url-guard.js(_SCRML_IMAGE_SOURCE_ATTRS / _scrml_url_scheme_admitted — name-only) prov=review:s464-quoted-handler-refused-S239-r4 -->
+
+Inert: a frame showing a raster image decodes it, it never runs it. Recorded because the S464 "(a) Narrow attrs, allow-list" wording admits a raster `data:image` on attributes that LOAD AN IMAGE, and an `<iframe>` loads a document. Not changed in s464 (owner/PA call whether the image-source set should become element-scoped, in both the static rule and rule 3).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 

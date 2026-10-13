@@ -629,3 +629,66 @@ describe("Round 4 — the remaining navigate / load attributes are judged (PA re
     expect(se("r4-usemap", `<img src="/a.png" usemap="javascript:x">`)).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 5 — review F1 (operand/operator tracker) and F2 (image-loading rel / animated image href)
+// ---------------------------------------------------------------------------
+
+describe("Round 5 F1 — `lift` / `)` before markup, and postfix ++ / -- / ! before a division", () => {
+  const lam = (body) => `<program>\n<items> = [{ name: "a" }]\nconst List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>\n<List items=@items row={ (x) => ${body} }/>\n</program>\n`;
+  const codesOf = (r) => r.all.map((d) => d.code).filter((c) => /^E-ATTR-(QUOTED-HANDLER|STATIC-EXECUTABLE|INTERP-EXECUTABLE)$/.test(c));
+  const CASES = {
+    m_for: [`<span>\${ for (const y of x.ys) { lift <b onclick="p()">y</b> } }</span>`, "E-ATTR-QUOTED-HANDLER"],
+    m_forh: [`<span>\${ for (const y of x.ys) { lift <a href="javascript:p()">y</a> } }</span>`, "E-ATTR-STATIC-EXECUTABLE"],
+    m_if: [`<span>\${ if (x.n > 1) { lift <b onclick="p()">y</b> } }</span>`, "E-ATTR-QUOTED-HANDLER"],
+    x_post: [`<span>\${ x.n++ / 2 }<b onclick="p()">y</b></span>`, "E-ATTR-QUOTED-HANDLER"],
+    x_post2: [`<span>\${ x.n-- / 2 }<a href="javascript:p()">y</a></span>`, "E-ATTR-STATIC-EXECUTABLE"],
+    x_bang: [`<span>\${ x.ok! / 2 }<b onclick="p()">y</b></span>`, "E-ATTR-QUOTED-HANDLER"],
+  };
+  for (const [name, [body, code]] of Object.entries(CASES)) {
+    test(name, () => {
+      expect(codesOf(compile(`r5-${name}`.toLowerCase(), lam(body)))).toEqual([code]);
+    });
+  }
+  test("controls: a comparison and a division stay code", () => {
+    expect(codesOf(compile("r5-cmp", lam(`<span>\${ x.n < 2 }<i title="a/b">z</i>\${ x.n > 1 }</span>`)))).toEqual([]);
+    expect(codesOf(compile("r5-div", lam(`<span>\${ x.n / 2 }<b>"q"</b><i title="/">z</i></span>`)))).toEqual([]);
+  });
+});
+
+describe("Round 5 F2 — image-loading `<link rel>` is an explicit token set; an animated SVG `<image>` href loads an image", () => {
+  const SE = "E-ATTR-STATIC-EXECUTABLE";
+  const se = (name, el) => compile(name, `<program>\n${el}\n</program>\n`).all.filter((d) => d.code === SE).length;
+  const PNG = "data:image/png;base64,AAAA";
+  test("admitted: apple-touch-icon-precomposed, apple-touch-startup-image, mask-icon, fluid-icon, shortcut icon", () => {
+    for (const [i, rel] of ["apple-touch-icon-precomposed", "apple-touch-startup-image", "mask-icon", "fluid-icon", "Shortcut Icon"].entries()) {
+      expect(se(`r5-rel-ok-${i}`, `<link rel="${rel}" href="${PNG}">`)).toBe(0);
+    }
+  });
+  test("refused: a made-up *-icon token, a non-image rel beside icon", () => {
+    expect(se("r5-rel-no-0", `<link rel="x-icon" href="${PNG}">`)).toBe(1);
+    expect(se("r5-rel-no-1", `<link rel="noticon" href="${PNG}">`)).toBe(1);
+    expect(se("r5-rel-no-2", `<link rel="stylesheet icon" href="${PNG}">`)).toBe(1);
+  });
+  test("an <animate> inside SVG <image> animating href to a raster data:image is admitted; to javascript: refused", () => {
+    expect(se("r5-anim-ok", `<svg><image href="/a.png"><animate attributeName="href" to="${PNG}"/></image></svg>`)).toBe(0);
+    expect(se("r5-anim-no", `<svg><image href="/a.png"><animate attributeName="href" to="javascript:x"/></image></svg>`)).toBe(1);
+    expect(se("r5-anim-a", `<svg><a><animate attributeName="href" to="${PNG}"/></a></svg>`)).toBe(1);
+  });
+  test("the codegen backstop agrees inside a `<match>` arm row (no false refusal)", () => {
+    const r = compile("r5-arm", `\${
+  type Phase:enum = { Idle, Ready }
+  <phase>: Phase = .Idle
+  <items> = [{ name: "a" }]
+}
+<match for=Phase on=@phase>
+  <Idle>
+    <each in=@items as it><svg><image href="/a.png"><animate attributeName="href" to="${PNG}"/></image></svg></each>
+    <link rel="apple-touch-icon-precomposed" href="${PNG}">
+  </>
+  <Ready><p>r</p></>
+</match>
+`);
+    expect(r.all.filter((d) => d.code === SE)).toEqual([]);
+  });
+});
