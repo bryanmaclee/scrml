@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 255 | 4 |
-| MED | 616 | 6 |
-| LOW | 385 | 0 |
+| MED | 618 | 6 |
+| LOW | 386 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -25372,3 +25372,21 @@ Confirmed on main (S464): `rawHtml` is named only in the lint's correction text 
 <!-- @gap id=g-module-resolver-literal-nul-byte-hides-file-from-grep-s464 sev=LOW status=open locus=compiler/src/module-resolver.js(seedKey join, byte offset ~25888) prov=empirical:s464-file-s462-gaps-agent-note+PA-verified -->
 
 PA-verified by execution (S464): `python3` finds byte 0x00 at offset 25888 inside `[...seed].sort().join("\x00")`; `grep -c` returns 0 matches for patterns present in the file unless `-a` is passed. Behaviour is fine at run time; the hazard is investigative — a grep-based probe silently answers "absent" about a live compiler file (the indistinguishable-failure probe shape). Fix: write the separator as the escape `"\0"` (byte-identical string value; inert).
+
+### g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 — the markup scanner over unparsed (escape-hatch) lambda text unions a BOUNDED set of readings at ambiguous `<`, so a text whose true reading mixes 2+ choices outside the set hides a quoted handler / static executable URL — `NEW S464; MED; open (LATENT)`
+
+<!-- @gap id=g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks / markupTextSinksOnce) prov=review:s464-quoted-handler-refused-r6-S239-F1 -->
+
+LATENT: only snippet-lambda / escape-hatch markup, which impl#1 does not emit today (see g-parametric-snippet-render-in-for-lift-unbound-s464). Reproducer (reviewer scratch `~/.cache/scrml-review-qh-r6/p/mix/mx1.scrml`): `row={ (x) => <span>${ if (x.ok) <b>don't</b> }${ x.n <lo ? "x>" : "</b>" }${ for (const y of x.ys) <u>a'b</u> }${ x.n <lo ? "x>" : "</b>" }<i onclick="z">y</i></span> }` → no E-ATTR at f28de6e1f (round 5 refused it). A bounded union cannot be complete over 2^k readings. ⚑ **MUST be closed BEFORE snippet-lambda markup is ever lowered/emitted** — the structural fix is the design item below, not more scanner heuristics.
+
+### g-escape-hatch-markup-scanner-false-refusal-attr-text-in-string-s464 — the all-markup reading parses a string literal holding attribute-like text after a comparison as an attribute → false E-ATTR-QUOTED-HANDLER — `NEW S464; LOW; open (escape-hatch only)`
+
+<!-- @gap id=g-escape-hatch-markup-scanner-false-refusal-attr-text-in-string-s464 sev=LOW status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks all-markup reading) prov=review:s464-quoted-handler-refused-r6-S239-F2 -->
+
+`row={ (x) => <span>${ x.n <lim ? 'onclick="x"' : "" }</span> }` → E-ATTR-QUOTED-HANDLER naming a phantom element (round 5 compiled it clean). Escape-hatch text only; parsed-markup equivalents unaffected.
+
+### g-escape-hatch-markup-judged-by-scanner-not-parser-s464 — DESIGN ITEM: markup inside unparsed escape-hatch lambda text is judged by a hand-written heuristic scanner (6 review rounds on it, S464) instead of the real markup parser — `NEW S464; MED; open (design)`
+
+<!-- @gap id=g-escape-hatch-markup-judged-by-scanner-not-parser-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks)+compiler/src/expression-parser.ts(lambda markup left as escape-hatch text) prov=rationale:S464-PA-landing-call-after-6-rounds-on-one-heuristic -->
+
+The S239 rounds on `s464-quoted-handler-refused` kept finding scanner-reading bugs (quotes, regex literals, `)<`, postfix ops, mixed readings) — a heuristic standing in for a parser (the "two readers of one text" class). Root fix: parse lambda/snippet markup with the real markup parser (or lower it to structure) so E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE / E-ATTR-INTERP-EXECUTABLE judge parsed attributes, and delete `markupTextSinks`. Gate: before snippet-lambda markup emission lands.
