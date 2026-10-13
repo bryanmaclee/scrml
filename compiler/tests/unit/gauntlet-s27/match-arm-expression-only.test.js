@@ -144,7 +144,12 @@ describe("S27 — single-line match with expression-only arms", () => {
 </program>
 `;
     const { errors } = compile(src);
-    expect(errors).toEqual([]);
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on a `write: false`
+    // compile: the arm `fn(1)` is lowered as `function ( 1 )` (a callee named `fn` is read
+    // as the `fn` keyword) — JS that never parsed, already refused by a `write: true`
+    // compile (g-emitted-js-invalid-shapes-surfaced-by-floor-s464). The split itself (the
+    // point here) raises nothing else.
+    expect(errors.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
 
   test("multi-line form continues to work (regression guard for the pre-existing behavior)", () => {

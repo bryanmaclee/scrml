@@ -150,3 +150,27 @@ describe("validate-emit gate — default OFF preserves pre-gate behavior", () =>
     expect(r.errors.filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
   }, 30000);
 });
+
+// S464 Q24 fix round 3 — the §2.2.1 parse floor holds for EVERY compile. Before, the gate
+// ran only inside the write phase, so a `write: false` compile (the LSP, every in-process
+// caller) reported exit 0 for artifacts that do not parse
+// (GAP-S385-VALIDATE-EMIT-SKIPPED-WHEN-WRITE-FALSE).
+describe("validate-emit gate — runs on a write:false compile too (S464)", () => {
+  // `const m = <main>…</>` at file top level is emitted as `const m;` (pre-existing,
+  // g-emitted-js-invalid-shapes-surfaced-by-floor-s464) — invalid JS the CLI already refused.
+  const SRC = "type Phase:enum = { Idle, Loading }\n<phase>: Phase = Phase.Idle\nconst m = <main>${@phase}</>\n${ render(m) }\n";
+  test("write:false — refused with E-CODEGEN-INVALID-LOGIC, the same verdict as write:true", () => {
+    const f = join(TMP, "floor-nowrite.scrml");
+    writeFileSync(f, SRC);
+    const noWrite = compileScrml({ inputFiles: [f], write: false, log: () => {} });
+    const withWrite = compileScrml({ inputFiles: [f], write: true, outputDir: join(TMP, "floor-out"), log: () => {} });
+    expect(noWrite.errors.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+    expect(withWrite.errors.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+  });
+  test("write:false with validateEmit:false — the operational escape still suppresses it", () => {
+    const f = join(TMP, "floor-escape.scrml");
+    writeFileSync(f, SRC);
+    const r = compileScrml({ inputFiles: [f], write: false, validateEmit: false, log: () => {} });
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+  });
+});

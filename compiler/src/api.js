@@ -4056,6 +4056,50 @@ function _compileScrmlImpl(options = {}) {
   const clientSeeds = new Set();
   let clientAssets = [];
 
+  // §2.2.1 (S464 Q24 fix round 3) — the emitted-JS parse floor holds for EVERY compile,
+  // not only one that writes. The gate below runs inside the write phase (it judges the
+  // exact bytes written, after import re-basing); a `write: false` compile — the LSP,
+  // `scrml check`-style callers, every in-process API use — skipped it and reported
+  // exit 0 for artifacts that do not parse (S464 review R2-1/R2-3/R2-5: handler bodies
+  // in `<each>` rows / `<match>` arms / component bodies, `when` bodies, function-
+  // expression returns). Without a write, the artifacts are judged as emitted: import
+  // re-basing and production stripping change specifiers / comments, never whether the
+  // JS parses. Same artifacts, same validator, same prior-fatal suppression (Bug 70).
+  if (!(writeEligible && outputDir) && validateEmit && cgResult?.outputs) {
+    const priorFatal = allErrors.some((e) =>
+      !(e.code?.startsWith("W-") || e.code?.startsWith("I-") || e.severity === "warning"
+        || e.severity === "info" || e.code === "E-STYLE-CONFLICT"));
+    if (!priorFatal) {
+      const arts = [];
+      const push = (sourceFile, artifact, contents) => {
+        if (typeof contents === "string" && contents.length > 0) arts.push({ sourceFile, artifact, contents });
+      };
+      for (const [filePath, output] of cgResult.outputs) {
+        const base = basename(filePath, ".scrml");
+        push(filePath, `${base}.js`, output.toolJs);
+        push(filePath, `${base}.server.js`, output.serverJs);
+        push(filePath, `${base}.js`, output.libraryJs);
+        push(filePath, `${base}.client.js`, output.clientJs);
+        if (output.workerBundles) {
+          for (const [name, workerJs] of output.workerBundles) push(filePath, workerBundleFilename(filePath, name), workerJs);
+        }
+      }
+      if (mode !== "library" && cgResult.runtimeJs && cgResult.runtimeFilename) {
+        push(cgResult.runtimeFilename, cgResult.runtimeFilename, cgResult.runtimeJs);
+      }
+      if (cgResult.chunks) for (const chunk of cgResult.chunks.values()) push(chunk.filename, chunk.filename, chunk.payloadJs);
+      if (cgResult.chunksBootJs && cgResult.chunksBootFilename) push(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
+      const gateErrors = validateEmittedArtifacts(arts,
+        (name) => [...sourceByFile.values()].some((src) => typeof src === "string" && src.includes(name)));
+      for (const ge of gateErrors) {
+        allErrors.push({
+          stage: "CG", code: ge.code, message: ge.message, file: ge.span?.file ?? "",
+          line: ge.span?.line, column: ge.span?.col, severity: "error",
+        });
+      }
+    }
+  }
+
   if (writeEligible && outputDir) {
     // `writeAborted` short-circuits ALL writes below (stdlib shims, runtime chunk,
     // per-file client/server/library, per-route chunks + manifest) when the
