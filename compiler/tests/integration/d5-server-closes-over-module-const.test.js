@@ -156,10 +156,13 @@ describe("D-5 — a module const the server bundle closes over", () => {
     expect(c.clientJs).toContain("CLIENT_ONLY");
   });
 
-  test("§5 a const whose initializer cannot resolve server-side is SKIPPED, not guessed", () => {
-    // `compute()` is not emitted into the server bundle; emitting
-    // `const DERIVED = compute();` at server module scope would turn a call-time
-    // ReferenceError into a module-LOAD crash. Fail-closed: skip it.
+  test("§5 a const whose initializer cannot resolve server-side is REFUSED (E-ROUTE-002), never emitted", () => {
+    // `compute()` is a client `function`, not emitted into the server bundle;
+    // emitting `const DERIVED = compute();` at server module scope would turn a
+    // call-time ReferenceError into a module-LOAD crash, and skipping it (the S293
+    // behaviour) left `return DERIVED` dangling — a ReferenceError at request time
+    // with zero diagnostics. s464 fix round 2: refuse at compile time, naming the
+    // chain (§12.4 E-ROUTE-002).
     const c = compileFixture(
       "d5unresolvable",
       `\${
@@ -174,7 +177,9 @@ describe("D-5 — a module const the server bundle closes over", () => {
 <div><p>x</></div>
 `,
     );
-    expect(c.errors).toEqual([]);
+    const e = c.errors.find((x) => x.code === "E-ROUTE-002");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("server code → `DERIVED` → `compute`");
     expect(c.serverJs).not.toMatch(/^const DERIVED = /m);
   });
 });

@@ -504,3 +504,106 @@ describe("s464 fix round 2 NEW-2 — E-REACTIVE-003 reads the same tree", () => 
     expect(readFileSync(join(outDir, "app.server.js"), "utf-8")).not.toContain("_scrml_reactive_get(");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 2 items 3-5 — the D-5 module-binding CLOSURE, its order (TDZ), its
+// refusals, and the complete E-CG-016 check.
+// ---------------------------------------------------------------------------
+
+async function goResult(pre, name) {
+  const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": goProg(pre) }, "app.scrml", name);
+  expect(errors).toEqual([]);
+  // Plain import (no test patch) — the bundle must LOAD, not just parse.
+  const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
+  const route = mod.routes.find((r) => String(r.path).includes("go"));
+  const resp = await route.handler(new Request(`http://localhost${route.path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", "Cookie": "scrml_csrf=t" },
+    body: JSON.stringify({ n: 3, x: 3 }),
+  }));
+  expect(resp.status).toBe(200);
+  return resp.json();
+}
+
+describe("s464 fix round 2 item 3 — D-5 chains", () => {
+  const CASES = [
+    ["const of a const", "  const BASE = 5\n  const RATE = BASE * 2\n  fn f(n) { return n * RATE }\n  server fn go(n) { return f(n) }", 30],
+    ["const from a pure fn call (the fn is emitted too)", "  fn dbl(x) { return x * 2 }\n  const RATE = dbl(4)\n  fn f(n) { return n * RATE }\n  server fn go(n) { return f(n) }", 24],
+    ["member read", "  const LIST = [1, 2, 3]\n  const TOTAL = LIST.length\n  fn f(n) { return n + TOTAL }\n  server fn go(n) { return f(n) }", 6],
+    ["object destructuring", "  const { a, b } = { a: 1, b: 2 }\n  fn f(n) { return n + a + b }\n  server fn go(n) { return f(n) }", 6],
+    ["array destructuring", "  const [p, q] = [10, 20]\n  fn f(n) { return n + p + q }\n  server fn go(n) { return f(n) }", 33],
+    ["a lambda in the initializer reads another const", "  const RATE = 2\n  const L = [1, 2, 3].map((q) => q * RATE)\n  fn f(x) { return x + L.length + Math.max(...L) }\n  server fn go(x) { return f(x) }", 12],
+  ];
+  for (const [label, pre, expected] of CASES) {
+    test(`${label} → ${expected}`, async () => {
+      if (HAPPY_DOM()) return;
+      expect(await goResult(pre, "d5-chain")).toBe(expected);
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
+});
+
+describe("s464 fix round 2 item 4 — module-load order (TDZ)", () => {
+  test("`export const A = BASE + 1` loads (BASE declared ahead of the exports) → 18", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult("  const BASE = 5\n  export const A = BASE + 1\n  fn f(n) { return n * A }\n  server fn go(n) { return f(n) }", "tdz-a")).toBe(18);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("`export const V = f(2)` with f a pure fn reading a const loads → 9", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult("  const K = 3\n  fn f(x) { return x * K }\n  export const V = f(2)\n  server fn go(n) { return n + V }", "tdz-v")).toBe(9);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("a const that reads an exported value is placed after it → 11", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult("  export const A = 4\n  const B = A * 2\n  fn f(x) { return x + B }\n  server fn go(x) { return f(x) }", "tdz-after")).toBe(11);
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 2 item 3 — a needed binding that cannot run on the server is refused", () => {
+  const REFUSE = [
+    ["reads a cell", "  const T = @n * 2\n  fn f(x) { return x + T }\n  server fn go(x) { return f(x) }"],
+    ["reads a browser-only global", "  const T = document.title\n  fn f(x) { return x + T }\n  server fn go(x) { return f(x) }"],
+    ["calls a client `function`", "  function h(x) { return x * 3 }\n  const T = h(2)\n  fn f(x) { return x + T }\n  server fn go(x) { return f(x) }"],
+  ];
+  for (const [label, pre] of REFUSE) {
+    test(`${label} → E-ROUTE-002 naming the chain`, () => {
+      const { errors } = compileFiles({ "app.scrml": goProg(pre) }, "app.scrml", "d5-refuse");
+      const e = errors.find((x) => x.code === "E-ROUTE-002");
+      expect(e).toBeDefined();
+      expect(e.message).toContain("server code → `T`");
+    });
+  }
+
+  for (const [label, pre, expected] of [
+    ["a server local shadowing a client-only module const", "  const total = @n * 2\n  server fn go(x) { const total = x * 10\n    return total }", 30],
+    ["an object key named like a client-only module const", "  const total = @n * 2\n  server fn go(x) { return { total: x } }", { total: 3 }],
+  ]) {
+    test(`no refusal for ${label}`, async () => {
+      if (HAPPY_DOM()) return;
+      expect(await goResult(pre, "d5-norefuse")).toEqual(expected);
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
+});
+
+describe("s464 fix round 2 item 5 — E-CG-016 against the COMPLETE server bundle", () => {
+  const dbProg = (name) => `<program db="./x.db">
+\${
+  fn ${name}(x) { return x * 2 }
+  function go(x) {
+    ?{\`CREATE TABLE IF NOT EXISTS t (v INTEGER)\`}.run()
+    const r = ${name}(x)
+    return r
+  }
+}
+<n> = 3
+<out> = 0
+<button onclick=\${@out = go(@n)}>s</button>
+<p>\${@out}</p>
+</program>`;
+  for (const nm of ["SQL", "_SCRML_TENANT_DECLARED"]) {
+    test(`\`fn ${nm}\` (a late compiler binding) is E-CG-016, not a generic codegen error`, () => {
+      const { errors } = compileFiles({ "app.scrml": dbProg(nm) }, "app.scrml", `late-${nm}`);
+      expect(errors.map((e) => e.code)).toEqual(["E-CG-016"]);
+    });
+  }
+});
