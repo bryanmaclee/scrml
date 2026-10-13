@@ -385,6 +385,10 @@ export type StaticExecutableSink =
  */
 export const STATIC_NAV_LOAD_URL_ATTRS: ReadonlySet<string> = new Set([
   "href", "src", "action", "formaction", "data", "poster", "srcset", "ping", "xlink:href", "background",
+  // Round 4 (PA reading of the same ruling — "attributes the browser NAVIGATES to or LOADS"): the
+  // remaining load attributes of rule 2's list. `usemap` is left OUT: it names a same-document
+  // `<map>` (`#map`) and loads nothing.
+  "imagesrcset", "archive", "codebase", "classid", "dynsrc", "lowsrc", "manifest", "icon",
 ]);
 
 /** The STATIC string value of attribute `name` in `attrs` (AST or lift-string form), or null. */
@@ -403,12 +407,13 @@ function staticAttrValue(attrs: ReadonlyArray<unknown> | null | undefined, name:
 /**
  * Does `name` on `element` LOAD AN IMAGE? Then a raster `data:image/…` is admitted (S464 "(a) Narrow
  * attrs, allow-list" — "on EVERY image-loading attribute"): the image-source attributes rule 2 names
- * (`src`, `srcset`, `imagesrcset`, `poster`), plus `background`, an SVG `<image>` / `<feImage>`
+ * (`src`, `srcset`, `imagesrcset`, `poster`), plus `background`, `<img>` `dynsrc` / `lowsrc`, an SVG `<image>` / `<feImage>`
  * `href` / `xlink:href`, and a `<link>` `href` whose `rel` names an icon (`icon`, `shortcut icon`,
  * `apple-touch-icon`, `apple-touch-icon-precomposed`, `mask-icon`).
  */
 function loadsAnImage(lowerName: string, element?: AttrElementContext | null): boolean {
-  if (_SCRML_IMAGE_SOURCE_ATTRS.has(lowerName) || lowerName === "background") return true;
+  if (_SCRML_IMAGE_SOURCE_ATTRS.has(lowerName) || lowerName === "background" ||
+      lowerName === "dynsrc" || lowerName === "lowsrc") return true;
   const tag = element && typeof element.tag === "string" ? element.tag.toLowerCase() : "";
   if ((lowerName === "href" || lowerName === "xlink:href") && (tag === "image" || tag === "feimage")) return true;
   if (lowerName === "href" && tag === "link") {

@@ -605,3 +605,27 @@ describe("S464 (a) Narrow attrs — only navigate / load attributes are judged; 
     expect(se(r)[0].message).toContain("navigates to / loads a URL whose scheme (`webcal:`) is not admitted");
   });
 });
+
+describe("Round 4 — the remaining navigate / load attributes are judged (PA reading of S464 \"(a) Narrow attrs\")", () => {
+  const SE = "E-ATTR-STATIC-EXECUTABLE";
+  const se = (name, el) => compile(name, `<program>\n${el}\n</program>\n`).all.filter((d) => d.code === SE).length;
+  const CASES = {
+    imagesrcset: [`<link rel="preload" as="image" imagesrcset="javascript:x 1x">`, `<link rel="preload" as="image" imagesrcset="data:image/png;base64,AAAA 1x">`],
+    archive: [`<object archive="javascript:x"></object>`, `<object archive="/a.jar"></object>`],
+    codebase: [`<object codebase="javascript:x"></object>`, `<object codebase="https://x.example/"></object>`],
+    classid: [`<object classid="javascript:x"></object>`, `<object classid="/c"></object>`],
+    dynsrc: [`<img src="/a.png" dynsrc="javascript:x">`, `<img src="/a.png" dynsrc="data:image/png;base64,AAAA">`],
+    lowsrc: [`<img src="/a.png" lowsrc="javascript:x">`, `<img src="/a.png" lowsrc="data:image/gif;base64,AAAA">`],
+    manifest: [`<html manifest="javascript:x"></html>`, `<html manifest="/app.appcache"></html>`],
+    icon: [`<menuitem icon="javascript:x"></menuitem>`, `<menuitem icon="/i.png"></menuitem>`],
+  };
+  for (const [attr, [bad, ok]] of Object.entries(CASES)) {
+    test(`${attr}: an unadmitted scheme is refused; an admitted value compiles`, () => {
+      expect(se(`r4-${attr}-bad`, bad)).toBe(1);
+      expect(se(`r4-${attr}-ok`, ok)).toBe(0);
+    });
+  }
+  test("usemap is not judged (a same-document `#map` reference loads nothing)", () => {
+    expect(se("r4-usemap", `<img src="/a.png" usemap="javascript:x">`)).toBe(0);
+  });
+});
