@@ -49,6 +49,7 @@ import { parseExprToNode } from "./expression-parser.ts";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { dirname, resolve as resolvePath } from "path";
+import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 
 export interface ValueFnSpan {
@@ -186,7 +187,7 @@ export function setValueFnModuleIndex(index: Map<string, unknown[]> | null): voi
 
 /** Resolve an import specifier to a module path in the index (relative or `scrml:` stdlib), else null. */
 /** The scrml standard library's source tree (`stdlib/<name>/index.scrml`, `stdlib/<name>.scrml`). */
-const STDLIB_DIR = resolvePath(import.meta.dir, "..", "..", "stdlib");
+const STDLIB_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), "..", "..", "stdlib");
 
 function resolveImportPath(source: unknown, fromPath: string): string | null {
   if (typeof source !== "string") return null;
