@@ -72,6 +72,16 @@ const ROWS = [
   ["`server function` body", [ENUM, `${D} server function s() { <p>srv</p>\nreturn 1 } }<button onclick=s()>x</button>`], null, null],
   ["arrow function block body", [ENUM, `${D} const g = () => { <p>arrow</p> } }<button onclick=g()>x</button>`], [ENUM, `${D} const g = () => <p>arrow</p> }<p>${D}g()}</p>`], "arrow"], // (a markup value RETURNED from an arrow block body is E-CODEGEN-INVALID-LOGIC on base too — filed)
   ["`defer` in a function", [ENUM, `${D} function f() { defer { <p>def</p> }\nreturn 1 } }<p>${D}f()}</p>`], null, null],
+  // S464 fix round 2 (review of 868d1e414, N2) — handler, `when` and function-expression
+  // bodies gave E-CODEGEN-INVALID-LOGIC ("compiler defect") or dropped the element.
+  ["event handler body", [ENUM, `<button onclick=${D} @n = 1\n<p>clicked</p> }>b</button>`], [ENUM, `<button onclick=${D} @n = 1 }>go</button>`], "go"],
+  ["event handler, bare element", [ENUM, `<button onclick=${D} <p>clicked</p> }>b</button>`], null, null],
+  ["event handler, single-element `if` arm", [ENUM, `<button onclick=${D} if (@n > 0) { <p>x</p> } }>b</button>`], null, null],
+  ["event handler, arrow value", [ENUM, `<button onclick=${D} () => { @n = 1\n<p>arrow</p> } }>b</button>`], null, null],
+  ["event handler, statement then element then statement", [ENUM, `<button onclick=${D} let q = 1\n<p>x</p>\n@n = q }>b</button>`], null, null],
+  ["`when … changes` body", [ENUM, `${D} when @n changes { <p>chg</p> } }`], null, null],
+  ["function expression body", [ENUM, `${D} const h = function() { <i>x</i> } }<button onclick=h()>x</button>`], null, null],
+  ["function expression body, element after a statement", [ENUM, `${D} const h = function() { let a = 1\n<i>x</i>\nreturn a } }<p>${D}h()}</p>`], null, null],
 ];
 
 describe("§17.6.10.1 — every logic-body context: refused, or renders (S464 fix round 1)", () => {
@@ -110,5 +120,36 @@ describe("§17.6.10.1 — the message names the fix that works in the context (r
   test("in an `fn` body `lift` is valid (§48.5), so the `lift` fix stands", () => {
     const m = messageOf(ENUM, `${D} fn mk() { <b>x</b>\nreturn ~ } }`);
     expect(m).toContain("write `lift <b>…</b>`");
+  });
+});
+
+describe("§17.6.10.1 — messages and locations (S464 fix round 2)", () => {
+  const errOf = (decls, body) => compileAndMount(prog(decls, body), "loc").errors.find((e) => e.code === CODE);
+  test("N2: an event handler's markup names the handler fix (it renders nothing), not `lift`", () => {
+    const e = errOf(ENUM, `<button onclick=${D} @n = 1\n<p>clicked</p> }>b</button>`);
+    expect(e.message).toContain("an event handler, a `when` body or an engine `effect=` runs for its effects and renders nothing");
+    expect(e.message).not.toContain("write `lift");
+  });
+  test("N5: a single-element branch kept from converting by a sibling `lift` branch names that cause", () => {
+    const e = errOf(ENUM, `${D} if (@n > 0) { <p>a</p> } else { lift <p>b</p> } }`);
+    expect(e.message).toContain("it is the single element of its branch, but another branch of the same `if` uses `lift`");
+    expect(e.message).toContain("Make every branch a single element, or write `lift <p>…</p>` in every branch");
+  });
+  test("N3: an engine `effect=` element is reported at its own file line:col", () => {
+    // prog(): line 1 `<program>`, lines 2-4 ENG decls, line 5 `<div id="host"><engine … effect=${ @note = "x"`,
+    // line 6 `<p>eff</p> }>` — the element is at 6:1.
+    const e = errOf(ENG, `<engine for=S initial=.A effect=${D} @note = "x"\n<p>eff</p> }>\n<A rule=.B><p>a</p></A>\n<B rule=.A><p>b</p></B>\n</engine>`);
+    expect(e.span.file).toMatch(/loc\.scrml$/);
+    expect([e.span.line, e.span.col]).toEqual([6, 1]);
+  });
+  test("N3: a component body element is reported at its own file line:col, not the component's synthetic body", () => {
+    // lines 2-5: ENUM decls, line 6: `const Card = <div class="c">`, line 7: `  ${ <b>card</b> }` — the element is at 7:6.
+    const e = errOf(ENUM + `\nconst Card = <div class="c">\n  ${D} <b>card</b> }\n</div>`, `<Card/>`);
+    expect(e.span.file).toMatch(/loc\.scrml$/);
+    expect([e.span.line, e.span.col]).toEqual([7, 6]);
+  });
+  test("N4: an arrow body inside a function reports its element once", () => {
+    const { errors } = compileAndMount(prog(ENUM, `${D} function outer() { const h = () => { <i>x</i> }\nreturn 1 } }<p>${D}outer()}</p>`), "dup");
+    expect(errors.filter((e) => e.code === CODE).length).toBe(1);
   });
 });

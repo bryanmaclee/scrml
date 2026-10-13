@@ -1506,6 +1506,51 @@ function parseComponentDef(
   const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
   const normalizedBody = nb ?? "";
 
+  // S464 Q24 r2 (§17.6.10.1, review N3) — a statement-position element in the body is
+  // refused by codegen (markup-statement-refusal.ts) at the span its LEAD carries; the
+  // re-parse gave it a span in the normalized body (`comp.scrml#W:3:4`). Map each one
+  // to the definition's own source position, as the other body diagnostics here are.
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    // The re-parse's span does not always address the normalized body (the native
+    // parser numbers a NESTED function body from that body's own start), so the span
+    // is trusted only when the text there is the element; otherwise the element is
+    // found by its tag: the only `<tag` in the body, or the first at/after the span.
+    const elementAt = (tag: string, start: unknown, end: unknown): [number | undefined, number | undefined] => {
+      const opener = new RegExp(`<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`, "g");
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        opener.lastIndex = 0;
+        const head = normalizedBody.slice(start, end).trimStart();
+        if (new RegExp(`^<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`).test(head)) return [start, end];
+      }
+      const hits: number[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = opener.exec(normalizedBody)) !== null) hits.push(m.index);
+      if (hits.length === 0) return [undefined, undefined];
+      const at = hits.length === 1 ? hits[0] : (hits.find((h) => typeof start === "number" && h >= start) ?? hits[0]);
+      const close = normalizedBody.indexOf(`</${tag}>`, at);
+      const selfClose = normalizedBody.indexOf("/>", at);
+      const stop = close >= 0 ? close + tag.length + 3 : selfClose >= 0 ? selfClose + 2 : at + tag.length + 1;
+      return [at, stop];
+    };
+    const seenNodes = new WeakSet<object>();
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seenNodes.has(n as object)) return;
+      seenNodes.add(n as object);
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      const rec = n as Record<string, any>;
+      if (rec.kind === "html-fragment" && rec._markupLead) {
+        const [s0, s1] = elementAt(String(rec._markupLead.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._markupLead.span = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      } else if (rec.kind === "bare-expr" && rec.exprNode?.kind === "markup-value") {
+        const [s0, s1] = elementAt(String(rec.exprNode?.node?.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._refusalSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      }
+      for (const k of Object.keys(rec)) if (k !== "span" && k !== "_markupLead") visit(rec[k]);
+    };
+    visit(nodes);
+  }
+
   // §4.17 (S462) — scrml does not admit `<script>` / `<style>` at any position, a
   // component body included. The body is raw text until this re-parse, so this is
   // where its element nodes first exist; the structural check runs over them for

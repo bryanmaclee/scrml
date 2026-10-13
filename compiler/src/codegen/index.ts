@@ -1412,10 +1412,10 @@ export function runCG(input: CgInput): CgOutput {
   // §17.6.10.1 (S464 Q24) — every statement-position element no lowering renders, in
   // every logic body, before any emitter (several re-parse or special-case bodies).
   for (const fileAST of files ?? []) {
-    refuseUnrenderedStatementMarkup((fileAST as any).ast ?? fileAST, (lead, context) => {
+    refuseUnrenderedStatementMarkup((fileAST as any).ast ?? fileAST, (lead, context, cause) => {
       recordRefusedLowering(new CGError(
         "E-MARKUP-STATEMENT-NOT-RENDERED",
-        markupNotRenderedMessage(lead.tag, context),
+        markupNotRenderedMessage(lead.tag, context, cause),
         (lead.span as any) ?? { start: 0, end: 0 },
       ), lead);
     });

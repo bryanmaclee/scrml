@@ -2221,7 +2221,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // Recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts):
       // the control-flow emitters rebuild `opts` field by field and do not thread
       // `opts.errors` into an `if` / loop body, which is exactly where this lands.
-      if ((node as any)._markupLead) {
+      if ((node as any)._markupLead && !(node as any)._markupLead._reportedAtTab) {
         const lead = (node as any)._markupLead as { tag: string; span: object };
         recordRefusedLowering(new CGError(
           "E-MARKUP-STATEMENT-NOT-RENDERED",

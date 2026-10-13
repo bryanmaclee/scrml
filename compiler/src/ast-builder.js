@@ -105,7 +105,7 @@ function escapeRawHasEffect(raw) {
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
-import { markupNotRenderedMessage } from "./markup-statement-refusal.ts";
+import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -3604,6 +3604,9 @@ function scanMarkupBodyConstAtDecls(children, errors, filePath) {
 // Error type
 // ---------------------------------------------------------------------------
 
+/** S464 r2 — the synthetic function name an event handler's statements are framed in. */
+const HANDLER_BLOCK_FRAME_NAME = "__scrml_handler_block__";
+
 export class TABError extends Error {
   constructor(code, message, span) {
     super(`${message} (line ${span.line}, col ${span.col})`);
@@ -5800,11 +5803,40 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
-   * S464 r1 #8 — is token `k` inside a `function` or arrow BODY (in this token
-   * stream)? Decides the refusal's fix: `return` the markup there (§10.4 — `lift` in a
-   * bare `function` body is E-SYNTAX-002), `lift` it in a `${ }` body.
+   * S464 r2 — does the `{` at token `j` open a FUNCTION VALUE's body: an arrow's
+   * (`isJsArrowBrace`) or a function EXPRESSION's (`function (…) {` / `function name(…) {`
+   * whose `function` keyword is not the first token of the statement at `stmtFrom` — that
+   * would be a declaration, which its own statement loop reads)?
    */
-  function insideFunctionBodyAt(k) {
+  function isFunctionValueBrace(j, stmtFrom) {
+    if (isJsArrowBrace(j)) return true;
+    let p = j - 1;
+    while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
+    const pt = tokens[p];
+    if (!(pt && pt.kind === "PUNCT" && pt.text === ")")) return false;
+    let pd = 0;
+    let q = p;
+    for (; q >= 0; q--) {
+      const u = tokens[q];
+      if (!u || u.kind !== "PUNCT") continue;
+      if (u.text === ")") pd++;
+      else if (u.text === "(" && --pd === 0) break;
+    }
+    const isFnKw = (u) => !!u && (u.kind === "KEYWORD" || u.kind === "IDENT") && u.text === "function";
+    let f = -1;
+    if (isFnKw(tokens[q - 1])) f = q - 1;
+    else if (tokens[q - 1] && tokens[q - 1].kind === "IDENT" && isFnKw(tokens[q - 2])) f = q - 2;
+    return f > stmtFrom;
+  }
+
+  /**
+   * S464 r1 #8 / r2 — the context of token `k` in this token stream, which decides the
+   * refusal's fix: "function" inside a `function` / arrow / function-expression body
+   * (`return` the markup — §10.4: `lift` in a bare `function` body is E-SYNTAX-002),
+   * "effect" inside an event handler's statements (renders nothing at all), else "logic"
+   * (`lift` it in a `${ }` body).
+   */
+  function statementContextAt(k) {
     let depth = 0;
     for (let j = k - 1; j >= 0; j--) {
       const t = tokens[j];
@@ -5816,7 +5848,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       let p = j - 1;
       while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
       const pt = tokens[p];
-      if (isJsArrowBrace(j)) return true;
+      if (isJsArrowBrace(j)) return "function";
       if (pt && pt.kind === "PUNCT" && pt.text === ")") {
         let pd = 0;
         let q = p;
@@ -5830,10 +5862,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const n2 = tokens[q - 2];
         // `fn` bodies are NOT included: `lift` is valid there (§48.5), so the `lift` fix stands.
         const isFnKw = (u) => !!u && (u.kind === "KEYWORD" || u.kind === "IDENT") && u.text === "function";
-        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) return true;
+        // S464 r2 — an event handler's statements are parsed framed as the synthetic
+        // `function __scrml_handler_block__() { … }` (parseHandlerStatementListCore; an
+        // engine `effect=` body reuses it): that frame is not a function the author wrote,
+        // and its body runs for effects — the "effect" fix.
+        if (n1 && n1.kind === "IDENT" && n1.text === HANDLER_BLOCK_FRAME_NAME && isFnKw(n2)) return "effect";
+        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) return "function";
       }
     }
-    return false;
+    return "logic";
   }
 
   function refuseSwallowedStatementMarkup(from, to) {
@@ -5848,33 +5885,43 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) ||
       ((t.kind === "OPERATOR" || t.kind === "PUNCT") && (t.text === "++" || t.text === "--"))
     );
-    // A brace opened right after `=>` is an arrow function's BLOCK body. No statement
-    // loop reads it — the arrow is part of this statement's expression — so an
-    // element in it is checked here, at any depth inside it, and also when it starts
-    // a statement there (after `{` / `;`), not only after an operand (S464 r1:
-    // `const g = () => { <p>arrow</p> }` reached codegen as E-CODEGEN-INVALID-LOGIC).
-    // Any other nested `{ … }` body is checked by its own statement loop.
-    const braces = []; // true = an arrow block body
+    // A brace that opens a FUNCTION VALUE's body — an arrow's block body (`=> {`) or a
+    // function expression's (`function (…) {` where `function` does not start the
+    // statement, i.e. it is not a declaration). No statement loop reads it — the
+    // function is part of this statement's expression — so an element in it is checked
+    // here, at any depth inside it, and also when it starts a statement there (after
+    // `{` / `;`), not only after an operand (S464 r1: `const g = () => { <p>arrow</p> }`
+    // reached codegen as E-CODEGEN-INVALID-LOGIC; r2: `const h = function() { <i>x</i> }`).
+    // Only when the OUTERMOST brace of this statement is such a body: any other nested
+    // `{ … }` body (a function declaration's, an `if` arm) is read by its own statement
+    // loop, which checks a function value inside it — checking it here too reported the
+    // same element twice (S464 r2 N4).
+    const braces = []; // true = a function value's block body
     let prev = null;
     for (let k = from; k < to; k++) {
       const t = tokens[k];
       if (!t || t.kind === "EOF") return;
       if (t.kind === "COMMENT") continue;
-      if (t.kind === "PUNCT" && t.text === "{") braces.push(isJsArrowBrace(k) || braces.includes(true));
+      if (t.kind === "PUNCT" && t.text === "{") braces.push(isFunctionValueBrace(k, from));
       else if (t.kind === "PUNCT" && t.text === "}") braces.pop();
-      const inArrowBody = braces.length > 0 && braces[braces.length - 1] === true;
-      if ((braces.length === 0 || inArrowBody) && t.kind === "PUNCT" && t.text === "<") {
+      const inValueBody = braces.length > 0 && braces[0] === true;
+      if ((braces.length === 0 || inValueBody) && t.kind === "PUNCT" && t.text === "<") {
         const n1 = tokens[k + 1];
         if (n1 && (n1.kind === "IDENT" || n1.kind === "KEYWORD") && t.span && n1.span && t.span.end === n1.span.start) {
           const end = scanMarkupElementEnd(k);
           if (end > k) {
-            const startsArrowStatement = inArrowBody && !!prev && prev.kind === "PUNCT" && (prev.text === "{" || prev.text === ";");
-            if (k > from && (endsOperand(prev) || startsArrowStatement) && !openerIsDeclaration(k)) {
-              errors.push(new TABError(
-                "E-MARKUP-STATEMENT-NOT-RENDERED",
-                markupNotRenderedMessage(String(n1.text), insideFunctionBodyAt(k) ? "function" : "logic"),
-                tokenSpan(t, filePath),
-              ));
+            const startsValueStatement = inValueBody && !!prev && prev.kind === "PUNCT" && (prev.text === "{" || prev.text === ";");
+            if (k > from && (endsOperand(prev) || startsValueStatement) && !openerIsDeclaration(k)) {
+              const span = tokenSpan(t, filePath);
+              const dup = errors.some((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED" &&
+                (e.tabSpan ?? e.span)?.start === span.start && (e.tabSpan ?? e.span)?.file === span.file);
+              if (!dup) {
+                errors.push(new TABError(
+                  "E-MARKUP-STATEMENT-NOT-RENDERED",
+                  markupNotRenderedMessage(String(n1.text), statementContextAt(k)),
+                  span,
+                ));
+              }
               return;
             }
             prev = tokens[end - 1];
@@ -20431,7 +20478,7 @@ function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, 
     const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
     const frame = (kind, text) => ({ kind, text, span: frameSpan });
     const framed = [
-      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
+      frame("KEYWORD", "function"), frame("IDENT", HANDLER_BLOCK_FRAME_NAME),
       frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
       ...inner,
       frame("PUNCT", "}"), eof ?? frame("EOF", ""),
@@ -20585,7 +20632,10 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   }
   const fatal = bodyRes.parseErrors.some(isFatalHandlerParseError);
   const nonFatal = bodyRes.parseErrors.filter((e) => e && typeof e === "object" && !isFatalHandlerParseError(e));
-  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal };
+  // S464 r2 — the refusals of statement-position markup in the arrow's body (see
+  // refuseHandlerMarkup); carried separately because `fatal` is only a flag.
+  const markup = bodyRes.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED");
+  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal, markup };
 }
 
 /** Does a statement list hold a `!{}` guard anywhere (not inside a nested function)? */
@@ -20864,6 +20914,38 @@ function checkAttrMultiStatement(name, value, filePath, errors, delimited = fals
  * anything else a bare value (a bare sequence is E-MULTI-STATEMENT-HANDLER's, so
  * its parse errors are never reported here). `errors` null = report nothing.
  */
+/**
+ * S464 r2 (§17.6.10.1) — markup in statement position in an event handler (`onclick=${
+ * @n = 1⏎<p>clicked</p> }`, `onclick=${ <p/> }`, an `if` arm in a handler, a function
+ * value in one) renders nothing: a handler runs for its effects. Its statements are
+ * parsed here, at the TAB, with file-true spans, and lowered later from TEXT — no other
+ * stage reads them as statements — so this is where they are refused:
+ *   - `tabRefusals`: elements the handler's statement parse refused as read into a
+ *     statement as code (refuseSwallowedStatementMarkup; the message already names the
+ *     handler / function context);
+ *   - every statement-position element left in the parsed statements (a lead), reported
+ *     with the handler ("effect") fix, or the function fix inside a function value.
+ * Before: such a handler emitted the element into an expression (E-CODEGEN-INVALID-LOGIC,
+ * a "compiler defect" message) or dropped it at exit 0.
+ */
+function refuseHandlerMarkup(stmts, tabRefusals, errors) {
+  if (!Array.isArray(errors)) return;
+  const seen = new Set(errors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED")
+    .map((e) => (e.tabSpan ?? e.span)?.start));
+  const push = (e) => {
+    const st = (e.tabSpan ?? e.span)?.start;
+    if (seen.has(st)) return;
+    seen.add(st);
+    errors.push(e);
+  };
+  for (const e of tabRefusals) push(e);
+  if (!Array.isArray(stmts) || stmts.length === 0) return;
+  refuseUnrenderedStatementMarkup(stmts, (lead, context, cause) => {
+    lead._reportedAtTab = true;
+    push(new TABError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(lead.tag, context, cause), lead.span));
+  }, "effect");
+}
+
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
   // An ARROW-valued handler keeps the as-is arrow emission — unless its body
@@ -20873,6 +20955,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   // "check it the same way and emit its guard").
   const arrow = parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
   if (arrow !== undefined) {
+    refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], errors);
     if (!arrow.fatal && arrow.stmts.length > 0 && handlerStmtsContainGuard(arrow.stmts)) {
       value.handlerBlock = { stmts: arrow.stmts };
       if (Array.isArray(errors)) for (const e of arrow.nonFatal) { e.fromHandlerStatementList = true; errors.push(e); }
@@ -20882,6 +20965,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
   if (!res) return;
   const { tokens, stmts, parseErrors } = res;
+  refuseHandlerMarkup(stmts, parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), errors);
   const count = Array.isArray(stmts) ? stmts.length : 0;
   // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
   // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
@@ -23227,6 +23311,33 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               // The inner expression text between `${` and the matching `}`.
               openerEffect = header.slice(dollarBrace + 2, j).trim();
               if (openerEffect.length === 0) openerEffect = null;
+              // S464 r2 (§17.6.10.1, review N3) — markup in statement position in the
+              // opener `effect=` body renders nothing (it runs once, for its effects).
+              // Codegen re-parses the body from this raw text with no source position, so
+              // it is checked HERE, at the body's real offset / line / col, through the
+              // event-handler statement parse (the same "effect" refusal as a handler).
+              // emit-engine.ts does not report the opener body again.
+              if (openerEffect !== null) {
+                const _effRaw = header.slice(dollarBrace + 2, j);
+                const _effIdx = dollarBrace + 2 + (_effRaw.length - _effRaw.trimStart().length);
+                const _effAnchor = structuralHeaderAnchor(block, header);
+                const _effBefore = header.slice(0, _effIdx);
+                const _effNl = (_effBefore.match(/\n/g) || []).length;
+                const _effLine = _effAnchor.line + _effNl;
+                const _effCol = _effNl === 0 ? _effAnchor.col + _effIdx : _effIdx - _effBefore.lastIndexOf("\n");
+                const _effAbs = _effAnchor.absStart + _effIdx;
+                const _effRes = parseHandlerStatementListCore(
+                  { raw: openerEffect, span: { file: filePath, start: _effAbs, end: _effAbs + openerEffect.length, line: _effLine, col: _effCol } },
+                  filePath, counter, block, _effAbs, _effLine, _effCol,
+                );
+                if (_effRes) {
+                  refuseHandlerMarkup(
+                    _effRes.stmts,
+                    _effRes.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"),
+                    errors,
+                  );
+                }
+              }
             }
             // Unbalanced braces → openerEffect stays null (best-effort capture;
             // downstream rewriteExpr would surface a parse error if the malformed

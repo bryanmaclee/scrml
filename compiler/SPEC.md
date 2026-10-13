@@ -16760,23 +16760,34 @@ to be `not`.
 > `benchmarks/` plus 114 in `giti` / `flogence` — 2 conformance fixtures newly refused (migrated),
 > 1 sample that already failed to compile gains the code, 0 elsewhere. Fix round 1 (S464, the
 > contexts below that the first build missed): 2952 files — 0 newly refused; 1 more sample that
-> already failed to compile gains the code.
+> already failed to compile gains the code. Fix round 2 (S464: handlers, `when`, function
+> expressions): 2952 files — 0 newly refused.
 
 A markup element written as a STATEMENT in a logic body renders in exactly two ways: as the single
 element of an `if` / `given` branch (the implied `lift` above), or named by a `lift` (§10.1). Markup
 in statement position that neither way reaches is not rendered, and the compiler SHALL NOT drop it
 silently. "A logic body" is every one of: a `${ … }` block (in markup, in a component body, in an
-`<each>` row, in a `<match>` markup arm, in an engine state-child); an engine `effect=${ … }` body;
-an `if` / `given` / `for` / `while` / `do` body, a logic `match` arm and a bare nested block `{ … }`
-inside any of them; a `function` / `fn` / `server function` body, including a `defer { … }` in it;
-and an arrow function's block body.
+`<each>` row, in a `<match>` markup arm, in an engine state-child); an engine `effect=${ … }` body
+and an engine message-arm body; an event-handler body (`onclick=${ … }`, `onclick={ … }`, an arrow
+handler); a `when … changes { … }` body; an `if` / `given` / `for` / `while` / `do` body, a logic
+`match` arm and a bare nested block `{ … }` inside any of them; a `function` / `fn` / `server
+function` body, including a `defer { … }` in it; and the block body of a function VALUE — an arrow
+function or a function expression (`const h = function() { … }`).
 
 - A markup element in statement position in a logic body that no `lift` names and that is not the
   single-element branch of a value-form (this section) SHALL be a compile error,
   E-MARKUP-STATEMENT-NOT-RENDERED. Its message SHALL say the markup is not rendered and SHALL name the
   fix that works where it stands: `lift <tag>…</tag>` (or making it the branch's single element) in a
-  `${ }` or `fn` body; `return` it and render the call in markup (`${f()}`) in a `function` or arrow
-  body, where `lift` is not valid (§10.4).
+  `${ }` or `fn` body; `return` it and render the call in markup (`${f()}`) in a `function`, arrow or
+  function-expression body, where `lift` is not valid (§10.4); and, in an event handler, a `when`
+  body or an engine `effect=` / message arm — code run for its effects, which renders nothing at all
+  — change state there and render the markup from that state in markup.
+- When the element is the single element of its branch but a SIBLING branch of the same `if` /
+  `given` is not (it uses `lift`, or holds statements), the message SHALL name that cause: a
+  single-element branch renders only when every branch is one, so the fix is to make every branch a
+  single element or to `lift` in every branch.
+- The diagnostic SHALL be reported at the element's own file position, including where the compiler
+  reads the body from a copy (a component body, an engine `effect=` body).
 - This holds in every context above, including those whose bodies are lowered by their own emitters
   (`<each>` rows, `<match>` arms, engine state-children and `effect=`, component bodies): a bare
   `${ <p/> }` is the same error in a `<match>` arm as at the top level.
@@ -26166,7 +26177,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
-| E-MARKUP-STATEMENT-NOT-RENDERED | §17.6.10.1, §10.1, §4.18.1 | A markup element written as a STATEMENT in a logic body (`${ … }`, an `if` / `given` / loop / `match` body, a function body) that no lowering renders — it is not the single element of an `if` / `given` branch (the §17.6.10 implied `lift`), and no `lift` names it: `${ <p>hello</p> }`, two elements in one branch, an element after a statement (also when the statement's expression read it in as code: `let k = 1⏎<p>…</p>`), a `for` / `while` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a branch the compiler could not read back as exactly one element (`a < b` or a quoted closing tag in its text), markup in statement position in a `function` body. Message: *"this markup is in statement position and is not rendered — write `lift <p>…</p>`"*, plus the single-element and interpolation fixes. **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a"; code + message ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED". **Direction of change: newly-rejecting** (before: exit 0, the element rendered nothing). Corpus measured at S464: see §17.6.10.1. Emitted by `compiler/src/markup-statement-refusal.ts` `refuseUnrenderedStatementMarkup`, run once over every file's tree at the start of codegen (`codegen/index.ts`) so `<each>` rows, `<match>` arms, engine state-children and component bodies are covered whatever emitter lowers them; by `compiler/src/codegen/emit-logic.ts` (the `html-fragment` case) and `codegen/emit-engine.ts` `parseEngineSynthLogicBody` for engine bodies re-parsed at emit time; and by `compiler/src/ast-builder.js` `refuseSwallowedStatementMarkup` (an element a statement read in as code, incl. after `++` / `--` / a regex, and in an arrow block body). All through the run-wide refused-lowering sink or the TAB error list; message `markupNotRenderedMessage` (context-correct: `lift` in a `${ }` / `fn` body, `return` in a `function` / arrow body). | Error |
+| E-MARKUP-STATEMENT-NOT-RENDERED | §17.6.10.1, §10.1, §4.18.1 | A markup element written as a STATEMENT in a logic body (`${ … }`, an `if` / `given` / loop / `match` body, a function body) that no lowering renders — it is not the single element of an `if` / `given` branch (the §17.6.10 implied `lift`), and no `lift` names it: `${ <p>hello</p> }`, two elements in one branch, an element after a statement (also when the statement's expression read it in as code: `let k = 1⏎<p>…</p>`), a `for` / `while` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a branch the compiler could not read back as exactly one element (`a < b` or a quoted closing tag in its text), markup in statement position in a `function` body. Message: *"this markup is in statement position and is not rendered — write `lift <p>…</p>`"*, plus the single-element and interpolation fixes. **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a"; code + message ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED". **Direction of change: newly-rejecting** (before: exit 0, the element rendered nothing). Corpus measured at S464: see §17.6.10.1. Emitted by `compiler/src/markup-statement-refusal.ts` `refuseUnrenderedStatementMarkup`, run once over every file's tree at the start of codegen (`codegen/index.ts`) so `<each>` rows, `<match>` arms, engine state-children and component bodies are covered whatever emitter lowers them; by `compiler/src/codegen/emit-logic.ts` (the `html-fragment` case) and `codegen/emit-engine.ts` `parseEngineSynthLogicBody` for engine bodies re-parsed at emit time; by `compiler/src/ast-builder.js` `refuseSwallowedStatementMarkup` (an element a statement read in as code, incl. after `++` / `--` / a regex, and in an arrow or function-expression block body); and by `ast-builder.js` `refuseHandlerMarkup` for event-handler bodies and the engine opener `effect=` body, at their file positions. All through the run-wide refused-lowering sink or the TAB error list; message `markupNotRenderedMessage` (context-correct: `lift` in a `${ }` / `fn` body, `return` in a `function` / arrow / function-expression body, state + markup for a handler / `when` / engine effect; names a sibling branch as the cause when a single-element branch did not convert). | Error |
 | ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
