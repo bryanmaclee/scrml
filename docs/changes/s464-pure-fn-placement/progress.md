@@ -6,3 +6,4 @@
 2026-10-12 sibling repos (giti + flogence, 16 dirs compiled per-dir by both compilers): 7 dirs fail on both sides identically; 0 diagnostic diffs; 2 artifacts differ (flogence src/ports graph-read client/server) by route-counter renumbering only — same route set.
 2026-10-12T15:36:51-06:00 fix: side-placement export exclusion is per-file (a local fn named like another module's export was left undefined in the server bundle — p5 probe); +test
 2026-10-12T16:11:15-06:00 gate: base(origin/main) 33227 pass/58 skip/0 fail; head 33235/58/0. Head re-capture at f3b629006 byte-identical to the measured head (0 artifact diffs). Done.
+2026-10-13T02:47:23-06:00 fix round 1 start (merge origin/main: up to date)
