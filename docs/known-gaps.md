@@ -558,11 +558,19 @@ Reproduced on the s464 branch: the row element (`<li id="shorthand-row">`) appea
 
 Reproduced with main's compiler and on the s464 branch (same output). Fail-safe for handlers (a text node never runs), but the author's markup is silently turned into text. A `//` in the text (`a // b`) does the same.
 
+**S464 round 3 (review r2):** this is DATA CORRUPTION, not only lost structure — the displayed text loses its apostrophes (`it's` renders as `its`), at exit 0. Some variants (`<span>it's <a href=…>y</a></span>`) instead fail with E-CODEGEN-INVALID-LOGIC, which names the wrong cause.
+
 ### g-bootstrap-static-executable-values-not-refused-s464 — the BOOTSTRAP does not implement S464 "(a) Refuse both": a static `srcdoc` and a static `href="javascript:…"` are written as the author wrote them (impl#1 refuses both, E-ATTR-STATIC-EXECUTABLE) — `NEW S464; MED; open`
 
 <!-- @gap id=g-bootstrap-static-executable-values-not-refused-s464 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(attrCaseDiags / the srcdoc data-form check — no static-value judgment; the scheme reader lives only in compiler/src/runtime-url-guard.js) prov=dispatch:s464-quoted-handler-refused-round-2 -->
 
 `compiler/self-host-v2/slice-m4/sink-guards.test.js` still pins "a static `srcdoc` is written as the author wrote it" (the pre-S464 rule). The bootstrap needs the rule 2/3 scheme reader and safe set in scrml (one definition — mirror `runtime-url-guard.js`) and a static-value refusal beside its quoted-handler refusal.
+
+### g-bare-srcdoc-no-value-s464 — a bare `<iframe srcdoc>` (no value) is not refused by E-ATTR-STATIC-EXECUTABLE — `NEW S464; LOW; resolved (decided legal)`
+
+<!-- @gap id=g-bare-srcdoc-no-value-s464 sev=LOW status=resolved resolved-by=s464-quoted-handler-refused-round-3 locus=compiler/src/attr-injection-sink.ts(classifyStaticExecutableAttr judges string values only; a presence attribute has no value) prov=review:s464-quoted-handler-refused-S239-r2 -->
+
+Raised by the S239 review of ae1924b95. Decided LEGAL in round 3 and stated in SPEC §5.2 "Static executable values (S464)" item 1: a bare `srcdoc` is an empty document and runs nothing — there is no text for the browser to execute, so the S464 purpose ("JS scrml never checks") does not reach it. Pinned by `s464-quoted-handler-refused.test.js` (narrow-ok) and `s457-executable-sinks-srcdoc-svg.test.js` (§2 controls).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
