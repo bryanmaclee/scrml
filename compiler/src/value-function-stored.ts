@@ -49,6 +49,7 @@ import { parseExprToNode } from "./expression-parser.ts";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { dirname, resolve as resolvePath } from "path";
+import { existsSync, readFileSync } from "fs";
 
 export interface ValueFnSpan {
   file: string;
@@ -59,7 +60,7 @@ export interface ValueFnSpan {
 }
 
 export interface ValueFnStoredDiag {
-  code: "E-VALUE-FUNCTION-STORED";
+  code: "E-VALUE-FUNCTION-STORED" | "E-TIMER-STRUCT-MISUSE";
   message: string;
   span: ValueFnSpan;
 }
@@ -95,6 +96,10 @@ interface Binding {
   fn?: FnInfo;
   /** Bound by an import (not a declaration in this file). */
   imported?: boolean;
+  /** `debounce` / `throttle` imported from `scrml:time`: its call builds this struct. */
+  timerFactory?: "Debouncer" | "Throttler";
+  /** This name holds a `scrml:time` Debouncer / Throttler (a struct — not callable). */
+  timer?: "Debouncer" | "Throttler";
 }
 
 interface Ctx {
@@ -180,9 +185,13 @@ export function setValueFnModuleIndex(index: Map<string, unknown[]> | null): voi
 }
 
 /** Resolve an import specifier to a module path in the index (relative or `scrml:` stdlib), else null. */
+/** The scrml standard library's source tree (`stdlib/<name>/index.scrml`, `stdlib/<name>.scrml`). */
+const STDLIB_DIR = resolvePath(import.meta.dir, "..", "..", "stdlib");
+
 function resolveImportPath(source: unknown, fromPath: string): string | null {
-  if (!moduleIndex || typeof source !== "string") return null;
+  if (typeof source !== "string") return null;
   if (source.startsWith("./") || source.startsWith("../")) {
+    if (!moduleIndex) return null;
     const p = resolvePath(dirname(fromPath), source);
     if (moduleIndex.has(p)) return p;
     if (moduleIndex.has(`${p}.scrml`)) return `${p}.scrml`;
@@ -190,16 +199,41 @@ function resolveImportPath(source: unknown, fromPath: string): string | null {
   }
   if (source.startsWith("scrml:")) {
     const name = source.slice("scrml:".length);
-    for (const k of moduleIndex.keys()) {
-      if (k.endsWith(`/stdlib/${name}/index.scrml`) || k.endsWith(`/stdlib/${name}.scrml`)) return k;
+    if (moduleIndex) {
+      for (const k of moduleIndex.keys()) {
+        if (k.endsWith(`/stdlib/${name}/index.scrml`) || k.endsWith(`/stdlib/${name}.scrml`)) return k;
+      }
+    }
+    // Not in this compilation unit: read the stdlib module's own source (its export facts).
+    for (const cand of [resolvePath(STDLIB_DIR, name, "index.scrml"), resolvePath(STDLIB_DIR, `${name}.scrml`)]) {
+      if (existsSync(cand)) return cand;
     }
   }
   return null;
 }
 
+/** Parsed stdlib modules read from disk (not in the compilation unit), per process. */
+const stdlibNodesCache = new Map<string, unknown[] | null>();
+function stdlibNodes(path: string): unknown[] | null {
+  if (stdlibNodesCache.has(path)) return stdlibNodesCache.get(path) ?? null;
+  let out: unknown[] | null = null;
+  if (path.startsWith(STDLIB_DIR) && existsSync(path)) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { splitBlocks } = require("./block-splitter.js") as { splitBlocks: (p: string, s: string) => unknown };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildAST } = require("./ast-builder.js") as { buildAST: (b: unknown) => { ast?: { nodes?: unknown[] } } };
+      const tab = buildAST(splitBlocks(path, readFileSync(path, "utf8")));
+      out = Array.isArray(tab?.ast?.nodes) ? tab.ast!.nodes! : null;
+    } catch { out = null; }
+  }
+  stdlibNodesCache.set(path, out);
+  return out;
+}
+
 function moduleFacts(path: string): Map<string, ExportFact> | null {
   if (moduleFactsCache.has(path)) return moduleFactsCache.get(path) ?? null;
-  const nodes = moduleIndex?.get(path);
+  const nodes = moduleIndex?.get(path) ?? stdlibNodes(path);
   if (!nodes) return null;
   moduleFactsCache.set(path, null); // a cycle back to this module reads "unknown"
   const facts = analyze(nodes, path, [], undefined, "facts").exports;
@@ -230,6 +264,9 @@ function isKnownHostCallable(name: string, prop: string | null): boolean {
   if (!ns) return false;
   try { return typeof ns[prop] === "function"; } catch { return false; }
 }
+
+/** A `match` arm the shared arm reader could not read: it fails CLOSED (it may yield a function). */
+const UNREAD_ARM: Record<string, unknown> = { kind: "unread-arm" };
 
 /** Host calls that write their later arguments INTO their first argument. */
 const WRITES_INTO_FIRST = new Set<string>([
@@ -370,15 +407,28 @@ function analyze(
           b.kind = ef.kind;
           if (ef.mayFn) b.mayFn = true;
           if (ef.fn) b.fn = { ...ef.fn, foreign: true };
+        } else if (/^[a-z_$]/.test(local)) {
+          b.mayFn = true; // the module has no fact for this value name — fail closed
+        }
+        if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+          b.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
         }
         frames[0].set(local, b);
         continue;
       }
       const existing = frames[0].get(local);
-      if (existing && existing.kind === "fn") continue; // an imported scrml function (importedFnDecls)
+      if (existing && existing.kind === "fn") { // an imported scrml function (importedFnDecls)
+        if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+          existing.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
+        }
+        continue;
+      }
       const b = bindingFor(moduleOwner, `import:${local}`, "value");
       b.name = local; b.imported = true;
       if (/^[a-z_$]/.test(local)) b.mayFn = true; // unknown cross-module fact — fail closed
+      if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+        b.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
+      }
       frames[0].set(local, b);
     }
   }
@@ -455,6 +505,8 @@ function analyze(
       case "binary":
         return (x.op === "||" || x.op === "??" || x.op === "&&") ? (mayFn(x.left) || mayFn(x.right)) : false;
       case "cast": return mayFn(x.expression);
+      case "unread-arm": return true;
+      case "match-expr": return matchArms(x).some((arm) => inArm(arm, arm.names, () => arm.values.some((v) => mayFn(v))));
       case "assign": return mayFn(x.value);
       case "call": return callMayFn(x);
       default: return false;
@@ -488,6 +540,123 @@ function analyze(
     if (c.kind === "escape-hatch") { const lo = loweredOf(c); return lo ? callbackReturnsFn(lo) : false; }
     if (c.kind === "ident" && typeof c.name === "string") return lookup(c.name)?.fn?.returnsFn ?? false;
     return false;
+  }
+
+  /** The values an `if` / `for` expression LIFTS (its `lift-expr` statements, not inside nested functions). */
+  function liftedValues(n: unknown, out: unknown[] = [], depth = 0): unknown[] {
+    if (!n || typeof n !== "object" || depth > 200) return out;
+    if (Array.isArray(n)) { for (const c of n) liftedValues(c, out, depth + 1); return out; }
+    const r = n as Rec;
+    if (r.kind === "function-decl" || r.kind === "lambda" || EXPR_KINDS.has(String(r.kind))) return out;
+    if (r.kind === "lift-expr") {
+      const e = r.expr as Rec | undefined;
+      const v = e?.exprNode ?? (e && EXPR_KINDS.has(String(e.kind)) ? e : null);
+      if (v) out.push(v);
+      return out;
+    }
+    for (const k in r) {
+      if (k === "span" || k === "condExpr" || k === "iterExpr") continue;
+      const c = r[k];
+      if (c && typeof c === "object") liftedValues(c, out, depth + 1);
+    }
+    return out;
+  }
+
+  /** `debounce(…)` / `throttle(…)` imported from `scrml:time` → the struct it builds. */
+  function timerOf(init: unknown): "Debouncer" | "Throttler" | null {
+    const x = init as Rec | undefined;
+    if (!x || x.kind !== "call") return null;
+    const c = x.callee as Rec | undefined;
+    if (c?.kind !== "ident" || typeof c.name !== "string") return null;
+    return lookup(c.name)?.timerFactory ?? null;
+  }
+
+  /**
+   * A `match` expression's arms: the payload binders each arm introduces and the arm's VALUE —
+   * the result expression, or (a `{ … }` statement block, §18.5) its tail expression. Read with
+   * the same arm splitter / parser codegen lowers them with.
+   */
+  const armCache = new WeakMap<object, { names: string[]; values: unknown[]; stmts: unknown[] }[]>();
+  function matchArms(x: Rec): { names: string[]; values: unknown[]; stmts: unknown[] }[] {
+    const hit = armCache.get(x);
+    if (hit) return hit;
+    const out: { names: string[]; values: unknown[]; stmts: unknown[] }[] = [];
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const cf = require("./codegen/emit-control-flow.ts") as {
+        splitMultiArmString: (s: string) => string[];
+        parseMatchArm: (s: string) => { binding: string | null; result: string } | null;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { armBodyStatementsFromText } = require("./arm-body-statements.ts") as { armBodyStatementsFromText: (t: string) => unknown[] | null };
+      const namesOf = (binding: unknown): string[] => {
+        const names: string[] = [];
+        for (const b of (Array.isArray(binding) ? binding : [binding])) {
+          if (typeof b !== "string") continue;
+          for (const part of b.split(",")) {
+            const nm = part.includes(":") ? part.split(":").pop()!.trim() : part.trim();
+            if (/^[A-Za-z_$][\w$]*$/.test(nm) && nm !== "_") names.push(nm);
+          }
+        }
+        return names;
+      };
+      // Statement-level `match` (a `return` / declaration initializer): structured arm nodes.
+      if (Array.isArray(x.body)) {
+        for (const it of x.body as Rec[]) {
+          if (!it || typeof it !== "object") continue;
+          if (it.kind === "match-arm-inline") {
+            out.push({ names: namesOf(it.binding), values: it.resultExpr ? [it.resultExpr] : [], stmts: [] });
+          } else if (it.kind === "match-arm-block") {
+            const body = Array.isArray(it.body) ? (it.body as Rec[]) : [];
+            const last = body[body.length - 1];
+            out.push({ names: namesOf([...((it.payloadBindings as unknown[]) ?? []), it.binding]), values: last && last.kind === "bare-expr" && last.exprNode ? [last.exprNode] : [], stmts: body });
+          } else if (it.kind === "bare-expr" && typeof it.expr === "string" && /=>|:>/.test(it.expr)) {
+            const armText = it.expr.replace(/,\s*$/, "").trim();
+            const arm = cf.parseMatchArm(armText) ?? givenArm(armText);
+            let v: unknown = null;
+            if (arm) { try { v = parseExprToNode(String(arm.result ?? ""), filePath, 0); } catch { v = null; } }
+            out.push({ names: arm ? namesOf(arm.binding) : [], values: [v ?? UNREAD_ARM], stmts: [] });
+          }
+        }
+      }
+      for (const raw of (Array.isArray(x.rawArms) ? (x.rawArms as unknown[]) : [])) {
+        for (const piece of cf.splitMultiArmString(String(raw))) {
+          const arm = cf.parseMatchArm(piece.trim()) ?? givenArm(piece.trim());
+          // An arm the shared reader cannot read (codegen cannot either) fails CLOSED.
+          if (!arm) { out.push({ names: [], values: [UNREAD_ARM], stmts: [] }); continue; }
+          const names = namesOf(arm.binding);
+          const res = String(arm.result ?? "").trim();
+          let node: Rec | null = null;
+          try { node = parseExprToNode(res, filePath, 0) as unknown as Rec; } catch { node = null; }
+          const isBlock = res.startsWith("{") && res.endsWith("}") && !(node && node.kind === "object");
+          if (isBlock) {
+            const stmts = armBodyStatementsFromText(res) ?? [];
+            const last = stmts[stmts.length - 1] as Rec | undefined;
+            const values: unknown[] = [];
+            if (last && last.kind === "bare-expr" && last.exprNode) values.push(last.exprNode);
+            out.push({ names, values, stmts });
+          } else if (node) {
+            out.push({ names, values: [node], stmts: [] });
+          }
+        }
+      }
+    } catch { /* an arm the shared reader cannot read contributes nothing (the codegen path refuses it) */ }
+    armCache.set(x, out);
+    return out;
+  }
+  /**
+   * A §42.2.3 presence arm `given x, y :> value` — codegen collects these apart from
+   * `parseMatchArm` (`givenGuardCondition`); its value is read here the same way. The names it
+   * tests are not re-bound (they keep their outer binding).
+   */
+  function givenArm(t: string): { binding: string | null; result: string } | null {
+    const m = t.match(/^given\s+[\s\S]+?\s*(?::>|=>)\s*([\s\S]+)$/);
+    return m ? { binding: null, result: m[1] } : null;
+  }
+  function inArm<T>(owner: object, names: string[], fn: () => T): T {
+    pushFrame();
+    for (const n of names) declare(bindingFor(owner, n, "param"));
+    try { return fn(); } finally { popFrame(); }
   }
 
   /**
@@ -566,6 +735,8 @@ function analyze(
       case "binary": return mayFn(x.right) ? describe(x.right) : describe(x.left);
       case "cast": return describe(x.expression);
       case "assign": return describe(x.value);
+      case "match-expr": return "a function a `match` arm yields";
+      case "unread-arm": return "a `match` arm value the compiler could not read";
       default: return "a function value";
     }
   }
@@ -679,6 +850,45 @@ function analyze(
       span: where,
     });
   }
+  /** State cells holding a scrml:time Debouncer / Throttler (`<d> = debounce(…)`). */
+  const cellTimers = new Map<string, "Debouncer" | "Throttler">();
+  function timerHeldBy(e: unknown): { name: string; kind: "Debouncer" | "Throttler" } | null {
+    const r = e as Rec | undefined;
+    if (r?.kind !== "ident" || typeof r.name !== "string") return null;
+    if (r.name.startsWith("@")) {
+      const k = cellTimers.get(r.name.slice(1));
+      return k ? { name: r.name, kind: k } : null;
+    }
+    const k = lookup(r.name)?.timer;
+    return k ? { name: r.name, kind: k } : null;
+  }
+  function checkTimerMisuse(callee: unknown, at: ValueFnSpan): void {
+    if (!reporting) return;
+    const c = callee as Rec | undefined;
+    if (!c) return;
+    let msg: string | null = null;
+    const direct = timerHeldBy(c);
+    if (direct) {
+      msg = `\`${direct.name}\` is a ${direct.kind} — a struct, not a function — so it cannot be called. ` +
+        `Drive it with \`run(${direct.name}, …)\` (import \`run\` from 'scrml:time').`;
+    } else if (c.kind === "member" && typeof c.property === "string") {
+      const held = timerHeldBy(c.object);
+      if (held) {
+        const p = c.property;
+        msg = (p === "cancel" || p === "flush" || p === "run")
+          ? `\`${held.name}.${p}()\` — a ${held.kind} is a struct with no methods. Call the free function ` +
+            `\`${p}(${held.name})\` instead (import \`${p}\` from 'scrml:time').`
+          : `\`${held.name}.${p}\` is not callable — a ${held.kind} is a struct (fields \`id\`, ` +
+            `\`${held.kind === "Debouncer" ? "delay" : "limit"}\`). Drive it with \`run\` / \`cancel\` / \`flush\` from 'scrml:time'.`;
+      }
+    }
+    if (!msg) return;
+    const key = `timer:${at.file}:${at.start}:${msg}`;
+    if (reportedKeys.has(key)) return;
+    reportedKeys.add(key);
+    diags.push({ code: "E-TIMER-STRUCT-MISUSE", message: `E-TIMER-STRUCT-MISUSE: ${msg} (§41.21)`, span: at });
+  }
+
   const join = (path: string, seg: string): string => (seg.startsWith("[") ? `${path}${seg}` : path ? `${path}.${seg}` : seg);
   function fieldHint(path: string, ctx: Ctx, extra?: string): string | null {
     const parts: string[] = [];
@@ -865,6 +1075,9 @@ function analyze(
         const callee = x.callee as Rec | undefined;
         const args = (x.args as unknown[] | undefined) ?? [];
         const host = isHostCallee(callee);
+        // A scrml:time Debouncer / Throttler is a STRUCT (§41.21): calling it, or calling a method
+        // on it (`d(q)`, `d.cancel()` — the retired shape), is refused, naming the free function.
+        if (x.kind === "call") checkTimerMisuse(callee, at);
         // Enum payload — `Op.Apply(g)` and the dot shorthand `.Apply(g)` (the type comes from context).
         {
           let enumLabel: string | null = null;
@@ -952,6 +1165,20 @@ function analyze(
         }
         return;
       }
+      case "match-expr":
+        // The arm values ARE the match's value: walk each in its arm's binder scope, so a literal
+        // or a stored function inside an arm is judged like any other (S464 round 3).
+        walkExpr(x.subject, at, freshCtx());
+        for (const arm of matchArms(x)) {
+          inArm(arm, arm.names, () => {
+            inHatch++;
+            try {
+              for (const s of arm.stmts) walkAny(s, at);
+              for (const v of arm.values) walkExpr(v, at, freshCtx());
+            } finally { inHatch--; }
+          });
+        }
+        return;
       case "member": case "index":
         walkExpr(x.object, at, freshCtx({ discard: ctx.discard }));
         if (x.kind === "index") walkExpr(x.index, at, freshCtx());
@@ -1016,6 +1243,10 @@ function analyze(
       const kind = initKind(init);
       const b = bindingFor(node, nm, kind);
       if (mayFn(init)) setMayFn(b);
+      const tk = timerOf(init);
+      if (tk) b.timer = tk;
+      // `const a = if (c) { lift f } else { lift g }` — the lifted values ARE the value.
+      if (node.ifExpr && liftedValues(node.ifExpr).some((v) => mayFn(v))) setMayFn(b);
       if (init && typeof init === "object") {
         const ix = init as Rec;
         if (isFnExpr(ix)) b.fn = fnInfoFor(ix);
@@ -1083,13 +1314,25 @@ function analyze(
         return;
       }
       case "let-decl": case "const-decl": case "tilde-decl": case "lin-decl": {
-        const init = node.initExpr;
+        const init = node.initExpr ?? node.matchExpr;
         if (init) withRoot(node.init, init, here.line, () => walkExpr(init, here, freshCtx()));
+        if (node.ifExpr) walkAny(node.ifExpr, here);
+        if (node.forExpr) {
+          walkAny(node.forExpr, here);
+          // `const xs = for (i of items) { lift () => pick(i) }` builds an array of what it lifts.
+          const fe = node.forExpr as Rec;
+          pushFrame();
+          for (const n of boundNamesOf(fe.variable)) declare(bindingFor(fe, n, "param"));
+          for (const v of liftedValues(fe)) {
+            if (mayFn(v)) report("The array this `for` lift builds", v, describe(v), here, null, CLOSURE_ARRAY_FIX);
+          }
+          popFrame();
+        }
         bindDecl(node, kind, init, here);
         return;
       }
       case "return-stmt": {
-        const e = node.exprNode;
+        const e = node.exprNode ?? node.matchExpr;
         const rc = retCtx[retCtx.length - 1];
         if (e && rc) noteReturn(e, rc.fi, rc.paramIndex);
         if (e) withRoot(node.expr, e, here.line, () => walkExpr(e, here, freshCtx()));
@@ -1100,6 +1343,8 @@ function analyze(
         return;
       }
       case "state-decl": {
+        const tk = timerOf(node.initExpr);
+        if (tk && typeof node.name === "string") cellTimers.set(node.name, tk);
         withRoot(node.init, node.initExpr, here.line, () => {
           if (mayFn(node.initExpr)) report(`The state cell \`@${String(node.name ?? "")}\``, node.initExpr, describe(node.initExpr), here, null);
           if (node.initExpr) walkExpr(node.initExpr, here, freshCtx());
@@ -1212,6 +1457,8 @@ function analyze(
         const ik = r.initExpr as Rec | undefined;
         const b = bindingFor(r, r.name, initKind(ik));
         if (ik && isFnExpr(ik)) b.fn = fnInfoFor(ik);
+        const tk = timerOf(ik);
+        if (tk) b.timer = tk;
         frames[0].set(r.name, b);
         continue;
       }
@@ -1273,11 +1520,34 @@ function analyze(
           const b = frames[0].get(r.name);
           if (b) out.set(r.name, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
         }
-        if (r.kind === "export-decl" && typeof r.exportedName === "string" && !r.reExportSource && !out.has(r.exportedName)) {
-          const b = frames[0].get(r.exportedName);
-          if (b) out.set(r.exportedName, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+        if (r.kind === "export-decl") {
+          const renames = Array.isArray(r.renames) ? (r.renames as Rec[]) : null;
+          if (typeof r.reExportSource === "string") {
+            // `export { a as b } from './m.scrml'` / `export * from './m.scrml'`: the facts are the
+            // other module's. An unresolvable module leaves the names out — the importer then fails
+            // closed on a lower-case name it cannot find.
+            const dep = moduleFacts(resolveImportPath(r.reExportSource, filePath) ?? "");
+            if (r.isReExportAll === true) {
+              if (dep) for (const [k, v] of dep) if (!out.has(k)) out.set(k, v);
+            } else if (renames && dep) {
+              for (const rn of renames) {
+                const f = dep.get(String(rn.local ?? rn.exported));
+                if (f) out.set(String(rn.exported ?? rn.local), f);
+              }
+            }
+          } else if (renames) {
+            // `export { a, b }` / `export { a as c }` — a local export list.
+            for (const rn of renames) {
+              const b = frames[0].get(String(rn.local ?? rn.exported));
+              if (b) out.set(String(rn.exported ?? rn.local), { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+            }
+          } else if (typeof r.exportedName === "string" && !out.has(r.exportedName)) {
+            const b = frames[0].get(r.exportedName);
+            if (b) out.set(r.exportedName, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+          }
         }
         if (r.kind === "logic" && Array.isArray(r.body)) collect(r.body as unknown[]);
+        if (r.kind === "markup" && Array.isArray(r.children)) collect(r.children as unknown[]);
       }
     };
     collect(nodes);

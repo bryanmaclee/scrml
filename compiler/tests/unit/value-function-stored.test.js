@@ -414,3 +414,82 @@ describe("fix round 2 — N5: the fixpoint runs to convergence (no silent 16-pas
     expect(stored(compile(prog(lines.join("\n"), `<p>\${o.v}</p>`))).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S464 fix round 3 (final): stdlib export facts, re-exports / export lists, match arms,
+// the scrml:time struct is not callable.
+// ---------------------------------------------------------------------------
+function codesOf(res) {
+  return [...(res.errors || []), ...(res.warnings || [])].map((d) => d.code);
+}
+
+describe("fix round 3 — item 1: stdlib DATA exports are data, stdlib functions are functions", () => {
+  test("`{ p: patterns }` (scrml:regex) and `{ s: sep }` (scrml:path, server fn) compile; `{ f: formatDate }` is refused", () => {
+    expect(stored(compile(`\${\n  import { patterns } from "scrml:regex"\n  const o = { p: patterns }\n}\n<program><p>x</p></>\n`)).length).toBe(0);
+    expect(stored(compile(`\${\n  import { sep } from "scrml:path"\n  server function load() {\n    const o = { s: sep }\n    return o\n  }\n}\n<program><p>\${load().s}</p></>\n`)).length).toBe(0);
+    expect(stored(compile(`\${\n  import { formatDate } from "scrml:time"\n  const o = { f: formatDate }\n}\n<program><p>x</p></>\n`)).length).toBe(1);
+  });
+});
+
+describe("fix round 3 — item 4: re-exports, `export *` and export lists carry function facts", () => {
+  function compileIn(files, main) {
+    const dir = mkdtempSync(join(TMP, "rx-"));
+    for (const [n, s] of Object.entries(files)) writeFileSync(join(dir, n), s);
+    const fp = join(dir, "main.scrml");
+    writeFileSync(fp, main);
+    const res = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} });
+    return stored(res).filter((d) => String(d.span?.file ?? fp).endsWith("main.scrml"));
+  }
+  const LIB = `\${\n  export function adder(n) { return (x) => x + n }\n  export function label(x) { return "n" + x }\n  export const conf = { a: 1 }\n}\n`;
+  test("`export { adder } from` / `export * from` / a local `export { adder2, inc2 }` list", () => {
+    const files = {
+      "lib.scrml": LIB,
+      "reexp.scrml": `\${\n  export { adder, label, conf } from './lib.scrml'\n}\n`,
+      "star.scrml": `\${\n  export * from './lib.scrml'\n}\n`,
+      "lib2.scrml": `\${\n  function adder2(n) { return (x) => x + n }\n  const inc2 = (x) => x + 1\n  export { adder2, inc2 }\n}\n`,
+    };
+    expect(compileIn(files, `\${\n  import { adder } from './reexp.scrml'\n  const o = { f: adder(1) }\n}\n<program><p>x</p></>\n`).length).toBe(1);
+    expect(compileIn(files, `\${\n  import { adder } from './star.scrml'\n  const o = { f: adder(1) }\n}\n<program><p>x</p></>\n`).length).toBe(1);
+    expect(compileIn(files, `\${\n  import { adder2, inc2 } from './lib2.scrml'\n  const o = { f: adder2(1) }\n  const p = [inc2]\n}\n<program><p>x</p></>\n`).length).toBe(2);
+    expect(compileIn(files, `\${\n  import { label, conf } from './star.scrml'\n  const o = { l: label(1), c: conf }\n}\n<program><p>x</p></>\n`).length).toBe(0);
+  });
+});
+
+describe("fix round 3 — item 5: `match` arm values are the value", () => {
+  for (const [label, logic] of [
+    ["in an object field", `  const xs = [1, 2]\n  const o = { f: match xs.length { 1 => twice, _ => thrice } }`],
+    ["in an array", `  const xs = [1, 2]\n  const o = [match xs.length { 1 => twice, _ => thrice }]`],
+    ["as a .map callback's result", `  const xs = [1, 2]\n  const o = xs.map((x) => match x { 1 => twice, _ => thrice })`],
+    ["returned by a statement match, then stored", `  fn pick(n: number) { return match n { 1 => twice, _ => thrice } }\n  const o = { f: pick(1) }`],
+  ]) {
+    test(label, () => {
+      expect(stored(compile(prog(`${TWICE}  function thrice(x) { return x * 3 }\n${logic}`, `<p>x</p>`))).length).toBeGreaterThan(0);
+    });
+  }
+  test("a §42.2.3 `given x :> value` arm is read (no false refusal)", () => {
+    const src = `\${\n    type K:enum = { A, B }\n    <v> : number = 0\n    function go() {\n        let n: number | not = 5\n        @v = match K.A {\n            given n :> 1\n            .A :> 2\n            .B :> 3\n        }\n    }\n}\n<button onclick=go()>\${@v}</>\n`;
+    expect(stored(compile(src)).length).toBe(0);
+  });
+  test("a data-valued match, and a match whose arm binder shadows a file function, are not functions", () => {
+    expect(stored(compile(prog(`  const xs = [1, 2]\n  const o = { f: match xs.length { 1 => "a", _ => "b" } }`, `<p>x</p>`))).length).toBe(0);
+    const src = `\${\n  type E:enum = { Bad(email: string), Ok }\n  function email(x) { return x }\n  fn show(e: E) -> string {\n    const o = { msg: match e { .Bad(email) => email\n .Ok => "ok" } }\n    return o.msg\n  }\n}\n<program><p>\${show(E.Ok)}</p></>\n`;
+    expect(stored(compile(src)).length).toBe(0);
+  });
+});
+
+describe("fix round 3 — item 2: a scrml:time Debouncer / Throttler is a struct, not a function", () => {
+  test("calling it, or `.cancel()` on it (the retired shape), is E-TIMER-STRUCT-MISUSE naming run / cancel", () => {
+    const res = compile(`\${\n  import { debounce, throttle } from 'scrml:time'\n  function search(q) { return q }\n  const handleSearch = debounce((q) => search(q), 300)\n}\n<q> = ""\n<program><input oninput=\${ handleSearch(@q) }/><button onclick=\${ handleSearch.cancel() }>c</button></>\n`);
+    const ms = [...(res.errors || [])].filter((d) => d.code === "E-TIMER-STRUCT-MISUSE");
+    expect(ms.length).toBe(2);
+    expect(ms.some((d) => d.message.includes("run(handleSearch"))).toBe(true);
+    expect(ms.some((d) => d.message.includes("cancel(handleSearch)"))).toBe(true);
+  });
+  test("a Debouncer in a state cell called directly is refused too; run / cancel compile", () => {
+    const bad = compile(`\${\n  import { debounce } from 'scrml:time'\n  function search(q) { return q }\n}\n<d> = debounce(search, 50)\n<program><button onclick=\${ @d("x") }>x</button></>\n`);
+    expect(codesOf(bad)).toContain("E-TIMER-STRUCT-MISUSE");
+    const ok = compile(`\${\n  import { debounce, run, cancel } from 'scrml:time'\n  function search(q) { return q }\n  const s = debounce(search, 50)\n}\n<program><button onclick=\${ run(s, "x") }>x</button><button onclick=\${ cancel(s) }>c</button></>\n`);
+    expect(codesOf(ok)).not.toContain("E-TIMER-STRUCT-MISUSE");
+    expect(stored(ok).length).toBe(0);
+  });
+});
