@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 254 | 4 |
-| MED | 617 | 6 |
-| LOW | 392 | 0 |
+| HIGH | 256 | 4 |
+| MED | 624 | 6 |
+| LOW | 395 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -526,6 +526,8 @@ Reproduced on `origin/main` `6e58dd9eb`: `<program> <pre><script>window.pwned=3<
 
 Measured by `bun scripts/bootstrap-conformance.ts` after the S462 impl#1 review fix: `element-refusal/{raw-comment-script-pos, raw-noscript-attr-style-pos, raw-textarea-attr-breakout-pos, raw-xmp-comment-breakout-pos}` FAIL on the bootstrap (code not emitted). Whether the bootstrap's artifact EXECUTES these was not measured here (its printer escapes `<` in text and attribute values, s462-bootstrap-script-style-refusal, which may make it fail-safe); the divergence is the missing refusal. Fix: when the bootstrap gains raw content, apply the same fail-closed text rule as `scanRawContentForRefusedTags` (any case-insensitive `<script` / `<style` start-tag text in the body).
 
+**S464 — same root cause, one more symptom** (s464-quoted-handler-refused): with no raw-content mode the bootstrap also reports `E-ATTR-QUOTED-HANDLER` on a quoted `on…=` inside a `<pre>` / `<code>` body (`raw-content/active-html-displays-as-text`, `raw-content/each-row-raw-body-displays-as-text` — both already failing there with E-SCOPE-001). impl#1 does not (raw content is text; tested). The fix is this gap's raw-content mode, not a carve-out in the handler check.
+
 **S462 Q21 widens what the bootstrap's raw-content mode owes** (s462-q21-raw-body-as-text; NOT implemented there — recorded here). The bootstrap must also emit a raw body as display text: every `<` / `>` encoded, `&` NOT encoded (an author entity still decodes), a balanced attribute-less nested `<code>` / `<pre>` pair kept as an element (SPEC §4.17, impl#1 `compiler/src/raw-content-encode.ts`). Measured with `bun scripts/bootstrap-conformance.ts` at the s462-q21 head, the 8 new `conformance/cases/raw-content/*` cases on the bootstrap: `pre-code-wrapper-stays-element` PASS; FAIL — `active-html-displays-as-text` and `each-row-raw-body-displays-as-text` (no artifact: E-SCOPE-001, the bootstrap parses the body as markup and reads `onerror="window.pwned=1"` as a handler over an unbound name — fail-closed, but wrong), `entity-display-unchanged` (displays `&lt;b&gt;bold?&lt;/b&gt; a &amp;&amp; b`: `html.scrml` `escText` encodes `&` in every text node, so an author entity shows literally — this is the bootstrap twin of [[g-dom-text-entities-shown-literally-each-lift-s462]] and is NOT limited to raw content); parse-reject — `bare-angle-displays` (`<y` read as a tag) and `nested-code-with-attribute-is-text` (`</pre>` closes `<code>`); not reached — `match-arm-raw-body-displays-as-text` (unsupported `.A`), `component-prop-displays-as-text` (not twinned). Shape of the fix (sized — not a local change): (1) `parse.scrml` `parseMarkupNode` — for a lowercase-first `pre` / `code` element opener (not `*`, not a declaration, not self-closing or `:`-shorthand) capture the source to the matching `</pre>` / `</code>` (case-insensitive, `rawCloseAt`), run the fail-closed `<script` / `<style` scan over it, and keep it as ONE raw child; (2) a raw-HTML node kind through `ANodeK` → `View` → `HNode` (each is an exhaustive enum: ~35 match sites across analyze / check / lower / print / walk / measure / names must take the new arm — the no-default-arm lint enforces it), printed through a port of `encodeRawContentBody`, never through `escText`; (3) its client DOM build (if a view rebuilds a `<pre>` at run time) through an inert `<template>` parse, as impl#1 does.
 
 ### g-raw-content-static-active-html-executes-s462 — a `<pre>` / `<code>` raw body passes author tag text through verbatim, so ANY active HTML written there runs: `<img onerror=…>`, `<svg onload=…>`, an `<iframe srcdoc="&lt;script&gt;…">` (a real script in a same-origin child document), a `<link rel=stylesheet href="data:text/css,…">` (CSS injection); a static string component prop holding `<img onerror>` substituted into `<pre>${t}</pre>` runs too — all Chromium-confirmed, base `d6820a607` AND the S462 head — `NEW S462; HIGH; RESOLVED S462 Q21 (s462-q21-raw-body-as-text)`
@@ -619,6 +621,70 @@ Reported by the S239 review of 58e601693, reproduced in Chromium (pre-existing; 
 <!-- @gap id=g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveHtml — a Braced value on a non-handler attribute is filed AStatic)+compiler/self-host-v2/lower.scrml(quotedText(.Braced) -> "", handlerBlock(.Quoted) -> block([])) prov=review:s462-bootstrap-sink-guards-S239 -->
 
 Nothing executable is written (the braced value becomes `attr=""`; the quoted handler becomes a listener that does nothing), so no sink is open — but the author's text is dropped with no diagnostic. impl#1 writes a quoted static `onclick="…"` as the author's static string (§5.2 rule 1: "A quoted event attribute with no `${…}` stays a static string"). Either reading should be a diagnostic in the bootstrap rather than a silent drop (`feedback_dont_soft_classify_bugs`).
+
+**S464 — handler half CLOSED** (`s464-quoted-handler-refused`): the S464 ruling made a quoted event attribute with no `${…}` a compile error in both implementations (§5.2 "Quoted event-handler attributes (S464)", `E-ATTR-QUOTED-HANDLER`); the bootstrap now refuses it in `analyze.scrml` `attrCaseDiags` (any case; tests in `slice-m4/sink-guards.test.js`). The braced-non-handler-value half (`srcdoc={@doc}` → `""`) stays OPEN.
+
+### g-parametric-snippet-render-in-for-lift-unbound-s464 — a parametric snippet rendered inside a `for … lift` row (`${ for (i of items) { lift <div>${render row(i)}</> } }`, `row: snippet(item: Item)`) is emitted as a text node reading `row(i)` — `row` is bound nowhere in the client JS, so the row throws (ReferenceError) at runtime and the caller's lambda markup is dropped — `NEW S464; HIGH; open (silent at compile)`
+
+<!-- @gap id=g-parametric-snippet-render-in-for-lift-unbound-s464 sev=HIGH status=open locus=compiler/src/component-expander.ts(the parametric-snippet render limb does not reach a `render` inside a for-lift body)+compiler/src/codegen/emit-lift.js(the interpolation is lowered as `_scrml_g.String((row(i)) ?? "")`) prov=review:s464-quoted-handler-refused-S239-F3+empirical:samples/compilation-tests/snippet-002-parametric.scrml-compiles-exit-0-client-has-row(i)-unbound -->
+
+Reproduced on the s464 branch: `bun compiler/bin/scrml.js compile samples/compilation-tests/snippet-002-parametric.scrml` → exit 0; the client JS holds `_scrml_lift_tn_8.textContent = _scrml_g.String((row(i)) ?? "");` with no `row` binding. Found by the S239 review of s464-quoted-handler-refused (F3): a quoted handler in such a lambda (`row={ (item) => <span onclick="…">…</span> }`) reached no output only because the lambda's markup is dropped. The S464 fix judges that markup anyway (`collectEscapeHatchQuotedHandlerErrors`, E-ATTR-QUOTED-HANDLER), so it stays closed when this lowering is fixed.
+
+### g-component-in-each-row-in-match-arm-unexpanded-s464 — a DEFINED component used in an `<each>` row inside a `<match>` arm (`const Btn = <button>b</button>` · `<Idle><each in=@items as it><Btn/></each></>`) is emitted unexpanded, as `document.createElement("Btn")` — exit 0, no diagnostic — `NEW S464; HIGH; open (silent)`
+
+<!-- @gap id=g-component-in-each-row-in-match-arm-unexpanded-s464 sev=HIGH status=open locus=compiler/src/codegen/emit-match.ts(the arm body is re-parsed in codegen, after component expansion)+compiler/src/codegen/emit-each.ts(row element built from the unexpanded call node) prov=review:s464-quoted-handler-refused-S239-F1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch (component defined, used once in the row, no attributes): the client JS builds `createElement("Btn")`. The sibling unresolved-component case is [[g-match-arm-unresolved-component-phantom]]. With an undeclared call-site attribute (`<Btn onclick="pwn()"/>`) the attribute was written onto that `<Btn>` element, where a browser runs it. S464 closes the handler half (the codegen backstop `refuseQuotedHandlerWrite` refuses the write whatever the tag), but not the missing expansion.
+
+### g-codegen-backstop-refusal-span-is-synthetic-label-s464 — a refusal raised by a codegen backstop over markup re-parsed in codegen (a `<match>` arm body, an engine state-child) points at the synthetic label, not the source: `<match:8:Idle>:1:39`, `<engine:light:Green>:1:1` — `NEW S464; LOW; open (pre-existing pattern)`
+
+<!-- @gap id=g-codegen-backstop-refusal-span-is-synthetic-label-s464 sev=LOW status=open locus=compiler/src/codegen/emit-match.ts(arm bodies re-parsed with synthLabel `<match:${id}:${tag}>` and body-relative offsets)+compiler/src/codegen/emit-engine.ts(state-child re-parse label) prov=review:s464-quoted-handler-refused-S239-r1-N3 -->
+
+Every codegen backstop that refuses a node inside a re-parsed arm (E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE via `refuseStaticAttrWrite`, E-ATTR-INTERP-EXECUTABLE via the `<each>` row check, E-SCRIPT-001 via `refuseElementLowering`) inherits the re-parse's span: file = the synthetic label, offsets relative to the arm body text. The compile still fails (the error is real), but the author is pointed at a location that does not exist. Fix: carry the arm body's source start offset into the re-parse (or rebase every span of the re-parsed nodes onto it) so `file` / `line` / `col` are the source file's.
+
+### g-single-quoted-attr-in-each-row-in-match-arm-written-empty-s464 — a single-quoted attribute (`title='hello'`) on an element in an `<each>` row inside a `<match>` arm compiles at exit 0 and is written as `setAttribute("title", "")`; elsewhere a single-quoted value is E-ATTR-001 — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-single-quoted-attr-in-each-row-in-match-arm-written-empty-s464 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(the arm body re-parse in codegen; its parse errors are not surfaced)+compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs writes the dropped value as "") prov=review:s464-quoted-handler-refused-S239-r1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: `<match for=Phase on=@phase><Idle><each in=@items as it><b title='hello'>x</b></each></>…</match>` → exit 0, client JS `setAttribute("title", "")`. The author's value is silently dropped; the same attribute at top level is refused (E-ATTR-001, `"` is the only attribute-string delimiter, §5.1).
+
+### g-each-in-shorthand-match-arm-dropped-s464 — an `<each>` inside a `:`-shorthand `<match>` arm (`<Ready : <ul><each in=@items as it><li>…</li></each></ul>>`) is dropped from the output — exit 0, no diagnostic — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-each-in-shorthand-match-arm-dropped-s464 sev=MED status=open locus=compiler/src/codegen/emit-match.ts(the `:`-shorthand arm body takes the native-parser route, which has no each-block transform; the bare-body route checks for `<each` and re-splits) prov=review:s464-quoted-handler-refused-S239-r1+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: the row element (`<li id="shorthand-row">`) appears nowhere in the client JS or HTML. The bare-body arm route re-splits a body holding `<each>` through splitBlocks+buildAST (S153); the shorthand route (`looksLikeMarkupStart`) goes straight to `nativeParseFile`.
+
+### g-markup-text-apostrophe-in-logic-lambda-renders-as-text-s464 — markup in a logic-context lambda whose TEXT holds an apostrophe (`${ const mk = (x) => <span>it's <button>y</button> that's</span> }`) is emitted as ONE text node — `createTextNode("its <button …>y</button> thats")`: the child elements become literal text and the apostrophes are dropped — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-markup-text-apostrophe-in-logic-lambda-renders-as-text-s464 sev=MED status=open locus=compiler/src/ast-builder.js(markup value in a logic expression — text lexed as JS; the apostrophe opens a string) prov=review:s464-quoted-handler-refused-S239-r1(probes f3/logic_lambda*)+empirical:reproduced-on-main-and-s464-branch -->
+
+Reproduced with main's compiler and on the s464 branch (same output). Fail-safe for handlers (a text node never runs), but the author's markup is silently turned into text. A `//` in the text (`a // b`) does the same.
+
+**S464 round 3 (review r2):** this is DATA CORRUPTION, not only lost structure — the displayed text loses its apostrophes (`it's` renders as `its`), at exit 0. Some variants (`<span>it's <a href=…>y</a></span>`) instead fail with E-CODEGEN-INVALID-LOGIC, which names the wrong cause.
+
+### g-bootstrap-static-executable-values-not-refused-s464 — the BOOTSTRAP does not implement S464 "(a) Refuse both": a static `srcdoc` and a static `href="javascript:…"` are written as the author wrote them (impl#1 refuses both, E-ATTR-STATIC-EXECUTABLE) — `NEW S464; MED; open`
+
+<!-- @gap id=g-bootstrap-static-executable-values-not-refused-s464 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(attrCaseDiags / the srcdoc data-form check — no static-value judgment; the scheme reader lives only in compiler/src/runtime-url-guard.js) prov=dispatch:s464-quoted-handler-refused-round-2 -->
+
+`compiler/self-host-v2/slice-m4/sink-guards.test.js` still pins "a static `srcdoc` is written as the author wrote it" (the pre-S464 rule). The bootstrap needs the rule 2/3 scheme reader and safe set in scrml (one definition — mirror `runtime-url-guard.js`) and a static-value refusal beside its quoted-handler refusal.
+
+### g-bare-srcdoc-no-value-s464 — a bare `<iframe srcdoc>` (no value) is not refused by E-ATTR-STATIC-EXECUTABLE — `NEW S464; LOW; resolved (decided legal)`
+
+<!-- @gap id=g-bare-srcdoc-no-value-s464 sev=LOW status=resolved resolved-by=s464-quoted-handler-refused-round-3 locus=compiler/src/attr-injection-sink.ts(classifyStaticExecutableAttr judges string values only; a presence attribute has no value) prov=review:s464-quoted-handler-refused-S239-r2 -->
+
+Raised by the S239 review of ae1924b95. Decided LEGAL in round 3 and stated in SPEC §5.2 "Static executable values (S464)" item 1: a bare `srcdoc` is an empty document and runs nothing — there is no text for the browser to execute, so the S464 purpose ("JS scrml never checks") does not reach it. Pinned by `s464-quoted-handler-refused.test.js` (narrow-ok) and `s457-executable-sinks-srcdoc-svg.test.js` (§2 controls).
+
+### g-iframe-src-raster-data-image-admitted-s464 — `<iframe src="data:image/png;…">` is admitted by both the static rule and the runtime guard: rule 2's image-source set (`src`, `srcset`, `imagesrcset`, `poster`) is attribute-name based, not element based — `NEW S464; LOW; open (pre-existing, inert)`
+
+<!-- @gap id=g-iframe-src-raster-data-image-admitted-s464 sev=LOW status=open locus=compiler/src/runtime-url-guard.js(_SCRML_IMAGE_SOURCE_ATTRS / _scrml_url_scheme_admitted — name-only) prov=review:s464-quoted-handler-refused-S239-r4 -->
+
+Inert: a frame showing a raster image decodes it, it never runs it. Recorded because the S464 "(a) Narrow attrs, allow-list" wording admits a raster `data:image` on attributes that LOAD AN IMAGE, and an `<iframe>` loads a document. Not changed in s464 (owner/PA call whether the image-source set should become element-scoped, in both the static rule and rule 3).
+
+### g-xlink-href-cell-emitted-as-literal-name-s464 — `<a xlink:href=@t>` is emitted as the literal attribute `xlink:href="t"` (the cell NAME), not the cell's value — exit 0, no diagnostic — `NEW S464; MED; open (pre-existing, silent)`
+
+<!-- @gap id=g-xlink-href-cell-emitted-as-literal-name-s464 sev=MED status=open locus=compiler/src/codegen/emit-html.ts(a namespaced `xlink:` attribute with a variable-ref value takes the static path) prov=review:s464-quoted-handler-refused-S239-r5(side-note)+empirical:PA-agent-reproduced-on-s464-branch -->
+
+Reproduced on the s464 branch: `<t> = "/x"` · `<svg><a xlink:href=@t><text>t</text></a></svg>` → the HTML holds `xlink:href="t"`, and no reactive wiring. The author's value is replaced by the cell's name. Found by the S239 review of cb67d17ea while probing an animation-element `xlink:href=@t` spoof (that refusal is closed in s464 round 6).
 
 ### g-component-block-lambda-emits-empty-body-s458 — a block-bodied arrow / function expression in a component body containing `< identifier` (even a LOCAL: `x < k`) or a C-style `for` is emitted as `(x) => { /* block body */ }` — an empty callback, silently — `NEW S458; HIGH; open (pre-existing)`
 
@@ -25436,3 +25502,20 @@ Map the emitted-JS parse position back to the source span that produced it (or a
 <!-- @gap id=g-conformance-clean-case-passes-when-compile-fails-s464 sev=LOW status=open locus=conformance/run.ts(code matching) prov=review:s464-q24-r3-S239 -->
 
 Now visible: `module/e-export-002-component-single-root-clean`, `e-export-003-attr-distinct-clean`, `channel/same-source-two-aliases`. A clean case should fail if ANY error fires (the other half of g-conformance-adapter-skips-the-emitted-js-gate…). Also: `g-emitted-js-invalid-shapes-surfaced-by-floor-s464` lists 27 files; the review's corpus found 36 (adds `compiler/self-host-v2/{analyze,check,lower,print}.scrml` — type annotations leak into JS — plus `compiler/tests/integration/fixtures/a5/cross-file/components/header.scrml`, `docs/changes/m6.4a/exemplars/cross-file/components.scrml`, several `docs/changes/*/repro`, `samples/match-001-nested-with-call.scrml`).
+### g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 — the markup scanner over unparsed (escape-hatch) lambda text unions a BOUNDED set of readings at ambiguous `<`, so a text whose true reading mixes 2+ choices outside the set hides a quoted handler / static executable URL — `NEW S464; MED; open (LATENT)`
+
+<!-- @gap id=g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks / markupTextSinksOnce) prov=review:s464-quoted-handler-refused-r6-S239-F1 -->
+
+LATENT: only snippet-lambda / escape-hatch markup, which impl#1 does not emit today (see g-parametric-snippet-render-in-for-lift-unbound-s464). Reproducer (reviewer scratch `~/.cache/scrml-review-qh-r6/p/mix/mx1.scrml`): `row={ (x) => <span>${ if (x.ok) <b>don't</b> }${ x.n <lo ? "x>" : "</b>" }${ for (const y of x.ys) <u>a'b</u> }${ x.n <lo ? "x>" : "</b>" }<i onclick="z">y</i></span> }` → no E-ATTR at f28de6e1f (round 5 refused it). A bounded union cannot be complete over 2^k readings. ⚑ **MUST be closed BEFORE snippet-lambda markup is ever lowered/emitted** — the structural fix is the design item below, not more scanner heuristics.
+
+### g-escape-hatch-markup-scanner-false-refusal-attr-text-in-string-s464 — the all-markup reading parses a string literal holding attribute-like text after a comparison as an attribute → false E-ATTR-QUOTED-HANDLER — `NEW S464; LOW; open (escape-hatch only)`
+
+<!-- @gap id=g-escape-hatch-markup-scanner-false-refusal-attr-text-in-string-s464 sev=LOW status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks all-markup reading) prov=review:s464-quoted-handler-refused-r6-S239-F2 -->
+
+`row={ (x) => <span>${ x.n <lim ? 'onclick="x"' : "" }</span> }` → E-ATTR-QUOTED-HANDLER naming a phantom element (round 5 compiled it clean). Escape-hatch text only; parsed-markup equivalents unaffected.
+
+### g-escape-hatch-markup-judged-by-scanner-not-parser-s464 — DESIGN ITEM: markup inside unparsed escape-hatch lambda text is judged by a hand-written heuristic scanner (6 review rounds on it, S464) instead of the real markup parser — `NEW S464; MED; open (design)`
+
+<!-- @gap id=g-escape-hatch-markup-judged-by-scanner-not-parser-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks)+compiler/src/expression-parser.ts(lambda markup left as escape-hatch text) prov=rationale:S464-PA-landing-call-after-6-rounds-on-one-heuristic -->
+
+The S239 rounds on `s464-quoted-handler-refused` kept finding scanner-reading bugs (quotes, regex literals, `)<`, postfix ops, mixed readings) — a heuristic standing in for a parser (the "two readers of one text" class). Root fix: parse lambda/snippet markup with the real markup parser (or lower it to structure) so E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE / E-ATTR-INTERP-EXECUTABLE judge parsed attributes, and delete `markupTextSinks`. Gate: before snippet-lambda markup emission lands.
