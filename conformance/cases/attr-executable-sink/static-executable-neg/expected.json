@@ -1,0 +1,14 @@
+{
+  "id": "attr-executable-sink-static-executable-neg",
+  "description": "§5.2 \"Static executable values (S464)\": a static `href=\"javascript:…\"` (top level), a static `srcdoc`, a static `vbscript:` href in an `<each>` row, and a static SVG `<set to=\"javascript:…\">` animating `href` are each E-ATTR-STATIC-EXECUTABLE; a relative href and a raster `data:image/png` src stay legal.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "provenance": "ruling:user-voice-scrml.md S464 \"(a) Refuse both\"",
+  "rationale": "§5.2 (S464): \"Any static `srcdoc`\" and \"A static URL-valued attribute whose scheme is not admitted\" SHALL each be a compile error (E-ATTR-STATIC-EXECUTABLE). Before the ruling each was written into the page as the author wrote it, and the browser ran it.",
+  "expect": {
+    "codes": ["E-ATTR-STATIC-EXECUTABLE"],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "severity": { "E-ATTR-STATIC-EXECUTABLE": "error" },
+    "codeCounts": { "E-ATTR-STATIC-EXECUTABLE": 4 }
+  }
+}
