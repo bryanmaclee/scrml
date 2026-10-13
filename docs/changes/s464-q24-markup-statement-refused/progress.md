@@ -18,3 +18,10 @@
 - #8: context-correct message (function / arrow → `return` + `${f()}`; `${}` / fn → `lift`).
 - Corpus (2952 files, base 7e90f6ff0 vs head, compiled): 0 newly refused; gauntlet-r10-ts-components.scrml (already failing) gains the code. (stdlib code-set differences in the diff are the base checkout resolving stdlib from its own tree — no E-MARKUP involvement.)
 - Gate: pre-commit passed at 9c0f0fe68. Filed g-arrow-block-body-markup-return-codegen-invalid-s464 (LOW, pre-existing).
+
+## Fix round 2 (re-review of 868d1e414 — verdict FIX, light)
+- 2026-10-13 origin/main unchanged; brief archived (5e1ebcca7). Reviewer probes (miss/, fr/, p/, loc/, pm/) copied read-only from ~/.cache/scrml-review-q24-r1.
+- N1 (eb61d4aa2): promote --match refuses in a phrasing-only parent, with sibling content unless every arm is a block element, and with duplicate variant arms. Render-equivalence browser test: before/after promote rendered in happy-dom for every variant (3 accepted chains SAME; 4 refused chains untouched — those 4 promote on base and 2 render differently: inline `<p>` closed early, duplicate arm's later body).
+- N2–N5 (390d6c78e; first attempt failed its hook — a `const` inserted between `export` and `class TABError` un-exported it; fixed): handler bodies refused at the TAB (refuseHandlerMarkup), `when` bodies and function-expression bodies refused; engine opener effect checked at the TAB at its file position; component-body leads mapped to source; arrow-in-function reported once; sibling-branch cause named. 13 new tests fail on base.
+- Corpus (2952 files, base 5e1ebcca7 vs head, compiled): 0 changes; 4 files carry the code on both.
+- Filed: g-engine-message-arm-markup-refusal-location-s464 (LOW), g-component-two-element-arm-component-021-cascade-s464 (LOW, pre-existing).

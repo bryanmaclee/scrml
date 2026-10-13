@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
 | MED | 614 | 6 |
-| LOW | 388 | 0 |
+| LOW | 390 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -65,6 +65,18 @@ The S239 review of s462-given-body-text-as-code found the readers disagreeing: t
 Executed S464 (`compiler/tests/unit/g-if-chain-promotable-lints-blind.test.js` fixture, `promoteMatchOnFile` dry run): base reported `count: 1` for the rewrite `function render() { <match for=Phase on=@phase> <Idle> return 'a' </> … </> 'z' }`. Since S464 Q24 the sanity parse refuses that rewrite (E-MARKUP-STATEMENT-NOT-RENDERED) and the file is left untouched — fail-closed, but the lint still suggests a promotion the tool cannot perform. Fix direction: nominate (and rewrite) only chains in a markup render position; a `return` / value chain promotes to a logic `match`, not a `<match>` element. The S464 branch also made a chain that is the sole content of `${…}` replace the whole `${…}` (before, the `<match>` was left inside the `${}` and rendered nothing).
 
 **S464 fix round 1 (review of a0d464f1f):** `promote --match` now rewrites ONLY a chain that is the sole content of a `${…}` block AND whose every arm is exactly one markup element (bare, or `lift <el>` with the `lift` dropped) — `singleMarkupArmElement` in `promote.js`; anything else is skipped with a reason and the file left untouched. (The first S464 cut replaced the whole `${…}` for any chain, which turned `lift` arms and logic arms like `{ @x = 10 }` into DISPLAY TEXT that compiled clean.) What remains open here is the LINT: `I-MATCH-PROMOTABLE` still nominates chains the tool refuses (return chains, logic-arm chains).
+
+### g-engine-message-arm-markup-refusal-location-s464 — E-MARKUP-STATEMENT-NOT-RENDERED in an engine MESSAGE-ARM body is reported at a position in the arm body's re-parse (`__msg_arm__.scrml`), not the file's line:col — `NEW S464; LOW; open`
+
+<!-- @gap id=g-engine-message-arm-markup-refusal-location-s464 sev=LOW status=open locus=compiler/src/codegen/emit-engine.ts(parseEngineSynthLogicBody — message-arm bodies have no TAB parse with file offsets; MessageArmEntryShape carries spanStart only) prov=dispatch:s464-markup-text-q24(fix round 2) -->
+
+Fix round 2 moved the engine OPENER `effect=` refusal to the TAB at the body's real offset / line / col (review N3). A message-arm body (`.Msg :> { … <p/> }`) is still parsed only at emit time from `arm.bodyRaw`, so its refusal (correct code, the "effect" fix) names the synthetic file. Fix direction: parse message-arm bodies at the TAB from their source offset, as the opener effect now is.
+
+### g-component-two-element-arm-component-021-cascade-s464 — two elements in an `if` arm inside a component body (`const W = <div>${ if (c) { <p>one</p><p>two</p> } }</div>`) fails as E-COMPONENT-021 / -020 / -035 (a "malformed component body" cascade at every use site) instead of E-MARKUP-STATEMENT-NOT-RENDERED at the element — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-component-two-element-arm-component-021-cascade-s464 sev=LOW status=open locus=compiler/src/component-expander.ts(parseComponentBody — the body re-parse fails, so the def is reported malformed) prov=review:s464-markup-text-q24(round 2, pre-existing) -->
+
+Reported by the round-2 review (probe comp2/comp3); same on the pre-Q24 base. The program is rejected either way; the diagnostic names the wrong cause.
 
 ### g-arrow-block-body-markup-return-codegen-invalid-s464 — a markup value RETURNED from an arrow function's block body (`const g = () => { return <p>x</p> }`) fails as E-CODEGEN-INVALID-LOGIC, while the expression-bodied arrow (`() => <p>x</p>`) and a `function` returning markup compile and render — `NEW S464; LOW; open (pre-existing on BASE)`
 
