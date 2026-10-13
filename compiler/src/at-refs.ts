@@ -38,21 +38,21 @@ export function isPlainPureFn(fnNode: unknown): boolean {
  * What counts:
  *   - an `ident` node whose name starts with `@`;
  *   - a `?{}` query's text (`${@x}` interpolations), as before;
- *   - with `opaqueCode: true` ONLY: a template literal's `${…}` interpolations and
- *     an `escape-hatch` node's code (a block-body lambda), which the expression
- *     tree keeps as raw text — read only after `blankLiteralTextInSource` has
- *     blanked every string literal, template quasi and comment.
+ *   - with `opaqueCode: true`: a template literal's `${…}` interpolations and an
+ *     `escape-hatch` node's code (a block-body lambda), which the expression tree
+ *     keeps as raw text — read only after `blankLiteralTextInSource(…, { blankRegex:
+ *     true })` has blanked every string literal, template quasi, comment AND
+ *     regular-expression body (s464 fix round 4).
  * What never counts: string / template text, regex literals, comments.
  *
- * `opaqueCode` is a COVERAGE choice, not a second parser. The placement decision
- * turns it on because over-detection is its safe direction (the `fn` keeps its
- * prior path). E-REACTIVE-003 leaves it off — it has never read template
- * interpolations or escape-hatch code, and turning it on is a newly-rejecting
- * change that needs its own ruling (g-template-literal-cell-read-in-fn-undefined-on-server-s464).
+ * `opaqueCode` is a COVERAGE choice, not a second parser. Both callers turn it on:
+ * the placement decision (over-detection is its safe direction — the `fn` keeps its
+ * prior path) and E-REACTIVE-003 (owner ruling S464 "(a) Close it", SPEC §6.6.9
+ * "Every read position counts"). It stays an option so a future caller has to choose.
  */
 const AT_REF_RE = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
 function forEachAtRefInCode(code: string, cb: (bare: string) => void): void {
-  const blanked = blankLiteralTextInSource(code);
+  const blanked = blankLiteralTextInSource(code, { blankRegex: true });
   const re = new RegExp(AT_REF_RE.source, "g");
   let m: RegExpExecArray | null;
   while ((m = re.exec(blanked)) !== null) {

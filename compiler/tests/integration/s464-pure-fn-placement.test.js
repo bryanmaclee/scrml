@@ -711,3 +711,63 @@ describe("s464 fix round 3 N4 — scope-aware shadowing; template text is not co
     )).toBe(17);
   }, EXECUTED_DB_TIMEOUT_MS);
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 4 — a regex literal's body and string text are literal text for the
+// `@`-reader (B) and for the non-determinism classifier (C).
+// ---------------------------------------------------------------------------
+
+describe("s464 fix round 4 B — `@n` inside a regex literal is not a cell read", () => {
+  test("regex in a block-bodied callback of a server fn → [\"aX\"]", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  server fn go(k) { return [k].map((x) => { return \"a@n\".replace(/@n\\b/g, \"X\") }) }",
+      "b-regex-cb",
+    )).toEqual(["aX"]);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("regex in a block-bodied callback of a pure fn reached from server code → [true]", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  fn f(k) { return [1].map((x) => { return /@n/.test(\"a@n\") }) }\n  server fn go(n) { return f(n) }",
+      "b-regex-fn",
+    )).toEqual([true]);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("regex inside a template interpolation of a server fn → \"@n\"", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult("  server fn go(k) { return `${/@n/.source}` }", "b-regex-tpl")).toBe("@n");
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("a real cell read next to a regex is still E-REACTIVE-003", () => {
+    const { errors } = compileFiles({
+      "app.scrml": goProg("  server fn go(k) { return [k].map((x) => { return /@n/.test(\"a\") ? @n : 0 }) }"),
+    }, "app.scrml", "b-regex-real");
+    expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
+  });
+});
+
+describe("s464 fix round 4 C — a non-deterministic call written inside a STRING is text", () => {
+  test("`const V = \"call Date.now() later\"` used on both sides → not refused, \"call Date.now() later3\"", async () => {
+    if (HAPPY_DOM()) return;
+    const { errors, outDir } = compileFiles({ "app.scrml": `<program>
+\${
+  const V = "call Date.now() later"
+  fn f(n) { return V + n }
+  server fn go(n) { return f(n) }
+}
+<out> = ""
+<button onclick=\${@out = go(3)}>s</button>
+<p>\${V} \${@out}</p>
+</program>` }, "app.scrml", "c-string");
+    expect(errors).toEqual([]);
+    const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
+    const route = mod.routes.find((r) => String(r.path).includes("go"));
+    const resp = await route.handler(new Request(`http://localhost${route.path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", "Cookie": "scrml_csrf=t" },
+      body: JSON.stringify({ n: 3 }),
+    }));
+    expect(await resp.json()).toBe("call Date.now() later3");
+  }, EXECUTED_DB_TIMEOUT_MS);
+});

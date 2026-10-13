@@ -1348,7 +1348,7 @@ const _blankedCache = new Map<string, string>();
 function blankedOf(text: string): string {
   let b = _blankedCache.get(text);
   if (b === undefined) {
-    b = blankLiteralTextInSource(text);
+    b = blankLiteralTextInSource(text, { blankRegex: true });
     if (_blankedCache.size > 64) _blankedCache.clear();
     _blankedCache.set(text, b);
   }
@@ -1664,7 +1664,8 @@ function planModuleBindingClosure(
       {
         let initText = typeof decl.init === "string" ? decl.init : "";
         if (!initText.trim()) { try { initText = emitStringFromTree(decl.initExpr); } catch { initText = ""; } }
-        const nd = nonDeterministicCallIn(fileAST, initText);
+        // Literal-blanked (s464 fix round 4): `"call Date.now() later"` is text.
+        const nd = nonDeterministicCallIn(fileAST, blankedOf(initText));
         if (nd && clientUsed(b)) {
           refuse(b,
             `its initializer calls \`${nd}\`, which is non-deterministic, and client code also uses ` +
