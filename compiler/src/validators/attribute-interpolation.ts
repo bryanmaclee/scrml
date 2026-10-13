@@ -387,20 +387,59 @@ function markupTextSinks(raw: string): MarkupTextSinkHit[] {
   };
   // Read CODE from i until the closing char `close` at depth 0 (or end of text); returns the index
   // after the closer. Markup met in code is read as markup.
+  // A `/` in code begins a REGEX literal (not a division) when what precedes it cannot end an
+  // operand: the start of the code, an operator / punctuator other than `)` `]`, or a keyword that
+  // takes an expression (`return`, `typeof`, …). Round 3 (review NEW-1): without this, `/"/g` read
+  // its `"` as a string opener and swallowed the markup after it, and `/<i onclick="z">/g` was read
+  // as an element.
+  const REGEX_AFTER_WORDS: ReadonlySet<string> = new Set([
+    "return", "typeof", "instanceof", "in", "of", "new", "delete", "void", "throw", "case", "do", "else",
+    "yield", "await", "is", "not", "and", "or",
+  ]);
+  const skipRegex = (i: number): number => {
+    let k = i + 1;
+    let inClass = false;
+    while (k < n && raw[k] !== "\n") {
+      const c = raw[k];
+      if (c === "\\") { k += 2; continue; }
+      if (c === "[") inClass = true;
+      else if (c === "]") inClass = false;
+      else if (c === "/" && !inClass) { k++; break; }
+      k++;
+    }
+    while (k < n && /[a-z]/i.test(raw[k])) k++; // flags
+    return k;
+  };
   function skipCode(i: number, close: string | null): number {
     let k = i;
     let depth = 0;
+    // What the last significant token was: "operand" (an identifier, number, `)`, `]`, a literal) —
+    // after which `/` divides — or "operator" (anything else, and the start) — after which `/`
+    // opens a regex.
+    let prev: "operand" | "operator" = "operator";
     while (k < n) {
       const c = raw[k];
-      if (c === '"' || c === "'" || c === "`") { k = skipString(k, c); continue; }
+      if (/\s/.test(c)) { k++; continue; }
+      if (c === '"' || c === "'" || c === "`") { k = skipString(k, c); prev = "operand"; continue; }
       if (c === "/" && raw[k + 1] === "/") { while (k < n && raw[k] !== "\n") k++; continue; }
       if (c === "/" && raw[k + 1] === "*") { const e = raw.indexOf("*/", k + 2); k = e < 0 ? n : e + 2; continue; }
-      if (c === "<" && isLetter(raw[k + 1])) { k = readElement(k); continue; }
-      if (c === "{" || c === "(" || c === "[") { depth++; k++; continue; }
+      if (c === "/" && prev === "operator") { k = skipRegex(k); prev = "operand"; continue; }
+      if (c === "<" && isLetter(raw[k + 1]) && prev === "operator") { k = readElement(k); prev = "operand"; continue; }
+      if (/[A-Za-z0-9_$@]/.test(c)) {
+        const at = k;
+        while (k < n && /[A-Za-z0-9_$@.]/.test(raw[k])) k++;
+        const word = raw.slice(at, k);
+        prev = REGEX_AFTER_WORDS.has(word) ? "operator" : "operand";
+        continue;
+      }
+      if (c === "{" || c === "(" || c === "[") { depth++; k++; prev = "operator"; continue; }
       if ((c === "}" || c === ")" || c === "]")) {
         if (depth === 0 && close !== null && c === close) return k + 1;
-        depth--; k++; continue;
+        depth--; k++;
+        prev = c === "}" ? "operator" : "operand";
+        continue;
       }
+      prev = "operator";
       k++;
     }
     return n;

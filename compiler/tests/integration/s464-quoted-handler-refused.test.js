@@ -537,3 +537,71 @@ describe("S464 (a) — a static srcdoc / a static URL with an unadmitted scheme 
     expect(r.all.filter((d) => d.code === "E-MD-URL-SCHEME").length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 3 (review NEW-1) — regex literals in code inside lambda markup
+// ---------------------------------------------------------------------------
+
+describe("NEW-1 — a regex literal's contents are neither a string opener nor markup", () => {
+  const lam = (body) => `<program>\n<items> = [{ name: "a" }]\nconst List = <ul props={ items: asIs, row: snippet(it: asIs) }>\${ for (const it of items) { lift <li>\${render row(it)}</li> } }</ul>\n<List items=@items row={ (x) => ${body} }/>\n</program>\n`;
+  const codesOf = (r) => r.all.map((d) => d.code).filter((c) => /^E-ATTR-(QUOTED-HANDLER|STATIC-EXECUTABLE|INTERP-EXECUTABLE)$/.test(c));
+  test("a quote inside a regex does not swallow the markup after it (handler, href, srcdoc)", () => {
+    expect(codesOf(compile("re-q1", lam(`<span>\${ x.name.replace(/"/g, "") }<b onclick="go(1)">y</b></span>`)))).toEqual(["E-ATTR-QUOTED-HANDLER"]);
+    expect(codesOf(compile("re-q2", lam(`<span>\${ x.name.replace(/'/g, "") }<a href="javascript:go()">y</a></span>`)))).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
+    expect(codesOf(compile("re-q3", lam(`<span>\${ x.name.replace(/\\//g, "") }<iframe srcdoc="<p>x</p>"></iframe></span>`)))).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
+  });
+  test("tag text inside a regex is not an element", () => {
+    expect(codesOf(compile("re-t1", lam(`<b>\${ x.name.replace(/<i onclick="z">/g, "") }</b>`)))).toEqual([]);
+    expect(codesOf(compile("re-t2", lam(`<b>\${ /<a href="javascript:z">/.test(x.name) ? "a" : "b" }</b>`)))).toEqual([]);
+  });
+  test("division is still division (`a / b` then markup)", () => {
+    expect(codesOf(compile("re-div", lam(`<span>\${ x.n / 2 }<b onclick="go(1)">y</b>\${ x.n / 3 }</span>`)))).toEqual(["E-ATTR-QUOTED-HANDLER"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 3 — S464 "(a) Narrow attrs, allow-list"
+// ---------------------------------------------------------------------------
+
+describe("S464 (a) Narrow attrs — only navigate / load attributes are judged; raster data:image on every image load", () => {
+  const SE = "E-ATTR-STATIC-EXECUTABLE";
+  const se = (r) => r.all.filter((d) => d.code === SE);
+  test("compile clean: metadata URL attributes, icon / SVG image raster data:image, bare srcdoc", () => {
+    const r = compile("narrow-ok", `<program>
+<dl itemscope itemid="urn:isbn:0-330-34032-8"><dt>x</dt></dl>
+<blockquote cite="urn:isbn:123">q</blockquote>
+<div itemtype="javascript:x" longdesc="javascript:y">meta</div>
+<link rel="icon" href="data:image/png;base64,AAAA">
+<link rel="apple-touch-icon" href="data:image/png;base64,AAAA">
+<svg><image href="data:image/png;base64,AAAA"/></svg>
+<iframe srcdoc></iframe>
+<svg><a><set attributeName="cite" to="javascript:alert(1)"/></a></svg>
+</program>
+`);
+    expect(se(r)).toEqual([]);
+    expect(r.result.errors ?? []).toEqual([]);
+  });
+  test("still refused: webcal:, geo:, an empty `data:,` icon, a data:image NAVIGATION, an unadmitted scheme on each judged attribute", () => {
+    const cases = [
+      `<a href="webcal:x">w</a>`,
+      `<a href="geo:1,2">g</a>`,
+      `<link rel="icon" href="data:,">`,
+      `<a href="data:image/png;base64,AAAA">nav</a>`,
+      `<link rel="stylesheet" href="data:image/png;base64,AAAA">`,
+      `<form action="javascript:x"><button formaction="javascript:y">b</button></form>`,
+      `<object data="javascript:x"></object>`,
+      `<video poster="javascript:x"></video>`,
+      `<a ping="https://ok javascript:x" href="/">p</a>`,
+      `<svg><a xlink:href="javascript:x"><text>t</text></a></svg>`,
+      `<table background="javascript:x"><tr><td>c</td></tr></table>`,
+    ];
+    for (const [i, el] of cases.entries()) {
+      const r = compile(`narrow-no-${i}`, `<program>\n${el}\n</program>\n`);
+      expect(se(r).length).toBeGreaterThan(0);
+    }
+  });
+  test("the message says the attribute navigates to / loads a URL whose scheme is not admitted", () => {
+    const r = compile("narrow-msg", `<program>\n<a href="webcal:x">w</a>\n</program>\n`);
+    expect(se(r)[0].message).toContain("navigates to / loads a URL whose scheme (`webcal:`) is not admitted");
+  });
+});

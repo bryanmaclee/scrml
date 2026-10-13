@@ -376,6 +376,48 @@ export type StaticExecutableSink =
  * no scheme is admitted. When the element is not known the URL-attribute set is read element-insensitive
  * (fail closed).
  */
+/**
+ * S464 "(a) Narrow attrs, allow-list" — the attributes the STATIC rule judges: only those the browser
+ * NAVIGATES to or LOADS. Metadata URL attributes (`itemid`, `itemtype`, `cite`, `longdesc`, `profile`,
+ * …) are not judged by the static rule. Each is still element-scoped as rule 3 scopes it
+ * (`_scrml_is_url_attr`: `data` only on `<object>`, `action` only on `<form>`, …). The RUNTIME guard
+ * (rule 3) is not narrowed: it judges the whole rule-2 list.
+ */
+export const STATIC_NAV_LOAD_URL_ATTRS: ReadonlySet<string> = new Set([
+  "href", "src", "action", "formaction", "data", "poster", "srcset", "ping", "xlink:href", "background",
+]);
+
+/** The STATIC string value of attribute `name` in `attrs` (AST or lift-string form), or null. */
+function staticAttrValue(attrs: ReadonlyArray<unknown> | null | undefined, name: string): string | null {
+  for (const a of attrs ?? []) {
+    const attr = a as { name?: unknown; value?: unknown } | null;
+    if (!attr || typeof attr.name !== "string" || attr.name.toLowerCase() !== name) continue;
+    const v = attr.value as { kind?: string; value?: unknown } | string | null | undefined;
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && v.kind === "string-literal" && typeof v.value === "string") return v.value;
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Does `name` on `element` LOAD AN IMAGE? Then a raster `data:image/…` is admitted (S464 "(a) Narrow
+ * attrs, allow-list" — "on EVERY image-loading attribute"): the image-source attributes rule 2 names
+ * (`src`, `srcset`, `imagesrcset`, `poster`), plus `background`, an SVG `<image>` / `<feImage>`
+ * `href` / `xlink:href`, and a `<link>` `href` whose `rel` names an icon (`icon`, `shortcut icon`,
+ * `apple-touch-icon`, `apple-touch-icon-precomposed`, `mask-icon`).
+ */
+function loadsAnImage(lowerName: string, element?: AttrElementContext | null): boolean {
+  if (_SCRML_IMAGE_SOURCE_ATTRS.has(lowerName) || lowerName === "background") return true;
+  const tag = element && typeof element.tag === "string" ? element.tag.toLowerCase() : "";
+  if ((lowerName === "href" || lowerName === "xlink:href") && (tag === "image" || tag === "feimage")) return true;
+  if (lowerName === "href" && tag === "link") {
+    const rel = staticAttrValue(element?.attrs, "rel");
+    if (rel !== null && rel.toLowerCase().split(/\s+/).some((r) => /(^|-)icon$/.test(r))) return true;
+  }
+  return false;
+}
+
 export function classifyStaticExecutableAttr(
   name: string,
   value: string,
@@ -391,14 +433,21 @@ export function classifyStaticExecutableAttr(
   };
   const target = element ? animationUrlTarget(element.tag, name, element.attrs) : null;
   if (target !== null) {
+    // An animation value writes the attribute `attributeName` names: judged only when that is a
+    // navigate / load attribute, or is computed ("" — any attribute may be animated: fail closed).
+    if (target !== "" && !STATIC_NAV_LOAD_URL_ATTRS.has(target)) return null;
     if (_scrml_animation_value_admitted(lower, value, target)) return null;
     const bad = (lower === "values" ? value.split(";") : [value])
       .find((v) => !_scrml_url_value_admitted(target, v));
     return { kind: "url-scheme", scheme: bad !== undefined ? schemeOf(bad) : null };
   }
+  if (!STATIC_NAV_LOAD_URL_ATTRS.has(lower)) return null;
   const tag = element && typeof element.tag === "string" ? element.tag : "";
   if (!_scrml_is_url_attr(tag, lower)) return null;
-  if (_scrml_url_value_admitted(lower, value)) return null;
+  // The scheme test and safe set are rule 2's (`_scrml_url_value_admitted` — one definition). On an
+  // image-loading attribute the value is judged as an image source (raster `data:image/…` admitted).
+  const judgedAs = loadsAnImage(lower, element) && !_SCRML_IMAGE_SOURCE_ATTRS.has(lower) ? "src" : lower;
+  if (_scrml_url_value_admitted(judgedAs, value)) return null;
   return { kind: "url-scheme", scheme: schemeOf(value) };
 }
 
@@ -415,11 +464,12 @@ export function staticExecutableMessage(
     return head + " is an inline HTML document (`srcdoc`), which the browser runs — script included — " +
       "without scrml checking it. Point the frame at a page with `src=` instead (§5.2).";
   }
-  return head + " is a URL" + (sink.scheme ? ` whose scheme is \`${sink.scheme}:\`` : " whose scheme is not admitted") +
-    ". A URL attribute may name `http:`, `https:`, `ftp:`, `mailto:`, `tel:` or `sms:` (and, on an image " +
-    "source, a raster `data:image/…`), or be relative; any other scheme (`javascript:`, `vbscript:`, " +
-    "`data:text/html`, …) runs code scrml never checked. For behaviour, use an event handler " +
-    "(`onclick=fn()`) (§5.2).";
+  return head + " navigates to / loads a URL" +
+    (sink.scheme ? ` whose scheme (\`${sink.scheme}:\`) is not admitted` : " whose scheme is not admitted") +
+    ". Such an attribute may name `http:`, `https:`, `ftp:`, `mailto:`, `tel:` or `sms:` (and, on an " +
+    "attribute that loads an image, a raster `data:image/…`), or be relative; any other scheme " +
+    "(`javascript:`, `vbscript:`, `data:text/html`, …) can run code scrml never checked. For behaviour, " +
+    "use an event handler (`onclick=fn()`) (§5.2).";
 }
 
 /** The author-facing message for a quoted static event-handler attribute (S464). */
