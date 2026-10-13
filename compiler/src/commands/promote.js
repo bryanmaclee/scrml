@@ -371,9 +371,21 @@ function rewriteOneChain(source, ch) {
       reason: "the chain is not the sole content of a `${ … }` block — a `<match>` element renders only in markup position (E-MARKUP-STATEMENT-NOT-RENDERED), so it is left as is",
     };
   }
+  // Two arms for the same variant (`if .B / else if .A / else if .A`): the source runs
+  // the FIRST, a `<match>` would keep the later one — refuse rather than change which renders.
+  {
+    const seenTags = new Set();
+    for (const tag of ch.variantTagsInOrder) {
+      if (seenTags.has(tag)) {
+        return { ok: false, reason: `variant \`${tag}\` has more than one arm — the rewrite would change which arm renders; left as is` };
+      }
+      seenTags.add(tag);
+    }
+  }
 
   // Build arm source for each branch.
   const armChunks = [];
+  const armTags = [];
   for (let i = 0; i < ch.branches.length; i++) {
     const b = ch.branches[i];
     const variantTag = ch.variantTagsInOrder[i];
@@ -388,9 +400,37 @@ function rewriteOneChain(source, ch) {
         reason: `branch ${i + 1} (\`${variantTag}\`) is not exactly one markup element — a \`<match>\` arm is markup, so its logic would become display text; left as is`,
       };
     }
+    armTags.push((/^<([A-Za-z][A-Za-z0-9-]*)/.exec(element) ?? [])[1] ?? "");
     // Re-indent body to the inner level
     const reIndented = reindent(element, innerIndent);
     armChunks.push(`${armIndent}<${variantTag}>\n${reIndented}\n${armIndent}</>`);
+  }
+
+  // S464 Q24 (fix round 2) — what renders must not change. The `${…}` renders into an
+  // inline `<span>` wrapper; a `<match>` mounts as a BLOCK `<div>`. They render the same
+  // only when:
+  //   - the parent element admits a block child — in a phrasing-only parent (`<p>`,
+  //     `<span>`, `<a>`, …) the HTML parser closes the parent before the `<div>`
+  //     (measured on 868d1e414: `<p>Status: </p><div><b>a</b></div> ok`); and
+  //   - the wrapper's box does not matter: the `${…}` is the only content of its parent,
+  //     or every arm is itself a block element (a block inside the inline `<span>`
+  //     already breaks the line exactly where the `<div>` does).
+  // Anything else is refused.
+  {
+    const parent = enclosingElementTag(source, from);
+    if (parent != null && PHRASING_ONLY_PARENTS.has(parent.toLowerCase())) {
+      return {
+        ok: false,
+        reason: `the \`\${ … }\` sits in a \`<${parent}>\`, which admits only inline (phrasing) content — the \`<match>\` mounts as a block \`<div>\`, which the HTML parser moves out of the \`<${parent}>\`, so what renders would change; left as is`,
+      };
+    }
+    const sole = parent != null && isSoleContent(source, from, to, parent);
+    if (!sole && !armTags.every((t) => BLOCK_ELEMENTS.has(t.toLowerCase()))) {
+      return {
+        ok: false,
+        reason: "the `${ … }` has sibling content and an arm renders an inline element — the `<match>` mounts as a block `<div>` where the `${}` rendered inline, so what renders would change; left as is",
+      };
+    }
   }
 
   const matchBlock =
@@ -400,6 +440,109 @@ function rewriteOneChain(source, ch) {
 
   const rewritten = source.slice(0, from) + matchBlock + source.slice(to);
   return { ok: true, rewritten };
+}
+
+/**
+ * S464 Q24 (fix round 2) — elements whose content model is phrasing content only
+ * (HTML Living Standard, §3.2.5.2.5). A block `<div>` child is invalid in them; the
+ * parser closes `<p>` before it, and the rest render it inside an inline box.
+ */
+const PHRASING_ONLY_PARENTS = new Set([
+  "p", "span", "a", "b", "i", "em", "strong", "small", "s", "cite", "q", "dfn", "abbr",
+  "code", "var", "samp", "kbd", "sub", "sup", "u", "mark", "bdi", "bdo", "label", "button",
+  "h1", "h2", "h3", "h4", "h5", "h6", "pre", "legend", "dt", "summary", "option", "data",
+  "time", "output", "ruby", "rt", "rp", "del", "ins", "font", "nobr", "big", "tt", "strike",
+]);
+
+/** Block-level HTML elements: a box that breaks the line on its own. */
+const BLOCK_ELEMENTS = new Set([
+  "address", "article", "aside", "blockquote", "details", "dialog", "dd", "div", "dl", "dt",
+  "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+  "header", "hgroup", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "table", "ul",
+]);
+
+const VOID_ELEMENTS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
+]);
+
+/**
+ * S464 Q24 (fix round 2) — the tag of the markup element that encloses source offset
+ * `pos`, or null (top level / not determinable). A forward scan of the markup from the
+ * start of the file: openers push, `</tag>` / `</>` pop, self-closing and void elements
+ * do not nest, and `${ … }` / `#{ … }` / `?{ … }` / `^{ … }` blocks, comments and quoted
+ * attribute values are skipped whole — so markup INSIDE a logic block never nests.
+ */
+function enclosingElementTag(source, pos) {
+  const stack = [];
+  let i = 0;
+  const skipBraced = (k) => { // k at `{`; returns index after the matching `}`
+    let depth = 0;
+    for (; k < source.length; k++) {
+      const c = source[k];
+      if (c === '"' || c === "'" || c === "`") {
+        const q = c;
+        k++;
+        while (k < source.length && source[k] !== q) { if (source[k] === "\\") k++; k++; }
+        continue;
+      }
+      if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) return k + 1;
+    }
+    return source.length;
+  };
+  while (i < pos) {
+    const c = source[i];
+    if ((c === "$" || c === "#" || c === "?" || c === "^") && source[i + 1] === "{") { i = skipBraced(i + 1); continue; }
+    if (source.startsWith("<!--", i)) { const e = source.indexOf("-->", i + 4); i = e < 0 ? pos : e + 3; continue; }
+    if (source.startsWith("//", i) && (i === 0 || /\s/.test(source[i - 1]))) { const e = source.indexOf("\n", i); i = e < 0 ? pos : e; continue; }
+    if (c === "<") {
+      if (source.startsWith("</>", i)) { stack.pop(); i += 3; continue; }
+      const close = /^<\/([A-Za-z][A-Za-z0-9-]*)\s*>/.exec(source.slice(i, i + 80));
+      if (close) {
+        const at = stack.lastIndexOf(close[1]);
+        if (at >= 0) stack.length = at;
+        i += close[0].length;
+        continue;
+      }
+      const open = /^<([A-Za-z][A-Za-z0-9-]*)/.exec(source.slice(i, i + 80));
+      if (open) {
+        // Find the opener's end `>`, skipping quoted values and `${…}` / `{…}` values.
+        let k = i + open[0].length;
+        let selfClose = false;
+        while (k < source.length) {
+          const d = source[k];
+          if (d === '"' || d === "'") { const e = source.indexOf(d, k + 1); k = e < 0 ? source.length : e + 1; continue; }
+          if (d === "{") { k = skipBraced(k); continue; }
+          if (d === "$" && source[k + 1] === "{") { k = skipBraced(k + 1); continue; }
+          if (d === "/" && source[k + 1] === ">") { selfClose = true; k += 2; break; }
+          if (d === ">") { k++; break; }
+          k++;
+        }
+        if (k > pos) break; // the position is inside this opener
+        if (!selfClose && !VOID_ELEMENTS.has(open[1].toLowerCase())) stack.push(open[1]);
+        i = k;
+        continue;
+      }
+    }
+    i++;
+  }
+  const top = stack[stack.length - 1];
+  return top == null || top === "program" ? null : top;
+}
+
+/**
+ * S464 Q24 (fix round 2) — is the source range [from, to) the ONLY content of the
+ * element `tag` that encloses it (only whitespace between its opener `>` and `from`,
+ * and between `to` and its closer `</tag>` / `</>`)?
+ */
+function isSoleContent(source, from, to, tag) {
+  let a = from - 1;
+  while (a >= 0 && /\s/.test(source[a])) a--;
+  if (a < 0 || source[a] !== ">") return false;
+  let b = to;
+  while (b < source.length && /\s/.test(source[b])) b++;
+  const rest = source.slice(b, b + 80);
+  return rest.startsWith("</>") || new RegExp(`^</${tag}\\s*>`).test(rest);
 }
 
 /**

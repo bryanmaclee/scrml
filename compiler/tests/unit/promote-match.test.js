@@ -391,10 +391,39 @@ describe("§10 S464 Q24 — only single-element arms in a sole-content `${…}` 
 
   test("logic arms (`{ @x = 10 }`) are NOT rewritten — the file is untouched", async () => {
     const { res, src, after } = await run(
-      `${D}\n  if (@m is .A) { @x = 10 } else if (@m is .B) { @x = 20 }\n}\n<p id="host">${D}@x}</p>`);
+      `<div>${D}\n  if (@m is .A) { @x = 10 } else if (@m is .B) { @x = 20 }\n}</div>\n<p id="host">${D}@x}</p>`);
     expect(res.status).not.toBe("promoted");
     expect(after).toBe(src);
     expect(JSON.stringify(res.skipped)).toContain("not exactly one markup element");
+  });
+
+  // S464 Q24 fix round 2 (review of 868d1e414, N1) — what renders must not change. The
+  // `${…}` renders into an inline `<span>`; a `<match>` mounts as a block `<div>`. Measured
+  // on 868d1e414: `<p id="host">Status: ${ if … } ok</p>` was promoted and rendered
+  // `<p>Status: </p><div><b>a</b></div> ok` (the parser closes the `<p>`).
+  const notPromoted = {
+    "the `${…}` in a phrasing-only parent with siblings (`<p>Status: ${…} ok</p>`)":
+      `<p id="host">Status: ${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } } ok</p>`,
+    "the `${…}` as the only content of a phrasing-only parent (`<span>`)":
+      `<span id="host">${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } }</span>`,
+    "the `${…}` with sibling text in a flow parent":
+      `<div id="host">${D} if (@m is .A) { <b>a</b> } else if (@m is .B) { <i>b</i> } } tail</div>`,
+    "two arms for the same variant (the source runs the first; a <match> would keep the last)":
+      `<div id="host">${D} if (@m is .B) { <p>b</p> } else if (@m is .A) { <p>a1</p> } else if (@m is .A) { <p>a2</p> } }</div>`,
+  };
+  for (const [label, body] of Object.entries(notPromoted)) {
+    test(`NOT rewritten: ${label}`, async () => {
+      const { res, src, after } = await run(body);
+      expect(res.status).not.toBe("promoted");
+      expect(after).toBe(src);
+    });
+  }
+
+  test("rewritten: the `${…}` as the only content of a flow parent (`<section>`)", async () => {
+    const { res, after } = await run(
+      `<section id="host">\n  ${D} if (@m is .A) { lift <p>a</p> } else if (@m is .B) { lift <p>b</p> } }\n</section>`);
+    expect(res.status).toBe("promoted");
+    expect(after).toContain("<match for=M on=@m>");
   });
 
   test("an arm with two elements is NOT rewritten", async () => {
