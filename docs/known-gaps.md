@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 255 | 4 |
-| MED | 614 | 6 |
-| LOW | 385 | 0 |
+| MED | 616 | 6 |
+| LOW | 386 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -75,6 +75,21 @@ Executed S464 fix round 2 (reviewer case `fp1.scrml`): `fn f(n) { … }` + `serv
 
 <!-- @gap id=g-nondeterministic-module-value-evaluated-in-both-bundles-s464 sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(planModuleBindingClosure — D-5 copies a module value into the server bundle by re-evaluating its initializer) prov=dispatch:s464-pure-fn-placement -->
 Reviewer case x4 (S464 fix round 3, executed): base and head both answer a fresh random number per server load (`200 0.76…` / `200 0.65…`); the client bundle evaluates its own `R`. **Narrowed by s464 fix round 3:** when client code ALSO uses the binding (directly, or through another module value), the copy is now refused — E-ROUTE-002 names the non-deterministic call and the split (classifier = E-FN-004's list, `FN_NON_DET_CALLS` / `FN_NONDET_STDLIB`; corpus: 0 refusals). What remains: (1) the unobservable split (the client never reads it) still evaluates the initializer twice, which matters for a SIDE-EFFECTING initializer (I/O) — the classifier covers clock / random / ids, not arbitrary I/O; (2) the semantic question of which side owns a module value is unruled (§12 places functions, not module values).
+
+### g-d5-shadow-check-ignores-inner-scopes-s464 — the D-5 refusal's shadow test is per module-scope UNIT but blind to scopes inside it: a lambda parameter `W`, a block-scoped `const W`, or `for (const W of …)` in the same unit silences the refusal and the server answers `W is not defined` — `NEW S464; MED; open (outcome pre-existing on BASE)`
+
+<!-- @gap id=g-d5-shadow-check-ignores-inner-scopes-s464 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(bodyHasFreeUse — unit-level text test, no block/param scopes) prov=review:S464-purefn-r3 -->
+RELAYED from the S464 round-3 review (reviewer-executed; not re-run by the dispatch). `const W = window.innerWidth; fn f(n) { return n + W }` reached from a server function whose unit also binds `W` in an inner scope (`(W) => …`, `{ const W = 1 }`, `for (const W of xs)`) → no E-ROUTE-002, and the request throws `W is not defined`. The S464 fix round 3 made the test per module-scope unit (t14); inner scopes need a real scope walk — the fix is a scope-aware free-variable pass over the emitted unit (or over the AST before lowering), not a wider regex.
+
+### g-d5-imported-client-function-counts-as-available-s464 — a module value whose initializer calls an IMPORTED plain `function` that reads `document` is treated as available; the server module then fails to LOAD — `NEW S464; MED; open (outcome pre-existing on BASE)`
+
+<!-- @gap id=g-d5-imported-client-function-counts-as-available-s464 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(planModuleBindingClosure — every imported name is available) prov=review:S464-purefn-r3 -->
+RELAYED from the S464 round-3 review (reviewer-executed). S464 fix round 3 (N2) counts every import as available because the import pass keeps a referenced specifier; that is right for an exported value or pure `fn`, wrong for an exported client `function` (it reads `document`): the server module evaluates the initializer at load and dies. The same shape with a LOCAL function is E-ROUTE-002. Fix direction: classify an imported binding by its declaration in the source module (pure `fn` / value / client `function`), not by the fact of the import.
+
+### g-s464-review-r3-preexisting-batch — pre-existing defects listed by the S464 round-3 review (each reviewer-executed, relayed): an escaped `\${@n}` dropped; `(0, Math.random)()` emitted as `(0, Math.random)()()`; an enum imported from a types-only file → missing `lib.server.js`; E-FN-003 false positives on `(W = 2) => W` and on a const object inside a callback in a `server fn`; `export const A = f(2)` reading a LATER `const K` → no diagnostic (TDZ at load); and the non-determinism list (E-FN-004 / S464 N3) misses `Date()`, `Math["random"]()`, `(0, Math.random)()` — `NEW S464; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-s464-review-r3-preexisting-batch sev=LOW status=open locus=searched:review:S464-purefn-r3 prov=review:S464-purefn-r3 -->
+RELAYED, not re-executed by the dispatch; each item needs its own reproduction before it is split into its own gap and fixed. The non-determinism misses are a shared limitation of the call-NAME list (`FN_NON_DET_CALLS` in type-system.ts, used by E-FN-004 and by the S464 N3 refusal): a computed member, a bare `Date()` call, or an indirect call through a comma expression is not matched — a resolved-callee check (what the call actually evaluates to) closes all three at once.
 
 ### g-braceless-if-same-line-else-dropped-s462 — a braceless `if (c) a else b` with the `else` on the SAME line silently dropped the else branch (client, server and library mode) — `NEW S462; HIGH; RESOLVED S462`
 
