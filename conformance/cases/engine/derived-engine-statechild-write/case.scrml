@@ -10,4 +10,4 @@ ${ type Health:enum = { Healthy, AtRisk } }
   </>
   <AtRisk/>
 </>
-${ <p id="h">${@health}</p> }
+<p id="h">${@health}</p>

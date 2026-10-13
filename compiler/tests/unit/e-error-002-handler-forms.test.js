@@ -261,7 +261,9 @@ describe("§19.4.3 — handled calls and references stay legal", () => {
     expect(errors).toEqual([]);
   });
   test("braced !{} inside a one-statement if — pin: no E-ERROR-002, codegen fails closed (g-guard-in-one-line-if-for-emits-raw-bang-brace)", () => {
-    expect(compileBody(GUARD_IN_ONE_LINE_IF).errors).toEqual([]);
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now runs on a `write: false` compile
+    // too, so both views fail closed the same way (and neither reports E-ERROR-002).
+    expect(compileBody(GUARD_IN_ONE_LINE_IF).errors).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
     expect(compileBody(GUARD_IN_ONE_LINE_IF, { emit: true }).errors).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
 

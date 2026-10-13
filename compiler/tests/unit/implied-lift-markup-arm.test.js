@@ -231,32 +231,35 @@ describe("§17.6.10 implied lift — inside a COMPONENT body", () => {
 });
 
 describe("§17.6.10 implied lift — the boundaries it must NOT cross", () => {
-  test("a statement-position if in a FUNCTION body gains no lift", () => {
+  // S464 Q24 (ruling S462 Q24 "a"; code S464 "E-MARKUP-STATEMENT-NOT-RENDERED") — every
+  // shape in this block is OUTSIDE §17.6.10's grammar, so the pass still declines it,
+  // and the all-or-nothing rule still keeps a sibling arm from half-rendering. Before
+  // Q24 the declined markup was DROPPED at exit 0; now each element left unrendered is
+  // a compile error naming the fix — one refusal per element.
+  const codesOf = (r) => r.errors.map((e) => e.code);
+  const NOT_RENDERED = "E-MARKUP-STATEMENT-NOT-RENDERED";
+
+  test("a statement-position if in a FUNCTION body gains no lift — and is refused, not dropped", () => {
     // `lift` in a function body is not an accumulation into a markup parent, so
     // synthesising one there would change what the code means rather than
-    // restore what it says. The arm keeps its pre-existing (dropped) behaviour.
+    // restore what it says. The element renders nothing, so it is refused.
     const r = compileSource(
       `<div id="root">\n    \${\n        <on> = true\n        function f() {\n            if (@on) { <p>never</p> }\n        }\n    }\n` +
       `    <button onclick=f()>go</button>\n${TAIL}`,
     );
-    expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).not.toContain('document.createTextNode("never")');
+    expect(codesOf(r)).toEqual([NOT_RENDERED]);
   });
 
-  test("an arm holding TWO markup elements is not a value-form and is not converted", () => {
+  test("an arm holding TWO markup elements is not a value-form — every unrendered element is refused", () => {
     // §17.6.10's grammar is `'{' expression '}'` — exactly ONE expression
     // (invariant 83: a local `length !== 1` test, not §18.5's positional tail
     // rule). Two elements are outside it, so the pass declines. Conversion is
     // ALL-OR-NOTHING per cascade, so the sibling `else` arm is left alone too
-    // rather than rendering half the construct and implying the shape is
-    // supported. Tracked separately as a silent-drop gap.
+    // rather than rendering half the construct — and is refused with the others.
     const r = compileSource(
       `${HEAD}    \${ if (@on) { <p>A</p><p>B</p> } else { <p>No</p> } }\n${TAIL}`,
     );
-    expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).not.toContain('document.createTextNode("A")');
-    // The all-or-nothing rule: the convertible sibling is NOT half-emitted.
-    expect(r.clientJs).not.toContain('document.createTextNode("No")');
+    expect(codesOf(r)).toEqual([NOT_RENDERED, NOT_RENDERED, NOT_RENDERED]);
   });
 
   // ⛑ THE ALL-OR-NOTHING INVARIANT, PER ARM POSITION. These three shapes are the
@@ -267,37 +270,37 @@ describe("§17.6.10 implied lift — the boundaries it must NOT cross", () => {
   // dropped, which is worse than the uniform drop because the working half argues
   // the construct is supported. `else { log(…)  <p>…</p> }` is ordinary code.
   //
-  // Base-side result for all three (measured at 280ecbdd): NOTHING renders.
-  // So the bar is "still nothing", not "everything" — the cascade must revert
-  // WHOLE, and the test asserts the sibling arm is absent too.
+  // Base-side result for all three (measured at 280ecbdd): NOTHING renders. The
+  // cascade still reverts WHOLE (no half-render); since Q24 every element it leaves
+  // unrendered — the statement-led one included — is refused instead of dropped.
   const STMT_HEAD = `<div id="root">\n    \${\n        <on> = true\n        <n> = 1\n        <k> = 0\n    }\n`;
 
-  test("a STATEMENT-LED consequent declines the whole cascade (no half-render)", () => {
+  test("a STATEMENT-LED consequent declines the whole cascade (no half-render) — both elements refused", () => {
     const r = compileSource(`${STMT_HEAD}    \${ if (@on) { @k = 1 <p>MARKA</p> } else { <p>MARKB</p> } }\n${TAIL}`);
-    expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).not.toContain("MARKA");
-    // The sibling arm must NOT render on its own — that was the defect.
-    expect(r.clientJs).not.toContain("MARKB");
+    expect(codesOf(r)).toEqual([NOT_RENDERED, NOT_RENDERED]);
   });
 
-  test("a STATEMENT-LED alternate declines the whole cascade (no half-render)", () => {
+  test("a STATEMENT-LED alternate declines the whole cascade (no half-render) — both elements refused", () => {
     const r = compileSource(
       `${STMT_HEAD}    \${ if (@on) { <p>MARKA</p> } else { @k = 1\n        <p>MARKB</p> } }\n${TAIL}`,
     );
-    expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).not.toContain("MARKB");
-    expect(r.clientJs).not.toContain("MARKA");
+    expect(codesOf(r)).toEqual([NOT_RENDERED, NOT_RENDERED]);
   });
 
-  test("a statement-led MIDDLE arm declines the whole three-arm cascade", () => {
+  test("a statement-led MIDDLE arm declines the whole three-arm cascade — every element refused", () => {
     const r = compileSource(
       `${STMT_HEAD}    \${ if (@n > 2) { <p>MARKA</p> } else if (@n > 0) { @k = 1\n        <p>MARKMID</p> } else { <p>MARKC</p> } }\n${TAIL}`,
     );
-    expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).not.toContain("MARKMID");
-    // Arms 1 and 3 converted while the middle stayed dropped — the exact shape.
-    expect(r.clientJs).not.toContain("MARKA");
-    expect(r.clientJs).not.toContain("MARKC");
+    expect(codesOf(r)).toEqual([NOT_RENDERED, NOT_RENDERED, NOT_RENDERED]);
+  });
+
+  test("the fix the refusal names — `lift` in the statement-led arm and its sibling — compiles and emits both", () => {
+    const r = compileSource(
+      `${STMT_HEAD}    \${ if (@on) { @k = 1\n        lift <p>MARKA</p> } else { lift <p>MARKB</p> } }\n${TAIL}`,
+    );
+    expect(codesOf(r)).toEqual([]);
+    expect(r.clientJs).toContain("MARKA");
+    expect(r.clientJs).toContain("MARKB");
   });
 
   test("REGRESSION GUARD for that decline: an `else if` cascade and a nested `if` still CONVERT", () => {

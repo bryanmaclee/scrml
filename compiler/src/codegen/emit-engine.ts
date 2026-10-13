@@ -54,6 +54,12 @@
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
+import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "../markup-statement-refusal.ts";
+
+/** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
+const _engineSynthRefusalAnchors: Map<string, object> = new Map();
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -913,6 +919,39 @@ function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null 
     const wrapped = "${\n" + src + "\n}";
     const bsOut = bs.runBlockSplitter({ filePath, source: wrapped });
     const built = tab.buildAST(bsOut);
+    // §17.6.10.1 (S464 r1 #4, r2) — markup in statement position in an engine body (a
+    // message-arm body; the opener `effect=`) renders nothing: the body runs for its
+    // effects. Every element of the parsed body is marked reported, so the html-fragment
+    // case of emit-logic does not report it again with a `lift` fix:
+    //   - the OPENER `effect=` body is refused at the TAB, at its real file position
+    //     (ast-builder, the engine opener parse) — nothing is reported here;
+    //   - a message-arm body has no TAB parse: its refusals are recorded here, with the
+    //     "effect" fix, once per body text (the body is re-parsed per emitter). Its
+    //     location is the arm body's, not the file's (deferred — see known-gaps).
+    const isOpener = filePath === "__opener_effect__.scrml";
+    const once = (key: string): object => {
+      let anchor = _engineSynthRefusalAnchors.get(key);
+      if (!anchor) { anchor = {}; _engineSynthRefusalAnchors.set(key, anchor); }
+      return anchor;
+    };
+    if (!isOpener) {
+      for (const e of (built?.errors ?? []) as any[]) {
+        if (e?.code !== "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
+        const tag = (/<([A-Za-z][A-Za-z0-9:-]*)>…/.exec(String(e.message ?? "")) ?? [])[1] ?? "p";
+        recordRefusedLowering(
+          new CGError(e.code, markupNotRenderedMessage(tag, "effect"), e.span ?? { start: 0, end: 0 }),
+          once(filePath + "\u0000" + src + "\u0000" + String(e.span?.start ?? 0)),
+        );
+      }
+    }
+    refuseUnrenderedStatementMarkup(built?.ast ?? null, (lead) => {
+      lead._reportedAtTab = true;
+      if (isOpener) return;
+      recordRefusedLowering(
+        new CGError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(lead.tag, "effect"), (lead.span as any) ?? { start: 0, end: 0 }),
+        once(filePath + "\u0000" + src + "\u0000lead" + String((lead.span as any)?.start ?? 0)),
+      );
+    }, "effect");
     const nodes: any[] = built?.ast?.nodes ?? [];
     for (const n of nodes) {
       if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) return n.body;
