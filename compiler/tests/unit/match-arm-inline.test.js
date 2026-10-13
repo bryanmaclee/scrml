@@ -364,6 +364,11 @@ describe("match-arm-inline end-to-end compilation", () => {
 </program>
 `;
     const { errors } = compile(src);
-    expect(errors).toEqual([]);
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on a `write: false`
+    // compile: the arm `fn(1)` is lowered as `function ( 1 )` (the callee named `fn` is
+    // read as the `fn` keyword) — JS that never parsed, already refused by a `write: true`
+    // compile. Pinned as the floor's refusal (g-emitted-js-invalid-shapes-surfaced-by-
+    // floor-s464); the arm split itself (the S27 point) raises nothing else.
+    expect(errors.map((e) => e.code ?? e)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
 });

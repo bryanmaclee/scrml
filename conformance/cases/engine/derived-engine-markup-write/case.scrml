@@ -9,4 +9,4 @@ ${ type Health:enum = { Healthy, AtRisk } }
   <AtRisk/>
 </>
 <button id="w" onclick=${ @health = .AtRisk }>write</button>
-${ <p id="h">${@health}</p> }
+<p id="h">${@health}</p>

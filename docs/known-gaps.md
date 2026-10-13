@@ -30,6 +30,113 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
+| HIGH | 258 | 4 |
+| MED | 629 | 6 |
+| LOW | 398 | 0 |
+| Nominal (spec-ahead-of-impl) | 7 | 0 |
+<!-- @generated:gap-counts END -->
+
+### g-statement-markup-silently-not-rendered-s462 — (P1) markup written as a statement in a logic body, outside the §17.6.10 single-element branch, renders NOTHING at exit 0: `${ <p>hi</p> }`, two elements in one branch, an element after a statement, a `for` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a nested `${ if }` inside an implied-lift element, and a single-element branch the implied-lift desugar declines (`a < b` or a quoted `"</p>"` in its text) — `NEW S462; HIGH (P1); RESOLVED S464 (E-MARKUP-STATEMENT-NOT-RENDERED, §17.6.10.1)`
+
+<!-- @gap id=g-statement-markup-silently-not-rendered-s462 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(statement-position markup → html-fragment)+compiler/src/implied-lift-desugar.ts(single-element arms only)+compiler/src/codegen/emit-logic.ts(case "html-fragment" returns "") prov=ruling:user-voice-scrml.md(S462 Q24 "a");review:s462-given-body-text-as-code;dispatch:s462-given-body-text-as-code -->
+
+Ruled S462 Q24 (a): such markup is a compile ERROR naming the fix (`lift <…>`, or make it the branch's single element), never silently dropped. **Not built — blocked on the code name.** The S462 fix round 1 draft refused the elements impl#1's statement-position reader arms (those holding a `${…}`) under a code it named `E-MARKUP-STATEMENT-NOT-RENDERED` (commit 5585dc1f6); no ruling names that code and no existing code fits (E-CG-003 is a compiler-defect code; E-STMT-NO-EFFECT / E-LIFT-* / E-CTX-* describe other things), so the S465 resume removed it pending a ruling on the name — reverting that removal commit restores the draft (emission in `emit-logic.ts` case "html-fragment" through the refused-lowering sink, `_markupLead` on the element's first text run, SPEC §34 row, tests). The implied-lift desugar's decline is silent by construction (`implied-lift-desugar.ts` `planArm` → "declined"); every decline in a markup render position is one of the shapes above. Measured: a nested `${ if (c) { <b>${@n}</b> } }` inside an implied-lift `<div>` renders `<div>3 tail</div>` (the `<b>` dropped); `lift <b>…</b>` there renders. The full Q24 build (with the corpus measured first per the ruling) needs the code name. Single-reader direction: see g-statement-markup-two-readers-s462.
+
+**RESOLVED S464** (branch `s464-markup-text-q24`; code name ruled S464 "E-MARKUP-STATEMENT-NOT-RENDERED"): the draft was restored and widened to EVERY statement-leading element (`ast-builder.js` `takeStatementMarkupLead` puts `_markupLead` on the fragment each statement-leading element becomes; `emit-logic.ts` refuses any lead-carrying fragment that reaches logic emission — i.e. that no lowering rendered). SPEC §17.6.10.1 (normative + Provenance) and the §34 row. The nested `${ if }` shape now RENDERS instead (the desugar recurses into the recovered element against its re-parse text — §17.6.10 reaches every markup `${…}` position). Corpus, compiled: 2836 repo `.scrml` + 114 giti/flogence — 2 conformance fixtures newly refused (migrated to plain markup), 1 already-failing sample (`samples/dashboard.scrml`) gains the code, 0 elsewhere. Pins: `compiler/tests/unit/markup-statement-not-rendered-s464.test.js` (16 refused shapes fail on base), `conformance/cases/control-flow/markup-statement-not-rendered-{pos,neg}`, browser cases in `browser-markup-text-not-code-s462.browser.test.js`.
+
+### g-statement-markup-after-statement-text-runs-s462 — an element on the line AFTER a statement in a logic body (`let k = 1⏎<p>${a} track(@n) ${b}</p>`) is read into that statement's expression up to its first `${…}`, and the text after it is parsed as STATEMENTS: `track(@n)` written as display text RUNS when the result happens to be valid JS — `NEW S465; HIGH; RESOLVED S464 (refused, E-MARKUP-STATEMENT-NOT-RENDERED)`
+
+<!-- @gap id=g-statement-markup-after-statement-text-runs-s462 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(collectExpr newline boundary — only the state-decl lookahead breaks at a later-line `<`) prov=review:s462-given-body-text-as-code;ruling:user-voice-scrml.md(S462 Q24 "a") -->
+
+Round 0 of s462-given-body-text-as-code closed this with a newline boundary in `collectExpr` at a later-line markup element; the S462 review had that hunk dropped (a change to general expression collection; its loose opener split `return @n⏎ <input && @n > 0`). With it gone the shape is back to base. Executed (S465, `${ if (@u is given) { const b = 2⏎ let k = 1⏎ <b>b ${@n} track(@n) ${@n}</b> } }`): compiles clean, emits `let k = 1 < b > b; _scrml_track_3(...)`, and `track` runs; most spellings instead fail as E-CODEGEN-INVALID-LOGIC (`let k = 1 < p >;`). The shape is "an element after a statement" — under ruling Q24 (a) a compile error — so the narrow fix is that refusal (detect a later-line, well-formed element holding a `${…}` inside a collected expression and refuse it), not a change to what `collectExpr` collects; it is blocked on the same unruled code name as g-statement-markup-silently-not-rendered-s462. The single-reader parse (g-statement-markup-two-readers-s462) also retires it.
+
+**RESOLVED S464** (branch `s464-markup-text-q24`): refused at the TAB without changing what `collectExpr` collects — `ast-builder.js` `refuseSwallowedStatementMarkup` checks each statement's token range (both statement loops, the statement's own brace depth) for a `<name` (source-adjacent) after an operand-ending token that opens a well-formed, CLOSED element (`scanMarkupElementEnd`) whose opener is not followed by `=` / `:` (a state declaration). Covers the same-line spelling too (`@k = 1 <p>A</p>`). `return @n⏎ <input && @n > 0` stays one expression (not a well-formed element). Pinned: the HIGH-gap shape in the unit file and the browser file (both fail on base).
+
+### g-statement-markup-two-readers-s462 — a statement-position markup element's extent is decided by TWO readers that can disagree: the logic token stream (ast-builder `scanMarkupElementEnd`, parseLiftTag's grammar) and the implied-lift desugar's source re-parse (block splitter) — `NEW S462; MED; open (direction recorded)`
+
+<!-- @gap id=g-statement-markup-two-readers-s462 sev=MED status=open locus=compiler/src/ast-builder.js(scanMarkupElementEnd, collectMarkupTextRun)+compiler/src/implied-lift-desugar.ts(recoverMarkupNode re-parse) prov=review:s462-given-body-text-as-code(HIGH-1, MED-2) -->
+
+The S239 review of s462-given-body-text-as-code found the readers disagreeing: text `a < b` or a quoted `"</p>"` passes the token scanner but the block splitter's re-parse closes or opens a tag there, so the arm declines — since S464 the declined element is refused (E-MARKUP-STATEMENT-NOT-RENDERED) rather than dropped, so the disagreement now costs a false refusal, not a silent drop. **Direction (recorded with the fix round):** parse statement-position markup ONCE, with the markup grammar, at the TAB — a statement that begins with an element opener becomes a markup node (as `lift <…>` already does via parseLiftTag), retiring BOTH `scanMarkupElementEnd` and the desugar's source re-parse. Then no second reader can decide the element's extent differently from the first.
+
+### g-promote-match-function-body-return-chain-s464 — `I-MATCH-PROMOTABLE` nominates an enum `if` / `else if` chain of `return`s inside a `function` body, and `promote --match` rewrites it to a `<match>` ELEMENT there (markup in a function body, which renders nothing and returns nothing) and swallows the trailing statement's keyword (`return 'z'` → `</> 'z'`) — `NEW S464; MED; open (pre-existing on BASE; now fails closed)`
+
+<!-- @gap id=g-promote-match-function-body-return-chain-s464 sev=MED status=open locus=compiler/src/commands/promote.js(rewriteOneChain — chain end span runs past the last branch's `}`; no check that the chain sits in markup position)+compiler/src/lint-i-match-promotable.js(nominates value/return chains) prov=dispatch:s464-markup-text-q24 -->
+
+Executed S464 (`compiler/tests/unit/g-if-chain-promotable-lints-blind.test.js` fixture, `promoteMatchOnFile` dry run): base reported `count: 1` for the rewrite `function render() { <match for=Phase on=@phase> <Idle> return 'a' </> … </> 'z' }`. Since S464 Q24 the sanity parse refuses that rewrite (E-MARKUP-STATEMENT-NOT-RENDERED) and the file is left untouched — fail-closed, but the lint still suggests a promotion the tool cannot perform. Fix direction: nominate (and rewrite) only chains in a markup render position; a `return` / value chain promotes to a logic `match`, not a `<match>` element. The S464 branch also made a chain that is the sole content of `${…}` replace the whole `${…}` (before, the `<match>` was left inside the `${}` and rendered nothing).
+
+**S464 fix round 1 (review of a0d464f1f):** `promote --match` now rewrites ONLY a chain that is the sole content of a `${…}` block AND whose every arm is exactly one markup element (bare, or `lift <el>` with the `lift` dropped) — `singleMarkupArmElement` in `promote.js`; anything else is skipped with a reason and the file left untouched. (The first S464 cut replaced the whole `${…}` for any chain, which turned `lift` arms and logic arms like `{ @x = 10 }` into DISPLAY TEXT that compiled clean.) What remains open here is the LINT: `I-MATCH-PROMOTABLE` still nominates chains the tool refuses (return chains, logic-arm chains).
+
+### g-engine-message-arm-markup-refusal-location-s464 — E-MARKUP-STATEMENT-NOT-RENDERED in an engine MESSAGE-ARM body is reported at a position in the arm body's re-parse (`__msg_arm__.scrml`), not the file's line:col — `NEW S464; LOW; open`
+
+<!-- @gap id=g-engine-message-arm-markup-refusal-location-s464 sev=LOW status=open locus=compiler/src/codegen/emit-engine.ts(parseEngineSynthLogicBody — message-arm bodies have no TAB parse with file offsets; MessageArmEntryShape carries spanStart only) prov=dispatch:s464-markup-text-q24(fix round 2) -->
+
+Fix round 2 moved the engine OPENER `effect=` refusal to the TAB at the body's real offset / line / col (review N3). A message-arm body (`.Msg :> { … <p/> }`) is still parsed only at emit time from `arm.bodyRaw`, so its refusal (correct code, the "effect" fix) names the synthetic file. Fix direction: parse message-arm bodies at the TAB from their source offset, as the opener effect now is.
+
+### g-component-two-element-arm-component-021-cascade-s464 — two elements in an `if` arm inside a component body (`const W = <div>${ if (c) { <p>one</p><p>two</p> } }</div>`) fails as E-COMPONENT-021 / -020 / -035 (a "malformed component body" cascade at every use site) instead of E-MARKUP-STATEMENT-NOT-RENDERED at the element — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-component-two-element-arm-component-021-cascade-s464 sev=LOW status=open locus=compiler/src/component-expander.ts(parseComponentBody — the body re-parse fails, so the def is reported malformed) prov=review:s464-markup-text-q24(round 2, pre-existing) -->
+
+Reported by the round-2 review (probe comp2/comp3); same on the pre-Q24 base. The program is rejected either way; the diagnostic names the wrong cause.
+
+### g-emitted-js-invalid-shapes-surfaced-by-floor-s464 — pre-existing codegen shapes that emit JS that does not parse; the CLI (a writing compile) already refused each, and since the S464 round-3 parse floor every compile does — `NEW S464; MED; open (pre-existing; now fail-closed everywhere)`
+
+<!-- @gap id=g-emitted-js-invalid-shapes-surfaced-by-floor-s464 sev=MED status=open locus=compiler/src/codegen(per shape — see list) prov=dispatch:s464-markup-text-q24(fix round 3) -->
+
+Surfaced when the parse floor reached `write: false` compiles (unit tests and a single-file corpus compile, `base 71a4a27ee` vs head; every one is also refused by a `write: true` compile — verified file by file). Each is a lowering defect, reported only as the generic E-CODEGEN-INVALID-LOGIC:
+- a regex literal as an `is` LHS: `String(/a/.test(x) is not)` → `(. test ( x ))` (is-predicate-regex-comment-literal-blind);
+- a function-EXPRESSION handler value `onclick=${function (e) { … }}` → the statement `function (e) { … }` inside the listener (s462-narrowing-ends-on-write);
+- a snippet prop's markup-returning arrow `row={ (item) => <span>…</span> }` → raw markup (value-attr-binding-i81);
+- a match arm calling a function named `fn` (`.A => fn(1)`) → `function ( 1 )` (match-arm-inline, gauntlet-s27);
+- a `key=` lambda's template literal keeps `${@prefix}` unlowered (each-opener-expr-undeclared-read);
+- a file-top `const m = <main>…</>` → `const m;` (c22-bare-variant-codegen);
+- a computed `debounced=${@delay}ms` → `() => (@delay) * 1` (debounce-throttle-attribute);
+- a braced `!{}` inside a one-statement `if` in a handler (g-guard-in-one-line-if-for-emits-raw-bang-brace);
+- a component LIBRARY module compiled on its own (`export const Card = <div …>` emitted raw: examples/23-trucking-dispatch/components/*.scrml ×8, examples/22-multifile/components.scrml, samples gauntlet-s19 `_helper-component` / `phase1-export-component-010`, conformance module/e-export-00{2,3} and engine/mount-not-engine-neg/lib) — the multi-file program builds clean (corpus-compile-floor PASS);
+- stdlib `host/index.scrml` (`await` in a non-async helper), `data/index.scrml` + `data/transform.scrml` (`function ( a )` with no body), conformance channel/same-source-two-aliases (`_scrml_route_ws_chat` declared twice), and gauntlet negative samples (nested `when`, `for … else` lift, labelled `break`, `with`, `let` in an expression, `match` as a `return` operand, `error-004-in-logic`, ctrl-010 lift in a match arm).
+
+### g-arrow-block-body-markup-return-codegen-invalid-s464 — a markup value RETURNED from an arrow function's or a function EXPRESSION's block body (`const g = () => { return <p>x</p> }`, `const h = function() { return <i>x</i> }`) fails as E-CODEGEN-INVALID-LOGIC, while the expression-bodied arrow (`() => <p>x</p>`) and a `function` returning markup compile and render — `NEW S464; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-arrow-block-body-markup-return-codegen-invalid-s464 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts(arrow block body statements re-parsed as JS; markup not lowered) prov=dispatch:s464-markup-text-q24(fix round 1) -->
+
+Found while writing the §17.6.10.1 context table (S464 fix round 1): identical on base `7e90f6ff0` and head. The error names the wrong cause (a codegen defect) for valid source; the statement-position case in the same body (`() => { <p>x</p> }`) is now E-MARKUP-STATEMENT-NOT-RENDERED.
+
+**S464 fix round 3 (re-review R2-5):** the function-expression form fails the same way (`return < i > x < / i >` emitted; reviewer probes fx1–fx3). Since the round-3 parse floor, every compile refuses it (E-CODEGEN-INVALID-LOGIC), `write: false` included; and E-MARKUP-STATEMENT-NOT-RENDERED in a function-value block body now advises the two forms that compile and render (an expression-bodied arrow, a `function` declaration — verified by compile + render), not the `return` that does not lower.
+
+### g-lift-of-markup-value-renders-escaped-source-s464 — `lift` of a markup VALUE that is not written inline renders the element as escaped TEXT: `const m = <p>val</p>; lift m`, `lift mk()` (a function returning `<p>…</p>`), `lift @c ? <p>a</p> : <p>b</p>`, and `${m}` inside lifted markup all render `&lt;p&gt;val&lt;/p&gt;` at exit 0 — `NEW S464; HIGH; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lift-of-markup-value-renders-escaped-source-s464 sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(lift of a non-markup-literal expression → text node) prov=dispatch:s464-markup-text-q24 -->
+
+Executed S464 in happy-dom on base `cba9971df` and head (identical): `${ const m = <p>val</p>⏎ lift m }` → `<span …>&lt;p&gt;val&lt;/p&gt;</span>`; same for `lift mk()`, a lifted ternary of markup arms, and `lift <div>${m}</div>`. The same value interpolated in markup renders the element (`<div>${m}</div>`, `<div>${mk()}</div>` → `<p>…</p>`). §10.1.1 makes markup a first-class value that `lift` emits like any other, so `lift m` must render the element. Matters for E-MARKUP-STATEMENT-NOT-RENDERED's guidance: its "write `lift <p>…</p>`" (inline markup) renders; lifting a markup VALUE does not.
+
+### g-display-text-apostrophe-tokenizes-as-code-s462 — an apostrophe in display text inside statement-position or lifted markup opens a string token: `${ if (c) { <p>${@n} don't ${@n}</p> } }` is E-SCOPE-001 on `don`; `lift <p>${@n} don't …</p>` renders garbage (`don "t … &lt;/p&gt; } "`); with no interpolation before it the element is silently dropped — `NEW S462; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-display-text-apostrophe-tokenizes-as-code-s462 sev=MED status=open locus=compiler/src/tokenizer.ts(tokenizeLogic reads `'` as a string opener inside markup text) prov=review:S239-s462-given-body-text-as-code(repros apos2, apos-lift, apos-noint) -->
+
+The logic tokenizer does not know it is inside an element's free-text body (§4.18.1), so `'` starts a JS string that swallows the rest of the element. Plain markup (`<p>${@n} don't …</p>` outside a logic block) is correct. Fix direction: the single-reader parse (g-statement-markup-two-readers-s462) reads element text with the markup grammar, where `'` is text.
+
+### g-unclosed-statement-element-text-runs-s462 — an UNCLOSED element at statement position (`${ if (c) { <p>${@n} track(@n) ${@n} } }`, no `</p>`) still parses its text as statements: `track(@n)` RUNS — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-unclosed-statement-element-text-runs-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(armMarkupTextRuns declines when scanMarkupElementEnd finds no closer) prov=review:S239-s462-given-body-text-as-code(repro unclosed) -->
+
+The token scanner arms only a cleanly closed element, so an unclosed one keeps the base parse (measured: `#hits` 1 on base and head). Fix direction: refuse an unclosed statement-position element (E-CTX-003-shaped) instead of re-reading its text as code — falls out of the single-reader parse.
+
+### g-lift-markup-lt-text-garbled-s462 — `lift <p>${@n} a < b … ${@n}</p>` renders garbled (`p >`): parseLiftTag reads `< b` in the text as an opener — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lift-markup-lt-text-garbled-s462 sev=LOW status=open locus=compiler/src/ast-builder.js(parseLiftTag children — `<` + name with no adjacency check) prov=review:S239-s462-given-body-text-as-code(repro lift-altb) -->
+
+§4.18.1b exit (3) makes `<` an exit only when FOLLOWED BY a letter; `a < b` is text. parseLiftTag accepts `<` IDENT regardless of the space. Fix direction: require source adjacency of `<` and the name in parseLiftTag's child loop (as scanMarkupElementEnd does).
+
+### g-bs-lt-space-text-read-as-tag-s462 — the block splitter reads `5 < 7` in plain markup text as a tag (E-CTX-001 `'</p>' tries to close '<7>'`), contrary to §4.18.1b ("So `5 < 7` is just text") — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-bs-lt-space-text-read-as-tag-s462 sev=LOW status=open locus=compiler/src/block-splitter.js(markup opener recognition after `<` + whitespace) prov=dispatch:s462-given-body-text-as-code;review:s462-given-body-text-as-code(repro plain-altb) -->
+
+`<p>${@n} 5 < 7 and a > b ${@n}</p>` fails to compile; the same splitter is what the implied-lift desugar uses to read back a statement-position element, so such an element in a markup arm is declined there and dropped (g-statement-markup-silently-not-rendered-s462) rather than rendered. §4.18 marks the free-text exit fixes as built in the bootstrap first (impl#1 only if security).
+
+### g-lift-path-drops-whitespace-around-interpolation-s462 — on the lift / markup-value paths, the space between a `${…}` and adjacent text is dropped (`lift <p>${@u.name} track ${@n}</p>` → `bobtrack3`; a component body also re-spaces `if (x)` → `if(x)`), contrary to §4.18.5 (whitespace kept exactly) — `NEW S462; LOW; open (pre-existing on BASE)`
+
+<!-- @gap id=g-lift-path-drops-whitespace-around-interpolation-s462 sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(text/interpolation part assembly)+compiler/src/component-expander.ts(body re-join) prov=dispatch:s462-given-body-text-as-code;review:s462-given-body-text-as-code -->
+
+Measured in happy-dom and Chromium on base and head. The implied-lift (`${ if (c) { <p>…</p> } }`) and plain-markup paths keep the space; the explicit `lift` and markup-value (`const m = <p>…</p>`, `return <p>…</p>`, ternary arm) paths do not.
 | HIGH | 257 | 4 |
 | MED | 623 | 6 |
 | LOW | 389 | 0 |
@@ -7670,6 +7777,8 @@ directory, not only "genuinely nested multi-segment flat routes".**
 ## §S262 — gaps filed S262 (2026-07-16/17, Peter)
 
 ### g-codegen-unit-tests-blind-to-emitted-js — every codegen unit test is structurally blind to whether the emitted JS parses. `compiler/src/api.js:2576` is `if (write && outputDir) {` and the **S141 emitted-JS acorn gate is nested INSIDE it**; every codegen unit test calls `compileScrml({ write: false })`, so the gate **never runs in unit tests**. `expect(r.errors).toEqual([])` returns `[]` while the emitted bundle is a `SyntaxError`. PA-verified at source (S262). **This is the mechanism that let 8 real bugs — 2 of them page-killers — pass a green suite on the #81 dispatch** (a template-literal `@` emitting an unparseable bundle scored 0 diagnostics). Pre-existing and repo-wide: it silently weakens the tests-as-gate contract for the whole codegen surface, which is freeze-relevant (a conformance case pinning a codegen surface inherits the same blindness if it asserts only `errors == []`). Fix shape: hoist the acorn validation out of the `write` branch (validate the emitted artifact regardless of whether it is written to disk), or have the unit-test harness parse-check. Found while landing the #81 S239 fix round; NOT fixed there (freeze-surface). — `NEW S262; HIGH (gate integrity); open`
+
+**RESOLVED S464** (branch `s464-markup-text-q24`, fix round 3): the §2.2.1 parse gate now runs on EVERY compile, `write: false` included (`compiler/src/api.js`, before the write phase: the same artifacts — client / server / library / tool / worker, runtime, chunks, chunk boot — judged as emitted). A codegen unit test's `expect(r.errors).toEqual([])` now fails when the emitted JS does not parse. The 9 tests that had pinned exit-0-with-invalid-JS were re-pointed at the refusal; the shapes are listed in g-emitted-js-invalid-shapes-surfaced-by-floor-s464.
 
 ### g-value-attr-dropped-outside-each — dynamic VALUE attributes (`class=`/`style=`/`title=`/`data-*`) are silently dropped outside an `<each>` (adopter issue #81, `pjoliver11/assetManagement`; PA-reproduced on `caf50487`). Root cause: `emit-html.ts`'s `val.kind==="expr"` attribute chain runs directive → event → bool-attr (`REACTIVE_BOOL_ATTRS` = a 3-element allowlist) and **ends with NO final `else`**, so a dynamic value attr matches no branch and evaporates — clean compile, 0 diagnostics, and the CSS written against those classes becomes dead code that reviews as correct. Inside `<each>` all wire (`emit-each.ts` builds elements imperatively). **HELD on a DESIGN FORK, not a patch:** two S239 rounds found **16 confirmed correctness bugs**, and round 2 repeats round 1's shape — **patching instances, not classes** (a `style`-only clobber guard left the identical `class=` vs `class:`/transition clobber unguarded; a `_componentPropNames` stamp gated on `propsDecl.length > 0` leaves #81 **still live, silently, for every propless component**). **Root cause of the non-convergence: the lowering adds a NEW writer competing for DOM surface that already has writers (`class:` · transitions · the `show=`/`if=` display toggle · `bind:value`) with NO ownership/arbitration model.** ⇒ **R2 design Q for bryan: who OWNS an attribute when multiple reactive writers target it?** (touches the reactivity contract). Options: (A) per-collision guards [unbounded tail] · (B) an arbitration model [single-writer + a merge protocol for the composite `class`/`style`] · (C) narrow to non-composite attrs, fail-closed on `class`/`style`/`value`. Work checkpointed: `fix/i81-value-attr-emitter` @ `bcf85c29` (pushed; worktree `../scrml-i81-attrs` retained; 17 commits + 487L progress.md) — **a checkpoint, NOT a base to trust** (its guards are instance-shaped). — `RESOLVED S268 (#81 Axiom ① build): bryan ruled Axiom ① (option B/C hybrid — exclusive wholesale-owner per surface + compile error). Built as analyzeWriterConflict + E-ATTR-WRITER-CONFLICT (docs/changes/i81-writer-ownership/); the arbitration model IS the ownership answer. Residual surfaces filed as §S268 gaps (loop-context enforcement, bool-attr silent drop, component-root class/style, template-lit owner, duplicate wholesale).`
 
@@ -21502,6 +21611,8 @@ when its runtime half holds (relayed from the review). Fix direction: run `valid
 compile (or compile with the gate on), and make any unlisted fatal (`E-*`, severity error) fail a case unless the case
 lists it.
 
+**Half (1) closed S464** (branch `s464-markup-text-q24`, fix round 3): the emitted-JS gate now runs on a `write: false` compile, so the adapter observes E-CODEGEN-INVALID-LOGIC and `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` can fail. Half (2) — `codes: []` passing a case that emits an unlisted fatal error (the superset rule) — is still open.
+
 ### g-is-event-handler-attr-name-matches-one-once-only — `isEventHandlerAttrName` treats any `on[a-z]+` name as an event handler, so `one=` / `once=` / `only=` / `onward=` are handled as event attributes — `NEW S437; LOW; open`
 <!-- @gap id=g-is-event-handler-attr-name-matches-one-once-only sev=LOW status=open locus=compiler/src/multi-statement-scan.ts(isEventHandlerAttrName — /^on[a-z]+$/i) and its inlined copy compiler/src/tokenizer.ts(isEventHandlerAttrName) prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->
 
@@ -25428,6 +25539,29 @@ Confirmed on main (S464): `rawHtml` is named only in the lint's correction text 
 
 PA-verified by execution (S464): `python3` finds byte 0x00 at offset 25888 inside `[...seed].sort().join("\x00")`; `grep -c` returns 0 matches for patterns present in the file unless `-a` is passed. Behaviour is fine at run time; the hazard is investigative — a grep-based probe silently answers "absent" about a live compiler file (the indistinguishable-failure probe shape). Fix: write the separator as the escape `"\0"` (byte-identical string value; inert).
 
+### g-standalone-component-module-emits-raw-markup-export-s464 — a component module compiled ON ITS OWN (library mode) copies its logic text through raw (`export const AddressForm = <fieldset …`) → JS that never parses; the whole-program build of the same file is valid — `NEW S464; MED; open (pre-existing)`
+
+<!-- @gap id=g-standalone-component-module-emits-raw-markup-export-s464 sev=MED status=open locus=compiler/src/codegen/emit-library.ts(library-mode export of a markup-valued const) prov=review:s464-q24-r3-S239 -->
+
+Surfaced by the S464 emitted-JS parse floor (now on every compile): `examples/23-trucking-dispatch/components/*` (8), `examples/22-multifile/components.scrml`, conformance `module/e-export-002/003`, … now report E-CODEGEN-INVALID-LOGIC ("compiler defect") when compiled per file. Base's WRITING CLI refused them identically; no program breaks (the whole-program build emits valid JS). Cost lands on per-file tooling: `scrml promote` (compiles `gather: false`) now fails these 4 components with "compiler defect" (was "unchanged"). Fix: lower library-mode markup-valued exports.
+
+### g-markup-value-in-handler-and-when-body-not-lowered-s464 — a markup VALUE in an event-handler or `when` body (`@lst = [<p>a</p>]`, `{ m: <p/> }`, `keep(<p/>)`, `@v = c ? <b>y</b> : <i>n</i>`) does not lower (refused by the parse floor as E-CODEGEN-INVALID-LOGIC); the same value at top level works — `NEW S464; MED; open (pre-existing)`
+
+<!-- @gap id=g-markup-value-in-handler-and-when-body-not-lowered-s464 sev=MED status=open locus=searched:emit-event-wiring.ts,emit-logic.ts(handler/when body lowering) prov=review:s464-q24-r3-S239 -->
+
+§17.6.10.1 lists these as VALUE positions (legal). Base: exit 0 with invalid JS on write:false, refused on write:true; head refuses everywhere (fails closed). Needs the lowering.
+
+### g-parse-floor-errors-carry-no-source-location-s464 — E-CODEGEN-INVALID-LOGIC from the emitted-JS parse floor reports `file::` with no line/col (CLI too) — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-parse-floor-errors-carry-no-source-location-s464 sev=LOW status=open locus=compiler/src/api.js(validateEmittedArtifacts error construction) prov=review:s464-q24-r3-S239 -->
+
+Map the emitted-JS parse position back to the source span that produced it (or at least the nearest statement).
+
+### g-conformance-clean-case-passes-when-compile-fails-s464 — a `codes: []` ("clean") conformance case passes even when its compile emits E-CODEGEN-INVALID-LOGIC (superset matching) — `NEW S464; LOW; open (pre-existing)`
+
+<!-- @gap id=g-conformance-clean-case-passes-when-compile-fails-s464 sev=LOW status=open locus=conformance/run.ts(code matching) prov=review:s464-q24-r3-S239 -->
+
+Now visible: `module/e-export-002-component-single-root-clean`, `e-export-003-attr-distinct-clean`, `channel/same-source-two-aliases`. A clean case should fail if ANY error fires (the other half of g-conformance-adapter-skips-the-emitted-js-gate…). Also: `g-emitted-js-invalid-shapes-surfaced-by-floor-s464` lists 27 files; the review's corpus found 36 (adds `compiler/self-host-v2/{analyze,check,lower,print}.scrml` — type annotations leak into JS — plus `compiler/tests/integration/fixtures/a5/cross-file/components/header.scrml`, `docs/changes/m6.4a/exemplars/cross-file/components.scrml`, several `docs/changes/*/repro`, `samples/match-001-nested-with-call.scrml`).
 ### g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 — the markup scanner over unparsed (escape-hatch) lambda text unions a BOUNDED set of readings at ambiguous `<`, so a text whose true reading mixes 2+ choices outside the set hides a quoted handler / static executable URL — `NEW S464; MED; open (LATENT)`
 
 <!-- @gap id=g-escape-hatch-markup-scanner-bounded-readings-incomplete-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks / markupTextSinksOnce) prov=review:s464-quoted-handler-refused-r6-S239-F1 -->

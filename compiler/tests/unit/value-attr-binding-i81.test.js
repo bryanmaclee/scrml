@@ -491,8 +491,12 @@ describe("§i81.5 — no regressions on the paths that already worked", () => {
       />
     </program>`;
     const r = compile(src);
-    // The exact regression: a codegen crash, not a wrong attribute.
-    expect(diagCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on this `write: false`
+    // compile, and it shows the snippet prop's markup-returning ARROW is emitted as raw
+    // markup (`String(((item) => <span>…`), JS that never parsed — a `write: true` compile
+    // already refused it. Pinned as the floor's refusal (g-emitted-js-invalid-shapes-
+    // surfaced-by-floor-s464); the attribute assertions below (the i81 point) still hold.
+    expect(diagCodes(r)).toContain("E-CODEGEN-INVALID-LOGIC");
     // The prop must NOT be lowered as a DOM attribute.
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
     expect(emittedClient(r)).not.toContain('setAttribute("row"');
