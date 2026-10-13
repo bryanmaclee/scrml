@@ -510,8 +510,8 @@ describe("s464 fix round 2 NEW-2 — E-REACTIVE-003 reads the same tree", () => 
 // refusals, and the complete E-CG-016 check.
 // ---------------------------------------------------------------------------
 
-async function goResult(pre, name) {
-  const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": goProg(pre) }, "app.scrml", name);
+async function goResult(pre, name, extraFiles = {}) {
+  const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": goProg(pre), ...extraFiles }, "app.scrml", name);
   expect(errors).toEqual([]);
   // Plain import (no test patch) — the bundle must LOAD, not just parse.
   const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
@@ -606,4 +606,103 @@ describe("s464 fix round 2 item 5 — E-CG-016 against the COMPLETE server bundl
       expect(errors.map((e) => e.code)).toEqual(["E-CG-016"]);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 3 — N1 one dependency order, N2 imports/types available, N3 a
+// non-deterministic value split across bundles, N4 scope-aware / literal-blind.
+// ---------------------------------------------------------------------------
+
+describe("s464 fix round 3 N1 — one dependency-ordered sequence for every module value", () => {
+  test("exported and non-exported values interleave: B, A=B+1, C=A*2, D=C+1 → go(3) = 8", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  const B = 1\n  export const A = B + 1\n  const C = A * 2\n  export const D = C + 1\n  fn f(n) { return n + D }\n  server fn go(n) { return f(n) }",
+      "n1-interleave",
+    )).toBe(8);
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 3 N2 — what the bundle already provides is not refused", () => {
+  test("an enum read in a module value (`const DEF = Color.Green`) → \"Green\"", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  type Color:enum = { Red, Green }\n  const DEF = Color.Green\n  fn f(n) { return DEF }\n  server fn go(n) { return f(n) }",
+      "n2-enum",
+    )).toBe("Green");
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("an imported value in a module value (`const RATE = BASE * 2`) → 30", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  import { BASE } from './lib.scrml'\n  const RATE = BASE * 2\n  fn f(n) { return n * RATE }\n  server fn go(n) { return f(n) }",
+      "n2-import-value", { "lib.scrml": "${ export const BASE = 5 }\n" },
+    )).toBe(30);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("an imported fn in a module value (`const RATE = dbl(4)`) → 24", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  import { dbl } from './lib.scrml'\n  const RATE = dbl(4)\n  fn f(n) { return n * RATE }\n  server fn go(n) { return f(n) }",
+      "n2-import-fn", { "lib.scrml": "${ export fn dbl(x) { return x * 2 } }\n" },
+    )).toBe(24);
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 3 N3 — a non-deterministic value used on BOTH sides is refused", () => {
+  const prog = (pre) => `<program>
+\${
+${pre}
+  fn f(n) { return R }
+  server fn go(n) { return f(n) }
+}
+<out> = ""
+<button onclick=\${@out = go(3)}>s</button>
+<p>\${R} \${@out}</p>
+</program>`;
+  for (const [label, pre, call] of [
+    ["Math.random()", "  const R = Math.random()", "Math.random"],
+    ["crypto.randomUUID()", "  const R = crypto.randomUUID()", "crypto.randomUUID"],
+    ["scrml:time now() under an alias", "  import { now as clock } from 'scrml:time'\n  const R = clock()", "scrml:time.now"],
+    ["a value derived from Math.random()", "  const R0 = Math.random()\n  const R = R0 * 2", "Math.random"],
+  ]) {
+    test(`${label} → E-ROUTE-002 naming the split`, () => {
+      const { errors } = compileFiles({ "app.scrml": prog(pre) }, "app.scrml", "n3-split");
+      const e = errors.find((x) => x.code === "E-ROUTE-002");
+      expect(e).toBeDefined();
+      expect(e.message).toContain(`calls \`${call}\``);
+      expect(e.message).toContain("DIFFERENT values");
+    });
+  }
+
+  test("used only on the server: not refused (one evaluation is observed)", async () => {
+    if (HAPPY_DOM()) return;
+    const v = await goResult("  const R = crypto.randomUUID()\n  fn f(n) { return R }\n  server fn go(n) { return f(n) }", "n3-server-only");
+    expect(typeof v).toBe("string");
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 3 N4 — scope-aware shadowing; template text is not code", () => {
+  test("a local of the same name in an UNRELATED server fn does not hide the refusal", () => {
+    const { errors } = compileFiles({
+      "app.scrml": goProg("  const W = window.innerWidth\n  fn f(n) { return n + W }\n  server fn other(q) { const W = 1; return W + q }\n  server fn go(n) { return f(n) }"),
+    }, "app.scrml", "n4-scope");
+    expect(errors.map((e) => e.code)).toContain("E-ROUTE-002");
+  });
+
+  test("a column-0 `const LIM = 9` inside a template literal is text → 21", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  const LIM = 3\n  fn f(n) { const s = `\nconst LIM = 9\n`; return n + LIM + s.length }\n  server fn go(n) { return f(n) }",
+      "n4-tpl-fn",
+    )).toBe(21);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("a column-0 `let K = 9` inside a server fn's template literal is text → 17", async () => {
+    if (HAPPY_DOM()) return;
+    expect(await goResult(
+      "  const K = 2\n  fn f(n) { return n * K }\n  server fn go(n) {\n    const s = `\nlet K = 9\n`\n    return f(n) + s.length\n  }",
+      "n4-tpl-server",
+    )).toBe(17);
+  }, EXECUTED_DB_TIMEOUT_MS);
 });

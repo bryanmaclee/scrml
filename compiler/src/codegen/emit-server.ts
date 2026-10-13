@@ -47,9 +47,9 @@ import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./lo
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
-import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource } from "../expression-parser.ts";
+import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
 import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
-import { isDestructurePattern, iterDestructuredNames } from "../type-system.ts";
+import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
@@ -1028,6 +1028,9 @@ function emitModuleValueExportLines(
   assembledBody: string,
   errors?: CGError[],
   exportRegistry?: ServerExportRegistry | null,
+  /** s464 fix round 3 (N1): when given, `export const/let/var` values go HERE (for the
+   *  D-5 closure to place in dependency order) instead of into the returned lines. */
+  outValues?: ExportedModuleValue[],
 ): string[] {
   // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
   // collectLogicBlocks — exported value decls live in the file's logic body.
@@ -1188,7 +1191,11 @@ function emitModuleValueExportLines(
         const initNode = parseExprToNode(init, filePath, 0);
         const lowered = emitExprField(initNode, init, { mode: "server" });
         const _kw = kind === "var" ? "var" : (kind === "let" ? "let" : "const");
-        constLines.push(`export ${_kw} ${name} = ${lowered};`);
+        if (outValues) {
+          outValues.push({ name, text: `export ${_kw} ${name} = ${lowered};`, order: (stmt.span?.start ?? 0), initNode });
+        } else {
+          constLines.push(`export ${_kw} ${name} = ${lowered};`);
+        }
         continue;
       }
 
@@ -1331,13 +1338,31 @@ const D5_CLIENT_ONLY_GLOBALS = new Set<string>([
   "document", "window", "localStorage", "sessionStorage", "navigator", "location", "history",
 ]);
 
+/**
+ * `text` with every string literal, template quasi and comment blanked (cached).
+ * s464 fix round 3 (N4): every module-scope / free-use question below is asked of
+ * THIS text, so a column-0 `const LIM = 9` inside a multi-line template literal is
+ * literal text, not a declaration.
+ */
+const _blankedCache = new Map<string, string>();
+function blankedOf(text: string): string {
+  let b = _blankedCache.get(text);
+  if (b === undefined) {
+    b = blankLiteralTextInSource(text);
+    if (_blankedCache.size > 64) _blankedCache.clear();
+    _blankedCache.set(text, b);
+  }
+  return b;
+}
+
 /** Is `name` declared at MODULE scope of `body` (column-0 declaration or a named import)? */
 function moduleScopeDeclares(body: string, name: string): boolean {
-  const moduleScope = body.split("\n").filter((l) => !/^\s/.test(l)).join("\n");
+  const code = blankedOf(body);
+  const moduleScope = code.split("\n").filter((l) => !/^\s/.test(l)).join("\n");
   if (topLevelBindingExists(moduleScope, name)) return true;
   const re = /^import\s*\{([^}]*)\}\s*from\b/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(body)) !== null) {
+  while ((m = re.exec(code)) !== null) {
     for (const spec of m[1].split(",")) {
       const parts = spec.trim().split(/\s+as\s+/);
       if ((parts[1] ?? parts[0]).trim() === name) return true;
@@ -1349,7 +1374,7 @@ function moduleScopeDeclares(body: string, name: string): boolean {
 /** Identifier tokens of CODE in `text` (literal text and property names excluded). */
 function codeTokens(text: string): Set<string> {
   const out = new Set<string>();
-  const blanked = blankLiteralTextInSource(text);
+  const blanked = blankedOf(text);
   const re = /[A-Za-z_$][A-Za-z0-9_$]*/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(blanked)) !== null) {
@@ -1363,18 +1388,36 @@ function codeTokens(text: string): Set<string> {
 
 /**
  * Precise-evidence test for a REFUSAL: does `body` use `name` as a free reference —
- * not only as a property key / shorthand-free object key, and with no declaration of
- * the same name anywhere in the body (a local that may shadow the module binding)?
+ * not only as a property key / object key — in a MODULE-SCOPE UNIT (a top-level
+ * function, handler or statement) that does not declare the same name itself?
+ *
+ * s464 fix round 3 (N4): the shadow test is per unit, not bundle-wide — a local
+ * `const W` in an unrelated `server fn other()` no longer hides a free `W` in the
+ * function that needs the module binding. Units are split on column-0 lines of the
+ * literal-blanked text (a template's column-0 line is literal text, not a unit).
  */
 function bodyHasFreeUse(body: string, name: string): boolean {
-  const blanked = blankLiteralTextInSource(body);
+  const blanked = blankedOf(body);
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const local = new RegExp(
     `(?:\\b(?:const|let|var)\\s+(?:[\\[{][^=;]*\\b)?${esc}\\b)|(?:\\bfunction\\*?\\s*[A-Za-z0-9_$]*\\s*\\([^)]*\\b${esc}\\b[^)]*\\))|(?:\\(([^()]*\\b${esc}\\b[^()]*)\\)\\s*=>)|(?:\\b${esc}\\s*=>)|(?:\\bcatch\\s*\\(\\s*${esc}\\s*\\))`,
   );
-  if (local.test(blanked)) return false;
-  const use = new RegExp(`(?<![.$\\w])${esc}(?![$\\w])(?!\\s*:(?!:))`, "g");
-  return use.test(blanked);
+  const use = new RegExp(`(?<![.$\\w])${esc}(?![$\\w])(?!\\s*:(?!:))`);
+  // Module-scope units: a new unit starts at each column-0 line that is not a
+  // closing bracket.
+  const units: string[] = [];
+  let cur: string[] = [];
+  for (const line of blanked.split("\n")) {
+    if (line.length > 0 && !/^[\s})\]]/.test(line) && cur.length > 0) { units.push(cur.join("\n")); cur = []; }
+    cur.push(line);
+  }
+  if (cur.length > 0) units.push(cur.join("\n"));
+  for (const u of units) {
+    if (!use.test(u)) continue;
+    if (local.test(u)) continue;
+    return true;
+  }
+  return false;
 }
 
 interface D5Binding {
@@ -1382,6 +1425,74 @@ interface D5Binding {
   names: string[];
   node: any;
   order: number;
+  /** An `export const` the value-export pass lowered (already chosen to emit). */
+  exported?: boolean;
+}
+
+/** An `export const/let/var` the value-export pass lowered, handed to the D-5 closure (N1). */
+interface ExportedModuleValue { name: string; text: string; order: number; initNode: any }
+
+/** s464 fix round 3 (N3) — a non-deterministic call in a module value's initializer, if any. */
+function nonDeterministicCallIn(fileAST: any, initText: string): string | null {
+  for (const call of FN_NON_DET_CALLS) {
+    const pat = call.split(".").map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s*\\.\\s*");
+    const re = call.startsWith("new ")
+      ? new RegExp(`\\bnew\\s+${call.slice(4)}\\b`)
+      : new RegExp(`(?<![.$\\w])${pat}\\s*\\(`);
+    if (re.test(initText)) return call;
+  }
+  // Non-deterministic `scrml:` stdlib members, by their LOCAL binding (an `as`
+  // alias included) — the same registry E-FN-004 uses.
+  const astImports = (fileAST?.ast?.imports ?? fileAST?.imports ?? []) as any[];
+  for (const imp of (Array.isArray(astImports) ? astImports : [])) {
+    const src = String(imp?.source ?? "");
+    const members = FN_NONDET_STDLIB[src];
+    if (!members) continue;
+    const specs: Array<{ local: string; imported: string }> = Array.isArray(imp?.specifiers) && imp.specifiers.length > 0
+      ? imp.specifiers.map((sp: any) => ({ local: String(sp?.local ?? sp?.imported ?? ""), imported: String(sp?.imported ?? sp?.local ?? "") }))
+      : (Array.isArray(imp?.names) ? imp.names.map((n: string) => ({ local: n, imported: n })) : []);
+    for (const { local, imported } of specs) {
+      if (!local || !members.includes(imported)) continue;
+      if (new RegExp(`(?<![.$\\w])${local.replace(/[$]/g, "\\$")}\\s*\\(`).test(initText)) return `${src}.${imported}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * s464 fix round 3 (N3) — identifier tokens of the code this file runs on the
+ * CLIENT: everything except server-placed function bodies (a CPS-split function
+ * keeps its client half), pure `fn` helpers kept out of the client bundle, and the
+ * module value declarations themselves (their client use is followed through the
+ * closure's dependency walk instead).
+ */
+function clientSideTokens(fileAST: any, filePath: string, routeMap: any): Set<string> {
+  const out = new Set<string>();
+  const skipFn = (n: any): boolean => {
+    const id = `${filePath}::${n?.span?.start}`;
+    const r = routeMap?.functions?.get?.(id);
+    if (r && r.boundary !== "client" && !r.cpsSplit) return true;
+    if (routeMap?.pureFnClientSkipIds?.has?.(id)) return true;
+    if (routeMap?.endpointClientSkipIds?.has?.(id)) return true;
+    return false;
+  };
+  const seen = new Set<unknown>();
+  const visit = (node: unknown, topLogicStmt: boolean): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") { for (const t of codeTokens(node)) out.add(t); return; }
+    if (typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const c of node) visit(c, topLogicStmt); return; }
+    const n = node as any;
+    if (n.kind === "function-decl" && skipFn(n)) return;
+    if (topLogicStmt && (n.kind === "const-decl" || n.kind === "let-decl" || n.kind === "export-decl")) return;
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      visit(n[key], n.kind === "logic" && key === "body");
+    }
+  };
+  visit(getNodes(fileAST), false);
+  return out;
 }
 
 function planModuleBindingClosure(
@@ -1389,6 +1500,9 @@ function planModuleBindingClosure(
   filePath: string,
   assembledBody: string,
   errors?: CGError[],
+  exportedValues: ExportedModuleValue[] = [],
+  /** Identifier tokens of the code this file runs CLIENT-side (N3). */
+  clientTokens: Set<string> = new Set(),
 ): { before: string[]; after: string[]; decls: UserModuleDecl[] } {
   // 1. File-scope bindings, in source order.
   const bindings: D5Binding[] = [];
@@ -1420,7 +1534,26 @@ function planModuleBindingClosure(
     }
   };
   collectLogic(getNodes(fileAST));
+  // N1 — exported values join the SAME graph (already chosen to emit).
+  for (const ev of exportedValues) {
+    const b: D5Binding = { kind: "value", names: [ev.name], node: { span: { start: ev.order } }, order: ev.order, exported: true };
+    bindings.push(b);
+    if (!byName.has(ev.name)) byName.set(ev.name, b);
+  }
   if (bindings.length === 0) return { before: [], after: [], decls: [] };
+  // Source order is the tiebreak of the dependency order: the declaration's offset.
+  for (const b of bindings) {
+    const st = b.node?.span?.start;
+    if (typeof st === "number") b.order = st;
+  }
+  // N2 — names the server bundle gets on its own when the emitted code references
+  // them: imports (the import pass keeps a referenced specifier) and types (the
+  // enum objects are injected when referenced).
+  const importedNames = new Set<string>((buildCalleeImportMap(fileAST) as Map<string, unknown>).keys());
+  const typeNames = new Set<string>();
+  for (const d of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
+    if (d && typeof d.name === "string") typeNames.add(d.name);
+  }
 
   // 2. Closure. `strong` = precise evidence for a refusal (see the docblock).
   type Need = { via: string[]; strong: boolean };
@@ -1443,7 +1576,7 @@ function planModuleBindingClosure(
   const fnIds = new Set<string>();
   const fnNodes: any[] = [];
   const refused = new Set<D5Binding>();
-  const refuse = (b: D5Binding, why: string): void => {
+  const refuse = (b: D5Binding, why: string, fix: string): void => {
     refused.add(b);
     const n = needed.get(b)!;
     if (!n.strong || !errors) return;
@@ -1452,12 +1585,46 @@ function planModuleBindingClosure(
       "E-ROUTE-002",
       `E-ROUTE-002: server code needs the module-level \`${b.names.join(", ")}\` (${chain}), but it ` +
       `cannot run on the server: ${why}. A value the server bundle closes over must be computable ` +
-      `on the server (§12.4). Resolution: pass the value to the server function as an argument, ` +
-      `or compute it from server-side data.`,
+      `on the server (§12.4). Resolution: ${fix}`,
       (b.node?.span ?? {}),
       "error",
     ));
   };
+  const FIX_CLIENT_VALUE = "read the value on the client and pass it to the server function as an argument.";
+  // N3 — is a module value used by CLIENT code (directly, or through another module
+  // value whose initializer reads it)?
+  const clientUsed = (b: D5Binding): boolean => {
+    const seenB = new Set<D5Binding>();
+    const visit = (x: D5Binding): boolean => {
+      if (seenB.has(x)) return false;
+      seenB.add(x);
+      if (x.names.some((n) => clientTokens.has(n))) return true;
+      for (const y of bindings) {
+        if (y.kind !== "value" || y === x || y.exported) continue;
+        const t = typeof y.node?.init === "string" ? y.node.init : "";
+        if (x.names.some((n) => new RegExp(`(?<![.$\\w])${n.replace(/[$]/g, "\\$")}(?![$\\w])`).test(t)) && visit(y)) return true;
+      }
+      return false;
+    };
+    return visit(b);
+  };
+  // N1 — exported values are pre-chosen: record their text and seed their deps.
+  for (const ev of exportedValues) {
+    const b = byName.get(ev.name)!;
+    needed.set(b, { via: [ev.name], strong: true });
+    emittedValue.set(b, ev.text);
+    if (ev.initNode) {
+      forEachIdentInExprNode(ev.initNode, (id: any) => {
+        const n: string = typeof id?.name === "string" ? id.name : "";
+        const dep = n ? byName.get(n) : undefined;
+        if (dep && dep !== b && !declaredInBody(n)) need(dep, [ev.name, n], true);
+      });
+    }
+    for (const t of codeTokens(ev.text)) {
+      const dep = byName.get(t);
+      if (dep && dep !== b && !declaredInBody(t)) need(dep, [ev.name, t], false);
+    }
+  }
   const deps = new Map<D5Binding, Set<D5Binding>>();
   const addDep = (from: D5Binding, to: D5Binding): void => {
     if (!deps.has(from)) deps.set(from, new Set());
@@ -1477,7 +1644,7 @@ function planModuleBindingClosure(
       if (!decl.initExpr) continue;
       let cellRef: string | null = null;
       forEachAtRef(decl.initExpr, (bare) => { if (!cellRef) cellRef = bare; }, { descendNestedFns: true, opaqueCode: true });
-      if (cellRef) { refuse(b, `its initializer reads \`@${cellRef}\`, which lives in the browser`); continue; }
+      if (cellRef) { refuse(b, `its initializer reads \`@${cellRef}\`, which lives in the browser`, FIX_CLIENT_VALUE); continue; }
       let bad: string | null = null;
       forEachIdentInExprNode(decl.initExpr, (id: any) => {
         const n: string = typeof id?.name === "string" ? id.name : "";
@@ -1487,11 +1654,27 @@ function planModuleBindingClosure(
           if (!declaredInBody(n)) { addDep(b, dep); need(dep, [...via, n], strong); }
           return;
         }
-        if (D5_SERVER_HOST_GLOBALS.has(n) || declaredInBody(n)) return;
+        if (D5_SERVER_HOST_GLOBALS.has(n) || declaredInBody(n) || importedNames.has(n) || typeNames.has(n)) return;
         if (D5_CLIENT_ONLY_GLOBALS.has(n)) { bad = `its initializer reads the browser-only global \`${n}\``; return; }
-        bad = `its initializer reads \`${n}\`, which the server bundle does not have`;
+        bad = `its initializer reads \`${n}\`, which is not declared in this file and not imported`;
       });
-      if (bad) { refuse(b, bad); continue; }
+      if (bad) { refuse(b, bad, FIX_CLIENT_VALUE); continue; }
+      // N3 — a non-deterministic initializer evaluated in BOTH bundles holds two
+      // different values; refuse when client code also uses the binding.
+      {
+        let initText = typeof decl.init === "string" ? decl.init : "";
+        if (!initText.trim()) { try { initText = emitStringFromTree(decl.initExpr); } catch { initText = ""; } }
+        const nd = nonDeterministicCallIn(fileAST, initText);
+        if (nd && clientUsed(b)) {
+          refuse(b,
+            `its initializer calls \`${nd}\`, which is non-deterministic, and client code also uses ` +
+            `\`${b.names.join(", ")}\` — the client and server bundles would each evaluate it and hold ` +
+            `DIFFERENT values`,
+            "produce the value on one side and pass it to the other (an argument to the server " +
+            "function, or a value the server function returns).");
+          continue;
+        }
+      }
       const code = emitLogicNode(decl, {
         boundary: "server" as const,
         insideFunctionBody: true,
@@ -1519,11 +1702,12 @@ function planModuleBindingClosure(
         continue;
       }
       if (!isPlainPureFn(fn)) {
-        refuse(b, `\`${b.names[0]}\` is a client-side \`function\` (only a pure \`fn\` can be copied to the server)`);
+        refuse(b, `\`${b.names[0]}\` is a client-side \`function\` (only a pure \`fn\` can be copied to the server)`,
+          `declare \`${b.names[0]}\` as a pure \`fn\`, or compute the value inside the server function.`);
         continue;
       }
       if (fnReachesAtName(fn, filePath)) {
-        refuse(b, `\`fn ${b.names[0]}\` reads \`@\`-state, which lives in the browser`);
+        refuse(b, `\`fn ${b.names[0]}\` reads \`@\`-state, which lives in the browser`, FIX_CLIENT_VALUE);
         continue;
       }
       fnIds.add(id);
@@ -1536,46 +1720,44 @@ function planModuleBindingClosure(
     }
   }
 
-  // 3. Placement: a value that reads an exported value (directly or through another
-  //    emitted value) goes AFTER the value-export block; everything else BEFORE it.
-  const exported = new Set<string>();
-  {
-    const re = /^export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/gm;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(assembledBody)) !== null) exported.add(m[1]);
-  }
-  const after = new Set<D5Binding>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const [b, text] of emittedValue) {
-      if (after.has(b)) continue;
-      const toks = codeTokens(text);
-      let late = [...toks].some((t) => exported.has(t) && !b.names.includes(t));
-      if (!late) for (const d of deps.get(b) ?? []) if (after.has(d)) { late = true; break; }
-      if (late) { after.add(b); changed = true; }
+  // 3. Order (N1): ONE dependency-ordered sequence of every module value the bundle
+  //    carries — exported or not — with source order as the tiebreak. Every value
+  //    is initialized at module load, so a value must follow everything it reads.
+  for (const [b, text] of emittedValue) {
+    for (const t of codeTokens(text)) {
+      const d = byName.get(t);
+      if (d && d !== b && emittedValue.has(d)) addDep(b, d);
     }
   }
-  const ordered = [...emittedValue.keys()].sort((x, y) => x.order - y.order);
-  const beforeVals = ordered.filter((b) => !after.has(b)).map((b) => emittedValue.get(b)!);
-  const afterVals = ordered.filter((b) => after.has(b)).map((b) => emittedValue.get(b)!);
+  const pending = new Set<D5Binding>(emittedValue.keys());
+  const orderedVals: D5Binding[] = [];
+  while (pending.size > 0) {
+    const ready = [...pending]
+      .filter((b) => ![...(deps.get(b) ?? [])].some((d) => pending.has(d) && d !== b))
+      .sort((x, y) => x.order - y.order);
+    // A cycle (should not happen in valid scrml): fall back to source order.
+    const next = ready.length > 0 ? ready[0] : [...pending].sort((x, y) => x.order - y.order)[0];
+    pending.delete(next);
+    orderedVals.push(next);
+  }
+  const beforeVals = orderedVals.map((b) => emittedValue.get(b)!);
   const fnBlock = fnIds.size > 0 ? emitEndpointServerHelperLines(fnNodes, filePath, fnIds, "", null) : [];
 
   const block = (vals: string[], fns: string[]): string[] => {
     if (vals.length === 0 && fns.length === 0) return [];
     const out: string[] = [""];
-    out.push("// --- module-level values the server bundle closes over (D-5) ---");
-    out.push("// Also present in the client bundle; this is an ADDITIONAL declaration for");
-    out.push("// the server side, not a relocation — nothing leaves the client output.");
+    out.push("// --- module-level values, in dependency order (exports + what the server code closes over, D-5) ---");
+    out.push("// The non-exported ones are also in the client bundle; these are ADDITIONAL");
+    out.push("// declarations for the server side, not a relocation.");
     for (const l of vals) out.push(l);
     for (const l of fns) out.push(l);
     out.push("");
     return out;
   };
   const decls: UserModuleDecl[] = [];
-  for (const [b, text] of emittedValue) for (const n of b.names) decls.push({ name: n, node: b.node, text });
+  for (const [b, text] of emittedValue) if (!b.exported) for (const n of b.names) decls.push({ name: n, node: b.node, text });
   for (const fn of fnNodes) decls.push({ name: fn.name, node: fn, text: null });
-  return { before: block(beforeVals, fnBlock), after: block(afterVals, []), decls };
+  return { before: block(beforeVals, fnBlock), after: [], decls };
 }
 
 /** A module-scope declaration the user's code puts into the server bundle under its own name. */
@@ -1602,7 +1784,9 @@ function checkUserModuleDeclCollisions(
     seen.add(d.name);
     const esc = d.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const declRe = new RegExp(`^(?:export\\s+)?(?:const|let|var|(?:async\\s+)?function\\*?|class)\\s+${esc}\\b`, "gm");
-    let count = (out.match(declRe) ?? []).length;
+    // Count on the literal-blanked text (N4): a column-0 `const K = 9` inside a
+    // template literal is text, not a declaration.
+    let count = (blankedOf(out).match(declRe) ?? []).length;
     if (moduleScopeDeclares(out.replace(declRe, "// "), d.name)) count++;
     if (count <= 1) continue;
     errors.push(new CGError(
@@ -1783,9 +1967,10 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   // `errors` is threaded so the value-export pass's diagnostics reach the live stream —
   // its own, and (via the drain in `generateValueOnlyServerJs`) the run-wide refused-lowering
   // sink's, e.g. E-SQL-006 for a `.prepare()` in an exported async fn (g-esql006, s456 F3).
-  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
+  const _veValues: ExportedModuleValue[] = [];
+  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, undefined, _veValues);
   setVarCounter(_veSnapshot);
-  if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
+  if (veLines.length === 0 && _veValues.length === 0) return ""; // nothing server-importable → emit nothing.
   const _veInsertAt = lines.length;
   for (const l of veLines) lines.push(l);
   // s464 fix rounds 1-2 (F1, D-5 closure) — the module bindings the exported
@@ -1794,7 +1979,7 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   // load — the TDZ fix); `after` holds only bindings that read an exported value.
   {
     const _mcSnapshot = getVarCounter();
-    const _mc = planModuleBindingClosure(fileAST, filePath, lines.join("\n"), errors);
+    const _mc = planModuleBindingClosure(fileAST, filePath, lines.join("\n"), errors, _veValues);
     setVarCounter(_mcSnapshot);
     lines.splice(_veInsertAt, 0, ..._mc.before);
     for (const l of _mc.after) lines.push(l);
@@ -7055,12 +7240,14 @@ function generateServerJsImpl(
   // s464 fix round 2 (TDZ) — where the D-5 closure's `before` lines go: ahead of
   // the value exports, which run at module load.
   const _d5InsertAt = lines.length;
+  // s464 fix round 3 (N1) — the `export const` values, handed to the D-5 closure.
+  const _d5ExportedValues: ExportedModuleValue[] = [];
   // s464 fix round 2 (item 5) — every user declaration this bundle carries under
   // its own name; checked against the COMPLETE bundle at the end.
   const _userModuleDecls: UserModuleDecl[] = [];
   {
     const _veSnapshot = getVarCounter();
-    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry);
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry, _d5ExportedValues);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
   }
@@ -7162,7 +7349,10 @@ function generateServerJsImpl(
   // of the value exports (TDZ), `after` appended. See planModuleBindingClosure.
   {
     const _mcSnapshot = getVarCounter();
-    const _mc = planModuleBindingClosure(fileAST, filePath, lines.join("\n"), errors);
+    const _mc = planModuleBindingClosure(
+      fileAST, filePath, lines.join("\n"), errors, _d5ExportedValues,
+      clientSideTokens(fileAST, filePath, routeMap),
+    );
     setVarCounter(_mcSnapshot);
     lines.splice(_d5InsertAt, 0, ..._mc.before);
     for (const _l of _mc.after) lines.push(_l);
