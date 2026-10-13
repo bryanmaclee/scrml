@@ -15,8 +15,10 @@
 //   - startOf(timestamp, unit)                → Date
 //   - addTime(timestamp, amount, unit)        → Date
 //   - diffTime(a, b, unit)                    → number
-//   - debounce(fn, delay)                     → function with cancel/flush
-//   - throttle(fn, limit)                     → function
+//   - debounce(fn, delay)                     → Debouncer { id, delay }   (S464: struct + free fns)
+//   - throttle(fn, limit)                     → Throttler { id, limit }
+//   - run(t, ...args)                         → drive a Debouncer / Throttler
+//   - cancel(t) / flush(t)                    → drop / run the pending call
 //   - sleep(ms)                               → Promise
 //   - formatInTimezone(timestamp, tz, options?, locale?)
 //   - nowInTimezone(tz, options?, locale?)
@@ -151,71 +153,76 @@ export function diffTime(a, b, unit) {
   return diffMs;
 }
 
+// debounce / throttle — S464 "(a) Struct + free fns". A Debouncer / Throttler is
+// DATA ({ id, delay } / { id, limit }); the timed function is kept here in the
+// timer table and driven by run / cancel / flush. Mirrors stdlib/time/index.scrml.
+// id -> { kind, fn, wait, timer, pendingArgs, cooling }; entries are never removed,
+// so `size + 1` is a fresh id.
+const timerState = new Map();
+
 export function debounce(fn, delay) {
-  let timer = null;
-  function debounced(...args) {
-    if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      fn.apply(this, args);
-    }, delay);
-  }
-  debounced.cancel = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-  debounced.flush = function (...args) {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-      fn.apply(this, args);
-    }
-  };
-  return debounced;
+  const id = timerState.size + 1;
+  timerState.set(id, { kind: "debounce", fn, wait: delay, timer: null, pendingArgs: null, cooling: false });
+  return { id, delay };
 }
 
 export function throttle(fn, limit) {
-  let inThrottle = false;
-  let lastArgs = null;
-  let timer = null;
-  function throttled(...args) {
-    if (!inThrottle) {
-      fn.apply(this, args);
-      inThrottle = true;
-      timer = setTimeout(() => {
-        inThrottle = false;
-        timer = null;
-        if (lastArgs !== null) {
-          fn.apply(this, lastArgs);
-          lastArgs = null;
-        }
-      }, limit);
-    } else {
-      lastArgs = args;
-    }
+  const id = timerState.size + 1;
+  timerState.set(id, { kind: "throttle", fn, wait: limit, timer: null, pendingArgs: null, cooling: false });
+  return { id, limit };
+}
+
+export function run(t, ...args) {
+  const st = timerState.get(t && t.id);
+  if (!st) return;
+  if (st.kind === "debounce") {
+    if (st.timer !== null) clearTimeout(st.timer);
+    st.pendingArgs = args;
+    st.timer = setTimeout(() => {
+      st.timer = null;
+      const pending = st.pendingArgs;
+      st.pendingArgs = null;
+      st.fn(...pending);
+    }, st.wait);
+    return;
   }
-  throttled.cancel = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    inThrottle = false;
-    lastArgs = null;
-  };
-  throttled.flush = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-      inThrottle = false;
-      if (lastArgs !== null) {
-        fn.apply(this, lastArgs);
-        lastArgs = null;
+  if (!st.cooling) {
+    st.fn(...args);
+    st.cooling = true;
+    st.timer = setTimeout(() => {
+      st.cooling = false;
+      st.timer = null;
+      if (st.pendingArgs !== null) {
+        const pending = st.pendingArgs;
+        st.pendingArgs = null;
+        st.fn(...pending);
       }
-    }
-  };
-  return throttled;
+    }, st.wait);
+  } else {
+    st.pendingArgs = args;
+  }
+}
+
+export function cancel(t) {
+  const st = timerState.get(t && t.id);
+  if (!st) return;
+  if (st.timer !== null) clearTimeout(st.timer);
+  st.timer = null;
+  st.pendingArgs = null;
+  st.cooling = false;
+}
+
+export function flush(t) {
+  const st = timerState.get(t && t.id);
+  if (!st) return;
+  if (st.timer !== null) clearTimeout(st.timer);
+  st.timer = null;
+  st.cooling = false;
+  if (st.pendingArgs !== null) {
+    const pending = st.pendingArgs;
+    st.pendingArgs = null;
+    st.fn(...pending);
+  }
 }
 
 export async function sleep(ms) {

@@ -4,15 +4,14 @@ ${
     // scrml:time — date formatting and timing utilities
     //
     // All date formatting functions are pure (no side effects, usable client + server).
-    // Timing utilities (debounce, throttle) are pure functions — no lifecycle awareness.
+    // Timing utilities: debounce / throttle return a Debouncer / Throttler STRUCT,
+    // driven by the free functions run / cancel / flush (S464 "(a) Struct + free fns").
     //
     // Note on debounce/throttle: these do not integrate with scrml's lifecycle system
-    // (no cleanup on component unmount). Use them for non-component contexts or
-    // document the cleanup requirement explicitly. Timer cleanup via lifecycle hooks
-    // is planned for Wave 1b.
+    // (no cleanup on component unmount) — call cancel(d) when the owner goes away.
     //
     // Usage:
-    //   ${ import { formatDate, formatRelative, debounce } from 'scrml:time' }
+    //   ${ import { formatDate, formatRelative, debounce, run } from 'scrml:time' }
     // ---------------------------------------------------------------------------
 
     /**
@@ -239,98 +238,126 @@ ${
     }
 
     // ---------------------------------------------------------------------------
-    // Timing utilities
+    // Timing utilities — debounce / throttle (S464 "(a) Struct + free fns")
+    //
+    // A debouncer / throttler is DATA (a struct: its id and its wait), never a
+    // function with methods hung on it — no value holds a function (§14.3). The
+    // function it times is PASSED once, to debounce / throttle, and kept in this
+    // module's timer table; the caller drives it with the free functions run /
+    // cancel / flush, passing the struct. Same shape as scrml:auth's RateLimiter.
     // ---------------------------------------------------------------------------
 
-    /**
-     * Debounce a function. The debounced function delays invoking fn until after
-     * `delay` milliseconds have elapsed since the last invocation.
-     *
-     * IMPORTANT: Timer cleanup on component unmount is NOT automatic.
-     * If you use this inside a component event handler, call .cancel() when
-     * the component unmounts to prevent memory leaks.
-     *
-     * Example:
-     *   const handleSearch = debounce((query) => search(query), 300)
-     *   // handleSearch.cancel() — cancel pending invocation
-     */
-    export function debounce(fn, delay) {
-        let timer = not
-        function debounced(...args) {
-            if (timer is given) clearTimeout(timer)
-            timer = setTimeout(() => {
-                timer = not
-                fn.apply(this, args)
-            }, delay)
-        }
-        debounced.cancel = function() {
-            if (timer is given) {
-                clearTimeout(timer)
-                timer = not
-            }
-        }
-        debounced.flush = function(...args) {
-            if (timer is given) {
-                clearTimeout(timer)
-                timer = not
-                fn.apply(this, args)
-            }
-        }
-        return debounced
+    // id -> { kind, fn, wait, timer, pendingArgs, cooling }. Entries are never
+    // removed, so `size + 1` is a fresh id.
+    const timerState = new Map()
+
+    export type Debouncer:struct = {
+        id: number,
+        delay: number
+    }
+
+    export type Throttler:struct = {
+        id: number,
+        limit: number
     }
 
     /**
-     * Throttle a function. The throttled function invokes fn at most once per
-     * `limit` milliseconds, leading edge by default.
+     * Make a debouncer: `run(d, …args)` (re)starts a `delay`-ms timer, and the
+     * function runs once, with the LAST run's arguments, after `delay` ms pass
+     * with no further run.
      *
-     * The returned function carries `.cancel()` (drop the pending trailing call
-     * and clear its timer) and `.flush()` (run the pending trailing call now),
-     * mirroring `debounce` — so callers can actually clean up its timer.
+     * IMPORTANT: timer cleanup on component unmount is NOT automatic — call
+     * cancel(d) when the owner goes away.
      *
      * Example:
-     *   const handleScroll = throttle(updateScrollPosition, 16)
-     *   // later: handleScroll.cancel()
+     *   const searchLater = debounce((query) => search(query), 300)
+     *   <input oninput=${ (e) => run(searchLater, e.target.value) }/>
+     *   // cancel(searchLater) — drop the pending call; flush(searchLater) — run it now
+     */
+    export function debounce(fn, delay) {
+        const id = timerState.size + 1
+        timerState.set(id, { kind: "debounce", fn: fn, wait: delay, timer: not, pendingArgs: not, cooling: false })
+        return { id: id, delay: delay }
+    }
+
+    /**
+     * Make a throttler: `run(t, …args)` runs the function at once (leading
+     * edge), then at most once per `limit` ms; a run inside the window is kept
+     * and runs when the window closes (trailing edge, last arguments win).
+     *
+     * Example:
+     *   const onScrollLimited = throttle(updateScrollPosition, 16)
+     *   <div onscroll=${ run(onScrollLimited) }>…</div>
+     *   // later: cancel(onScrollLimited)
      */
     export function throttle(fn, limit) {
-        let inThrottle = false
-        let lastArgs = not
-        let timer = not
-        function throttled(...args) {
-            if (!inThrottle) {
-                fn.apply(this, args)
-                inThrottle = true
-                timer = setTimeout(() => {
-                    inThrottle = false
-                    timer = not
-                    if (lastArgs is given) {
-                        fn.apply(this, lastArgs)
-                        lastArgs = not
-                    }
-                }, limit)
-            } else {
-                lastArgs = args
-            }
+        const id = timerState.size + 1
+        timerState.set(id, { kind: "throttle", fn: fn, wait: limit, timer: not, pendingArgs: not, cooling: false })
+        return { id: id, limit: limit }
+    }
+
+    /**
+     * Drive a Debouncer or Throttler with these arguments (see debounce / throttle).
+     */
+    export function run(t, ...args) {
+        const st = timerState.get(t.id)
+        if (st is not) return
+        if (st.kind == "debounce") {
+            if (st.timer is given) clearTimeout(st.timer)
+            st.pendingArgs = args
+            st.timer = setTimeout(() => {
+                st.timer = not
+                const pending = st.pendingArgs
+                st.pendingArgs = not
+                st.fn(...pending)
+            }, st.wait)
+            return
         }
-        throttled.cancel = function() {
-            if (timer is given) {
-                clearTimeout(timer)
-                timer = not
-            }
-            inThrottle = false
-            lastArgs = not
-        }
-        throttled.flush = function() {
-            if (timer is given) {
-                clearTimeout(timer)
-                timer = not
-                inThrottle = false
-                if (lastArgs is given) {
-                    fn.apply(this, lastArgs)
-                    lastArgs = not
+        if (!st.cooling) {
+            st.fn(...args)
+            st.cooling = true
+            st.timer = setTimeout(() => {
+                st.cooling = false
+                st.timer = not
+                if (st.pendingArgs is given) {
+                    const pending = st.pendingArgs
+                    st.pendingArgs = not
+                    st.fn(...pending)
                 }
-            }
+            }, st.wait)
+        } else {
+            st.pendingArgs = args
         }
-        return throttled
+    }
+
+    /**
+     * Drop a pending call and clear the timer (debounce: the waiting call;
+     * throttle: the trailing call, and the window).
+     */
+    export function cancel(t) {
+        const st = timerState.get(t.id)
+        if (st is not) return
+        if (st.timer is given) clearTimeout(st.timer)
+        st.timer = not
+        st.pendingArgs = not
+        st.cooling = false
+    }
+
+    /**
+     * Run a pending call now (with its pending arguments) and clear the timer.
+     * Nothing pending → nothing runs.
+     */
+    export function flush(t) {
+        const st = timerState.get(t.id)
+        if (st is not) return
+        if (st.timer is given) clearTimeout(st.timer)
+        st.timer = not
+        st.cooling = false
+        if (st.pendingArgs is given) {
+            const pending = st.pendingArgs
+            st.pendingArgs = not
+            st.fn(...pending)
+        }
     }
 
     /**
