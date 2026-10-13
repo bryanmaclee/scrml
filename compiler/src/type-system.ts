@@ -7772,6 +7772,27 @@ function engineNameToProjectedVar(name: string): string {
  * for state-decls whose name matches a projected var AND for bare-expr
  * nodes whose text starts with `@name = ...` where name matches.
  */
+
+/**
+ * §48.3.4 — the non-deterministic calls a pure `fn` body may not make (E-FN-004).
+ * Exported (s464 fix round 3) so server codegen classifies a module value's
+ * initializer with the SAME list before copying it into the server bundle.
+ */
+export const FN_NON_DET_CALLS: readonly string[] = [
+  "Date.now",
+  "new Date",
+  "Math.random",
+  "crypto.randomUUID",
+  "crypto.getRandomValues",
+  "performance.now",
+];
+
+/** §48.3.4 — the non-deterministic `scrml:` stdlib members (DD1 Fork 1), by module. */
+export const FN_NONDET_STDLIB: Record<string, string[]> = {
+  "scrml:time": ["now"],
+  "scrml:random": ["random", "randomInt"],
+};
+
 export function rejectWritesToDerivedVars(
   nodes: ASTNodeLike[],
   projectedVars: Map<string, MachineType>,
@@ -10464,10 +10485,7 @@ function annotateNodes(
   // Registry-driven so the next non-det primitive extends trivially: add a
   // `"scrml:module": ["member", ...]` row.
   // ---------------------------------------------------------------------------
-  const NONDET_STDLIB: Record<string, string[]> = {
-    "scrml:time": ["now"],
-    "scrml:random": ["random", "randomInt"],
-  };
+  const NONDET_STDLIB: Record<string, string[]> = FN_NONDET_STDLIB;
   // local-name → set of bound non-det members (a single local could in theory
   // shadow across modules, but the common case is one binding per name).
   const nonDetStdlibBindings = new Set<string>();
@@ -28674,15 +28692,8 @@ function checkFnBodyProhibitions(
     ));
   }
 
-  // Known non-deterministic call identifiers (§48.3.4)
-  const NON_DET_CALLS = [
-    "Date.now",
-    "new Date",
-    "Math.random",
-    "crypto.randomUUID",
-    "crypto.getRandomValues",
-    "performance.now",
-  ];
+  // Known non-deterministic call identifiers (§48.3.4) — the shared list.
+  const NON_DET_CALLS = FN_NON_DET_CALLS;
 
   // Known DOM mutation identifiers (§48.3.2)
   const DOM_MUTATION_APIS = [

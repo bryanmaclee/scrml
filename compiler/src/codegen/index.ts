@@ -150,6 +150,17 @@ export interface CgRouteMap {
    * `.client.js`. Mirrors `RouteMap.endpointClientSkipIds`.
    */
   endpointClientSkipIds?: Set<string>;
+  /**
+   * s464-pure-fn-placement — plain pure `fn`s a server-placed body reaches;
+   * emit-server emits each as a plain synchronous `function` (never a route).
+   * Mirrors `RouteMap.pureFnServerHelperIds`.
+   */
+  pureFnServerHelperIds?: Set<string>;
+  /**
+   * The subset no client code reaches; emit-functions skips their client body.
+   * Mirrors `RouteMap.pureFnClientSkipIds`.
+   */
+  pureFnClientSkipIds?: Set<string>;
 }
 
 export interface CgAuthMiddleware {
