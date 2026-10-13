@@ -72,7 +72,7 @@ import type {
 } from "./types/ast.ts";
 
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
-import { exprNodeCollectCallees, emitStringFromTree, emitCodeOnlyStringFromTree, blankLiteralTextInSource, forEachIdentInExprNode } from "./expression-parser.ts";
+import { exprNodeCollectCallees, emitStringFromTree, emitCodeOnlyStringFromTree, blankLiteralTextInSource, forEachIdentInExprNode, parseExprToNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, fnParamNameSet } from "./indirect-callee-resolver.ts";
 // Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
@@ -1458,27 +1458,113 @@ export function isPlainPureFn(fnNode: unknown): boolean {
 }
 
 /**
- * s464-pure-fn-placement — does this function's subtree reference any `@`-name
- * (a reactive cell, derived value, channel cell, `@session` / `@currentUser`)?
- * Used to keep such a `fn` on its prior placement path, so a server body that
- * reaches it still meets the existing fail-closed diagnostics (E-REACTIVE-003,
- * E-CHANNEL-SERVER-CELL-READ, E-SESSION-AMBIENT-SERVER) instead of shipping a
- * client-cell read into the server bundle. Over-detection is safe (the fn keeps
- * the old placement); string literals are skipped so `"a@b.com"` does not count.
+ * s464 fix round 2 — THE reader of `@`-references (cells, derived values, channel
+ * cells, `@session` / `@currentUser`) in a function's code. Both decisions that
+ * need it read it HERE, from the parsed expression tree, never by regex over
+ * source text: the placement decision (a plain `fn` that reaches `@`-state keeps
+ * its prior path, `fnReachesAtName`) and E-REACTIVE-003
+ * (`detectServerFreeClientCellReads`). Before this they were two readers of one
+ * text and disagreed — a `"@n"` string default counted for one and not the other.
+ *
+ * What counts:
+ *   - an `ident` node whose name starts with `@`;
+ *   - a `?{}` query's text (`${@x}` interpolations), as before;
+ *   - with `opaqueCode: true` ONLY: a template literal's `${…}` interpolations and
+ *     an `escape-hatch` node's code (a block-body lambda), which the expression
+ *     tree keeps as raw text — read only after `blankLiteralTextInSource` has
+ *     blanked every string literal, template quasi and comment.
+ * What never counts: string / template text, regex literals, comments.
+ *
+ * `opaqueCode` is a COVERAGE choice, not a second parser. The placement decision
+ * turns it on because over-detection is its safe direction (the `fn` keeps its
+ * prior path). E-REACTIVE-003 leaves it off — it has never read template
+ * interpolations or escape-hatch code, and turning it on is a newly-rejecting
+ * change that needs its own ruling (g-template-literal-cell-read-in-fn-undefined-on-server-s464).
  */
-function subtreeReferencesAtName(node: unknown, seen: Set<unknown> = new Set()): boolean {
-  if (node === null || node === undefined) return false;
-  if (typeof node === "string") return /(^|[^A-Za-z0-9_$.])@[A-Za-z_$]/.test(node);
-  if (typeof node !== "object" || seen.has(node)) return false;
-  seen.add(node);
-  if (Array.isArray(node)) return node.some((c) => subtreeReferencesAtName(c, seen));
-  const n = node as Record<string, unknown>;
-  if (n.kind === "lit" || n.kind === "string-literal") return false;
-  for (const key of Object.keys(n)) {
-    if (key === "span") continue;
-    if (subtreeReferencesAtName(n[key], seen)) return true;
+const AT_REF_RE = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
+function forEachAtRefInCode(code: string, cb: (bare: string) => void): void {
+  const blanked = blankLiteralTextInSource(code);
+  const re = new RegExp(AT_REF_RE.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blanked)) !== null) {
+    const prev = m.index > 0 ? blanked[m.index - 1] : "";
+    if (prev && /[A-Za-z0-9_$.]/.test(prev)) continue; // `a@b` / `x.@y` are not refs
+    cb(m[1]);
   }
-  return false;
+}
+export function forEachAtRef(
+  root: unknown,
+  cb: (bare: string, span: Span | undefined) => void,
+  opts: { descendNestedFns: boolean; opaqueCode: boolean },
+  inheritedSpan?: Span,
+): void {
+  const visited = new WeakSet<object>();
+  const visit = (node: any, stmtSpan: Span | undefined): void => {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) { for (const c of node) visit(c, stmtSpan); return; }
+    if (node.kind === "function-decl" && !opts.descendNestedFns) return;
+    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : stmtSpan;
+    if (node.kind === "ident" && typeof node.name === "string"
+        && node.name.length > 1 && node.name.charCodeAt(0) === 0x40 /* @ */) {
+      cb(node.name.slice(1), sp);
+    }
+    if (node.kind === "sql" && typeof node.query === "string") {
+      const re = new RegExp(AT_REF_RE.source, "g");
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(node.query)) !== null) cb(m[1], sp);
+    }
+    if (opts.opaqueCode && node.kind === "lit" && node.litType === "template" && node.hasInterpolation === true && typeof node.raw === "string") {
+      forEachAtRefInCode(node.raw, (b) => cb(b, sp));
+    }
+    if (opts.opaqueCode && node.kind === "escape-hatch" && node.nativeKind !== "Literal" && typeof node.raw === "string") {
+      forEachAtRefInCode(node.raw, (b) => cb(b, sp));
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = node[key];
+      if (val && typeof val === "object") visit(val, sp);
+    }
+  };
+  visit(root, inheritedSpan);
+}
+
+/**
+ * A function's parameter defaults as PARSED expressions. The parser keeps a
+ * default as raw text (`defaultValue`); it is parsed here so the `@`-reader sees
+ * the same tree shape as the body.
+ */
+const _parsedDefaultsCache = new WeakMap<object, ExprNode[]>();
+export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode[] {
+  if (!fnNode || typeof fnNode !== "object") return [];
+  const hit = _parsedDefaultsCache.get(fnNode as object);
+  if (hit) return hit;
+  const out: ExprNode[] = [];
+  const params = (fnNode as any).params;
+  for (const p of (Array.isArray(params) ? params : [])) {
+    if (p && typeof p === "object" && typeof p.defaultValue === "string" && p.defaultValue.trim()) {
+      try { out.push(parseExprToNode(p.defaultValue, filePath, 0)); }
+      catch { out.push({ kind: "escape-hatch", raw: p.defaultValue } as unknown as ExprNode); }
+    }
+  }
+  _parsedDefaultsCache.set(fnNode as object, out);
+  return out;
+}
+
+/**
+ * s464-pure-fn-placement — does this function reference any `@`-name in its body
+ * (nested functions included) or its parameter defaults? Such a `fn` keeps its
+ * prior placement path, so a server body that reaches it still meets the
+ * fail-closed diagnostics (E-REACTIVE-003, E-CHANNEL-SERVER-CELL-READ,
+ * E-SESSION-AMBIENT-SERVER) instead of shipping a client-cell read into the
+ * server bundle.
+ */
+function fnReachesAtName(fnNode: unknown, filePath: string): boolean {
+  let found = false;
+  const hit = (): void => { found = true; };
+  forEachAtRef((fnNode as any)?.body, hit, { descendNestedFns: true, opaqueCode: true });
+  if (!found) forEachAtRef(parsedParamDefaults(fnNode, filePath), hit, { descendNestedFns: true, opaqueCode: true });
+  return found;
 }
 
 /**
@@ -2748,12 +2834,12 @@ function detectServerFreeClientCellReads(
   body: any[],
   clientCells: Map<string, boolean>,
   exclude: Set<string>,
-  /** Raw source texts evaluated in the same server body (e.g. param defaults). */
-  extraRawTexts: Array<{ text: string; span: Span | undefined }> = [],
+  /** Parsed expressions evaluated in the same server body (the parameter defaults). */
+  extraExprs: ExprNode[] = [],
+  extraSpan?: Span,
 ): Array<{ cell: string; span: Span | undefined; derived: boolean }> {
   const out: Array<{ cell: string; span: Span | undefined; derived: boolean }> = [];
   const seen = new Set<string>();
-  const visited = new WeakSet<object>();
   if (!Array.isArray(body) || clientCells.size === 0) return out;
 
   const record = (bare: string, span: Span | undefined): void => {
@@ -2762,32 +2848,13 @@ function detectServerFreeClientCellReads(
     out.push({ cell: bare, span, derived: clientCells.get(bare) === true });
   };
 
-  const scanSql = (text: string, span: Span | undefined): void => {
-    const re = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) record(m[1], span);
-  };
-
-  const visit = (node: any, stmtSpan: Span | undefined): void => {
-    if (!node || typeof node !== "object" || visited.has(node)) return;
-    visited.add(node);
-    if (node.kind === "function-decl") return;
-    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : stmtSpan;
-    if (node.kind === "ident" && typeof node.name === "string"
-        && node.name.length > 1 && node.name.charCodeAt(0) === 0x40 /* @ */) {
-      record(node.name.slice(1), sp);
-    }
-    if (node.kind === "sql" && typeof node.query === "string") scanSql(node.query, sp);
-    for (const key of Object.keys(node)) {
-      if (key === "span") continue;
-      const val = (node as any)[key];
-      if (Array.isArray(val)) { for (const c of val) visit(c, sp); }
-      else if (val && typeof val === "object") visit(val, sp);
-    }
-  };
-
-  for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
-  for (const t of extraRawTexts) scanSql(t.text, t.span);
+  // s464 fix round 2 — the shared `@`-reader (nested function declarations are
+  // their own placement unit, so they are not descended, as before).
+  for (const stmt of body) {
+    forEachAtRef(stmt, record, { descendNestedFns: false, opaqueCode: false },
+      (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
+  }
+  forEachAtRef(extraExprs, record, { descendNestedFns: false, opaqueCode: false }, extraSpan);
   return out;
 }
 
@@ -5985,10 +6052,7 @@ export function runRI(input: RIInput): RIOutput {
       if (!isPlainPureFn(record.fnNode)) continue;
       pureIds.push(fnNodeId);
       // Params too (s464 fix round 1, F3): a default `k: int = @n` is a cell read.
-      if (
-        subtreeReferencesAtName((record.fnNode as any).body) ||
-        subtreeReferencesAtName((record.fnNode as any).params)
-      ) atReaching.add(fnNodeId);
+      if (fnReachesAtName(record.fnNode, record.filePath)) atReaching.add(fnNodeId);
       const toks = new Set<string>();
       collect((record.fnNode as any).body, toks, new Set());
       collect((record.fnNode as any).params, toks, new Set());
@@ -6988,17 +7052,12 @@ export function runRI(input: RIInput): RIOutput {
           const _chanExclude = new Set<string>();
           const _chMap = perFileChannelCellMap.get(record.filePath);
           if (_chMap) for (const _cells of _chMap.values()) for (const _c of _cells) _chanExclude.add(_c);
-          // s464 fix round 1 (F3) — a parameter DEFAULT (`k: int = @n`) is evaluated in
-          // the server body too; the parser keeps it as raw text (`defaultValue`).
-          const _paramDefaults: Array<{ text: string; span: Span | undefined }> = [];
-          for (const _p of (Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [])) {
-            if (_p && typeof _p === "object" && typeof _p.defaultValue === "string") {
-              // Quoted string literals are not reads (`"a@n.com"`); template literals stay.
-              const _txt = _p.defaultValue.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
-              _paramDefaults.push({ text: _txt, span: record.fnNode.span });
-            }
-          }
-          const _freeReads = detectServerFreeClientCellReads(body, _clientCells, _chanExclude, _paramDefaults);
+          // s464 fix rounds 1-2 (F3) — a parameter DEFAULT (`k: int = @n`) is evaluated
+          // in the server body too; read from its PARSED expression (one reader).
+          const _freeReads = detectServerFreeClientCellReads(
+            body, _clientCells, _chanExclude,
+            parsedParamDefaults(record.fnNode, record.filePath), record.fnNode.span,
+          );
           for (const _r of _freeReads) {
             const _kind = _r.derived ? "derived value" : "reactive variable";
             const _fn = record.fnNode.name ?? "<anonymous>";

@@ -441,3 +441,66 @@ describe("s464 fix round 1 F3 — a fn whose parameter DEFAULT reads a cell", ()
     expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 2 — ONE reader of `@`-references (the parsed expression tree) for
+// both the placement decision and E-REACTIVE-003. Literal text never counts.
+// ---------------------------------------------------------------------------
+
+const goProg = (pre) => `<program>
+\${
+${pre}
+}
+<n> = 7
+<out> = ""
+<button onclick=\${@out = go(3)}>s</button>
+<p>\${@out}</p>
+</program>`;
+
+describe("s464 fix round 2 NEW-1 — `@` inside a default's literal text is not a cell read", () => {
+  const CASES = [
+    ["string", "fn f(m, k: string = \"@n\") { return k + m }", "@n3"],
+    ["template, no interpolation", "fn f(m, k: string = `@n`) { return k + m }", "@n3"],
+    ["template with an interpolation", "fn f(m, k: string = `@${m}`) { return k }", "@3"],
+    ["escaped quote", "fn f(m, k: string = \"a\\\"@n\") { return k }", "a\"@n"],
+    ["regex literal", "fn f(m, k = /@n/) { return k.test(\"@n\") }", true],
+    ["email-like string", "fn f(m, k: string = 'ops@n.io') { return k }", "ops@n.io"],
+  ];
+  for (const [label, fnSrc, expected] of CASES) {
+    test(`${label}: the fn stays a plain helper and its default applies`, async () => {
+      if (HAPPY_DOM()) return;
+      const { errors, outDir, tmpDir } = compileFiles({
+        "app.scrml": goProg(`  ${fnSrc}\n  server fn go(x) { return f(x) }`),
+      }, "app.scrml", "lit-default");
+      expect(errors).toEqual([]);
+      const server = readFileSync(join(outDir, "app.server.js"), "utf-8");
+      expect(routesOf(server)).toEqual(["go"]);
+      expect(server).not.toMatch(/async function f\b/);
+      const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "go", { x: 3 });
+      expect(r.status).toBe(200);
+      expect(r.json).toEqual(expected);
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
+});
+
+describe("s464 fix round 2 NEW-2 — E-REACTIVE-003 reads the same tree", () => {
+  for (const [label, dflt] of [["regex", "/@n/"], ["template, no interpolation", "`@n`"], ["template text", "`a@n.io`"]]) {
+    test(`no false positive on a server fn default that is a ${label}`, () => {
+      const { errors } = compileFiles({
+        "app.scrml": goProg(`  server fn go(x) { return g(x) }\n  server fn g(m, k = ${dflt}) { return k }`),
+      }, "app.scrml", "no-fp");
+      expect(errors.map((e) => e.code)).not.toContain("E-REACTIVE-003");
+    });
+  }
+
+  test("a fn reading a cell inside a template interpolation is not emitted as a client-lowered helper", () => {
+    // Placement reads interpolations (opaqueCode), so the fn keeps its prior path
+    // and no `_scrml_reactive_get` reaches the server bundle. (E-REACTIVE-003 does
+    // not yet read interpolations — g-template-literal-cell-read-in-fn-undefined-on-server-s464.)
+    const { errors, outDir } = compileFiles({
+      "app.scrml": goProg("  fn f(k) { return `${@n}-${k}` }\n  server fn go(x) { return f(x) }"),
+    }, "app.scrml", "tpl-cell");
+    expect(errors).toEqual([]);
+    expect(readFileSync(join(outDir, "app.server.js"), "utf-8")).not.toContain("_scrml_reactive_get(");
+  });
+});
