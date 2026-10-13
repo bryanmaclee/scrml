@@ -1140,7 +1140,12 @@ describe("S462 round 6 — F6-4: a function handler value is the handler, not a 
   test("several parameters, an expression body, a function expression", () => {
     expect(nM(`<div if=@user><button onclick=\${(e, x) => { @out = @user.name }}>go</button></div>`)).toBe(0);
     expect(nM(`<div if=@user><button onclick=\${() => @out = @user.name}>go</button></div>`)).toBe(0);
-    expect(nM(`<div if=@user><button onclick=\${function (e) { @out = @user.name }}>go</button></div>`)).toBe(0);
+    // A function-EXPRESSION handler value lowers to the statement `function (e) { … }`
+    // inside the listener — JS that never parsed. The §2.2.1 parse floor now refuses it
+    // in every compile (S464 Q24 fix round 3; g-emitted-js-invalid-shapes-surfaced-by-
+    // floor-s464); the narrowing itself (the point here) raises no E-TYPE-046.
+    const fx = compile(progM(`<div if=@user><button onclick=\${function (e) { @out = @user.name }}>go</button></div>`));
+    expect(fx.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
   test("outside a gate it re-tests (Q12)", () => {
     expect(nM(`<button onclick=\${() => { @out = @user.name }}>go</button>`)).toBe(1);

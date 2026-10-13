@@ -289,8 +289,6 @@ describe("§C: scrml fix `given-presence`", () => {
 `;
     const shapes = {
       "a1b (assignment + lift)": `\${ given @user :> { @hits = @hits.concat([@user.name]); lift <p class="who">\${@n}</p> } }`,
-      "a1 (assignment + markup)": `\${ given @user :> { @hits = @hits.concat([@user.name]); <p class="who">\${@n}</p> } }`,
-      "a3 (if-stmt)": `\${ given @user :> { if (@n > 1) { @hits = [] }; <p class="who">\${@user.name} \${@n}</p> } }`,
       "an interpolation that writes": `\${ given @user :> { <p class="who">\${@user.name} \${@n = 2}</p> } }`,
     };
     for (const [label, guard] of Object.entries(shapes)) {
@@ -300,6 +298,24 @@ describe("§C: scrml fix `given-presence`", () => {
         expect(r.changed).toBe(false);
         expect(r.blockers.length).toBe(1);
         expect(r.blockers[0].reason).toContain(MARKUP_BODY_STATEMENTS);
+      });
+    }
+    // a1 / a3 — a statement and a BARE `<p>` in one guard body: the `<p>` is not the arm's
+    // single element, so no lowering renders it. Base rendered nothing at exit 0; since
+    // s462-given-body-text-as-code fix round 1 (ruling Q24 (a)) the file does not compile
+    // (E-MARKUP-STATEMENT-NOT-RENDERED), and the rule reports that reason first.
+    const unrendered = {
+      "a1 (assignment + markup)": `\${ given @user :> { @hits = @hits.concat([@user.name]); <p class="who">\${@n}</p> } }`,
+      "a3 (if-stmt)": `\${ given @user :> { if (@n > 1) { @hits = [] }; <p class="who">\${@user.name} \${@n}</p> } }`,
+    };
+    for (const [label, guard] of Object.entries(unrendered)) {
+      test(label, () => {
+        const src = `<program>\n${PRE}<main>\n  <p id="hits">\${@hits.length}</p>\n  <div id="guard">${guard}</div>\n</main>\n</program>\n`;
+        const r = fixGivenPresence(src, { filePath: join(TMP, `c/stmt-${label.split(" ")[0]}.scrml`) });
+        expect(r.changed).toBe(false);
+        expect(r.blockers.length).toBe(1);
+        expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+        expect(r.blockers[0].reason).toContain("E-MARKUP-STATEMENT-NOT-RENDERED");
       });
     }
   });
@@ -385,13 +401,35 @@ type User:struct = { name: string }
 </main>
 </program>
 `;
+      // s462-given-body-text-as-code: the `+` between the interpolations is TEXT (§4.18.1), so the
+      // file compiles and the guard is rewritten. (Before that fix impl#1 parsed the `+` as code and
+      // the file failed with E-TYPE-046, which is what this repro first pinned.)
       const r = fixGivenPresence(src, { filePath: join(TMP, "c/a8.scrml") });
+      expect(r.blockers).toEqual([]);
+      expect(r.applied.length).toBe(1);
+      expect(r.output).toContain("${ if (@user is given && @b2 is given) { <p class=\"who\">${@user.name}+${@b2.name} ${@n}</p> } }");
+    });
+    test("a guard with a statement in a file that does not compile gets the compile reason, not the statement reason", () => {
+      // The read outside the guard is E-TYPE-046 (a member of a `T | not` cell, not narrowed).
+      const src = `<program>
+type User:struct = { name: string }
+<user>: User | not = { name: "ada" }
+<n> = 0
+<main>
+  <p id="out">\${@user.name}</p>
+  <div id="guard">\${ given @user :> { @n = 1
+    <p class="who">\${@user.name}</p> } }</div>
+</main>
+</program>
+`;
+      const r = fixGivenPresence(src, { filePath: join(TMP, "c/a8-stmt.scrml") });
       expect(r.changed).toBe(false);
       expect(r.blockers.length).toBe(1);
+      expect(r.blockers[0].reason).not.toContain(MARKUP_BODY_STATEMENTS);
       expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
       expect(r.blockers[0].reason).toContain("E-TYPE-046");
     });
-    test("literal `-` between interpolations is text, not a statement; impl#1 emits it as `-;`, so the file does not compile (the emitted-JS check runs on the verify compile too)", () => {
+    test("literal `-` between interpolations is text, not a statement — the file compiles and the guard is rewritten (s462-given-body-text-as-code; impl#1 used to emit it as `-;`)", () => {
       const src = `<user>: { name: string } | not = { name: "ada" }
 <n> = 0
 <main>
@@ -399,13 +437,11 @@ type User:struct = { name: string }
 </main>
 `;
       const r = fixGivenPresence(src, { filePath: join(TMP, "c/punct.scrml") });
-      expect(r.changed).toBe(false);
-      expect(r.blockers.length).toBe(1);
-      expect(r.blockers[0].reason).not.toContain(MARKUP_BODY_STATEMENTS);
-      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
-      expect(r.blockers[0].reason).toContain("E-CODEGEN-INVALID-LOGIC");
+      expect(r.blockers).toEqual([]);
+      expect(r.applied.length).toBe(1);
+      expect(r.output).toContain("${ if (@user is given) { <p id=\"n\">${@user.name} - ${@n}</p> } }");
     });
-    test("a6 — a guard inside `<each>` gets the compile reason", () => {
+    test("a6 — a guard inside `<each>` is refused (it compiles since s462-given-body-text-as-code; the rewrite emits different code, so the verify refuses it)", () => {
       const src = `<program>
 type User:struct = { name: string }
 <user>: User | not = { name: "ada" }
@@ -419,7 +455,8 @@ type User:struct = { name: string }
       const r = fixGivenPresence(src, { filePath: join(TMP, "c/a6.scrml") });
       expect(r.changed).toBe(false);
       expect(r.blockers.length).toBe(1);
-      expect(r.blockers[0].reason).toContain("file does not compile; cannot verify");
+      expect(r.blockers[0].reason).not.toContain("file does not compile");
+      expect(r.blockers[0].reason).toContain("emits different code after the rewrite");
     });
   });
 

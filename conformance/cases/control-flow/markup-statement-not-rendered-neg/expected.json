@@ -1,0 +1,13 @@
+{
+  "id": "markup-statement-not-rendered-neg",
+  "description": "The two ways statement-position markup renders compile clean: the single element of an `if` / `else` branch (the §17.6.10 implied `lift`, including a single-element `${ if }` nested inside such an element) and an explicit `lift` (several per arm, after a statement, in a `for` body).",
+  "language-version": "1.0",
+  "spec": "§17.6.10.1",
+  "rationale": "§17.6.10.1: statement-position markup renders \"as the single element of an `if` / `given` branch (the implied `lift` above), or named by a `lift` (§10.1)\"; only markup neither way reaches is E-MARKUP-STATEMENT-NOT-RENDERED.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MARKUP-STATEMENT-NOT-RENDERED"
+    ]
+  }
+}
