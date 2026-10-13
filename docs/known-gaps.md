@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
-| MED | 612 | 6 |
-| LOW | 384 | 0 |
+| MED | 613 | 6 |
+| LOW | 386 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -202,6 +202,18 @@ Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mj
 ### g-tree-path-destructured-arrow-param-s465 — an arrow with a destructured parameter emitted through the tree path becomes `(__destructured__) => k + v` → ReferenceError at run time — `NEW S465; MED; open`
 <!-- @gap id=g-tree-path-destructured-arrow-param-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(arrow param emission on the tree path) prov=review:s465-await-r5 -->
 `[[s, 1]].map(([k, v]) => k + v)` and `({ k }) =>` at server function top level throw on main (probe rv7/g.mjs dTop/dTopObj). The await branch routes block-bodied server function values through this path, so it newly breaks shapes that worked on main — fix this before that branch lands.
+
+### g-enum-payload-type-accepts-function-s465 — an enum variant whose payload field is typed `string` (`type Op:enum = { Apply(f: string) }`) accepts a FUNCTION argument (`Op.Apply(twice)`, `.Apply(twice)`) with no type error; only E-VALUE-FUNCTION-STORED (the value rule) refuses it — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-enum-payload-type-accepts-function-s465 sev=MED status=open locus=searched:compiler/src/type-system.ts(enum constructor argument vs declared payload field type) prov=review:s465-value-fn-r2 -->
+Found by the S465 round-2 review of s465-value-fn-land (probes `n7/e1`–`e3`). The payload field's declared type is not checked against the argument at an enum construction (qualified or dot-shorthand), so any value — a function included — is accepted. E-VALUE-FUNCTION-STORED now refuses the function case regardless of the declared type; the general mismatch (`Apply(f: string)` given a number) is the gap. Fix direction: check each constructor argument against its payload field type (E-TYPE-… assignability), both spellings.
+
+### g-host-value-callable-unknown-s465 — a function read off HOST data and stored in a scrml value (`{ h: window.handler }`, `{ cb: someHostObj.method }`, an `import:host` function stored) is not refused: E-VALUE-FUNCTION-STORED knows a host value is callable only for the ECMAScript standard globals and standard-namespace members (`Math.max`, `String`) — `NEW S465; LOW; open`
+<!-- @gap id=g-host-value-callable-unknown-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(isKnownHostCallable — standard globals only) prov=dispatch:s465-value-function-stored -->
+The compiler cannot see a host value's runtime type. Closing the general case needs either a typed host boundary (`import:host` declarations carrying callable-ness) or a fail-closed rule for host member reads in stored positions (which would refuse ordinary host DATA such as `{ w: window.innerWidth }`). Design call owed; recorded by the round-2 fix of s465-value-fn-land.
+
+### g-cross-module-param-store-unjudged-s465 — a function passed to an IMPORTED function that stores its parameter into a value (`lib: export function wrap(cb) { return { cb } }`, main: `wrap(twice)`) is not refused: call-site → parameter facts are propagated within a file only — `NEW S465; LOW; open`
+<!-- @gap id=g-cross-module-param-store-unjudged-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(foreign FnInfo — importer call sites do not feed the exporter's parameters) prov=dispatch:s465-value-function-stored -->
+The store is in the exporting file, which is checked on its own and never sees the importer's argument. Function RETURNS and exported const arrows do cross imports (round 2). Fix direction: either judge, in the exporter, a parameter stored into a value when the function is exported (fail closed — may refuse legitimate data-only callers), or carry importer call-site facts back to the exporter's report.
 
 ### g-template-interp-helper-not-server-placed-s465 — a plain helper called ONLY inside a template-literal interpolation of a server function (`server function f(n) { return \`v ${doubleIt(n)}\` }`) is not server-placed: the server bundle calls `doubleIt` without defining it → ReferenceError at run time, compiled clean — `NEW S465; HIGH; open (pre-existing on BASE)`
 <!-- @gap id=g-template-interp-helper-not-server-placed-s465 sev=HIGH status=open locus=compiler/src/route-inference.ts(caller edges read structured call nodes; template interpolations are not decomposed)+compiler/src/indirect-callee-resolver.ts(dispatchCalledTargets raw-text scan covers only the dispatch-table shape) prov=dispatch:s465-value-function-stored -->

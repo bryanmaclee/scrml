@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1788 of 1788 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1789 of 1789 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -16,7 +16,7 @@ Scope: **1788 of 1788 cases attempted** — every attempted case reached the pur
 | FAIL | 74 | 4.1% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 670 | 37.5% |
-| UNSUPPORTED | 855 | 47.8% |
+| UNSUPPORTED | 856 | 47.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,11 +26,11 @@ Scope: **1788 of 1788 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 34 of 74; the other 40 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 589 · parse-reject 266.
+UNSUPPORTED by reason: bootstrap-unsupported 590 · parse-reject 266.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **793** — PASS 104 · FAIL 59 · UNSUPPORTED 630. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **794** — PASS 104 · FAIL 59 · UNSUPPORTED 631. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -161,7 +161,7 @@ NOT-TWINNED by reason (670 cases; a case counts once per distinct reason):
 | style | 27 | 1 | · | · | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
-| type-state-codes | 31 | 2 | · | 2 | · | 3 | 24 | · | · |
+| type-state-codes | 32 | 2 | · | 2 | · | 3 | 25 | · | · |
 
 ### FAIL (74)
 
@@ -558,7 +558,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (855)
+### UNSUPPORTED (856)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1415,6 +1415,7 @@ none
 - `type-state-codes/e-type-lifecycle-on-engine-cell-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
+- `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
