@@ -493,3 +493,33 @@ describe("fix round 3 — item 2: a scrml:time Debouncer / Throttler is a struct
     expect(stored(ok).length).toBe(0);
   });
 });
+
+// S464 round 4 (R2): an exported value whose initializer is a value-form `match` / `if` / `for`
+// is read from the statement the AST builder parsed for it, not by re-parsing the export text.
+describe("fix round 4 — R2: exported value-form match / if / for initializers carry their facts", () => {
+  function compileLibApp(lib, app) {
+    const dir = mkdtempSync(join(TMP, "r4-"));
+    writeFileSync(join(dir, "lib.scrml"), lib);
+    const fp = join(dir, "app.scrml");
+    writeFileSync(fp, app);
+    const res = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} });
+    return stored(res).filter((d) => String(d.span?.file ?? fp).endsWith("app.scrml"));
+  }
+  const APP = `\${ import { n } from './lib.scrml'\nconst o = { v: n } }\n<c> = n\n<program><p>\${o.v}\${@c}</p></>\n`;
+  for (const [label, lib] of [
+    ["export const n = match …", `\${ export const n = match 1 { 1 => "a", _ => "b" } }\n`],
+    ["export let n = match …", `\${ export let n = match 1 { 1 => "a", _ => "b" } }\n`],
+    ["a block arm with lift", `\${ const k = 1\nexport const n = match k { 1 => { lift "a" }, _ => "b" } }\n`],
+    ["export const n = if … lift", `\${ const c = true\nexport const n = if (c) { lift "x" } else { lift "y" } }\n`],
+    ["export const n = for … lift", `\${ export const n = for (i of [1, 2]) { lift i * 2 } }\n`],
+    ["a destructuring export", `\${ export const { n } = { n: 1 } }\n`],
+  ]) {
+    test(`data: ${label} — importer may store it`, () => {
+      expect(compileLibApp(lib, APP).length).toBe(0);
+    });
+  }
+  test("a value-form match exported that yields a FUNCTION is still a function in the importer", () => {
+    const lib = `\${ function twice(x) { return x * 2 }\nexport const n = match 1 { 1 => twice, _ => twice } }\n`;
+    expect(compileLibApp(lib, APP).length).toBeGreaterThan(0);
+  });
+});

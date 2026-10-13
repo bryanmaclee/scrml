@@ -163,6 +163,16 @@ export function diffTime(a, b, unit) {
 // struct -> { kind, fn, timer, pendingArgs, cooling }
 const timerState = new WeakMap();
 const timerIds = { next: 0 };
+// A timer struct is built on its OWN prototype (a plain object one level above
+// Object.prototype). The client runtime's deep-reactive wrapper wraps only arrays
+// and plain objects (`_scrml_deep_reactive`, runtime-template.js), so a timer held
+// in a state cell, a field or a collection is read back as ITSELF — the identity
+// the table is keyed by — not as a Proxy of it. Its own enumerable fields are
+// unchanged, so `==` (field by field) and serialization read it as before.
+const timerProto = Object.create(Object.prototype);
+function makeTimer(fields) {
+  return Object.assign(Object.create(timerProto), fields);
+}
 
 function stateOf(t) {
   return t !== null && typeof t === "object" ? timerState.get(t) : undefined;
@@ -170,14 +180,14 @@ function stateOf(t) {
 
 export function debounce(fn, delay) {
   timerIds.next = timerIds.next + 1;
-  const d = { id: timerIds.next, delay };
+  const d = makeTimer({ id: timerIds.next, delay });
   timerState.set(d, { kind: "debounce", fn, timer: null, pendingArgs: null, cooling: false });
   return d;
 }
 
 export function throttle(fn, limit) {
   timerIds.next = timerIds.next + 1;
-  const t = { id: timerIds.next, limit };
+  const t = makeTimer({ id: timerIds.next, limit });
   timerState.set(t, { kind: "throttle", fn, timer: null, pendingArgs: null, cooling: false });
   return t;
 }

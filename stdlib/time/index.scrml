@@ -257,6 +257,12 @@ ${
     const timerState = new WeakMap()
     // id source: distinguishes two debouncers with the same wait under `==`.
     const timerIds = { next: 0 }
+    // A timer struct is built on its OWN prototype (a plain object one level above
+    // Object.prototype). The client runtime's deep-reactive wrapper wraps only arrays
+    // and plain objects, so a timer held in a state cell, a field or a collection is
+    // read back as ITSELF — the identity the table is keyed by — not as a Proxy of it.
+    // Its own fields are unchanged, so `==` and serialization read it as before.
+    const timerProto = Object.create(Object.prototype)
 
     export type Debouncer:struct = {
         id: number,
@@ -283,7 +289,7 @@ ${
      */
     export function debounce(fn, delay) -> Debouncer {
         timerIds.next = timerIds.next + 1
-        const d = { id: timerIds.next, delay: delay }
+        const d = Object.assign(Object.create(timerProto), { id: timerIds.next, delay: delay })
         timerState.set(d, { kind: "debounce", fn: fn, timer: not, pendingArgs: not, cooling: false })
         return d
     }
@@ -300,7 +306,7 @@ ${
      */
     export function throttle(fn, limit) -> Throttler {
         timerIds.next = timerIds.next + 1
-        const t = { id: timerIds.next, limit: limit }
+        const t = Object.assign(Object.create(timerProto), { id: timerIds.next, limit: limit })
         timerState.set(t, { kind: "throttle", fn: fn, timer: not, pendingArgs: not, cooling: false })
         return t
     }

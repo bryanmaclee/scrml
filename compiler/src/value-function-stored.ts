@@ -435,10 +435,35 @@ function analyze(
 
   /** `export const NAME = …` / `export let …` held only as raw text → its name and parsed initializer. */
   const exportInits = new WeakMap<object, { name: string; init: unknown } | null>();
+  /** export-decl → the statement that follows it in its list (see exportConstInit). */
+  const exportNext = new WeakMap<object, Rec>();
+  const indexExports = (list: unknown[]): void => {
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i] as Rec | null;
+      if (!r || typeof r !== "object") continue;
+      if (r.kind === "export-decl" && list[i + 1] && typeof list[i + 1] === "object") exportNext.set(r, list[i + 1] as Rec);
+      if (r.kind === "logic" && Array.isArray(r.body)) indexExports(r.body as unknown[]);
+      if (r.kind === "markup" && Array.isArray(r.children)) indexExports(r.children as unknown[]);
+    }
+  };
+  indexExports(nodes);
   function exportConstInit(r: Rec): { name: string; init: unknown } | null {
     if (r.kind !== "export-decl" || (r.exportKind !== "const" && r.exportKind !== "let") || r.declaration) return null;
     if (exportInits.has(r)) return exportInits.get(r) ?? null;
     let out: { name: string; init: unknown } | null = null;
+    // A value-form `match` / `if` / `for` initializer is PARSED by the AST builder as the statement
+    // that follows the export-decl (whose raw text then ends at `=`): read that parsed statement.
+    const head = typeof r.raw === "string" ? r.raw.match(/^\s*export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*$/) : null;
+    const next = exportNext.get(r);
+    if (head && next) {
+      let init: Rec | null = null;
+      if (next.kind === "match-stmt") init = { kind: "match-expr", body: next.body, subject: next.headerExpr };
+      else if (next.kind === "if-stmt" || next.kind === "for-stmt") init = { kind: "value-set", values: liftedValues(next) };
+      if (init) out = { name: head[1], init };
+      exportInits.set(r, out);
+      return out;
+    }
+    // Otherwise the export-decl carries its initializer only as text (there is no parsed node).
     const m = typeof r.raw === "string" ? r.raw.match(/^\s*export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([\s\S]+)$/) : null;
     if (m) {
       try {
@@ -506,6 +531,7 @@ function analyze(
         return (x.op === "||" || x.op === "??" || x.op === "&&") ? (mayFn(x.left) || mayFn(x.right)) : false;
       case "cast": return mayFn(x.expression);
       case "unread-arm": return true;
+      case "value-set": return Array.isArray(x.values) && (x.values as unknown[]).some((v) => mayFn(v));
       case "match-expr": return matchArms(x).some((arm) => inArm(arm, arm.names, () => arm.values.some((v) => mayFn(v))));
       case "assign": return mayFn(x.value);
       case "call": return callMayFn(x);
@@ -529,6 +555,20 @@ function analyze(
     if (!fi) return false;
     if (fi.returnsFn) return true;
     for (const i of fi.returnsParams) if (mayFn(args[i])) return true;
+    return false;
+  }
+
+  /** Does an object / array / map literal hold, anywhere inside it, a value that may be a function? */
+  function literalHoldsFn(e: unknown, depth = 0): boolean {
+    const x = e as Rec | undefined;
+    if (!x || typeof x !== "object" || depth > 50) return false;
+    if (mayFn(x)) return true;
+    if (x.kind === "object") {
+      return ((x.props as Rec[] | undefined) ?? []).some((p) =>
+        p?.kind === "shorthand" ? !!lookup(String(p.name))?.mayFn : literalHoldsFn(p?.kind === "spread" ? p.argument : p?.value, depth + 1));
+    }
+    if (x.kind === "array") return ((x.elements as Rec[] | undefined) ?? []).some((el) => literalHoldsFn(el?.kind === "spread" ? el.argument : el, depth + 1));
+    if (x.kind === "map-lit") return ((x.entries as Rec[] | undefined) ?? []).some((en) => literalHoldsFn(en?.value, depth + 1));
     return false;
   }
 
@@ -1540,6 +1580,16 @@ function analyze(
             for (const rn of renames) {
               const b = frames[0].get(String(rn.local ?? rn.exported));
               if (b) out.set(String(rn.exported ?? rn.local), { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+            }
+          } else if (r.exportedName == null && typeof r.raw === "string") {
+            // `export const { a, b } = init` — a destructuring export: each name may hold a function
+            // when the initializer may hold one anywhere (coarse; the parser keeps no node for it).
+            const dm = r.raw.match(/^\s*export\s+(?:const|let)\s+([{[][\s\S]*?[}\]])\s*=\s*([\s\S]+)$/);
+            if (dm) {
+              let init: unknown = null;
+              try { init = parseExprToNode(dm[2], filePath, 0); } catch { init = null; }
+              const holdsFn = !init || mayFn(init) || literalHoldsFn(init);
+              for (const n of boundNamesOf(dm[1])) if (!out.has(n)) out.set(n, { kind: "value", mayFn: holdsFn });
             }
           } else if (typeof r.exportedName === "string" && !out.has(r.exportedName)) {
             const b = frames[0].get(r.exportedName);
