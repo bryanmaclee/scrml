@@ -309,3 +309,135 @@ describe("s464 — fail-closed guard: a fn that reads a client cell, reached fro
     expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (S464 adversarial review of 6ce9fcd62).
+// ---------------------------------------------------------------------------
+
+function compileFiles(files, entry, name, seedFiles = {}) {
+  const tag = `${name}-${++tmpCounter}`;
+  const tmpDir = resolve(TMP_ROOT, tag);
+  for (const [f, txt] of Object.entries(files)) {
+    mkdirSync(dirname(join(tmpDir, f)), { recursive: true });
+    writeFileSync(join(tmpDir, f), txt);
+  }
+  for (const [fileName, stmts] of Object.entries(seedFiles)) {
+    const db = new Database(resolve(tmpDir, fileName), { create: true });
+    for (const stmt of stmts) db.exec(stmt);
+    db.close();
+  }
+  const outDir = join(tmpDir, "dist");
+  const result = compileScrml({ inputFiles: [join(tmpDir, entry)], write: true, outputDir: outDir, log: () => {} });
+  const errors = (result.errors ?? []).filter((e) => e.severity == null || e.severity === "error");
+  return { errors, outDir, tmpDir };
+}
+
+async function callRoute(serverJsPath, dbPath, routeName, body) {
+  const mod = await patchAndImport(serverJsPath, dbPath);
+  const route = Object.values(mod).find(
+    (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes(routeName),
+  );
+  expect(route).toBeDefined();
+  const TOKEN = "s464-fr1";
+  const resp = await route.handler(new Request(`http://localhost${route.path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN, "Cookie": `scrml_csrf=${TOKEN}` },
+    body: JSON.stringify(body),
+  }));
+  return { status: resp.status, json: await resp.json() };
+}
+
+// happy-dom-polluted globals strip the CSRF headers (see server-fn-calls-server-fn).
+const HAPPY_DOM = () => typeof globalThis.document !== "undefined";
+
+const saveProg = (pre, body) => `<program db="./x.db">
+\${
+${pre}
+  function save(n: int) {
+    ?{\`INSERT INTO t (v) VALUES (1)\`}.run()
+${body}
+  }
+  function go() { @out = save(@n) }
+}
+<n> = 3
+<out> = 0
+<button onclick=go()>s</button>
+<p>\${@out}</p>
+</program>
+`;
+const T_SEED = { "x.db": ["CREATE TABLE t (v INTEGER)"] };
+
+describe("s464 fix round 1 F1 — module consts a server-bundle fn helper closes over (D-5)", () => {
+  test("the D-5 repro in its `fn` form: `labelFor` reads `ROLES`; describe(1) → \"editor\"", async () => {
+    if (HAPPY_DOM()) return;
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": `<program>
+\${ const ROLES = ["admin", "editor", "viewer"]
+   fn labelFor(i) { return ROLES[i] }
+   server fn describe(i) -> string { return labelFor(i) } }
+<out> = ""
+<button onclick=\${@out = describe(1)}>s</button>
+<p>\${@out}</p>
+</program>` }, "app.scrml", "d5-fn");
+    expect(errors).toEqual([]);
+    const server = readFileSync(join(outDir, "app.server.js"), "utf-8");
+    expect(server).toMatch(/^const ROLES = /m);
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "describe", { i: 1 });
+    expect(r.status).toBe(200);
+    expect(r.json).toBe("editor");
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("same file: `const RATE = 7; fn mul(n) { n * RATE }` via `const r = mul(n)` → 21", async () => {
+    if (HAPPY_DOM()) return;
+    const { errors, outDir, tmpDir } = compileFiles({
+      "app.scrml": saveProg("  const RATE = 7\n  fn mul(n: int) -> int { return n * RATE }", "    const r = mul(n)\n    return r"),
+    }, "app.scrml", "rate-local", T_SEED);
+    expect(errors).toEqual([]);
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "save", { n: 3 });
+    expect(r.status).toBe(200);
+    expect(r.json).toBe(21);
+  }, EXECUTED_DB_TIMEOUT_MS);
+
+  test("cross file: exported `fn mul` reads module-local `RATE`; m.server.js declares it → 21", async () => {
+    if (HAPPY_DOM()) return;
+    const { errors, outDir, tmpDir } = compileFiles({
+      "m.scrml": "${\n  const RATE = 7\n  export fn mul(n: int) -> int { return n * RATE }\n}\n",
+      "app.scrml": saveProg("  import { mul } from './m.scrml'", "    const r = mul(n)\n    return r"),
+    }, "app.scrml", "rate-xfile", T_SEED);
+    expect(errors).toEqual([]);
+    expect(readFileSync(join(outDir, "m.server.js"), "utf-8")).toMatch(/^const RATE = 7;/m);
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "save", { n: 3 });
+    expect(r.status).toBe(200);
+    expect(r.json).toBe(21);
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 1 F2 — a fn helper named like a server-bundle binding", () => {
+  for (const nm of ["routes", "fetch"]) {
+    test(`\`fn ${nm}\` called by server code is E-CG-016, not silently rebound`, () => {
+      const { errors } = compileFiles({
+        "app.scrml": saveProg(`  fn ${nm}(n: int) -> int { return n * 2 }`, `    const r = ${nm}(n)\n    return r`),
+      }, "app.scrml", `collide-${nm}`, T_SEED);
+      expect(errors.map((e) => e.code)).toContain("E-CG-016");
+    });
+  }
+
+  test("a route-handler LOCAL with the helper's name is not a collision (shadow) → 300", async () => {
+    if (HAPPY_DOM()) return;
+    const { errors, outDir, tmpDir } = compileFiles({
+      "app.scrml": saveProg("  fn a(n) { return n + 1 }", "    const a = (k) => k * 100\n    return a(n)"),
+    }, "app.scrml", "shadow-local", T_SEED);
+    expect(errors).toEqual([]);
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "save", { n: 3 });
+    expect(r.status).toBe(200);
+    expect(r.json).toBe(300);
+  }, EXECUTED_DB_TIMEOUT_MS);
+});
+
+describe("s464 fix round 1 F3 — a fn whose parameter DEFAULT reads a cell", () => {
+  test("`fn f(n, k = @n)` reached from server code is E-REACTIVE-003", () => {
+    const { errors } = compileFiles({
+      "app.scrml": saveProg("  fn f(n: int, k: int = @n) -> int { return n + k }", "    const r = f(n)\n    return r"),
+    }, "app.scrml", "param-default-cell", T_SEED);
+    expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
+  });
+});

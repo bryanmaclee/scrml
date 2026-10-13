@@ -7,3 +7,4 @@
 2026-10-12T15:36:51-06:00 fix: side-placement export exclusion is per-file (a local fn named like another module's export was left undefined in the server bundle — p5 probe); +test
 2026-10-12T16:11:15-06:00 gate: base(origin/main) 33227 pass/58 skip/0 fail; head 33235/58/0. Head re-capture at f3b629006 byte-identical to the measured head (0 artifact diffs). Done.
 2026-10-13T02:47:23-06:00 fix round 1 start (merge origin/main: up to date)
+2026-10-13T02:52:35-06:00 FR1: F1 D-5 pass moved after all body emission + added to value-only path; F2 E-CG-016 for pure-fn helper names (module-scope check, no silent skip; endpoint helpers excluded from pure set); F3 params scanned (placement) + E-REACTIVE-003 scans param defaults. +7 tests (6 fail on 6ce9fcd62). Reviewer cases: all equal-or-better vs main.

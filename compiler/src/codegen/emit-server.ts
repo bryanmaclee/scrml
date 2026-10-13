@@ -1552,6 +1552,15 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   setVarCounter(_veSnapshot);
   if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
   for (const l of veLines) lines.push(l);
+  // s464 fix round 1 (F1) — the same D-5 pass the route-bundle path runs: an
+  // exported fn that closes over a module-local `const` (`const RATE = 7;
+  // export fn mul(n) { return n * RATE }`) needs that const declared here too.
+  {
+    const _mcSnapshot = getVarCounter();
+    const _mcLines = emitReferencedModuleConstLines(fileAST, lines.join("\n"));
+    setVarCounter(_mcSnapshot);
+    for (const l of _mcLines) lines.push(l);
+  }
 
   let emitted = lines.join("\n");
 
@@ -6812,22 +6821,6 @@ function generateServerJsImpl(
     for (const _l of _veLines) lines.push(_l);
   }
 
-  // D-5 (adopter report, S293) — a module-level `const` / `let` VALUE binding the
-  // server bundle closes over. `fn` declarations already cross the boundary (the
-  // peer-callable loop above + the §61 endpoint-helper path below); a module const
-  // did not, so `return ROLES[i];` reached `.server.js` with no `ROLES` in scope —
-  // a runtime ReferenceError with ZERO errors and ZERO warnings. Emitted AFTER the
-  // value exports so an already-exported binding wins the already-declared guard,
-  // and BEFORE `finalEmitted` is joined so the helper-inline scans see it. The
-  // client bundle is UNCHANGED — this ADDS a server-side declaration, it does not
-  // relocate one, so the §14.8.9 protect-floor surface is untouched.
-  {
-    const _mcSnapshot = getVarCounter();
-    const _mcLines = emitReferencedModuleConstLines(fileAST, lines.join("\n"));
-    setVarCounter(_mcSnapshot);
-    for (const _l of _mcLines) lines.push(_l);
-  }
-
   // §61 <endpoint> private-arm reachability — retain endpoint-only private server
   // helpers. A `<FleetStatus : fleetStatus()>` arm (§61.2) calls a LOCAL pure
   // `fn` the handler runs server-side; without this it tree-shakes out and the
@@ -6859,17 +6852,88 @@ function generateServerJsImpl(
   // the §61 endpoint helpers above. Additive (var-counter restored); the
   // `.client.js` skip for server-only ones is RouteMap.pureFnClientSkipIds.
   if (routeMap.pureFnServerHelperIds && routeMap.pureFnServerHelperIds.size > 0) {
+    // s464 fix round 1 (F2) — a helper is emitted under its OWN name, so one named
+    // like a binding the bundle already declares (`routes` / `fetch`, an import, a
+    // peer, a value export) or a page-local enum the compiler injects later would
+    // be a second declaration. Never skip it silently: fail closed with E-CG-016,
+    // exactly as the peer-callable path does for a server fn.
+    const _pfBodySoFar = lines.join("\n");
+    // Module scope only: the bundle's top-level declarations start at column 0, so
+    // drop indented lines (a route handler's local `const a = …` is not a clash —
+    // `topLevelBindingExists` alone would count it). Named imports are checked on
+    // the full text because a multi-line `import { … }` puts specifiers on
+    // indented lines.
+    const _pfModuleScope = _pfBodySoFar.split("\n").filter((l) => !/^\s/.test(l)).join("\n");
+    const _pfImportBinds = (name: string): boolean => {
+      const re = /^import\s*\{([^}]*)\}\s*from\b/gm;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(_pfBodySoFar)) !== null) {
+        for (const spec of m[1].split(",")) {
+          const parts = spec.trim().split(/\s+as\s+/);
+          if ((parts[1] ?? parts[0]).trim() === name) return true;
+        }
+      }
+      return false;
+    };
+    const _pfEnumNames = new Set<string>();
+    for (const _decl of ((fileAST as any).typeDecls ?? (fileAST as any).ast?.typeDecls ?? [])) {
+      if (_decl && _decl.kind === "type-decl" && _decl.typeKind === "enum" && typeof _decl.name === "string") {
+        _pfEnumNames.add(_decl.name);
+      }
+    }
+    const _pfIds = new Set<string>();
+    for (const _fn of fnNodes) {
+      const _start = (_fn?.span as any)?.start;
+      const _id = `${filePath}::${_start}`;
+      if (typeof _start !== "number" || !routeMap.pureFnServerHelperIds.has(_id)) continue;
+      const _name: string = _fn.name;
+      if (_name === "routes" || _name === "fetch" || _pfEnumNames.has(_name) || topLevelBindingExists(_pfModuleScope, _name) || _pfImportBinds(_name)) {
+        errors.push(new CGError(
+          "E-CG-016",
+          `E-CG-016: \`fn ${_name}\` is called by server code, so the server bundle declares it — but ` +
+          `\`${_name}\` is already a top-level server-bundle binding (e.g. the \`routes\` / \`fetch\` ` +
+          `WinterCG exports, a page-local enum, an import, or the \`import { SQL } from "bun"\` runtime ` +
+          `handle). The bundle cannot declare \`${_name}\` twice. Resolution: rename the \`fn\`.`,
+          (_fn.span ?? {}),
+          "error",
+        ));
+        continue;
+      }
+      _pfIds.add(_id);
+    }
     const _pfSnapshot = getVarCounter();
     const _pfHelperLines = emitEndpointServerHelperLines(
       fnNodes,
       filePath,
-      routeMap.pureFnServerHelperIds,
-      lines.join("\n"),
+      _pfIds,
+      _pfBodySoFar,
       "// --- pure `fn` helpers called by server code (synchronous; never a route — §12.4, §13.4) ---",
     );
     setVarCounter(_pfSnapshot);
     for (const _l of _pfHelperLines) lines.push(_l);
   }
+
+  // D-5 (adopter report, S293) — a module-level `const` / `let` VALUE binding the
+  // server bundle closes over. `fn` declarations already cross the boundary (the
+  // peer-callable loop above + the §61 endpoint-helper path below); a module const
+  // did not, so `return ROLES[i];` reached `.server.js` with no `ROLES` in scope —
+  // a runtime ReferenceError with ZERO errors and ZERO warnings. Emitted AFTER the
+  // value exports so an already-exported binding wins the already-declared guard,
+  // and BEFORE `finalEmitted` is joined so the helper-inline scans see it.
+  // s464 fix round 1 (F1): this is ONE pass after EVERY function body the bundle
+  // carries has been emitted — route handlers, peer callables, value exports, the
+  // §61 endpoint helpers and the pure-`fn` helpers. It used to run before the two
+  // helper blocks, so a const read only by a helper body (`fn labelFor(i) {
+  // return ROLES[i] }`) was never declared server-side. The
+  // client bundle is UNCHANGED — this ADDS a server-side declaration, it does not
+  // relocate one, so the §14.8.9 protect-floor surface is untouched.
+  {
+    const _mcSnapshot = getVarCounter();
+    const _mcLines = emitReferencedModuleConstLines(fileAST, lines.join("\n"));
+    setVarCounter(_mcSnapshot);
+    for (const _l of _mcLines) lines.push(_l);
+  }
+
 
   // A9 Ext 5 (§19.9.6): idempotency-key storage helper inlining. When
   // `_scrml_idempotency_lookup(` / `_scrml_idempotency_store(` callsites

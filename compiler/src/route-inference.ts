@@ -1510,6 +1510,7 @@ function computePureFnSidePlacement(
   files: FileAST[],
   functions: Map<string, FunctionRoute>,
   placeFreePureFnIds: Set<string>,
+  endpointServerHelperIds: Set<string>,
   serverHelperIds: Set<string>,
   clientSkipIds: Set<string>,
 ): void {
@@ -1577,6 +1578,9 @@ function computePureFnSidePlacement(
       const id = idOf(fn);
       // A `fn` that reaches reactive state keeps its prior placement (5c note).
       if (id && !placeFreePureFnIds.has(id)) continue;
+      // Already carried server-side (and client-skipped or not) by the §61
+      // endpoint-helper sets; emitting it twice would declare it twice.
+      if (id && endpointServerHelperIds.has(id)) continue;
       const name = fn.name;
       if (!id || typeof name !== "string" || !name) continue;
       if (fileExportedNames.has(name) || fn.fromExport === true || fn.exported === true) continue;
@@ -2744,6 +2748,8 @@ function detectServerFreeClientCellReads(
   body: any[],
   clientCells: Map<string, boolean>,
   exclude: Set<string>,
+  /** Raw source texts evaluated in the same server body (e.g. param defaults). */
+  extraRawTexts: Array<{ text: string; span: Span | undefined }> = [],
 ): Array<{ cell: string; span: Span | undefined; derived: boolean }> {
   const out: Array<{ cell: string; span: Span | undefined; derived: boolean }> = [];
   const seen = new Set<string>();
@@ -2781,6 +2787,7 @@ function detectServerFreeClientCellReads(
   };
 
   for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
+  for (const t of extraRawTexts) scanSql(t.text, t.span);
   return out;
 }
 
@@ -5977,9 +5984,14 @@ export function runRI(input: RIInput): RIOutput {
     for (const [fnNodeId, record] of analysisMap) {
       if (!isPlainPureFn(record.fnNode)) continue;
       pureIds.push(fnNodeId);
-      if (subtreeReferencesAtName((record.fnNode as any).body)) atReaching.add(fnNodeId);
+      // Params too (s464 fix round 1, F3): a default `k: int = @n` is a cell read.
+      if (
+        subtreeReferencesAtName((record.fnNode as any).body) ||
+        subtreeReferencesAtName((record.fnNode as any).params)
+      ) atReaching.add(fnNodeId);
       const toks = new Set<string>();
       collect((record.fnNode as any).body, toks, new Set());
+      collect((record.fnNode as any).params, toks, new Set());
       tokensById.set(fnNodeId, toks);
     }
     let grew = true;
@@ -6976,7 +6988,17 @@ export function runRI(input: RIInput): RIOutput {
           const _chanExclude = new Set<string>();
           const _chMap = perFileChannelCellMap.get(record.filePath);
           if (_chMap) for (const _cells of _chMap.values()) for (const _c of _cells) _chanExclude.add(_c);
-          const _freeReads = detectServerFreeClientCellReads(body, _clientCells, _chanExclude);
+          // s464 fix round 1 (F3) — a parameter DEFAULT (`k: int = @n`) is evaluated in
+          // the server body too; the parser keeps it as raw text (`defaultValue`).
+          const _paramDefaults: Array<{ text: string; span: Span | undefined }> = [];
+          for (const _p of (Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [])) {
+            if (_p && typeof _p === "object" && typeof _p.defaultValue === "string") {
+              // Quoted string literals are not reads (`"a@n.com"`); template literals stay.
+              const _txt = _p.defaultValue.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+              _paramDefaults.push({ text: _txt, span: record.fnNode.span });
+            }
+          }
+          const _freeReads = detectServerFreeClientCellReads(body, _clientCells, _chanExclude, _paramDefaults);
           for (const _r of _freeReads) {
             const _kind = _r.derived ? "derived value" : "reactive variable";
             const _fn = record.fnNode.name ?? "<anonymous>";
@@ -7675,7 +7697,7 @@ export function runRI(input: RIInput): RIOutput {
   const pureFnServerHelperIds = new Set<string>();
   const pureFnClientSkipIds = new Set<string>();
   computePureFnSidePlacement(
-    files, functions, placeFreePureFnIds, pureFnServerHelperIds, pureFnClientSkipIds,
+    files, functions, placeFreePureFnIds, endpointServerHelperIds, pureFnServerHelperIds, pureFnClientSkipIds,
   );
 
   return {
