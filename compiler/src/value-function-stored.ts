@@ -48,6 +48,7 @@ import { boundNamesOf } from "./binding-names.ts";
 import { parseExprToNode } from "./expression-parser.ts";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
+import { dirname, resolve as resolvePath } from "path";
 
 export interface ValueFnSpan {
   file: string;
@@ -83,6 +84,8 @@ interface FnInfo {
   returnsFn: boolean;
   /** Positions of parameters the function may return (judged per call site). */
   returnsParams: Set<number>;
+  /** Read from another module's facts: a call here never feeds its parameters. */
+  foreign?: boolean;
 }
 
 interface Binding {
@@ -90,6 +93,8 @@ interface Binding {
   kind: BindingKind;
   mayFn: boolean;
   fn?: FnInfo;
+  /** Bound by an import (not a declaration in this file). */
+  imported?: boolean;
 }
 
 interface Ctx {
@@ -153,12 +158,108 @@ function isFunctionTypeAnnotation(t: unknown): boolean {
   return /\)\s*(->|=>)\s*[^)\s][^)]*$/.test(s);
 }
 
+/** What an importer learns about one export of a scrml module. */
+interface ExportFact {
+  kind: BindingKind;
+  mayFn: boolean;
+  fn?: FnInfo;
+}
+
+/** The compilation unit's modules (file path → top-level nodes), set by `runTS` for one run. */
+let moduleIndex: Map<string, unknown[]> | null = null;
+/** Export facts per module path for the current run; `null` while being computed (a cycle → unknown). */
+let moduleFactsCache = new Map<string, Map<string, ExportFact> | null>();
+
+/**
+ * Give the check the compilation unit's modules, so a function fact crosses an `import` (an exported
+ * function that returns a closure, an exported const arrow). Call with `null` after the run.
+ */
+export function setValueFnModuleIndex(index: Map<string, unknown[]> | null): void {
+  moduleIndex = index;
+  moduleFactsCache = new Map();
+}
+
+/** Resolve an import specifier to a module path in the index (relative or `scrml:` stdlib), else null. */
+function resolveImportPath(source: unknown, fromPath: string): string | null {
+  if (!moduleIndex || typeof source !== "string") return null;
+  if (source.startsWith("./") || source.startsWith("../")) {
+    const p = resolvePath(dirname(fromPath), source);
+    if (moduleIndex.has(p)) return p;
+    if (moduleIndex.has(`${p}.scrml`)) return `${p}.scrml`;
+    return null;
+  }
+  if (source.startsWith("scrml:")) {
+    const name = source.slice("scrml:".length);
+    for (const k of moduleIndex.keys()) {
+      if (k.endsWith(`/stdlib/${name}/index.scrml`) || k.endsWith(`/stdlib/${name}.scrml`)) return k;
+    }
+  }
+  return null;
+}
+
+function moduleFacts(path: string): Map<string, ExportFact> | null {
+  if (moduleFactsCache.has(path)) return moduleFactsCache.get(path) ?? null;
+  const nodes = moduleIndex?.get(path);
+  if (!nodes) return null;
+  moduleFactsCache.set(path, null); // a cycle back to this module reads "unknown"
+  const facts = analyze(nodes, path, [], undefined, "facts").exports;
+  moduleFactsCache.set(path, facts);
+  return facts;
+}
+
+/**
+ * Host values KNOWN to be callable: the ECMAScript-standard global functions and the function
+ * members of the standard namespace objects (`Math.max`, `JSON.stringify`, `Object.keys` …),
+ * read from the standard library itself. Any other host value (a `window` / `import:host` member)
+ * is not judged — see gap g-host-value-callable-unknown-s465.
+ */
+const STD_GLOBAL_FNS = new Set<string>([
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURI", "encodeURIComponent", "decodeURI",
+  "decodeURIComponent", "String", "Number", "Boolean", "Array", "Object", "Date", "RegExp", "Map", "Set",
+  "WeakMap", "WeakSet", "Promise", "Error", "TypeError", "RangeError", "Symbol", "BigInt", "Function",
+  "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "structuredClone",
+]);
+const STD_NAMESPACES = new Set<string>([
+  "Math", "JSON", "Object", "Array", "Number", "String", "Reflect", "Promise", "Date", "Symbol", "BigInt", "Intl", "Atomics",
+]);
+function isKnownHostCallable(name: string, prop: string | null): boolean {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (prop === null) return STD_GLOBAL_FNS.has(name) && typeof g[name] === "function";
+  if (!STD_NAMESPACES.has(name)) return false;
+  const ns = g[name] as Record<string, unknown> | undefined;
+  if (!ns) return false;
+  try { return typeof ns[prop] === "function"; } catch { return false; }
+}
+
+/** Host calls that write their later arguments INTO their first argument. */
+const WRITES_INTO_FIRST = new Set<string>([
+  "Object.assign", "Object.defineProperty", "Object.defineProperties", "Reflect.set", "Reflect.defineProperty",
+]);
+
+/** The fix a closure-array refusal names (S464 "(a) Close it", the closure-array entry). */
+const CLOSURE_ARRAY_FIX =
+  "Do not build a list of functions: bind the call at the use site instead — " +
+  "`<each in=@items as i><button onclick=pick(i)>…</button></each>` or `onclick=${() => pick(i)}`.";
+
+/** Facts never stop growing in a correct run; this only bounds a defect (see the fixpoint loop). */
+const MAX_FIXPOINT_PASSES = 10000;
+
 export function checkValueFunctionStored(
   nodes: unknown[],
   filePath: string,
   importedFnNames: Iterable<string> = [],
   sourceText?: string,
 ): ValueFnStoredDiag[] {
+  return analyze(nodes, filePath, [...importedFnNames], sourceText, "report").diags;
+}
+
+function analyze(
+  nodes: unknown[],
+  filePath: string,
+  importedFnNames: string[],
+  sourceText: string | undefined,
+  mode: "report" | "facts",
+): { diags: ValueFnStoredDiag[]; exports: Map<string, ExportFact> | null } {
   const diags: ValueFnStoredDiag[] = [];
   const reportedKeys = new Set<string>();
   const defaultSpan: ValueFnSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -240,6 +341,65 @@ export function checkValueFunctionStored(
   }
   collectEnums(nodes);
 
+  /**
+   * Bind an import's names. A host import is a host binding. A scrml import takes the exporting
+   * module's facts (is it a function, may it hold / return one). When the module's facts are not
+   * known here (not in this compilation unit, or an import cycle), a lower-case name — a value or a
+   * function, not a type / enum / component — fails CLOSED: it may hold a function.
+   */
+  function bindImport(node: Rec): void {
+    const host = !isScrmlSource(node.source);
+    const specs = Array.isArray(node.specifiers) && (node.specifiers as Rec[]).length > 0
+      ? (node.specifiers as Rec[]).map((s) => ({ imported: String(s.imported ?? s.local ?? ""), local: String(s.local ?? s.imported ?? "") }))
+      : ((node.names as string[] | undefined) ?? []).map((n) => ({ imported: n, local: n }));
+    const path = host ? null : resolveImportPath(node.source, filePath);
+    const facts = path ? moduleFacts(path) : null;
+    for (const { imported, local } of specs) {
+      if (!local) continue;
+      if (host) {
+        const b = bindingFor(moduleOwner, `import:${local}`, "host");
+        b.name = local; b.imported = true;
+        frames[0].set(local, b);
+        continue;
+      }
+      if (facts) {
+        const ef = facts.get(imported);
+        const b = bindingFor(moduleOwner, `import:${local}`, ef?.kind ?? "value");
+        b.name = local; b.imported = true;
+        if (ef) {
+          b.kind = ef.kind;
+          if (ef.mayFn) b.mayFn = true;
+          if (ef.fn) b.fn = { ...ef.fn, foreign: true };
+        }
+        frames[0].set(local, b);
+        continue;
+      }
+      const existing = frames[0].get(local);
+      if (existing && existing.kind === "fn") continue; // an imported scrml function (importedFnDecls)
+      const b = bindingFor(moduleOwner, `import:${local}`, "value");
+      b.name = local; b.imported = true;
+      if (/^[a-z_$]/.test(local)) b.mayFn = true; // unknown cross-module fact — fail closed
+      frames[0].set(local, b);
+    }
+  }
+
+  /** `export const NAME = …` / `export let …` held only as raw text → its name and parsed initializer. */
+  const exportInits = new WeakMap<object, { name: string; init: unknown } | null>();
+  function exportConstInit(r: Rec): { name: string; init: unknown } | null {
+    if (r.kind !== "export-decl" || (r.exportKind !== "const" && r.exportKind !== "let") || r.declaration) return null;
+    if (exportInits.has(r)) return exportInits.get(r) ?? null;
+    let out: { name: string; init: unknown } | null = null;
+    const m = typeof r.raw === "string" ? r.raw.match(/^\s*export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([\s\S]+)$/) : null;
+    if (m) {
+      try {
+        const init = parseExprToNode(m[2], filePath, 0);
+        if (init && typeof init === "object") out = { name: m[1], init };
+      } catch { out = null; }
+    }
+    exportInits.set(r, out);
+    return out;
+  }
+
   // ---- function-ness, read from the tree ----
   function loweredOf(x: Rec): Rec | null {
     if (x.nativeKind !== "ParseError" || typeof x.raw !== "string") return null;
@@ -280,7 +440,16 @@ export function checkValueFunctionStored(
       case "ident": {
         const name = x.name;
         if (typeof name !== "string" || name.startsWith("@") || name.startsWith(".")) return false;
-        return lookup(name)?.mayFn ?? false;
+        const b = lookup(name);
+        if (b) return b.mayFn;
+        return isKnownHostCallable(name, null);
+      }
+      case "member": {
+        const o = x.object as Rec | undefined;
+        if (o?.kind === "ident" && typeof o.name === "string" && !lookup(o.name) && typeof x.property === "string") {
+          return isKnownHostCallable(o.name, x.property);
+        }
+        return false;
       }
       case "ternary": return mayFn(x.consequent) || mayFn(x.alternate);
       case "binary":
@@ -302,11 +471,41 @@ export function checkValueFunctionStored(
     const callee = x.callee as Rec | undefined;
     const args = (x.args as unknown[] | undefined) ?? [];
     if (callee?.kind === "member" && callee.property === "bind" && mayFn(callee.object)) return true;
-    const fi = calleeFn(callee);
+    // `xs.reduce(f, init)` is what its reducer last returned.
+    if (callee?.kind === "member" && (callee.property === "reduce" || callee.property === "reduceRight") && callbackReturnsFn(args[0])) return true;
+    const fi = calleeFn(callee) ?? (callee && isFnExpr(callee) ? fnInfos.get(callee) ?? null : null);
     if (!fi) return false;
     if (fi.returnsFn) return true;
     for (const i of fi.returnsParams) if (mayFn(args[i])) return true;
     return false;
+  }
+
+  /** Does this callback (a function expression or a name bound to a function) return a function? */
+  function callbackReturnsFn(cb: unknown): boolean {
+    if (!cb || typeof cb !== "object") return false;
+    const c = cb as Rec;
+    if (isFnExpr(c)) return fnInfos.get(c)?.returnsFn ?? false;
+    if (c.kind === "escape-hatch") { const lo = loweredOf(c); return lo ? callbackReturnsFn(lo) : false; }
+    if (c.kind === "ident" && typeof c.name === "string") return lookup(c.name)?.fn?.returnsFn ?? false;
+    return false;
+  }
+
+  /**
+   * A call that BUILDS a value out of what its callback returns: `xs.map(f)` / `xs.flatMap(f)`, the
+   * §59.7 `m.update(k, f)` (the updater's result is the new entry), `Array.from(xs, f)`.
+   */
+  function builtFromCallback(x: Rec): { cbIndex: number; what: string } | null {
+    const callee = x.callee as Rec | undefined;
+    if (x.kind !== "call" || callee?.kind !== "member" || typeof callee.property !== "string") return null;
+    const p = callee.property;
+    const obj = callee.object as Rec | undefined;
+    if (obj?.kind === "ident" && obj.name === "Array" && !lookup("Array") && p === "from") return { cbIndex: 1, what: "The array `Array.from(…)` builds" };
+    if (p === "map" || p === "flatMap") return { cbIndex: 0, what: `The array \`.${p}(…)\` builds` };
+    if (p === "update") {
+      const rk = rootKind(obj);
+      if (rk !== "host" && rk !== "global") return { cbIndex: 1, what: "The map entry `.update(…)` writes" };
+    }
+    return null;
   }
 
   /** What a RETURN expression of function `F` may yield: its own function, or which parameters. */
@@ -460,7 +659,7 @@ export function checkValueFunctionStored(
     const col = from + hit.index + 1;
     return { file: at.file ?? filePath, start: startOff + col - 1, end: startOff + col - 1 + tok.length, line, col };
   }
-  function report(what: string, valueNode: unknown, fnDesc: string, at: ValueFnSpan, hint: string | null): void {
+  function report(what: string, valueNode: unknown, fnDesc: string, at: ValueFnSpan, hint: string | null, fix?: string): void {
     if (!reporting) return;
     const where = locate(valueNode, at);
     const key = `${where.file}:${where.start}:${where.end}:${what}:${hint ?? ""}:${fnDesc}`;
@@ -473,9 +672,10 @@ export function checkValueFunctionStored(
         `E-VALUE-FUNCTION-STORED: ${what} stores ${fnDesc}${h}. A function is not value data — it has no ` +
         `structural equality, is not serializable and cannot be a map key — so no value holds one: not an ` +
         `object, array or map literal, not a spread into one, not a state cell, not a field or element written ` +
-        `into a value, not an enum payload (§14.3, §15.11.5.1, §59.3). Pass it instead: hand it directly to ` +
+        `into a value, not an enum payload (§14.3, §15.11.5.1, §59.3). ` +
+        (fix ?? `Pass it instead: hand it directly to ` +
         `the call that uses it as its own argument (a callback), wire it as a component prop or event handler, ` +
-        `or call it where the work happens; to choose between behaviours, store an enum tag and \`match\` on it.`,
+        `or call it where the work happens; to choose between behaviours, store an enum tag and \`match\` on it.`),
       span: where,
     });
   }
@@ -665,11 +865,54 @@ export function checkValueFunctionStored(
         const callee = x.callee as Rec | undefined;
         const args = (x.args as unknown[] | undefined) ?? [];
         const host = isHostCallee(callee);
-        // Enum payload — `Op.Apply(g)`.
-        if (x.kind === "call" && callee?.kind === "member" && (callee.object as Rec | undefined)?.kind === "ident") {
-          const en = String((callee.object as Rec).name);
-          if (enumNames.has(en) && !lookup(en)) {
-            for (const a of args) if (mayFn(a)) report(`The enum value \`${en}.${String(callee.property)}\``, a, describe(a), at, "as its payload");
+        // Enum payload — `Op.Apply(g)` and the dot shorthand `.Apply(g)` (the type comes from context).
+        {
+          let enumLabel: string | null = null;
+          if (x.kind === "call" && callee?.kind === "member" && (callee.object as Rec | undefined)?.kind === "ident") {
+            const en = String((callee.object as Rec).name);
+            if (enumNames.has(en) && !lookup(en)) enumLabel = `${en}.${String(callee.property)}`;
+          } else if (x.kind === "call" && callee?.kind === "ident" && typeof callee.name === "string" && /^\.[A-Z]/.test(callee.name)) {
+            enumLabel = callee.name;
+          }
+          if (enumLabel) for (const a of args) if (mayFn(a)) report(`The enum value \`${enumLabel}\``, a, describe(a), at, "as its payload");
+        }
+        // A value built from what a callback RETURNS — S464 "(a) Close it" (the closure-array entry).
+        {
+          const b = builtFromCallback(x);
+          if (b && callbackReturnsFn(args[b.cbIndex])) {
+            report(b.what, args[b.cbIndex], "the functions its callback returns", at, null, CLOSURE_ARRAY_FIX);
+          }
+        }
+        // A host call that writes its later arguments INTO a scrml value (`Object.assign(o, { f })`,
+        // `Object.defineProperty(o, "f", { value: f })`, `Reflect.set(o, "f", f)`).
+        let intoScrml = false;
+        if (callee?.kind === "member" && (callee.object as Rec | undefined)?.kind === "ident" && typeof callee.property === "string") {
+          const on = String((callee.object as Rec).name);
+          if (!lookup(on) && WRITES_INTO_FIRST.has(`${on}.${callee.property}`)) {
+            const rk = rootKind(args[0]);
+            if (rk !== "host" && rk !== "global") {
+              intoScrml = true;
+              const root = rootOf(args[0]);
+              const rn = root?.kind === "ident" ? String(root.name) : "this value";
+              args.forEach((a, ai) => {
+                if (ai >= 1 && mayFn(a)) report(rn.startsWith("@") ? `The state cell \`${rn}\`` : `The value \`${rn}\``, a, describe(a), at, `through \`${on}.${String(callee.property)}(…)\``);
+              });
+            }
+          }
+        }
+        // A KEPT host call whose result holds a function it was handed (`Array.of(g)`,
+        // `new Array(2).fill(g)`, `new Set().add(g)`, `new Map().set(k, g)`).
+        if (host && !ctx.discard && callee?.kind === "member" && typeof callee.property === "string" &&
+            (STORING_METHODS.has(callee.property) || callee.property === "of")) {
+          for (const a of args) if (mayFn(a)) report(`The result of \`….${callee.property}(…)\`, kept as a value,`, a, describe(a), at, "the host call's result is kept as a value, so the host boundary does not apply");
+        }
+        // A storing method on a LOCAL host collection marks it: it now holds a function, and storing
+        // it into a value is then refused like any other (`const s = new Set(); s.add(g); { s }`).
+        if (callee?.kind === "member" && typeof callee.property === "string" && STORING_METHODS.has(callee.property)) {
+          const root = rootOf(callee.object);
+          if (root?.kind === "ident" && typeof root.name === "string") {
+            const b = lookup(root.name);
+            if (b && b.kind === "host" && !b.imported && args.some((a) => mayFn(a))) setMayFn(b);
           }
         }
         // A method that may put its argument into a scrml value.
@@ -691,7 +934,7 @@ export function checkValueFunctionStored(
         }
         // Call-site propagation into a file function's parameters.
         const fi = calleeFn(callee);
-        if (fi) {
+        if (fi && !fi.foreign) {
           args.forEach((a, ai) => {
             if (mayFn(a)) for (const b of fi.params[ai] ?? []) setMayFn(b);
           });
@@ -701,7 +944,7 @@ export function checkValueFunctionStored(
         for (const a of args) {
           if (!a || typeof a !== "object") continue;
           const lit = LITERAL_KINDS.has(String((a as Rec).kind));
-          if (host && lit) {
+          if (host && lit && !intoScrml) {
             walkExpr(a, at, freshCtx({ hostArg: discardChain, keptHost: !discardChain, discard: discardChain }));
           } else {
             walkExpr(a, at, freshCtx({ discard: discardChain }));
@@ -812,14 +1055,23 @@ export function checkValueFunctionStored(
 
     switch (kind) {
       case "import-decl": {
-        const host = !isScrmlSource(node.source);
-        for (const n of importNames(node)) {
-          const existing = frames[0].get(n);
-          if (existing && existing.kind === "fn" && !host) continue; // an imported scrml function
-          frames[0].set(n, bindingFor(moduleOwner, `import:${n}`, host ? "host" : "value"));
-          frames[0].get(n)!.name = n;
-        }
+        bindImport(node);
         return;
+      }
+      case "export-decl": {
+        // `export const inc = (x) => x + 1` reaches the type stage as an export-decl carrying only
+        // its raw text (no const-decl node): read the initializer the way the other decls are read.
+        const ex = exportConstInit(node);
+        if (ex) {
+          withRoot(null, null, here.line, () => walkExpr(ex.init, here, freshCtx()));
+          const b = bindingFor(node, ex.name, initKind(ex.init));
+          if (mayFn(ex.init)) setMayFn(b);
+          if (isFnExpr(ex.init as Rec)) b.fn = fnInfoFor(ex.init as object);
+          else if ((ex.init as Rec).kind === "ident") { const t = lookup(String((ex.init as Rec).name)); if (t?.fn) b.fn = t.fn; }
+          declare(b);
+          return;
+        }
+        break;
       }
       case "function-decl": {
         if (typeof node.name === "string") {
@@ -964,8 +1216,25 @@ export function checkValueFunctionStored(
         continue;
       }
       if (r.kind === "export-decl" && r.declaration && typeof r.declaration === "object") topLevel([r.declaration]);
+      if (r.kind === "export-decl") {
+        const ex = exportConstInit(r);
+        if (ex) {
+          const b = bindingFor(r, ex.name, initKind(ex.init));
+          if (isFnExpr(ex.init as Rec)) b.fn = fnInfoFor(ex.init as object);
+          frames[0].set(ex.name, b);
+        }
+      }
       if (r.kind === "logic" && Array.isArray(r.body)) topLevel(r.body as unknown[]);
       if (r.kind === "markup" && Array.isArray(r.children)) topLevel(r.children as unknown[]);
+    }
+  };
+  const bindTopImports = (list: unknown[]): void => {
+    for (const n of list) {
+      if (!n || typeof n !== "object") continue;
+      const r = n as Rec;
+      if (r.kind === "import-decl") bindImport(r);
+      if (r.kind === "logic" && Array.isArray(r.body)) bindTopImports(r.body as unknown[]);
+      if (r.kind === "markup" && Array.isArray(r.children)) bindTopImports(r.children as unknown[]);
     }
   };
 
@@ -979,17 +1248,53 @@ export function checkValueFunctionStored(
       b.name = n;
       frames[0].set(n, b);
     }
+    bindTopImports(nodes);
     topLevel(nodes);
     for (const n of nodes) walkAny(n, defaultSpan);
   }
 
-  // Solve binding / function facts to a fixpoint, then report once.
-  for (let pass = 0; pass < 16; pass++) {
+  // Solve binding / function facts to a fixpoint (facts only grow — booleans flip false→true and
+  // sets only gain members — so this terminates), then report once. The cap is a guard against a
+  // defect, not a budget: hitting it refuses the file (fail closed), it never reports silently.
+  let converged = false;
+  for (let pass = 0; pass < MAX_FIXPOINT_PASSES; pass++) {
     changed = false;
     runPass();
-    if (!changed) break;
+    if (!changed) { converged = true; break; }
+  }
+  if (mode === "facts") {
+    const out = new Map<string, ExportFact>();
+    if (!converged) return { diags, exports: null };
+    const collect = (list: unknown[]): void => {
+      for (const n of list) {
+        if (!n || typeof n !== "object") continue;
+        const r = n as Rec;
+        if (r.kind === "function-decl" && r.exported === true && typeof r.name === "string") {
+          const b = frames[0].get(r.name);
+          if (b) out.set(r.name, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+        }
+        if (r.kind === "export-decl" && typeof r.exportedName === "string" && !r.reExportSource && !out.has(r.exportedName)) {
+          const b = frames[0].get(r.exportedName);
+          if (b) out.set(r.exportedName, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+        }
+        if (r.kind === "logic" && Array.isArray(r.body)) collect(r.body as unknown[]);
+      }
+    };
+    collect(nodes);
+    return { diags, exports: out };
   }
   reporting = true;
+  if (!converged) {
+    diags.push({
+      code: "E-VALUE-FUNCTION-STORED",
+      message:
+        "E-VALUE-FUNCTION-STORED: the compiler could not finish deciding which values in this file may hold a " +
+        "function (the analysis did not converge), so it refuses the file rather than pass a value it could not " +
+        "judge. This is a compiler limit, not a defect in your program — please report it.",
+      span: defaultSpan,
+    });
+    return { diags, exports: null };
+  }
   runPass();
-  return diags;
+  return { diags, exports: null };
 }

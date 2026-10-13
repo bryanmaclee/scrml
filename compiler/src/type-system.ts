@@ -119,7 +119,7 @@ import {
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
-import { checkValueFunctionStored } from "./value-function-stored.ts";
+import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
@@ -28601,6 +28601,18 @@ export function runTS(input: {
   // read off the file being checked. See `compilationUnitHasServerContext`.
   const appHasServerContext = compilationUnitHasServerContext(files);
 
+  // §14.3 E-VALUE-FUNCTION-STORED reads function facts ACROSS imports (an exported closure-returning
+  // function, an exported const arrow), so it is handed the compilation unit's modules for this run.
+  {
+    const _vfsIndex = new Map<string, unknown[]>();
+    for (const f of files) {
+      const fp = (f as { filePath?: unknown }).filePath;
+      const ns = ((f as { nodes?: unknown }).nodes ?? (f as { ast?: { nodes?: unknown } }).ast?.nodes) as unknown[] | undefined;
+      if (typeof fp === "string" && Array.isArray(ns)) _vfsIndex.set(fp, ns);
+    }
+    setValueFnModuleIndex(_vfsIndex);
+  }
+
   for (const fileAST of files) {
     // Look up imported types for this file from the caller-provided map.
     // api.js builds this map in topological order so dependency types are available
@@ -28618,6 +28630,7 @@ export function runTS(input: {
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;
   }
+  setValueFnModuleIndex(null);
 
   return {
     files: typedFiles,

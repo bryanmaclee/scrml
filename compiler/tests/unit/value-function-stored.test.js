@@ -333,3 +333,84 @@ describe("fix round 1 — F6: each stored function is reported at its own positi
     expect(d.find((x) => x.span.line === 7).message).toContain("`deep.f`");
   });
 });
+
+// ---------------------------------------------------------------------------
+// S464 fix round 2 (re-review of 8e685cc35). Each refusal below compiled clean under round 1.
+// ---------------------------------------------------------------------------
+describe("fix round 2 — N1: the dot-shorthand enum payload", () => {
+  test("`const v: Op = .Apply(twice)` and `return .Apply(twice)` (e3, e1)", () => {
+    expect(stored(compile(prog(`  type Op:enum = { Apply(f: string), None }\n${TWICE}  const v: Op = .Apply(twice)`, `<p>\${v}</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`  type Op:enum = { Apply(f: string), None }\n${TWICE}  function mk() -> Op { return .Apply(twice) }\n  const v = mk()`, `<p>\${v}</p>`))).length).toBe(1);
+  });
+});
+
+describe("fix round 2 — S464 \"(a) Close it\": a value built from what a callback RETURNS", () => {
+  test("`[1, 2].map(() => twice)` / `.map((n) => (x) => x + n)` / `Array.from([1], () => twice)` (c05, c06, c13)", () => {
+    for (const logic of [
+      `${TWICE}  const o = [1, 2].map(() => twice)`,
+      `  const o = [1, 2].map((n) => (x) => x + n)`,
+      `${TWICE}  const o = Array.from([1], () => twice)`,
+    ]) {
+      const d = stored(compile(prog(logic, `<p>\${o}</p>`)));
+      expect(d.length).toBe(1);
+      expect(d[0].message).toContain("bind the call at the use site");
+    }
+  });
+  test("`items.map((i) => () => pick(i))` — the closure-array the ruling names", () => {
+    const d = stored(compile(prog(`  function pick(i) { return i }\n  const items = [1, 2]\n  const handlers = items.map((i) => () => pick(i))`, `<p>\${handlers.length}</p>`)));
+    expect(d.length).toBe(1);
+  });
+  test("a callback that returns DATA builds data (`.map(twice)`, `Array.from(xs, twice)`)", () => {
+    expect(stored(compile(prog(`${TWICE}  const a = [1, 2].map(twice)\n  const b = Array.from([1, 2], twice)\n  const c = [1].map((x) => x + 1)`, `<p>\${a}\${b}\${c}</p>`))).length).toBe(0);
+  });
+});
+
+describe("fix round 2 — N3: function facts cross an import", () => {
+  function compileWithLib(main) {
+    const dir = mkdtempSync(join(TMP, "imp-"));
+    writeFileSync(join(dir, "lib.scrml"), `\${\n  export function twice(x) { return x * 2 }\n  export function adder(n) { return (x) => x + n }\n  export const inc = (x) => x + 1\n  export const LIMIT = 3\n}\n`);
+    const fp = join(dir, "main.scrml");
+    writeFileSync(fp, main);
+    const res = compileScrml({ inputFiles: [fp], outputDir: join(dir, "dist"), write: false, log: () => {} });
+    return stored(res).filter((d) => String(d.span?.file ?? fp).endsWith("main.scrml"));
+  }
+  test("an exported const arrow stored (`[inc]`) and an imported closure-returning call stored (`{ f: adder(2) }`)", () => {
+    expect(compileWithLib(`\${\n  import { inc } from './lib.scrml'\n  const o = [inc]\n}\n<program><p>\${o}</p></>\n`).length).toBe(1);
+    expect(compileWithLib(`\${\n  import { adder } from './lib.scrml'\n  const o = { f: adder(2) }\n}\n<program><p>\${o.f(1)}</p></>\n`).length).toBe(1);
+  });
+  test("imported DATA and imported data-returning calls are not functions", () => {
+    expect(compileWithLib(`\${\n  import { twice, LIMIT } from './lib.scrml'\n  const o = { n: twice(2), max: LIMIT }\n}\n<program><p>\${o.n}</p></>\n`).length).toBe(0);
+  });
+});
+
+describe("fix round 2 — N4: host calls that store into a value, kept host results, known host callables", () => {
+  test("`Object.assign(o, { f: twice })` / `Object.defineProperty(o, \"f\", { value: twice })` on a scrml value (c02, c03)", () => {
+    expect(stored(compile(prog(`${TWICE}  const o = { n: 1 }\n  Object.assign(o, { f: twice })`, `<p>\${o.n}</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`${TWICE}  const o = { n: 1 }\n  Object.defineProperty(o, "f", { value: twice })`, `<p>\${o.n}</p>`))).length).toBe(1);
+  });
+  test("kept host results holding a function: `Array.of(twice)`, `new Array(2).fill(twice)`, `new Set().add(twice)`, `new Map().set(\"k\", twice)` (c14, c15)", () => {
+    for (const init of ["Array.of(twice)", "new Array(2).fill(twice)", "new Set().add(twice)", `new Map().set("k", twice)`]) {
+      expect(stored(compile(prog(`${TWICE}  const o = ${init}`, `<p>x</p>`))).length).toBe(1);
+    }
+  });
+  test("a local host collection that took a function, then stored in a value (c11, c12)", () => {
+    expect(stored(compile(prog(`${TWICE}  const s = new Set()\n  s.add(twice)\n  const o = { s: s }`, `<p>x</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`${TWICE}  const m = new Map()\n  m.set("k", twice)\n  const o = { m: m }`, `<p>x</p>`))).length).toBe(1);
+  });
+  test("a host value KNOWN callable stored: `{ f: Math.max }`, `{ t: String }` (c20)", () => {
+    expect(stored(compile(prog(`  const o = { f: Math.max }`, `<p>x</p>`))).length).toBe(1);
+    expect(stored(compile(prog(`  const o = { t: String }`, `<p>x</p>`))).length).toBe(1);
+  });
+  test("host DATA stays legal: `{ pi: Math.PI }`, `Object.assign({}, { a: 1 })`, a statement `new Set().add(twice)`", () => {
+    expect(stored(compile(prog(`${TWICE}  const o = { pi: Math.PI, m: Object.assign({}, { a: 1 }) }\n  function go() { new Set().add(twice) }`, `<button onclick=go()>\${o.pi}</button>`))).length).toBe(0);
+  });
+});
+
+describe("fix round 2 — N5: the fixpoint runs to convergence (no silent 16-pass cap)", () => {
+  test("a 17-deep reverse-order alias chain is still refused", () => {
+    const lines = [TWICE.trimEnd()];
+    for (let i = 17; i >= 1; i--) lines.push(`  function a${i}() { return a${i - 1}() }`);
+    lines.push("  function a0() { return twice }", "  const o = { v: a17() }");
+    expect(stored(compile(prog(lines.join("\n"), `<p>\${o.v}</p>`))).length).toBe(1);
+  });
+});
