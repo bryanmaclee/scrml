@@ -3805,6 +3805,19 @@ to a path where the value actually crosses the wire.
   sibling of E-RI-002 (§12), which governs a server function *writing* a `@reactive` cell.
 - The error message SHALL name the cell, state that it resolves to `undefined` server-side
   because the value is not transported, and offer both fixes above.
+- **Every read position counts (S464).** A client-cell read inside a template-literal
+  interpolation (`` `n=${@n}` ``), inside a block-bodied callback, or in a parameter default of
+  the wholly server-escalated function is the same not-transported read and SHALL be
+  E-REACTIVE-003. Literal text that merely contains `@` — a string, a template's literal part, a
+  regular-expression literal, a comment — is not a read and SHALL NOT fire it.
+  > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Close it" (template cell-read entry) ·
+  > closes `g-template-literal-cell-read-in-fn-undefined-on-server-s464` (`fn f(k) { return
+  > \`${@n}-${k}\` }` reached from a server function answered `"undefined-3"`) · dispatch
+  > s464-pure-fn-placement fix round 3. **Direction of change: newly-rejecting** — a program
+  > whose server function read a cell in one of these positions (always `undefined` at request
+  > time) no longer compiles. Corpus measured at S464: 0 of 2836 repo sources and 0 giti /
+  > flogence programs newly rejected; 9 compiler test fixtures moved to a CPS-split host,
+  > where the read is marshalled.
 - **CPS carve-out — the MARSHAL (the form-submit / login idiom).** A function that also
   performs a reactive assignment (`@cell = …`) is CPS-split (§19.9.9) — a CLIENT function
   with an embedded server round-trip. Its `@cell` reads sit in the server BATCH, and the

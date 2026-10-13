@@ -2726,11 +2726,14 @@ function detectServerFreeClientCellReads(
 
   // s464 fix round 2 — the shared `@`-reader (nested function declarations are
   // their own placement unit, so they are not descended, as before).
+  // s464 fix round 3 — `opaqueCode: true` (owner ruling S464 "(a) Close it"): a
+  // cell read inside a template-literal interpolation or block-body lambda of a
+  // wholly-server function is the same always-`undefined` read as a bare one.
   for (const stmt of body) {
-    forEachAtRef(stmt, record, { descendNestedFns: false, opaqueCode: false },
+    forEachAtRef(stmt, record, { descendNestedFns: false, opaqueCode: true },
       (stmt && typeof stmt === "object") ? (stmt as any).span : undefined);
   }
-  forEachAtRef(extraExprs, record, { descendNestedFns: false, opaqueCode: false }, extraSpan);
+  forEachAtRef(extraExprs, record, { descendNestedFns: false, opaqueCode: true }, extraSpan);
   return out;
 }
 

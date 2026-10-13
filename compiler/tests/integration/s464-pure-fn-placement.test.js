@@ -493,15 +493,20 @@ describe("s464 fix round 2 NEW-2 — E-REACTIVE-003 reads the same tree", () => 
     });
   }
 
-  test("a fn reading a cell inside a template interpolation is not emitted as a client-lowered helper", () => {
-    // Placement reads interpolations (opaqueCode), so the fn keeps its prior path
-    // and no `_scrml_reactive_get` reaches the server bundle. (E-REACTIVE-003 does
-    // not yet read interpolations — g-template-literal-cell-read-in-fn-undefined-on-server-s464.)
-    const { errors, outDir } = compileFiles({
+  test("a cell read inside a template interpolation reached from server code is E-REACTIVE-003 (was `\"undefined-3\"`)", () => {
+    // s464 fix round 3 — owner ruling S464 "(a) Close it": E-REACTIVE-003 reads
+    // template-literal interpolations (closes g-template-literal-cell-read-in-fn-undefined-on-server-s464).
+    const { errors } = compileFiles({
       "app.scrml": goProg("  fn f(k) { return `${@n}-${k}` }\n  server fn go(x) { return f(x) }"),
     }, "app.scrml", "tpl-cell");
-    expect(errors).toEqual([]);
-    expect(readFileSync(join(outDir, "app.server.js"), "utf-8")).not.toContain("_scrml_reactive_get(");
+    expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
+  });
+
+  test("…and directly in a wholly-server function's template", () => {
+    const { errors } = compileFiles({
+      "app.scrml": goProg("  server fn go(x) { const s = `n=${@n}`\n    return s }"),
+    }, "app.scrml", "tpl-cell-direct");
+    expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
   });
 });
 
