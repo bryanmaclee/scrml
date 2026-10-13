@@ -488,3 +488,11 @@
   commands + lsp 726 pass / 3 skip / 0 fail (after `bun run pretest`); s465 test files (8 integration + 5 unit) 533 /
   0; PA repro `pa-verify.mjs` high1LibLambda wrong → REJECTED, right → WELCOME; reviewer probes s1–s14 (206 shapes):
   0 wrong passwords accepted (3 IMPORT-FAIL = the filed stdlib re-export gap, fail closed).
+- 2026-10-13 origin/main moved again during the gates (#1417, f7b7310bf): merged → 7a45390b6. One code hunk:
+  compiler/src/codegen/index.ts imports — HEAD added `dropCascadeOnlyErrors` (server-text-guard), main added
+  `recordRefusedLowering` + `refuseUnrenderedStatementMarkup` / `markupNotRenderedMessage`; resolved as the union of
+  both. known-gaps: main's 15 new S462/S464 entries + every branch entry kept (both id sets verified present),
+  counts regenerated; FACTS regenerated.
+- Gates on 7a45390b6: pre-commit full 36251 pass / 0 fail; types-gate --check OK (180, 0 NEW); self-host-v2 2280 / 0;
+  commands + lsp 726 pass / 3 skip / 0 fail (after `bun run pretest`); s465 test files 533 / 0; `pa-verify.mjs`
+  high1LibLambda wrong → REJECTED / right → WELCOME; reviewer probes s1–s14 (206): 0 wrong passwords accepted.
