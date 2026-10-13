@@ -10,3 +10,4 @@
 2026-10-13T02:52:35-06:00 FR1: F1 D-5 pass moved after all body emission + added to value-only path; F2 E-CG-016 for pure-fn helper names (module-scope check, no silent skip; endpoint helpers excluded from pure set); F3 params scanned (placement) + E-REACTIVE-003 scans param defaults. +7 tests (6 fail on 6ce9fcd62). Reviewer cases: all equal-or-better vs main.
 2026-10-13T03:07:02-06:00 FR1: filed 6 gaps (P1-P5 + Trigger-5 function-helper route), each re-executed on base+head; state.ts regenerated
 2026-10-13T03:29:38-06:00 FR1 differential (base origin/main 707c499f): 2836 sources, outcomes/diagnostics/artifact set/syntax identical; 15 real artifact diffs = the same trucking-dispatch set as round 0 (D-5 block count unchanged corpus-wide); giti+flogence: 7 dir failures both sides, 0 diag diffs, 2 artifacts (flogence graph-read route renumbering). Gate head 33242/58/0.
+2026-10-13T03:50:30-06:00 fix round 2 start (merge origin/main: up to date)
