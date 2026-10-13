@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 254 | 4 |
 | MED | 617 | 6 |
-| LOW | 391 | 0 |
+| LOW | 392 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -206,6 +206,10 @@ Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mj
 ### g-value-function-stored-by-type-design-s465 — DESIGN ITEM: E-VALUE-FUNCTION-STORED is POSITION-ENUMERATED (a retrofit that lists the places a function can be put into a value); enforce it BY TYPE instead — a value's type may not contain a function type — `NEW S465; MED; open (design item — owner ruled S464 "(a) Fix + land + type rule" to bank it)`
 <!-- @gap id=g-value-function-stored-by-type-design-s465 sev=MED status=open locus=compiler/src/value-function-stored.ts(position enumeration)+compiler/src/type-system.ts(no function-in-value-type rule) prov=ruling:user-voice-scrml.md S464 "(a) Fix + land + type rule" -->
 Three adversarial review rounds of s465-value-fn-land each found new positions the enumeration missed (block-bodied lambdas, aliases, field writes, enum payloads, host stores, closure-returning callbacks, imports, re-exports, match arms…). Positions still open when the branch landed (evidence for the by-type design): `reduceRight` with a function accumulator (`g-vfs-reduceright-s465`), `Array.prototype.map.call(xs, () => g)` (`g-vfs-proto-call-s465`), `Array(g)` / `new Array(g)` (`g-vfs-array-ctor-s465`), `Object.setPrototypeOf(o, { f: g })` and an aliased `const d = Object.defineProperty` (`g-vfs-host-store-alias-s465`), a function read off host data (`g-host-value-callable-unknown-s465`), a function passed to an imported function that stores its parameter (`g-cross-module-param-store-unjudged-s465`), a value-form `if` inside an expression (`g-value-form-if-in-expression-invalid-js-s465`), a namespace import's members. A type rule closes the class by construction: every value position has a type; refuse any whose type (deep) contains a function type, with the passed/called positions (argument, callback, prop, handler, local binding) typed as such.
+
+### g-timer-struct-misuse-aliases-s465 — E-TIMER-STRUCT-MISUSE fires on a name or state cell initialised by `debounce(…)` / `throttle(…)`, but not through an alias (`const e = d; e(1)`), an array element (`ds[0](1)`) or an object field (`o.s.cancel()`): those compile clean and throw a TypeError at run time — `NEW S465; LOW; open`
+<!-- @gap id=g-timer-struct-misuse-aliases-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(checkTimerMisuse — direct names / cells only) prov=review:s465-value-fn-r4 (tm/t08, tm/t09) -->
+Filed per the round-4 brief (residual RS1). The struct type is not carried through aliases or into collection elements / fields. Closed by giving `Debouncer` / `Throttler` a real struct type the call checker reads (calling a value of struct type, or a missing method on one), or by the by-type design item `g-value-function-stored-by-type-design-s465`.
 
 ### g-vfs-reduceright-s465 — `xs.reduceRight((a, x) => twice, thrice)` — a reducer whose accumulator is a function is not judged as storing (the result is a function bound to a local; storing it later is refused) — `NEW S465; LOW; open`
 <!-- @gap id=g-vfs-reduceright-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(callMayFn reduce/reduceRight) prov=review:s465-value-fn-r3 (ca/h28) -->
