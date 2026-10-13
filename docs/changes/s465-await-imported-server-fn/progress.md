@@ -471,3 +471,20 @@
   + 1` → `i = i + 1` inside a C-for body: main ships a TDZ ReferenceError — the r3 for-header-names fix), flogence
   fsp-wire-tool (`await (rpc(…))` → `await (await rpc(…))`: `rpc` is a function-valued binding now coloured async;
   same value).
+- 2026-10-13 r6 merge of origin/main 351c11b7c (#1416, #1419) → 0352fea45. Code conflicts: emit-server.ts only (4
+  hunks) — #1419 replaced `emitReferencedModuleConstLines` with `planModuleBindingClosure` (transitive closure in
+  dependency order, E-ROUTE-002 refusals, N1–N4) and `checkUserModuleDeclCollisions`, and moved the D-5 call after
+  every helper block. Resolved by taking main's side of all 4 hunks and re-applying r6 inside it: (1) two new
+  optional params `asyncCalleeMap` / `asyncExportRegistry` + `asyncLocalBindingsOfFile(fileAST)`; (2) in the value
+  branch, before `emitLogicNode`: the r6 module-value escape refusal (E-ASYNC-FN-ESCAPES-AS-VALUE, the binding added to
+  `refused`) and the async emission (`asyncFnValueDecl` + the async facts in the emit opts); (3) the web-app call site
+  passes `_asyncCalleeMap` / `_asyncExportRegistry` and drains the sync-callback sink after the closure. r6's own
+  "referenced is transitive" fixpoint is dropped — main's closure supersedes it (it follows lambda bodies through
+  `codeTokens`). The value-only module path (`generateValueOnlyServerJs`) is unchanged (it has no export registry —
+  pre-existing). One import fix (auto-merged, not a conflict hunk): emit-server's scheduling import now carries both
+  main's `buildCalleeImportMap` and r1's `buildServerCalleeImportMap` (types-gate caught the missing name).
+  known-gaps: both sides' entries kept (every main gap id present), counts regenerated; FACTS regenerated.
+- Gates on 0352fea45: pre-commit full 36163 pass / 0 fail; types-gate --check OK (180, 0 NEW); self-host-v2 2280 / 0;
+  commands + lsp 726 pass / 3 skip / 0 fail (after `bun run pretest`); s465 test files (8 integration + 5 unit) 533 /
+  0; PA repro `pa-verify.mjs` high1LibLambda wrong → REJECTED, right → WELCOME; reviewer probes s1–s14 (206 shapes):
+  0 wrong passwords accepted (3 IMPORT-FAIL = the filed stdlib re-export gap, fail closed).
