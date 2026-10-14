@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 260 | 4 |
-| MED | 634 | 6 |
-| LOW | 400 | 0 |
+| MED | 636 | 6 |
+| LOW | 401 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -157,6 +157,24 @@ Measured in s465 fix round 4 (S239 probes c1 / cl3, client functions): `{ @out =
 <!-- @gap id=g-js-exclusions-unchecked-in-block-arrow-value-bodies-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(ArrowFunctionExpression / FunctionExpression with a BlockStatement body → makeEscapeHatch; the body text is never read by the statement parser) + compiler/src/codegen/emit-expr.ts(emitEscapeHatch: client text path; server serverTextLowering → emitServerFnValueFromText only when the text holds a call) prov=review:s465-await-r5 -->
 
 Measured in s465 fix round 5 (executed, origin/main 41af4153a and r5 head alike): a client function with `const g = (x) => { switch (x) { case 2: return "two"⏎default: return "other" } }` compiles with zero errors (also `throw`, `try`); a server function's arrow value with the same body and no call runs. Since r4 a server block-bodied value whose body holds a call is read by the function-body statement parser (`emitServerFnValueFromText`), and since r5 that path reports the front-end's own code (E-SWITCH-FORBIDDEN …) — so on the server the diagnostic now depends on whether the body happens to call something. Fix direction (the one-reader fix): the front-end reads a block-bodied function value's body with the statement parser at stage 1 (the same reader a function declaration's body gets), on both sides. Direction of change: newly-rejecting — each such body becomes the code its statement gets in a function body.
+
+### g-per-emitter-async-fixpoints-remaining-s466 — four emit paths still run their OWN async-coloring fixpoint instead of reading the file's one async name set (`file-async-fns.ts`): the client coloring, library mode, tool mode and emit-server's escape-rule `_genuineAsync` — `NEW S466 r7; MED; open`
+
+<!-- @gap id=g-per-emitter-async-fixpoints-remaining-s466 sev=MED status=open locus=compiler/src/codegen/emit-functions.ts(computeClientAsyncSets)+compiler/src/codegen/emit-library.ts(emitAsyncLibraryFns, guardNestedFnValues)+compiler/src/codegen/emit-tool.ts(generateToolJs / serve harness / generateToolLibraryJs computeAsyncFnNames without the stdlib registry)+compiler/src/codegen/emit-server.ts(_genuineAsync) prov=review:s466-await-r6 -->
+
+s465 fix round 7 put every SERVER web-app reader on ONE per-file set (ss1 value exports, the D-5 closure, the server callee map, the cross-module importers) and deleted five second readers. Left, each answering a related but not identical question, each its own `computeAsyncFnNames` call: (1) the client coloring — a server function is a fetch stub there, not a peer; (2) library mode — the GITI-038 guarded walk (a nested function VALUE's async call does not colour its factory), a client-facing `.js`; (3) tool mode — `generateToolJs` and the serve / tool-lib paths pass no stdlib registry, so a tool function calling `verifyPassword` is coloured only by the call-site classifier, not by the fixpoint (not measured as a hole this round); (4) `_genuineAsync` decides the ESCAPE rule's narrower outer facts (#284 placement-only helpers), not an await. Fix direction: the one set carries the guarded / by-body / mode facts as views (`asyncByBodyOf` is the first such view) and each path reads a view. Direction of change: none for programs the server paths already colour; possible newly-coloured (newly-awaited) tool functions.
+
+### g-lambda-to-user-hof-reports-sync-callback-code-s466 — an async-calling lambda passed to a user-written higher-order function (`run((a, b) => check(a, b), …)`) is refused with E-ASYNC-STDLIB-IN-SYNC-CALLBACK; SPEC §13.2 names E-ASYNC-FN-ESCAPES-AS-VALUE for passing an async-colored function to a user HOF — `NEW S466 r7; LOW; open`
+
+<!-- @gap id=g-lambda-to-user-hof-reports-sync-callback-code-s466 sev=LOW status=open locus=compiler/src/codegen/emit-expr.ts(sync-call sink recording sites: syncCallSink / syncPeerCalls pushes) + the drains in emit-server.ts / emit-library.ts / emit-functions.ts prov=review:s466-await-r6 -->
+
+Fails closed either way (the program does not compile). The code is chosen where the sink entry is drained; whether the lambda was an argument of a user HOF (vs a sync consumer like `.sort`) is not recorded at the ~7 recording sites in emit-expr. Fix direction: emitCall marks the argument context (`escapingLambda`) and the sink entry carries it; every drain maps such an entry to the E-ASYNC-FN-ESCAPES-AS-VALUE builder. Probe: reviewer `probes2/n3.mjs` runLambda.
+
+### g-fn-reached-only-through-lambda-not-on-server-s466 — a top-level function reached by server code only inside a lambda argument (`setTimeout(() => peer(…))` with a program-bound `setTimeout`, a binding's block body calling `getPw()`, a propagated helper) is not placed on the server: `ReferenceError: peer is not defined` at run time (a 500 — fails closed) — `NEW S466 r7; MED; open (pre-existing on BASE)`
+
+<!-- @gap id=g-fn-reached-only-through-lambda-not-on-server-s466 sev=MED status=open locus=searched:compiler/src/route-inference.ts(callee collection does not descend lambda arguments for placement)—not-traced prov=review:s466-await-r6 -->
+
+Executed on s466-await-r7 and on base (reviewer probes n4 peerSchedShadowTop, s-probes propagate / sqlInBindingBlock): every request throws a ReferenceError — no wrong value, but a compile that should either place the function or refuse ships a bundle that cannot run. Related: g-cell-reading-fn-called-inline-from-server-undefined-no-diagnostic-s464 (the `@`-reading variant). Fix direction: route inference's callee walk descends lambda / block-arrow bodies (the same tree the emit pass's `_calledPeerNames` walk already reads), or the emit pass refuses a call to a name it will not emit.
 
 ### g-top-level-fn-param-default-dropped-server-s465 — a top-level `function g(x = 5) { return x }` called from server code returns `undefined` for `g()`: the parameter default is dropped when the function is emitted as a server peer — `NEW S465 r6; HIGH; open (pre-existing on BASE)`
 
@@ -415,6 +433,8 @@ TAB already built.
 Found by the S465 S239 review of the P0 CPS branch and reproduced on main `1c1e9eee` (route `x1`: wrong password → "WELCOME"). Same-file helpers are awaited; #1399 fixed the same class for `scrml:` stdlib. Governing §13.2: "It MAY be called directly (the compiler awaits the call)". Fix branch `auto/s465-await-imported-server-fn` (5 S239 rounds at S465; round 5 on `55cdda9d` still FIX: `firstCallInText` misses a callee named `of` and calls after a postfix `++`/`--` division; block-bodied server function values regress — see that branch's progress.md and the S465 hand-off).
 
 **s465-await-r5 (branch `s465-await-r5`, on top of 55cdda9d):** round-5 findings fixed — the server text guard is now purely lexical (`lexicalCallInText`, nothing skipped; executed `of(…)` and `i++ / … check(…) /` hatches → compile error instead of WELCOME), block-bodied values accept `await` in a string and report §7.2.1 constructs by their own code, destructured lambda parameters are written back, `.then` on an awaited call is E-ASYNC-CALL-PROMISE-METHOD. Status stays open until the PA lands the branch.
+
+**s466-await-r7 (root round, pushed to `s465-await-r5`):** ONE async name set per file (`codegen/file-async-fns.ts`, read by ss1 / D-5 / the server callee map / importers; five second readers deleted) closes the non-exported-helper hole (HIGH-A); ONE scheduler predicate (`isGlobalSchedulerCallee`, SPEC §13.2 file-level rule) closes the program-bound `setTimeout` hole (HIGH-B); async function-valued bindings are coloured on the client (MED-C); function values are lowered from the parser's node (MED-D). Reviewer probe set (331 shapes): wrong passwords accepted 12 → 0. Residue filed: g-per-emitter-async-fixpoints-remaining-s466, g-lambda-to-user-hof-reports-sync-callback-code-s466, g-fn-reached-only-through-lambda-not-on-server-s466.
 
 ### g-destructure-string-default-loses-quotes-s465 — a string-literal default in a destructuring pattern loses its quotes: `const { r = "user" } = {}` emits `{ r = user }` and binds whatever `user` is in scope (client and server) — `NEW S465; HIGH; open`
 <!-- @gap id=g-destructure-string-default-loses-quotes-s465 sev=HIGH status=open locus=compiler/src/codegen/emit-destructure-pattern.ts(default emission) prov=review:s465-await-r5 -->
