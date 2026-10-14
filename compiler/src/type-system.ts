@@ -1532,24 +1532,85 @@ const BUILTIN_TYPES: Map<string, ResolvedType> = new Map([
   ["SQLError",        tError("SQLError",        new Map())],
   ["AuthError",       tError("AuthError",       new Map())],
   ["TimeoutError",    tError("TimeoutError",    new Map())],
-  // §41.13 — ParseError is the canonical failure-type for parseVariant
-  // (Path A, L22). It is declared in `stdlib/data/parse.scrml`; an explicit
-  // `import { ParseError } from 'scrml:data'` seeds that declaration through
-  // the general stdlib-type path (§53.14.6, api.js importedTypes — re-exports
-  // chased since S462), which shadows this entry. The built-in remains for the
-  // case the import path cannot cover: a `!{}` handler on a parseVariant call
-  // in a file that never imports ParseError still resolves the type for its
-  // exhaustiveness check. The four variants must stay identical to the stdlib
-  // declaration — pinned by compiler/tests/unit/stdlib-shim-export-parity.test.js §5.
-  ["ParseError",      tEnum("ParseError", [
-    { name: "MissingDiscriminator", payload: null, renders: null },
-    { name: "UnknownVariant",       payload: new Map([["tag",    tPrimitive("string")]]), renders: null },
-    { name: "InvalidPayload",       payload: new Map([["field",  tPrimitive("string")], ["reason", tPrimitive("string")]]), renders: null },
-    { name: "Malformed",            payload: new Map([["reason", tPrimitive("string")]]), renders: null },
-  ])],
+  // §41.13 / §53.14.6 (S466, ruling user-voice-scrml.md S464 "(a) Import-only")
+  // — `ParseError` is NOT a built-in name. It is imported like every stdlib
+  // export (`import { ParseError } from 'scrml:data'`); see PARSE_ERROR_ENUM.
   ["NotFoundError",   tError("NotFoundError",   new Map())],
   ["ConflictError",   tError("ConflictError",   new Map())],
 ]);
+
+/**
+ * §41.13 — the failure type of a `parseVariant` call, as the COMPILER knows it.
+ *
+ * NOT a name in any file's scope or type registry (S466, ruling user-voice-scrml.md
+ * S464 "(a) Import-only": `ParseError` is imported like every stdlib export). A
+ * `parseVariant` call's failure type is resolved by this IDENTITY, never by name
+ * lookup: `fnErrorTypes` maps a `parseVariant` local to the unnameable key
+ * PARSE_VARIANT_FAILURE, so a user's own `type ParseError:enum` cannot hijack it, and
+ * a `!{}` handler whose arms are bare (`.Malformed(r) :>`) needs no import and is
+ * still checked for exhaustiveness against these four variants. The four variants
+ * must stay identical to the stdlib declaration — pinned by
+ * compiler/tests/unit/stdlib-shim-export-parity.test.js §5.
+ */
+const PARSE_ERROR_ENUM: EnumType = tEnum("ParseError", [
+  { name: "MissingDiscriminator", payload: null, renders: null },
+  { name: "UnknownVariant",       payload: new Map([["tag",    tPrimitive("string")]]), renders: null },
+  { name: "InvalidPayload",       payload: new Map([["field",  tPrimitive("string")], ["reason", tPrimitive("string")]]), renders: null },
+  { name: "Malformed",            payload: new Map([["reason", tPrimitive("string")]]), renders: null },
+]);
+
+/** The `fnErrorTypes` key for a parseVariant call's failure type — not an identifier, so no program can name it. */
+const PARSE_VARIANT_FAILURE = "scrml:data/ParseError";
+
+/**
+ * The error types the COMPILER provides — named by the SPEC as built in, never declared
+ * by the program, and NOT in BUILTIN_TYPES (so not seeded into the type registry):
+ *
+ *   - `Error` — §19.4.2: "`!` without `-> ErrorType` uses a built-in default error enum:
+ *     `Error`, which has a single variant `Error::Generic(message: string)`."
+ *   - `SqlError` — §19.8.1: "`SqlError` SHALL be a built-in enum type provided by the
+ *     compiler." Variants: §19.8.1's three + §8.9.4's `BatchPrepareFailed`.
+ *   - `ServerCallError` — §19.9 (S454): "one built-in enum, `ServerCallError`. It is
+ *     provided by the compiler, as `SqlError` is". (impl#1 does not yet emit it.)
+ *
+ * The other SPEC-named built-in error types (§14.1.2: NetworkError, ValidationError,
+ * SQLError, AuthError, TimeoutError, NotFoundError, ConflictError) ARE in
+ * BUILTIN_TYPES and resolve through the registry. `ParseError` is a stdlib export
+ * (import-only, §41.13) and is deliberately absent here.
+ */
+const COMPILER_ERROR_TYPE_NAMES: ReadonlySet<string> = new Set(["Error", "SqlError", "ServerCallError"]);
+
+/**
+ * The VARIANT SET an error-type name denotes, for the checks that read one
+ * (exhaustiveness, `?` propagation, qualifier mismatch): the file's registry (declared,
+ * imported under its LOCAL name, or a BUILTIN_TYPES entry), or — for the parseVariant
+ * identity key only — PARSE_ERROR_ENUM. A compiler-provided type in
+ * COMPILER_ERROR_TYPE_NAMES is deliberately NOT given a variant set here: those checks
+ * have never been applied to `Error` / `SqlError` / `ServerCallError` through a
+ * `fnErrorTypes` name (the `Error` default and a `?{}` handler's SqlError keep their own
+ * dedicated paths), and turning them on is newly-rejecting beyond S466's scope.
+ */
+function resolveFailableErrorType(
+  name: string,
+  typeRegistry: Map<string, ResolvedType>,
+): ResolvedType | undefined {
+  if (name === PARSE_VARIANT_FAILURE) return PARSE_ERROR_ENUM;
+  return typeRegistry.get(name);
+}
+
+/**
+ * THE answer to "does this error-type name exist in this file?" — the one notion the
+ * `!{}` arm-qualifier check uses: anything resolveFailableErrorType resolves, or a
+ * compiler-provided error type. (`ParseError` is in neither unless imported.)
+ */
+function isKnownErrorTypeName(name: string, typeRegistry: Map<string, ResolvedType>): boolean {
+  return resolveFailableErrorType(name, typeRegistry) !== undefined || COMPILER_ERROR_TYPE_NAMES.has(name);
+}
+
+/** The name a diagnostic shows for an error-type key (the parseVariant key reads `ParseError`). */
+function errorTypeDisplayName(name: string): string {
+  return name === PARSE_VARIANT_FAILURE ? PARSE_ERROR_ENUM.name : name;
+}
 
 // ---------------------------------------------------------------------------
 // §53.6 Named Shape Registry
@@ -6734,9 +6795,10 @@ function typeTextMentionsAnyToken(typeText: string): boolean {
  *      none of which are PascalCase, so only a capitalized NAME is ever a
  *      candidate. A `.`-leading variant literal (`.Admin`) never produces a
  *      leading-`[A-Za-z]` leaf, so it never reaches here.
- *   2. NOT a built-in type (`BUILTIN_TYPES`, which includes the 8 PascalCase
- *      built-in error / enum types: NetworkError, ValidationError, SQLError,
- *      AuthError, TimeoutError, ParseError, NotFoundError, ConflictError).
+ *   2. NOT a built-in type (`BUILTIN_TYPES`, which includes the 7 PascalCase
+ *      built-in error types: NetworkError, ValidationError, SQLError,
+ *      AuthError, TimeoutError, NotFoundError, ConflictError). `ParseError` is
+ *      NOT among them — it is import-only (S466; §41.13 / §53.14.6).
  *   3. NOT `asIs` (the sanctioned, named escape hatch — already in
  *      BUILTIN_TYPES, but spelled out for clarity; it must NEVER fire).
  *   4. NOT present in `typeRegistry` — PRESENCE, not kind. A same-file forward
@@ -6985,8 +7047,8 @@ function forEachTypeNameLeaf(
  */
 /**
  * §14.1.2 / §21.8 — Collect the set of imported specifier names from a file's
- * AST. Returns BOTH the original imported name AND the local alias for every
- * `import { X } / import { X as Y } from '...'` specifier, plus default-import
+ * AST. Returns the LOCAL name of every `import { X } / import { X as Y } from '...'`
+ * specifier (`X`, resp. `Y` — never the aliased-away `X`, S466), plus default-import
  * names. Import nodes are nested inside `${...}` logic blocks (not top-level), so
  * this deep-walks. Used by `checkUnknownTypeNames` as the single-file-mode
  * exemption: an imported type name absent from the registry (because its dep was
@@ -7001,18 +7063,26 @@ function collectImportSpecifierNames(topNodes: ASTNodeLike[]): Set<string> {
     seen.add(node as object);
     const n = node as Record<string, unknown>;
     if (n.kind === "import-decl") {
+      // S466 fix round 1 — the LOCAL name only. `import { ParseError as PE }` binds
+      // `PE`, not `ParseError`: the imported name is not in the file's scope (the
+      // registry seeds imports under their local name too, api.js importedTypes), so
+      // exempting it let `e: ParseError` / an arm `ParseError.V` through while the
+      // expression `ParseError.V(…)` was E-SCOPE-001. `names` carries the IMPORTED
+      // names, so it is read only for a specifier-less (default) import, whose one
+      // name IS its local binding.
       const specs = n.specifiers;
-      if (Array.isArray(specs)) {
-        for (const s of specs) {
+      const hasSpecs = Array.isArray(specs) && specs.length > 0;
+      if (hasSpecs) {
+        for (const s of specs as unknown[]) {
           if (!s || typeof s !== "object") continue;
           const imported = (s as Record<string, unknown>).imported;
           const local = (s as Record<string, unknown>).local;
-          if (typeof imported === "string" && imported) names.add(imported);
           if (typeof local === "string" && local) names.add(local);
+          else if (typeof imported === "string" && imported) names.add(imported);
         }
       }
       const ns = n.names;
-      if (Array.isArray(ns)) {
+      if (!hasSpecs && Array.isArray(ns)) {
         for (const nm of ns) if (typeof nm === "string" && nm) names.add(nm);
       }
     }
@@ -9839,6 +9909,49 @@ function extractThemeInitVariant(initExpr: unknown): string | null {
   return null;
 }
 
+/**
+ * §14.10 / §66.3 rule 5 (S464 ruling "(a) Infer from initializer") — the enum
+ * an unannotated cell declaration takes from a QUALIFIED-variant initializer.
+ *
+ *   - `E.V` / `E::V` where `V` is a UNIT variant of enum `E` → `E` (rule 5 (a):
+ *     a qualified unit variant is a literal of `E`).
+ *   - `E.V(…)` / `E::V(…)` where `V` is a PAYLOAD variant of `E` → `E` (rule 5
+ *     (g): a payload variant's construction is a call whose declared type is `E`).
+ *
+ * Returns null for everything else: a bare `.V` (no type context), an unknown
+ * or non-enum `E`, a `V` that `E` does not declare, a unit variant called /
+ * a payload variant left uncalled, an optional member, and an `E` that names a
+ * VALUE in scope (a local / cell / function shadowing the type name).
+ */
+function inferEnumFromQualifiedVariantInit(
+  initExpr: unknown,
+  typeRegistry: Map<string, ResolvedType>,
+  scopeChain: ScopeChain,
+): EnumType | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  const node = initExpr as Record<string, unknown>;
+  let head = node;
+  let isCall = false;
+  if (node.kind === "call") {
+    if (node.optional === true || !node.callee || typeof node.callee !== "object") return null;
+    head = node.callee as Record<string, unknown>;
+    isCall = true;
+  }
+  if (head.kind !== "member" || head.optional === true || typeof head.property !== "string") return null;
+  const obj = head.object as { kind?: string; name?: string } | undefined;
+  if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
+  const enumName = obj.name;
+  const shadow = scopeChain.lookup(enumName) as { kind?: string } | undefined;
+  if (shadow && shadow.kind !== "type" && shadow.kind !== "import") return null;
+  const t = typeRegistry.get(enumName);
+  if (!t || t.kind !== "enum") return null;
+  const variant = (t.variants ?? []).find((v) => v.name === head.property);
+  if (!variant) return null;
+  const hasPayload = variant.payload !== null && variant.payload !== undefined;
+  if (isCall !== hasPayload) return null;
+  return t;
+}
+
 function annotateNodes(
   fileAST: FileAST,
   scopeChain: ScopeChain,
@@ -10529,7 +10642,7 @@ function annotateNodes(
 
   // Step 2: wire fnErrorTypes / fnCanFail so `!{}` exhaustiveness fires.
   for (const localName of parseVariantLocals) {
-    fnErrorTypes.set(localName, "ParseError");
+    fnErrorTypes.set(localName, PARSE_VARIANT_FAILURE);
     fnCanFail.add(localName);
     fnAllDeclared.add(localName);
   }
@@ -11877,14 +11990,14 @@ function annotateNodes(
                 const enclosingErrTypeName = ((n as Record<string, unknown>).errorType as string) || "Error";
                 if (calleeErrTypeName && calleeErrTypeName !== enclosingErrTypeName) {
                   // Resolve the callee's error-variant set.
-                  const calleeEnum = typeRegistry.get(calleeErrTypeName);
+                  const calleeEnum = resolveFailableErrorType(calleeErrTypeName, typeRegistry);
                   // Resolve the enclosing fn's declared error-variant set (the
                   // built-in `Error` default → its sole `Generic` variant, §19.4.2).
                   let enclosingVariants: Set<string> | null = null;
                   if (enclosingErrTypeName === "Error") {
                     enclosingVariants = new Set(["Generic"]);
                   } else {
-                    const enclosingEnum = typeRegistry.get(enclosingErrTypeName);
+                    const enclosingEnum = resolveFailableErrorType(enclosingErrTypeName, typeRegistry);
                     if (enclosingEnum && enclosingEnum.kind === "enum") {
                       enclosingVariants = new Set((enclosingEnum as EnumType).variants.map((v) => v.name));
                     }
@@ -11896,7 +12009,7 @@ function annotateNodes(
                       .map((v) => v.name)
                       .filter((name) => !enclosingVariants!.has(name));
                     if (incompatible.length > 0) {
-                      const variantList = incompatible.map((v) => `'${calleeErrTypeName}.${v}'`).join(", ");
+                      const variantList = incompatible.map((v) => `'${errorTypeDisplayName(calleeErrTypeName)}.${v}'`).join(", ");
                       const it = incompatible.length === 1 ? "it" : "them";
                       // D-ERR-2 remedy: for a BARE-`!` enclosing function the error
                       // type is the built-in `Error` enum (§19.4.2 — sole variant
@@ -11910,7 +12023,7 @@ function annotateNodes(
                         : `the enclosing function's declared error type '${enclosingErrTypeName}'`;
                       const remedy = isBuiltinError
                         ? `The built-in 'Error' envelope cannot be extended. Declare an explicit error type on ` +
-                          `'${fnName}' that includes ${it} (§19.4, e.g. '${fnName}(…) ! ${calleeErrTypeName}'), ` +
+                          `'${fnName}' that includes ${it} (§19.4, e.g. '${fnName}(…) ! ${errorTypeDisplayName(calleeErrTypeName)}'), ` +
                           `or handle '${calleeName}' explicitly with 'match' or '!{}'.`
                         : `Add the missing variant(s) to '${enclosingErrTypeName}', or handle '${calleeName}' ` +
                           `explicitly with 'match' or '!{}'.`;
@@ -12828,6 +12941,23 @@ function annotateNodes(
           }
         }
 
+        // §14.10 / §66.3 rule 5 (S464 ruling "(a) Infer from initializer") — an
+        // UNANNOTATED cell DECLARATION (`<col> = Col.Red`) whose initializer is a
+        // qualified variant of a known enum has that enum type: `E.V` is a literal
+        // of `E` (rule 5 (a)) and `E.V(…)` is a call whose declared type is `E`
+        // (rule 5 (g)). Only the structural declaration form infers — a collapsed
+        // reassignment (`@col = Col.Blue` in a function body) never retypes its
+        // cell. A bare `.V` initializer stays context-less (E-VARIANT-AMBIGUOUS).
+        if (
+          !reactAnnot &&
+          (n as ASTNodeLike).structuralForm === true &&
+          (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") &&
+          !(n as ASTNodeLike).stateType
+        ) {
+          const _inferredEnum = inferEnumFromQualifiedVariantInit((n as any).initExpr, typeRegistry, scopeChain);
+          if (_inferredEnum) resolvedType = _inferredEnum;
+        }
+
         // §2a — E-SCOPE-001 on undeclared idents in the state-decl init.
         // Same shape as the let/const handling above. Runs before the @name
         // bind so a self-reference (`@x = x`) is treated as a forward ref.
@@ -13702,6 +13832,35 @@ function annotateNodes(
         // If either side does not resolve to an enum (an imported alias this
         // compile cannot see, a non-enum), the check is SKIPPED — unverifiable,
         // not wrong (as for an unknown callee).
+        //
+        // S466 (§41.13 / §53.14.6, ruling user-voice-scrml.md S464 "(a) Import-only")
+        // — but a qualifier that names NOTHING in the file (not declared, not
+        // imported, not built-in) is not "unverifiable", it is undeclared: E-SCOPE-001,
+        // as the same name is in any other expression. This is what makes `ParseError`
+        // import-only in an arm (`ParseError.Malformed(r) :>` without
+        // `import { ParseError } from 'scrml:data'`); a bare arm (`.Malformed(r) :>`)
+        // names no type and needs no import. An imported name this compile cannot
+        // see (single-file mode) is still unverifiable and accepted.
+        for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
+          const q = arm.typeQualifier;
+          if (!q) continue;
+          // ONE notion of "an error type this file can name": isKnownErrorTypeName
+          // (registry incl. BUILTIN_TYPES + imports under their LOCAL name, and the
+          // compiler-provided `Error` / `SqlError` / `ServerCallError`), plus any
+          // in-scope binding, a LOCAL import name this compile cannot see
+          // (single-file mode), or a state type.
+          if (isKnownErrorTypeName(q, typeRegistry) || scopeChain.lookup(q) || failImportNames().has(q) || stateTypeRegistry.has(q)) continue;
+          const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+          const hint = q === "ParseError"
+            ? ` \`ParseError\` is exported by \`scrml:data\` and is not ambient: add \`import { ParseError } from 'scrml:data'\`, or write the arm bare (\`.${v} :>\`) — a bare arm needs no import (§41.13, §53.14.6).`
+            : ` Declare or import \`${q}\`, fix the spelling, or write the arm bare (\`.${v} :>\`).`;
+          errors.push(new TSError(
+            "E-SCOPE-001",
+            `E-SCOPE-001: Undeclared identifier \`${q}\` in the \`!{}\` handler arm \`${q}.${v}\`. ` +
+            `No type or import with that name is in scope.` + hint,
+            ((arm.span ?? n.span) as Span),
+          ));
+        }
         if (errorTypeName) {
           const _aliasRhs = new Map<string, string>();
           const _tds = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
@@ -13718,7 +13877,7 @@ function annotateNodes(
           const enumNameOf = (name: string): string | null => {
             let cur = name;
             for (let hop = 0; hop < 16; hop++) {
-              const t = typeRegistry.get(cur);
+              const t = resolveFailableErrorType(cur, typeRegistry);
               if (t && t.kind === "enum") return (t as EnumType).name ?? cur;
               const rhs = _aliasRhs.get(cur);
               if (!rhs) return null;
@@ -13729,6 +13888,7 @@ function annotateNodes(
             return null;
           };
           const handledEnum = enumNameOf(errorTypeName);
+          const handledShown = errorTypeDisplayName(errorTypeName);
           for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
             const q = arm.typeQualifier;
             if (!q || q === errorTypeName || !handledEnum) continue;
@@ -13736,11 +13896,16 @@ function annotateNodes(
             if (!qEnum || qEnum === handledEnum) continue;
             const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
             const named = (x: string, e: string) => (x === e ? "`" + x + "`" : "`" + x + "` (= `" + e + "`)");
+            // A parseVariant call's failure type is nameable only through the import
+            // (§41.13): point at the bare form first, and name the import.
+            const fix = errorTypeName === PARSE_VARIANT_FAILURE
+              ? `Write the arm bare (\`.${v}\`) — a bare arm needs no import — or qualify it \`ParseError.${v}\` ` +
+                `after \`import { ParseError } from 'scrml:data'\`.`
+              : `Qualify the arm with \`${handledShown}\` (\`${handledShown}.${v}\`) or write it bare (\`.${v}\`).`;
             errors.push(new TSError(
               "E-TYPE-ARM-QUALIFIER-MISMATCH",
               `E-TYPE-ARM-QUALIFIER-MISMATCH: the \`!{}\` handler arm \`${q}.${v}\` names the enum ${named(q, qEnum)}, ` +
-              `but the handled call fails with ${named(errorTypeName, handledEnum)}. Qualify the arm with \`${errorTypeName}\` ` +
-              `(\`${errorTypeName}.${v}\`) or write it bare (\`.${v}\`).`,
+              `but the handled call fails with ${named(handledShown, handledEnum)}. ` + fix,
               ((arm.span ?? n.span) as Span),
             ));
           }
@@ -13748,7 +13913,7 @@ function annotateNodes(
 
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {
-          const errorEnumType = typeRegistry.get(errorTypeName);
+          const errorEnumType = resolveFailableErrorType(errorTypeName, typeRegistry);
           if (errorEnumType && errorEnumType.kind === "enum") {
             const enumType = errorEnumType as EnumType;
             const allVariants = (enumType.variants ?? []).map((v: VariantDef) => v.name);
@@ -13775,7 +13940,7 @@ function annotateNodes(
               if (missing.length > 0) {
                 errors.push(new TSError(
                   "E-TYPE-080",
-                  `E-TYPE-080: Non-exhaustive error handler for \`${errorTypeName}\`. ` +
+                  `E-TYPE-080: Non-exhaustive error handler for \`${errorTypeDisplayName(errorTypeName)}\`. ` +
                   `Missing variant(s): ${missing.join(", ")}. ` +
                   `Add the missing arms or use \`else =>\` to handle all remaining variants.`,
                   n.span as Span,
@@ -15805,7 +15970,7 @@ function annotateNodes(
         && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
       if (!hasFallback) {
         const errTypeName = fnErrorTypes.get(bareCallee);
-        const errType = errTypeName ? typeRegistry.get(errTypeName) : undefined;
+        const errType = errTypeName ? resolveFailableErrorType(errTypeName, typeRegistry) : undefined;
         if (errType && errType.kind === "enum" && Array.isArray(errType.variants)) {
           for (const v of errType.variants) {
             // A variant with no `renders` clause and no boundary `fallback`
@@ -15814,7 +15979,7 @@ function annotateNodes(
               const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
               errors.push(new TSError(
                 "E-ERROR-005",
-                `E-ERROR-005: Error variant '${errTypeName}::${v.name}' may occur inside ` +
+                `E-ERROR-005: Error variant '${errorTypeDisplayName(errTypeName ?? "")}::${v.name}' may occur inside ` +
                 `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
                 `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
                 `'fallback' attribute to the boundary.`,
@@ -16793,9 +16958,9 @@ function annotateNodes(
     if (operand.kind === "call" && operand.callee.kind === "ident") {
       const typeName = fnErrorTypes.get(operand.callee.name);
       if (!typeName) return null;
-      const t = typeRegistry.get(typeName);
+      const t = resolveFailableErrorType(typeName, typeRegistry);
       if (!t || t.kind !== "enum") return null;
-      return { typeName, variants: ((t as EnumType).variants ?? []).map((v: VariantDef) => v.name) };
+      return { typeName: errorTypeDisplayName(typeName), variants: ((t as EnumType).variants ?? []).map((v: VariantDef) => v.name) };
     }
     return null;
   }
@@ -20498,7 +20663,7 @@ function resolveFailableCallResultType(
   if (!calleeName || !fnCanFail.has(calleeName)) return null;
   const errorTypeName = fnErrorTypes.get(calleeName);
   if (!errorTypeName) return null;
-  const errEnum = typeRegistry.get(errorTypeName);
+  const errEnum = resolveFailableErrorType(errorTypeName, typeRegistry);
   if (!errEnum || errEnum.kind !== "enum") return null;
   const errVariants = (errEnum as EnumType).variants ?? [];
   // Synthetic result union: the implicit `::Ok` success variant + the declared
@@ -20507,7 +20672,7 @@ function resolveFailableCallResultType(
   const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
   return {
     kind: "enum",
-    name: errorTypeName,
+    name: errorTypeDisplayName(errorTypeName),
     variants: [okVariant, ...errVariants],
     transitionRules: null,
   };
@@ -32601,6 +32766,7 @@ export {
   tPredicated,
   tState,
   BUILTIN_TYPES,
+  PARSE_ERROR_ENUM,
   NAMED_SHAPES,
   parsePredicateExpr,
   evaluatePredicateOnLiteral,
