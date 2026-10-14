@@ -316,3 +316,12 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   corpus-neutral.
 - SPEC §19.9.9.8 rule 3 amended (guard paragraph) + provenance `ruling:user-voice-scrml.md S464 "(a) Guards
   stay server"`. The "Ratify" provenance line was already flipped in round 2 (d5910316d).
+- [ea13cd4e9] guard ruling committed — pre-commit 36484 pass / 0 fail (1580 files).
+- Gates on ea13cd4e9: root-level 2239/0 · lsp+commands 726/0 · e2e-render-map 259/0 · types-gate OK (180,
+  unchanged) · bootstrap slice: lint-no-default-arm OK, m1 99/0, m2 612/0, m1-lowered 99/0, m3 60/0, m4 1343/0,
+  codec 166/0, v2-lexer 337/0 · state --check PASS · spec-index OK · bootstrap-conformance --check OK ·
+  corpus-compile-floor PASS · host-global-scan OK · gen-md-shim OK · snippet-gate PASS · s34-census
+  --check-new --base origin/main PASS (1 row, the round-1 one) · facts: stale after the new tests → regenerated
+  (this commit) · browser-baseline --check: "PARSER DISAGREES 48 vs 47" (the documented flake, as in rounds 1–2)
+  → direct name-set comparison after a fresh pretest: 48 failures == the 48 baseline names, none new, none gone.
+- NOT CHANGED: a1/g5 fail-closed 500s (KNOWN LOW, as recorded).
