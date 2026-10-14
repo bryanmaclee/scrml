@@ -1,0 +1,1621 @@
+/**
+ * value-function-stored.ts — §14.3 / §15.11.5.1 / §59.3 `E-VALUE-FUNCTION-STORED`
+ * (S462 ruling "a", "no value holds a function"; S464 "(a) Migrate the tests" /
+ * "Yes, maps too" / "(a) Close it").
+ *
+ * The §14.3 S174 principle "a function is not value data … it SHALL NOT be STORED" extends
+ * from struct fields + state cells to EVERY value. A function still flows PASSED (arguments,
+ * callbacks, fn props/attributes = wiring) and CALLED (handlers), and a local binding may NAME
+ * one (`const g = twice`); it is never put INTO a value. The stored positions judged here:
+ *
+ *   - a field / element / entry of an object, array or map literal (directly, through a spread,
+ *     a computed key, a method, a getter);
+ *   - a state cell's initializer or assigned value (`<f> = g`, `@f = g`);
+ *   - an assignment INTO a value — `@o.k = g`, `@o["k"] = g`, `@fs[0] = g`, `o.f = g`,
+ *     `u.toJSON = () => …` — unless the target is rooted in a host binding;
+ *   - a method call on a scrml value that is not one of the closed set of built-in methods that
+ *     only CALL their function argument (`map`, `filter`, `then`, …): `.push(g)`, `.concat(g)`,
+ *     `.with(i, g)`, `.insert(k, g)`, `.add(g)` …; on a receiver of unknown provenance (a
+ *     parameter, a call result) only the known storing methods are judged;
+ *   - an enum payload (`Op.Apply(g)`);
+ *   - an object/array literal handed to a host-JS call whose RESULT is kept as a scrml value
+ *     (`const o = Object.freeze({ f: g })`) — S464 "(a) Close it". A host call in statement
+ *     position (`console.log({ f })`, `el.addEventListener("x", f, { once: true })`) is the host
+ *     boundary and is not judged.
+ *
+ * Function-ness is read from the TREE (pa.md Rule 7), never from source text. An expression MAY
+ * hold a function when it is a lambda / `fn` / `function` expression; a name bound to a function
+ * declaration, an imported scrml function, or a binding ANY of whose writes (initializer,
+ * destructuring default, reassignment, parameter default, a call-site argument, a function-typed
+ * annotation) may hold one; a call of a file function that may return one (its own function, or
+ * one of its parameters — judged per call site); `.bind(…)` of one; or a ternary / `||` / `??` /
+ * `&&` / `as` / assignment whose operand may. Facts about bindings and functions are solved to a
+ * fixpoint over the whole file before anything is reported, so a later write or a later call
+ * site is seen. Fail closed: a binding that MAY hold a function is treated as holding one.
+ *
+ * Block-bodied arrows / `function` expressions reach the type stage as escape hatches; their
+ * bodies are read through the one shared reader (`escape-hatch-body.ts`), so the statements inside
+ * are judged like any other. An object literal holding a `fn(…) { … }` value is unreadable to
+ * acorn (a ParseError escape hatch); this pass reads what codegen emits for it (the
+ * `rewriteFnKeyword` lowering, re-parsed) — the `checkRegisterMessagesCalls` precedent.
+ *
+ * Location: each stored function is reported at ITS OWN position when the file source is
+ * available and the expression node's span verifiably points at it, else at the nearest
+ * enclosing statement / markup node (expression spans can be expression-relative). The message
+ * names the path inside the value (`deep.f`, `[0]`).
+ */
+import { boundNamesOf } from "./binding-names.ts";
+import { parseExprToNode } from "./expression-parser.ts";
+import { rewriteFnKeyword } from "./codegen/rewrite.ts";
+import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
+import { dirname, resolve as resolvePath } from "path";
+import { fileURLToPath } from "url";
+import { existsSync, readFileSync } from "fs";
+
+export interface ValueFnSpan {
+  file: string;
+  start: number;
+  end: number;
+  line: number;
+  col: number;
+}
+
+export interface ValueFnStoredDiag {
+  code: "E-VALUE-FUNCTION-STORED" | "E-TIMER-STRUCT-MISUSE";
+  message: string;
+  span: ValueFnSpan;
+}
+
+type Rec = Record<string, unknown>;
+
+/**
+ * What a name is bound to, as far as this check needs to know.
+ *   fn    — a function definition (function-decl, `const g = (…) => …`, an alias of one, an
+ *           imported scrml function)
+ *   known — a scrml VALUE of known provenance (a literal initializer): its methods are built-ins
+ *   value — a scrml binding of unknown provenance (a call result, a scrml import, a pattern)
+ *   param — a parameter / loop / match / catch binder
+ *   host  — a host-JS binding (import:host / .js import, or a local holding a host object)
+ */
+type BindingKind = "fn" | "known" | "value" | "param" | "host";
+
+interface FnInfo {
+  /** Parameter bindings by position (a pattern parameter binds several names). */
+  params: Binding[][];
+  /** The function may return a function of its own making. */
+  returnsFn: boolean;
+  /** Positions of parameters the function may return (judged per call site). */
+  returnsParams: Set<number>;
+  /** Read from another module's facts: a call here never feeds its parameters. */
+  foreign?: boolean;
+}
+
+interface Binding {
+  name: string;
+  kind: BindingKind;
+  mayFn: boolean;
+  fn?: FnInfo;
+  /** Bound by an import (not a declaration in this file). */
+  imported?: boolean;
+  /** `debounce` / `throttle` imported from `scrml:time`: its call builds this struct. */
+  timerFactory?: "Debouncer" | "Throttler";
+  /** This name holds a `scrml:time` Debouncer / Throttler (a struct — not callable). */
+  timer?: "Debouncer" | "Throttler";
+}
+
+interface Ctx {
+  /** Descending the literal containers of a literal handed to a host call whose result is NOT kept. */
+  hostArg: boolean;
+  /** The value is discarded (statement position / an event handler / a host chain off one). */
+  discard: boolean;
+  /** Path inside the enclosing literal (`deep.f`, `[0]`). */
+  path: string;
+  /** The literal is an argument of a host call whose result IS kept (S464 "(a) Close it"). */
+  keptHost: boolean;
+}
+
+const EXPR_KINDS = new Set<string>([
+  "ident", "lit", "array", "object", "spread", "unary", "binary", "assign", "ternary", "member",
+  "index", "call", "new", "lambda", "cast", "match-expr", "map-lit", "sql-ref", "input-state-ref",
+  "escape-hatch", "markup-value", "reset-expr", "prop", "shorthand", "template",
+]);
+
+/** Array methods that put their arguments INTO the receiver (a store) — the reactive statement form. */
+const STORING_ARRAY_METHODS = new Set<string>(["push", "unshift", "splice", "fill"]);
+
+/**
+ * Methods known to put an argument into their receiver or their result. Judged on a receiver of
+ * UNKNOWN provenance (a parameter, a call result, a scrml import), where the receiver might be a
+ * host object whose methods scrml does not know.
+ */
+const STORING_METHODS = new Set<string>([
+  ...STORING_ARRAY_METHODS, "insert", "add", "concat", "with", "set", "toSpliced", "append", "prepend",
+]);
+
+/**
+ * The CLOSED set of built-in methods that take a function only to CALL it (it ends up in neither
+ * the receiver nor the result). On a receiver KNOWN to be a scrml value (an `@` cell, a literal, a
+ * binding initialised with a literal) every other method that receives a function is refused —
+ * an allow-list, so a storing method the list does not name cannot slip through.
+ */
+const CALLING_METHODS = new Set<string>([
+  "map", "filter", "forEach", "some", "every", "find", "findIndex", "findLast", "findLastIndex",
+  "reduce", "reduceRight", "flatMap", "sort", "toSorted", "then", "catch", "finally", "replace",
+  "replaceAll",
+  // §59.7 / §59.8 map surface: `.update(k, f)` calls its updater; `.sortedBy(f)` its key function.
+  "update", "sortedBy",
+]);
+
+/** Statement-list keys: an array under one of these is a block (a lexical scope). */
+const BLOCK_KEYS = new Set<string>(["body", "consequent", "alternate", "stmts", "children", "elseBody", "finallyBody", "catchBody"]);
+
+const LITERAL_KINDS = new Set<string>(["object", "array", "map-lit"]);
+
+function isScrmlSource(source: unknown): boolean {
+  if (typeof source !== "string") return false;
+  return source.startsWith("scrml:") || /\.scrml$/.test(source);
+}
+
+/** A function-TYPE annotation (`() -> void`, `(x: int) => string`, `fn()`) — not a lifecycle `(A -> B)`. */
+function isFunctionTypeAnnotation(t: unknown): boolean {
+  if (typeof t !== "string") return false;
+  const s = t.trim();
+  if (/^fn\s*\(/.test(s)) return true;
+  return /\)\s*(->|=>)\s*[^)\s][^)]*$/.test(s);
+}
+
+/** What an importer learns about one export of a scrml module. */
+interface ExportFact {
+  kind: BindingKind;
+  mayFn: boolean;
+  fn?: FnInfo;
+}
+
+/** The compilation unit's modules (file path → top-level nodes), set by `runTS` for one run. */
+let moduleIndex: Map<string, unknown[]> | null = null;
+/** Export facts per module path for the current run; `null` while being computed (a cycle → unknown). */
+let moduleFactsCache = new Map<string, Map<string, ExportFact> | null>();
+
+/**
+ * Give the check the compilation unit's modules, so a function fact crosses an `import` (an exported
+ * function that returns a closure, an exported const arrow). Call with `null` after the run.
+ */
+export function setValueFnModuleIndex(index: Map<string, unknown[]> | null): void {
+  moduleIndex = index;
+  moduleFactsCache = new Map();
+}
+
+/** Resolve an import specifier to a module path in the index (relative or `scrml:` stdlib), else null. */
+/** The scrml standard library's source tree (`stdlib/<name>/index.scrml`, `stdlib/<name>.scrml`). */
+const STDLIB_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), "..", "..", "stdlib");
+
+function resolveImportPath(source: unknown, fromPath: string): string | null {
+  if (typeof source !== "string") return null;
+  if (source.startsWith("./") || source.startsWith("../")) {
+    if (!moduleIndex) return null;
+    const p = resolvePath(dirname(fromPath), source);
+    if (moduleIndex.has(p)) return p;
+    if (moduleIndex.has(`${p}.scrml`)) return `${p}.scrml`;
+    return null;
+  }
+  if (source.startsWith("scrml:")) {
+    const name = source.slice("scrml:".length);
+    if (moduleIndex) {
+      for (const k of moduleIndex.keys()) {
+        if (k.endsWith(`/stdlib/${name}/index.scrml`) || k.endsWith(`/stdlib/${name}.scrml`)) return k;
+      }
+    }
+    // Not in this compilation unit: read the stdlib module's own source (its export facts).
+    for (const cand of [resolvePath(STDLIB_DIR, name, "index.scrml"), resolvePath(STDLIB_DIR, `${name}.scrml`)]) {
+      if (existsSync(cand)) return cand;
+    }
+  }
+  return null;
+}
+
+/** Parsed stdlib modules read from disk (not in the compilation unit), per process. */
+const stdlibNodesCache = new Map<string, unknown[] | null>();
+function stdlibNodes(path: string): unknown[] | null {
+  if (stdlibNodesCache.has(path)) return stdlibNodesCache.get(path) ?? null;
+  let out: unknown[] | null = null;
+  if (path.startsWith(STDLIB_DIR) && existsSync(path)) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { splitBlocks } = require("./block-splitter.js") as { splitBlocks: (p: string, s: string) => unknown };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { buildAST } = require("./ast-builder.js") as { buildAST: (b: unknown) => { ast?: { nodes?: unknown[] } } };
+      const tab = buildAST(splitBlocks(path, readFileSync(path, "utf8")));
+      out = Array.isArray(tab?.ast?.nodes) ? tab.ast!.nodes! : null;
+    } catch { out = null; }
+  }
+  stdlibNodesCache.set(path, out);
+  return out;
+}
+
+function moduleFacts(path: string): Map<string, ExportFact> | null {
+  if (moduleFactsCache.has(path)) return moduleFactsCache.get(path) ?? null;
+  const nodes = moduleIndex?.get(path) ?? stdlibNodes(path);
+  if (!nodes) return null;
+  moduleFactsCache.set(path, null); // a cycle back to this module reads "unknown"
+  const facts = analyze(nodes, path, [], undefined, "facts").exports;
+  moduleFactsCache.set(path, facts);
+  return facts;
+}
+
+/**
+ * Host values KNOWN to be callable: the ECMAScript-standard global functions and the function
+ * members of the standard namespace objects (`Math.max`, `JSON.stringify`, `Object.keys` …),
+ * read from the standard library itself. Any other host value (a `window` / `import:host` member)
+ * is not judged — see gap g-host-value-callable-unknown-s465.
+ */
+const STD_GLOBAL_FNS = new Set<string>([
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURI", "encodeURIComponent", "decodeURI",
+  "decodeURIComponent", "String", "Number", "Boolean", "Array", "Object", "Date", "RegExp", "Map", "Set",
+  "WeakMap", "WeakSet", "Promise", "Error", "TypeError", "RangeError", "Symbol", "BigInt", "Function",
+  "setTimeout", "clearTimeout", "setInterval", "clearInterval", "queueMicrotask", "structuredClone",
+]);
+const STD_NAMESPACES = new Set<string>([
+  "Math", "JSON", "Object", "Array", "Number", "String", "Reflect", "Promise", "Date", "Symbol", "BigInt", "Intl", "Atomics",
+]);
+function isKnownHostCallable(name: string, prop: string | null): boolean {
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (prop === null) return STD_GLOBAL_FNS.has(name) && typeof g[name] === "function";
+  if (!STD_NAMESPACES.has(name)) return false;
+  const ns = g[name] as Record<string, unknown> | undefined;
+  if (!ns) return false;
+  try { return typeof ns[prop] === "function"; } catch { return false; }
+}
+
+/** A `match` arm the shared arm reader could not read: it fails CLOSED (it may yield a function). */
+const UNREAD_ARM: Record<string, unknown> = { kind: "unread-arm" };
+
+/** Host calls that write their later arguments INTO their first argument. */
+const WRITES_INTO_FIRST = new Set<string>([
+  "Object.assign", "Object.defineProperty", "Object.defineProperties", "Reflect.set", "Reflect.defineProperty",
+]);
+
+/** The fix a closure-array refusal names (S464 "(a) Close it", the closure-array entry). */
+const CLOSURE_ARRAY_FIX =
+  "Do not build a list of functions: bind the call at the use site instead — " +
+  "`<each in=@items as i><button onclick=pick(i)>…</button></each>` or `onclick=${() => pick(i)}`.";
+
+/** Facts never stop growing in a correct run; this only bounds a defect (see the fixpoint loop). */
+const MAX_FIXPOINT_PASSES = 10000;
+
+export function checkValueFunctionStored(
+  nodes: unknown[],
+  filePath: string,
+  importedFnNames: Iterable<string> = [],
+  sourceText?: string,
+): ValueFnStoredDiag[] {
+  return analyze(nodes, filePath, [...importedFnNames], sourceText, "report").diags;
+}
+
+function analyze(
+  nodes: unknown[],
+  filePath: string,
+  importedFnNames: string[],
+  sourceText: string | undefined,
+  mode: "report" | "facts",
+): { diags: ValueFnStoredDiag[]; exports: Map<string, ExportFact> | null } {
+  const diags: ValueFnStoredDiag[] = [];
+  const reportedKeys = new Set<string>();
+  const defaultSpan: ValueFnSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  const src = typeof sourceText === "string" ? sourceText : null;
+  const importedFns = [...importedFnNames];
+
+  // ---- stable facts (identity survives the fixpoint passes) ----
+  const bindingsByOwner = new WeakMap<object, Map<string, Binding>>();
+  const fnInfos = new WeakMap<object, FnInfo>();
+  const lowered = new WeakMap<object, unknown>();
+  const hatchBodies = new WeakMap<object, unknown[] | null>();
+  const parsedDefaults = new WeakMap<object, unknown>();
+  const moduleOwner = {};
+  let changed = false;
+  let reporting = false;
+
+  function bindingFor(owner: object, name: string, kind: BindingKind): Binding {
+    let m = bindingsByOwner.get(owner);
+    if (!m) { m = new Map(); bindingsByOwner.set(owner, m); }
+    let b = m.get(name);
+    if (!b) { b = { name, kind, mayFn: kind === "fn" }; m.set(name, b); }
+    return b;
+  }
+  function setMayFn(b: Binding | null | undefined): void {
+    if (b && !b.mayFn) { b.mayFn = true; changed = true; }
+  }
+  function fnInfoFor(node: object): FnInfo {
+    let fi = fnInfos.get(node);
+    if (!fi) { fi = { params: [], returnsFn: false, returnsParams: new Set() }; fnInfos.set(node, fi); }
+    return fi;
+  }
+
+  // ---- scope ----
+  let frames: Map<string, Binding>[] = [];
+  /** >0 while walking a re-parsed escape-hatch body: its statement spans are body-relative. */
+  let inHatch = 0;
+  /** The expression root being walked: its normalised text, its span start, its source line. */
+  let curRoot: { text: string; start: number; line: number } | null = null;
+  function withRoot(text: unknown, rootNode: unknown, line: unknown, fn: () => void): void {
+    const r = rootNode as Rec | undefined;
+    const st = (r?.span as { start?: number } | undefined)?.start;
+    const saved = curRoot;
+    curRoot = (typeof text === "string" && typeof st === "number" && typeof line === "number" && inHatch === 0)
+      ? { text: text.replace(/^\s+/, ""), start: st, line } : null;
+    try { fn(); } finally { curRoot = saved; }
+  }
+  const lookup = (name: string): Binding | null => {
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const b = frames[i].get(name);
+      if (b) return b;
+    }
+    return null;
+  };
+  const declare = (b: Binding): void => { frames[frames.length - 1].set(b.name, b); };
+  const pushFrame = (): void => { frames.push(new Map()); };
+  const popFrame = (): void => { if (frames.length > 1) frames.pop(); };
+
+  // ---- enum type names (an enum constructor's payload is a stored value) ----
+  const enumNames = new Set<string>();
+  const collectEnums = (v: unknown, depth = 0): void => {
+    if (!v || typeof v !== "object" || depth > 200) return;
+    if (Array.isArray(v)) { for (const c of v) collectEnums(c, depth + 1); return; }
+    const r = v as Rec;
+    if (r.kind === "type-decl" && r.typeKind === "enum" && typeof r.name === "string") enumNames.add(r.name);
+    if (r.kind === "import-decl" && isScrmlSource(r.source)) {
+      for (const n of importNames(r)) if (/^[A-Z]/.test(n)) enumNames.add(n);
+    }
+    for (const k in r) {
+      if (k === "span" || k === "parent") continue;
+      const c = r[k];
+      if (c && typeof c === "object" && !EXPR_KINDS.has(String((c as Rec).kind ?? ""))) collectEnums(c, depth + 1);
+    }
+  };
+  function importNames(node: Rec): string[] {
+    const specs = node.specifiers as Rec[] | undefined;
+    return Array.isArray(specs) && specs.length > 0
+      ? specs.map((s) => String(s.local ?? s.imported ?? "")).filter(Boolean)
+      : ((node.names as string[] | undefined) ?? []);
+  }
+  collectEnums(nodes);
+
+  /**
+   * Bind an import's names. A host import is a host binding. A scrml import takes the exporting
+   * module's facts (is it a function, may it hold / return one). When the module's facts are not
+   * known here (not in this compilation unit, or an import cycle), a lower-case name — a value or a
+   * function, not a type / enum / component — fails CLOSED: it may hold a function.
+   */
+  function bindImport(node: Rec): void {
+    const host = !isScrmlSource(node.source);
+    const specs = Array.isArray(node.specifiers) && (node.specifiers as Rec[]).length > 0
+      ? (node.specifiers as Rec[]).map((s) => ({ imported: String(s.imported ?? s.local ?? ""), local: String(s.local ?? s.imported ?? "") }))
+      : ((node.names as string[] | undefined) ?? []).map((n) => ({ imported: n, local: n }));
+    const path = host ? null : resolveImportPath(node.source, filePath);
+    const facts = path ? moduleFacts(path) : null;
+    for (const { imported, local } of specs) {
+      if (!local) continue;
+      if (host) {
+        const b = bindingFor(moduleOwner, `import:${local}`, "host");
+        b.name = local; b.imported = true;
+        frames[0].set(local, b);
+        continue;
+      }
+      if (facts) {
+        const ef = facts.get(imported);
+        const b = bindingFor(moduleOwner, `import:${local}`, ef?.kind ?? "value");
+        b.name = local; b.imported = true;
+        if (ef) {
+          b.kind = ef.kind;
+          if (ef.mayFn) b.mayFn = true;
+          if (ef.fn) b.fn = { ...ef.fn, foreign: true };
+        } else if (/^[a-z_$]/.test(local)) {
+          b.mayFn = true; // the module has no fact for this value name — fail closed
+        }
+        if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+          b.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
+        }
+        frames[0].set(local, b);
+        continue;
+      }
+      const existing = frames[0].get(local);
+      if (existing && existing.kind === "fn") { // an imported scrml function (importedFnDecls)
+        if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+          existing.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
+        }
+        continue;
+      }
+      const b = bindingFor(moduleOwner, `import:${local}`, "value");
+      b.name = local; b.imported = true;
+      if (/^[a-z_$]/.test(local)) b.mayFn = true; // unknown cross-module fact — fail closed
+      if (node.source === "scrml:time" && (imported === "debounce" || imported === "throttle")) {
+        b.timerFactory = imported === "debounce" ? "Debouncer" : "Throttler";
+      }
+      frames[0].set(local, b);
+    }
+  }
+
+  /** `export const NAME = …` / `export let …` held only as raw text → its name and parsed initializer. */
+  const exportInits = new WeakMap<object, { name: string; init: unknown } | null>();
+  /** export-decl → the statement that follows it in its list (see exportConstInit). */
+  const exportNext = new WeakMap<object, Rec>();
+  const indexExports = (list: unknown[]): void => {
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i] as Rec | null;
+      if (!r || typeof r !== "object") continue;
+      if (r.kind === "export-decl" && list[i + 1] && typeof list[i + 1] === "object") exportNext.set(r, list[i + 1] as Rec);
+      if (r.kind === "logic" && Array.isArray(r.body)) indexExports(r.body as unknown[]);
+      if (r.kind === "markup" && Array.isArray(r.children)) indexExports(r.children as unknown[]);
+    }
+  };
+  indexExports(nodes);
+  function exportConstInit(r: Rec): { name: string; init: unknown } | null {
+    if (r.kind !== "export-decl" || (r.exportKind !== "const" && r.exportKind !== "let") || r.declaration) return null;
+    if (exportInits.has(r)) return exportInits.get(r) ?? null;
+    let out: { name: string; init: unknown } | null = null;
+    // A value-form `match` / `if` / `for` initializer is PARSED by the AST builder as the statement
+    // that follows the export-decl (whose raw text then ends at `=`): read that parsed statement.
+    const head = typeof r.raw === "string" ? r.raw.match(/^\s*export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*$/) : null;
+    const next = exportNext.get(r);
+    if (head && next) {
+      let init: Rec | null = null;
+      if (next.kind === "match-stmt") init = { kind: "match-expr", body: next.body, subject: next.headerExpr };
+      else if (next.kind === "if-stmt" || next.kind === "for-stmt") init = { kind: "value-set", values: liftedValues(next) };
+      if (init) out = { name: head[1], init };
+      exportInits.set(r, out);
+      return out;
+    }
+    // Otherwise the export-decl carries its initializer only as text (there is no parsed node).
+    const m = typeof r.raw === "string" ? r.raw.match(/^\s*export\s+(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([\s\S]+)$/) : null;
+    if (m) {
+      try {
+        const init = parseExprToNode(m[2], filePath, 0);
+        if (init && typeof init === "object") out = { name: m[1], init };
+      } catch { out = null; }
+    }
+    exportInits.set(r, out);
+    return out;
+  }
+
+  // ---- function-ness, read from the tree ----
+  function loweredOf(x: Rec): Rec | null {
+    if (x.nativeKind !== "ParseError" || typeof x.raw !== "string") return null;
+    if (lowered.has(x)) return lowered.get(x) as Rec | null;
+    let out: Rec | null = null;
+    const raw = x.raw as string;
+    const low = rewriteFnKeyword(raw);
+    if (low !== raw) {
+      try {
+        const re = parseExprToNode(low, filePath, 0) as unknown as Rec;
+        if (re && re.kind !== "escape-hatch") out = re;
+      } catch { out = null; }
+    }
+    lowered.set(x, out);
+    return out;
+  }
+
+  function isFnExpr(x: Rec): boolean {
+    if (x.kind === "lambda") return true;
+    if (x.kind === "escape-hatch") {
+      const nk = String(x.nativeKind ?? "");
+      return nk === "ArrowFunctionExpression" || nk === "FunctionExpression";
+    }
+    return false;
+  }
+
+  /** May this expression evaluate to a function? (fail closed on bindings) */
+  function mayFn(e: unknown): boolean {
+    if (!e || typeof e !== "object") return false;
+    const x = e as Rec;
+    switch (x.kind) {
+      case "lambda": return true;
+      case "escape-hatch": {
+        if (isFnExpr(x)) return true;
+        const lo = loweredOf(x);
+        return lo ? mayFn(lo) : false;
+      }
+      case "ident": {
+        const name = x.name;
+        if (typeof name !== "string" || name.startsWith("@") || name.startsWith(".")) return false;
+        const b = lookup(name);
+        if (b) return b.mayFn;
+        return isKnownHostCallable(name, null);
+      }
+      case "member": {
+        const o = x.object as Rec | undefined;
+        if (o?.kind === "ident" && typeof o.name === "string" && !lookup(o.name) && typeof x.property === "string") {
+          return isKnownHostCallable(o.name, x.property);
+        }
+        return false;
+      }
+      case "ternary": return mayFn(x.consequent) || mayFn(x.alternate);
+      case "binary":
+        return (x.op === "||" || x.op === "??" || x.op === "&&") ? (mayFn(x.left) || mayFn(x.right)) : false;
+      case "cast": return mayFn(x.expression);
+      case "unread-arm": return true;
+      case "value-set": return Array.isArray(x.values) && (x.values as unknown[]).some((v) => mayFn(v));
+      case "match-expr": return matchArms(x).some((arm) => inArm(arm, arm.names, () => arm.values.some((v) => mayFn(v))));
+      case "assign": return mayFn(x.value);
+      case "call": return callMayFn(x);
+      default: return false;
+    }
+  }
+
+  function calleeFn(callee: unknown): FnInfo | null {
+    const c = callee as Rec | undefined;
+    if (!c || c.kind !== "ident" || typeof c.name !== "string") return null;
+    return lookup(c.name)?.fn ?? null;
+  }
+
+  function callMayFn(x: Rec): boolean {
+    const callee = x.callee as Rec | undefined;
+    const args = (x.args as unknown[] | undefined) ?? [];
+    if (callee?.kind === "member" && callee.property === "bind" && mayFn(callee.object)) return true;
+    // `xs.reduce(f, init)` is what its reducer last returned.
+    if (callee?.kind === "member" && (callee.property === "reduce" || callee.property === "reduceRight") && callbackReturnsFn(args[0])) return true;
+    const fi = calleeFn(callee) ?? (callee && isFnExpr(callee) ? fnInfos.get(callee) ?? null : null);
+    if (!fi) return false;
+    if (fi.returnsFn) return true;
+    for (const i of fi.returnsParams) if (mayFn(args[i])) return true;
+    return false;
+  }
+
+  /** Does an object / array / map literal hold, anywhere inside it, a value that may be a function? */
+  function literalHoldsFn(e: unknown, depth = 0): boolean {
+    const x = e as Rec | undefined;
+    if (!x || typeof x !== "object" || depth > 50) return false;
+    if (mayFn(x)) return true;
+    if (x.kind === "object") {
+      return ((x.props as Rec[] | undefined) ?? []).some((p) =>
+        p?.kind === "shorthand" ? !!lookup(String(p.name))?.mayFn : literalHoldsFn(p?.kind === "spread" ? p.argument : p?.value, depth + 1));
+    }
+    if (x.kind === "array") return ((x.elements as Rec[] | undefined) ?? []).some((el) => literalHoldsFn(el?.kind === "spread" ? el.argument : el, depth + 1));
+    if (x.kind === "map-lit") return ((x.entries as Rec[] | undefined) ?? []).some((en) => literalHoldsFn(en?.value, depth + 1));
+    return false;
+  }
+
+  /** Does this callback (a function expression or a name bound to a function) return a function? */
+  function callbackReturnsFn(cb: unknown): boolean {
+    if (!cb || typeof cb !== "object") return false;
+    const c = cb as Rec;
+    if (isFnExpr(c)) return fnInfos.get(c)?.returnsFn ?? false;
+    if (c.kind === "escape-hatch") { const lo = loweredOf(c); return lo ? callbackReturnsFn(lo) : false; }
+    if (c.kind === "ident" && typeof c.name === "string") return lookup(c.name)?.fn?.returnsFn ?? false;
+    return false;
+  }
+
+  /** The values an `if` / `for` expression LIFTS (its `lift-expr` statements, not inside nested functions). */
+  function liftedValues(n: unknown, out: unknown[] = [], depth = 0): unknown[] {
+    if (!n || typeof n !== "object" || depth > 200) return out;
+    if (Array.isArray(n)) { for (const c of n) liftedValues(c, out, depth + 1); return out; }
+    const r = n as Rec;
+    if (r.kind === "function-decl" || r.kind === "lambda" || EXPR_KINDS.has(String(r.kind))) return out;
+    if (r.kind === "lift-expr") {
+      const e = r.expr as Rec | undefined;
+      const v = e?.exprNode ?? (e && EXPR_KINDS.has(String(e.kind)) ? e : null);
+      if (v) out.push(v);
+      return out;
+    }
+    for (const k in r) {
+      if (k === "span" || k === "condExpr" || k === "iterExpr") continue;
+      const c = r[k];
+      if (c && typeof c === "object") liftedValues(c, out, depth + 1);
+    }
+    return out;
+  }
+
+  /** `debounce(…)` / `throttle(…)` imported from `scrml:time` → the struct it builds. */
+  function timerOf(init: unknown): "Debouncer" | "Throttler" | null {
+    const x = init as Rec | undefined;
+    if (!x || x.kind !== "call") return null;
+    const c = x.callee as Rec | undefined;
+    if (c?.kind !== "ident" || typeof c.name !== "string") return null;
+    return lookup(c.name)?.timerFactory ?? null;
+  }
+
+  /**
+   * A `match` expression's arms: the payload binders each arm introduces and the arm's VALUE —
+   * the result expression, or (a `{ … }` statement block, §18.5) its tail expression. Read with
+   * the same arm splitter / parser codegen lowers them with.
+   */
+  const armCache = new WeakMap<object, { names: string[]; values: unknown[]; stmts: unknown[] }[]>();
+  function matchArms(x: Rec): { names: string[]; values: unknown[]; stmts: unknown[] }[] {
+    const hit = armCache.get(x);
+    if (hit) return hit;
+    const out: { names: string[]; values: unknown[]; stmts: unknown[] }[] = [];
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const cf = require("./codegen/emit-control-flow.ts") as {
+        splitMultiArmString: (s: string) => string[];
+        parseMatchArm: (s: string) => { binding: string | null; result: string } | null;
+      };
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { armBodyStatementsFromText } = require("./arm-body-statements.ts") as { armBodyStatementsFromText: (t: string) => unknown[] | null };
+      const namesOf = (binding: unknown): string[] => {
+        const names: string[] = [];
+        for (const b of (Array.isArray(binding) ? binding : [binding])) {
+          if (typeof b !== "string") continue;
+          for (const part of b.split(",")) {
+            const nm = part.includes(":") ? part.split(":").pop()!.trim() : part.trim();
+            if (/^[A-Za-z_$][\w$]*$/.test(nm) && nm !== "_") names.push(nm);
+          }
+        }
+        return names;
+      };
+      // Statement-level `match` (a `return` / declaration initializer): structured arm nodes.
+      if (Array.isArray(x.body)) {
+        for (const it of x.body as Rec[]) {
+          if (!it || typeof it !== "object") continue;
+          if (it.kind === "match-arm-inline") {
+            out.push({ names: namesOf(it.binding), values: it.resultExpr ? [it.resultExpr] : [], stmts: [] });
+          } else if (it.kind === "match-arm-block") {
+            const body = Array.isArray(it.body) ? (it.body as Rec[]) : [];
+            const last = body[body.length - 1];
+            out.push({ names: namesOf([...((it.payloadBindings as unknown[]) ?? []), it.binding]), values: last && last.kind === "bare-expr" && last.exprNode ? [last.exprNode] : [], stmts: body });
+          } else if (it.kind === "bare-expr" && typeof it.expr === "string" && /=>|:>/.test(it.expr)) {
+            const armText = it.expr.replace(/,\s*$/, "").trim();
+            const arm = cf.parseMatchArm(armText) ?? givenArm(armText);
+            let v: unknown = null;
+            if (arm) { try { v = parseExprToNode(String(arm.result ?? ""), filePath, 0); } catch { v = null; } }
+            out.push({ names: arm ? namesOf(arm.binding) : [], values: [v ?? UNREAD_ARM], stmts: [] });
+          }
+        }
+      }
+      for (const raw of (Array.isArray(x.rawArms) ? (x.rawArms as unknown[]) : [])) {
+        for (const piece of cf.splitMultiArmString(String(raw))) {
+          const arm = cf.parseMatchArm(piece.trim()) ?? givenArm(piece.trim());
+          // An arm the shared reader cannot read (codegen cannot either) fails CLOSED.
+          if (!arm) { out.push({ names: [], values: [UNREAD_ARM], stmts: [] }); continue; }
+          const names = namesOf(arm.binding);
+          const res = String(arm.result ?? "").trim();
+          let node: Rec | null = null;
+          try { node = parseExprToNode(res, filePath, 0) as unknown as Rec; } catch { node = null; }
+          const isBlock = res.startsWith("{") && res.endsWith("}") && !(node && node.kind === "object");
+          if (isBlock) {
+            const stmts = armBodyStatementsFromText(res) ?? [];
+            const last = stmts[stmts.length - 1] as Rec | undefined;
+            const values: unknown[] = [];
+            if (last && last.kind === "bare-expr" && last.exprNode) values.push(last.exprNode);
+            out.push({ names, values, stmts });
+          } else if (node) {
+            out.push({ names, values: [node], stmts: [] });
+          }
+        }
+      }
+    } catch { /* an arm the shared reader cannot read contributes nothing (the codegen path refuses it) */ }
+    armCache.set(x, out);
+    return out;
+  }
+  /**
+   * A §42.2.3 presence arm `given x, y :> value` — codegen collects these apart from
+   * `parseMatchArm` (`givenGuardCondition`); its value is read here the same way. The names it
+   * tests are not re-bound (they keep their outer binding).
+   */
+  function givenArm(t: string): { binding: string | null; result: string } | null {
+    const m = t.match(/^given\s+[\s\S]+?\s*(?::>|=>)\s*([\s\S]+)$/);
+    return m ? { binding: null, result: m[1] } : null;
+  }
+  function inArm<T>(owner: object, names: string[], fn: () => T): T {
+    pushFrame();
+    for (const n of names) declare(bindingFor(owner, n, "param"));
+    try { return fn(); } finally { popFrame(); }
+  }
+
+  /**
+   * A call that BUILDS a value out of what its callback returns: `xs.map(f)` / `xs.flatMap(f)`, the
+   * §59.7 `m.update(k, f)` (the updater's result is the new entry), `Array.from(xs, f)`.
+   */
+  function builtFromCallback(x: Rec): { cbIndex: number; what: string } | null {
+    const callee = x.callee as Rec | undefined;
+    if (x.kind !== "call" || callee?.kind !== "member" || typeof callee.property !== "string") return null;
+    const p = callee.property;
+    const obj = callee.object as Rec | undefined;
+    if (obj?.kind === "ident" && obj.name === "Array" && !lookup("Array") && p === "from") return { cbIndex: 1, what: "The array `Array.from(…)` builds" };
+    if (p === "map" || p === "flatMap") return { cbIndex: 0, what: `The array \`.${p}(…)\` builds` };
+    if (p === "update") {
+      const rk = rootKind(obj);
+      if (rk !== "host" && rk !== "global") return { cbIndex: 1, what: "The map entry `.update(…)` writes" };
+    }
+    return null;
+  }
+
+  /** What a RETURN expression of function `F` may yield: its own function, or which parameters. */
+  function retSources(e: unknown, F: FnInfo, paramIndex: Map<Binding, number>, out: { own: boolean; params: Set<number> }): void {
+    if (!e || typeof e !== "object") return;
+    const x = e as Rec;
+    switch (x.kind) {
+      case "ident": {
+        const b = typeof x.name === "string" ? lookup(x.name) : null;
+        if (b && paramIndex.has(b)) { out.params.add(paramIndex.get(b)!); return; }
+        if (mayFn(x)) out.own = true;
+        return;
+      }
+      case "ternary": retSources(x.consequent, F, paramIndex, out); retSources(x.alternate, F, paramIndex, out); return;
+      case "binary":
+        if (x.op === "||" || x.op === "??" || x.op === "&&") { retSources(x.left, F, paramIndex, out); retSources(x.right, F, paramIndex, out); }
+        return;
+      case "cast": retSources(x.expression, F, paramIndex, out); return;
+      case "call": {
+        const fi = calleeFn(x.callee);
+        const args = (x.args as unknown[] | undefined) ?? [];
+        if (fi) {
+          if (fi.returnsFn) out.own = true;
+          for (const i of fi.returnsParams) retSources(args[i], F, paramIndex, out);
+          return;
+        }
+        if (mayFn(x)) out.own = true;
+        return;
+      }
+      default:
+        if (mayFn(x)) out.own = true;
+    }
+  }
+
+  function describe(e: unknown): string {
+    const x = (e ?? {}) as Rec;
+    switch (x.kind) {
+      case "lambda":
+        return x.fnStyle === "fn" ? "a `fn` expression" : x.fnStyle === "function" ? "a `function` expression" : "an arrow function";
+      case "escape-hatch": {
+        const nk = String(x.nativeKind ?? "");
+        if (nk === "ArrowFunctionExpression") return "an arrow function";
+        if (nk === "FunctionExpression") return "a `function` expression";
+        const lo = loweredOf(x);
+        return lo ? describe(lo) : "a function value";
+      }
+      case "ident": {
+        const name = String(x.name ?? "");
+        const b = lookup(name);
+        return b && b.kind === "fn" && b.fn ? `the function \`${name}\`` : `\`${name}\`, which may hold a function`;
+      }
+      case "call": {
+        const c = x.callee as Rec | undefined;
+        const cn = c?.kind === "ident" ? String(c.name) : c?.kind === "member" ? `….${String(c.property)}` : "…";
+        return `the result of \`${cn}(…)\`, which may be a function`;
+      }
+      case "ternary": return mayFn(x.consequent) ? describe(x.consequent) : describe(x.alternate);
+      case "binary": return mayFn(x.right) ? describe(x.right) : describe(x.left);
+      case "cast": return describe(x.expression);
+      case "assign": return describe(x.value);
+      case "match-expr": return "a function a `match` arm yields";
+      case "unread-arm": return "a `match` arm value the compiler could not read";
+      default: return "a function value";
+    }
+  }
+
+  // ---- binding provenance ----
+  function rootOf(e: unknown): Rec | null {
+    let cur = e as Rec | undefined;
+    for (let guard = 0; cur && guard < 64; guard++) {
+      switch (cur.kind) {
+        case "member": case "index": cur = cur.object as Rec; continue;
+        case "call": case "new": cur = cur.callee as Rec; continue;
+        case "unary": cur = cur.argument as Rec ?? cur.operand as Rec; continue;
+        default: return cur;
+      }
+    }
+    return null;
+  }
+  /** host | global | known | value | param | fn | other — the provenance of a chain's root. */
+  function rootKind(e: unknown): BindingKind | "global" | "other" {
+    const r = rootOf(e);
+    if (!r) return "other";
+    if (LITERAL_KINDS.has(String(r.kind)) || r.kind === "lit" || r.kind === "template") return "known";
+    if (r.kind !== "ident" || typeof r.name !== "string") return "other";
+    if (r.name.startsWith("@")) return "known";
+    if (r.name === "this") return "value";
+    const b = lookup(r.name);
+    return b ? b.kind : "global";
+  }
+  function isHostCallee(callee: unknown): boolean {
+    const k = rootKind(callee);
+    return k === "host" || k === "global";
+  }
+  function initKind(init: unknown): BindingKind {
+    if (!init || typeof init !== "object") return "value";
+    const x = init as Rec;
+    if (isFnExpr(x)) return "fn";
+    if (LITERAL_KINDS.has(String(x.kind)) || x.kind === "lit" || x.kind === "template") return "known";
+    if (x.kind === "unary") return initKind(x.argument ?? x.operand);
+    if (x.kind === "ident" && typeof x.name === "string") {
+      if (x.name.startsWith("@")) return "known";
+      const b = lookup(x.name);
+      if (b) return b.kind === "fn" ? "fn" : b.kind;
+      return "host";
+    }
+    if (x.kind === "call" || x.kind === "new") return isHostCallee(x.callee) ? "host" : "value";
+    if (x.kind === "member" || x.kind === "index") {
+      const rk = rootKind(x);
+      return rk === "host" || rk === "global" ? "host" : "value";
+    }
+    return "value";
+  }
+
+  // ---- reporting ----
+  /**
+   * An ExprNode's span is an offset into the expression's own (token-normalised) text, which keeps
+   * the source's line breaks. So the value's LINE is the root's line plus the line breaks before
+   * it in that text, and its COLUMN is found by locating the same token, the same number of times
+   * over, on that source line. Anything that does not line up falls back to the enclosing node.
+   */
+  function locate(node: unknown, at: ValueFnSpan): ValueFnSpan {
+    const x = node as Rec | undefined;
+    const sp = x?.span as { start?: number } | undefined;
+    const root = curRoot;
+    if (!src || !root || inHatch > 0 || !sp || typeof sp.start !== "number") return at;
+    const off = sp.start - root.start;
+    if (off < 0 || off > root.text.length) return at;
+    const before = root.text.slice(0, off);
+    const dl = before.split("\n").length - 1;
+    const line = root.line + dl;
+    const lines = src.split("\n");
+    const srcLine = lines[line - 1];
+    if (srcLine === undefined) return at;
+    const rest = root.text.slice(off);
+    const tok = (x!.kind === "ident" || x!.kind === "shorthand") ? String(x!.name) : (rest.match(/^\s*([A-Za-z_$][\w$]*|\S)/)?.[1] ?? "");
+    if (!tok) return at;
+    const esc = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(/^[A-Za-z_$]/.test(tok) ? `(?<![\\w$])${esc}(?![\\w$])` : esc, "g");
+    const lineBefore = before.slice(before.lastIndexOf("\n") + 1);
+    const k = (lineBefore.match(re) ?? []).length;
+    // On the root's first line, search only from where the root's text begins.
+    let from = 0;
+    if (dl === 0) {
+      const first = root.text.match(/^\s*([A-Za-z_$@][\w$]*|\S)/)?.[1];
+      if (first) { const i = srcLine.indexOf(first); if (i >= 0) from = i; }
+    }
+    const hits = [...srcLine.slice(from).matchAll(re)];
+    const hit = hits[k];
+    if (!hit || hit.index === undefined) return at;
+    let startOff = 0;
+    for (let i = 0; i < line - 1; i++) startOff += lines[i].length + 1;
+    const col = from + hit.index + 1;
+    return { file: at.file ?? filePath, start: startOff + col - 1, end: startOff + col - 1 + tok.length, line, col };
+  }
+  function report(what: string, valueNode: unknown, fnDesc: string, at: ValueFnSpan, hint: string | null, fix?: string): void {
+    if (!reporting) return;
+    const where = locate(valueNode, at);
+    const key = `${where.file}:${where.start}:${where.end}:${what}:${hint ?? ""}:${fnDesc}`;
+    if (reportedKeys.has(key)) return;
+    reportedKeys.add(key);
+    const h = hint ? ` (${hint})` : "";
+    diags.push({
+      code: "E-VALUE-FUNCTION-STORED",
+      message:
+        `E-VALUE-FUNCTION-STORED: ${what} stores ${fnDesc}${h}. A function is not value data — it has no ` +
+        `structural equality, is not serializable and cannot be a map key — so no value holds one: not an ` +
+        `object, array or map literal, not a spread into one, not a state cell, not a field or element written ` +
+        `into a value, not an enum payload (§14.3, §15.11.5.1, §59.3). ` +
+        (fix ?? `Pass it instead: hand it directly to ` +
+        `the call that uses it as its own argument (a callback), wire it as a component prop or event handler, ` +
+        `or call it where the work happens; to choose between behaviours, store an enum tag and \`match\` on it.`),
+      span: where,
+    });
+  }
+  /** State cells holding a scrml:time Debouncer / Throttler (`<d> = debounce(…)`). */
+  const cellTimers = new Map<string, "Debouncer" | "Throttler">();
+  function timerHeldBy(e: unknown): { name: string; kind: "Debouncer" | "Throttler" } | null {
+    const r = e as Rec | undefined;
+    if (r?.kind !== "ident" || typeof r.name !== "string") return null;
+    if (r.name.startsWith("@")) {
+      const k = cellTimers.get(r.name.slice(1));
+      return k ? { name: r.name, kind: k } : null;
+    }
+    const k = lookup(r.name)?.timer;
+    return k ? { name: r.name, kind: k } : null;
+  }
+  function checkTimerMisuse(callee: unknown, at: ValueFnSpan): void {
+    if (!reporting) return;
+    const c = callee as Rec | undefined;
+    if (!c) return;
+    let msg: string | null = null;
+    const direct = timerHeldBy(c);
+    if (direct) {
+      msg = `\`${direct.name}\` is a ${direct.kind} — a struct, not a function — so it cannot be called. ` +
+        `Drive it with \`run(${direct.name}, …)\` (import \`run\` from 'scrml:time').`;
+    } else if (c.kind === "member" && typeof c.property === "string") {
+      const held = timerHeldBy(c.object);
+      if (held) {
+        const p = c.property;
+        msg = (p === "cancel" || p === "flush" || p === "run")
+          ? `\`${held.name}.${p}()\` — a ${held.kind} is a struct with no methods. Call the free function ` +
+            `\`${p}(${held.name})\` instead (import \`${p}\` from 'scrml:time').`
+          : `\`${held.name}.${p}\` is not callable — a ${held.kind} is a struct (fields \`id\`, ` +
+            `\`${held.kind === "Debouncer" ? "delay" : "limit"}\`). Drive it with \`run\` / \`cancel\` / \`flush\` from 'scrml:time'.`;
+      }
+    }
+    if (!msg) return;
+    const key = `timer:${at.file}:${at.start}:${msg}`;
+    if (reportedKeys.has(key)) return;
+    reportedKeys.add(key);
+    diags.push({ code: "E-TIMER-STRUCT-MISUSE", message: `E-TIMER-STRUCT-MISUSE: ${msg} (§41.21)`, span: at });
+  }
+
+  const join = (path: string, seg: string): string => (seg.startsWith("[") ? `${path}${seg}` : path ? `${path}.${seg}` : seg);
+  function fieldHint(path: string, ctx: Ctx, extra?: string): string | null {
+    const parts: string[] = [];
+    if (path) parts.push(path.startsWith("[") ? `at \`${path}\`` : `in field \`${path}\``);
+    if (extra) parts.push(extra);
+    if (ctx.keptHost) parts.push("the host call's result is kept as a value, so the host boundary does not apply");
+    return parts.length ? parts.join("; ") : null;
+  }
+
+  // ---- functions (decl, lambda, escape-hatch): parameters, body, returns ----
+  function paramDefault(p: Rec): unknown {
+    const dv = p.defaultValue;
+    if (!dv) return null;
+    if (typeof dv === "object") return dv;
+    if (typeof dv === "string") {
+      if (parsedDefaults.has(p)) return parsedDefaults.get(p);
+      let n: unknown = null;
+      try { n = parseExprToNode(dv, filePath, 0); } catch { n = null; }
+      parsedDefaults.set(p, n);
+      return n;
+    }
+    return null;
+  }
+
+  function enterFunction(node: Rec, params: unknown[], at: ValueFnSpan): { fi: FnInfo; paramIndex: Map<Binding, number> } {
+    const fi = fnInfoFor(node);
+    const paramIndex = new Map<Binding, number>();
+    params.forEach((p, i) => {
+      const pr = (p && typeof p === "object" ? p : {}) as Rec;
+      const dv = typeof p === "object" ? paramDefault(pr) : null;
+      if (dv) walkExpr(dv, at, freshCtx());
+      const names = boundNamesOf(p);
+      const list: Binding[] = [];
+      for (const n of names) {
+        const b = bindingFor(node, `${i}:${n}`, "param");
+        b.name = n;
+        if (isFunctionTypeAnnotation(pr.typeAnnotation)) setMayFn(b);
+        if (dv && mayFn(dv)) setMayFn(b);
+        declare(b);
+        list.push(b);
+        paramIndex.set(b, i);
+      }
+      fi.params[i] = list;
+    });
+    return { fi, paramIndex };
+  }
+
+  function noteReturn(e: unknown, fi: FnInfo, paramIndex: Map<Binding, number>): void {
+    const out = { own: false, params: new Set<number>() };
+    retSources(e, fi, paramIndex, out);
+    if (out.own && !fi.returnsFn) { fi.returnsFn = true; changed = true; }
+    for (const i of out.params) if (!fi.returnsParams.has(i)) { fi.returnsParams.add(i); changed = true; }
+  }
+
+  const retCtx: { fi: FnInfo; paramIndex: Map<Binding, number> }[] = [];
+
+  function walkFunction(node: Rec, params: unknown[], body: { expr?: unknown; stmts?: unknown[] }, at: ValueFnSpan): FnInfo {
+    pushFrame();
+    const r = enterFunction(node, params, at);
+    retCtx.push(r);
+    if (body.expr !== undefined) {
+      noteReturn(body.expr, r.fi, r.paramIndex);
+      walkExpr(body.expr, at, freshCtx());
+    } else if (body.stmts) {
+      walkStmts(body.stmts, at);
+    }
+    retCtx.pop();
+    popFrame();
+    return r.fi;
+  }
+
+  function hatchBody(x: Rec): unknown[] | null {
+    if (hatchBodies.has(x)) return hatchBodies.get(x) ?? null;
+    const stmts = escapeHatchBodyStatements(x, filePath);
+    hatchBodies.set(x, stmts);
+    return stmts;
+  }
+
+  /** Walk a function-valued expression's body; returns its FnInfo (null when not a function). */
+  function walkFnExpr(x: Rec, at: ValueFnSpan): FnInfo | null {
+    if (x.kind === "lambda") {
+      const body = x.body as Rec | undefined;
+      const params = (x.params as unknown[] | undefined) ?? [];
+      if (body?.kind === "expr") return walkFunction(x, params, { expr: body.value }, at);
+      if (body?.kind === "block") return walkFunction(x, params, { stmts: (body.stmts as unknown[]) ?? [] }, at);
+      return walkFunction(x, params, {}, at);
+    }
+    if (x.kind === "escape-hatch" && isFnExpr(x)) {
+      const params = Array.isArray(x.params) ? (x.params as unknown[]) : [];
+      const stmts = hatchBody(x);
+      inHatch++;
+      try { return walkFunction(x, params, { stmts: stmts ?? [] }, at); } finally { inHatch--; }
+    }
+    return null;
+  }
+
+  // ---- expression walk ----
+  const freshCtx = (over: Partial<Ctx> = {}): Ctx => ({ hostArg: false, discard: false, path: "", keptHost: false, ...over });
+  let seen = new WeakSet<object>();
+
+  function walkExpr(e: unknown, at: ValueFnSpan, ctx: Ctx): void {
+    if (!e || typeof e !== "object") return;
+    if (Array.isArray(e)) { for (const c of e) walkExpr(c, at, freshCtx()); return; }
+    if (seen.has(e as object)) return;
+    seen.add(e as object);
+    const x = e as Rec;
+    const inLit = (over: Partial<Ctx>): Ctx => freshCtx({ hostArg: ctx.hostArg, keptHost: ctx.keptHost, ...over });
+    switch (x.kind) {
+      case "object": {
+        for (const p of (x.props as Rec[] | undefined) ?? []) {
+          if (!p || typeof p !== "object") continue;
+          if (p.kind === "prop") {
+            const keyName = typeof p.key === "string" ? p.key : "[computed]";
+            const path = join(ctx.path, keyName);
+            if (!ctx.hostArg && mayFn(p.value)) report("This object literal", p.value, describe(p.value), at, fieldHint(path, ctx));
+            if (p.computed && p.key && typeof p.key === "object") walkExpr(p.key, at, freshCtx());
+            walkExpr(p.value, at, inLit({ path }));
+          } else if (p.kind === "shorthand") {
+            const name = String(p.name ?? "");
+            const path = join(ctx.path, name);
+            const b = lookup(name);
+            if (!ctx.hostArg && b?.mayFn) report("This object literal", p, describe({ kind: "ident", name }), at, fieldHint(path, ctx));
+          } else if (p.kind === "spread") {
+            if (!ctx.hostArg && mayFn(p.argument)) report("This object literal", p.argument, describe(p.argument), at, fieldHint(ctx.path, ctx, "through a spread"));
+            walkExpr(p.argument, at, inLit({ path: ctx.path }));
+          }
+        }
+        return;
+      }
+      case "array": {
+        let i = 0;
+        for (const el of (x.elements as Rec[] | undefined) ?? []) {
+          if (el && typeof el === "object") {
+            const spread = el.kind === "spread";
+            const target = spread ? el.argument : el;
+            const path = join(ctx.path, `[${i}]`);
+            if (!ctx.hostArg && mayFn(target)) {
+              report("This array literal", target, describe(target), at, fieldHint(spread ? ctx.path : path, ctx, spread ? "through a spread" : undefined));
+            }
+            walkExpr(target, at, inLit({ path }));
+          }
+          i++;
+        }
+        return;
+      }
+      case "map-lit": {
+        for (const ent of (x.entries as Rec[] | undefined) ?? []) {
+          if (!ent) continue;
+          const k = ent.key as Rec | undefined;
+          const seg = k && k.kind === "lit" ? `[${String(k.raw ?? k.value)}]` : "[…]";
+          const path = join(ctx.path, seg);
+          if (!ctx.hostArg && mayFn(ent.value)) report("This map literal", ent.value, describe(ent.value), at, fieldHint(path, ctx));
+          walkExpr(ent.key, at, freshCtx());
+          walkExpr(ent.value, at, inLit({ path }));
+        }
+        return;
+      }
+      case "spread":
+        walkExpr(x.argument, at, ctx);
+        return;
+      case "assign": {
+        const t = x.target as Rec | undefined;
+        const v = x.value;
+        if (t?.kind === "ident" && typeof t.name === "string") {
+          if (t.name.startsWith("@")) {
+            if (mayFn(v)) report(`The state cell \`${t.name}\``, v, describe(v), at, null);
+          } else if (mayFn(v)) {
+            setMayFn(lookup(t.name));
+          }
+        } else if (t && (t.kind === "member" || t.kind === "index")) {
+          const rk = rootKind(t);
+          if (rk !== "host" && rk !== "global" && mayFn(v)) {
+            const root = rootOf(t);
+            const rn = root?.kind === "ident" ? String(root.name) : "this value";
+            const what = rn.startsWith("@") ? `The state cell \`${rn}\`` : `The value \`${rn}\``;
+            report(what, v, describe(v), at, "through a field / element write");
+          }
+          walkExpr(t, at, freshCtx());
+        }
+        walkExpr(v, at, freshCtx());
+        return;
+      }
+      case "call": case "new": {
+        const callee = x.callee as Rec | undefined;
+        const args = (x.args as unknown[] | undefined) ?? [];
+        const host = isHostCallee(callee);
+        // A scrml:time Debouncer / Throttler is a STRUCT (§41.21): calling it, or calling a method
+        // on it (`d(q)`, `d.cancel()` — the retired shape), is refused, naming the free function.
+        if (x.kind === "call") checkTimerMisuse(callee, at);
+        // Enum payload — `Op.Apply(g)` and the dot shorthand `.Apply(g)` (the type comes from context).
+        {
+          let enumLabel: string | null = null;
+          if (x.kind === "call" && callee?.kind === "member" && (callee.object as Rec | undefined)?.kind === "ident") {
+            const en = String((callee.object as Rec).name);
+            if (enumNames.has(en) && !lookup(en)) enumLabel = `${en}.${String(callee.property)}`;
+          } else if (x.kind === "call" && callee?.kind === "ident" && typeof callee.name === "string" && /^\.[A-Z]/.test(callee.name)) {
+            enumLabel = callee.name;
+          }
+          if (enumLabel) for (const a of args) if (mayFn(a)) report(`The enum value \`${enumLabel}\``, a, describe(a), at, "as its payload");
+        }
+        // A value built from what a callback RETURNS — S464 "(a) Close it" (the closure-array entry).
+        {
+          const b = builtFromCallback(x);
+          if (b && callbackReturnsFn(args[b.cbIndex])) {
+            report(b.what, args[b.cbIndex], "the functions its callback returns", at, null, CLOSURE_ARRAY_FIX);
+          }
+        }
+        // A host call that writes its later arguments INTO a scrml value (`Object.assign(o, { f })`,
+        // `Object.defineProperty(o, "f", { value: f })`, `Reflect.set(o, "f", f)`).
+        let intoScrml = false;
+        if (callee?.kind === "member" && (callee.object as Rec | undefined)?.kind === "ident" && typeof callee.property === "string") {
+          const on = String((callee.object as Rec).name);
+          if (!lookup(on) && WRITES_INTO_FIRST.has(`${on}.${callee.property}`)) {
+            const rk = rootKind(args[0]);
+            if (rk !== "host" && rk !== "global") {
+              intoScrml = true;
+              const root = rootOf(args[0]);
+              const rn = root?.kind === "ident" ? String(root.name) : "this value";
+              args.forEach((a, ai) => {
+                if (ai >= 1 && mayFn(a)) report(rn.startsWith("@") ? `The state cell \`${rn}\`` : `The value \`${rn}\``, a, describe(a), at, `through \`${on}.${String(callee.property)}(…)\``);
+              });
+            }
+          }
+        }
+        // A KEPT host call whose result holds a function it was handed (`Array.of(g)`,
+        // `new Array(2).fill(g)`, `new Set().add(g)`, `new Map().set(k, g)`).
+        if (host && !ctx.discard && callee?.kind === "member" && typeof callee.property === "string" &&
+            (STORING_METHODS.has(callee.property) || callee.property === "of")) {
+          for (const a of args) if (mayFn(a)) report(`The result of \`….${callee.property}(…)\`, kept as a value,`, a, describe(a), at, "the host call's result is kept as a value, so the host boundary does not apply");
+        }
+        // A storing method on a LOCAL host collection marks it: it now holds a function, and storing
+        // it into a value is then refused like any other (`const s = new Set(); s.add(g); { s }`).
+        if (callee?.kind === "member" && typeof callee.property === "string" && STORING_METHODS.has(callee.property)) {
+          const root = rootOf(callee.object);
+          if (root?.kind === "ident" && typeof root.name === "string") {
+            const b = lookup(root.name);
+            if (b && b.kind === "host" && !b.imported && args.some((a) => mayFn(a))) setMayFn(b);
+          }
+        }
+        // A method that may put its argument into a scrml value.
+        if (x.kind === "call" && callee?.kind === "member" && typeof callee.property === "string") {
+          const prop = callee.property;
+          const rk = rootKind(callee.object);
+          const judge = rk === "known" ? !CALLING_METHODS.has(prop)
+            : (rk === "value" || rk === "param" || rk === "fn") ? STORING_METHODS.has(prop)
+            : false;
+          if (judge) {
+            const root = rootOf(callee.object);
+            const rn = root?.kind === "ident" ? String(root.name) : null;
+            const what = rn ? (rn.startsWith("@") ? `The state cell \`${rn}\`` : `The value \`${rn}\``) : "This value";
+            const from = prop === "splice" || prop === "toSpliced" ? 2 : prop === "with" || prop === "set" || prop === "insert" ? 1 : 0;
+            args.forEach((a, ai) => {
+              if (ai >= from && mayFn(a)) report(what, a, describe(a), at, `through \`.${prop}(…)\``);
+            });
+          }
+        }
+        // Call-site propagation into a file function's parameters.
+        const fi = calleeFn(callee);
+        if (fi && !fi.foreign) {
+          args.forEach((a, ai) => {
+            if (mayFn(a)) for (const b of fi.params[ai] ?? []) setMayFn(b);
+          });
+        }
+        const discardChain = host && ctx.discard;
+        walkExpr(callee, at, freshCtx({ discard: discardChain }));
+        for (const a of args) {
+          if (!a || typeof a !== "object") continue;
+          const lit = LITERAL_KINDS.has(String((a as Rec).kind));
+          if (host && lit && !intoScrml) {
+            walkExpr(a, at, freshCtx({ hostArg: discardChain, keptHost: !discardChain, discard: discardChain }));
+          } else {
+            walkExpr(a, at, freshCtx({ discard: discardChain }));
+          }
+        }
+        return;
+      }
+      case "match-expr":
+        // The arm values ARE the match's value: walk each in its arm's binder scope, so a literal
+        // or a stored function inside an arm is judged like any other (S464 round 3).
+        walkExpr(x.subject, at, freshCtx());
+        for (const arm of matchArms(x)) {
+          inArm(arm, arm.names, () => {
+            inHatch++;
+            try {
+              for (const s of arm.stmts) walkAny(s, at);
+              for (const v of arm.values) walkExpr(v, at, freshCtx());
+            } finally { inHatch--; }
+          });
+        }
+        return;
+      case "member": case "index":
+        walkExpr(x.object, at, freshCtx({ discard: ctx.discard }));
+        if (x.kind === "index") walkExpr(x.index, at, freshCtx());
+        return;
+      case "lambda":
+        walkFnExpr(x, at);
+        return;
+      case "escape-hatch": {
+        if (isFnExpr(x)) { walkFnExpr(x, at); return; }
+        const lo = loweredOf(x);
+        if (lo) walkExpr(lo, at, ctx);
+        return;
+      }
+      default:
+        for (const k in x) {
+          if (k === "span") continue;
+          const v = x[k];
+          if (v && typeof v === "object") walkAny(v, at);
+        }
+    }
+  }
+
+  // ---- statement / tree walk ----
+  function spanOf(node: Rec, fallback: ValueFnSpan): ValueFnSpan {
+    const sp = node.span as ValueFnSpan | undefined;
+    const kind = typeof node.kind === "string" ? node.kind : "";
+    if (inHatch === 0 && !EXPR_KINDS.has(kind) && sp && typeof sp.start === "number" && typeof sp.line === "number") {
+      return { file: sp.file ?? fallback.file, start: sp.start, end: sp.end, line: sp.line, col: sp.col };
+    }
+    return fallback;
+  }
+
+  function hoist(stmts: unknown[]): void {
+    for (const s of stmts) {
+      if (!s || typeof s !== "object") continue;
+      const r = s as Rec;
+      if (r.kind === "function-decl" && typeof r.name === "string") {
+        const b = bindingFor(r, r.name, "fn");
+        b.fn = fnInfoFor(r);
+        declare(b);
+      }
+      if (r.kind === "export-decl" && r.declaration && typeof r.declaration === "object") hoist([r.declaration]);
+    }
+  }
+
+  function walkStmts(stmts: unknown[], at: ValueFnSpan): void {
+    pushFrame();
+    hoist(stmts);
+    for (const s of stmts) walkAny(s, at);
+    popFrame();
+  }
+
+  /** Bind the names a declaration introduces; `init` decides function-ness / provenance. */
+  function bindDecl(node: Rec, declKind: string, init: unknown, at: ValueFnSpan): void {
+    const nm = node.name;
+    if (typeof nm === "string") {
+      // A tilde-decl naming a binding already in scope is a REASSIGNMENT (`g = twice`).
+      if (declKind === "tilde-decl") {
+        const existing = lookup(nm);
+        if (existing && existing.kind !== "fn") { if (mayFn(init)) setMayFn(existing); return; }
+      }
+      const kind = initKind(init);
+      const b = bindingFor(node, nm, kind);
+      if (mayFn(init)) setMayFn(b);
+      const tk = timerOf(init);
+      if (tk) b.timer = tk;
+      // `const a = if (c) { lift f } else { lift g }` — the lifted values ARE the value.
+      if (node.ifExpr && liftedValues(node.ifExpr).some((v) => mayFn(v))) setMayFn(b);
+      if (init && typeof init === "object") {
+        const ix = init as Rec;
+        if (isFnExpr(ix)) b.fn = fnInfoFor(ix);
+        else if (ix.kind === "ident" && typeof ix.name === "string") { const t = lookup(ix.name); if (t?.fn) b.fn = t.fn; }
+      }
+      declare(b);
+      return;
+    }
+    // A destructuring pattern: each name may take a default.
+    const pat = nm as Rec | undefined;
+    if (pat && (pat.kind === "destructure-object" || pat.kind === "destructure-array")) {
+      const items = ((pat.properties ?? pat.elements) as Rec[] | undefined) ?? [];
+      for (const it of items) {
+        if (!it || typeof it !== "object") continue;
+        const dv = it.defaultExpr;
+        if (dv) walkExpr(dv, at, freshCtx());
+        for (const n of boundNamesOf(it.bindName ?? it.name ?? it)) {
+          const b = bindingFor(it, n, "value");
+          if (dv && mayFn(dv)) setMayFn(b);
+          declare(b);
+        }
+      }
+      return;
+    }
+    for (const n of boundNamesOf(nm)) declare(bindingFor(node, n, initKind(init)));
+  }
+
+  function walkAny(v: unknown, at: ValueFnSpan): void {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { for (const c of v) walkAny(c, at); return; }
+    const node = v as Rec;
+    const kind = typeof node.kind === "string" ? node.kind : "";
+    if (kind && EXPR_KINDS.has(kind)) { walkExpr(node, at, freshCtx()); return; }
+    if (seen.has(node)) return;
+    seen.add(node);
+    const here = spanOf(node, at);
+
+    switch (kind) {
+      case "import-decl": {
+        bindImport(node);
+        return;
+      }
+      case "export-decl": {
+        // `export const inc = (x) => x + 1` reaches the type stage as an export-decl carrying only
+        // its raw text (no const-decl node): read the initializer the way the other decls are read.
+        const ex = exportConstInit(node);
+        if (ex) {
+          withRoot(null, null, here.line, () => walkExpr(ex.init, here, freshCtx()));
+          const b = bindingFor(node, ex.name, initKind(ex.init));
+          if (mayFn(ex.init)) setMayFn(b);
+          if (isFnExpr(ex.init as Rec)) b.fn = fnInfoFor(ex.init as object);
+          else if ((ex.init as Rec).kind === "ident") { const t = lookup(String((ex.init as Rec).name)); if (t?.fn) b.fn = t.fn; }
+          declare(b);
+          return;
+        }
+        break;
+      }
+      case "function-decl": {
+        if (typeof node.name === "string") {
+          const b = bindingFor(node, node.name, "fn");
+          b.fn = fnInfoFor(node);
+          declare(b);
+        }
+        walkFunction(node, (node.params as unknown[] | undefined) ?? [], { stmts: Array.isArray(node.body) ? (node.body as unknown[]) : [] }, here);
+        return;
+      }
+      case "let-decl": case "const-decl": case "tilde-decl": case "lin-decl": {
+        const init = node.initExpr ?? node.matchExpr;
+        if (init) withRoot(node.init, init, here.line, () => walkExpr(init, here, freshCtx()));
+        if (node.ifExpr) walkAny(node.ifExpr, here);
+        if (node.forExpr) {
+          walkAny(node.forExpr, here);
+          // `const xs = for (i of items) { lift () => pick(i) }` builds an array of what it lifts.
+          const fe = node.forExpr as Rec;
+          pushFrame();
+          for (const n of boundNamesOf(fe.variable)) declare(bindingFor(fe, n, "param"));
+          for (const v of liftedValues(fe)) {
+            if (mayFn(v)) report("The array this `for` lift builds", v, describe(v), here, null, CLOSURE_ARRAY_FIX);
+          }
+          popFrame();
+        }
+        bindDecl(node, kind, init, here);
+        return;
+      }
+      case "return-stmt": {
+        const e = node.exprNode ?? node.matchExpr;
+        const rc = retCtx[retCtx.length - 1];
+        if (e && rc) noteReturn(e, rc.fi, rc.paramIndex);
+        if (e) withRoot(node.expr, e, here.line, () => walkExpr(e, here, freshCtx()));
+        return;
+      }
+      case "bare-expr": {
+        if (node.exprNode) withRoot(node.expr, node.exprNode, here.line, () => walkExpr(node.exprNode, here, freshCtx({ discard: true })));
+        return;
+      }
+      case "state-decl": {
+        const tk = timerOf(node.initExpr);
+        if (tk && typeof node.name === "string") cellTimers.set(node.name, tk);
+        withRoot(node.init, node.initExpr, here.line, () => {
+          if (mayFn(node.initExpr)) report(`The state cell \`@${String(node.name ?? "")}\``, node.initExpr, describe(node.initExpr), here, null);
+          if (node.initExpr) walkExpr(node.initExpr, here, freshCtx());
+        });
+        break;
+      }
+      case "reactive-assign": {
+        if (mayFn(node.valueExpr)) report(`The state cell \`@${String(node.target ?? "")}\``, node.valueExpr, describe(node.valueExpr), here, null);
+        break;
+      }
+      case "reactive-nested-assign": {
+        const path = Array.isArray(node.path) ? (node.path as unknown[]).join(".") : "";
+        if (mayFn(node.valueExpr)) report(`The state cell \`@${String(node.target ?? "")}\``, node.valueExpr, describe(node.valueExpr), here, path ? `in field \`${path}\`` : null);
+        break;
+      }
+      case "reactive-array-mutation": {
+        if (typeof node.method === "string" && STORING_METHODS.has(node.method)) {
+          for (const a of (node.argExprs as unknown[] | undefined) ?? []) {
+            if (mayFn(a)) report(`The state cell \`@${String(node.target ?? "")}\``, a, describe(a), here, `through \`.${node.method}(…)\``);
+          }
+        }
+        break;
+      }
+      case "for-stmt": {
+        pushFrame();
+        for (const n of boundNamesOf(node.variable)) declare(bindingFor(node, n, "param"));
+        for (const k in node) {
+          if (k === "span" || k === "variable") continue;
+          const c = node[k];
+          if (c && typeof c === "object") walkAny(c, here);
+        }
+        popFrame();
+        return;
+      }
+      case "match-arm-block": {
+        pushFrame();
+        const names = new Set<string>();
+        for (const n of (node.payloadBindings as unknown[] | undefined) ?? []) if (typeof n === "string") names.add(n);
+        if (typeof node.binding === "string") names.add(node.binding);
+        for (const n of names) for (const bn of boundNamesOf(n)) declare(bindingFor(node, bn, "param"));
+        walkAny(node.body, here);
+        popFrame();
+        return;
+      }
+      case "try-stmt": {
+        if (Array.isArray(node.body)) walkStmts(node.body as unknown[], here);
+        const cn = node.catchNode as Rec | undefined;
+        if (cn) {
+          pushFrame();
+          const header = typeof cn.header === "string" ? cn.header.trim().replace(/^\(/, "").replace(/\)$/, "").trim() : "";
+          if (header) for (const n of boundNamesOf(header)) declare(bindingFor(cn, n, "param"));
+          if (Array.isArray(cn.body)) walkStmts(cn.body as unknown[], here);
+          popFrame();
+        }
+        for (const k of ["finallyNode", "finallyBody", "finalizer"]) if (node[k]) walkAny(node[k], here);
+        return;
+      }
+      case "each-block": {
+        pushFrame();
+        const names: string[] = [];
+        if (typeof node.asName === "string") names.push(node.asName);
+        if (Array.isArray(node.asNames)) for (const n of node.asNames as unknown[]) if (typeof n === "string") names.push(n);
+        for (const n of names) for (const bn of boundNamesOf(n)) declare(bindingFor(node, bn, "param"));
+        for (const k in node) {
+          if (k === "span") continue;
+          const c = node[k];
+          if (c && typeof c === "object") walkAny(c, here);
+        }
+        popFrame();
+        return;
+      }
+      case "markup": {
+        for (const a of (node.attrs as Rec[] | undefined) ?? []) {
+          const val = a?.value as Rec | undefined;
+          if (val && val.exprNode) {
+            const name = typeof a.name === "string" ? a.name : "";
+            const asp = spanOf(a, here);
+            withRoot(val.raw, val.exprNode, asp.line, () => walkExpr(val.exprNode, asp, freshCtx({ discard: /^on/i.test(name) })));
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    for (const k in node) {
+      if (k === "span") continue;
+      if (kind === "markup" && k === "attrs") continue;
+      const c = node[k];
+      if (!c || typeof c !== "object") continue;
+      if (Array.isArray(c) && BLOCK_KEYS.has(k)) walkStmts(c, here);
+      else walkAny(c, here);
+    }
+  }
+
+  // ---- one pass over the file ----
+  const topLevel = (list: unknown[]): void => {
+    for (const n of list) {
+      if (!n || typeof n !== "object") continue;
+      const r = n as Rec;
+      if (r.kind === "function-decl" && typeof r.name === "string") {
+        const b = bindingFor(r, r.name, "fn");
+        b.fn = fnInfoFor(r);
+        frames[0].set(r.name, b);
+        continue;
+      }
+      if ((r.kind === "const-decl" || r.kind === "let-decl") && typeof r.name === "string") {
+        // A file-level declaration is visible file-wide (markup, other logic blocks, state cells).
+        const ik = r.initExpr as Rec | undefined;
+        const b = bindingFor(r, r.name, initKind(ik));
+        if (ik && isFnExpr(ik)) b.fn = fnInfoFor(ik);
+        const tk = timerOf(ik);
+        if (tk) b.timer = tk;
+        frames[0].set(r.name, b);
+        continue;
+      }
+      if (r.kind === "export-decl" && r.declaration && typeof r.declaration === "object") topLevel([r.declaration]);
+      if (r.kind === "export-decl") {
+        const ex = exportConstInit(r);
+        if (ex) {
+          const b = bindingFor(r, ex.name, initKind(ex.init));
+          if (isFnExpr(ex.init as Rec)) b.fn = fnInfoFor(ex.init as object);
+          frames[0].set(ex.name, b);
+        }
+      }
+      if (r.kind === "logic" && Array.isArray(r.body)) topLevel(r.body as unknown[]);
+      if (r.kind === "markup" && Array.isArray(r.children)) topLevel(r.children as unknown[]);
+    }
+  };
+  const bindTopImports = (list: unknown[]): void => {
+    for (const n of list) {
+      if (!n || typeof n !== "object") continue;
+      const r = n as Rec;
+      if (r.kind === "import-decl") bindImport(r);
+      if (r.kind === "logic" && Array.isArray(r.body)) bindTopImports(r.body as unknown[]);
+      if (r.kind === "markup" && Array.isArray(r.children)) bindTopImports(r.children as unknown[]);
+    }
+  };
+
+  function runPass(): void {
+    seen = new WeakSet<object>();
+    frames = [new Map()];
+    retCtx.length = 0;
+    inHatch = 0;
+    for (const n of importedFns) {
+      const b = bindingFor(moduleOwner, `importedFn:${n}`, "fn");
+      b.name = n;
+      frames[0].set(n, b);
+    }
+    bindTopImports(nodes);
+    topLevel(nodes);
+    for (const n of nodes) walkAny(n, defaultSpan);
+  }
+
+  // Solve binding / function facts to a fixpoint (facts only grow — booleans flip false→true and
+  // sets only gain members — so this terminates), then report once. The cap is a guard against a
+  // defect, not a budget: hitting it refuses the file (fail closed), it never reports silently.
+  let converged = false;
+  for (let pass = 0; pass < MAX_FIXPOINT_PASSES; pass++) {
+    changed = false;
+    runPass();
+    if (!changed) { converged = true; break; }
+  }
+  if (mode === "facts") {
+    const out = new Map<string, ExportFact>();
+    if (!converged) return { diags, exports: null };
+    const collect = (list: unknown[]): void => {
+      for (const n of list) {
+        if (!n || typeof n !== "object") continue;
+        const r = n as Rec;
+        if (r.kind === "function-decl" && r.exported === true && typeof r.name === "string") {
+          const b = frames[0].get(r.name);
+          if (b) out.set(r.name, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+        }
+        if (r.kind === "export-decl") {
+          const renames = Array.isArray(r.renames) ? (r.renames as Rec[]) : null;
+          if (typeof r.reExportSource === "string") {
+            // `export { a as b } from './m.scrml'` / `export * from './m.scrml'`: the facts are the
+            // other module's. An unresolvable module leaves the names out — the importer then fails
+            // closed on a lower-case name it cannot find.
+            const dep = moduleFacts(resolveImportPath(r.reExportSource, filePath) ?? "");
+            if (r.isReExportAll === true) {
+              if (dep) for (const [k, v] of dep) if (!out.has(k)) out.set(k, v);
+            } else if (renames && dep) {
+              for (const rn of renames) {
+                const f = dep.get(String(rn.local ?? rn.exported));
+                if (f) out.set(String(rn.exported ?? rn.local), f);
+              }
+            }
+          } else if (renames) {
+            // `export { a, b }` / `export { a as c }` — a local export list.
+            for (const rn of renames) {
+              const b = frames[0].get(String(rn.local ?? rn.exported));
+              if (b) out.set(String(rn.exported ?? rn.local), { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+            }
+          } else if (r.exportedName == null && typeof r.raw === "string") {
+            // `export const { a, b } = init` — a destructuring export: each name may hold a function
+            // when the initializer may hold one anywhere (coarse; the parser keeps no node for it).
+            const dm = r.raw.match(/^\s*export\s+(?:const|let)\s+([{[][\s\S]*?[}\]])\s*=\s*([\s\S]+)$/);
+            if (dm) {
+              let init: unknown = null;
+              try { init = parseExprToNode(dm[2], filePath, 0); } catch { init = null; }
+              const holdsFn = !init || mayFn(init) || literalHoldsFn(init);
+              for (const n of boundNamesOf(dm[1])) if (!out.has(n)) out.set(n, { kind: "value", mayFn: holdsFn });
+            }
+          } else if (typeof r.exportedName === "string" && !out.has(r.exportedName)) {
+            const b = frames[0].get(r.exportedName);
+            if (b) out.set(r.exportedName, { kind: b.kind, mayFn: b.mayFn, fn: b.fn });
+          }
+        }
+        if (r.kind === "logic" && Array.isArray(r.body)) collect(r.body as unknown[]);
+        if (r.kind === "markup" && Array.isArray(r.children)) collect(r.children as unknown[]);
+      }
+    };
+    collect(nodes);
+    return { diags, exports: out };
+  }
+  reporting = true;
+  if (!converged) {
+    diags.push({
+      code: "E-VALUE-FUNCTION-STORED",
+      message:
+        "E-VALUE-FUNCTION-STORED: the compiler could not finish deciding which values in this file may hold a " +
+        "function (the analysis did not converge), so it refuses the file rather than pass a value it could not " +
+        "judge. This is a compiler limit, not a defect in your program — please report it.",
+      span: defaultSpan,
+    });
+    return { diags, exports: null };
+  }
+  runPass();
+  return { diags, exports: null };
+}

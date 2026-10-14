@@ -14,7 +14,7 @@
  * REAL `Bun.serve` whose `error:` handler is the one `generateServerEntry` emits.
  */
 import { describe, test, expect, beforeAll } from "bun:test";
-import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, readdirSync } from "fs";
+import { writeFileSync, readFileSync, mkdtempSync, mkdirSync, readdirSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
@@ -75,7 +75,10 @@ function prodErrorHandler() {
   return new Function(`return {${m[0]}};`)().error;
 }
 
-async function serve(auth, errorHandler, src = SRC(auth)) {
+// `refusedWith` (S464): the compile is EXPECTED to be refused with exactly these codes. A refused
+// compile writes no file (SPEC §2.2.1), so the run-time floor — defense in depth PAST the refusal —
+// is driven from the refused compile's in-memory server codegen (the round-6e precedent below).
+async function serve(auth, errorHandler, src = SRC(auth), refusedWith = []) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-protect-error-"));
   const outDir = join(dir, "dist");
   mkdirSync(outDir, { recursive: true });
@@ -88,8 +91,12 @@ async function serve(auth, errorHandler, src = SRC(auth)) {
   db.close();
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
   const fatal = (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""));
-  expect(fatal.map((e) => e.code)).toEqual([]);
+  expect([...new Set(fatal.map((e) => e.code))].sort()).toEqual([...refusedWith].sort());
   const sp = join(outDir, "app.server.js");
+  if (refusedWith.length > 0) {
+    expect(existsSync(sp)).toBe(false);
+    writeFileSync(sp, result.outputs.get(file).serverJs);
+  }
   const js = readFileSync(sp, "utf8");
   writeFileSync(sp, js.replace('new SQL("sqlite:./app.db")', `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
   const mod = await import(`file://${sp}?v=${Date.now()}-${Math.random()}`);
@@ -302,8 +309,11 @@ ${J.map(([n]) => `<button onclick=\${ @resultCell = ${n}() }>${n}</button>`).joi
 <p>\${@resultCell}</p>
 </program>
 `;
+  // S464: J1/J4/J5 hold a function in an object literal, so the compile now REFUSES them
+  // (E-VALUE-FUNCTION-STORED) — a compile-time layer in front of this one. The run-time floor is
+  // still driven, from the refused compile's in-memory server codegen, and must still hold.
   test("J1, J3, J4, J5, J9, J10, J17 answer 200 without the protected column", async () => {
-    const s = await serve(' auth="none"', prodErrorHandler(), SRC_J);
+    const s = await serve(' auth="none"', prodErrorHandler(), SRC_J, ["E-VALUE-FUNCTION-STORED"]);
     try {
       for (const [n] of J) {
         const r = await s.post(n);
