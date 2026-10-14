@@ -45056,6 +45056,17 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   **designer-card** ruling (the form is rare / zero-corpus / hand-migration is trivial),
   recorded as a version-event decision. Without that waiver, a no-codemod form stays
   SOFT-DEPRECATED indefinitely.
+- **A file that does not compile is refused.** `scrml fix` SHALL NOT rewrite a file that does not
+  compile before the rewrite (any error-severity diagnostic, including a failure of the emitted-JS
+  check). It leaves the file byte-identical and reports the compile errors (code and source line,
+  where the diagnostic carries one). A rewrite of a file the compiler cannot fully read cannot be
+  verified: a verify that compares the compiler's reading before and after passes any rewrite of a
+  file that yields the same errors and no artifacts. The refusal applies to every `scrml fix` rule,
+  with or without `--s66`. A file that compiles with warnings or info diagnostics is not refused.
+  Over a directory, a refused file is skipped and listed and the other files are processed. The
+  exit status is non-zero when any file was refused (impl#1: 3, ahead of `--check`'s 1 and 2).
+
+> **Provenance:** ruling:user-voice-scrml.md S464 "your recs" — *"The client-server-call / sql-failable / s66 `scrml fix` rules SHALL refuse (no rewrite, a message naming the compile errors) any file that does not compile before the rewrite — a rewrite of a file the compiler cannot fully read cannot be verified (matches the S462 markup-given migration's verify-fail-closed)."* Extended from the three named rules to every rule by the ruling's stated reason (PA reading, bryan's veto window): measured S464, the `unwrap-logic` rule deleted the `${` / `}` lines of a file whose other function emits invalid JS.
 
 ### 63.5 Conformance interaction
 

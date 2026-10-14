@@ -87,7 +87,7 @@ Options:
   --dry-run            Print a diff; write nothing
   --check              Write nothing; exit 1 if a file would change, else 2 if a reported construct
                        was left untouched, else 0 (3 if a file was refused, in every mode)
-  --s66               Add the §66 declaration rules (dry-run unless --write; output not compilable today)
+  --s66                Add the §66 declaration rules (dry-run unless --write; output not compilable today)
   --write              With --s66: write the §66 rewrite in place
   --entry              Treat every file as an application entry (program-wrap applies)
   --no-program-wrap    Never wrap a file in <program>
