@@ -54,8 +54,8 @@
 
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
-import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from "./fix-s66.js";
-import { compileErrorsTogether, COMPILE_THREW } from "./fix-verify-shared.js";
+import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges, hasProgramRoot } from "./fix-s66.js";
+import { compileErrorsTogether } from "./fix-verify-shared.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -237,72 +237,79 @@ export function applyFixRules(file, source, rel, o, files = [file], extra = {}) 
 /**
  * The does-it-compile gate of one target (S464 ruling; S466 review): which of `files` are refused,
  * with the error-severity diagnostics that refuse each, judged the way `scrml compile` judges the
- * target.
- *   - A file target: `scrml compile <file>` — any error refuses it.
- *   - A directory: the target files compiled TOGETHER (`scrml compile <dir>`); a file is refused on
- *     the errors of itself and of the modules it imports (`resolveProject`). One file's error can stop the compile before a later check runs for the others
- *     (the emitted-JS parse check is skipped once any error is reported), so the refused files are
- *     dropped and the rest compiled again, until a compile refuses no further file. When only
- *     errors that name no file remain — or the joint compile CRASHES — each remaining file is
- *     judged by its own compile (`jointNote` says why).
+ * file in the application it belongs to.
+ *   - A file target: `scrml compile <file>` — any error of that compile refuses it.
+ *   - A directory: one compile per ROOT. A root is a file with a top-level `<program>` (§40.8: one
+ *     program per application) or a file no other target file imports (a route page, a lone
+ *     module). Each root is compiled as `scrml compile <root>`, which brings its imports, and is
+ *     refused on any error of that compile. Every other file — a module some target file imports —
+ *     is judged inside the roots that reach it: it is refused on an error, in such a compile, of
+ *     itself or of a module it imports — and, when such a compile reports an error that names no
+ *     file (it may be this file's), also by its own compile. A file that no root reaches (a
+ *     module import cycle) is judged by its own compile. So a component module that compiles inside its application is
+ *     not refused because it does not compile alone, and a directory of unrelated applications
+ *     (examples/, samples/, conformance/cases/) is not judged as one program. Compiled as one,
+ *     such a directory reports protect conflicts (E-PROTECT-006) and route collisions (E-CG-001)
+ *     BETWEEN unrelated applications, errors that name no file, or crashes (`scrml compile
+ *     samples` overflows the stack). All measured S466.
  * pre-migrate exists to clear E-DEPRECATED-001 (impl#1's hard error on `<machine>`): while it runs,
  * that code alone does not refuse; pre-migrate then requires the migrated file to compile (fix-s66.js).
- * @returns {{ refused: Map<string, object[]>, clean: boolean }} `clean`: the last compile of the
- *   files that were not refused reported no error at all (so a rule's scratch compile that errors
- *   is a divergence of the scratch copy, not a file that does not compile).
+ * @returns {{ refused: Map<string, object[]>, clean: Set<string> }} `clean`: the files whose judging
+ *   compile(s) reported nothing fatal at all — for them a rule's scratch compile that errors is a
+ *   divergence of the scratch copy, not a file that does not compile.
  */
 export function judgeTargets(files, isDir, rules) {
   const tolerated = (d) => rules.includes("pre-migrate") && d.code === "E-DEPRECATED-001";
   const refused = new Map();
+  const clean = new Set();
+  const judgeAlone = (f) => {
+    const diags = compileErrorsTogether([f]);
+    const errs = diags.filter((d) => !tolerated(d));
+    if (errs.length > 0) refused.set(f, errs);
+    else if (diags.length === 0) clean.add(f);
+  };
   if (!isDir) {
-    const diags = compileErrorsTogether(files);
-    const errs = diags.filter((d) => !tolerated(d));
-    for (const f of files) if (errs.length > 0) refused.set(f, errs);
-    return { refused, clean: diags.length === 0 };
+    for (const f of files) judgeAlone(f);
+    return { refused, clean };
   }
-  const own = new Map();
-  const ownOf = (f) => {
-    if (!own.has(f)) own.set(f, new Set([f, ...Object.keys(resolveProject(f))]));
-    return own.get(f);
+  const closure = new Map();
+  const closureOf = (f) => {
+    if (!closure.has(f)) closure.set(f, new Set([resolve(f), ...Object.keys(resolveProject(f))]));
+    return closure.get(f);
   };
-  // Each file by its own compile (`scrml compile <file>`): the fallback when the joint compile
-  // reports only errors that name no file, or crashes.
-  const judgeEach = (fs) => {
-    let allClean = true;
-    for (const f of fs) {
-      const mine = compileErrorsTogether([f]);
-      if (mine.length > 0) allClean = false;
-      const errs = mine.filter((d) => !tolerated(d));
-      if (errs.length > 0) refused.set(f, errs);
-    }
-    return allClean;
-  };
-  let remaining = [...files];
-  let clean = true;
-  while (remaining.length > 0) {
-    const diags = compileErrorsTogether(remaining);
-    clean = diags.length === 0;
+  const targets = new Set(files.map((f) => resolve(f)));
+  const importedByAnother = new Set();
+  for (const f of files) for (const g of closureOf(f)) if (g !== resolve(f) && targets.has(g)) importedByAnother.add(g);
+  const roots = files.filter((f) => hasProgramRoot(f, readCached(f)) || !importedByAnother.has(resolve(f)));
+  const rootSet = new Set(roots);
+  // Each root's compile, once.
+  const rootDiags = new Map();
+  for (const r of roots) {
+    const diags = compileErrorsTogether([r]);
+    rootDiags.set(r, diags);
     const errs = diags.filter((d) => !tolerated(d));
-    if (errs.length === 0) break;
-    if (remaining.length === 1) { refused.set(remaining[0], errs); break; }
-    // Errors that name a file refuse that file and every file importing it; the rest is compiled again.
-    let newly = 0;
-    for (const f of remaining) {
-      const mine = errs.filter((d) => d.file !== null && ownOf(f).has(d.file));
-      if (mine.length > 0) { refused.set(f, mine); newly++; }
+    if (errs.length > 0) refused.set(r, errs);
+    else if (diags.length === 0) clean.add(r);
+  }
+  for (const m of files) {
+    if (rootSet.has(m)) continue;
+    const reaching = roots.filter((r) => closureOf(r).has(resolve(m)));
+    if (reaching.length === 0) { judgeAlone(m); continue; }
+    const mine = closureOf(m);
+    const hits = [];
+    let any = false;
+    for (const r of reaching) {
+      for (const d of rootDiags.get(r)) {
+        if (d.file === null || !mine.has(d.file)) continue;
+        any = true;
+        if (!tolerated(d)) hits.push(d);
+      }
     }
-    if (newly > 0) { remaining = remaining.filter((f) => !refused.has(f)); continue; }
-    // Only errors that name no file are left (measured S466: E-IMPORT-002 / E-CG-003 / E-TYPE-031 /
-    // E-META-EVAL-002 / E-VALIDATOR-INLINE-DYNAMIC carry no file in a joint compile of
-    // conformance/cases), or the compiler CRASHED on the set (`scrml compile samples`, 881 unrelated
-    // files, overflows the stack). Such an error says nothing about which file it belongs to, so it
-    // refuses none by itself: each remaining file is judged by its own compile.
-    const threw = errs.find((d) => d.code === COMPILE_THREW);
-    const allClean = judgeEach(remaining);
-    return {
-      refused, clean: allClean,
-      jointNote: threw ? `crashes on these files together (${threw.message})` : `reports ${errs.length} error(s) that name no file (${[...new Set(errs.map((d) => d.code))].join(", ")})`,
-    };
+    if (hits.length > 0) { refused.set(m, hits); continue; }
+    // A reaching root's compile reported an error that names no file (E-IMPORT-002 on an import
+    // cycle carries none): it may be this module's, so the module is judged by its own compile too.
+    if (reaching.some((r) => rootDiags.get(r).some((d) => d.file === null && !tolerated(d)))) { judgeAlone(m); continue; }
+    if (!any && reaching.every((r) => rootDiags.get(r).length === 0)) clean.add(m);
   }
   return { refused, clean };
 }
@@ -331,7 +338,6 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
   const report = [];
   let wouldChange = 0;
   let refused = 0;
-  const notes = [];
   if (o.s66) {
     io.err("scrml fix --s66: WARNING — the §66 declaration rules emit the §66 opener dialect, which today's compiler (impl#1) cannot compile."
       + (o.write ? " Writing in place (--write)." : " Preview only (dry-run); pass --write to write it."));
@@ -347,20 +353,12 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
     // at all (measured S464: unwrap-logic + sql-failable rewrote a file whose other function emits
     // invalid JS). Warnings and info do not refuse. Every rule, every mode (incl. --s66).
     //
-    // "Does not compile" is judged the way `scrml compile` judges it (S466 review): the target is
-    // compiled AS THE USER WOULD COMPILE IT — `scrml compile <file>` for a file, `scrml compile
-    // <dir>` (every target file together) for a directory — once, in place, before anything is
-    // written. A single file is refused on any error of that compile. In a directory, a file is
-    // refused on the errors of ITSELF and of the modules it imports (its project), not on another
-    // file's: a component module that compiles as part of its project is not refused because it
-    // does not compile alone. Errors that name no file, or a crash, fall back to judging each file by its own compile (judgeTargets).
+    // "Does not compile" is judged the way `scrml compile` judges the file in the application it
+    // belongs to (S466 review; judgeTargets): `scrml compile <file>` for a file target; in a
+    // directory, one compile per `<program>` entry, a module judged inside the entries that import
+    // it. Once, in place, before anything is written.
     const rules = effectiveRules(o);
     const gate = judgeTargets(files, statSync(root).isDirectory(), rules);
-    if (gate.jointNote) notes.push(`scrml compile ${relative(cwd, root) || "."} ${gate.jointNote}; the remaining files were each judged by their own compile`);
-    if (gate.jointNote && !o.json) {
-      io.err(`scrml fix: note — \`scrml compile ${relative(cwd, root) || "."}\` ${gate.jointNote}; the remaining files were each judged by their own compile`);
-    }
-    const isDir = statSync(root).isDirectory();
     for (const file of files) {
       const rel = relative(cwd, file) || file;
       const source = readFileSync(file, "utf8");
@@ -369,7 +367,7 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
         refused++;
         report.push({ file: rel, refused: true, compileErrors: compileErrors.map((d) => ({ ...d, file: d.file ? relative(cwd, d.file) || d.file : null })), changed: false, applied: [], blockers: [], infos: [] });
         if (!o.json) {
-          io.err(`${rel}: refused — the file does not compile, so no rewrite can be verified; nothing was changed. Fix these first (\`scrml compile ${isDir ? relative(cwd, root) || "." : rel}\` shows them in full):`);
+          io.err(`${rel}: refused — the file does not compile, so no rewrite can be verified; nothing was changed. Fix these first (\`scrml compile\` on the file, or on the program that imports it, shows them in full):`);
           for (const d of compileErrors) {
             const where = d.file ? `${relative(cwd, d.file) || d.file}${d.line != null ? `:${d.line}` : ""}` : "(no file)";
             io.err(`  ${where} ${d.code}${d.message ? `: ${d.message}` : ""}`);
@@ -377,7 +375,7 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
         }
         continue;
       }
-      const { cls, r } = applyFixRules(file, source, rel, o, files, { inPlaceClean: gate.clean });
+      const { cls, r } = applyFixRules(file, source, rel, o, files, { inPlaceClean: gate.clean.has(file) });
       report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers, infos: r.infos ?? [] });
       if (!o.json) {
         for (const b of r.blockers) io.err(`${rel}:${b.line} ${b.rule}: ${b.reason}${b.snippet ? `  [${b.snippet}]` : ""}`);
@@ -396,7 +394,7 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
       if (!o.dryRun && !o.check) writeFileSync(file, r.output);
     }
   }
-  if (o.json) io.out(JSON.stringify(notes.length ? { files: report, notes } : { files: report }, null, 2));
+  if (o.json) io.out(JSON.stringify({ files: report }, null, 2));
   else {
     const blocked = report.filter((f) => f.blockers.length > 0).length;
     io.err(`scrml fix: ${report.length} file(s) · ${wouldChange} ${o.dryRun || o.check ? "would change" : "changed"} · ${blocked} with constructs left for a human`

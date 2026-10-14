@@ -45063,11 +45063,15 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   verified: a verify that compares the compiler's reading before and after passes any rewrite of a
   file that yields the same errors and no artifacts. The refusal applies to every `scrml fix` rule,
   with or without `--s66`. A file that compiles with warnings or info diagnostics is not refused.
-  "Does not compile" is judged as `scrml compile` judges the same target. For a file target, any
-  error of `scrml compile <file>` refuses it. For a directory, the files are compiled together,
-  and a file is refused for an error in itself or in a module it imports, not for an error in
-  another file. A module that compiles as part of its project is therefore not refused for failing
-  to compile alone. A rule whose own verify copy of the project reports an error, for a file that
+  "Does not compile" is judged as `scrml compile` judges the file within the application it
+  belongs to. For a file target, any error of `scrml compile <file>` refuses it. In a directory,
+  a root is compiled on its own, with its imports, and is refused on any error of that compile. A
+  root is a `<program>` file (one application, §40.8) or a file that no other target file imports,
+  such as a route page. Every other file is judged inside the roots that import it, directly or
+  transitively. It is refused for an error in itself, or in a module it imports, in such a
+  compile. A file that no root reaches is judged by its own compile. A module that compiles as
+  part of its application is therefore not refused for failing to compile alone. Unrelated
+  applications in one directory are never judged as one program. A rule whose own verify copy of the project reports an error, for a file that
   compiles in place, reports that it cannot verify, not that the file does not compile. One
   exception: a rewrite whose purpose is to clear a removed-form hard error does not refuse a file
   whose only error is that one, provided the rewritten file compiles. In impl#1 this is the
@@ -45078,8 +45082,10 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
 > **Provenance:** ruling:user-voice-scrml.md S464 "your recs" — *"The client-server-call / sql-failable / s66 `scrml fix` rules SHALL refuse (no rewrite, a message naming the compile errors) any file that does not compile before the rewrite — a rewrite of a file the compiler cannot fully read cannot be verified (matches the S462 markup-given migration's verify-fail-closed)."* Extended from the three named rules to every rule by the ruling's stated reason (PA reading, bryan's veto window): measured S464, the `unwrap-logic` rule deleted the `${` / `}` lines of a file whose other function emits invalid JS.
 
 > **PA reading (S466, owner veto):** three refinements above follow from the ruling's reason rather
-> than its text. First, "does not compile" is judged project-aware, as `scrml compile` judges it
-> (S466 review: a component module compiles inside its project but not alone). Second, a scratch-copy
+> than its text. First, "does not compile" is judged per application, as `scrml compile` judges it
+> (S466 review: a component module compiles inside its project but not alone). Compiling a whole
+> directory of unrelated programs as one compile is not used: measured S466, it reported
+> cross-program protect and route conflicts, errors with no file, and a crash. Second, a scratch-copy
 > divergence is reported as "cannot verify", not as a compile failure (S466 review: a `../app.db`
 > page). Third, the removed-form exception exists because the round-1 gate refused every `<machine>`
 > file, blocking the migration `scrml fix` exists to perform. Not settled: a file already rewritten

@@ -332,6 +332,18 @@ function collectEnums(asts) {
  * or builds no AST — impl#1 cannot read the file.
  */
 const FRONT_END_MEMO = new Map();
+
+/**
+ * Is the file an application entry — a top-level `<program>` in impl#1's parsed tree? (A
+ * `<program` in a comment decides nothing.) When the front end cannot read the file, a textual
+ * `<program` makes it an entry, so it is judged by its own compile (the conservative side).
+ */
+export function hasProgramRoot(filePath, source) {
+  const ast = frontEndMemo(filePath, source)?.ast;
+  if (!ast) return /<program\b/.test(source);
+  return (Array.isArray(ast.nodes) ? ast.nodes : []).some((n) => n && n.kind === "markup" && n.tag === "program");
+}
+
 function frontEndMemo(filePath, source) {
   const key = `${filePath}\u0000${source}`;
   if (FRONT_END_MEMO.has(key)) return FRONT_END_MEMO.get(key);

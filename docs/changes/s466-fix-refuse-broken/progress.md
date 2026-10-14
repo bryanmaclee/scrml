@@ -42,3 +42,12 @@
 
 - Acceptance r1 (first pass): examples 0 refused, 23/23 rewrites byte-identical to base, 105/105 trucking sql-failable back. samples + conformance were ALL refused: `scrml compile samples` crashes (stack overflow, no file) and conformance/cases joint compile reports errors with no file (E-IMPORT-002, E-CG-003, E-TYPE-031, E-META-EVAL-002, E-VALIDATOR-INLINE-DYNAMIC). Fix: attributed errors refuse first + recompile; when only no-file errors (or a crash) remain, each remaining file is judged by its own compile; a note says so (stderr + `notes` in --json).
 - Gaps for the PA: `scrml compile samples` crashes (Maximum call stack size exceeded); those five codes carry no file in a joint compile.
+
+## Fix round 1, resumed after process exit
+- salvage committed e56a92433; joint-compile no-file fallback 9a784de04 (superseded below).
+- Directory judgement REPLACED by per-root compiles (judgeTargets): a root = a `<program>` file or a file no other target imports (route page); each root = `scrml compile <root>`; other files judged inside the roots that reach them (+ own compile when a reaching root reports a no-file error). Reason, measured: one joint compile of a directory of unrelated programs reports cross-program E-PROTECT-006 / E-CG-001 (conformance: 480 false refusals), no-file errors, and crashes on samples.
+- Acceptance (base f28b58a31 vs tip, `fix <dir> --dry-run`, text diffs compared byte-for-byte + JSON records):
+  - examples: 71 files, 0 refused, 23/23 rewrites identical, 105/105 trucking sql-failable rewrites.
+  - samples: 881 files, 210 refused (all 210 fail real `scrml compile <file>`), 593/593 rewrites identical, 0 lost.
+  - conformance/cases: 1827 files, 888 refused (887 fail `scrml compile <file>`; writer.scrml in tenant/floor-imported-module-write-neg fails inside its importing case.scrml), 571/571 identical, 0 lost.
+- Gaps for the PA: `scrml compile samples` crashes (Maximum call stack size exceeded); E-IMPORT-002/E-CG-003/E-TYPE-031/E-META-EVAL-002/E-VALIDATOR-INLINE-DYNAMIC (+ E-COMPONENT-012/-020/-035, E-THEME-TOKEN-UNKNOWN, E-IF-IN-DISPATCHED-ARM) carry no file in a multi-file compile; protected-field scan (E-CG-001) is compile-unit-global (one program's protect= fails another's client JS in a joint compile).

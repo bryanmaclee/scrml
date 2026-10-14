@@ -16,7 +16,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { Database } from "bun:sqlite";
@@ -374,7 +374,9 @@ describe("§7 a component module that compiles as part of its project", () => {
     });
   });
 
-  test("one file's error does not hide another's: a front-end error stops the joint compile before the emitted-JS check, so the rest is compiled again", () => {
+  // Two unrelated programs are two applications: each is compiled on its own (in one joint compile
+  // the front-end error of one skips the emitted-JS check of the other — measured S466).
+  test("two unrelated programs are judged by their own compiles: one's error neither hides nor causes the other's", () => {
     withDir({ "a.scrml": BROKEN, "c.scrml": MISSING_IMPORT }, (dir) => {
       const g = judgeTargets([join(dir, "a.scrml"), join(dir, "c.scrml")], true, ["sql-failable"]);
       expect([...g.refused.keys()].sort()).toEqual([join(dir, "a.scrml"), join(dir, "c.scrml")]);
@@ -384,29 +386,93 @@ describe("§7 a component module that compiles as part of its project", () => {
   });
 });
 
-describe("§7b an error that names no file does not refuse unrelated files", () => {
-  // E-IMPORT-002 (a circular import) carries no file in a joint compile — measured S466 over
-  // conformance/cases, where such errors refused all 1827 independent cases.
-  const A = "${ import { B } from \"./b.scrml\"\n  export const A = 1 }\n";
-  const B = "${ import { A } from \"./a.scrml\"\n  export const B = 2 }\n";
+describe("§7a route pages without `<program>` import components that do not compile alone", () => {
+  // examples/23-trucking-dispatch: components/*.scrml fail `scrml compile <component>` alone
+  // (E-CODEGEN-INVALID-LOGIC, the standalone library-output defect) but compile inside the pages
+  // that import them; the pages have no `<program>` (route files), so a module is judged inside
+  // every ROOT that reaches it, not only inside `<program>` files. The S466 review counted 8.
+  test("the trucking app: no component refused, the 105 sql-failable rewrites proposed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-truck-"));
+    try {
+      cpSync(join(import.meta.dir, "../../../examples/23-trucking-dispatch"), dir, { recursive: true });
+      const comp = join(dir, "components/load-card.scrml");
+      expect(compileErrorsInPlace(comp).map((d) => d.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+      const r = run([dir, "--dry-run", "--json"]);
+      expect(r.code).toBe(0);
+      const rep = JSON.parse(r.out);
+      expect(rep.files.filter((f) => f.refused)).toEqual([]);
+      expect(rep.files.flatMap((f) => f.applied).filter((a) => a.rule === "sql-failable").length).toBe(105);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 300000);
+});
 
-  test("precondition: the joint compile reports an E-IMPORT-002 with no file", () => {
-    withDir({ "a.scrml": A, "b.scrml": B, "g.scrml": GOOD }, (dir) => {
-      const d = compileErrorsTogether(["a.scrml", "b.scrml", "g.scrml"].map((n) => join(dir, n)));
-      expect(d.some((x) => x.code === "E-IMPORT-002" && x.file === null)).toBe(true);
+describe("§7c review cases from conformance/cases", () => {
+  const CASES = join(import.meta.dir, "../../../conformance/cases");
+  const copyCase = (rel, body) => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-case-"));
+    try {
+      cpSync(join(CASES, rel), dir, { recursive: true });
+      return body(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test("engine/mount-not-engine-neg: lib.scrml compiles inside case.scrml — not refused (S466 review)", () => {
+    copyCase("engine/mount-not-engine-neg", (dir) => {
+      const r = run([dir, "--check", "--json"]);
+      expect(r.code).not.toBe(3);
+      expect(JSON.parse(r.out).files.filter((f) => f.refused)).toEqual([]);
     });
   });
 
-  test("the cycle's files are refused by their own compiles; the unrelated compiling file is rewritten", () => {
+  test("module/e-import-002-reexport-cycle-named-reject: the cycle error names no file, so x / y are judged alone and refused", () => {
+    copyCase("module/e-import-002-reexport-cycle-named-reject", (dir) => {
+      const g = judgeTargets(["case.scrml", "x.scrml", "y.scrml"].map((n) => join(dir, n)), true, ["sql-failable"]);
+      expect([...g.refused.keys()].map((f) => f.slice(dir.length + 1)).sort()).toEqual(["case.scrml", "x.scrml", "y.scrml"]);
+    });
+  });
+});
+
+describe("§7b a directory of unrelated applications is not one program", () => {
+  // Measured S466: compiling conformance/cases as ONE program reports protect conflicts
+  // (E-PROTECT-006) and route collisions (E-CG-001) between unrelated cases, errors that name no
+  // file (E-IMPORT-002, …), and `scrml compile samples` crashes — any of which refused files that
+  // compile on their own. Each `<program>` is its own application (§40.8).
+  const A = "${ import { B } from \"./b.scrml\"\n  export const A = 1 }\n";
+  const B = "${ import { A } from \"./a.scrml\"\n  export const B = 2 }\n";
+
+  test("a module cycle no program imports is refused by its own compiles; an unrelated program is rewritten", () => {
     withDir({ "a.scrml": A, "b.scrml": B, "g.scrml": GOOD }, (dir) => {
       const r = run([dir]);
       expect(r.code).toBe(3);
-      expect(r.err).toContain("that name no file");
       expect(readFileSync(join(dir, "a.scrml"), "utf8")).toBe(A);
       expect(readFileSync(join(dir, "b.scrml"), "utf8")).toBe(B);
       expect(readFileSync(join(dir, "g.scrml"), "utf8")).toContain("!{ _ :> not }");
       const list = r.err.slice(r.err.indexOf("scrml fix: refused"));
+      expect(list).toMatch(/a\.scrml/);
       expect(list).not.toMatch(/g\.scrml/);
+    });
+  });
+
+  // One program's protect= leaks into another's verdict only when both are compiled as one:
+  // the joint compile reports E-CG-001 ("protected field `name` found in client JS") against p1,
+  // which compiles clean on its own (measured S466; the conformance/cases run had 43 such files).
+  test("one program's protect= does not refuse an unrelated program", () => {
+    const prog = (prot, col) => `<program db="./x.db">\n<db src="./x.db" protect="${prot}" tables="users">\n\${\n  function f() { return ?{\`SELECT ${col} FROM users WHERE id = 1\`}.get() }\n}\n</db>\n<p>x</p>\n</program>\n`;
+    withDir({ "p1/app.scrml": prog("secret", "name"), "p2/app.scrml": prog("name", "secret") }, (dir) => {
+      for (const n of ["p1", "p2"]) makeDb(join(dir, n, "x.db"), "CREATE TABLE users(id integer primary key, name text, secret text)");
+      const p1 = join(dir, "p1/app.scrml");
+      const p2 = join(dir, "p2/app.scrml");
+      expect(compileErrorsInPlace(p1)).toEqual([]);
+      // precondition: compiled as ONE program, p1 is blamed
+      expect(compileErrorsTogether([p1, p2]).some((d) => d.file === p1 && d.code === "E-CG-001")).toBe(true);
+      const g = judgeTargets([p1, p2], true, ["sql-failable"]);
+      expect(g.refused.has(p1)).toBe(false);
+      expect(g.clean.has(p1)).toBe(true);
+      expect(g.refused.has(p2)).toBe(compileErrorsInPlace(p2).length > 0);
     });
   });
 });
