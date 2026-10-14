@@ -81,6 +81,7 @@ import { captureTrailingContentWarnings, guardCallArmsRaw } from "../expression-
 import { rmSync, readdirSync, copyFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { skipBalanced, endsStatement, lineOf, scratchProject, compileWithRI, promiseAllBatches } from "./fix-client-server-call.js";
+import { doesNotCompileReason } from "./fix-verify-shared.js";
 
 export const SQL_FAILABLE_RULE = "sql-failable";
 
@@ -482,6 +483,9 @@ export function fixSqlFailable(source, opts = {}) {
       edits.push({ start: point, end: point, text: ` ${SQL_FALLBACK[s.term]}`, line: lineOf(source, st), kind: s.kind, term: s.term, fn: s.fn?.name });
     }
     if (edits.length === 0) return none;
+    // S464 ruling ("your recs"): a file that does not compile before the rewrite is refused — its
+    // before/after comparison would pass any rewrite at all (fix-verify-shared.js).
+    if (opts.verify !== false && before.errs.length > 0) { block(edits[0].start, `${doesNotCompileReason(before.errs)} — no \`?{}\` in this file rewritten`); return none; }
 
     edits.sort((a, b) => a.start - b.start);
     const uniq = [];

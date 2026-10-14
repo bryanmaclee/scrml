@@ -43,14 +43,19 @@
  * `pages/` or `routes/` directory, and it has top-level markup — or when `--entry` is given. The
  * classification is printed for every wrapped file.
  *
+ * A file that does not compile is REFUSED (S464 ruling "your recs"; §63.4): no rule runs on it and
+ * nothing is written; its compile errors are printed (code + line) and the file is listed in the
+ * summary. The rest of a directory proceeds. A file that compiles with warnings is not refused.
+ *
  * Exit status: 0 (blockers are reported, not fatal) · with --check: 1 when a file would change,
  * 2 when nothing would change but a reported construct remains untouched · 1 on a usage / read
- * error.
+ * error · 3 when any file was refused (does not compile) — in every mode, ahead of 1 / 2.
  */
 
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from "./fix-s66.js";
+import { compileErrorsInPlace, formatCompileError } from "./fix-verify-shared.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -67,6 +72,10 @@ A construct that is not mechanically rewritable is left untouched and reported; 
 marks a rewrite whose meaning differs (a client function's callers no longer abort; a failed read
 no longer throws on today's compiler — it yields \`not\` / \`[]\`).
 
+A file that does not compile is REFUSED: no rule runs, nothing is written, and its compile errors
+are listed (a rewrite of a file the compiler cannot fully read cannot be verified). Fix the errors
+first. Warnings do not refuse. In a directory the other files proceed; the exit status is then 3.
+
 DEFAULT rules (${IMPL1_SAFE_RULES.join(", ")}): their output still compiles with
 today's compiler, and each rewrite is verified by compiling the file in its project — a rewrite
 that changes what the compiler reports is withdrawn and reported.
@@ -77,8 +86,8 @@ dialect, which TODAY'S COMPILER CANNOT COMPILE. --s66 is a preview: dry-run unle
 Options:
   --dry-run            Print a diff; write nothing
   --check              Write nothing; exit 1 if a file would change, else 2 if a reported construct
-                       was left untouched, else 0
-  --s66                Add the §66 declaration rules (dry-run unless --write; output not compilable today)
+                       was left untouched, else 0 (3 if a file was refused, in every mode)
+  --s66               Add the §66 declaration rules (dry-run unless --write; output not compilable today)
   --write              With --s66: write the §66 rewrite in place
   --entry              Treat every file as an application entry (program-wrap applies)
   --no-program-wrap    Never wrap a file in <program>
@@ -199,6 +208,33 @@ export function parseFixArgs(args) {
   return o;
 }
 
+/**
+ * The rule run of one file, as the CLI does it AFTER its does-it-compile gate (the gate is the
+ * caller's: `runFixCommand` refuses a file that does not compile and never calls this for it).
+ * Exported so the §66 write analysis can be tested on project shapes impl#1 does not compile
+ * (a missing import, a `vendor:` component) — those are refused by the CLI, but the analysis keeps
+ * its fail-closed behaviour for the other callers of fixS66 (the bootstrap twin generator).
+ * @param {string} file     absolute path
+ * @param {string} source   its text
+ * @param {string} rel      the path as printed (entry classification reads it)
+ * @param {object} o        parsed options (parseFixArgs)
+ * @param {string[]} files  every target file of the run (scanned for writes by the §66 rules)
+ */
+export function applyFixRules(file, source, rel, o, files = [file]) {
+  const cls = o.entry ? { entry: true, why: "--entry" } : classifyEntry(source, rel);
+  let rules = o.rules ?? (o.s66 ? [...S66_RULES] : [...IMPL1_SAFE_RULES]);
+  if (o.noWrap) rules = rules.filter((r) => r !== "program-wrap");
+  // The file's project (entry + resolved imports + the other target files): its writes count
+  // toward this file's cells, and the verify compile runs with the whole project beside it.
+  // auxSources: the import closure (beside the file in the verify compile); scanSources: the
+  // other target files, read only for writes (a component file can write an ambient cell).
+  const project = resolveProject(file);
+  const scan = {};
+  if (rules.some((x) => S66_DECL_RULES.includes(x))) for (const f of files) if (f !== file && !(f in project)) scan[f] = readCached(f);
+  const r = fixS66(source, { filePath: file, entry: cls.entry, rules, auxSources: project, scanSources: scan });
+  return { cls, r };
+}
+
 /** Run `scrml fix` over the given args. Returns the exit code (the CLI calls process.exit). */
 export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) => console.error(s) }) {
   let o;
@@ -215,6 +251,7 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
   const cwd = process.cwd();
   const report = [];
   let wouldChange = 0;
+  let refused = 0;
   if (o.s66) {
     io.err("scrml fix --s66: WARNING — the §66 declaration rules emit the §66 opener dialect, which today's compiler (impl#1) cannot compile."
       + (o.write ? " Writing in place (--write)." : " Preview only (dry-run); pass --write to write it."));
@@ -226,17 +263,23 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
     for (const file of files) {
       const rel = relative(cwd, file) || file;
       const source = readFileSync(file, "utf8");
-      const cls = o.entry ? { entry: true, why: "--entry" } : classifyEntry(source, rel);
-      let rules = o.rules ?? (o.s66 ? [...S66_RULES] : [...IMPL1_SAFE_RULES]);
-      if (o.noWrap) rules = rules.filter((r) => r !== "program-wrap");
-      // The file's project (entry + resolved imports + the other target files): its writes count
-      // toward this file's cells, and the verify compile runs with the whole project beside it.
-      // auxSources: the import closure (beside the file in the verify compile); scanSources: the
-      // other target files, read only for writes (a component file can write an ambient cell).
-      const project = resolveProject(file);
-      const scan = {};
-      if (rules.some((x) => S66_DECL_RULES.includes(x))) for (const f of files) if (f !== file && !(f in project)) scan[f] = readCached(f);
-      const r = fixS66(source, { filePath: file, entry: cls.entry, rules, auxSources: project, scanSources: scan });
+      // S464 ruling ("your recs"): a file that does not compile BEFORE the rewrite is refused — no
+      // rule runs, nothing is written, and its compile errors are named. A rewrite of a file the
+      // compiler cannot fully read cannot be verified: every rule's verify compares the compiler's
+      // reading before and after, and a broken file's "same errors, no artifacts" passes any rewrite
+      // at all (measured S464: unwrap-logic + sql-failable rewrote a file whose other function emits
+      // invalid JS). Warnings and info do not refuse. Every rule, every mode (incl. --s66).
+      const compileErrors = compileErrorsInPlace(file);
+      if (compileErrors.length > 0) {
+        refused++;
+        report.push({ file: rel, refused: true, compileErrors, changed: false, applied: [], blockers: [], infos: [] });
+        if (!o.json) {
+          io.err(`${rel}: refused — the file does not compile, so no rewrite can be verified; nothing was changed. Fix these first (\`scrml compile ${rel}\` shows them in full):`);
+          for (const d of compileErrors) io.err(`  ${rel}${d.line != null ? `:${d.line}` : ""} ${formatCompileError(d)}`);
+        }
+        continue;
+      }
+      const { cls, r } = applyFixRules(file, source, rel, o, files);
       report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers, infos: r.infos ?? [] });
       if (!o.json) {
         for (const b of r.blockers) io.err(`${rel}:${b.line} ${b.rule}: ${b.reason}${b.snippet ? `  [${b.snippet}]` : ""}`);
@@ -258,8 +301,15 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
   if (o.json) io.out(JSON.stringify({ files: report }, null, 2));
   else {
     const blocked = report.filter((f) => f.blockers.length > 0).length;
-    io.err(`scrml fix: ${report.length} file(s) · ${wouldChange} ${o.dryRun || o.check ? "would change" : "changed"} · ${blocked} with constructs left for a human`);
+    io.err(`scrml fix: ${report.length} file(s) · ${wouldChange} ${o.dryRun || o.check ? "would change" : "changed"} · ${blocked} with constructs left for a human`
+      + (refused > 0 ? ` · ${refused} refused (does not compile)` : ""));
+    if (refused > 0) {
+      io.err("scrml fix: refused (fix the compile errors, then run scrml fix again):");
+      for (const f of report) if (f.refused) io.err(`  ${f.file}`);
+    }
   }
+  // A refused file is the most severe outcome — the tool could not assess it at all — in every mode.
+  if (refused > 0) return 3;
   if (!o.check) return 0;
   if (wouldChange > 0) return 1;
   return report.some((f) => f.blockers.length > 0) ? 2 : 0;

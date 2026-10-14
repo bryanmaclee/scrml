@@ -94,6 +94,7 @@ import { parse as acornParse } from "acorn";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
+import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
 
 export const CLIENT_SERVER_CALL_RULE = "client-server-call";
 /** The handler the rule writes after the call (S454 F8; a bare leave arm — §18.2, S462 dpa-068 W1). */
@@ -268,6 +269,10 @@ export function scratchProject(filePath, source, auxSources) {
     writeFileSync(out, s);
     if (ap === self) target = out;
   }
+  // The file's sibling database files, so the scratch compile sees what an in-place compile sees
+  // (a `<program db=…>` whose file is missing reads as a compile error, which the refusal below
+  // would take for "does not compile" — fix-verify-shared.js).
+  mirrorSiblingDatabases(filePath, dirname(target));
   return { dir, target };
 }
 
@@ -299,7 +304,9 @@ export function compileWithRI(proj, text) {
   const me = files.find((f) => resolve(f.filePath ?? f.ast?.filePath ?? "") === resolve(proj.target));
   let clientJs = null;
   for (const [k, v] of r?.outputs ?? new Map()) if (resolve(k) === resolve(proj.target) && typeof v?.clientJs === "string") clientJs = v.clientJs;
-  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null, clientJs };
+  // `errs`: the error-severity codes (incl. the emitted-JS parse gate) — non-empty = the file does
+  // not compile, and a rewrite of it cannot be verified (S464 ruling; fix-verify-shared.js).
+  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null, clientJs, errs: errorSeverityCodes(r) };
 }
 
 /**
@@ -744,6 +751,9 @@ export function fixClientServerCall(source, opts = {}) {
       edits.push({ start: loc.end, end: loc.end, text: ` ${TRANSPORT_HANDLER}`, line: lineOf(source, loc.start), kind: s.kind, name: s.name, fn: s.fn });
     }
     if (edits.length === 0) return none;
+    // S464 ruling ("your recs"): a file that does not compile before the rewrite is refused — its
+    // before/after comparison would pass any rewrite at all (fix-verify-shared.js).
+    if (opts.verify !== false && before.errs.length > 0) { block(edits[0].start, `${doesNotCompileReason(before.errs)} — no call in this file rewritten`); return none; }
 
     // Deduplicate (a component instance can name the same source text twice) and check overlap.
     edits.sort((a, b) => a.start - b.start || a.end - b.end);
