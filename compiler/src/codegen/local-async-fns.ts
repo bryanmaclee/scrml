@@ -109,15 +109,11 @@ export const LOCAL_SYNC_SHADOW_MARK = "_scrmlLocalSyncShadow";
  * run, or the text did not parse) — consumers fall back to their name scan.
  */
 export const RAW_ASYNC_MARK = "_scrmlRawAsync";
-/**
- * s441 fix round — a `call` whose bare-ident callee is BOUND by the program (a
- * local / param / nested fn in scope, or a file-scope binding per
- * `LocalAsyncAnnotateOpts.isFileBound`). Read by the fire-and-forget scheduler
- * exemptions: only the GLOBAL `setTimeout` & co. discard the callback's return.
- */
-export const BOUND_CALLEE_MARK = "_scrmlBoundCallee";
+// S466 r7 — the s441 BOUND_CALLEE_MARK (a per-call "the callee name is bound" mark the
+// scheduler exemption read) is gone: whether a callee is the GLOBAL scheduler is ONE
+// file-level predicate, async-combinators.ts `isGlobalSchedulerCallee` (SPEC §13.2).
 
-const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK, LOCAL_SYNC_SHADOW_MARK, RAW_ASYNC_MARK, BOUND_CALLEE_MARK]);
+const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK, LOCAL_SYNC_SHADOW_MARK, RAW_ASYNC_MARK]);
 
 /** Does this call / ident certainly resolve to a SYNC nested function (see LOCAL_SYNC_SHADOW_MARK)? */
 export function localSyncShadowOf(node: unknown): boolean {
@@ -398,8 +394,7 @@ export interface LocalAsyncAnnotateOpts {
   escapeOuterAsync?: (name: string) => AsyncRoot | null;
   /**
    * s441 fix round — does the FILE bind `name` (file-scope fn / top-level decl /
-   * import)? A bare callee bound here or in an enclosing scope is marked
-   * BOUND_CALLEE_MARK — it is not the global scheduler of the same name.
+   * import)? Read by the raw-fragment analysis's free-name resolver.
    */
   isFileBound?: (name: string) => boolean;
 }
@@ -562,9 +557,6 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
       else delete call[LOCAL_CALLEE_MARK];
       if (!res && nm && isSyncShadow(nm, scope)) call[LOCAL_SYNC_SHADOW_MARK] = true;
       else delete call[LOCAL_SYNC_SHADOW_MARK];
-      const _bare = (call.callee as ASTNode | undefined)?.kind === "ident" ? calleeName(call) : null;
-      if (_bare && (resolve(_bare, scope) || (opts.isFileBound && opts.isFileBound(_bare)))) call[BOUND_CALLEE_MARK] = true;
-      else delete call[BOUND_CALLEE_MARK];
     },
     (ident, scope, link) => {
       const nm = typeof ident.name === "string" ? ident.name : null;

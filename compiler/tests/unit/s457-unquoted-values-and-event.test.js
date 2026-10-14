@@ -60,7 +60,9 @@ const page = (markup, extra = "") => `<program>
 <big> = false
 <ok> = true
 <list> = [{ name: "x" }]
-function mk(x) { return { ok: x > 1, then: (f) => f(x), x: () => 1 } }
+function mk(x) { return { ok: x > 1 } }
+function pend(x) { return Promise.resolve(x) }
+function num(x) { return x }
 function fmt(x) { return " v" + x + " " }
 function g(v) { @msg = "g" + v }
 function f(v) { @msg = "f" + v }
@@ -107,8 +109,8 @@ describe("§1 4a — a handler expression is read whole", () => {
     [`onclick=@msg = @ok ? "y" : "n"`, /_scrml_cs_reactive_set\("msg", _scrml_cs_reactive_get\("ok"\) \? "y" : "n"\)/],
     [`onclick=@ok = !@ok`, /_scrml_cs_reactive_set\("ok", !_scrml_cs_reactive_get\("ok"\)\)/],
     [`onclick=@n += 2 * 3`, /_scrml_cs_reactive_set\("n", _scrml_cs_reactive_get\("n"\) \+ \(2 \* 3\)\)/],
-    [`onclick=mk(1) .then(g)`, /_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/],
-    [`onclick=@count = mk(1) .x() + 1`, /_scrml_cs_reactive_set\("count", _scrml_mk_\d+\(1\)\s*\.x\(\) \+ 1\)/],
+    [`onclick=pend(1) .then(g)`, /_scrml_pend_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/],
+    [`onclick=@count = num(1) .valueOf() + 1`, /_scrml_cs_reactive_set\("count", _scrml_num_\d+\(1\)\s*\.valueOf\(\) \+ 1\)/],
     // `>=` never closes the opener (block splitter, issue #28), spaced or not
     [`onclick=@big = @n >= 2`, /_scrml_cs_reactive_set\("big", _scrml_cs_reactive_get\("n"\) >= 2\)/],
     [`onclick=@big = @n>=2`, /_scrml_cs_reactive_set\("big", _scrml_cs_reactive_get\("n"\) >= 2\)/],
@@ -133,7 +135,7 @@ describe("§1 4a — a handler expression is read whole", () => {
   });
 
   test("a spaced `>=` the opener scan ended the tag at is refused, not truncated", () => {
-    const { codes } = compileToOutputs(page(`<button onclick=@big = mk(1).x() >= 2>go</button>`));
+    const { codes } = compileToOutputs(page(`<button onclick=@big = num(1).valueOf() >= 2>go</button>`));
     expect(codes).toEqual(["E-ATTR-UNQUOTED-OPERATOR"]);
   });
 
@@ -365,10 +367,10 @@ describe("§5 4a — ONE reader: the native re-parse paths and lifted markup rea
     });
   }
 
-  test("component body: `onclick=mk(1) .then(g)` keeps `.then(g)`", () => {
-    const { codes, clientJs } = compileToOutputs(page(COMP(`onclick=mk(1) .then(g)`)));
+  test("component body: `onclick=pend(1) .then(g)` keeps `.then(g)`", () => {
+    const { codes, clientJs } = compileToOutputs(page(COMP(`onclick=pend(1) .then(g)`)));
     expect(codes).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
+    expect(clientJs).toMatch(/_scrml_pend_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
   });
 
   const refused = [
@@ -432,10 +434,10 @@ describe("§6 S458 re-review — (c), F7, (d), every listener emitter, <each> fu
   }
 
   const MV = (markup) => `\${ const el = ${markup} }\n<div>\${ lift el }</div>`;
-  test("(d) markup VALUE: `onclick=mk(1) .then(g)` keeps `.then(g)`", () => {
-    const { codes, clientJs } = compileToOutputs(page(MV(`<button onclick=mk(1) .then(g)>x</button>`)));
+  test("(d) markup VALUE: `onclick=pend(1) .then(g)` keeps `.then(g)`", () => {
+    const { codes, clientJs } = compileToOutputs(page(MV(`<button onclick=pend(1) .then(g)>x</button>`)));
     expect(codes).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_mk_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
+    expect(clientJs).toMatch(/_scrml_pend_\d+\(1\)\s*\.then\(_scrml_g_\d+\)/);
   });
   for (const markup of [`<button onclick=@count = @count > 1>x</button>`, `<p title=@msg + "x">x</p>`]) {
     test(`(d) markup VALUE: \`${markup}\` is refused (the diagnostic is forwarded, not discarded)`, () => {

@@ -52,7 +52,8 @@ const OTHER_RECEIVER_SRC = `<program>
 </program>
 
 function handle(request, resolve) {
-  const shape = { formData: () => 1 }
+  // S464: a scrml value cannot hold a function, so the non-request receiver is host data.
+  const shape = globalThis.formShape
   const v = shape.formData()
   return resolve(request)
 }

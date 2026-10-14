@@ -569,12 +569,23 @@ describe("§9 a `<machine>` file with an error hidden behind E-DEPRECATED-001 is
         const r = run([f, ...args]);
         expect(r.code).toBe(3);
         expect(r.out).toBe("");
-        expect(r.err).toContain("pre-migrate could not migrate its `<machine>`");
+        expect(r.err).toMatch(/pre-migrate could not migrate the `<machine>` in [^,]*m\.scrml/);
         expect(r.err).toContain("E-CODEGEN-INVALID-LOGIC");
         expect(readFileSync(f, "utf8")).toBe(MACHBAD);
       });
     });
   }
+
+  test("a `<machine>` in an IMPORTED module: the headline names the module, not the file being fixed", () => {
+    const MOD = "${\n  export type Book:enum = { Idle, Loaded }\n}\n<machine name=Flow for=Book initial=.Idle>\n    <Idle rule=.Loaded></>\n    <Loaded rule=.Idle></>\n</>\n";
+    const APP = "<program>\n${\n  import { Book } from \"./mod.scrml\"\n}\n<p>x</p>\n</program>\n";
+    withDir({ "app.scrml": APP, "mod.scrml": MOD }, (dir) => {
+      const r = run([join(dir, "app.scrml"), "--check"]);
+      expect(r.code).toBe(3);
+      expect(r.err).toMatch(/pre-migrate could not migrate the `<machine>` in [^,]*mod\.scrml/);
+      expect(r.err).not.toMatch(/in [^\n]*app\.scrml, so no rewrite/);
+    });
+  });
 
   test("fixS66 called directly with every rule: no rewrite once pre-migrate is blocked", () => {
     withDir({ "m.scrml": MACHBAD }, (dir) => {

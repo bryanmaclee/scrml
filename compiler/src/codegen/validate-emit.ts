@@ -237,7 +237,7 @@ export function isSingleJsExpression(src: string): boolean {
   try {
     // parseExpressionAt parses ONE expression and stops; `.end` is the offset
     // just past it. ecmaVersion 2022 matches the emit gate's PARSE_OPTIONS.
-    const node = acorn.parseExpressionAt(t, 0, { ecmaVersion: 2022 }) as { end?: number };
+    const node = acorn.parseExpressionAt(t, 0, { ecmaVersion: 2022, allowAwaitOutsideFunction: true }) as { end?: number };
     const end = typeof node?.end === "number" ? node.end : 0;
     return t.slice(end).trim().length === 0;
   } catch {

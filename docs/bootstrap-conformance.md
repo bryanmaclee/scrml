@@ -7,16 +7,16 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1788 of 1788 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1793 of 1793 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 189 | 10.6% |
+| PASS | 189 | 10.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 74 | 4.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 674 | 37.7% |
-| UNSUPPORTED | 851 | 47.6% |
+| NOT-TWINNED | 673 | 37.5% |
+| UNSUPPORTED | 857 | 47.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,18 +26,18 @@ Scope: **1788 of 1788 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 34 of 74; the other 40 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 584 · parse-reject 267.
+UNSUPPORTED by reason: bootstrap-unsupported 590 · parse-reject 267.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **789** — PASS 104 · FAIL 59 · UNSUPPORTED 626. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **795** — PASS 104 · FAIL 59 · UNSUPPORTED 632. Twin holds 104 (non-vacuous 96). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (674 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (673 cases; a case counts once per distinct reason):
 
 - 107 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
-- 75 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 74 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 67 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 58 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
 - 56 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (674 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 71 | 23 | · | 5 | · | 5 | 38 | · | · |
+| error | 71 | 23 | · | 5 | · | 4 | 39 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | · | · | 1 | · | 1 | 17 | · | · |
@@ -161,7 +161,7 @@ NOT-TWINNED by reason (674 cases; a case counts once per distinct reason):
 | style | 27 | 1 | · | · | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
-| type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
+| type-state-codes | 32 | 2 | · | 2 | · | 3 | 25 | · | · |
 
 ### FAIL (74)
 
@@ -558,7 +558,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (851)
+### UNSUPPORTED (857)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -840,6 +840,7 @@ none
 - `error/failable-handler-lift-success` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `error/for-await-not-in-scrml` — twin · bootstrap-unsupported: an unannotated parameter `items` — bootstrap slice M2 needs `items: Type` (Core parameters are typed)
+- `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-guard-in-arrow-rt` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1415,8 +1416,13 @@ none
 - `type-state-codes/e-type-lifecycle-on-engine-cell-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
+- `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 
-### NOT-TWINNED (674)
+### NOT-TWINNED (673)
 
 - `attr-executable-sink/component-prop-substituted-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `attr-executable-sink/event-attr-interp-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1688,7 +1694,6 @@ none
 - `error-boundary/terse-fallback-closer` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `error-boundary/variant-renders` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
 - `error/handler-failable-reference-component-prop-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
-- `error/handler-failable-reference-exempt-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `error/handler-failable-reference-via-component-prop-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-guard-arm-uses-prop-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `error/handler-guard-in-component-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)

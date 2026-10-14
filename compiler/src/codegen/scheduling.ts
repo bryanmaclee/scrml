@@ -9,6 +9,7 @@ import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -44,6 +45,14 @@ export type CalleeImportMap = Map<string, string> & {
    * `isPromiseReturningImportedCallee` (module-resolver.js), never by the alias.
    */
   importedNames?: Map<string, string>;
+  /**
+   * S465 — LOCAL binding names that bind an ASYNC function imported from another
+   * `.scrml` module (or a Promise-returning `scrml:` export), resolved from the
+   * imported module's own analysis (codegen/index.ts `asyncImportedLocalsOf`,
+   * stashed on the FileAST as `_asyncImportedLocals`). Absent before codegen
+   * stashes it. Read through `isPromiseReturningImportedCallee`.
+   */
+  asyncImportedLocals?: Set<string>;
 };
 
 /**
@@ -95,6 +104,43 @@ export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): Calle
       }
     }
   }
+  return out;
+}
+
+/**
+ * S465 (s465-await-imported-server-fn) — the importing file's cross-module async
+ * facts: the LOCAL names that bind an async function of another `.scrml` module
+ * (or a Promise-returning `scrml:` export), resolved from the imported module's
+ * own analysis (codegen/index.ts `asyncImportedLocalsOf`, stashed on the FileAST
+ * as `_asyncImportedLocals` and mirrored onto a TABResult's `.ast`). Empty before
+ * codegen stashes it.
+ */
+export function asyncImportedLocalsOfFile(fileAST: ASTNode | null | undefined): Set<string> {
+  if (!fileAST) return new Set();
+  const v = (fileAST as { _asyncImportedLocals?: unknown })._asyncImportedLocals
+    ?? ((fileAST as { ast?: { _asyncImportedLocals?: unknown } }).ast)?._asyncImportedLocals;
+  return v instanceof Set ? (v as Set<string>) : new Set();
+}
+
+/**
+ * S465 — `buildCalleeImportMap` for SERVER-emitted code: the map also carries the
+ * file's cross-module async facts as `asyncImportedLocals`, so the one classifier
+ * every server await site asks (`isPromiseReturningImportedCallee`) awaits a call
+ * to an async function imported from another `.scrml` module. The client keeps
+ * the plain map: its emitters already await those imports through their own
+ * async-coloring seeds / peer sets, several of which read the classifier as
+ * "stdlib-owned" and must not see user modules (`_stdlibOwnedImport`).
+ */
+export function buildServerCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
+  const out = buildCalleeImportMap(fileAST);
+  // S466 r7 — read off THE file's async name set (file-async-fns.ts): its async
+  // imports and its async function-valued bindings (`const w = (a, b) => check(a, b)`).
+  // The set's `function` declarations are not added here: on the server each one is
+  // either an in-process peer (awaited through `serverFnNames`, whose escape facts are
+  // deliberately narrower — #284) or not emitted on the server at all; the ss1 value
+  // exports and the D-5 closure read the full set directly.
+  const all = new Set<string>([...asyncImportedLocalsOfFile(fileAST), ...asyncFnValuedBindingsOfFile(fileAST)]);
+  if (all.size > 0) out.asyncImportedLocals = all;
   return out;
 }
 

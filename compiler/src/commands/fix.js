@@ -402,7 +402,13 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
           refused++;
           report.push({ file: rel, refused: true, compileErrors: why.map((d) => ({ ...d, file: d.file ? relative(cwd, d.file) || d.file : null })), changed: false, applied: [], blockers: [], infos: [] });
           if (!o.json) {
-            io.err(`${rel}: refused — the file does not compile${migrated === null ? " and pre-migrate could not migrate its `<machine>`" : " after pre-migrate migrates its `<machine>`"}, so no rewrite can be verified; nothing was changed. Fix these first:`);
+            // Name the file the blocking error is in — the `<machine>` (or the error left after the
+            // migration) can sit in an imported module, not in this file.
+            const filesOf = (ds) => [...new Set(ds.filter((d) => d.file).map((d) => relative(cwd, d.file) || d.file))].join(", ") || rel;
+            const headline = migrated === null
+              ? `pre-migrate could not migrate the \`<machine>\` in ${filesOf(gate.deprecatedOnly.get(file).filter((d) => d.code === "E-DEPRECATED-001"))}`
+              : `after pre-migrate migrates its \`<machine>\`, errors remain in ${filesOf(after)}`;
+            io.err(`${rel}: refused — the file does not compile: ${headline}, so no rewrite can be verified; nothing was changed. Fix these first:`);
             for (const d of why) {
               const where = d.file ? `${relative(cwd, d.file) || d.file}${d.line != null ? `:${d.line}` : ""}` : "(no file)";
               io.err(`  ${where} ${d.code}${d.message ? `: ${d.message}` : ""}`);

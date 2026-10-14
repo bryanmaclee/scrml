@@ -1,0 +1,14 @@
+{
+  "id": "e-value-function-stored-map-pos",
+  "description": "A §59 map literal whose entry VALUE is a function fires E-VALUE-FUNCTION-STORED (§59.3, §14.3). `[\"double\": twice]` stores the declared function `twice` in a map entry; a map is a value, and no value holds a function. Incidental W-PROGRAM-SPA-INFERRED / W-TYPE-031-UNPROVEN are ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/value-function-stored.test.js",
+  "spec": "§59.3",
+  "provenance": "ruling:user-voice-scrml.md S464 \"Yes, maps too (Recommended)\" (map literals are values too — a function-valued map entry is refused)",
+  "rationale": "§59.3 a map entry SHALL NOT hold a function; the map literal entry and the §59.7 `.insert` write that would put one in are both E-VALUE-FUNCTION-STORED. To choose behaviour by key, store an enum tag and match on it.",
+  "expect": {
+    "codes": ["E-VALUE-FUNCTION-STORED"],
+    "notCodes": [],
+    "severity": { "E-VALUE-FUNCTION-STORED": "error" }
+  }
+}

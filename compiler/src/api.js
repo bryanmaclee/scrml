@@ -3553,9 +3553,14 @@ function _compileScrmlImpl(options = {}) {
   // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
   // the run already carries the real error).
   const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
-  collectErrors("CG", _riRefusedSession
-    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
-    : cgResult.errors);
+  // S465 r6 — a codegen BACKSTOP refusal (`cascadeOnly`: the server text guard, the
+  // client comma-sequence refusal) is dropped when an earlier stage already failed the
+  // compile — the precise diagnostic names the construct (runCG drops it against its
+  // own errors; this is the same rule across stages).
+  const _earlierFailed = allErrors.some((e) => e && (e.severity ?? "error") === "error" && !/^[WI]-/.test(String(e.code ?? "")));
+  collectErrors("CG", (cgResult.errors ?? []).filter((e) =>
+    !(_riRefusedSession && e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER") &&
+    !(_earlierFailed && e && e.cascadeOnly === true)));
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 
