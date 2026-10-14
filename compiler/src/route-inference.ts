@@ -98,7 +98,7 @@ import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
-import { isPlainPureFn, forEachAtRef, parsedParamDefaults, parsedParamDefault, paramDefaultSpan, fnReachesAtName } from "./at-refs.ts";
+import { isPlainPureFn, forEachAtRef, parsedParamDefaults, analyzedParamDefault, paramDefaultSpan, fnReachesAtName } from "./at-refs.ts";
 export { isPlainPureFn, forEachAtRef, parsedParamDefaults } from "./at-refs.ts";
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
@@ -6628,7 +6628,10 @@ export function runRI(input: RIInput): RIOutput {
     const sessionCellOwnsName = _fileScopeSessionCell.get(record.filePath) === true;
     const currentUserAmbient = _fileScopeCurrentUserCell.get(record.filePath) !== true;
     for (const p of params) {
-      const d = parsedParamDefault(p, record.filePath);
+      const _a = analyzedParamDefault(p, record.filePath);
+      // s466 fix round 3 — the ANALYSED tree (match arms, template slots parsed); a
+      // default the analysis refuses is refused where it is lowered (emitParamDefault).
+      const d = _a && "tree" in _a ? _a.tree : null;
       if (!d) continue;
       const at = (paramDefaultSpan(p) ?? record.fnNode.span) as Span;
       const label = typeof (p as any).name === "string" ? (p as any).name : "(destructured)";

@@ -123,8 +123,9 @@ import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-functio
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
-import { parsedParamDefault, paramDefaultSpan } from "./at-refs.ts";
+import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
 import { identityReadInDefault } from "./free-name.ts";
+import { walkScoped } from "./codegen/local-async-fns.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -11618,6 +11619,40 @@ function annotateNodes(
         if (boundary === "server") {
           scopeChain.bind("session", { kind: "variable", resolvedType: tAsIs() });
         }
+        // s466 fix round 3 — §7.3.2: a default "may reference earlier parameters in
+        // the same parameter list". A reference to its OWN parameter or a LATER one
+        // reads that parameter before it is bound (a ReferenceError at call time) —
+        // and silently shadows an outer name of the same spelling for the checks
+        // above (`uid = session.userId, session = "x"` hid the session builtin).
+        // Compile error, E-PARAM-DEFAULT-FORWARD-REF. Scope-aware (a lambda or match
+        // arm parameter of that name is its own binding).
+        if (Array.isArray(n.params)) {
+          const _ps = n.params as unknown[];
+          const _nameOf = (q: unknown): string | null =>
+            q && typeof q === "object" && typeof (q as ASTNodeLike).name === "string" ? (q as ASTNodeLike).name as string : null;
+          for (let _i = 0; _i < _ps.length; _i++) {
+            const _a = analyzedParamDefault(_ps[_i], filePath);
+            if (!_a || !("tree" in _a)) continue;
+            const _later = new Set(_ps.slice(_i).map(_nameOf).filter((x): x is string => x !== null));
+            let _fwd: string | null = null;
+            walkScoped({ params: [], body: [_a.tree] }, (_nd, _isBound) => {
+              if (_fwd !== null) return;
+              const _r = _nd as ASTNodeLike;
+              if (_r.kind === "ident" && typeof _r.name === "string" && _later.has(_r.name) && !_isBound(_r.name)) _fwd = _r.name;
+            });
+            if (_fwd === null) continue;
+            const _own = _nameOf(_ps[_i]);
+            errors.push(new TSError(
+              "E-PARAM-DEFAULT-FORWARD-REF",
+              `E-PARAM-DEFAULT-FORWARD-REF: the default of parameter \`${_own ?? "(destructured)"}\` of ` +
+              `\`${(n.name as string) ?? "anon"}\` reads \`${_fwd}\`, ` +
+              (_fwd === _own ? `the parameter itself` : `a parameter declared AFTER it`) +
+              `. A default may read only the parameters before it (§7.3.2) — that one is not bound yet ` +
+              `when the default runs. Reorder the parameters, or rename the one you meant.`,
+              ((paramDefaultSpan(_ps[_i]) ?? n.span) as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            ));
+          }
+        }
         // s466 fix round 2 — the same §20.5 rule over the function's PARAMETER
         // DEFAULTS (evaluated where the function runs): a free `session` in the
         // default of a function that is not server-escalated is E-SCOPE-012, as
@@ -11625,7 +11660,8 @@ function annotateNodes(
         // parameter named `session` is not the builtin.
         if (boundary !== "server" && Array.isArray(n.params) && !scopeChain.lookup("session")) {
           for (const _p of (n.params as unknown[])) {
-            const _d = parsedParamDefault(_p, filePath);
+            const _a = analyzedParamDefault(_p, filePath);
+            const _d = _a && "tree" in _a ? _a.tree : null;
             if (!_d) continue;
             const _hit = identityReadInDefault(_d, n.params, { currentUserAmbient: false, sessionProjection: false });
             if (_hit === null || !_hit.startsWith("session")) continue;

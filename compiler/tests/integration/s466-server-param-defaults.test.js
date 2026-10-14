@@ -747,3 +747,140 @@ describe("s466 fix round 2 — item 4: E-PARAM-DEFAULT-AWAIT names the way out",
     expect(r.json).toBe(3);
   }, EXECUTED_TIMEOUT_MS);
 });
+
+
+// ---------------------------------------------------------------------------
+// s466 fix round 3 — FAIL CLOSED. Every default check reads the ANALYSED tree
+// (at-refs.ts `analyzedParamDefault`): a closed set of expression kinds, with
+// `match` arms and template slots parsed. Anything else is refused.
+// ---------------------------------------------------------------------------
+
+describe("s466 fix round 3 — a `match` in a default is checked like any other code", () => {
+  const MATCH_PROG = (arm, extra = "", auth = "") => `<program db="./x.db"${auth}>
+\${
+  <n> = 1
+  server fn h() -> number { return 1 }
+${extra}  server fn a1(m: string, k = match m { "a" => ${arm}
+    else => 2 }) -> number { return k }
+  function go() { return a1("a") }
+}
+<out> = 0
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+`;
+  test("fo4: `session.userId` in an arm → E-PARAM-DEFAULT-SERVER-IDENTITY", () => {
+    const { errors } = compileFiles({ "app.scrml": MATCH_PROG("session.userId", "", ' auth="required"') }, "app.scrml", "r3-fo4");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(errors[0].span.line).toBe(5);
+  });
+  test("ma1: `@n` in an arm → E-REACTIVE-003 at the default", () => {
+    const { errors } = compileFiles({ "app.scrml": MATCH_PROG("@n") }, "app.scrml", "r3-ma1");
+    expect(codesOf(errors)).toEqual(["E-REACTIVE-003"]);
+    expect(errors[0].span.line).toBe(5);
+  });
+  test("ma2: a peer call in an arm → E-PARAM-DEFAULT-AWAIT", () => {
+    const { errors } = compileFiles({ "app.scrml": MATCH_PROG("h()") }, "app.scrml", "r3-ma2");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-AWAIT"]);
+    expect(errors[0].message).toContain("calls `h`");
+  });
+  test("ma3: `?{}` in an arm → E-PARAM-DEFAULT-AWAIT (not an unnamed codegen failure)", () => {
+    const { errors } = compileFiles({ "app.scrml": MATCH_PROG("?{`select 1 as v`}.get().v") }, "app.scrml", "r3-ma3");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-AWAIT"]);
+    expect(errors[0].message).toContain("`?{}` query");
+  });
+  test("a pure `match` default compiles and runs (arms parsed, then checked)", async () => {
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": prog(`  server fn pm(m: string, k = match m { "a" => 1
+    else => 2 }) -> number { return k }
+  function go() { return pm("a") }`) }, "app.scrml", "r3-pure-match");
+    expect(errors).toEqual([]);
+    if (HAPPY_DOM()) return;
+    const js = join(outDir, "app.server.js");
+    const db = join(tmpDir, "x.db");
+    expect((await callRoute(js, db, "pm", { m: "a" })).json).toBe(1);
+    expect((await callRoute(js, db, "pm", { m: "b" })).json).toBe(2);
+    expect((await callRoute(js, db, "pm", { m: "a", k: 9 })).json).toBe(9);
+  }, EXECUTED_TIMEOUT_MS);
+  test("a match-arm binding shadows: `.Some(session) => session` is not the builtin", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  type Opt:enum = { Some(v: string), None }
+  server fn ps(o: Opt, k = match o { .Some(session) => session
+    else => "none" }) -> string { return k }
+  function go() { return ps(.None) }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r3-arm-binding");
+    expect(codesOf(errors)).not.toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+});
+
+describe("s466 fix round 3 — anything outside the closed set is refused (E-PARAM-DEFAULT-UNSUPPORTED)", () => {
+  test("a block-bodied function in a default", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn bl(a: number, f = (x) => { return x + a }) -> number { return f(10) }
+  function go() { return bl(1) }`) }, "app.scrml", "r3-block-fn");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+    expect(errors[0].message).toContain("a function with a block body");
+    expect(errors[0].span.line).toBe(3);
+  });
+  test("…in a CLIENT function too (every function's defaults go through the one analysis)", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program>
+\${
+  function c(a: number, f = (x) => { return x + a }) { @out = f(1) }
+}
+<out> = 0
+<button onclick=\${c(1)}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r3-block-fn-client");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+  });
+  test("a regular-expression literal is a leaf, not unparsed code: accepted", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn rx(a: string, r = /x,\\)=/g) -> string { return a + r.source }
+  function go() { return rx("a") }`) }, "app.scrml", "r3-regex");
+    expect(errors).toEqual([]);
+  });
+  test("a template literal's `\${…}` slots are parsed and checked (identity read inside)", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn tl(m: string, uid = \`u-\${session.userId}\`) -> string { return m + uid }
+  function go() { return tl("a") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r3-template");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+  });
+});
+
+describe("s466 fix round 3 — LOW: a default may read only EARLIER parameters (§7.3.2)", () => {
+  test("fo2: `uid = session.userId, session = \"x\"` → E-PARAM-DEFAULT-FORWARD-REF", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn f1(m: string, uid: string = session.userId, session: string = "x") -> string { return m + uid }
+  function go() { return f1("a") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r3-forward");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-FORWARD-REF"]);
+    expect(errors[0].message).toContain("declared AFTER it");
+  });
+  test("a default reading its own parameter → E-PARAM-DEFAULT-FORWARD-REF", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn self(m: number, k: number = k + 1) -> number { return m + k }
+  function go() { return self(1) }`) }, "app.scrml", "r3-self");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-FORWARD-REF"]);
+  });
+  test("reading an EARLIER parameter is fine; a lambda parameter of a later name is its own binding", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn ok(a: number, b: number = a * 2, f = (c) => c + 1, c: number = 3) -> number { return a + b + f(c) }
+  function go() { return ok(1) }`) }, "app.scrml", "r3-earlier");
+    expect(errors).toEqual([]);
+  });
+});

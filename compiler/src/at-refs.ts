@@ -7,7 +7,8 @@
  * code read reactive state?" reads it the same way, from the parsed expression tree.
  */
 import type { Span, ExprNode } from "./types/ast.ts";
-import { blankLiteralTextInSource, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
+import { blankLiteralTextInSource, parseExprToNode, hasLostTrailingContent, tokenizeTemplateInterpolations } from "./expression-parser.ts";
+import { parseExpressionAt as acornParseExpressionAt } from "acorn";
 
 /**
  * s464-pure-fn-placement — a plain pure function: `fn` (or the deprecated
@@ -163,6 +164,13 @@ function dropSpans(n: unknown, seen: WeakSet<object> = new WeakSet()): void {
   delete (n as { span?: unknown }).span;
   for (const v of Object.values(n as object)) dropSpans(v, seen);
 }
+/**
+ * A function's parameter defaults as the trees every CHECK reads (the `@`-read
+ * checks, placement, the call graph): the ANALYSED form (`analyzedParamDefault`),
+ * so a `match` arm or a template interpolation is seen like any other code. A
+ * default the analysis refuses contributes its plain parse (the refusal fails the
+ * build where the default is lowered).
+ */
 export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode[] {
   if (!fnNode || typeof fnNode !== "object") return [];
   const hit = _parsedDefaultsCache.get(fnNode as object);
@@ -170,10 +178,210 @@ export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode
   const out: ExprNode[] = [];
   const params = (fnNode as any).params;
   for (const p of (Array.isArray(params) ? params : [])) {
-    const d = parsedParamDefault(p, filePath);
-    if (d) out.push(d);
+    const a = analyzedParamDefault(p, filePath);
+    if (a && "tree" in a) out.push(a.tree);
+    else {
+      const d = parsedParamDefault(p, filePath);
+      if (d) out.push(d);
+    }
   }
   _parsedDefaultsCache.set(fnNode as object, out);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// s466 fix round 3 — the ANALYSED default: a CLOSED set of expression kinds.
+// ---------------------------------------------------------------------------
+
+/**
+ * The expression kinds a parameter default may contain, each understood fully
+ * by every default check (the identity read, the `@`-read, the await check). The
+ * set is CLOSED: a kind not listed here, or a node that still holds source text
+ * the parser did not structure, makes the default UNSUPPORTED — refused, never
+ * passed through unchecked. (Three review rounds found a raw-text node — an
+ * escape-hatch, then the match arms — that every check walked past.)
+ *
+ *   ident · lit (a template's `${…}` slots are parsed into expressions) · array ·
+ *   object (prop / shorthand / spread) · spread · unary · binary · assign ·
+ *   ternary · member · index · call · new · cast · reset-expr · map-lit ·
+ *   input-state-ref · sql-ref (a leaf — the await check refuses it by name) ·
+ *   lambda with an EXPRESSION body · match-expr with one subject, whose arms are
+ *   parsed (each arm becomes an expression-bodied lambda binding its pattern
+ *   names).
+ *
+ * Not in the set (refused): an escape-hatch (a block-bodied function, text the
+ * parser could not structure), a lambda with a block body, a markup value, a
+ * multi-subject or `given`-led match, a block-bodied or unparseable match arm.
+ */
+export const DEFAULT_EXPR_KINDS: ReadonlySet<string> = new Set([
+  "ident", "lit", "array", "object", "spread", "unary", "binary", "assign", "ternary",
+  "member", "index", "call", "new", "cast", "reset-expr", "map-lit", "input-state-ref",
+  "sql-ref", "lambda", "match-expr",
+]);
+
+class UnsupportedDefault extends Error {
+  constructor(readonly what: string) { super(what); }
+}
+
+function parseFragment(text: string, filePath: string): ExprNode {
+  let node: ExprNode;
+  try { node = parseExprToNode(text, filePath, 0); }
+  catch { throw new UnsupportedDefault(`\`${text.trim().slice(0, 40)}\`, which does not parse`); }
+  if (hasLostTrailingContent(node)) throw new UnsupportedDefault(`\`${text.trim().slice(0, 40)}\`, which is not one expression`);
+  return node;
+}
+
+/** The names a match arm's pattern binds (`.Some(x)`, `.Rect(w, h)`, `.P(radius: r)`). */
+function armBindingNames(binding: string | null): string[] {
+  if (!binding) return [];
+  const out: string[] = [];
+  for (const part of binding.split(",")) {
+    const t = part.includes(":") ? part.slice(part.indexOf(":") + 1) : part;
+    const m = t.trim().match(/^[A-Za-z_$][\w$]*$/);
+    if (m && m[0] !== "_") out.push(m[0]);
+  }
+  return out;
+}
+
+function normalizeDefault(node: unknown, filePath: string): ExprNode {
+  if (!node || typeof node !== "object") throw new UnsupportedDefault("an empty expression");
+  const n = node as Record<string, unknown>;
+  const kind = String(n.kind);
+  if (!DEFAULT_EXPR_KINDS.has(kind)) {
+    if (kind === "escape-hatch") {
+      const nk = String(n.nativeKind ?? "");
+      // A regular-expression literal is kept as text but holds no code: it reads
+      // nothing and calls nothing. Accepted only when the text IS exactly one
+      // regex literal (acorn says so); anything else stays refused.
+      if (nk === "Literal" && typeof n.raw === "string") {
+        try {
+          const lit = acornParseExpressionAt(n.raw, 0, { ecmaVersion: "latest" }) as { type?: string; regex?: unknown; end?: number };
+          if (lit.type === "Literal" && lit.regex && lit.end === n.raw.length) {
+            return { kind: "lit", litType: "string", raw: n.raw, value: "" } as unknown as ExprNode;
+          }
+        } catch { /* not a regex literal — refused below */ }
+      }
+      throw new UnsupportedDefault(nk === "ArrowFunctionExpression" || nk === "FunctionExpression"
+        ? "a function with a block body"
+        : `\`${String(n.raw ?? "").trim().slice(0, 40)}\`, which the compiler keeps as unparsed text`);
+    }
+    if (kind === "markup-value") throw new UnsupportedDefault("markup");
+    throw new UnsupportedDefault(`a \`${kind}\` expression`);
+  }
+  const N = (x: unknown): ExprNode => normalizeDefault(x, filePath);
+  switch (kind) {
+    case "ident": case "input-state-ref": case "sql-ref":
+      return { ...n } as unknown as ExprNode; // a copy: the analysed tree never aliases the lowered one
+    case "lit": {
+      if (n.litType !== "template") return { ...n } as unknown as ExprNode;
+      const raw = String(n.raw ?? "");
+      const segs = tokenizeTemplateInterpolations(raw);
+      const parts = segs.filter((s) => s.kind === "expr").map((s) => N(parseFragment(s.text, filePath)));
+      return (parts.length === 0 ? { ...n } : { kind: "array", elements: parts }) as ExprNode;
+    }
+    case "array":
+      return { ...n, elements: ((n.elements as unknown[]) ?? []).map(N) } as unknown as ExprNode;
+    case "object":
+      return {
+        ...n,
+        props: ((n.props as Array<Record<string, unknown>>) ?? []).map((pr) => {
+          if (pr.kind === "shorthand") return { kind: "prop", key: pr.name, value: { kind: "ident", name: pr.name }, computed: false };
+          if (pr.kind === "spread") return { ...pr, argument: N(pr.argument) };
+          if (pr.kind === "prop") return { ...pr, key: typeof pr.key === "string" ? pr.key : N(pr.key), value: N(pr.value) };
+          throw new UnsupportedDefault(`an object entry of kind \`${String(pr.kind)}\``);
+        }),
+      } as unknown as ExprNode;
+    case "spread": case "unary": return { ...n, argument: N(n.argument) } as unknown as ExprNode;
+    case "cast": return { ...n, expression: N(n.expression) } as unknown as ExprNode;
+    case "reset-expr": return { ...n, target: N(n.target) } as unknown as ExprNode;
+    case "binary": return { ...n, left: N(n.left), right: N(n.right) } as unknown as ExprNode;
+    case "assign": return { ...n, target: N(n.target), value: N(n.value) } as unknown as ExprNode;
+    case "ternary": return { ...n, condition: N(n.condition), consequent: N(n.consequent), alternate: N(n.alternate) } as unknown as ExprNode;
+    case "member": return { ...n, object: N(n.object) } as unknown as ExprNode;
+    case "index": return { ...n, object: N(n.object), index: N(n.index) } as unknown as ExprNode;
+    case "call": case "new": return { ...n, callee: N(n.callee), args: ((n.args as unknown[]) ?? []).map(N) } as unknown as ExprNode;
+    case "map-lit":
+      return { ...n, entries: ((n.entries as Array<Record<string, unknown>>) ?? []).map((e) => ({ ...e, key: N(e.key), value: N(e.value) })) } as unknown as ExprNode;
+    case "lambda": {
+      const body = n.body as { kind?: string; value?: unknown } | undefined;
+      if (!body || body.kind !== "expr") throw new UnsupportedDefault("a function with a block body");
+      const params = ((n.params as Array<Record<string, unknown>>) ?? []).map((lp) =>
+        lp.defaultValue ? { ...lp, defaultValue: N(lp.defaultValue) } : lp);
+      return { ...n, params, body: { kind: "expr", value: N(body.value) } } as unknown as ExprNode;
+    }
+    case "match-expr": {
+      const subjects = n.subjects as unknown[] | undefined;
+      if (Array.isArray(subjects) && subjects.length >= 2) throw new UnsupportedDefault("a match on several subjects");
+      if (n.structured) throw new UnsupportedDefault("a match with a `given` arm");
+      // The same arm reader the match lowering uses (emit-control-flow.ts).
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const cf = require("./codegen/emit-control-flow.ts") as {
+        parseMatchArm: (s: string) => { kind: string; binding: string | null; result: string; structuredBody?: unknown } | null;
+        splitMultiArmString: (s: string) => string[];
+      };
+      const arms: ExprNode[] = [];
+      for (const rawArm of ((n.rawArms as string[]) ?? [])) {
+        for (const piece of cf.splitMultiArmString(String(rawArm))) {
+          const text = piece.trim();
+          if (!text) continue;
+          const arm = cf.parseMatchArm(text);
+          if (!arm) throw new UnsupportedDefault(`the match arm \`${text.slice(0, 40)}\`, which does not parse`);
+          if (arm.kind === "given") throw new UnsupportedDefault("a match with a `given` arm");
+          if (arm.structuredBody || arm.result.trim().startsWith("{")) throw new UnsupportedDefault("a match arm with a block body");
+          arms.push({
+            kind: "lambda",
+            params: armBindingNames(arm.binding).map((name) => ({ name })),
+            body: { kind: "expr", value: N(parseFragment(arm.result, filePath)) },
+            isAsync: false,
+            fnStyle: "arrow",
+          } as unknown as ExprNode);
+        }
+      }
+      if (arms.length === 0) throw new UnsupportedDefault("a match with no arm");
+      return { kind: "array", elements: [N(n.subject), ...arms] } as unknown as ExprNode;
+    }
+  }
+  throw new UnsupportedDefault(`a \`${kind}\` expression`);
+}
+
+function stampSpans(n: unknown, span: unknown, seen: WeakSet<object> = new WeakSet()): void {
+  if (!n || typeof n !== "object" || seen.has(n as object)) return;
+  seen.add(n as object);
+  if (Array.isArray(n)) { for (const c of n) stampSpans(c, span, seen); return; }
+  const r = n as Record<string, unknown>;
+  if (typeof r.kind === "string") {
+    if (span) r.span = span;
+    else delete r.span;
+  }
+  for (const [k, v] of Object.entries(r)) if (k !== "span") stampSpans(v, span, seen);
+}
+
+const _analyzedDefaultCache = new WeakMap<object, { tree: ExprNode } | { unsupported: string }>();
+
+/**
+ * s466 fix round 3 — ONE parameter's default as the tree every default check
+ * walks, or the reason it cannot be checked (`unsupported`). `null` when the
+ * parameter has no default. See DEFAULT_EXPR_KINDS.
+ */
+export function analyzedParamDefault(p: unknown, filePath: string): { tree: ExprNode } | { unsupported: string } | null {
+  const node = parsedParamDefault(p, filePath);
+  if (!node) return null;
+  const hit = _analyzedDefaultCache.get(p as object);
+  if (hit) return hit;
+  let out: { tree: ExprNode } | { unsupported: string };
+  try {
+    const tree = normalizeDefault(node, filePath);
+    // Every node of the analysed tree carries the DEFAULT's source position (its
+    // own parses ran at offset 0, so their spans point into the file's first
+    // line): a diagnostic about anything in the default lands on the default.
+    stampSpans(tree, paramDefaultSpan(p));
+    out = { tree };
+  }
+  catch (e) {
+    if (!(e instanceof UnsupportedDefault)) throw e;
+    out = { unsupported: e.what };
+  }
+  _analyzedDefaultCache.set(p as object, out);
   return out;
 }
 

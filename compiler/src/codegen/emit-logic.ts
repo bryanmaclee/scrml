@@ -23,14 +23,14 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
-import { localAsyncDeclRoot, rawAsyncUsesOf } from "./local-async-fns.ts";
+import { localAsyncDeclRoot, rawAsyncUsesOf, walkScoped } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
-import { parsedParamDefault, paramDefaultParseProblem, paramDefaultSpan } from "../at-refs.ts";
+import { parsedParamDefault, analyzedParamDefault, paramDefaultParseProblem, paramDefaultSpan } from "../at-refs.ts";
 import { isAsyncCalleeName, type AsyncNameFacts } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
@@ -1270,37 +1270,22 @@ function paramDefaultAwaitReason(
   let reason: string | null = null;
   let culprit: string | undefined;
   let sawCovered = false;
-  const asyncName = (name: string): boolean => isAsyncCalleeName(name, facts);
-  const seen = new WeakSet<object>();
-  const visit = (n: unknown): void => {
-    if (reason !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
-    seen.add(n as object);
-    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+  // s466 fix round 3 — `node` is the ANALYSED default (at-refs.ts: a closed set of
+  // expression kinds, no unparsed text), walked with its lexical scope by the one
+  // walker the identity check uses (`walkScoped`): a lambda / match-arm parameter
+  // that shadows an async name is not a call to it.
+  walkScoped({ params: [], body: [node] }, (n, isBound) => {
+    if (reason !== null) return;
     const r = n as Record<string, unknown>;
     if (r.kind === "sql" || r.kind === "sql-ref") { reason = "runs a `?{}` query"; return; }
-    if (r.kind === "call") {
-      const callee = r.callee as { kind?: unknown; name?: unknown } | undefined;
-      if (callee && callee.kind === "ident" && typeof callee.name === "string" && asyncName(callee.name)) {
-        if (covered && covered.has(callee.name)) sawCovered = true;
-        else { reason = `calls \`${callee.name}\`, which runs asynchronously`; culprit = callee.name; return; }
-      }
-    }
-    if (r.kind === "escape-hatch" && typeof r.raw === "string") {
-      const code = blankLiteralTextInSource(r.raw);
-      if (code.includes("?{")) { reason = "runs a `?{}` query"; return; }
-      const re = /(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(code)) !== null) {
-        if (!asyncName(m[1])) continue;
-        if (covered && covered.has(m[1])) { sawCovered = true; continue; }
-        reason = `calls \`${m[1]}\`, which runs asynchronously`;
-        culprit = m[1];
-        return;
-      }
-    }
-    for (const k of Object.keys(r)) if (k !== "span") visit(r[k]);
-  };
-  visit(node);
+    if (r.kind !== "call") return;
+    const callee = r.callee as { kind?: unknown; name?: unknown } | undefined;
+    if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
+    if (isBound(callee.name) || !isAsyncCalleeName(callee.name, facts)) return;
+    if (covered && covered.has(callee.name)) { sawCovered = true; return; }
+    reason = `calls \`${callee.name}\`, which runs asynchronously`;
+    culprit = callee.name;
+  });
   if (reason !== null) return culprit ? { reason, callee: culprit } : { reason };
   return sawCovered ? { covered: true } : null;
 }
@@ -1347,7 +1332,27 @@ export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOp
   const facts: AsyncNameFacts = site.asyncNames && site.asyncNames.size > 0
     ? { ...baseFacts, asyncFnNames: new Set([...(baseFacts.asyncFnNames ?? []), ...site.asyncNames]) }
     : baseFacts;
-  let awaitIssue = paramDefaultAwaitReason(node, facts, site.coveredCallees ?? null);
+  // s466 fix round 3 — FAIL CLOSED. Every default check reads the ANALYSED tree
+  // (at-refs.ts `analyzedParamDefault`: a closed set of expression kinds, match
+  // arms and template slots parsed). A default holding anything outside that set
+  // — text the compiler keeps unparsed, a block-bodied function — cannot be
+  // checked for identity reads, client-state reads or awaits, so it is refused.
+  const analysed = analyzedParamDefault(p, filePath);
+  if (analysed && "unsupported" in analysed) {
+    recordRefusedLowering(new CGError(
+      "E-PARAM-DEFAULT-UNSUPPORTED",
+      `E-PARAM-DEFAULT-UNSUPPORTED: the default of parameter \`${label}\` of \`${site.fnName}\` contains ` +
+      `${analysed.unsupported}. A parameter default must be an expression the compiler can check — for reads ` +
+      `of client state or of the server's identity, and for work that needs an await — before it runs ` +
+      `(§7.3.2). Compute the value in the function body instead: give the parameter the default \`not\` ` +
+      `(\`${label}: T | not = not\`) and, in the body, use the computed value when the argument is \`not\` ` +
+      `(a caller that passes \`not\` is then treated the same as one that omits the argument).`,
+      at,
+    ), p as object);
+    return "null /* E-PARAM-DEFAULT-UNSUPPORTED */";
+  }
+  const checked: ExprNode = analysed && "tree" in analysed ? analysed.tree : node;
+  let awaitIssue = paramDefaultAwaitReason(checked, facts, site.coveredCallees ?? null);
   // The s441 scope-aware pre-pass analysis of the default's text (when it ran for
   // this function): it resolves a nested async helper the file-scope sets above
   // cannot see. Same verdict, same refusal.
