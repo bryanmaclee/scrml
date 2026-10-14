@@ -570,3 +570,30 @@
 - LOW (runLambda code choice) NOT done: the code is chosen at ~7 sink-recording sites in emit-expr and drained
   by 4+ emitters (server route, ss1, library, client); "passed to a user HOF" is not known at the recording
   site. Not trivial → filed (g-lambda-to-user-hof-reports-sync-callback-code-s466).
+- ACCEPTANCE — reviewer probe set (probes/s1–s14 + pa-verify + probes2/n1–n8 = 331 shapes, executed vs
+  bun:sqlite on the final code tip 71f3f7bf9): r6 tip 22ed85298 → RUN-OK 209 / ERR 98 / runtime-fail-closed 12
+  / **ACCEPTED 12**; r7 → RUN-OK 226 / ERR 92 / runtime-fail-closed 13 / **ACCEPTED 0**. Changed shapes: the 7
+  libFnDecl* → REJECTED/WELCOME (libFnDeclSql → "no such table: users": the lib has no database of its own —
+  it now RUNS the query instead of testing a Promise); the 5 sched*Shadow* → E-ASYNC-STDLIB-IN-SYNC-CALLBACK;
+  the 11 MED-D shapes (n5 split* ×6, n6 ×5) → run; topFactoryConst / libFactory gain E-ASYNC-FN-ESCAPES-AS-VALUE
+  beside their existing errors. Runtime fail-closed (unchanged from r6/base, all 500s, none a wrong value):
+  libReexportStd*, libChainReexport3, reexportLocal (g-local-stdlib-reexport-no-server-emit-s462 family),
+  libLambda / libObjExport (g-lib-export-const-lambda-missing-import-s465), propagate / sqlInBindingBlock /
+  peerSchedShadowTop (NEW gap g-fn-reached-only-through-lambda-not-on-server-s466), hatchCapMember (the
+  program calls a non-function), nestedServerCall NO-ROUTE. MED-C cl2 / cl3: compile and run (happy-dom tests).
+- CORPUS DIFFERENTIAL (scripts/corpus-emit-differential.ts; base = archive of f7b7310bf with node_modules
+  symlinked, head = this worktree at 71f3f7bf9; roots examples, samples, conformance; 2779 sources): **0 newly
+  failing, 0 newly passing**, syntax delta 0, 1 code change (conformance sql/query-not-readable-neg +
+  E-SQL-MULTIPLE-STATEMENTS — r5's, unchanged); 169 artifacts differ, 153 only by the absolute tree root; 16
+  real — r1–r6's (the hoisted-loop servers ×11, sql-handled-match-scrutinee-rt, endpoint arm-body-valid-scope,
+  08-chat, 19-lin-token, gauntlet-r10-rails-blog) + ONE from r7: examples/23-trucking-dispatch
+  pages/auth/login.server.js `redirectTo: rolePath(row.role)` → `redirectTo: await rolePath(row.role)` (the
+  imported `rolePath` is a server-placed function — an async peer — so the one set lists it; its value copy is
+  sync, the await is a no-op on its value: emit-only). Verdict line "NOT A VALID COMPARISON" only because the
+  archived base has no .git (as r1–r6). Bare server-fn sites 30 → 29 (19-lin-token, r1's).
+- GATES: unit + integration + conformance + compiler/tests/*.test.js — the pre-commit hook (full, no bail
+  failure) passed on 2626714f0 and on 71f3f7bf9 (the last code commit); types-gate OK (180, unchanged);
+  bootstrap slice: lint-no-default-arm 0 violations, self-host-v2 m1–m4 + codec 2280 / 0; lsp + commands 726
+  pass / 3 skip / 0 fail; facts --check PASS (regenerated, +1 module); state --check PASS (regenerated after
+  the gaps); regen-spec-index --check OK; corpus-compile-floor --check PASS; host-global-scan --check exit 0
+  (the one `[esm]` note, stdlib/auth/password.scrml, is identical on the base tree).
