@@ -340,12 +340,17 @@ export interface Twin {
   blockers: string[];
 }
 
-/** Generate a case's §66 twin with the `scrml fix` §66 rules (entry + every aux file). */
+/**
+ * Generate a case's §66 twin with the `scrml fix` §66 rules (entry + every aux file).
+ * `allowNonCompiling`: a conformance error case fails to compile BY DESIGN, so the S464 refusal
+ * (`scrml fix` does not rewrite a file that does not compile — a CLI contract) is off here; the
+ * twin of an error case is checked against the bootstrap's expected codes, not verified by impl#1.
+ */
 export function twinOf(c: { source: string; auxFiles: Record<string, string> }): Twin {
   const rules = new Set<string>();
   const blockers: string[] = [];
   let changed = false;
-  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES });
+  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES, allowNonCompiling: true });
   for (const a of entry.applied) rules.add(a.rule);
   for (const b of entry.blockers) blockers.push(`case.scrml:${b.line} ${b.rule}: ${b.reason}`);
   changed ||= entry.changed;
@@ -353,7 +358,7 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
   for (const p of Object.keys(c.auxFiles).sort()) {
     const others = { ...c.auxFiles, "case.scrml": c.source };
     delete others[p];
-    const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others, rules: TWIN_RULES });
+    const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others, rules: TWIN_RULES, allowNonCompiling: true });
     for (const a of r.applied) rules.add(a.rule);
     for (const b of r.blockers) blockers.push(`${p}:${b.line} ${b.rule}: ${b.reason}`);
     changed ||= r.changed;

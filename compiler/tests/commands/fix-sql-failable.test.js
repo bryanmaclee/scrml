@@ -379,7 +379,9 @@ describe("sql-failable — listed, never rewritten", () => {
   // caller's Promise.all batching lost). impl#1 now sees the guarded statement exactly as the
   // unhandled one, so the codes and the batching are unchanged and the rewrite stands. The gate
   // itself is unchanged; these pin that it no longer has to fire for them.
-  test("a handled `?{}` in a `fn` keeps E-FN-001 on impl#1 (S455), so the gate passes and both reads are rewritten", () => {
+  // S455 rewrote this file (E-FN-001 before and after = "same codes"). The S464 ruling refuses it: a
+  // file that does not compile before the rewrite cannot be verified.
+  test("a `?{}` in a `fn` is E-FN-001 on impl#1 — the file does not compile, so it is refused, nothing rewritten (S464)", () => {
     const src = program([
       "  ${ function ok() {",
       `      ${q("SELECT n FROM t")}.get()`,
@@ -392,10 +394,9 @@ describe("sql-failable — listed, never rewritten", () => {
       "  <button onclick={ @out = ok() !{ .Transport(_) :> { return } } }>a</button>",
     ]);
     const r = fix(src);
-    expect(reasons(r).some((x) => /different codes after the rewrite/.test(x))).toBe(false);
-    expect(r.changed).toBe(true);
-    expect(r.output).toContain(`${q("SELECT n FROM t")}.get() ${NOT}\n`);
-    expect(r.output).toContain(`${q("SELECT n FROM t WHERE n = 2")}.get() ${NOT}\n`);
+    expect(r.changed).toBe(false);
+    expect(r.output).toBe(src);
+    expect(reasons(r).some((x) => /file does not compile; cannot verify \(impl#1 reports [^)]*E-FN-001/.test(x))).toBe(true);
   });
   test("a handled `?{}` in a callee keeps impl#1's Promise.all batching of the caller (S455), so the gate passes", () => {
     const src = program([

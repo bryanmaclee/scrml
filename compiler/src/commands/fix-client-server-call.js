@@ -94,6 +94,7 @@ import { parse as acornParse } from "acorn";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
+import { errorSeverityCodes, scratchRefusalReason, writeScratchProject } from "./fix-verify-shared.js";
 
 export const CLIENT_SERVER_CALL_RULE = "client-server-call";
 /** The handler the rule writes after the call (S454 F8; a bare leave arm — §18.2, S462 dpa-068 W1). */
@@ -237,37 +238,11 @@ export function lineOf(src, off) {
 // impl#1's reading: a compile in the project, Route Inference captured
 // ---------------------------------------------------------------------------
 
-function absKey(filePath, key) {
-  return isAbsolute(key) ? resolve(key) : resolve(dirname(resolve(filePath)), key);
-}
-function commonDir(paths) {
-  let parts = dirname(paths[0]).split(sep);
-  for (const p of paths.slice(1)) {
-    const q = dirname(p).split(sep);
-    let i = 0;
-    while (i < parts.length && i < q.length && parts[i] === q[i]) i++;
-    parts = parts.slice(0, i);
-  }
-  return parts.join(sep) || sep;
-}
-
-/** Build the scratch project once per file: `{ dir, target, run(text) }`. */
+/** Build the scratch project once per file: `{ dir, target }` (fix-verify-shared.js `writeScratchProject`:
+ * the file, its project, and every database they name, in one layout). */
 export function scratchProject(filePath, source, auxSources) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-csc-"));
-  const self = resolve(filePath);
-  const files = new Map([[self, source]]);
-  for (const [p, s] of Object.entries(auxSources ?? {})) {
-    const ap = absKey(filePath, p);
-    if (ap !== self) files.set(ap, s);
-  }
-  const root = commonDir([...files.keys()]);
-  let target = null;
-  for (const [ap, s] of files) {
-    const out = join(dir, "src", relative(root, ap));
-    mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, s);
-    if (ap === self) target = out;
-  }
+  const { target } = writeScratchProject(dir, filePath, source, auxSources);
   return { dir, target };
 }
 
@@ -299,7 +274,9 @@ export function compileWithRI(proj, text) {
   const me = files.find((f) => resolve(f.filePath ?? f.ast?.filePath ?? "") === resolve(proj.target));
   let clientJs = null;
   for (const [k, v] of r?.outputs ?? new Map()) if (resolve(k) === resolve(proj.target) && typeof v?.clientJs === "string") clientJs = v.clientJs;
-  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null, clientJs };
+  // `errs`: the error-severity codes (incl. the emitted-JS parse gate) — non-empty = the file does
+  // not compile, and a rewrite of it cannot be verified (S464 ruling; fix-verify-shared.js).
+  return { codes, ri: cap.res, files, ast: me ? (me.ast ?? me) : null, clientJs, errs: errorSeverityCodes(r) };
 }
 
 /**
@@ -744,6 +721,9 @@ export function fixClientServerCall(source, opts = {}) {
       edits.push({ start: loc.end, end: loc.end, text: ` ${TRANSPORT_HANDLER}`, line: lineOf(source, loc.start), kind: s.kind, name: s.name, fn: s.fn });
     }
     if (edits.length === 0) return none;
+    // S464 ruling ("your recs"): a file that does not compile before the rewrite is refused — its
+    // before/after comparison would pass any rewrite at all (fix-verify-shared.js).
+    if (opts.verify !== false && before.errs.length > 0) { block(edits[0].start, `${scratchRefusalReason(before.errs, filePath, source, opts.inPlaceClean)} — no call in this file rewritten`); return none; }
 
     // Deduplicate (a component instance can name the same source text twice) and check overlap.
     edits.sort((a, b) => a.start - b.start || a.end - b.end);
