@@ -1,0 +1,14 @@
+{
+  "id": "e-value-function-stored-pos",
+  "description": "An object literal that stores a function value fires E-VALUE-FUNCTION-STORED (§14.3, §15.11.5.1). `{ double: twice }` holds the declared function `twice` in a field: a function is not value data (no structural equality, not serializable, cannot be a map key), so no value holds one. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/value-function-stored.test.js",
+  "spec": "§14.3",
+  "provenance": "ruling:user-voice-scrml.md S462 \"a\" (no value holds a function) + S464 \"(a) Migrate the tests\"",
+  "rationale": "§14.3 the STORED prohibition governs every value, not only a function-typed field annotation: an object / array / map literal holding a function is the hard error E-VALUE-FUNCTION-STORED. Pass the function to the call that uses it, wire it as a prop / handler, or store an enum tag and match on it.",
+  "expect": {
+    "codes": ["E-VALUE-FUNCTION-STORED"],
+    "notCodes": [],
+    "severity": { "E-VALUE-FUNCTION-STORED": "error" }
+  }
+}

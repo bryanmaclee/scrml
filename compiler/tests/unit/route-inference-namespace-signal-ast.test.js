@@ -89,7 +89,8 @@ describe("§12.2 — Bun.*/process.* signal is string/comment-safe (no spurious 
     // The old `\\bBun\\.serve\\(` regex over-fired here; the AST checks the
     // receiver root resolves to the `Bun` global — here it is a user local `foo`.
     const { result, out } = compile(clientFn(
-      `       let foo = { Bun: { serve: (x) => "ok" } }\n       @msg = foo.Bun.serve(1)`));
+      // S464: a scrml value cannot hold a function, so `foo` is host data (still a USER local).
+      `       let foo = globalThis.fooHost\n       @msg = foo.Bun.serve(1)`));
     expect(errCodes(result).filter((c) => c.startsWith("E-"))).toEqual([]);
     expect(escalated(out)).toBe(false);
   });

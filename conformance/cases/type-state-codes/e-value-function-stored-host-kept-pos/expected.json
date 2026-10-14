@@ -1,0 +1,14 @@
+{
+  "id": "e-value-function-stored-host-kept-pos",
+  "description": "An object literal holding a function handed to a host-JS call whose RESULT is kept as a scrml value fires E-VALUE-FUNCTION-STORED (§14.3). `Object.freeze({ double: twice })` bound to `ops` launders the function back into a scrml value; the host-boundary exemption holds only while the host call's result is not kept. Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/value-function-stored.test.js",
+  "spec": "§14.3",
+  "provenance": "ruling:user-voice-scrml.md S464 \"(a) Close it\" (a host call's RESULT kept as a scrml value is judged)",
+  "rationale": "§14.3 the host-boundary exemption for a literal written directly as a host-JS call argument holds ONLY when the call's result is not kept; a statement-position host call (`console.log({ f })`) stays legal.",
+  "expect": {
+    "codes": ["E-VALUE-FUNCTION-STORED"],
+    "notCodes": [],
+    "severity": { "E-VALUE-FUNCTION-STORED": "error" }
+  }
+}
