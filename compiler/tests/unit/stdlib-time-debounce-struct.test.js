@@ -9,6 +9,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { debounce, throttle, run, cancel, flush } from "../../runtime/stdlib/time.js";
 import { compileScrml } from "../../src/api.js";
+import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -181,5 +182,153 @@ describe("scrml:time — a Debouncer inside a state cell's field / element still
     await wait(60);
     expect(state()).toBe("4:nested");      // a nested field
     expect($("#eq").textContent.trim()).toBe("true false"); // == : same struct equal, distinct debouncers not
+  });
+});
+
+// S466 (gap g-timer-struct-field-write-from-function-body-throws-s464). §41.21: "The struct's
+// `delay` / `limit` IS the wait `run` uses" and its fields read "as any struct". A field write
+// (`@d.delay = 10`) from a FUNCTION BODY lowered to `_scrml_deep_set`, whose copy step refused every
+// non-plain prototype — it threw, advising "Assign the whole cell", and a whole-cell copy is a DEAD
+// timer (the state is keyed by identity). The same write in an attribute handler mutated in place.
+// Now the timer struct (branded on its prototype by scrml:time) is written IN PLACE on both paths.
+const RT = (() => {
+  const box = {};
+  // eslint-disable-next-line no-new-func
+  new Function("box", `${SCRML_RUNTIME}\nbox.deepSet = _scrml_deep_set;`)(box);
+  return box;
+})();
+
+describe("scrml:time — _scrml_deep_set writes a timer struct IN PLACE (runtime)", () => {
+  test("a top-level field write keeps the struct's identity, and run uses the new wait", async () => {
+    const seen = [];
+    const d = debounce((x) => seen.push(x), 60);
+    const out = RT.deepSet(d, ["delay"], 5);
+    expect(out).toBe(d);
+    expect(d.delay).toBe(5);
+    expect(Object.keys(d).sort()).toEqual(["delay", "id"]); // the brand is not a field
+    run(out, "live");
+    await wait(30);
+    expect(seen).toEqual(["live"]);
+  });
+
+  test("a nested write copies the plain containers and reaches the same timer", async () => {
+    const seen = [];
+    const t = throttle((x) => seen.push(x), 60);
+    const s = { a: { b: t }, n: 0 };
+    const out = RT.deepSet(s, ["a", "b", "limit"], 5);
+    expect(out).not.toBe(s);
+    expect(out.a).not.toBe(s.a);
+    expect(out.a.b).toBe(t);
+    expect(t.limit).toBe(5);
+    run(t, 1); run(t, 2);
+    await wait(30);
+    expect(seen).toEqual([1, 2]); // the trailing call ran after the NEW 5 ms window
+  });
+
+  test("a non-timer object of its own prototype is still refused (brand, not field names)", () => {
+    const lookalike = Object.assign(Object.create(Object.create(Object.prototype)), { id: 1, delay: 5 });
+    expect(() => RT.deepSet(lookalike, ["delay"], 9)).toThrow("cannot write .delay of a Object in place");
+    const otherBrand = Object.create(Object.prototype);
+    Object.defineProperty(otherBrand, Symbol.for("scrml:time.other"), { value: true });
+    expect(() => RT.deepSet(Object.create(otherBrand), ["x"], 1)).toThrow("in place");
+    expect(() => RT.deepSet({ when: new Date(0) }, ["when", "x"], 1)).toThrow("of a Date in place");
+  });
+
+  test("a plain struct still copies on write exactly as before", () => {
+    const s = { a: { b: 1 } };
+    const out = RT.deepSet(s, ["a", "b"], 2);
+    expect(out).toEqual({ a: { b: 2 } });
+    expect(s.a.b).toBe(1);
+  });
+});
+
+describe("scrml:time — a timer field write from a function body and from a handler agree (executed)", () => {
+  let TMP;
+  beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "time-write-")); });
+  afterAll(async () => {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    if (TMP) rmSync(TMP, { recursive: true, force: true });
+  });
+
+  test("@d.delay / @s.a.b.delay = 10 changes the live wait on both paths; plain struct unchanged", async () => {
+    const fp = join(TMP, "w.scrml");
+    const out = join(TMP, "out");
+    writeFileSync(fp, `\${
+  import { debounce, run, Debouncer } from 'scrml:time'
+  function search(q) { @hits = @hits + 1; @last = q }
+  function setD() { @d.delay = 10 }
+  function setS() { @s.a.b.delay = 10 }
+  function setP() { @p.x = 7 }
+}
+type Pt:struct = { x: number, y: number }
+<hits> = 0
+<last> = ""
+<d>: Debouncer = debounce(search, 200)
+<e> = debounce(search, 200)
+<s> = { a: { b: debounce(search, 200) }, n: 0 }
+<u> = { a: { b: debounce(search, 200) } }
+<p>: Pt = { x: 1, y: 2 }
+<program>
+<button id="fd" onclick=\${ setD() }>a</button>
+<button id="fs" onclick=\${ setS() }>a</button>
+<button id="he" onclick=\${ @e.delay = 10 }>a</button>
+<button id="hu" onclick=\${ @u.a.b.delay = 10 }>a</button>
+<button id="fp" onclick=\${ setP() }>a</button>
+<button id="rd" onclick=\${ run(@d, "d") }>a</button>
+<button id="re" onclick=\${ run(@e, "e") }>a</button>
+<button id="rs" onclick=\${ run(@s.a.b, "s") }>a</button>
+<button id="ru" onclick=\${ run(@u.a.b, "u") }>a</button>
+<p id="dd">\${@d.delay}</p><p id="ed">\${@e.delay}</p><p id="sd">\${@s.a.b.delay}</p><p id="ud">\${@u.a.b.delay}</p><p id="px">\${@p.x}:\${@p.y}</p>
+<p id="h">\${@hits}</p><p id="l">\${@last}</p>
+</>
+`);
+    const res = compileScrml({ inputFiles: [fp], outputDir: out, write: true, log: () => {} });
+    expect((res.errors || []).map((e) => e.code)).toEqual([]);
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    GlobalRegistrator.register();
+    const errs = [];
+    window.addEventListener("error", (e) => errs.push(String(e.error || e.message)));
+    const html = readFileSync(join(out, "w.html"), "utf8");
+    const body = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    document.body.innerHTML = (body ? body[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+    const rt = readdirSync(out).find((f) => f.startsWith("scrml-runtime"));
+    // eslint-disable-next-line no-eval
+    (0, eval)(readFileSync(join(out, rt), "utf8") + "\n" + readFileSync(join(out, "w.client.js"), "utf8"));
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+    const $ = (s) => document.querySelector(s);
+    const fire = (sel) => {
+      try { $(sel).dispatchEvent(new Event("click", { bubbles: true })); } catch (e) { errs.push(String(e)); }
+    };
+    const text = (s) => $(s).textContent;
+    const state = () => `${text("#h")}:${text("#l")}`;
+
+    // function body — top-level field of a typed cell, then nested field
+    fire("#fd");
+    expect(text("#dd")).toBe("10");
+    fire("#rd");
+    await wait(60);
+    expect(state()).toBe("1:d");
+    fire("#fs");
+    expect(text("#sd")).toBe("10");
+    fire("#rs");
+    await wait(60);
+    expect(state()).toBe("2:s");
+
+    // attribute handler — the same writes, the same outcome
+    fire("#he");
+    expect(text("#ed")).toBe("10");
+    fire("#re");
+    await wait(60);
+    expect(state()).toBe("3:e");
+    fire("#hu");
+    expect(text("#ud")).toBe("10");
+    fire("#ru");
+    await wait(60);
+    expect(state()).toBe("4:u");
+
+    // a plain struct field write from a function body still works as before
+    fire("#fp");
+    expect(text("#px")).toBe("7:2");
+    expect(errs).toEqual([]);
   });
 });
