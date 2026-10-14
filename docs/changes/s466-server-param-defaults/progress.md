@@ -7,3 +7,8 @@
 - helpers: at-refs `parsedParamDefault` (one parse; spans dropped — offset-0 spans pointed at file line 1); emit-logic `emitParamDefault`; emit-server `serverParamDefaults` / `serverBodyParamLine` / `serverParamSignature`; utils `paramSignature(p, i, loweredDefault?)`.
 - tests: compiler/tests/integration/s466-server-param-defaults.test.js 14 pass on branch; 13/14 FAIL on base f28b58a31 (the direct `@n` E-REACTIVE-003 case is a regression guard).
 - full unit+integration+conformance on branch (before adding the new test file): 33479 pass / 0 fail.
+- 2026-10-13 committed a8d879cf6 (fix + tests + gaps + FACTS). Pre-commit hook suite: 35732 pass / 0 fail.
+- base f28b58a31 unit+integration+conformance (detached tree, no pretest): 33478 pass / 1 fail (env; not investigated). Branch before new tests: 33479 / 0.
+- R26: 333 sources (examples 32, samples/compilation-tests 297, gauntlet-r25 dev-* 4) compiled on base + branch: 0 status changes, 0 artifact diffs (32 server bundles; no corpus server fn declares a default — blast radius only, not demand evidence).
+- gates: types-gate OK (unchanged); bootstrap slice 2280/0 + lint 0 violations; lsp+commands 726/0; facts/state/spec-index PASS; corpus-compile-floor PASS.
+- extra probes: CPS default `= @n` → wrapper `qty = _scrml_cs_reactive_get("n")`; peer call in default → 1x E-SERVER-FN-IN-SYNC-CALLBACK; `not` default → `(null)`; SSE `from = 3` → `return 3` for missing key.
