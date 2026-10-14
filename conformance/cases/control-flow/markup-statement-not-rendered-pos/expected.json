@@ -1,0 +1,19 @@
+{
+  "id": "markup-statement-not-rendered-pos",
+  "description": "Markup written as a statement in a logic body that no `lift` names and that is not the single element of an `if` / `given` branch is E-MARKUP-STATEMENT-NOT-RENDERED — one per unrendered element: a bare `${ <p>…</p> }`, two elements in one arm (2), an element after a statement, a `for` body without `lift`. Before S464 every one compiled at exit 0 and rendered nothing.",
+  "language-version": "1.0",
+  "spec": "§17.6.10.1",
+  "rationale": "§17.6.10.1: \"A markup element in statement position in a logic body that no `lift` names and that is not the single-element branch of a value-form (this section) SHALL be a compile error, E-MARKUP-STATEMENT-NOT-RENDERED.\" Ruling S462 Q24 \"a\"; code S464.",
+  "expect": {
+    "codes": [
+      "E-MARKUP-STATEMENT-NOT-RENDERED"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-MARKUP-STATEMENT-NOT-RENDERED": "error"
+    },
+    "codeCounts": {
+      "E-MARKUP-STATEMENT-NOT-RENDERED": 5
+    }
+  }
+}

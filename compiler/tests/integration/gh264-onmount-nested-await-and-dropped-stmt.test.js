@@ -52,8 +52,13 @@ describe("GH #264 Defect 1 — nested server-fn calls are awaited (end-to-end)",
   let dbPath;
   beforeAll(() => {
     mkdirSync(join(TMP, "models"), { recursive: true });
+    // s464-pure-fn-placement — the helpers are `server fn` (the explicit server
+    // pin). They were plain `export fn` before, which only became server calls
+    // because route inference promoted a pure `fn` with a server caller to its
+    // own route. A plain `fn` is never a route and never async (§12.4, §13.4,
+    // §48.3.5), so these cases need a genuinely server-placed callee.
     writeFileSync(join(TMP, "models", "m.scrml"),
-      `\${\n    export fn tag() { return "x" }\n    export fn rolePatron() { return "patron" }\n    export fn sessionTtlSeconds() { return 604800 }\n}\n`);
+      `\${\n    export server fn tag() { return "x" }\n    export server fn rolePatron() { return "patron" }\n    export server fn sessionTtlSeconds() { return 604800 }\n}\n`);
     dbPath = join(TMP, "t.db");
     const db = new Database(dbPath);
     db.run("CREATE TABLE t (id INTEGER PRIMARY KEY, n INTEGER)");

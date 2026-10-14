@@ -187,19 +187,27 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
   });
 
   test("(c) @cell inside a server template lowers to _scrml_body[...]", () => {
+    // s464 fix round 3 (owner ruling S464 "(a) Close it"): in a WHOLLY-server
+    // function this read is E-REACTIVE-003 (the cell is never sent, so it is always
+    // `undefined`). The host is therefore CPS-split — it writes a client cell — so
+    // the read sits in the server batch and is MARSHALLED into the request body;
+    // the lowering under test (the `${@cnt}` slot → `_scrml_body["cnt"]`) is the same.
     const src = `
 <program db="./items.db">
 
   \${
-    server @cnt = 0
+    @cnt = 0
+    @done = 0
 
-    server function tag() {
-      const s = \`count=\${@cnt} done\`
-      return s
+    function tag(x) {
+      let s = \`count=\${@cnt} \${?{\`SELECT COUNT(*) AS n FROM items\`}.get().n} done\`
+      @done = 1
+      return 1
     }
   }
 
-  <div>Tag</div>
+  <button onclick=\${ tag("a") }>Tag</button>
+  <p>\${@done}</p>
 
 </program>
 `;
@@ -208,9 +216,9 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     const js = readFileSync(serverJsPath, "utf-8");
 
     // GREEN: the cell read is rewritten to the server body accessor.
-    expect(js).toContain('`count=${_scrml_body["cnt"]} done`');
+    expect(js).toContain('`count=${_scrml_body["cnt"]} ');
     // RED guard: a bare `@cnt` in the template is invalid JS.
-    expect(js).not.toContain("`count=${@cnt} done`");
+    expect(js).not.toContain("${@cnt}");
 
     assertValidJs(js);
   });

@@ -47,7 +47,7 @@ import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { sourceHasMdElement } from "./md-lower.ts";
-import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck, handlerMarkupRefusals } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
@@ -1506,6 +1506,92 @@ function parseComponentDef(
 
   const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
   const normalizedBody = nb ?? "";
+
+  // S464 Q24 r2 (§17.6.10.1, review N3) — a statement-position element in the body is
+  // refused by codegen (markup-statement-refusal.ts) at the span its LEAD carries; the
+  // re-parse gave it a span in the normalized body (`comp.scrml#W:3:4`). Map each one
+  // to the definition's own source position, as the other body diagnostics here are.
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    // The re-parse's span does not always address the normalized body (the native
+    // parser numbers a NESTED function body from that body's own start), so the span
+    // is trusted only when the text there is the element; otherwise the element is
+    // found by its tag: the only `<tag` in the body, or the first at/after the span.
+    const elementAt = (tag: string, start: unknown, end: unknown): [number | undefined, number | undefined] => {
+      const opener = new RegExp(`<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`, "g");
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        opener.lastIndex = 0;
+        const head = normalizedBody.slice(start, end).trimStart();
+        if (new RegExp(`^<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`).test(head)) return [start, end];
+      }
+      const hits: number[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = opener.exec(normalizedBody)) !== null) hits.push(m.index);
+      if (hits.length === 0) return [undefined, undefined];
+      const at = hits.length === 1 ? hits[0] : (hits.find((h) => typeof start === "number" && h >= start) ?? hits[0]);
+      const close = normalizedBody.indexOf(`</${tag}>`, at);
+      const selfClose = normalizedBody.indexOf("/>", at);
+      const stop = close >= 0 ? close + tag.length + 3 : selfClose >= 0 ? selfClose + 2 : at + tag.length + 1;
+      return [at, stop];
+    };
+    const seenNodes = new WeakSet<object>();
+    const seenHandlerRefusals = new Set<string>();
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seenNodes.has(n as object)) return;
+      seenNodes.add(n as object);
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      const rec = n as Record<string, any>;
+      if (rec.kind === "html-fragment" && rec._markupLead) {
+        const [s0, s1] = elementAt(String(rec._markupLead.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._markupLead.span = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      } else if (rec.kind === "bare-expr" && rec.exprNode?.kind === "markup-value") {
+        const [s0, s1] = elementAt(String(rec.exprNode?.node?.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._refusalSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      }
+      // S464 Q24 r3 (R2-1) — an event handler in the body (`<button onclick=${ @n = 2⏎
+      // <em>z</em> }>`) renders nothing: refuse its statement-position markup with the
+      // handler fix, checked on a copy positioned at the handler text in the FILE (the
+      // re-parse's spans address the normalized body).
+      if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
+        const src = _currentFileSource;
+        for (const a of rec.attrs) {
+          if (!a || typeof a.name !== "string" || !isEventHandlerAttrName(a.name)) continue;
+          const v = a.value;
+          if (!v || v.kind !== "expr" || typeof v.raw !== "string" || v.raw.trim() === "") continue;
+          if (!src || (defSpan.file && defSpan.file !== src.path)) continue;
+          let raw = v.raw;
+          let at = src.text.indexOf(raw, typeof defSpan.start === "number" ? defSpan.start : 0);
+          if (at < 0) {
+            // The normalized body re-spaced the value: map the value's own span to the
+            // source, and read the handler text there (between its `${` and matching `}`).
+            const mapped = bodyDiagnosticSourceSpan(defSpan, normalizedBody, v.span?.start, v.span?.end) as any;
+            const open = typeof mapped?.start === "number" ? src.text.indexOf("${", mapped.start) : -1;
+            if (open < 0 || open > (mapped.end ?? open) + 2) continue;
+            let depth = 0;
+            let k = open + 1;
+            for (; k < src.text.length; k++) {
+              const c = src.text[k];
+              if (c === "{") depth++;
+              else if (c === "}" && --depth === 0) break;
+            }
+            if (k >= src.text.length) continue;
+            at = open + 2;
+            raw = src.text.slice(at, k);
+          }
+          const lc = lineColAt(src.text, at);
+          const copy = { kind: "expr", raw, span: { file: filePath, start: at, end: at + raw.length, line: lc.line, col: lc.col } };
+          for (const e of handlerMarkupRefusals(copy, filePath) as any[]) {
+            const key = `${e.code}@${(e.tabSpan ?? e.span)?.start}`;
+            if (seenHandlerRefusals.has(key)) continue;
+            seenHandlerRefusals.add(key);
+            ceErrors.push(makeCEError(e.code, String(e.message).replace(/ \(line \d+, col \d+\)$/, ""), (e.tabSpan ?? e.span) as Span));
+          }
+        }
+      }
+      for (const k of Object.keys(rec)) if (k !== "span" && k !== "_markupLead") visit(rec[k]);
+    };
+    visit(nodes);
+  }
 
   // §4.17 (S462) — scrml does not admit `<script>` / `<style>` at any position, a
   // component body included. The body is raw text until this re-parse, so this is

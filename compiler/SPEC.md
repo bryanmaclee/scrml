@@ -228,7 +228,7 @@ The compiler SHALL generate all output from a single `.scrml` source. The develo
 
 The compiler SHALL NOT emit JavaScript that fails to parse. A successful compile (exit 0) guarantees that every emitted JavaScript artifact (`.client.js`, `.server.js`, library `.js`, per-route chunk, runtime chunk) is at least syntactically valid JavaScript. A codegen path that cannot lower a construct SHALL emit a hard diagnostic (e.g. `E-CG-003`) rather than a silent stub that yields malformed output.
 
-This invariant is enforced by an in-process parse gate: after codegen produces the final artifacts, the compiler parses each one and, on any parse failure, aborts the compile with `E-CODEGEN-INVALID-LOGIC` (§34) and writes no codegen output artifacts. The gate is a backstop: it catches malformed (unparseable) emission and un-lowered compiler placeholders (below), not other semantically-incorrect-but-parseable emission. The gate is **active by default** (S142): every compile parses its emitted artifacts unless the operational opt-out below is supplied. (Ratified S141; default-ON S142; implemented by `compiler/src/codegen/validate-emit.ts`, mirroring the `E-META-EVAL-002` reparse-emitted precedent of §22.4.)
+This invariant is enforced by an in-process parse gate: after codegen produces the final artifacts, the compiler parses each one and, on any parse failure, aborts the compile with `E-CODEGEN-INVALID-LOGIC` (§34) and writes no codegen output artifacts. The gate runs on EVERY compile, whether or not the compile writes output: an in-process compile that writes nothing (an editor, a checker, an API caller) reports the same `E-CODEGEN-INVALID-LOGIC` a writing compile does, judged on the artifacts as emitted (import re-basing and production stripping change specifiers and comments, never whether the JS parses). (S464 — impl#1 conforms; before, the gate ran only inside the write phase and a non-writing compile reported exit 0 for artifacts that do not parse.) The gate is a backstop: it catches malformed (unparseable) emission and un-lowered compiler placeholders (below), not other semantically-incorrect-but-parseable emission. The gate is **active by default** (S142): every compile parses its emitted artifacts unless the operational opt-out below is supplied. (Ratified S141; default-ON S142; implemented by `compiler/src/codegen/validate-emit.ts`, mirroring the `E-META-EVAL-002` reparse-emitted precedent of §22.4.)
 
 **Un-lowered placeholders (S457).** The gate SHALL also refuse, with `E-CODEGEN-INVALID-LOGIC`, an artifact that contains an identifier of the form `__scrml_<name>__` in any position: reference, binding, property name or object key. A string or comment that contains such a word is not an identifier and does not count. The compiler writes such identifiers as internal placeholders, for example `__scrml_is_some__(x)` for `x is given`, so its parser can read scrml operators. Every one must be lowered before emission, and none exists at run time. An artifact that still contains one parses, but it is a construct the compiler did not lower, and at run time it throws ReferenceError (or, behind a `.catch`, silently never runs). The test is by shape alone, with no exemptions. Every compiler placeholder carries a per-compilation unguessable token (§47.1.1), and only that form is recognised and lowered, so an author cannot spell one. A `__scrml_<name>__` an author writes is an ordinary identifier that nothing lowers. §47.1.1 refuses it where the reservation check inspects it. Anywhere else, for example an object key or opaque `_{}` foreign code, this gate refuses it once it reaches an artifact. When the name the gate found also appears in the author's source text, the diagnostic says so and asks for a rename. Otherwise it reports an un-lowered compiler placeholder, spelled without its token so the message is the same on every run, and asks for a bug report. The compiler's own locals use the `__scrml_<name>` form without the trailing `__` (e.g. `__scrml_is_v`) and do not match.
 > **Provenance:** ruling:user-voice-scrml.md S457 "a for __scrml_" (the reservation that makes a pure shape test sound) · supersedes: "The gate is a syntactic backstop only — it catches malformed (unparseable) emission, not semantically-incorrect-but-parseable emission." (narrowed to name the placeholder refusal). Adopter issue #1333. Direction of change: **newly-rejecting** for programs whose emission leaked a placeholder. Measured (S457): 0 of the 2361 `.scrml` files under `samples/`, `examples/` and `conformance/` are refused by it. Known live leak now refused rather than shipped: a `[:]` map literal inside a block-bodied function expression (`__scrml_map_lit__`).
@@ -3813,6 +3813,19 @@ to a path where the value actually crosses the wire.
   sibling of E-RI-002 (§12), which governs a server function *writing* a `@reactive` cell.
 - The error message SHALL name the cell, state that it resolves to `undefined` server-side
   because the value is not transported, and offer both fixes above.
+- **Every read position counts (S464).** A client-cell read inside a template-literal
+  interpolation (`` `n=${@n}` ``), inside a block-bodied callback, or in a parameter default of
+  the wholly server-escalated function is the same not-transported read and SHALL be
+  E-REACTIVE-003. Literal text that merely contains `@` — a string, a template's literal part, a
+  regular-expression literal, a comment — is not a read and SHALL NOT fire it.
+  > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Close it" (template cell-read entry) ·
+  > closes `g-template-literal-cell-read-in-fn-undefined-on-server-s464` (`fn f(k) { return
+  > \`${@n}-${k}\` }` reached from a server function answered `"undefined-3"`) · dispatch
+  > s464-pure-fn-placement fix round 3. **Direction of change: newly-rejecting** — a program
+  > whose server function read a cell in one of these positions (always `undefined` at request
+  > time) no longer compiles. Corpus measured at S464: 0 of 2836 repo sources and 0 giti /
+  > flogence programs newly rejected; 9 compiler test fixtures moved to a CPS-split host,
+  > where the read is marshalled.
 - **CPS carve-out — the MARSHAL (the form-submit / login idiom).** A function that also
   performs a reactive assignment (`@cell = …`) is CPS-split (§19.9.9) — a CLIENT function
   with an embedded server round-trip. Its `@cell` reads sit in the server BATCH, and the
@@ -9618,6 +9631,8 @@ Plain `.css` files placed alongside `.scrml` source files are valid CSS. scrml's
    > **S391 amendment.** The prior wording — "SHALL contain exactly one `lift` statement" — admitted only the explicit form and therefore contradicted both §17.6.10 and the shipping compiler, which accepts (and has accepted since the value-form landed) a lift-less single-expression arm. The sugar is defined in §17.6.10; this bullet is corrected here so §10 does not assert the opposite of §17.6. The multiplicity rule below ("at most once on any execution path") is unchanged and applies to the implied `lift` exactly as to an explicit one. Ratified S371, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`.
 
 In both modes, a `lift` call initializes `~` to the lifted value (§32.2).
+
+`lift` is the one explicit way to render from logic. Markup written as a statement in a logic body that no `lift` names renders only as the single element of an `if` / `given` branch (§17.6.10); anywhere else it is not rendered and is a compile error, E-MARKUP-STATEMENT-NOT-RENDERED (§17.6.10.1 — ruling:user-voice-scrml.md S462 Q24 "a"), never a silent drop.
 
 `lift` was chosen over `yield` to avoid collision with JavaScript generator function semantics. JavaScript `yield` works only inside generator functions; scrml logic contexts accept real JS generators. Having two different `yield` behaviors in the same `${ }` block would be a footgun. `lift` is unambiguous.
 
@@ -16772,6 +16787,74 @@ Renders `YES` when `@shown`, and nothing when not. Before this amendment the com
 form, emitted the branch value as a dangling no-op statement, and rendered an empty slot on both
 paths with zero diagnostics — silent-wrong against §17.6.4, which had already ruled the false path
 to be `not`.
+
+#### 17.6.10.1 Statement-position markup that would not render is an error
+
+**Date added:** 2026-10-12 (S464).
+
+> **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a" — *"such markup is a compile ERROR whose
+> message says it is not rendered and names the fix (`lift <…>`, or make it the arm's single
+> element). `lift` stays the one explicit way to render from logic; nothing vanishes silently."* ·
+> ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED" (the code name and message). ·
+> Direction of change: **newly-rejecting** (before: exit 0, the element rendered nothing). Measured
+> (S464) by compiling: 2836 `.scrml` files under `samples/`, `examples/`, `stdlib/`, `conformance/`,
+> `benchmarks/` plus 114 in `giti` / `flogence` — 2 conformance fixtures newly refused (migrated),
+> 1 sample that already failed to compile gains the code, 0 elsewhere. Fix round 1 (S464, the
+> contexts below that the first build missed): 2952 files — 0 newly refused; 1 more sample that
+> already failed to compile gains the code. Fix round 2 (S464: handlers, `when`, function
+> expressions): 2952 files — 0 newly refused.
+
+A markup element written as a STATEMENT in a logic body renders in exactly two ways: as the single
+element of an `if` / `given` branch (the implied `lift` above), or named by a `lift` (§10.1). Markup
+in statement position that neither way reaches is not rendered, and the compiler SHALL NOT drop it
+silently. "A logic body" is every one of: a `${ … }` block (in markup, in a component body, in an
+`<each>` row, in a `<match>` markup arm, in an engine state-child); an engine `effect=${ … }` body
+and an engine message-arm body; an event-handler body (`onclick=${ … }`, `onclick={ … }`, an arrow
+handler); a `when … changes { … }` body; an `if` / `given` / `for` / `while` / `do` body, a logic
+`match` arm and a bare nested block `{ … }` inside any of them; a `function` / `fn` / `server
+function` body, including a `defer { … }` in it; and the block body of a function VALUE — an arrow
+function or a function expression (`const h = function() { … }`).
+
+- A markup element in statement position in a logic body that no `lift` names and that is not the
+  single-element branch of a value-form (this section) SHALL be a compile error,
+  E-MARKUP-STATEMENT-NOT-RENDERED. Its message SHALL say the markup is not rendered and SHALL name the
+  fix that works where it stands: `lift <tag>…</tag>` (or making it the branch's single element) in a
+  `${ }` or `fn` body; `return` it and render the call in markup (`${f()}`) in a `function`
+  declaration body, where `lift` is not valid (§10.4); in an arrow or function-expression BLOCK body,
+  return it from an expression-bodied arrow (`() => <p/>`) or a `function` declaration instead (a
+  markup `return` from a block body is not lowered by impl#1 yet — the parse floor of §2.2.1 refuses
+  it); and, in an event handler (on any element, including one in an `<each>` row, a `<match>` arm
+  or a component body), a `when` body or an engine `effect=` / message arm — code run for its
+  effects, which renders nothing at all — change state there and render the markup from that state
+  in markup.
+- When the element is the single element of its branch but a SIBLING branch of the same `if` /
+  `given` is not (it uses `lift`, or holds statements), the message SHALL name that cause: a
+  single-element branch renders only when every branch is one, so the fix is to make every branch a
+  single element or to `lift` in every branch.
+- The diagnostic SHALL be reported at the element's own file position, including where the compiler
+  reads the body from a copy (a component body, an engine `effect=` body).
+- This holds in every context above, including those whose bodies are lowered by their own emitters
+  (`<each>` rows, `<match>` arms, engine state-children and `effect=`, component bodies): a bare
+  `${ <p/> }` is the same error in a `<match>` arm as at the top level.
+- An element the expression of a preceding statement would read as code — after an operand,
+  including a postfix `++` / `--` or a regex literal — is in statement position (`@n++⏎<p>q</p>`).
+- The shapes this reaches include: `${ <p>hello</p> }`; two elements in one branch; an element after
+  a statement in a branch or block (`let k = 1⏎<p>…</p>`, `@k = 1 <p>…</p>`); a `for` / `while`
+  body without `lift`; a logic `match` arm `{ <p>…</p> }`; a branch whose text the compiler cannot
+  read back as exactly one element (`a < b`, or a quoted closing tag, in its text — put such text in
+  an interpolation, `${"a < b"}`); and markup in statement position in a `function` body (`return` it
+  and render the call in markup, `${f()}` — `lift` is not valid there, §10.4).
+- When a cascade declines as a whole (an arm outside the value-form grammar keeps every sibling arm
+  from converting, so nothing half-renders), each element it leaves unrendered SHALL be reported.
+- A single-element branch is a value-form in every markup `${…}` position, including a `${ if … }`
+  nested inside the element of an enclosing single-element branch (`${ if (a) { <div>${ if (b) {
+  <b>x</b> } }</div> } }` renders the inner `<b>`).
+- Markup in a VALUE position is not in statement position and is unaffected: an initializer
+  (`const m = <p/>`), a `return` operand, the body of an expression-bodied arrow (`() => <p/>`,
+  including an arrow that is an event-handler value — its body is its return operand), a ternary
+  arm, a call argument, a `lift` operand. Where impl#1 cannot lower such a value, the emitted-JS
+  parse floor (§2.2.1) refuses the compile with E-CODEGEN-INVALID-LOGIC; this error does not apply.
+- A `^{ }` meta body is outside this rule: it renders through `emit(…)` and is governed by §22.
 
 ### 17.7 Iteration (`<each>`)
 
@@ -26144,6 +26227,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
+| E-MARKUP-STATEMENT-NOT-RENDERED | §17.6.10.1, §10.1, §4.18.1 | A markup element written as a STATEMENT in a logic body (`${ … }`, an `if` / `given` / loop / `match` body, a function body) that no lowering renders — it is not the single element of an `if` / `given` branch (the §17.6.10 implied `lift`), and no `lift` names it: `${ <p>hello</p> }`, two elements in one branch, an element after a statement (also when the statement's expression read it in as code: `let k = 1⏎<p>…</p>`), a `for` / `while` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a branch the compiler could not read back as exactly one element (`a < b` or a quoted closing tag in its text), markup in statement position in a `function` body. Message: *"this markup is in statement position and is not rendered — write `lift <p>…</p>`"*, plus the single-element and interpolation fixes. **Provenance:** ruling:user-voice-scrml.md S462 Q24 "a"; code + message ruling:user-voice-scrml.md S464 "E-MARKUP-STATEMENT-NOT-RENDERED". **Direction of change: newly-rejecting** (before: exit 0, the element rendered nothing). Corpus measured at S464: see §17.6.10.1. Emitted by `compiler/src/markup-statement-refusal.ts` `refuseUnrenderedStatementMarkup`, run once over every file's tree at the start of codegen (`codegen/index.ts`) so `<each>` rows, `<match>` arms, engine state-children and component bodies are covered whatever emitter lowers them; by `compiler/src/codegen/emit-logic.ts` (the `html-fragment` case) and `codegen/emit-engine.ts` `parseEngineSynthLogicBody` for engine bodies re-parsed at emit time; by `compiler/src/ast-builder.js` `refuseSwallowedStatementMarkup` (an element a statement read in as code, incl. after `++` / `--` / a regex, and in an arrow or function-expression block body); and by `ast-builder.js` `refuseHandlerMarkup` for event-handler bodies and the engine opener `effect=` body, at their file positions. All through the run-wide refused-lowering sink or the TAB error list; message `markupNotRenderedMessage` (context-correct: `lift` in a `${ }` / `fn` body, `return` in a `function` / arrow / function-expression body, state + markup for a handler / `when` / engine effect; names a sibling branch as the cause when a single-element branch did not convert). | Error |
 | ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |

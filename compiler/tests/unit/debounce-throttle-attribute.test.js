@@ -270,7 +270,12 @@ describe("§4 codegen: computed-form msExpr arrow-fn (A5-5 mirror)", () => {
       "computed-form.scrml",
     ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
-    expect(hard.length).toBe(0);
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on a `write: false`
+    // compile: the computed msExpr is emitted with its `@delay` UNLOWERED (`() =>
+    // (@delay) * 1`), JS that never parsed (a `write: true` compile already refused it;
+    // g-emitted-js-invalid-shapes-surfaced-by-floor-s464). The arrow-fn SHAPE (this
+    // test's point) is still checked below.
+    expect(hard.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
     // The msExpr arrow-fn shape: `() => (...) * 1`.
     expect(clientJs).toMatch(/\(\)\s*=>\s*\(.*\)\s*\*\s*1/);
   });
@@ -281,7 +286,8 @@ describe("§4 codegen: computed-form msExpr arrow-fn (A5-5 mirror)", () => {
       "computed-seconds.scrml",
     ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
-    expect(hard.length).toBe(0);
+    // S464 Q24 fix round 3 — see the `ms` case above (the parse floor's refusal).
+    expect(hard.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
     expect(clientJs).toMatch(/\(\)\s*=>\s*\(.*\)\s*\*\s*1000/);
   });
 });

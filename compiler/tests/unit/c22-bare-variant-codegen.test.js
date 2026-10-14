@@ -266,7 +266,12 @@ const m = <main>${"$"}{@phase}</>
 
 ${"$"}{ render(m) }
 `);
-    expect((result.errors ?? [])).toEqual([]);
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on a `write: false`
+    // compile. The file-top `const m = <main>…</>` is emitted as `const m;` — JS that
+    // never parsed (a `write: true` compile already refused it): the floor's refusal is
+    // the only error (g-emitted-js-invalid-shapes-surfaced-by-floor-s464). The variant
+    // identity (this test's point) is still checked on the emitted `reactive_set` below.
+    expect((result.errors ?? []).map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
     // The reactive_set call should reference Idle (either as "Idle" string OR
     // Phase.Idle property access) — both resolve to the variant tag at runtime.
     expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*(?:"Idle"|Phase\.Idle)\)/);

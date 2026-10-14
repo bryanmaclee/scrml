@@ -143,7 +143,11 @@ ${D}{
     expect(r.js).toContain("empty logic interpolation skipped");
   });
 
-  test("RESIDUAL PIN: a value-form `if` with a MARKUP branch is still skipped — flip when the markup-value-in-each path lands", () => {
+  // S464 Q24 (§17.6.10.1, fix round 1) — the skip below rendered NOTHING at exit 0 (the
+  // implied-lift desugar declines a cascade that mixes a markup arm with a value arm).
+  // That silent drop is now E-MARKUP-STATEMENT-NOT-RENDERED, as it already was outside
+  // an `<each>`; `lift` in both arms renders (pinned in markup-statement-not-rendered-s464).
+  test("a value-form `if` with a MARKUP branch is refused, not skipped (was a silent drop)", () => {
     const r = compileApp(`<program>
 ${D}{
   type Row:struct = { id: number, n: number }
@@ -155,9 +159,6 @@ ${D}{
   </each>
 </ul>
 </program>`, "markupbranch");
-    expect(r.errorCodes).toEqual([]);
-    // A markup-valued branch is left to the (open) GITI-032 markup-value-in-each
-    // lowering; _eachValueFormIfRaw returns null so it stays on the skip path.
-    expect(r.js).toContain("empty logic interpolation skipped");
+    expect(r.errorCodes).toEqual(["E-MARKUP-STATEMENT-NOT-RENDERED"]);
   });
 });

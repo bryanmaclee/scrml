@@ -923,12 +923,21 @@ describe("§10 — adversarial opener shapes that must not false-fire", () => {
   <each in=@m.entries() as (k, v)><li>\${k}\${v}</li></each>`],
   ];
 
+  // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on a `write: false`
+  // compile. This shape's `key=` lambda emits a template literal holding `${@prefix}`
+  // unlowered — JS that never parsed (a `write: true` compile already refused it). The
+  // opener-read check (this section's point) raises nothing; the floor's refusal is the
+  // only E- diagnostic (g-emitted-js-invalid-shapes-surfaced-by-floor-s464).
+  const FLOOR_REFUSED = new Set(["key-lambda-body-reads-a-declared-cell"]);
   for (const [label, body] of SHAPES) {
     test(`\`${label}\` compiles with zero E- diagnostics`, () => {
-      expectNoErrors3(
-        compileSource(`<program>\n  ${body}\n</program>\n`, `adversarial-${label}.scrml`),
-        label,
-      );
+      const r = compileSource(`<program>\n  ${body}\n</program>\n`, `adversarial-${label}.scrml`);
+      if (FLOOR_REFUSED.has(label)) {
+        expect([...r.errors, ...r.warnings].filter((d) => String(d.code).startsWith("E-")).map((d) => d.code))
+          .toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+        return;
+      }
+      expectNoErrors3(r, label);
     });
   }
 });
@@ -1183,14 +1192,18 @@ describe("§13 — `key=` inherits a false negative and gains a SQL type check",
 `,
       "key-at-asname-divergence.scrml",
     );
-    const typerECodes = [...r.errors, ...r.warnings]
+    // S464 Q24 fix round 3 closed GAP-S385-VALIDATE-EMIT-SKIPPED-WHEN-WRITE-FALSE: the
+    // §2.2.1 parse floor now runs on a `write: false` compile, so the LSP sees the same
+    // E-CODEGEN-INVALID-LOGIC the CLI reports. The TYPER is still silent (no E- code
+    // from it) — that half of the divergence is the open todo below.
+    const eCodes = [...r.errors, ...r.warnings]
       .filter((d) => String(d.code).startsWith("E-"))
       .map((d) => d.code);
-    expect({ note: KEY_AT_ASNAME_NOTE, typerECodes })
-      .toEqual({ note: KEY_AT_ASNAME_NOTE, typerECodes: [] });
+    expect({ note: KEY_AT_ASNAME_NOTE, eCodes })
+      .toEqual({ note: KEY_AT_ASNAME_NOTE, eCodes: ["E-CODEGEN-INVALID-LOGIC"] });
   });
 
-  test.todo("GAP-S385-EACH-KEY-AT-SIGIL-FALSE-NEGATIVE — `<each in=@rows as x key=@x>` passes the typer and fails codegen; a `write:false` consumer (the LSP) sees a clean buffer");
+  test.todo("GAP-S385-EACH-KEY-AT-SIGIL-FALSE-NEGATIVE — `<each in=@rows as x key=@x>` passes the typer and is refused only by the emitted-JS parse floor (E-CODEGEN-INVALID-LOGIC, a compiler-defect message), not by a typer diagnostic naming the cause");
 
   // ---- (b) E-TYPE-004 is NEWLY REACHABLE from `key=` -----------------------
   //
