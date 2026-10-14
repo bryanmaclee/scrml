@@ -64,13 +64,20 @@ describe("isUnrecognizedTypeNameAtom — leaf classifier", () => {
     }
   });
 
-  test("the 8 PascalCase built-in error/enum types → false", () => {
+  test("the 7 PascalCase built-in error types → false", () => {
     for (const t of [
       "NetworkError", "ValidationError", "SQLError", "AuthError",
-      "TimeoutError", "ParseError", "NotFoundError", "ConflictError",
+      "TimeoutError", "NotFoundError", "ConflictError",
     ]) {
       expect(isUnrecognizedTypeNameAtom(t, reg, imports)).toBe(false);
     }
+  });
+
+  // S466 — ruling user-voice-scrml.md S464 "(a) Import-only" (§41.13 / §53.14.6):
+  // `ParseError` is NOT built in; un-imported it is unrecognized, imported it is exempt.
+  test("ParseError is import-only: unrecognized without the import, exempt with it", () => {
+    expect(isUnrecognizedTypeNameAtom("ParseError", reg, imports)).toBe(true);
+    expect(isUnrecognizedTypeNameAtom("ParseError", reg, new Set([...imports, "ParseError"]))).toBe(false);
   });
 
   test("same-file declared struct name (Status) → false (registry presence)", () => {
