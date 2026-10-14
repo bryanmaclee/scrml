@@ -187,19 +187,27 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
   });
 
   test("(c) @cell inside a server template lowers to _scrml_body[...]", () => {
+    // s464 fix round 3 (owner ruling S464 "(a) Close it"): in a WHOLLY-server
+    // function this read is E-REACTIVE-003 (the cell is never sent, so it is always
+    // `undefined`). The host is therefore CPS-split — it writes a client cell — so
+    // the read sits in the server batch and is MARSHALLED into the request body;
+    // the lowering under test (the `${@cnt}` slot → `_scrml_body["cnt"]`) is the same.
     const src = `
 <program db="./items.db">
 
   \${
-    server @cnt = 0
+    @cnt = 0
+    @done = 0
 
-    server function tag() {
-      const s = \`count=\${@cnt} done\`
-      return s
+    function tag(x) {
+      let s = \`count=\${@cnt} \${?{\`SELECT COUNT(*) AS n FROM items\`}.get().n} done\`
+      @done = 1
+      return 1
     }
   }
 
-  <div>Tag</div>
+  <button onclick=\${ tag("a") }>Tag</button>
+  <p>\${@done}</p>
 
 </program>
 `;
@@ -208,9 +216,9 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     const js = readFileSync(serverJsPath, "utf-8");
 
     // GREEN: the cell read is rewritten to the server body accessor.
-    expect(js).toContain('`count=${_scrml_body["cnt"]} done`');
+    expect(js).toContain('`count=${_scrml_body["cnt"]} ');
     // RED guard: a bare `@cnt` in the template is invalid JS.
-    expect(js).not.toContain("`count=${@cnt} done`");
+    expect(js).not.toContain("${@cnt}");
 
     assertValidJs(js);
   });
@@ -465,19 +473,53 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
 </program>
 `;
 
-  test("(#284 dispatch) a PLAIN helper reached only via dispatch is server-placed", () => {
-    const { errors, serverJsPath } = compileToFiles(PLAIN_DISPATCH_SRC, "plain-disp");
+  // S464 — a dispatch TABLE stores a function in a value; S462/S464 refuse it
+  // (E-VALUE-FUNCTION-STORED). The table shape is converted to a negative, and the
+  // PLACEMENT concern (a plain helper reached only from a server fn's template
+  // interpolation must be server-placed and run) is kept on the migrated shape: the
+  // server fn chooses by CALLING the helper, not by indexing a stored table.
+  test("(#284 dispatch) a dispatch TABLE storing a plain helper is E-VALUE-FUNCTION-STORED", () => {
+    const { errors } = compileToFiles(PLAIN_DISPATCH_SRC, "plain-disp");
+    expect(errors.filter((e) => !e.code?.startsWith("W-")).map((e) => e.code)).toEqual(["E-VALUE-FUNCTION-STORED"]);
+  });
+
+  const PLAIN_CALLED_SRC = `
+<program>
+
+  \${
+    function doubleIt(n) { return n * 2 }
+
+    // reached only from inside a server fn, chosen by calling (no stored table)
+    server function dispatchPlain(n, which) {
+      const v = which == "d" ? doubleIt(n) : n
+      return \`v \${v}\`
+    }
+  }
+
+  <div>P</div>
+
+</program>
+`;
+
+  // KNOWN GAP surfaced by the S464 migration (pre-existing, not caused by it): a plain helper
+  // called ONLY inside a template-literal interpolation of a server fn (`return \`v ${doubleIt(n)}\``)
+  // is NOT server-placed — the server bundle calls `doubleIt` without defining it (a
+  // ReferenceError at run time, compiled clean). Route inference reads structured `call`
+  // nodes and template interpolations are not decomposed; the #284 raw-text scan covered
+  // only the dispatch-TABLE shape, which E-VALUE-FUNCTION-STORED now refuses.
+  test.todo("(#284 dispatch, migrated) a PLAIN helper reached only from a server-fn TEMPLATE interpolation is server-placed");
+
+  test("(#284 dispatch, migrated) a PLAIN helper reached only from a server fn is server-placed", () => {
+    const { errors, serverJsPath } = compileToFiles(PLAIN_CALLED_SRC, "plain-called");
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const serverJs = readFileSync(serverJsPath, "utf-8");
-    // The plain helper must be emitted in the SERVER bundle — else the emitted
-    // `const t = { d: doubleIt }` / `t[which]()` references an undefined name.
     expect(serverJs).toMatch(/function doubleIt\s*\(/);
     assertValidJs(serverJs);
   });
 
-  test("(#284 dispatch) runtime: a dispatch-only plain helper runs on the server", async () => {
+  test("(#284 dispatch, migrated) runtime: the plain helper runs on the server", async () => {
     if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
-    const { errors, serverJsPath, tmpDir } = compileToFiles(PLAIN_DISPATCH_SRC, "plain-disp-rt");
+    const { errors, serverJsPath, tmpDir } = compileToFiles(PLAIN_CALLED_SRC, "plain-called-rt");
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const mod = await patchAndImport(serverJsPath, resolve(tmpDir, "items.db"));
     const route = Object.values(mod).find(

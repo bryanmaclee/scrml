@@ -16,9 +16,10 @@ import { isSomeDeprecationDiagnostics } from "./is-some-deprecation.ts";
 import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
+import { assignMdHeadingIds } from "./md-lower.ts";
 import { runPostCEInvariant } from "./validators/post-ce-invariant.ts";
 import { runAttributeInterpolation, runExecutableSinkCheck } from "./validators/attribute-interpolation.ts";
-import { ATTR_INTERP_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
+import { ATTR_INTERP_EXECUTABLE_CODE, ATTR_QUOTED_HANDLER_CODE, ATTR_STATIC_EXECUTABLE_CODE } from "./attr-injection-sink.ts";
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
@@ -1594,9 +1595,14 @@ function _compileScrmlImpl(options = {}) {
         // (`attrSinkKey`) + where it is reported (two instances of one component are two
         // reports). The `<each>` row lowering asks the same question as a backstop (CG stage);
         // its report is dropped when that attribute was already refused anywhere.
-        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE) {
+        // S464 — the quoted static event-handler refusal (E-ATTR-QUOTED-HANDLER) and the static
+        // executable-value refusal (E-ATTR-STATIC-EXECUTABLE, S464 "(a) Refuse both") are decided by the
+        // same walk (VP-3, post-ME, CE definitions) and deduped the same way; keys carry the code
+        // so the two refusals never shadow each other.
+        if (enriched.code === ATTR_INTERP_EXECUTABLE_CODE || enriched.code === ATTR_QUOTED_HANDLER_CODE || enriched.code === ATTR_STATIC_EXECUTABLE_CODE) {
           const sp = enriched.span && typeof enriched.span === "object" ? enriched.span : {};
-          const attrKey = e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
+          const codeTag = enriched.code === ATTR_QUOTED_HANDLER_CODE ? "QH|" : enriched.code === ATTR_STATIC_EXECUTABLE_CODE ? "SE|" : "";
+          const attrKey = codeTag + (e.attrSinkKey ?? `${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`);
           const fullKey = `${attrKey}|${sp.file ?? enriched.filePath ?? ""}:${sp.start}:${sp.end}`;
           if (stageName === "CG" ? _attrInterpExecutableSeen.has(attrKey) : _attrInterpExecutableSeen.has(fullKey)) continue;
           // S457 — a codegen backstop that re-lowers markup from a COPY (a `<match>` arm body is
@@ -1605,7 +1611,7 @@ function _compileScrmlImpl(options = {}) {
           // attribute in the same file: the compile fails either way. Only those stages record the
           // name — codegen refusals never shadow each other, so two distinct `<button ONCLICK=${…}>`
           // the backstop alone refuses are two reports (identity = their own spans, `attrKey`).
-          const nameKey = e.attrSinkName ? `${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
+          const nameKey = e.attrSinkName ? `${codeTag}${enriched.filePath ?? ""}|${e.attrSinkName}` : null;
           if (stageName === "CG" && nameKey !== null && _attrInterpExecutableSeen.has(nameKey)) continue;
           if (stageName !== "CG" && nameKey !== null) _attrInterpExecutableSeen.add(nameKey);
           _attrInterpExecutableSeen.add(attrKey);
@@ -2578,6 +2584,13 @@ function _compileScrmlImpl(options = {}) {
     ceResults.push(...result.files);
   }
 
+  // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide, AFTER component expansion:
+  // a component's `<md>` headings are lowered once per instance, so the file-wide dedupe
+  // against author `id=`s and earlier headings runs again on the expanded tree.
+  for (const ceFile of ceResults) {
+    try { assignMdHeadingIds(ceFile?.ast?.nodes ?? ceFile?.nodes ?? []); } catch { /* ids stay as lowered */ }
+  }
+
   // Stage 3.3 — Post-CE Validators (Unified Validation Bundle / W1)
   // VP-2 — post-CE invariant: residual `isComponent: true` becomes a hard
   //        E-COMPONENT-035 instead of a silent phantom DOM emission.
@@ -3538,9 +3551,14 @@ function _compileScrmlImpl(options = {}) {
   // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
   // the run already carries the real error).
   const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
-  collectErrors("CG", _riRefusedSession
-    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
-    : cgResult.errors);
+  // S465 r6 — a codegen BACKSTOP refusal (`cascadeOnly`: the server text guard, the
+  // client comma-sequence refusal) is dropped when an earlier stage already failed the
+  // compile — the precise diagnostic names the construct (runCG drops it against its
+  // own errors; this is the same rule across stages).
+  const _earlierFailed = allErrors.some((e) => e && (e.severity ?? "error") === "error" && !/^[WI]-/.test(String(e.code ?? "")));
+  collectErrors("CG", (cgResult.errors ?? []).filter((e) =>
+    !(_riRefusedSession && e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER") &&
+    !(_earlierFailed && e && e.cascadeOnly === true)));
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 
@@ -4047,6 +4065,50 @@ function _compileScrmlImpl(options = {}) {
   // phase. Both static servers serve ONLY this set (plus passive media).
   const clientSeeds = new Set();
   let clientAssets = [];
+
+  // §2.2.1 (S464 Q24 fix round 3) — the emitted-JS parse floor holds for EVERY compile,
+  // not only one that writes. The gate below runs inside the write phase (it judges the
+  // exact bytes written, after import re-basing); a `write: false` compile — the LSP,
+  // `scrml check`-style callers, every in-process API use — skipped it and reported
+  // exit 0 for artifacts that do not parse (S464 review R2-1/R2-3/R2-5: handler bodies
+  // in `<each>` rows / `<match>` arms / component bodies, `when` bodies, function-
+  // expression returns). Without a write, the artifacts are judged as emitted: import
+  // re-basing and production stripping change specifiers / comments, never whether the
+  // JS parses. Same artifacts, same validator, same prior-fatal suppression (Bug 70).
+  if (!(writeEligible && outputDir) && validateEmit && cgResult?.outputs) {
+    const priorFatal = allErrors.some((e) =>
+      !(e.code?.startsWith("W-") || e.code?.startsWith("I-") || e.severity === "warning"
+        || e.severity === "info" || e.code === "E-STYLE-CONFLICT"));
+    if (!priorFatal) {
+      const arts = [];
+      const push = (sourceFile, artifact, contents) => {
+        if (typeof contents === "string" && contents.length > 0) arts.push({ sourceFile, artifact, contents });
+      };
+      for (const [filePath, output] of cgResult.outputs) {
+        const base = basename(filePath, ".scrml");
+        push(filePath, `${base}.js`, output.toolJs);
+        push(filePath, `${base}.server.js`, output.serverJs);
+        push(filePath, `${base}.js`, output.libraryJs);
+        push(filePath, `${base}.client.js`, output.clientJs);
+        if (output.workerBundles) {
+          for (const [name, workerJs] of output.workerBundles) push(filePath, workerBundleFilename(filePath, name), workerJs);
+        }
+      }
+      if (mode !== "library" && cgResult.runtimeJs && cgResult.runtimeFilename) {
+        push(cgResult.runtimeFilename, cgResult.runtimeFilename, cgResult.runtimeJs);
+      }
+      if (cgResult.chunks) for (const chunk of cgResult.chunks.values()) push(chunk.filename, chunk.filename, chunk.payloadJs);
+      if (cgResult.chunksBootJs && cgResult.chunksBootFilename) push(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
+      const gateErrors = validateEmittedArtifacts(arts,
+        (name) => [...sourceByFile.values()].some((src) => typeof src === "string" && src.includes(name)));
+      for (const ge of gateErrors) {
+        allErrors.push({
+          stage: "CG", code: ge.code, message: ge.message, file: ge.span?.file ?? "",
+          line: ge.span?.line, column: ge.span?.col, severity: "error",
+        });
+      }
+    }
+  }
 
   if (writeEligible && outputDir) {
     // `writeAborted` short-circuits ALL writes below (stdlib shims, runtime chunk,

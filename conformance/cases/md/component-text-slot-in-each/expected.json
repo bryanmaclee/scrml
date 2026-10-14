@@ -1,0 +1,28 @@
+{
+  "id": "md-component-text-slot-in-each",
+  "description": "A component whose body holds an `<md>` with text slots, used inside an `<each>` row, renders each row's prop values: a row-bound prop reads the row and a literal prop is its literal.",
+  "language-version": "1.0",
+  "spec": "§67.4",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY) · review:s465-md finding 1",
+  "rationale": "§67.4: an atom renders exactly as `${expr}` renders in a markup body (§7.4.2); in a component body a prop name in that expression is the prop (§15.10), so in an `<each>` row it is the caller's per-row value — never an unbound name.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#w section h2",
+        "text": "One"
+      },
+      {
+        "selector": "#w section p",
+        "text": "kind row One"
+      },
+      {
+        "selector": "#w section strong",
+        "text": "kind"
+      }
+    ]
+  }
+}

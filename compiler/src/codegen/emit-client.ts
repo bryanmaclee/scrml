@@ -1,3 +1,5 @@
+import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
@@ -6,7 +8,7 @@ import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } fro
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, stdlibClientChunkMembers } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, stdlibClientChunkMembers, chunksForEmittedHelpers } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
@@ -19,7 +21,7 @@ import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
 import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
-import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
+import { getNodes, isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -32,6 +34,8 @@ import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
+import { moduleScopeReferences } from "./module-scope-refs.ts";
 import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -214,6 +218,18 @@ function gateChunksByEmittedReference(texts: Iterable<unknown>, chunks: Set<stri
   // The chunks whose own helpers report through `_scrml_error_boundary_log`
   // pull 'errors' by CHUNK_DEPENDENCIES edge (runtime-chunks.ts), closed by the caller.
   if (!chunks.has("errors") && strs.some((t) => ERRORS_CHUNK_REFERENCE.test(t))) add("errors");
+
+  // s462 review round 4 (S465) — THE AUTHORITY for every `_scrml_*` runtime helper.
+  // The table above and the pre-emit walk both PREDICT which helpers some emitter
+  // will write; three review rounds measured them missing a position each time
+  // (handler statement lists, `<match>` arm bodies, engine arms, markup LIFTED in a
+  // component body / `<match>` arm → `_scrml_deep_set is not defined`). This reads
+  // the emitted text against the index DERIVED from the runtime chunk sources
+  // (runtime-chunks.ts RUNTIME_HELPER_DEFINING_CHUNK): every helper the client names
+  // ships its defining chunk, whichever emitter wrote the call. The entries above
+  // remain for the non-`_scrml_` names (error classes, `animationFrame`) and as
+  // early, cheaper hits; anything they miss this catches.
+  if (chunksForEmittedHelpers(strs.join("\n"), chunks)) added = true;
   return added;
 }
 
@@ -1533,6 +1549,16 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     }
   }
 
+  /** Walk every attribute's parsed handler statement list (s462 r2; see the
+   *  `case "markup"` call site). */
+  function walkAttrHandlerBlocks(node: any): void {
+    const attrs: any[] = node?.attributes ?? node?.attrs ?? [];
+    for (const attr of attrs) {
+      const stmts = attr?.value?.handlerBlock?.stmts;
+      if (Array.isArray(stmts)) walkBody(stmts);
+    }
+  }
+
   /**
    * §17.1.2 — `ifmount` gate for the three scrml-defined structural elements.
    *
@@ -1800,6 +1826,18 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
             }
           }
         }
+        // s462 r2 — a multi-statement event-handler attribute value
+        // (`onclick={ if (@c) { @o.a.b = 5 } else { … } }`, a `;`-sequence,
+        // a multi-line body, `onclick=${ … }`) is lowered from its PARSED
+        // statement list `attr.value.handlerBlock.stmts` (ast-builder
+        // attachHandlerStatementList → emitHandlerStatementList). Those
+        // statements are emitted exactly like a function body, so the chunk
+        // walk must see them exactly like a function body: before this, a
+        // `reactive-nested-assign` inside a handler list emitted
+        // `_scrml_deep_set(...)` while the `utilities` chunk that DEFINES it
+        // was tree-shaken out → ReferenceError on every click. Every emitted
+        // statement list must be visible to this walk.
+        walkAttrHandlerBlocks(node);
         // Check for reactive for-loop (iterable is @varName) — within children
         if (Array.isArray(node.children)) {
           walkNodes(node.children);
@@ -1955,6 +1993,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
         // `node --check`-clean: the call sites are syntactically valid, the gap
         // is purely tree-shaking). Recurse so those nested shapes gate correctly.
         if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
+        // s462 r3 — the opener `effect=` body and every `(state × message)` arm
+        // body are RAW TEXT until emit-engine re-parses them at emit time, so
+        // neither is reachable through `bodyChildren`. Walk the same parse the
+        // emitters lower from (a `@o.a.b = 5` in one emits `_scrml_deep_set`).
+        if (engineMeta) {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { engineDeferredStatementBodies } = require("./emit-engine.ts") as {
+            engineDeferredStatementBodies: typeof import("./emit-engine.ts").engineDeferredStatementBodies;
+          };
+          for (const stmts of engineDeferredStatementBodies(engineMeta)) walkBody(stmts);
+        }
         break;
       }
 
@@ -1973,16 +2022,26 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // actually contain an each. Both chunks are unconditional once an each is
       // present (every non-empty each emits the `_scrml_reconcile_list` call +
       // the `_scrml_effect_static` registration), mirroring the each-block case.
+      //
+      // s462 r3 — the arm bodies are now WALKED, not text-probed. The probe saw
+      // only `<each`; an arm's event-handler statement lists (if/else, braceless,
+      // multi-line, `;`-sequence, `onclick=${…}`) were invisible, so a
+      // `reactive-nested-assign` in an arm handler emitted `_scrml_deep_set(...)`
+      // with the `utilities` chunk pruned → ReferenceError per click.
+      // `matchBlockArmBodies` returns the memoized `buildMatchArms` result — the
+      // exact node lists codegen emits (each-bearing arms included: their
+      // `each-block` nodes reach `case "each-block"` above, which adds
+      // `reconciliation` + `deep_reactive`). Every arm-body shape now gates its
+      // chunks exactly as the same markup at file level does.
       case "match-block": {
         addIfMountChunkForStructural(node);
-        const armsRaw = (node as any).armsRaw;
-        if (typeof armsRaw === "string" && /<\s*each\b/.test(armsRaw)) {
-          chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_remount_each + _scrml_each_renderers
-          chunks.add("deep_reactive");  // _scrml_effect_static
-        }
-        // Defensive: if buildMatchArms already attached the lifted each-blocks
-        // to bodyChildren (re-run ordering), descend so any OTHER chunk-
-        // requiring shape inside them gates too.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { matchBlockArmBodies } = require("./emit-match.ts") as {
+          matchBlockArmBodies: typeof import("./emit-match.ts").matchBlockArmBodies;
+        };
+        for (const armBody of matchBlockArmBodies(node as any, fileAST)) walkNodes(armBody);
+        // buildMatchArms attaches the lifted arm each-blocks to bodyChildren;
+        // they are the same refs as above (visitedChunkNodes dedups).
         if (Array.isArray((node as any).bodyChildren)) walkNodes((node as any).bodyChildren);
         break;
       }
@@ -4152,12 +4211,16 @@ export function generateClientJs(ctx: CompileContext): string {
     if (regions.length === 0) return code;
     regions.sort((a, b) => a.start - b.start);
 
-    // Build the "body" view: blank every removable region so a bound name is
-    // never counted as used by its own declaration line. Iterate from the end
-    // so earlier offsets stay valid.
+    // The "body" view a usage test reads: `blanks` (every removable region, so a
+    // bound name is never counted as used by its own declaration) blanked, the
+    // spliced runtime excised, string-literal bodies masked (each step explained
+    // below, where it was first written).
+    const usageBody = (blanks: Array<{ start: number; end: number }>): string => {
+    // Blank from the end so earlier offsets stay valid.
     let body = code;
-    for (let i = regions.length - 1; i >= 0; i--) {
-      const r = regions[i];
+    const _blanks = [...blanks].sort((a, b) => a.start - b.start);
+    for (let i = _blanks.length - 1; i >= 0; i--) {
+      const r = _blanks[i];
       body = body.slice(0, r.start) + " ".repeat(r.end - r.start) + body.slice(r.end);
     }
 
@@ -4210,40 +4273,101 @@ export function generateClientJs(ctx: CompileContext): string {
     // this read-line alive — the read-line twin of the chunk-prune leak
     // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
     body = maskStringLiteralSpans(body);
+    return body;
+    };
+
+    // g-spread (2026-06-10): a member-access-only lookbehind (a `.` preceded by
+    // ident-char / `)` / `]`, e.g. `obj.makeRange`) plus a word-boundary
+    // lookbehind, so a genuine member access of a DIFFERENT object does not
+    // count as a use, while a spread call (`...makeRange`) does.
+    const usesName = (text: string, name: string): boolean =>
+      new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "").test(text);
+
+    // (3) S466 (s462-p0-cps r3) — a top-level FUNCTION-VALUED binding the client
+    // never calls, whose body reaches a stdlib read (`const inner = (p, h) =>
+    // verifyPassword(p, h)` used only by server code). fn-valued-bindings.ts makes
+    // such a binding a function for the async colouring, but it is still emitted
+    // on both sides; on the client it is dead code, and it alone kept
+    // `const { verifyPassword } = _scrml_stdlib.auth;` alive — so a server-only
+    // module was either shipped (when it had a client chunk) or refused
+    // (E-STDLIB-CLIENT-CHUNK-MISSING) for a use the browser never makes. A binding
+    // drops only when no remaining client code names it (to a fixpoint: dropping
+    // `b` can free the `a` it called). A binding the client DOES name stays, and
+    // with it the read — the gate below then refuses it, exactly as for a direct
+    // client use. Located by acorn on the emitted text (the name set is the
+    // tree's: fnValuedBindingsOf); a bundle acorn cannot read drops nothing.
+    const stdlibNames = new Set<string>();
+    for (const r of regions) if (!r.keepWhole) for (const n of r.names) stdlibNames.add(n);
+    const fnRegions: Array<{ start: number; end: number; name: string; text: string }> = [];
+    const fnNames = new Set(
+      fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never) as unknown[])
+        .filter((b) => !b.exported).map((b) => b.name),
+    );
+    if (fnNames.size > 0 && stdlibNames.size > 0) {
+      let program: { body?: Array<{ type: string; start: number; end: number; declarations?: Array<{ id?: { type: string; name?: string }; init?: { type: string } | null }> }> } | null = null;
+      try {
+        program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true }) as never;
+      } catch {
+        program = null;
+      }
+      for (const st of program?.body ?? []) {
+        if (st.type !== "VariableDeclaration" || st.declarations?.length !== 1) continue;
+        const d = st.declarations[0];
+        const name = d.id?.type === "Identifier" ? d.id.name : undefined;
+        const initType = d.init?.type;
+        if (!name || !fnNames.has(name)) continue;
+        if (initType !== "ArrowFunctionExpression" && initType !== "FunctionExpression") continue;
+        fnRegions.push({ start: st.start, end: st.end, name, text: code.slice(st.start, st.end) });
+      }
+    }
+    // Only a binding that (through other such bindings) reaches a stdlib read.
+    const reaching = new Set<number>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = 0; i < fnRegions.length; i++) {
+        if (reaching.has(i)) continue;
+        const t = maskStringLiteralSpans(fnRegions[i].text);
+        const reaches = [...stdlibNames].some((n) => usesName(t, n)) ||
+          [...reaching].some((j) => usesName(t, fnRegions[j].name));
+        if (reaches) { reaching.add(i); changed = true; }
+      }
+    }
+    const fnDropped = new Set<number>();
+    for (let changed = reaching.size > 0; changed;) {
+      changed = false;
+      for (const i of reaching) {
+        if (fnDropped.has(i)) continue;
+        const blanks = [...regions, ...[...fnDropped].map((j) => fnRegions[j]), fnRegions[i]];
+        if (!usesName(usageBody(blanks), fnRegions[i].name)) { fnDropped.add(i); changed = true; }
+      }
+    }
+
+    const body = usageBody([...regions, ...[...fnDropped].map((j) => fnRegions[j])]);
 
     // A region drops only when NONE of its bound names appear in the remaining
     // body (whole-region grain — matches GITI-003 and the brief: strip when
     // bound name(s) are referenced ONLY server-side; KEEP if any name is used
     // in BOTH client and server code).
-    const toDrop: Set<number> = new Set();
+    const drops: Array<{ start: number; end: number }> = [...fnDropped].map((j) => fnRegions[j]);
     for (let i = 0; i < regions.length; i++) {
       const r = regions[i];
       if (r.keepWhole) continue;
-      const usedInBody = r.names.some(name => {
-        // g-spread (2026-06-10): a member-access-only lookbehind (a `.`
-        // preceded by ident-char / `)` / `]`, e.g. `obj.makeRange`) plus a
-        // word-boundary lookbehind, so a genuine member access of a DIFFERENT
-        // object does not count as a use, while a spread call (`...makeRange`)
-        // does.
-        const useRe = new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "");
-        return useRe.test(body);
-      });
-      if (!usedInBody) toDrop.add(i);
+      const usedInBody = r.names.some((name) => usesName(body, name));
+      if (!usedInBody) drops.push(r);
     }
-    if (toDrop.size === 0) return code;
+    if (drops.length === 0) return code;
+    drops.sort((a, b) => a.start - b.start);
 
-    // Rebuild the file with dropped regions removed (regions are sorted by
-    // start; cursor walks left-to-right).
+    // Rebuild the file with dropped regions removed (sorted by start; cursor
+    // walks left-to-right).
     let result = "";
     let cursor = 0;
-    for (let i = 0; i < regions.length; i++) {
-      if (toDrop.has(i)) {
-        result += code.slice(cursor, regions[i].start);
-        // skip the declaration itself; also skip a following newline if present
-        let endCursor = regions[i].end;
-        if (code[endCursor] === "\n") endCursor++;
-        cursor = endCursor;
-      }
+    for (const r of drops) {
+      result += code.slice(cursor, r.start);
+      // skip the declaration itself; also skip a following newline if present
+      let endCursor = r.end;
+      if (code[endCursor] === "\n") endCursor++;
+      cursor = endCursor;
     }
     result += code.slice(cursor);
     return result;
@@ -4478,8 +4602,13 @@ export function generateClientJs(ctx: CompileContext): string {
     /\bbun\.eval\s*\(/,
     /\?\{`/,
   ];
+  // S465 r6 (review LOW-1) — a `?{` sigil inside a STRING / template-text literal of
+  // the client JS is text the program carries (`const s = "?{\`SELECT pw\`}"`), not a
+  // query; the sigil pattern reads the code with literal contents blanked (by acorn's
+  // tokenizer — a bundle it cannot tokenize is read raw: fail closed).
+  const _sigilCode = blankStringLiteralContents(clientCode);
   for (const pattern of SQL_LEAK_PATTERNS) {
-    if (pattern.test(clientCode)) {
+    if (pattern.test(pattern.source === "\\?\\{`" ? _sigilCode : clientCode)) {
       errors.push(new CGError(
         "E-CG-006",
         `E-CG-006: Server-only pattern (${pattern}) detected in client JS output. ` +
@@ -4488,6 +4617,39 @@ export function generateClientJs(ctx: CompileContext): string {
       ));
     }
   }
+  });
+
+  // S465 r6 / S466 r7 (MED-C) — an async-coloured function-valued top-level binding
+  // (`const persist = (v) => save(v)`) is coloured on the CLIENT too (emit-functions
+  // `_clientAsyncBindingEmit`): emitted `async`, and every call site the client emitters
+  // see is awaited, exactly as for a `function` declaration (§13.2: it "MAY be called
+  // directly (the compiler awaits the call)"). BACKSTOP over the final bundle: any
+  // reference to one that is not an awaited call (`await persist(…)`) — a position no
+  // emitter awaited, or a use as a value — would hand its reader a Promise (always
+  // truthy) and is refused at the binding's own declaration.
+  clientStage(ctx, "post-async-binding-scan", () => {
+    const _colored = ((ctx as unknown as { _clientAsyncBindingEmit?: { names: Set<string> } })._clientAsyncBindingEmit?.names) ?? new Set<string>();
+    const _asyncBindings = new Set<string>([...asyncFnValuedBindingsOfFile(ctx.fileAST as never), ..._colored]);
+    if (_asyncBindings.size === 0) return;
+    // Scope-aware (module-scope-refs.ts): a parameter or inner declaration named like
+    // the binding is not a use. A bundle that does not parse is not proof of absence —
+    // every binding counts as used (fail closed).
+    const used = moduleScopeReferences(clientCode, _asyncBindings, new Set(), { awaitedCallsAreNotUses: true }) ?? _asyncBindings;
+    for (const name of used) {
+      let span: unknown = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      for (const st of collectTopLevelStatements(ctx.fileAST as never) as Array<{ kind?: string; name?: unknown; span?: unknown }>) {
+        if ((st.kind === "const-decl" || st.kind === "let-decl") && st.name === name && st.span) { span = st.span; break; }
+      }
+      errors.push(new CGError(
+        "E-ASYNC-FN-ESCAPES-AS-VALUE",
+        `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${name}\` calls an async function (a server function or a Promise-returning ` +
+          `helper), so the compiler emits it \`async\` and awaits every direct call to it — but client code uses it ` +
+          "where the call is not awaited (as a value, or in a position the compiler cannot await). That reader " +
+          `would get a Promise, which is always truthy (§13.2). Call \`${name}(…)\` directly where its result is ` +
+          "needed (a handler, a function body, a markup value).",
+        span as never,
+      ));
+    }
   });
 
   // Phase-2 colorless-async — a client-side async-callback collection method
@@ -4996,4 +5158,28 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
   }
 
   return lines;
+}
+
+
+/**
+ * S465 r6 — `code` with the CONTENTS of every string literal and template-literal text
+ * replaced by spaces (delimiters, `${ … }` substitutions and all other code kept), read
+ * with acorn's tokenizer. On a tokenizer error the code is returned unchanged (the
+ * caller's scan then reads everything — fail closed).
+ */
+function blankStringLiteralContents(code: string): string {
+  try {
+    const chars = code.split("");
+    for (const tok of acornTokenizer(code, { ecmaVersion: "latest", sourceType: "module" })) {
+      const label = (tok.type as { label?: string }).label;
+      if (label === "string") {
+        for (let i = tok.start + 1; i < tok.end - 1; i++) if (chars[i] !== "\n") chars[i] = " ";
+      } else if (label === "template") {
+        for (let i = tok.start; i < tok.end; i++) if (chars[i] !== "\n") chars[i] = " ";
+      }
+    }
+    return chars.join("");
+  } catch {
+    return code;
+  }
 }

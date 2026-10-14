@@ -2032,7 +2032,13 @@ export function importedNameOf(localName, calleeMap) {
  * @returns {boolean}
  */
 export function isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry) {
-  if (!localName || !calleeMap || !exportRegistry) return false;
+  if (!localName || !calleeMap) return false;
+  // S465 r6 — the server map's `asyncImportedLocals` also carries this file's async
+  // function-valued top-level bindings (`const w = (a, b) => check(a, b)`), which have
+  // no source module: answered first.
+  const _asyncLocals = calleeMap.asyncImportedLocals;
+  if (_asyncLocals && typeof _asyncLocals.has === "function" && _asyncLocals.has(localName)) return true;
+  if (!exportRegistry) return false;
   const sourceModule = calleeMap.get(localName);
   if (!sourceModule) return false;
   // S465 (s465-await-imported-server-fn) — an async function imported from

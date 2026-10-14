@@ -603,6 +603,103 @@ export function applyChunkDependencies(chunks: Set<string>): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// RUNTIME_HELPER_DEFINING_CHUNK — every `_scrml_*` name a runtime chunk
+// DEFINES, mapped to that chunk. DERIVED from the chunk sources, never
+// hand-maintained (s462 review round 4, S465).
+//
+// Why it exists: three review rounds in a row found a client.js that called a
+// runtime helper whose chunk the pre-emit AST walk (`detectRuntimeChunks`) had
+// tree-shaken — a handler statement list, a `<match>` arm body, an engine arm,
+// then markup LIFTED inside a component body / `<match>` arm. Each was a
+// position the walk did not visit. The walk PREDICTS what the emitters will
+// write; the emitted text is what they DID write. `chunksForEmittedHelpers`
+// below reads the emitted client text against this index, so any position that
+// emits `_scrml_deep_set(` ships the chunk that defines it — whichever emitter
+// wrote it, including one added later. Nothing to register, nothing to forget.
+//
+// Rule: a top-level (column-0) `function` / `async function` / `const` /
+// `let` / `var` / `class` declaration of a `_scrml_*` name. Indented
+// declarations are function-locals (the stdlib-md `_scrml_tilde_N` temps,
+// `_scrml_deep_set_unjudged` inside refine) and are not referenceable from
+// client code. `stdlib-*` chunks are excluded: they are compiled scrml modules
+// carrying private copies of core helpers (stdlib-md re-declares `_scrml_g` and
+// `_scrml_structural_eq`), and they are gated by their `scrml:NAME` import, not
+// by helper names. A name declared in two non-stdlib chunks would be ambiguous;
+// there is none (pinned by unit/s462-runtime-helper-chunk-index.test.js), and
+// such a name is left out of the index rather than guessed.
+// ---------------------------------------------------------------------------
+
+const RUNTIME_TOP_LEVEL_DECL =
+  /(?:^|\n)(?:async[ \t]+)?(?:function\*?[ \t]+|class[ \t]+|(?:const|let|var)[ \t]+)(_scrml_[A-Za-z0-9_$]+)/g;
+
+function buildHelperIndex(): { index: Map<string, RuntimeChunkName>; ambiguous: string[] } {
+  const owners = new Map<string, RuntimeChunkName[]>();
+  for (const name of RUNTIME_CHUNK_ORDER) {
+    if (name.startsWith('stdlib-')) continue;
+    for (const m of (RUNTIME_CHUNKS[name] ?? '').matchAll(RUNTIME_TOP_LEVEL_DECL)) {
+      const list = owners.get(m[1]) ?? [];
+      if (!list.includes(name)) list.push(name);
+      owners.set(m[1], list);
+    }
+  }
+  const index = new Map<string, RuntimeChunkName>();
+  const ambiguous: string[] = [];
+  for (const [helper, list] of owners) {
+    if (list.length === 1) index.set(helper, list[0]);
+    else ambiguous.push(helper);
+  }
+  return { index, ambiguous };
+}
+
+const _helperIndex = buildHelperIndex();
+export const RUNTIME_HELPER_DEFINING_CHUNK: ReadonlyMap<string, RuntimeChunkName> = _helperIndex.index;
+/** Names declared at top level in more than one non-stdlib chunk (expected: none). */
+export const RUNTIME_HELPER_AMBIGUOUS: readonly string[] = _helperIndex.ambiguous;
+
+// A `_scrml_*` identifier REFERENCE in emitted client text: not a member
+// (`.x`), not the tail of a longer identifier, not directly inside quotes
+// (a string literal naming it is data, not a reference).
+const EMITTED_HELPER_REFERENCE = /(?<![\w$.'"`])(_scrml_[A-Za-z0-9_$]+)(?![\w$'"`])/g;
+// `typeof _scrml_x` is the deliberate optional-helper idiom (the call behind it
+// runs only when some other trigger shipped the chunk) — not a requirement.
+const TYPEOF_BEFORE = /typeof\s*$/;
+// A declaration of the name in the client text itself (an emitted local helper)
+// satisfies the reference without the runtime.
+const CLIENT_DECL = /(?:function\*?\s+|class\s+|(?:const|let|var)\s+)(_scrml_[A-Za-z0-9_$]+)/g;
+
+/**
+ * Add, to `chunks`, the defining chunk of every runtime helper the emitted
+ * client text references and the chunk set does not already carry. Returns
+ * true when it added one. The caller closes CHUNK_DEPENDENCIES afterwards.
+ * Pure over its inputs; idempotent.
+ */
+export function chunksForEmittedHelpers(text: string, chunks: Set<string>): boolean {
+  if (!text.includes('_scrml_')) return false;
+  let clientDecls: Set<string> | null = null;
+  let added = false;
+  for (const m of text.matchAll(EMITTED_HELPER_REFERENCE)) {
+    const chunk = RUNTIME_HELPER_DEFINING_CHUNK.get(m[1]);
+    if (chunk === undefined || chunks.has(chunk)) continue;
+    const at = m.index ?? 0;
+    if (TYPEOF_BEFORE.test(text.slice(Math.max(0, at - 16), at))) continue;
+    // The guarded USE on the guard's own line (`if (typeof _scrml_x === "function")
+    // _scrml_x(…)`, `typeof _scrml_x !== "undefined" && _scrml_x`) is part of the idiom.
+    const ls = text.lastIndexOf('\n', at) + 1;
+    const le = text.indexOf('\n', at);
+    const line = text.slice(ls, le < 0 ? text.length : le);
+    if (line.includes('typeof') && new RegExp(`typeof\\s+${m[1].replace(/\$/g, '\\$')}(?![\\w$])`).test(line)) continue;
+    if (clientDecls === null) {
+      clientDecls = new Set();
+      for (const d of text.matchAll(CLIENT_DECL)) clientDecls.add(d[1]);
+    }
+    if (clientDecls.has(m[1])) continue;
+    chunks.add(chunk);
+    added = true;
+  }
+  return added;
+}
+
+// ---------------------------------------------------------------------------
 // assembleRuntime — produce the runtime string from a set of chunk names.
 //
 // Chunks are assembled in RUNTIME_CHUNK_ORDER so the output is always in the

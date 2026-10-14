@@ -104,6 +104,8 @@ function escapeRawHasEffect(raw) {
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
+import { isRawContentElement } from "./raw-content-encode.ts";
+import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
@@ -114,6 +116,7 @@ import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
+import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement, refuseUnreadMdElements } from "./md-lower.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -1643,6 +1646,75 @@ function spliceAttrsIntoBodyRoot(bodyRootRaw, outerAttrSource) {
  * Mutates blocks in place (acceptable because they are freshly produced by
  * splitBlocks and not shared with anything else).
  */
+/**
+ * SPEC §67.2 / §67.4 (S462 md phase 2) — the AST node for one TEXT slot of a static `<md>`
+ * body, built only after `scrml:md` has placed the slot outside code. The slot's exact source
+ * `${…}` is read exactly as a `${…}` in a markup body is: block-split inside a synthetic
+ * `<span>` (so nested markup in the expression splits as it always does) and built with
+ * `buildBlock` — the ordinary reactive, text-only interpolation (§7.4.2). Every span is moved
+ * to the slot's real file position, so a diagnostic on the slot names the right line.
+ */
+function buildMdSlotNode(source, absStart, line, col, filePath, counter, errors) {
+  const PRE = "<span>";
+  const synth = PRE + source + "</span>";
+  let bs;
+  try { bs = _splitBlocksForP2Form1(filePath, synth); } catch { return null; }
+  const host = (bs && Array.isArray(bs.blocks) ? bs.blocks : []).find((b) => b && b.type === "markup" && b.name === "span");
+  if (!host) return null;
+  const local = (off) => {
+    const k = Math.max(0, Math.min(source.length, off - PRE.length));
+    const lead = source.slice(0, k);
+    const nl = lead.lastIndexOf("\n");
+    const lines = nl < 0 ? 0 : (lead.match(/\n/g) || []).length;
+    return { start: absStart + k, line: line + lines, col: nl < 0 ? col + k : k - nl };
+  };
+  const rebase = (b) => {
+    if (!b || typeof b !== "object") return;
+    if (b.span && typeof b.span.start === "number") {
+      const s = local(b.span.start);
+      b.span = { ...b.span, start: s.start, end: local(b.span.end).start, line: s.line, col: s.col };
+    }
+    for (const c of b.children ?? []) rebase(c);
+  };
+  for (const c of host.children ?? []) rebase(c);
+  for (const e of bs.errors ?? []) {
+    const sp = e && e.bsSpan;
+    const s = sp && typeof sp.start === "number" ? local(sp.start) : { start: absStart, line, col };
+    errors.push(new TABError(e.code, String(e.message ?? "").replace(/ \(line \d+, col \d+\)$/, ""),
+      { file: filePath, start: s.start, end: s.start + 1, line: s.line, col: s.col }));
+  }
+  const logic = (host.children ?? []).find((c) => c && c.type === "logic");
+  if (!logic) return null;
+  return buildBlock(logic, filePath, "markup", counter, errors);
+}
+
+/**
+ * SPEC §67.2 (S462 md phase 2) — a component body that holds an `<md>` keeps its markup AS
+ * WRITTEN. A component-def's `raw` is otherwise rebuilt from LOGIC tokens (whitespace joined,
+ * `#` runs and blank lines lost), which is harmless for markup but destroys markdown:
+ * indentation, blank lines and `#` are its structure. The enclosing logic block's `raw` IS the
+ * source text, so the expression's own extent (its first token's start to its last token's end)
+ * is sliced from it. The component expander keeps an `<md>` element opaque through its
+ * normalization (component-expander.ts `maskMdElements`).
+ * Returns null — the tokenized raw is used, as before — when there is no `<md>`, or when the
+ * slice is not the expression (a `<#name>` pre-pass moved the token offsets).
+ */
+function mdComponentVerbatimRaw(tokenizedRaw, firstTok, exprSpan, parentBlock) {
+  if (typeof tokenizedRaw !== "string" || !/<\s*m[dD]\b/.test(tokenizedRaw)) return null;
+  if (!parentBlock || typeof parentBlock.raw !== "string" || !parentBlock.span) return null;
+  const at = firstTok && firstTok.span && typeof firstTok.span.start === "number" ? firstTok.span.start : -1;
+  const end = exprSpan && typeof exprSpan.end === "number" ? exprSpan.end : -1;
+  if (at < 0 || end <= at) return null;
+  const base = parentBlock.span.start;
+  const slice = parentBlock.raw.slice(at - base, end - base);
+  if (!slice.startsWith("<") || !sourceHasMdElement(slice)) return null;
+  // the same non-whitespace characters as the tokenized text, `#` aside (the logic tokenizer
+  // drops `#` runs in markup text) — otherwise the offsets do not describe this expression
+  const sig = (t) => t.replace(/[\s#]/g, "");
+  if (sig(slice).length < sig(tokenizedRaw).length * 0.9) return null;
+  return slice;
+}
+
 function shiftBlockSpans(blocks, delta, lineDelta = 0) {
   for (const b of blocks) {
     if (b && b.span) {
@@ -3532,6 +3604,9 @@ function scanMarkupBodyConstAtDecls(children, errors, filePath) {
 // Error type
 // ---------------------------------------------------------------------------
 
+/** S464 r2 — the synthetic function name an event handler's statements are framed in. */
+const HANDLER_BLOCK_FRAME_NAME = "__scrml_handler_block__";
+
 export class TABError extends Error {
   constructor(code, message, span) {
     super(`${message} (line ${span.line}, col ${span.col})`);
@@ -5398,6 +5473,32 @@ function _captureWhenHandlerBody(peek, consume) {
   return { bodyRaw, lastTok };
 }
 
+/**
+ * S462 P0 (sql-chain-truncation audit) — is a `?{}` BLOCK_REF `refTok` an OPERAND
+ * of the expression being collected, i.e. does the token before it (`lastTok`,
+ * on the SAME line) demand an operand? A binary / logical / nullish operator, a
+ * prefix `!` / `-` / `+`, a ternary `?`, the `:` that opened a ternary's
+ * alternate (`ternaryColonTok`), a word operator (`and` / `or`, `in`, `of`,
+ * `instanceof`, `typeof`, `await`). Assignment operators are NOT counted: an
+ * assignment `x = ?{…}` keeps its own statement path. A line break before the
+ * block keeps the old statement boundary (`f()?` ⏎ `?{…}` is two statements).
+ */
+function sqlOperandPositionAfter(lastTok, refTok, ternaryColonTok) {
+  if (!lastTok || !refTok || !lastTok.span || !refTok.span) return false;
+  if (typeof lastTok.span.line !== "number" || lastTok.span.line !== refTok.span.line) return false;
+  const tx = lastTok.text;
+  if (lastTok.kind === "OPERATOR") {
+    return ["===", "!==", "==", "!=", "<=", ">=", "**", "&&", "||", "??", "<<", ">>", ">>>"].includes(tx);
+  }
+  if (lastTok.kind === "PUNCT") {
+    if (tx === ":") return lastTok === ternaryColonTok;
+    return ["?", "!", "+", "-", "*", "/", "%", "<", ">", "&", "|", "^"].includes(tx);
+  }
+  if (lastTok.kind === "IDENT") return tx === "and" || tx === "or";
+  if (lastTok.kind === "KEYWORD") return ["in", "of", "instanceof", "typeof", "await"].includes(tx);
+  return false;
+}
+
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
@@ -5413,6 +5514,551 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
   function consume() {
     return i < tokens.length ? tokens[i++] : peek();
+  }
+
+  // ---------------------------------------------------------------------------
+  // S462 (s462-given-body-text-as-code) — markup TEXT in a logic body is text.
+  //
+  // §4.18.1: a plain-markup element body (`<p>`, `<li>`, …) is a FREE-TEXT body —
+  // "In a free-text body a bare run is **display text**, literal by default, left
+  // only by the exit sequences of §4.18.1b" — and "Body modes nest. A plain-markup
+  // element opened *inside* a code-default body … opens a **free-text-mode** body".
+  //
+  // A markup element written at STATEMENT position in a logic body (`${ given @u :>
+  // { <p>${@u.name} - ${@n}</p> } }`, `${ if (c) { <p>…</p> } }`) reaches this parser
+  // as tokens, and each `${…}` inside it is a BLOCK_REF. The default statement path
+  // collects the opener up to the first BLOCK_REF as an `html-fragment`, the BLOCK_REF
+  // becomes a `logic` node — and, before this fix, the element's TEXT between two
+  // interpolations was parsed as the next STATEMENT: ` - ` lowered to `-;`
+  // (E-CODEGEN-INVALID-LOGIC), and `track(@n)` written as display text was CALLED.
+  //
+  // The fix: when a statement begins with a markup element that holds a BLOCK_REF,
+  // find the element's end (`scanMarkupElementEnd`) and, until the cursor reaches
+  // it, read every non-BLOCK_REF run as an `html-fragment` (`collectMarkupTextRun`)
+  // instead of as a statement. The tree keeps its `[html-fragment, logic, …]` shape
+  // (the implied-lift desugar recovers the element from SOURCE and now succeeds;
+  // logic context drops html-fragments, so nothing executes).
+  // ---------------------------------------------------------------------------
+  let _markupTextEnd = -1;
+  // The armed element's tag + opener span, handed to its FIRST text run
+  // (`_markupLead`): codegen reports an element that no lowering rendered at that
+  // run (E-MARKUP-STATEMENT-NOT-RENDERED, emit-logic.ts) — once per element.
+  let _markupArmLead = null;
+
+  /**
+   * The token index just past the markup element that opens at token `start`
+   * (`<` followed by a tag name), or -1 when the tokens are not certainly a
+   * well-formed element — the caller then keeps the pre-existing parse.
+   *
+   * The OPENER grammar is parseLiftTag's, no wider (one reader of an element's
+   * extent, not a looser second one — S462 review HIGH-1): the tag name, then
+   * attributes only — `name`, `name:sub` / `name-sub`, each optionally `=` a
+   * value that is a quoted string, a `${…}`, a balanced `( … )`, or an unquoted
+   * run of names / `@cell` / numbers / `.` member access / balanced call or index
+   * brackets. Anything else in an opener (`&&`, `?`, `||`, a comparison, `{`) is
+   * not an attribute, so the tokens are not an element: -1.
+   *
+   * Children: explicit `</tag>` and inferred `</>` closers, `/>` self-close, HTML
+   * void elements. A nested opener counts only when the name is source-adjacent
+   * to its `<` (§4.18.1b exit (3): `<` FOLLOWED BY a letter), so text such as
+   * `5 < 7` or `a < b` stays text. An HTML comment `<!-- … -->` is skipped whole
+   * (a `</p>` inside it closes nothing). A `}` that closes a brace opened before
+   * the element ends the enclosing body: -1.
+   */
+  function scanMarkupElementEnd(start) {
+    const at = (k) => (k < tokens.length ? tokens[k] : null);
+    const isPunct = (t, text) => !!t && t.kind === "PUNCT" && t.text === text;
+    const isName = (t) => !!t && (t.kind === "IDENT" || t.kind === "KEYWORD");
+    const adjacent = (a, b) => !!(a && b && a.span && b.span && a.span.end === b.span.start);
+    const isEnd = (t) => !t || t.kind === "EOF";
+    // A balanced bracket group opened at `k` (`(` or `[`); index after it, or -1.
+    const readGroup = (k) => {
+      let depth = 0;
+      for (; k < tokens.length; k++) {
+        const t = at(k);
+        if (isEnd(t)) return -1;
+        if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+        else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) {
+          depth--;
+          if (depth < 0) return -1;
+          if (depth === 0) return k + 1;
+        }
+      }
+      return -1;
+    };
+    // One attribute value after `=`; index after it, or -1.
+    const readValue = (k) => {
+      const t = at(k);
+      if (isEnd(t)) return -1;
+      if (t.kind === "STRING" || t.kind === "BLOCK_REF") return k + 1;
+      if (isPunct(t, "(")) return readGroup(k);
+      const unquotedLead = t.kind === "IDENT" || t.kind === "KEYWORD" || t.kind === "AT_IDENT" ||
+        t.kind === "NUMBER" || isPunct(t, "@");
+      if (!unquotedLead) return -1;
+      let prev = null;
+      while (k < tokens.length) {
+        const c = at(k);
+        if (isEnd(c)) return -1;
+        if (isPunct(c, ">") || (isPunct(c, "/") && isPunct(at(k + 1), ">"))) return k;
+        if (prev && !adjacent(prev, c)) return k; // whitespace ends an unquoted value
+        if (isPunct(c, "(") || isPunct(c, "[")) {
+          const next = readGroup(k);
+          if (next === -1) return -1;
+          prev = at(next - 1);
+          k = next;
+          continue;
+        }
+        const ok = c.kind === "IDENT" || c.kind === "KEYWORD" || c.kind === "AT_IDENT" ||
+          c.kind === "NUMBER" || isPunct(c, ".") || isPunct(c, "@");
+        if (!ok) return -1;
+        prev = c;
+        k++;
+      }
+      return -1;
+    };
+    // Read one opener at `k` (`<` name …): index after it (pushing the name unless
+    // the element closes itself), or -1.
+    const readOpener = (k, stack) => {
+      const name = at(k + 1).text;
+      k += 2;
+      while (k < tokens.length) {
+        const t = at(k);
+        if (isEnd(t)) return -1;
+        if (isPunct(t, "/") && isPunct(at(k + 1), ">")) return k + 2;
+        if (isPunct(t, ">")) {
+          if (!HTML_VOID_ELEMENTS.has(String(name).toLowerCase())) stack.push(name);
+          return k + 1;
+        }
+        if (!isName(t)) return -1;
+        k++;
+        while ((isPunct(at(k), ":") || isPunct(at(k), "-")) && isName(at(k + 1))) k += 2;
+        if (isPunct(at(k), "=")) {
+          k = readValue(k + 1);
+          if (k === -1) return -1;
+        }
+      }
+      return -1;
+    };
+    if (!(isPunct(at(start), "<") && isName(at(start + 1)))) return -1;
+    const stack = [];
+    let k = readOpener(start, stack);
+    let braces = 0;
+    while (k !== -1 && stack.length > 0) {
+      const t = at(k);
+      if (isEnd(t)) return -1;
+      // `<!-- … -->`: skip to the `>` that follows a `--`.
+      if (isPunct(t, "<") && isPunct(at(k + 1), "!") && adjacent(t, at(k + 1))) {
+        let j = k + 2;
+        while (j < tokens.length && !isEnd(at(j)) &&
+               !(isPunct(at(j), ">") && at(j - 1) && /--$/.test(String(at(j - 1).text)) && adjacent(at(j - 1), at(j)))) j++;
+        if (j >= tokens.length || isEnd(at(j))) return -1;
+        k = j + 1;
+        continue;
+      }
+      if (isPunct(t, "{")) braces++;
+      if (isPunct(t, "}") && --braces < 0) return -1;
+      if (isPunct(t, "<") && isPunct(at(k + 1), "/")) {
+        if (isPunct(at(k + 2), ">")) { stack.pop(); k += 3; continue; }
+        if (isName(at(k + 2)) && at(k + 2).text === stack[stack.length - 1]) {
+          stack.pop();
+          k += 3;
+          if (isPunct(at(k), ">")) k++;
+          continue;
+        }
+        return -1; // a mismatched closer
+      }
+      if (isPunct(t, "<") && isName(at(k + 1)) && adjacent(t, at(k + 1))) {
+        k = readOpener(k, stack);
+        continue;
+      }
+      k++;
+    }
+    return k;
+  }
+
+  /**
+   * At a statement-leading markup opener: when the element closes cleanly and
+   * holds at least one BLOCK_REF (an interpolation split it), arm the text-run
+   * reader for the element's extent. An element with no BLOCK_REF is collected
+   * whole by the default path, so it is left exactly as before.
+   */
+  function armMarkupTextRuns() {
+    if (_markupTextEnd > i) return;
+    const end = scanMarkupElementEnd(i);
+    if (end <= i) return;
+    for (let k = i; k < end; k++) {
+      if (tokens[k] && tokens[k].kind === "BLOCK_REF") {
+        _markupTextEnd = end;
+        _markupArmLead = { tag: String(tokens[i + 1].text), span: tokenSpan(tokens[i], filePath) };
+        return;
+      }
+    }
+  }
+
+  /**
+   * S464 Q24 — the `_markupLead` for an html-fragment built by a default statement
+   * path from the token run that began at `from`: the element's tag + opener span
+   * when that run is a statement-leading markup element (`<` + name), else null.
+   * An element armed by `armMarkupTextRuns` hands over its lead here (its FIRST run
+   * is this one), so its later text runs carry none — one lead per element.
+   *
+   * The lead is what makes the element refusable: codegen reports a lead-carrying
+   * fragment that no lowering rendered (E-MARKUP-STATEMENT-NOT-RENDERED, emit-logic.ts).
+   * A run that does not begin with an element opener (a closer, attribute or text
+   * continuation of a fragmented `lift`) carries none.
+   */
+  function takeStatementMarkupLead(from) {
+    // A `^{ }` meta body renders through `emit(…)`, not `lift`, and has its own
+    // diagnostics (§22); the refusal is scoped to `${ }` / function logic bodies.
+    if (blockContext === "meta") { _markupArmLead = null; return null; }
+    if (_markupArmLead) {
+      const lead = _markupArmLead;
+      _markupArmLead = null;
+      return lead;
+    }
+    const t0 = tokens[from];
+    const t1 = tokens[from + 1];
+    // S464 r1 — a bare nested block `{ <p>…</p> }` reaches here as ONE fragment run
+    // that begins with `{`: its first well-formed element is the one reported.
+    if (t0 && t0.kind === "PUNCT" && t0.text === "{") {
+      for (let k = from + 1; k < i; k++) {
+        const a = tokens[k];
+        const b = tokens[k + 1];
+        if (a && a.kind === "PUNCT" && a.text === "<" && b && (b.kind === "IDENT" || b.kind === "KEYWORD") &&
+            a.span && b.span && a.span.end === b.span.start && scanMarkupElementEnd(k) > k) {
+          return { tag: String(b.text), span: tokenSpan(a, filePath) };
+        }
+      }
+      return null;
+    }
+    if (!(t0 && t0.kind === "PUNCT" && t0.text === "<" && t1 && (t1.kind === "IDENT" || t1.kind === "KEYWORD"))) return null;
+    return { tag: String(t1.text), span: tokenSpan(t0, filePath) };
+  }
+
+  /**
+   * True when the opener at `k` is followed by `=` or `:` — `<name …> = value` /
+   * `<name>: type = value`, a state declaration (a compound's field line
+   * `<email default="x"> = "y"`), not markup.
+   */
+  function openerIsDeclaration(k) {
+    let depth = 0;
+    for (let j = k + 2; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (!t || t.kind === "EOF") return false;
+      if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[")) depth++;
+      else if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]")) depth--;
+      else if (depth === 0 && t.kind === "PUNCT" && t.text === ">") {
+        const n = tokens[j + 1];
+        return !!n && n.kind === "PUNCT" && (n.text === "=" || n.text === ":");
+      }
+    }
+    return false;
+  }
+
+  /**
+   * S464 Q24 — a markup element that a statement's expression collection read into
+   * itself as CODE (`let k = 1⏎<p>…</p>` collects `1 < p > …`; `@k = 1 <p>A</p>`
+   * likewise): the author wrote an element in statement position, after a statement,
+   * but no lowering can render it, and its display text may even run as code
+   * (g-statement-markup-after-statement-text-runs-s462). Refused here, at the TAB,
+   * because no html-fragment exists for codegen to find.
+   *
+   * Checked over the token range [from, to) of each statement both statement loops
+   * produced, at the statement's own brace depth (a nested body is checked by its own
+   * loop). A token `<` is such an element when ALL of:
+   *   - a name follows it with no space (`<p`, §4.18.1b exit (3)), so `a < b` is not;
+   *   - the significant token before it ends an operand (a name, a literal, `)`, `]`,
+   *     `}`), so the `<` was read as a less-than — after `(`, `=`, `,`, `return`, `?`,
+   *     `:`, `=>` it opens a markup VALUE, which renders where it is used;
+   *   - the tokens from it are a well-formed, CLOSED element (`scanMarkupElementEnd`,
+   *     the one reader of an element's extent) — a closed `<p>…</p>` after an operand
+   *     is never an expression;
+   *   - its opener is not followed by `=` / `:` (`<name> = value` is a state declaration).
+   * An element that is itself well-formed markup (the statement's own leading element,
+   * a `lift <…>` operand, a markup value) is skipped WHOLE, so its interior is never
+   * inspected.
+   */
+  /**
+   * S464 r1 — does the `{` at token `j` open a JS ARROW function's block body? `=>`
+   * also separates a legacy `match` arm (`.A => { … }`) and a deprecated `given`
+   * head (`given @u => { … }`) from their bodies, which their own statement loops
+   * parse; those are not arrows. An arrow's `=>` follows its parameter list `)`, or a
+   * single parameter name that itself follows an expression-start token.
+   */
+  function isJsArrowBrace(j) {
+    const sig = (k) => { while (k >= 0 && tokens[k] && tokens[k].kind === "COMMENT") k--; return k; };
+    const a = sig(j - 1);
+    const at = tokens[a];
+    if (!(at && (at.kind === "OPERATOR" || at.kind === "PUNCT") && at.text === "=>")) return false;
+    const b = sig(a - 1);
+    const bt = tokens[b];
+    if (!bt) return false;
+    if (bt.kind === "PUNCT" && bt.text === ")") return true;
+    if (bt.kind !== "IDENT") return false;
+    const ct = tokens[sig(b - 1)];
+    if (!ct) return false;
+    if (ct.kind === "KEYWORD") return ct.text === "return";
+    return (ct.kind === "PUNCT" || ct.kind === "OPERATOR") &&
+      ["=", "(", ":", "?", "=>", "||", "&&", "??", "["].includes(ct.text);
+  }
+
+  /**
+   * S464 r3 (R2-3/R2-4) — a `when … changes { … }` body runs for its effects and
+   * renders nothing. It is captured as TEXT (`_captureWhenHandlerBody`) and lowered from
+   * that text, so its statements are never parsed as statements — an element after a
+   * statement (`let z = 1⏎<p>chg</p>`) compiled to invalid JS. Parse the body's own
+   * tokens [from, to) — file-true spans — framed as the event-handler block, and refuse
+   * its statement-position markup with the handler ("effect") fix, at the element.
+   */
+  function refuseEffectBodyMarkup(from, to) {
+    if (!(to > from)) return;
+    const inner = tokens.slice(from, to);
+    const span0 = inner[0]?.span ?? tokens[from - 1]?.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const frame = (kind, text) => ({ kind, text, span: span0 });
+    const framed = [
+      frame("KEYWORD", "function"), frame("IDENT", HANDLER_BLOCK_FRAME_NAME),
+      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
+      ...inner,
+      frame("PUNCT", "}"), frame("EOF", ""),
+    ];
+    const errs = [];
+    let stmts = null;
+    try {
+      const top = parseLogicBody(framed, filePath, [], parentBlock, counter, errs, "logic");
+      stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" ? top[0].body : null;
+    } catch {
+      return;
+    }
+    refuseHandlerMarkup(stmts, errs.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), errors);
+  }
+
+  /**
+   * S464 r3 (R2-6) — a `${ … }` that is the value of an event-handler attribute on an
+   * element written inside this logic body (`<button onclick=${ @n = 1⏎<p>a</p> }>`) is
+   * built as a child logic block, whose statement-position markup refusals name the
+   * `lift` fix. A handler renders nothing: re-issue those refusals (the ones the child
+   * build added, from `errsBefore`) with the handler fix. Recognized by the tokens
+   * before the BLOCK_REF at `refIdx`: `on<name>` `=`.
+   */
+  function rescopeHandlerBlockRefusals(refIdx, errsBefore) {
+    const eq = tokens[refIdx - 1];
+    const nm = tokens[refIdx - 2];
+    if (!(eq && eq.kind === "PUNCT" && eq.text === "=" && nm && (nm.kind === "IDENT" || nm.kind === "KEYWORD") &&
+      isEventHandlerAttrName(String(nm.text)))) return;
+    for (let k = errsBefore; k < errors.length; k++) {
+      const e = errors[k];
+      if (!e || e.code !== "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
+      if (!/write `lift </.test(String(e.message))) continue; // a function-value fix stays
+      const tag = (/`lift <([A-Za-z][A-Za-z0-9:-]*)>…/.exec(String(e.message)) ?? [])[1] ?? "p";
+      errors[k] = new TABError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(tag, "effect"), e.tabSpan ?? e.span);
+    }
+  }
+
+  /**
+   * S464 r2 — does the `{` at token `j` open a FUNCTION VALUE's body: an arrow's
+   * (`isJsArrowBrace`) or a function EXPRESSION's (`function (…) {` / `function name(…) {`
+   * whose `function` keyword is not the first token of the statement at `stmtFrom` — that
+   * would be a declaration, which its own statement loop reads)?
+   */
+  function isFunctionValueBrace(j, stmtFrom) {
+    if (isJsArrowBrace(j)) return true;
+    let p = j - 1;
+    while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
+    const pt = tokens[p];
+    if (!(pt && pt.kind === "PUNCT" && pt.text === ")")) return false;
+    let pd = 0;
+    let q = p;
+    for (; q >= 0; q--) {
+      const u = tokens[q];
+      if (!u || u.kind !== "PUNCT") continue;
+      if (u.text === ")") pd++;
+      else if (u.text === "(" && --pd === 0) break;
+    }
+    const isFnKw = (u) => !!u && (u.kind === "KEYWORD" || u.kind === "IDENT") && u.text === "function";
+    let f = -1;
+    if (isFnKw(tokens[q - 1])) f = q - 1;
+    else if (tokens[q - 1] && tokens[q - 1].kind === "IDENT" && isFnKw(tokens[q - 2])) f = q - 2;
+    return f > stmtFrom;
+  }
+
+  /**
+   * S464 r1 #8 / r2 — the context of token `k` in this token stream, which decides the
+   * refusal's fix: "function" inside a `function` / arrow / function-expression body
+   * (`return` the markup — §10.4: `lift` in a bare `function` body is E-SYNTAX-002),
+   * "effect" inside an event handler's statements (renders nothing at all), else "logic"
+   * (`lift` it in a `${ }` body).
+   */
+  function statementContextAt(k) {
+    let depth = 0;
+    for (let j = k - 1; j >= 0; j--) {
+      const t = tokens[j];
+      if (!t || t.kind !== "PUNCT") continue;
+      if (t.text === "}") { depth++; continue; }
+      if (t.text !== "{") continue;
+      if (depth > 0) { depth--; continue; }
+      // `t` is a brace enclosing `k`: what opened it?
+      let p = j - 1;
+      while (p >= 0 && tokens[p] && tokens[p].kind === "COMMENT") p--;
+      const pt = tokens[p];
+      if (isJsArrowBrace(j)) return "function-value";
+      if (pt && pt.kind === "PUNCT" && pt.text === ")") {
+        let pd = 0;
+        let q = p;
+        for (; q >= 0; q--) {
+          const u = tokens[q];
+          if (!u || u.kind !== "PUNCT") continue;
+          if (u.text === ")") pd++;
+          else if (u.text === "(" && --pd === 0) break;
+        }
+        const n1 = tokens[q - 1];
+        const n2 = tokens[q - 2];
+        // `fn` bodies are NOT included: `lift` is valid there (§48.5), so the `lift` fix stands.
+        const isFnKw = (u) => !!u && (u.kind === "KEYWORD" || u.kind === "IDENT") && u.text === "function";
+        // S464 r2 — an event handler's statements are parsed framed as the synthetic
+        // `function __scrml_handler_block__() { … }` (parseHandlerStatementListCore; an
+        // engine `effect=` body reuses it): that frame is not a function the author wrote,
+        // and its body runs for effects — the "effect" fix.
+        if (n1 && n1.kind === "IDENT" && n1.text === HANDLER_BLOCK_FRAME_NAME && isFnKw(n2)) return "effect";
+        if (isFnKw(n1) || (n1 && n1.kind === "IDENT" && isFnKw(n2))) {
+          // A `function` keyword in expression position (after `=`, `(`, `,`, `:`, `?`,
+          // `return`, `=>`, `&&`, `||`, `??`) is a function EXPRESSION — a value.
+          const kwAt = isFnKw(n1) ? q - 1 : q - 2;
+          let b = kwAt - 1;
+          while (b >= 0 && tokens[b] && (tokens[b].kind === "COMMENT" || (tokens[b].kind === "KEYWORD" && tokens[b].text === "async"))) b--;
+          const bt = tokens[b];
+          const exprPos = !!bt && ((bt.kind === "KEYWORD" && bt.text === "return") ||
+            ((bt.kind === "PUNCT" || bt.kind === "OPERATOR") && ["=", "(", ",", ":", "?", "=>", "&&", "||", "??", "["].includes(bt.text)));
+          return exprPos ? "function-value" : "function";
+        }
+      }
+    }
+    return "logic";
+  }
+
+  function refuseSwallowedStatementMarkup(from, to) {
+    if (blockContext === "meta") return; // see takeStatementMarkupLead
+    if (!(to > from + 1)) return;
+    // A postfix `++` / `--` and a regex literal end an operand too (S464 r1: `@n++⏎<p>q</p>`
+    // and `const r = /ab/⏎<p>…</p>` were read into the statement as code).
+    const endsOperand = (t) => !!t && (
+      t.kind === "IDENT" || t.kind === "AT_IDENT" || t.kind === "NUMBER" || t.kind === "STRING" ||
+      t.kind === "REGEX" ||
+      (t.kind === "KEYWORD" && (t.text === "true" || t.text === "false" || t.text === "not" || t.text === "this")) ||
+      (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) ||
+      ((t.kind === "OPERATOR" || t.kind === "PUNCT") && (t.text === "++" || t.text === "--"))
+    );
+    // A brace that opens a FUNCTION VALUE's body — an arrow's block body (`=> {`) or a
+    // function expression's (`function (…) {` where `function` does not start the
+    // statement, i.e. it is not a declaration). No statement loop reads it — the
+    // function is part of this statement's expression — so an element in it is checked
+    // here, at any depth inside it, and also when it starts a statement there (after
+    // `{` / `;`), not only after an operand (S464 r1: `const g = () => { <p>arrow</p> }`
+    // reached codegen as E-CODEGEN-INVALID-LOGIC; r2: `const h = function() { <i>x</i> }`).
+    // Only when the OUTERMOST brace of this statement is such a body: any other nested
+    // `{ … }` body (a function declaration's, an `if` arm) is read by its own statement
+    // loop, which checks a function value inside it — checking it here too reported the
+    // same element twice (S464 r2 N4).
+    const braces = []; // true = a function value's block body
+    let prev = null;
+    for (let k = from; k < to; k++) {
+      const t = tokens[k];
+      if (!t || t.kind === "EOF") return;
+      if (t.kind === "COMMENT") continue;
+      if (t.kind === "PUNCT" && t.text === "{") braces.push(isFunctionValueBrace(k, from));
+      else if (t.kind === "PUNCT" && t.text === "}") braces.pop();
+      const inValueBody = braces.length > 0 && braces[0] === true;
+      if ((braces.length === 0 || inValueBody) && t.kind === "PUNCT" && t.text === "<") {
+        const n1 = tokens[k + 1];
+        if (n1 && (n1.kind === "IDENT" || n1.kind === "KEYWORD") && t.span && n1.span && t.span.end === n1.span.start) {
+          const end = scanMarkupElementEnd(k);
+          if (end > k) {
+            const startsValueStatement = inValueBody && !!prev && prev.kind === "PUNCT" && (prev.text === "{" || prev.text === ";");
+            if (k > from && (endsOperand(prev) || startsValueStatement) && !openerIsDeclaration(k)) {
+              const span = tokenSpan(t, filePath);
+              const dup = errors.some((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED" &&
+                (e.tabSpan ?? e.span)?.start === span.start && (e.tabSpan ?? e.span)?.file === span.file);
+              if (!dup) {
+                errors.push(new TABError(
+                  "E-MARKUP-STATEMENT-NOT-RENDERED",
+                  markupNotRenderedMessage(String(n1.text), statementContextAt(k)),
+                  span,
+                ));
+              }
+              return;
+            }
+            prev = tokens[end - 1];
+            k = end - 1;
+            continue;
+          }
+        }
+      }
+      prev = t;
+    }
+  }
+
+  /**
+   * S464 Q24 — runs `refuseSwallowedStatementMarkup` over each statement a statement
+   * loop produced: `step()` at the top of every iteration checks the PREVIOUS
+   * iteration's token range, `finish()` after the loop checks the last. A range that
+   * began inside an armed markup element (a text run of that element) is skipped —
+   * its tokens are the element's own text and tags.
+   */
+  function swallowedMarkupTracker() {
+    let from = -1;
+    let skip = false;
+    const check = () => {
+      if (from >= 0 && !skip && i > from) refuseSwallowedStatementMarkup(from, i);
+    };
+    return {
+      step() { check(); from = i; skip = _markupTextEnd > i; },
+      finish() { check(); from = -1; },
+    };
+  }
+
+  /**
+   * Inside an armed markup element (`i < _markupTextEnd`), the run of tokens up to
+   * the next BLOCK_REF (or the element's end) is markup — display text, a nested
+   * tag, the closer — never a statement. Returns that run as an `html-fragment`
+   * node, or null when the cursor is not in such a run (a BLOCK_REF is next, or
+   * the element has ended).
+   */
+  function collectMarkupTextRun() {
+    if (_markupTextEnd < 0) return null;
+    if (i >= _markupTextEnd) { _markupTextEnd = -1; return null; }
+    const first = peek();
+    if (first.kind === "BLOCK_REF" || first.kind === "EOF") return null;
+    const from = i;
+    const parts = [];
+    const lines = [];
+    const spans = [];
+    let lastTok = first;
+    while (i < _markupTextEnd && peek().kind !== "BLOCK_REF" && peek().kind !== "EOF") {
+      const t = consume();
+      lastTok = t;
+      // A `//` comment in free text is a comment (§4.18.1b exit (2)), not text.
+      if (t.kind === "COMMENT") continue;
+      // A quoted run in text is text: keep its own delimiters (the token holds the interior).
+      const q = t.kind === "STRING" ? (t.isTemplate ? "`" : (t.delim ?? "\"")) : "";
+      parts.push(q + t.text + q);
+      lines.push(t.span?.line ?? 0);
+      spans.push(t.span ?? null);
+    }
+    if (i >= _markupTextEnd) _markupTextEnd = -1;
+    // §4.17 (S462) — a `<script>` / `<style>` opener in the run is refused exactly
+    // as in any other markup in a logic body.
+    refuseFragmentElementTokens(tokens.slice(from, i), filePath, errors);
+    // Only an armed element's own lead — a nested `<b>` inside the element's text is
+    // part of the element, not a statement of its own.
+    const lead = _markupArmLead;
+    _markupArmLead = null;
+    return {
+      id: ++counter.next,
+      kind: "html-fragment",
+      content: joinWithNewlines(parts, lines, spans),
+      span: spanOf(first, lastTok),
+      _markupText: true,
+      ...(lead ? { _markupLead: lead } : {}),
+    };
   }
 
   // Consume a failable ERROR-type annotation (the type after `!` / `! ->`) in
@@ -6314,6 +6960,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // mid-expression at depth 0 — false for a ternary consequent `cond ? @cell
     // : alt`. Incremented on a depth-0 `?`, decremented on the matching `:`.
     let ternaryDepth = 0;
+    // The most recent depth-0 `:` that closed a ternary's consequent (S462 — read
+    // by the operand-position `?{}` test at the BLOCK_REF boundary).
+    let ternaryColonTok = null;
     // markup-value-in-expression-2026-06-17 (b) / g-derived-markup-cell-drops-
     // sibling-fn — markup-as-value in a ternary ARM. The `markupRootClosed`
     // boundary (the Cluster-C S190 markup-RHS over-consumption break, below) must
@@ -6341,6 +6990,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // statement-level propagation-then-SQL (`foo()? ` then a separate `?{}` stmt)
     // has no depth-0 `=>` and keeps its statement boundary.
     let sawArrowGlyphAtDepth0 = false;
+    // S465 r3 — a depth-0 word whose construct takes a `{ … }` body that may open
+    // on the next line; read by the bare-block boundary (BUG-ASI-NEWLINE below).
+    let sawBraceHeadAtDepth0 = false;
+    const BRACE_HEAD_WORDS = new Set(["function", "fn", "match", "if", "else", "for", "while", "do", "switch", "try", "catch", "finally", "given", "when", "class", "partial", "transaction", "server",
+      // not a body, but a `{ … }` that continues the statement on its next line:
+      // `import:host⏎{ tok } from "./h.js"`, a `type` / `use` declaration's shape.
+      "import", "type", "use"]);
+    // S465 r4 — the heads that are EXPRESSION constructs and so may follow a
+    // statement's start (`const f = function (x)⏎{`, `const v = match x⏎{`).
+    const EXPR_BRACE_HEAD_WORDS = new Set(["function", "fn", "match", "if", "else", "for", "while", "do", "switch", "try", "catch", "finally", "given", "when"]);
+    // A caller that consumed the statement's head word before collecting (the
+    // `import` handler collects `:host⏎{ … } from …` after eating `import`).
+    { const _h = peek(-1); if (_h && (_h.kind === "KEYWORD" || _h.kind === "IDENT") && BRACE_HEAD_WORDS.has(_h.text)) sawBraceHeadAtDepth0 = true; }
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
     const DECL_KEYWORDS = new Set(["const", "let", "type", "function", "fn"]);
@@ -6511,7 +7173,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // test caught it); a `?{}` SQL block in EITHER arm of an arrow-body ternary
       // must capture into the arrow escape-hatch → E-SQL-009, never break.
       const _lastIsTernaryPunctInArrow = lastTok && lastTok.kind === "PUNCT" && (lastTok.text === "?" || lastTok.text === ":") && sawArrowGlyphAtDepth0;
-      if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0 && !_lastIsArrowGlyph && !_lastIsTernaryPunctInArrow) break;
+      // S462 P0 (sql-chain-truncation audit) — a `?{}` query in OPERAND position
+      // (`1 + ?{…}.get().n`, `d ?? ?{…}.get().n`, `!?{…}.get()`, `f ? ?{…}.get().n : x`)
+      // is part of THIS expression: the token before it demands an operand, on the
+      // same line, so it cannot end a statement. Breaking here split the statement
+      // (`return d ??;` + an orphan query) — invalid JS, or a mis-read `?`
+      // (E-ERROR-003) for the ternary form. Kept in the expression, the query lowers
+      // as an expression-position `sql-ref` (emit-expr) with its full chain applied.
+      const _sqlInOperandPosition = tok.kind === "BLOCK_REF" && tok.block?.type === "sql" && sqlOperandPositionAfter(lastTok, tok, ternaryColonTok);
+      if (tok.kind === "BLOCK_REF" && depth === 0 && parts.length > 0 && (tok.block?.tagNesting ?? 0) === 0 && !_lastIsArrowGlyph && !_lastIsTernaryPunctInArrow && !_sqlInOperandPosition) break;
       // S89 §13.2 Sub-Phase B — `async function` / `async fn` decl-shape boundary.
       // When collectExpr sees `async` immediately followed by `function`/`fn` at
       // depth 0 (with optional `server` between), this is the start of an
@@ -6655,6 +7325,25 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `obj.x = function() {...}` truncated at `=` and emitted an orphan
         // function-decl. (Function-as-call-arg already worked because it sits inside
         // `(`...`)` and never reached depth 0 here.)
+        //
+        // S462 — a depth-0 `else` ENDS the expression. No scrml expression
+        // contains `else` at its own top level (if-as-expression is handled
+        // before collectExpr is entered; a match wildcard arm's `else` is an
+        // arm boundary, below; a member `x.else` is guarded by the `.` check),
+        // so the only thing it can be is the `else` of an enclosing braceless
+        // `if`. The newline-crossing break below already stopped there when the
+        // `else` sat on its OWN line; on the SAME line nothing stopped it, so
+        // `if (c) a.push(1) else a.push(2)` collected `a.push(1) else a.push(2)`
+        // as ONE bare expression, acorn parsed `a.push(1)` and the rest — the
+        // whole `else` branch — was dropped from the emitted JS at exit 0.
+        // Stop here and let `parseOneIfStmt` take it (or reject it as dangling).
+        // EXCEPT when this collection is itself an `if` construct carried as text
+        // (a single-expression match arm body `.A :> if (c) { … } else { … }`):
+        // `if` is a statement keyword, so a depth-0 `if` can only be the FIRST
+        // part, and the `else` then belongs to it.
+        if (parts.length > 0 && parts[0]?.trim() !== "if" && tok !== _headBodyTok && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
+          break;
+        }
         if (parts.length > 0 && tok !== _headBodyTok && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           const _lastPart = parts[parts.length - 1]?.trim() ?? "";
           // RHS context: the previous part is an operator/punctuation that
@@ -7036,6 +7725,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             lastKind === "BLOCK_REF" ||
             lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
+            // S465 r4 — a keyword-spelled PROPERTY name (`row.type`, `x?.match`) ends a value.
+            (lastKind === "KEYWORD" && !!prevLastTok && (prevLastTok.text === "." || prevLastTok.text === "?.")) ||
             endsPresenceGiven(lastTok) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
@@ -7054,6 +7745,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             tok.kind === "AT_IDENT"
           );
           if (lastEndsValue && tokStartsStmt) break;
+          // S465 r3 — a `{` on a later line after a value OPENS A BARE BLOCK
+          // STATEMENT (SPEC §7.2.2 "Terms": a bare block is a statement list).
+          // JS reads `a⏎{ … }` the same way (`a {` is not an expression, so ASI
+          // ends the statement). Pre-r3 the block was SWALLOWED into the
+          // previous statement's text (`let r = 0⏎{ r = 5 }` → init
+          // `0 { r = 5 }`; `{ A }⏎{ B }` → one bare-expr `{A}{B}`) and the
+          // expression parser read only the prefix — the block (a guard, in
+          // the S465 r3 finding) was silently dropped. NOT a boundary when the
+          // statement so far holds a depth-0 head that takes a brace body on
+          // its next line (`const f = function (x)⏎{`, `const v = match x⏎{`,
+          // `const v = if (c)⏎{`): there the `{` is that construct's body.
+          if (lastEndsValue && tok.kind === "PUNCT" && tok.text === "{" && !sawBraceHeadAtDepth0) break;
           // Phase A1a Step 11.0b — newline-as-statement-separator for state-decls.
           // When a newline crosses, lastTok ends a value, and the current token
           // is `<` PUNCT followed by IDENT, peek further to see if this opens a
@@ -7109,11 +7812,24 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
       }
+      // S465 r3 — see the bare-block boundary (BUG-ASI-NEWLINE) above.
+      // S465 r4 — the word counts only as a construct HEAD: never as a property
+      // name (`row.type`, `x?.match`), and a statement-only head (`type`, `import`,
+      // `use`, `class`, `server`, …) only when it LEADS the statement; an
+      // expression-construct head (`function`, `match`, `if`, …) may sit mid-statement.
+      if (depth === 0 && (tok.kind === "KEYWORD" || tok.kind === "IDENT") && BRACE_HEAD_WORDS.has(tok.text)) {
+        const _afterDot = parts.length > 0 && !!lastTok && (lastTok.text === "." || lastTok.text === "?.");
+        if (!_afterDot && (parts.length === 0 || EXPR_BRACE_HEAD_WORDS.has(tok.text))) sawBraceHeadAtDepth0 = true;
+      }
       // Track brace / paren depth
       if (tok.kind === "PUNCT" && (tok.text === "{" || tok.text === "(" || tok.text === "[")) depth++;
       if (tok.kind === "PUNCT" && (tok.text === "}" || tok.text === ")" || tok.text === "]")) {
         if (depth === 0) break;
         depth--;
+        // S465 r4 — the head's brace body has closed: the exception ends with it
+        // (`const f = function (q) { return q }⏎{ … }` — the `{` on the next line
+        // opens a bare block again).
+        if (depth === 0 && tok.text === "}") sawBraceHeadAtDepth0 = false;
       }
       // g-division-in-ternary-arm (S188): track ternary `?`/`:` nesting at
       // delimiter-depth 0 (and outside markup). A depth-0 `?` opens a ternary;
@@ -7126,6 +7842,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (tok.text === "?") { ternaryDepth++; }
         else if (tok.text === ":" && ternaryDepth > 0) {
           ternaryDepth--;
+          ternaryColonTok = tok;
           // g-derived-markup-cell-drops-sibling-fn — crossing into the alternate
           // arm: a CONSEQUENT markup arm that already closed (markupRootClosed) is
           // NOT the completion of the whole ternary value. Clear the flag so the
@@ -7484,6 +8201,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
 
+    // §4.17 (S465) — malformed lifted markup collected as a string: its `<pre>` /
+    // `<code>` bodies are raw content too. Rewrite them to one TEXT token each
+    // before the run is collected (parseLiftTag may have declined before reaching
+    // them), so no body token is read as code.
+    if (startTok.kind === "PUNCT" && startTok.text === "<" && peek(1) && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) {
+      _normalizeLiftRawBodiesInRun(i);
+    }
+
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
@@ -7553,6 +8278,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Guard: keywords inside markup text content (angleDepth > 0) are text, not code.
         // Guard (Bug M, 2026-04-26): `function` / `fn` after expression-RHS context
         // is a function expression — keep collecting. See collectExpr above.
+        // S462 — a depth-0 `else` ends the lifted expression too (see collectExpr):
+        // `if (c) lift a else lift b`. Same exception as collectExpr: a lifted
+        // value that is itself an `if` (`lift if (c) { … } else { … }`) keeps its
+        // own `else`.
+        if (parts.length > 0 && parts[0]?.trim() !== "if" && angleDepth === 0 && tok.kind === "KEYWORD" && tok.text === "else" && parts[parts.length - 1]?.trim() !== ".") {
+          break;
+        }
         if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           // §42.2.4 (S462): `is given` is one operator — see collectExpr.
           let _isFnExprAfterRhs = givenContinuesIsOperator();
@@ -7578,6 +8310,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // Consume the token — including `/` which collectExpr would stop at for operators
       lastTok = consume();
+      // §4.17 (S465) — a raw-content body (and its close tag) is written into the
+      // string EXACTLY as in source, glued to the opener's `>`: `<pre …>BODY</pre>`
+      // with no joiner spacing, so the string emitter (and a re-read of this text
+      // as markup) finds the same body by the same rule — the first `</pre>`.
+      if ((lastTok.kind === "TEXT" && lastTok._rawContent === true) || lastTok._rawCloser === true) {
+        let body = "";
+        if (lastTok.kind === "TEXT") body = lastTok.text;
+        else i--; // the close tag's `<` — re-read below with the rest of the close tag
+        const c0 = peek(), c1 = peek(1), c2 = peek(2), c3 = peek(3);
+        if (c0.text === "<" && c1.text === "/" && (c2.kind === "IDENT" || c2.kind === "KEYWORD")) {
+          consume(); consume(); consume();
+          if (c3.kind === "PUNCT" && c3.text === ">") consume();
+          lastTok = c3.kind === "PUNCT" && c3.text === ">" ? c3 : c2;
+          // (the TEXT case: this close tag was not seen by the angle tracking above)
+          if (body !== "" && angleDepth > 0) angleDepth--;
+          const glued = body + "</" + c2.text + ">";
+          if (parts.length > 0) parts[parts.length - 1] += glued;
+          else { parts.push(glued); partLines.push(lastTok.span?.line ?? 0); }
+          continue;
+        }
+        if (lastTok.kind !== "TEXT") lastTok = consume();
+        parts.push(body !== "" ? body : lastTok.text);
+      } else
       // Re-quote STRING tokens so their delimiters are preserved
       if (lastTok.kind === "STRING") {
         // A4: preserve backtick templates so `${...}` interpolations
@@ -7629,6 +8384,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     consume(); // tag name
     const tag = nameTok.text;
     const isComponent = /^[A-Z]/.test(tag);
+    // §4.17 (S465) — a lowercase-first `<pre>` / `<code>` is a raw-content element
+    // here exactly as in the block splitter (isRawContentElement — the one test).
+    const isRaw = isRawContentElement({ kind: "markup", tag });
+    // The offset of the raw body's first character (set when the opener closes).
+    let rawBodyStart = -1;
 
     // Parse attributes until > or /> or </> (malformed)
     const attrs = [];
@@ -7647,6 +8407,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Opening tag closer: >
       if (t.kind === "PUNCT" && t.text === ">") {
         consume();
+        if (isRaw && t.span && typeof t.span.start === "number") rawBodyStart = t.span.start + 1;
+        break;
+      }
+      // §4.17 (S465) — a raw body that begins with `=` / `>` (`<code>=</code>`): the
+      // logic tokenizer lexed the opener's `>` together with it (`>=`, `>>`). The
+      // opener closes at the `>`; the rest of the token is body text, captured from
+      // source with the rest of the body.
+      if (isRaw && (t.kind === "PUNCT" || t.kind === "OPERATOR") && t.text.length > 1 && t.text.charAt(0) === ">" && t.span && typeof t.span.start === "number") {
+        consume();
+        rawBodyStart = t.span.start + 1;
         break;
       }
       // Attribute
@@ -7738,6 +8508,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         isComponent: false, // void elements are HTML, never components
         span: spanOf(startTok, peek()),
       };
+    }
+
+    // §4.17 (S465, g-lift-pre-code-not-raw-content-s462) — a raw-content body is ONE
+    // text run to the matching `</pre>` / `</code>`, read from SOURCE: no `${…}`, no
+    // tag, no string token is recognized inside it. Its single text child reaches the
+    // same emitter rule as every other raw body (encodeRawContentBody).
+    if (isRaw && rawBodyStart >= 0) {
+      return _parseLiftRawContentBody(startTok, nameTok, tag, attrs, rawBodyStart);
     }
 
     // Parse children until </> or </tagname> or EOF
@@ -7832,6 +8610,252 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     // EOF without closer on non-component — malformed
     return null;
+  }
+
+  /**
+   * §4.17 (S465, g-lift-pre-code-not-raw-content-s462) — the body of a `<pre>` /
+   * `<code>` written in lifted / logic-context markup. The opener has been parsed
+   * (attributes included) and its `>` consumed; `bodyStart` is the offset of the
+   * body's first character.
+   *
+   * The logic tokenizer has already lexed the body as CODE (a `${…}` became a
+   * BLOCK_REF, `<img …>` became tag tokens, the `'` of `don't` opened a string that
+   * can run past the closer). `_normalizeLiftRawBody` rewrites the token stream at
+   * the cursor to what the body IS: one TEXT token (`_rawContent`) holding the
+   * source text up to the matching close tag — the block splitter's rule: the
+   * first `</pre>` / `</code>`, ASCII case-insensitive — then that close tag as
+   * `<` `/` name `>`, then the tokens after it (re-lexed from source when a token
+   * of the old lexing straddles the close tag). The rewrite is idempotent (a
+   * caller that resets its cursor and re-parses meets the same tokens), and a
+   * caller that declines the markup and collects it as a string reads the same
+   * corrected tokens (collectLiftExpr keeps the TEXT token whole).
+   *
+   * Returns the element with ONE `text` child (none for an empty body), or null
+   * when no close tag follows — the caller's malformed-markup path.
+   */
+  function _parseLiftRawContentBody(startTok, nameTok, tag, attrs, bodyStart) {
+    if (!_normalizeLiftRawBody(startTok, nameTok, tag.toLowerCase(), bodyStart)) return null;
+    const children = [];
+    if (peek().kind === "TEXT" && peek()._rawContent === true) {
+      const b = consume();
+      children.push({ id: ++counter.next, kind: "text", value: b.text, span: tokenSpan(b, filePath) });
+    }
+    // The close tag `_normalizeLiftRawBody` verified: `<` `/` name `>`.
+    consume(); consume(); consume();
+    if (peek().kind === "PUNCT" && peek().text === ">") consume();
+    return {
+      id: ++counter.next, kind: "markup", tag, attrs, children,
+      selfClosing: false, closerForm: "explicit", isComponent: false,
+      span: spanOf(startTok, peek()),
+    };
+  }
+
+  /** The text the token offsets index, when it can be found and is verified at the opener. */
+  function _liftRawSourceText(startTok, nameTok) {
+    const verify = (text, base) => {
+      const lt = startTok.span.start - base;
+      const nm = nameTok.span.start - base;
+      return lt >= 0 && text.charAt(lt) === "<" && nm >= 0 && text.startsWith(nameTok.text, nm);
+    };
+    if (!startTok.span || !nameTok.span || typeof startTok.span.start !== "number" || typeof nameTok.span.start !== "number") return null;
+    const s = tokens._s441Src;
+    if (s && typeof s.text === "string" && typeof s.offset === "number" && verify(s.text, s.offset)) {
+      return { text: s.text, base: s.offset };
+    }
+    if (parentBlock && typeof parentBlock.raw === "string" && parentBlock.span && typeof parentBlock.span.start === "number"
+        && verify(parentBlock.raw, parentBlock.span.start)) {
+      return { text: parentBlock.raw, base: parentBlock.span.start };
+    }
+    return null;
+  }
+
+  /** line/col of `text[relTo]`, counted from `text[relFrom]` at (line, col). */
+  function _lineColAt(text, relFrom, relTo, line, col) {
+    const seg = text.slice(relFrom, relTo);
+    const nl = seg.lastIndexOf("\n");
+    if (nl < 0) return { line, col: col + seg.length };
+    return { line: line + (seg.match(/\n/g)?.length ?? 0), col: seg.length - nl };
+  }
+
+  function _normalizeLiftRawBody(startTok, nameTok, lowerTag, bodyStart) {
+    const isCloserAt = (k) => {
+      const a = tokens[k], b = tokens[k + 1], c = tokens[k + 2];
+      return !!(a && b && c && a.kind === "PUNCT" && a.text === "<" && b.kind === "PUNCT" && b.text === "/"
+        && (c.kind === "IDENT" || c.kind === "KEYWORD") && c.text.toLowerCase() === lowerTag);
+    };
+    // Already normalized (a caller re-parsing the same tokens): the TEXT token or the
+    // close tag sits exactly at the body start.
+    const t0 = tokens[i];
+    if (t0 && t0.span && t0.span.start === bodyStart) {
+      if (t0.kind === "TEXT" && t0._rawContent === true && isCloserAt(i + 1)) return true;
+      if (t0._rawCloser === true && isCloserAt(i)) return true;
+    }
+    const needle = `</${lowerTag}>`;
+    const src = _liftRawSourceText(startTok, nameTok);
+    // The opener's `>` lexed together with the body's first characters (`>=`): that
+    // token becomes the `>` alone; its remaining characters are body text.
+    const prevTok = tokens[i - 1];
+    const mergedGt = !!(prevTok && prevTok.span && prevTok.span.end > bodyStart && (prevTok.kind === "PUNCT" || prevTok.kind === "OPERATOR") && prevTok.text.charAt(0) === ">");
+
+    const bodyLine = prevTok && prevTok.span ? prevTok.span.line : startTok.span.line;
+    const bodyCol = (prevTok && prevTok.span ? prevTok.span.col : startTok.span.col) + 1;
+    const mk = (kind, text, start, end, lc) => ({ kind, text, span: { start, end, line: lc.line, col: lc.col } });
+
+    let bodyText, closeStart, closeEnd, tailFrom, relexTail = null;
+    if (src) {
+      const rel = bodyStart - src.base;
+      let k = rel;
+      for (;;) {
+        k = src.text.indexOf("<", k);
+        if (k < 0) return false; // no close tag in this logic text — malformed
+        if (src.text.slice(k, k + needle.length).toLowerCase() === needle) break;
+        k++;
+      }
+      bodyText = src.text.slice(rel, k);
+      closeStart = src.base + k;
+      closeEnd = closeStart + needle.length;
+      // The first old token at or after the close tag's end.
+      let j = i;
+      let maxEnd = 0;
+      let straddles = false;
+      for (let m = i; m < tokens.length; m++) {
+        const tk = tokens[m];
+        if (!tk || tk.kind === "EOF" || !tk.span) continue;
+        if (tk.span.end > maxEnd) maxEnd = tk.span.end;
+      }
+      while (j < tokens.length && tokens[j].kind !== "EOF" && tokens[j].span && tokens[j].span.start < closeEnd) {
+        if (tokens[j].span.end > closeEnd) straddles = true;
+        j++;
+      }
+      tailFrom = j;
+      if (straddles) {
+        // The old lexing read across the close tag (a string opened in the body):
+        // every token after it is re-lexed from source.
+        const relEnd = Math.min(src.text.length, Math.max(maxEnd - src.base, k + needle.length));
+        const lc = _lineColAt(src.text, rel, k + needle.length, bodyLine, bodyCol);
+        const kids = Array.isArray(childBlocks) ? childBlocks.filter((c) => c && c.span && c.span.start >= closeEnd) : [];
+        let tail = tokenizeLogic(src.text.slice(k + needle.length, relEnd), closeEnd, lc.line, lc.col, kids);
+        if (parentBlock && parentBlock._bodyTop === true) {
+          tail = coverUnknownBodyTopChars(tail, src.text.slice(k + needle.length, relEnd), closeEnd, lc.line, lc.col);
+        }
+        const hadEof = tokens.length > 0 && tokens[tokens.length - 1].kind === "EOF";
+        if (!hadEof && tail.length > 0 && tail[tail.length - 1].kind === "EOF") tail.pop();
+        relexTail = tail;
+      }
+    } else {
+      // No source text indexes these tokens: rebuild the body from the tokens at
+      // their own offsets (whitespace preserved) up to the close tag's tokens.
+      let m = i;
+      while (m < tokens.length && tokens[m].kind !== "EOF" && !isCloserAt(m)) m++;
+      if (!isCloserAt(m)) return false;
+      let out = mergedGt ? prevTok.text.slice(bodyStart - prevTok.span.start) : "";
+      let at = bodyStart + out.length;
+      for (let q = i; q < m; q++) {
+        const tk = tokens[q];
+        const txt = tk.kind === "STRING"
+          ? (tk.isTemplate ? "`" + tk.text + "`" : (tk.delim ? tk.delim + tk.text + tk.delim : reemitJsStringLiteral(tk.text)))
+          : (tk.kind === "BLOCK_REF" && tk.block && typeof tk.block.raw === "string" ? tk.block.raw : tk.text);
+        if (tk.span && typeof tk.span.start === "number" && tk.span.start > at) out += " ".repeat(tk.span.start - at);
+        out += txt;
+        at = tk.span && typeof tk.span.end === "number" ? Math.max(at, tk.span.end) : at + txt.length;
+      }
+      bodyText = out;
+      const lt = tokens[m];
+      closeStart = lt.span.start;
+      const gt = tokens[m + 3];
+      closeEnd = gt && gt.kind === "PUNCT" && gt.text === ">" ? gt.span.end : tokens[m + 2].span.end;
+      tailFrom = gt && gt.kind === "PUNCT" && gt.text === ">" ? m + 4 : m + 3;
+    }
+
+    // The replacement run: [TEXT body]? `<` `/` name `>`.
+    const run = [];
+    if (bodyText.length > 0) {
+      const tt = mk("TEXT", bodyText, bodyStart, closeStart, { line: bodyLine, col: bodyCol });
+      tt._rawContent = true;
+      run.push(tt);
+    }
+    const clc = src
+      ? _lineColAt(src.text, bodyStart - src.base, closeStart - src.base, bodyLine, bodyCol)
+      : { line: bodyLine, col: bodyCol };
+    const nameText = src ? src.text.slice(closeStart - src.base + 2, closeEnd - src.base - 1) : lowerTag;
+    const ltTok = mk("PUNCT", "<", closeStart, closeStart + 1, clc);
+    if (bodyText.length === 0) ltTok._rawCloser = true;
+    run.push(ltTok);
+    run.push(mk("PUNCT", "/", closeStart + 1, closeStart + 2, { line: clc.line, col: clc.col + 1 }));
+    run.push(mk("IDENT", nameText, closeStart + 2, closeEnd - 1, { line: clc.line, col: clc.col + 2 }));
+    run.push(mk("PUNCT", ">", closeEnd - 1, closeEnd, { line: clc.line, col: clc.col + 2 + nameText.length }));
+
+    if (relexTail) tokens.splice(i, tokens.length - i, ...run, ...relexTail);
+    else tokens.splice(i, tailFrom - i, ...run);
+    if (mergedGt) {
+      tokens[i - 1] = { ...prevTok, kind: "PUNCT", text: ">", span: { ...prevTok.span, end: prevTok.span.start + 1 } };
+    }
+    return true;
+  }
+
+  /**
+   * §4.17 (S465) — the malformed-markup string path: walk the markup run that
+   * starts at token `from` the way parseLiftTag nests tags (opener `<name … >`,
+   * self-close `/>`, void elements, closer `</…>`), tolerating what parseLiftTag
+   * declined, and normalize every raw-content body met (`_normalizeLiftRawBody`).
+   * Stops when the run's tag depth returns to zero, or at a statement end outside
+   * any tag. The cursor `i` is restored.
+   */
+  function _normalizeLiftRawBodiesInRun(from) {
+    const saved = i;
+    let k = from;
+    let depth = 0;
+    try {
+      while (k < tokens.length) {
+        const t = tokens[k];
+        if (!t || t.kind === "EOF") break;
+        if (t.kind === "PUNCT" && t.text === "<") {
+          const n = tokens[k + 1];
+          if (n && n.kind === "PUNCT" && n.text === "/") {
+            // A closer: `</>` or `</name>`.
+            depth--;
+            k += 2;
+            if (tokens[k] && (tokens[k].kind === "IDENT" || tokens[k].kind === "KEYWORD")) k++;
+            if (tokens[k] && tokens[k].kind === "PUNCT" && tokens[k].text === ">") k++;
+            if (depth <= 0) break;
+            continue;
+          }
+          if (n && (n.kind === "IDENT" || n.kind === "KEYWORD")) {
+            // An opener: find its `>` / `/>`.
+            let m = k + 2;
+            let end = -1, selfClose = false;
+            while (m < tokens.length) {
+              const x = tokens[m];
+              if (!x || x.kind === "EOF") break;
+              if (x.kind === "PUNCT" && x.text === "/" && tokens[m + 1] && tokens[m + 1].kind === "PUNCT" && tokens[m + 1].text === ">") { end = m + 1; selfClose = true; break; }
+              if ((x.kind === "PUNCT" || x.kind === "OPERATOR") && x.text.charAt(0) === ">") { end = m; break; }
+              if (x.kind === "PUNCT" && (x.text === "<" || x.text === ";" || x.text === "}")) break;
+              m++;
+            }
+            if (end < 0) break;
+            if (selfClose || HTML_VOID_ELEMENTS.has(n.text.toLowerCase())) { k = end + 1; if (depth === 0) break; continue; }
+            if (isRawContentElement({ kind: "markup", tag: n.text }) && tokens[end].span && typeof tokens[end].span.start === "number") {
+              i = end + 1;
+              if (_normalizeLiftRawBody(t, n, n.text.toLowerCase(), tokens[end].span.start + 1)) {
+                // Past the TEXT body (if any) and the four close-tag tokens.
+                let q = end + 1;
+                if (tokens[q] && tokens[q].kind === "TEXT" && tokens[q]._rawContent === true) q++;
+                k = q + 4;
+                if (depth === 0) break;
+                continue;
+              }
+            }
+            depth++;
+            k = end + 1;
+            continue;
+          }
+        }
+        if (depth === 0) break;
+        k++;
+      }
+    } finally {
+      i = saved;
+    }
   }
 
   /**
@@ -8473,7 +9497,47 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   function rejectDanglingElse(prevNode) {
     const t = peek();
     if (!(t.kind === "KEYWORD" && t.text === "else")) return false;
-    if (!prevNode || prevNode.kind !== "if-stmt") return false;
+    // S462 — widened from "directly after an if-stmt" to "any statement-leading
+    // `else` that nothing can claim". collectExpr now ENDS an expression at a
+    // depth-0 `else` (so a braceless `if (c) a else b` keeps its else branch);
+    // the same cut means `foo() else bar()` / `x = 1 else 2` — an `else` after
+    // a statement that is not an `if` — now reaches here instead of being
+    // swallowed into the previous expression and silently dropped by acorn.
+    // Two statement-leading `else`s ARE legitimate and are left untouched:
+    //   - a match wildcard arm, `else :> body` (an arm arrow follows), and
+    //   - the §17.4a `for (…) { … } else { … }` empty-state block, which the
+    //     parser carries as an `else`-led bare-expr after the for-stmt
+    //     (checkForElseWithoutLift / codegen read it there).
+    if (matchArrowGlyphAt(peek, 1) != null) return false;
+    if (prevNode && prevNode.kind === "for-stmt") return false;
+    // S462 review — an `else` after a VALUE-position `for` (`const v = for (…) { lift … }
+    // else { … }`) is a for…else, not an if/else: name it as such. The §17.4a empty-state
+    // `else` is defined on a `for/lift` loop; the compiler does not lower it after a
+    // value-position `for`, so it is refused rather than dropped.
+    if (prevNode && prevNode.forExpr && typeof prevNode.forExpr === "object") {
+      errors.push(new TABError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        "E-STMT-UNEXPECTED-TOKEN: this `else` follows a `for` used as a value " +
+        "(`const v = for (…) { lift … } else { … }`). The §17.4a empty-state `else` is not " +
+        "supported on a value-position `for`. Compute the empty case separately, e.g. " +
+        "`const v = for (…) { lift … }` then `if (v.length == 0) { … }`. (SPEC §17.4a)",
+        tokenSpan(t, filePath),
+      ));
+      consume(); // the `else`
+      return true;
+    }
+    if (!prevNode || prevNode.kind !== "if-stmt") {
+      errors.push(new TABError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        "E-STMT-UNEXPECTED-TOKEN: `else` has no `if` to belong to. Only an `if` " +
+        "statement takes an `else`, and the statement before this one is not an `if`. " +
+        "Write `if (c) a else b` (or `if (c) { a } else { b }`), or remove the `else`." +
+        " (SPEC §4, §17)",
+        tokenSpan(t, filePath),
+      ));
+      consume(); // the `else`
+      return true;
+    }
     // Name what actually ended the `if` — the nearest significant token before
     // this `else` (comments / blank tokens are not separators: S437 round 5 F1).
     let back = i - 1;
@@ -8498,9 +9562,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
   function _parseRecursiveBodyInner() {
     const stmts = [];
+    const _swallowed = swallowedMarkupTracker(); // S464 Q24
     while (true) {
+      _swallowed.step();
       const tok = peek();
       if (tok.kind === "EOF") break;
+      // S462 — inside a markup element begun at statement position, a run of
+      // tokens is that element's text / tags, not a statement (and a `}` or `;`
+      // in it is text, not the end of this body).
+      {
+        const textRun = collectMarkupTextRun();
+        if (textRun) { stmts.push(textRun); continue; }
+      }
       // Closing brace ends the body
       if (tok.kind === "PUNCT" && tok.text === "}") {
         consume();
@@ -8805,35 +9878,125 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    */
   function consumeSqlChainedCalls(sqlNode) {
     if (!sqlNode || sqlNode.kind !== "sql" || !sqlNode.chainedCalls) return;
-    while (peek().kind === "PUNCT" && peek().text === ".") {
+    // S462 P0 (sql-chain-truncation) — consume ONLY the SQL method calls
+    // (`.all()` / `.get()` / `.first()` / `.run()` / `.prepare()` /
+    // `.nobatch()` / `.acrossTenants()`, each a CALL). Pre-fix this loop took
+    // every `.name` after the block as a "chained call" — `.get().name` recorded
+    // `name` as a second call, which the lowering never applied, so the
+    // expression evaluated to the WHOLE ROW (a `return` sent every column to the
+    // client). Anything after the SQL chain is the rest of an ordinary
+    // expression: the statement sites check `sqlBlockRefHasTail` BEFORE taking
+    // this structured path and route such a site through the expression path,
+    // which applies the full chain.
+    // Each pass takes one `.` method `(` args `)` link — bounds checked by
+    // sqlChainEndOffset (a link it does not recognise ends the chain).
+    while (sqlChainEndOffset(0) > 0) {
       consume(); // dot
-      // Accept IDENT or KEYWORD as the method name. `get` and `set` are
-      // tokenized as KEYWORD per tokenizer.ts:62 — without this, `.get()`
-      // would be left orphan in the parent token stream.
-      if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-        const methodTok = consume();
-        let args = "";
-        if (peek().kind === "PUNCT" && peek().text === "(") {
-          consume(); // open paren
-          while (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && peek().text === ")")) {
-            args += consume().text;
-          }
-          if (peek().kind === "PUNCT" && peek().text === ")") consume(); // close paren
+      const methodTok = consume();
+      let args = "";
+      consume(); // open paren
+      let depth = 1;
+      while (peek().kind !== "EOF") {
+        const t = peek();
+        if (t.kind === "PUNCT" && t.text === "(") depth++;
+        else if (t.kind === "PUNCT" && t.text === ")") {
+          depth--;
+          if (depth === 0) break;
         }
-        // §8.9.5: `.nobatch()` is a compile-time marker with no
-        // runtime effect. Flag the node and drop the call.
-        if (methodTok.text === "nobatch") {
-          sqlNode.nobatch = true;
-        } else {
-          sqlNode.chainedCalls.push({ method: methodTok.text, args });
-        }
+        args += consume().text;
+      }
+      if (peek().kind === "PUNCT" && peek().text === ")") consume(); // close paren
+      // §8.9.5: `.nobatch()` is a compile-time marker with no
+      // runtime effect. Flag the node and drop the call.
+      if (methodTok.text === "nobatch") {
+        sqlNode.nobatch = true;
       } else {
-        // Defensive: a dot followed by a non-IDENT is malformed; bail to avoid
-        // spinning. The trailing tokens fall through to the parent's normal
-        // statement processing.
-        break;
+        sqlNode.chainedCalls.push({ method: methodTok.text, args });
       }
     }
+  }
+
+  /**
+   * S462 P0 (sql-chain-truncation) — the SQL chain methods a `?{}` block may be
+   * followed by (§8.3 / §44.3 terminators, §8.9.5 `.nobatch()`, §14.8.10
+   * `.acrossTenants()`). The SAME set the expression path reads
+   * (codegen/sql-attempt.ts `sqlQueryExprShape`), so a statement-position query
+   * and an expression-position query split their chain at the same place.
+   */
+  const SQL_CHAIN_METHOD_NAMES = new Set(["all", "get", "first", "run", "prepare", "nobatch", "acrossTenants"]);
+
+  /**
+   * Peek offset just past the SQL method chain that starts at peek offset `k`
+   * (the token after a `?{}` BLOCK_REF). Each link is `.` + a SQL method name +
+   * a balanced `( … )`. Pure lookahead — consumes nothing.
+   */
+  function sqlChainEndOffset(k) {
+    for (;;) {
+      const dot = peek(k);
+      if (!(dot.kind === "PUNCT" && dot.text === ".")) return k;
+      const m = peek(k + 1);
+      if (!((m.kind === "IDENT" || m.kind === "KEYWORD") && SQL_CHAIN_METHOD_NAMES.has(m.text))) return k;
+      const open = peek(k + 2);
+      if (!(open.kind === "PUNCT" && open.text === "(")) return k;
+      let j = k + 3;
+      let depth = 1;
+      for (;;) {
+        const t = peek(j);
+        if (t.kind === "EOF") return k;
+        if (t.kind === "PUNCT" && t.text === "(") depth++;
+        else if (t.kind === "PUNCT" && t.text === ")") {
+          depth--;
+          if (depth === 0) break;
+        }
+        j++;
+      }
+      k = j + 1;
+    }
+  }
+
+  /**
+   * Does the token at peek offset `e` (just past a `?{}` + SQL chain) CONTINUE
+   * the expression whose leftmost operand is the query? A member / optional /
+   * index access, a call, a binary / ternary / word operator does; a statement
+   * end (`;` `}` `)` `]` `,` `:`, EOF, a `!{}` handler, a new statement on a
+   * later line) does not. `[` `(` and the single-character operators continue
+   * only on the SAME line — on a later line they may open the next statement
+   * (`<cell> = 0`, `[a, b] = …`). Pure lookahead.
+   */
+  function sqlOperandContinuesAt(e) {
+    let k = e;
+    while (peek(k).kind === "COMMENT") k++;
+    const t = peek(k);
+    if (!t || t.kind === "EOF") return false;
+    const last = peek(e - 1);
+    const sameLine = !!(t.span && last && last.span && typeof t.span.line === "number"
+      && typeof last.span.line === "number" && t.span.line === last.span.line);
+    if (t.kind === "PUNCT") {
+      if (t.text === "." || t.text === "?") return true;
+      if (t.text === "[" || t.text === "(") return sameLine;
+      if ("+-*/%^&|<>=".includes(t.text)) return sameLine;
+      return false;
+    }
+    if (t.kind === "OPERATOR") return !["=>", ":>", "...", "::", "..", "++", "--"].includes(t.text);
+    if (t.kind === "KEYWORD") return t.text === "is" || t.text === "as" || t.text === "in" || t.text === "instanceof";
+    if (t.kind === "IDENT") return t.text === "and" || t.text === "or";
+    return false;
+  }
+
+  /**
+   * Is the token at peek offset `k` a `?{}` SQL BLOCK_REF that is only the
+   * LEFTMOST OPERAND of a larger expression (`?{…}.get().name`,
+   * `?{…}.all().length`, `?{…}.get() is not`, …)? Such a site must NOT take a
+   * statement-level structured-`sqlNode` path (that path holds the query and its
+   * SQL chain only, and dropped the rest); it is parsed as an ordinary
+   * expression, whose `sql-ref` operand lowers exactly as the structured query
+   * (emit-expr `sqlQueryExprShape`) and whose remaining chain applies to the
+   * query's value, as in JS.
+   */
+  function sqlBlockRefHasTail(k) {
+    const t = peek(k);
+    if (!(t && t.kind === "BLOCK_REF" && t.block && t.block.type === "sql")) return false;
+    return sqlOperandContinuesAt(sqlChainEndOffset(k + 1));
   }
 
   /**
@@ -8862,6 +10025,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (!(next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql")) {
       return null;
     }
+    // S462 P0 — `= ?{…}.get().name`: the query is only the leftmost operand;
+    // the caller's collectExpr path parses the whole initializer (chain applied).
+    if (sqlBlockRefHasTail(0)) return null;
     const refTok = consume(); // consume the BLOCK_REF
     const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
     if (!childNode || childNode.kind !== "sql") {
@@ -10604,11 +11770,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const tok = peek();
 
     // BLOCK_REF — embedded child block
-    if (tok.kind === "BLOCK_REF") {
+    if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
+      const _refIdx = i;
+      const _errsBefore = errors.length;
       consume();
       const child = tok.block;
       if (child) {
         const childNode = buildBlock(child, filePath, parentBlock.type, counter, errors);
+        rescopeHandlerBlockRefusals(_refIdx, _errsBefore);
         if (childNode) {
           childNode.span = fullSpan(child.span, filePath);
           // §SQL: collect chained method calls (.run(), .all(), .get()) from parent token stream.
@@ -11116,7 +12285,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // LIFT
     if (tok.kind === "KEYWORD" && tok.text === "lift") {
       const startTok = consume();
-      if (peek().kind === "BLOCK_REF") {
+      if (peek().kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
         const refTok = consume();
         const child = refTok.block;
         if (child) {
@@ -11554,7 +12723,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // lift-expr SQL fix from `fix-lift-sql-chained-call` (S40).
       // Without this, `safeParseExprToNode` parses `?{...}.all()` → preprocesses
       // `?{}` to `__scrml_sql_placeholder__` → emits `return /* sql-ref:-1 */.all();`.
-      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         // Skip leading comments (already accounted for by lookAhead) — consume them.
         for (let i = 0; i < lookAhead; i++) consume();
         const refTok = consume(); // consume the BLOCK_REF
@@ -11695,7 +12864,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // `yield ?{...}.method()` — SQL BLOCK_REF + optional chained call.
       // Attach as structured sqlNode so emit-logic routes through case "sql".
-      if (next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         for (let _i = 0; _i < lookAhead; _i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
@@ -13016,6 +14185,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     {
       const startTok = peek();
       const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
+      // S462 — a markup element at statement position: its text is text (collectMarkupTextRun).
+      if (tok.kind === "PUNCT" && tok.text === "<" && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) armMarkupTextRuns();
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // §19.5: `fallible()?` as a statement — propagate-expr with no binding
@@ -13063,8 +14234,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          const _errsBefore = errors.length;
           refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
-          return { id: ++counter.next, kind: "html-fragment", content: expr, span };
+          // S464 Q24 — a statement-leading element carries its lead (see takeStatementMarkupLead).
+          // A misplaced structural element or a refused `<script>` / `<style>` already has
+          // its own error (above), which names the real problem.
+          const _lead0 = takeStatementMarkupLead(_fragFrom);
+          const _lead = errors.length > _errsBefore ||
+            (_seName && Object.prototype.hasOwnProperty.call(STRUCTURAL_ELEMENT_PLACEMENT, _seName)) ? null : _lead0;
+          return { id: ++counter.next, kind: "html-fragment", content: expr, span, ...(_lead ? { _markupLead: _lead } : {}) };
+        }
+        // S465 r3 — a statement directly at a `match` body's arm level that holds
+        // an arm arrow is an ARM (`"a" :> { … }`): codegen reads it from its text
+        // (parseMatchArm), so the expression view of it — which acorn reads only
+        // up to the arrow — loses nothing, and the "statement boundary not
+        // detected — trailing content would be silently dropped" warning it
+        // raised was false. Hold it. (The node keeps its dropped-content stamp,
+        // so a server emitter that ever reached it would still refuse it.)
+        if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth && /:>|=>/.test(expr)) {
+          const { result: _armView } = captureTrailingContentWarnings(() => safeParseExprToNode(expr, 0));
+          return { id: ++counter.next, kind: "bare-expr", expr, exprNode: _armView, span };
         }
         return { id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span };
       } else {
@@ -14207,7 +15396,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     _covI0 = -1;
   };
 
+  const _swallowed = swallowedMarkupTracker(); // S464 Q24
   while (true) {
+    _swallowed.step();
     if (_covTrack) {
       _covFlush();
       _covI0 = i;
@@ -14232,6 +15423,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else if (_tildeActive) {
         _tildeActive = false;
       }
+    }
+
+    // S462 — inside a markup element begun at statement position, a run of
+    // tokens is that element's text / tags, not a statement (see
+    // collectMarkupTextRun).
+    {
+      const textRun = collectMarkupTextRun();
+      if (textRun) { nodes.push(textRun); continue; }
     }
 
     // Skip comments
@@ -14264,12 +15463,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
 
     // BLOCK_REF — embedded child block from the block splitter
-    if (tok.kind === "BLOCK_REF") {
+    if (tok.kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
+      const _refIdx = i;
+      const _errsBefore = errors.length;
       consume();
       const child = tok.block;
       if (child) {
         // Build the child AST node — pass the parent block's type as context
         const childNode = buildBlock(child, filePath, parentBlock.type, counter, errors);
+        rescopeHandlerBlockRefusals(_refIdx, _errsBefore);
         if (childNode) {
           childNode.span = fullSpan(child.span, filePath);
           // §SQL: collect chained method calls (.run(), .all(), .get()) from parent token stream.
@@ -15582,6 +16784,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           });
         } else {
+        const _exprFirstTok = peek();
         const { expr, exprSource, span } = collectExpr();
         // Check if this is a component definition. Per SPEC §(component defs),
         // a component-def requires BOTH an uppercase-initial name AND markup RHS
@@ -15598,7 +16801,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             name,
             // S458 — the markup with its string literals AS WRITTEN (escapes kept); the
             // expander re-parses this text, so a cooked `'it\'s'` / `\d` would change it.
-            raw: exprSource ?? expr,
+            raw: mdComponentVerbatimRaw(exprSource ?? expr, _exprFirstTok, span, parentBlock) ?? (exprSource ?? expr),
             span: spanOf(startTok, peek()),
           });
         } else {
@@ -15632,7 +16835,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume();
 
       // If the next token is a BLOCK_REF, the lift target is an embedded block
-      if (peek().kind === "BLOCK_REF") {
+      if (peek().kind === "BLOCK_REF" && !sqlBlockRefHasTail(0)) {
         const refTok = consume();
         const child = refTok.block;
         if (child) {
@@ -16655,7 +17858,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // `return ?{...}.method()` collapses to `return /* sql-ref:-1 */.method()`
       // when the BLOCK_REF is left to fall through collectExpr → safeParseExprToNode.
       // Detect the SQL BLOCK_REF here, build the child, and attach as `sqlNode`.
-      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql") {
+      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "sql" && !sqlBlockRefHasTail(lookAhead)) {
         for (let i = 0; i < lookAhead; i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
@@ -16712,7 +17915,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         continue;
       }
       // `yield ?{...}.method()` — attach structured sqlNode.
-      if (yieldNext.kind === "BLOCK_REF" && yieldNext.block && yieldNext.block.type === "sql") {
+      if (yieldNext.kind === "BLOCK_REF" && yieldNext.block && yieldNext.block.type === "sql" && !sqlBlockRefHasTail(yieldLookAhead)) {
         for (let _i = 0; _i < yieldLookAhead; _i++) consume();
         const refTok = consume();
         const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
@@ -16953,7 +18156,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (shared _captureWhenHandlerBody — see its doc). Fixes the multi-statement drop
         // (g-when-message-parent-handler-drops-all-but-the-first-statement, S372).
         if (peek().text === "{") {
+          const _whenBodyFrom = i;
           const { bodyRaw: _whenWorkerBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+          refuseEffectBodyMarkup(_whenBodyFrom + 1, i - 1); // S464 r3 (R2-3/R2-4)
           nodes.push({
             id: ++counter.next,
             kind: workerName ? "when-worker-" + eventType : "when-message",
@@ -16997,7 +18202,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // (g-when-effect-multi-statement-body-drops-all-but-first, S372) — the same bug
       // the worker-handler branch above had.
       if (peek().text === "{") {
+        const _whenBodyFrom = i;
         const { bodyRaw: _whenEffectBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+        refuseEffectBodyMarkup(_whenBodyFrom + 1, i - 1); // S464 r3 (R2-3/R2-4)
         nodes.push({
           id: ++counter.next,
           kind: "when-effect",
@@ -17337,6 +18544,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     {
       const startTok = peek();
       const _fragFrom = i; // §4.17 (S462) — the token run an html-fragment is built from
+      // S462 — a markup element at statement position: its text is text (collectMarkupTextRun).
+      if (tok.kind === "PUNCT" && tok.text === "<" && (peek(1).kind === "IDENT" || peek(1).kind === "KEYWORD")) armMarkupTextRuns();
       const { expr, span } = collectExpr();
       if (expr.trim().length > 0) {
         // Check for `?` propagation suffix on bare expressions
@@ -17372,8 +18581,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span,
             ));
           }
+          const _errsBefore = errors.length;
           refuseFragmentElementTokens(tokens.slice(_fragFrom, i), filePath, errors);
-          nodes.push({ id: ++counter.next, kind: "html-fragment", content: expr, span });
+          // S464 Q24 — a statement-leading element carries its lead (see takeStatementMarkupLead).
+          // A misplaced structural element or a refused `<script>` / `<style>` already has
+          // its own error (above), which names the real problem.
+          const _lead0 = takeStatementMarkupLead(_fragFrom);
+          const _lead = errors.length > _errsBefore ||
+            (_seName && Object.prototype.hasOwnProperty.call(STRUCTURAL_ELEMENT_PLACEMENT, _seName)) ? null : _lead0;
+          nodes.push({ id: ++counter.next, kind: "html-fragment", content: expr, span, ...(_lead ? { _markupLead: _lead } : {}) });
         } else {
           nodes.push({ id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span });
         }
@@ -17408,6 +18624,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
   }
+  _swallowed.finish();
   if (_covTrack) _covFlush();
 
   return nodes;
@@ -19233,7 +20450,15 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // recovers as `absent`, so in an `<each>` row / engine arm / `<match>` arm a
 // DISCARDED diagnostic would leave the attribute — a handler included —
 // silently missing.
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR"]);
+// The `<md>` codes (S462 md phase 2, SPEC §67.11) qualify too: they are decided only by the
+// TAB lowering (md-lower.ts) — nothing downstream re-reads an `<md>` body — so an `<md>` in an
+// `<each>` row would otherwise lose its errors and lints.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT", "E-ATTR-UNQUOTED-OPERATOR",
+  "E-MD-INTERP-UNCLOSED", "E-MD-INDENT-MIXED", "E-MD-IN-PHRASING", "E-MD-URL-SCHEME", "E-MD-OF-BODY", "E-MD-OF-NOMINAL", "E-MD-IN-LOGIC-NOMINAL"]);
+/** A `W-MD-*` lint from the md reader (§67.3) — forwarded out of a discarded sub-build like the codes above. */
+function isForwardedMdLint(code) {
+  return typeof code === "string" && code.startsWith("W-MD-");
+}
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -19243,7 +20468,7 @@ const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-M
  */
 function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
   for (const err of subErrors) {
-    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || err.fromHandlerStatementList === true)) continue;
+    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || isForwardedMdLint(err.code) || err.fromHandlerStatementList === true)) continue;
     if (!deltaOffset || !err.tabSpan) {
       errors.push(err);
       continue;
@@ -19259,6 +20484,7 @@ function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
     }
     const rebased = new TABError(err.code, err.baseMessage, holder.span);
     rebased.baseMessage = err.baseMessage;
+    if (err.severity) rebased.severity = err.severity;
     if (err.fromHandlerStatementList === true) rebased.fromHandlerStatementList = true;
     errors.push(rebased);
   }
@@ -19375,7 +20601,7 @@ function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, 
     const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
     const frame = (kind, text) => ({ kind, text, span: frameSpan });
     const framed = [
-      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
+      frame("KEYWORD", "function"), frame("IDENT", HANDLER_BLOCK_FRAME_NAME),
       frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
       ...inner,
       frame("PUNCT", "}"), eof ?? frame("EOF", ""),
@@ -19529,7 +20755,10 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   }
   const fatal = bodyRes.parseErrors.some(isFatalHandlerParseError);
   const nonFatal = bodyRes.parseErrors.filter((e) => e && typeof e === "object" && !isFatalHandlerParseError(e));
-  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal };
+  // S464 r2 — the refusals of statement-position markup in the arrow's body (see
+  // refuseHandlerMarkup); carried separately because `fatal` is only a flag.
+  const markup = bodyRes.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED");
+  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal, markup, braced: !!split.braced };
 }
 
 /** Does a statement list hold a `!{}` guard anywhere (not inside a nested function)? */
@@ -19808,6 +21037,145 @@ function checkAttrMultiStatement(name, value, filePath, errors, delimited = fals
  * anything else a bare value (a bare sequence is E-MULTI-STATEMENT-HANDLER's, so
  * its parse errors are never reported here). `errors` null = report nothing.
  */
+/**
+ * S464 r2 (§17.6.10.1) — markup in statement position in an event handler (`onclick=${
+ * @n = 1⏎<p>clicked</p> }`, `onclick=${ <p/> }`, an `if` arm in a handler, a function
+ * value in one) renders nothing: a handler runs for its effects. Its statements are
+ * parsed here, at the TAB, with file-true spans, and lowered later from TEXT — no other
+ * stage reads them as statements — so this is where they are refused:
+ *   - `tabRefusals`: elements the handler's statement parse refused as read into a
+ *     statement as code (refuseSwallowedStatementMarkup; the message already names the
+ *     handler / function context);
+ *   - every statement-position element left in the parsed statements (a lead), reported
+ *     with the handler ("effect") fix, or the function fix inside a function value.
+ * Before: such a handler emitted the element into an expression (E-CODEGEN-INVALID-LOGIC,
+ * a "compiler defect" message) or dropped it at exit 0.
+ */
+function refuseHandlerMarkup(stmts, tabRefusals, errors, opts = {}) {
+  if (!Array.isArray(errors)) return [];
+  // S464 r3 (R2-7) — an EXPRESSION-bodied arrow handler (`onclick=${ () => <p/> }`):
+  // the body is the arrow's return operand, a VALUE position (§17.6.10.1), not a
+  // statement — not this refusal. (If impl#1 cannot lower it, the emitted-JS parse
+  // floor refuses the compile.)
+  if (opts.valueBody) {
+    // Its element is the arrow's value: mark it so no later pass reports it either.
+    if (Array.isArray(stmts)) refuseUnrenderedStatementMarkup(stmts, (lead) => { lead._reportedAtTab = true; }, "effect");
+    stmts = [];
+    tabRefusals = [];
+  }
+  const seen = new Set(errors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED")
+    .map((e) => (e.tabSpan ?? e.span)?.start));
+  const found = [];
+  const push = (e) => {
+    found.push(e);
+    const st = (e.tabSpan ?? e.span)?.start;
+    if (seen.has(st)) return;
+    seen.add(st);
+    errors.push(e);
+  };
+  for (const e of tabRefusals) push(e);
+  if (!Array.isArray(stmts) || stmts.length === 0) return found;
+  refuseUnrenderedStatementMarkup(stmts, (lead, context, cause) => {
+    lead._reportedAtTab = true;
+    push(new TABError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(lead.tag, context, cause), lead.span));
+  }, "effect");
+  return found;
+}
+
+/**
+ * S464 r3 (R2-1) — the handler-markup check for a handler value that was not parsed by
+ * attachHandlerStatementList with an error list: an `<each>` row's / a `<match>` arm's
+ * body (re-parsed into the tree without one), a component body (re-parsed by CE). Parses
+ * the value fresh (its own id range, never emitted) at the value's own span, and returns
+ * the refusals (TABErrors). Marks the value checked.
+ */
+export function handlerMarkupRefusals(value, filePath) {
+  const out = [];
+  if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return out;
+  if (Array.isArray(value._markupRefusals)) return value._markupRefusals;
+  const sp = value.span ?? {};
+  const base = [typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1];
+  try {
+    const arrow = parseArrowHandlerStatements(value, filePath, _handlerCheckStmtIds, null, ...base);
+    if (arrow !== undefined) {
+      refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], out, { valueBody: arrow.braced === false });
+    } else {
+      const res = parseHandlerStatementListCore(value, filePath, _handlerCheckStmtIds, null, ...base);
+      if (res) refuseHandlerMarkup(res.stmts, res.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), out);
+    }
+  } catch {
+    // An unparseable value has its own diagnostics; nothing to add here.
+  }
+  Object.defineProperty(value, "_markupRefusals", { value: out, enumerable: false, configurable: true, writable: true });
+  return out;
+}
+
+/**
+ * S464 r3 (R2-1) — every event-handler value in the finished tree that no TAB parse
+ * checked (an `<each>` row / `<match>` arm body is re-parsed into the tree without an
+ * error list): run the handler-markup check on it.
+ */
+function refuseUncheckedHandlerMarkup(ast, filePath, errors, bsOutput) {
+  // The file text, rebuilt from the root blocks (each carries its raw text at its
+  // span) — to put a handler value whose span is relative to a re-parsed body (an
+  // `<each>` row, a `<match>` arm) back at its file position.
+  let source = "";
+  for (const b of Array.isArray(bsOutput?.blocks) ? bsOutput.blocks : []) {
+    if (b && typeof b.raw === "string" && typeof b.span?.start === "number") {
+      if (source.length < b.span.start) source += " ".repeat(b.span.start - source.length);
+      source = source.slice(0, b.span.start) + b.raw + source.slice(b.span.start + b.raw.length);
+    }
+  }
+  const lineColAt = (off) => {
+    let line = 1, last = -1;
+    for (let k = 0; k < off && k < source.length; k++) if (source.charCodeAt(k) === 10) { line++; last = k; }
+    return { line, col: off - last };
+  };
+  const fileTrue = (v) => {
+    const sp = v.span;
+    if (!source || !sp || typeof sp.start !== "number" || typeof sp.end !== "number") return true;
+    return source.slice(sp.start, Math.max(sp.end, sp.start + v.raw.length + 4)).includes(v.raw.trim());
+  };
+  const seen = new Set();
+  const walk = (n, anchorStart) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) walk(x, anchorStart); return; }
+    if ((n.kind === "each-block" || n.kind === "match-block" || n.kind === "engine-decl") && typeof n.span?.start === "number") {
+      anchorStart = n.span.start;
+    }
+    if (n.kind === "markup" && Array.isArray(n.attrs)) {
+      for (const a of n.attrs) {
+        if (a && typeof a.name === "string" && isEventHandlerAttrName(a.name) && a.value) {
+          const orig = a.value;
+          if (typeof orig.raw !== "string" || orig.raw.trim() === "") continue;
+          // Check a FILE-POSITIONED copy: the value's span may be relative to a re-parsed
+          // body (an `<each>` row, a `<match>` arm), and its own span starts at the `${`,
+          // not at the text. The refusals an earlier parse recorded on the value — and,
+          // for a re-parsed body, merged into this file's errors at relative positions —
+          // are replaced by the copy's.
+          const from = fileTrue(orig) ? (orig.span?.start ?? 0) : Math.max(0, anchorStart);
+          const at = source ? source.indexOf(orig.raw, from) : -1;
+          let value = orig;
+          if (at >= 0) {
+            const lc = lineColAt(at);
+            value = { kind: orig.kind, raw: orig.raw, span: { file: filePath, start: at, end: at + orig.raw.length, line: lc.line, col: lc.col } };
+            const stale = Array.isArray(orig._markupRefusals) ? orig._markupRefusals : [];
+            for (const st of stale) { const ix = errors.indexOf(st); if (ix >= 0) errors.splice(ix, 1); }
+          }
+          for (const e of handlerMarkupRefusals(value, filePath)) {
+            const st = (e.tabSpan ?? e.span)?.start;
+            if (errors.some((x) => x && x.code === e.code && (x.tabSpan ?? x.span)?.start === st)) continue;
+            errors.push(e);
+          }
+        }
+      }
+    }
+    for (const k of Object.keys(n)) if (k !== "span" && !k.startsWith("_")) walk(n[k], anchorStart);
+  };
+  walk(ast, 0);
+}
+
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
   // An ARROW-valued handler keeps the as-is arrow emission — unless its body
@@ -19816,7 +21184,11 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   // Such an arrow lowers through its body's statement list instead (S440 ruling:
   // "check it the same way and emit its guard").
   const arrow = parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  // S464 r3 — the refusals are recorded ON THE VALUE as well: a re-parse into the tree
+  // (an `<each>` row, a `<match>` arm) runs this with an error list that is discarded, so
+  // the final pass (refuseUncheckedHandlerMarkup) reports them from the finished tree.
   if (arrow !== undefined) {
+    Object.defineProperty(value, "_markupRefusals", { value: refuseHandlerMarkup(arrow.stmts, arrow.markup ?? [], Array.isArray(errors) ? errors : [], { valueBody: arrow.braced === false }), enumerable: false, configurable: true, writable: true });
     if (!arrow.fatal && arrow.stmts.length > 0 && handlerStmtsContainGuard(arrow.stmts)) {
       value.handlerBlock = { stmts: arrow.stmts };
       if (Array.isArray(errors)) for (const e of arrow.nonFatal) { e.fromHandlerStatementList = true; errors.push(e); }
@@ -19826,6 +21198,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
   if (!res) return;
   const { tokens, stmts, parseErrors } = res;
+  Object.defineProperty(value, "_markupRefusals", { value: refuseHandlerMarkup(stmts, parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"), Array.isArray(errors) ? errors : []), enumerable: false, configurable: true, writable: true });
   const count = Array.isArray(stmts) ? stmts.length : 0;
   // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
   // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
@@ -19886,6 +21259,30 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
     // it — which is also what lets the §19.4.3 check see the call as handled
     // (S440: E-ERROR-002 follows the unhandled call in every handler form).
     if (stmts[0] && stmts[0].kind === "guarded-expr") {
+      value.handlerBlock = { stmts };
+      report(nonFatal);
+      return;
+    }
+    // S462 — an `if` with an `else` likewise: the single-expression path lowers
+    // the value as TEXT, and for a braceless consequent
+    // (`onclick={ if (@c) @n = 1 else @n = 2 }`) that text lowering read the
+    // `else` as part of the consequent's expression and produced malformed JS
+    // (`_scrml_reactive_set("n", 1 else …)`). The statement view has the
+    // if/else as structure, so it always takes it.
+    // Review round 1: ANY if-with-else in the statement's tree, not only a top-level
+    // one — `{ if (@c) if (@d) a else b }` (the else is the INNER if's) and
+    // `{ while (…) if (@c) a else b }` reached the text path the same way.
+    const _hasIfElse = (n, seen = new Set()) => {
+      if (!n || typeof n !== "object" || seen.has(n)) return false;
+      seen.add(n);
+      if (Array.isArray(n)) return n.some((x) => _hasIfElse(x, seen));
+      if (n.kind === "if-stmt" && n.alternate != null) return true;
+      for (const k of ["consequent", "alternate", "body"]) {
+        if (n[k] && _hasIfElse(n[k], seen)) return true;
+      }
+      return false;
+    };
+    if (stmts[0] && _hasIfElse(stmts[0])) {
       value.handlerBlock = { stmts };
       report(nonFatal);
       return;
@@ -21537,6 +22934,22 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // S437 — §5.2.3 statement-list view of multi-statement handler values.
       attachHandlerStatementLists(attrs, block, filePath, counter, errors);
 
+      // SPEC §67 (S462 md phase 2) — a static `<md>`: its body is markdown, read at compile
+      // time by the ONE md reader (`scrml:md`) and lowered to the §67.6 closed element set as
+      // ordinary markup nodes (md-lower.ts). `<md of=…/>` (phase 3) is diagnosed there too.
+      // The tag is `md` / `mD` — lowercase-first, so never a component reference (the block
+      // splitter's rule: a component name is uppercase-first).
+      if (typeof block.name === "string" && /^m[dD]$/.test(block.name)) {
+        return lowerMdBlock(block, attrs, span, {
+          filePath,
+          counter,
+          errors,
+          makeError: (code, message, sp) => new TABError(code, message, sp),
+          buildSlotNode: (source, absStart, line, col) => buildMdSlotNode(source, absStart, line, col, filePath, counter, errors),
+          parseExpr: (text, absStart) => safeParseExprToNodeGlobal(text, filePath, absStart, errors),
+        });
+      }
+
       // ----------------------------------------------------------------
       // A1b B18 fire-site #1 — multi-statement event-handler validation
       // (E-MULTI-STATEMENT-HANDLER) per SPEC §5.2.3 + §34 row 14260.
@@ -21675,6 +23088,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const children = block.children.map(child =>
         buildBlock(child, filePath, "markup", counter, errors)
       ).filter(Boolean);
+      // SPEC §67.2 — E-MD-IN-PHRASING: an `<md>` (block output) directly inside phrasing content.
+      // (`isMdPhrasingParent` reads the tag syntactically: an uppercase-first component is never a parent.)
+      checkMdInPhrasing(block.name, children, { errors, makeError: (code, message, sp) => new TABError(code, message, sp) });
 
       // S159 — SPEC §4.14 HTML-element `:`-shorthand content-model rule
       // (S154 design ruling (a)). For a NON-VOID lowercase HTML element that
@@ -22128,6 +23544,33 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               // The inner expression text between `${` and the matching `}`.
               openerEffect = header.slice(dollarBrace + 2, j).trim();
               if (openerEffect.length === 0) openerEffect = null;
+              // S464 r2 (§17.6.10.1, review N3) — markup in statement position in the
+              // opener `effect=` body renders nothing (it runs once, for its effects).
+              // Codegen re-parses the body from this raw text with no source position, so
+              // it is checked HERE, at the body's real offset / line / col, through the
+              // event-handler statement parse (the same "effect" refusal as a handler).
+              // emit-engine.ts does not report the opener body again.
+              if (openerEffect !== null) {
+                const _effRaw = header.slice(dollarBrace + 2, j);
+                const _effIdx = dollarBrace + 2 + (_effRaw.length - _effRaw.trimStart().length);
+                const _effAnchor = structuralHeaderAnchor(block, header);
+                const _effBefore = header.slice(0, _effIdx);
+                const _effNl = (_effBefore.match(/\n/g) || []).length;
+                const _effLine = _effAnchor.line + _effNl;
+                const _effCol = _effNl === 0 ? _effAnchor.col + _effIdx : _effIdx - _effBefore.lastIndexOf("\n");
+                const _effAbs = _effAnchor.absStart + _effIdx;
+                const _effRes = parseHandlerStatementListCore(
+                  { raw: openerEffect, span: { file: filePath, start: _effAbs, end: _effAbs + openerEffect.length, line: _effLine, col: _effCol } },
+                  filePath, counter, block, _effAbs, _effLine, _effCol,
+                );
+                if (_effRes) {
+                  refuseHandlerMarkup(
+                    _effRes.stmts,
+                    _effRes.parseErrors.filter((e) => e && e.code === "E-MARKUP-STATEMENT-NOT-RENDERED"),
+                    errors,
+                  );
+                }
+              }
             }
             // Unbalanced braces → openerEffect stays null (best-effort capture;
             // downstream rewriteExpr would surface a parse error if the malformed
@@ -23901,6 +25344,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
     if (result && typeof result === "object") {
       result.legacyIsSomeSites = [...sink.values()].sort((a, b) => a.start - b.start);
       refuseScriptStyleElements(result, bsOutput);
+      // SPEC §67 (S462 md phase 2) — an `<md>` built outside a markup body (lift / markup value).
+      if (result.ast && Array.isArray(result.errors)) refuseUnreadMdElements(result.ast, result.filePath, result.errors, (code, message, sp) => new TABError(code, message, sp));
     }
     return result;
   } finally {
@@ -24032,6 +25477,8 @@ function refuseScriptStyleElements(result, bsOutput) {
     ));
   }
   refuseEscapeHatchMarkup(result.ast, result.filePath, result.errors, reported);
+  // §17.6.10.1 (S464 r3, R2-1) — handler values no TAB parse checked.
+  refuseUncheckedHandlerMarkup(result.ast, result.filePath, result.errors, bsOutput);
 }
 
 function _buildASTImpl(bsOutput, tokenizerOverrides) {
@@ -24064,6 +25511,10 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+
+  // §67.6 (S462 md phase 2) — static `<md>` heading ids, page-wide: deduped against every
+  // author `id=` in the file and every earlier `<md>` heading.
+  assignMdHeadingIds(nodes);
 
   // §17.4a / §17.2: reject an `else` empty-state block on a `for` loop that has
   // no `lift` in its body (E-CTRL-010).

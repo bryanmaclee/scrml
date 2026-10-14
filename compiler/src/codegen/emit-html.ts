@@ -12,7 +12,7 @@ import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
-import { refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -349,6 +349,8 @@ function valueAttrIsLowerable(
   // parser the S141 emitted-JS gate uses, so the two cannot disagree. Rewriting
   // `@` inside template literals belongs in `emitExprField`/`rewriteExpr` and
   // would change every lowering path in the compiler — a separate arc.
+  // (S462: that arc landed — emit-expr `emitTemplateLitStructured` lowers a client
+  // template's `${@cell}` from the parsed template, so this probe now passes for it.)
   // g-request-is-some-in-value-bool-class-attr — a `<#r>.data is some` VALUE-attr
   // expression (`class=`, `value=`, …) arrives with `val.exprNode` an ESCAPE-HATCH
   // (shouldSkipExprParse skips the `<#`-leading expr). Un-fixed, the escape-hatch →
@@ -381,11 +383,9 @@ function valueAttrIsLowerable(
         `<${tag}> could not be lowered to valid JavaScript, so it is NOT emitted and ` +
         `the attribute will be absent at runtime.\n` +
         `  Expression: ${String(val.raw ?? "").slice(0, 80)}\n\n` +
-        `  The usual cause is a template literal that interpolates a reactive cell — ` +
-        `\`${name}=(\`… \${@cell} …\`)\`. The expression parser treats a template literal ` +
-        `as an opaque literal, so the \`@cell\` reference is not rewritten.\n` +
-        `  Workaround: use string concatenation instead — ` +
-        `\`${name}=("…" + @cell + "…")\` — which lowers correctly.`,
+        `  The value must be ONE expression the compiler can lower. (A template literal ` +
+        `that interpolates a reactive cell — \`${name}=(\`… \${@cell} …\`)\` — lowers ` +
+        `since S462; it is no longer a cause of this warning.)`,
         attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
         "warning",
       ));
@@ -3249,6 +3249,15 @@ export function generateHtml(
         if (!attr) continue;
         const name: string = attr.name;
         const val = armNameAttrAsExpr(registry, name, attr.value, node, tag);
+
+        // §5.2 (S464) — codegen backstop: a QUOTED event-handler attribute with no `${…}` is
+        // never written into HTML (E-ATTR-QUOTED-HANDLER, and a static executable value E-ATTR-STATIC-EXECUTABLE; `refuseStaticAttrWrite`).
+        if (attr.value && attr.value.kind === "string-literal" &&
+            refuseStaticAttrWrite(name, attr.value.value, attr, tag, attrs,
+              (node as { _parentTag?: string })._parentTag ??
+              (markupParentStack.length > 0 ? markupParentStack[markupParentStack.length - 1] : null))) {
+          continue;
+        }
 
         if (name.startsWith("transition:") || name.startsWith("in:") || name.startsWith("out:")) {
           continue;

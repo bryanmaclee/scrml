@@ -9,6 +9,7 @@ import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -132,8 +133,14 @@ export function asyncImportedLocalsOfFile(fileAST: ASTNode | null | undefined): 
  */
 export function buildServerCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
   const out = buildCalleeImportMap(fileAST);
-  const locals = asyncImportedLocalsOfFile(fileAST);
-  if (locals.size > 0) out.asyncImportedLocals = locals;
+  // S466 r7 — read off THE file's async name set (file-async-fns.ts): its async
+  // imports and its async function-valued bindings (`const w = (a, b) => check(a, b)`).
+  // The set's `function` declarations are not added here: on the server each one is
+  // either an in-process peer (awaited through `serverFnNames`, whose escape facts are
+  // deliberately narrower — #284) or not emitted on the server at all; the ss1 value
+  // exports and the D-5 closure read the full set directly.
+  const all = new Set<string>([...asyncImportedLocalsOfFile(fileAST), ...asyncFnValuedBindingsOfFile(fileAST)]);
+  if (all.size > 0) out.asyncImportedLocals = all;
   return out;
 }
 

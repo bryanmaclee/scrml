@@ -443,12 +443,12 @@ describe("S462 fix round 1 — fail-open holes closed", () => {
   test("F3: a built-in method NAME on a receiver of unknown type is not trusted", () => {
     expect(n046(`
     function clear() { @user = not }
-    function show() { const api = { get: clear }
+    function show(api) {
         if (@user is given) { api.get()
             @out = @user.name } }`)).toBe(1);
     expect(n046(`
     function clear() { @user = not }
-    function show() { const api = { clear: clear }
+    function show(api) {
         if (@user is given) { api.clear()
             @out = @user.name } }`)).toBe(1);
   });
@@ -471,7 +471,7 @@ describe("S462 fix round 1 — fail-open holes closed", () => {
     expect(n046(`
     function wipe() -> string { @user = not
         return "" }
-    function show() { if (@user is given) { const s = String({ toString: wipe })
+    function show() { if (@user is given) { String({ toString: wipe })
             @out = @user.name } }`)).toBe(1);
     expect(n046(`
     function wipe() -> string { @user = not
@@ -591,13 +591,13 @@ const n3 = (logic) => all3(logic).length;
 describe("S462 fix round 2 — N1: destructuring binders shadow file functions", () => {
   test("const { noop } = { noop: clear }; noop()", () => {
     expect(n3(`
-    function show() { if (@user is given) { const { noop } = { noop: clear }
+    function show(o) { if (@user is given) { const { noop } = o
             noop()
             @out = @user.name } }`)).toBe(1);
   });
   test("const { a: noop } = { a: clear }; noop()", () => {
     expect(n3(`
-    function show() { if (@user is given) { const { a: noop } = { a: clear }
+    function show(o) { if (@user is given) { const { a: noop } = o
             noop()
             @out = @user.name } }`)).toBe(1);
   });
@@ -605,7 +605,7 @@ describe("S462 fix round 2 — N1: destructuring binders shadow file functions",
     expect(n3(`
     function apply({ noop }) { if (@user is given) { noop()
             @out = @user.name } }
-    function go() { apply({ noop: clear }) }`)).toBe(1);
+    function go(o) { apply(o) }`)).toBe(1);
   });
 });
 
@@ -935,9 +935,9 @@ describe("S462 fix round 5 — P1-a: parameters are read structurally (no param 
   });
   test("a destructured parameter with a nested default", () => {
     expect(n5(`
-    function show() { const run = ({ b = { c: 1 }, noop } = {}) => { if (@user is given) { noop()
+    function show(o) { const run = ({ b = { c: 1 }, noop } = {}) => { if (@user is given) { noop()
                 @out = @user.name } }
-        run({ noop: clear }) }`)).toBe(1);
+        run(o) }`)).toBe(1);
   });
   test("a rest parameter", () => {
     expect(n5(`
@@ -1016,9 +1016,9 @@ describe("S462 fix round 5 — parameter defaults run on each call, before the b
   });
   test("a destructured array parameter shadows a file function", () => {
     expect(n5(`
-    function show() { const run = ([noop]) => { if (@user is given) { noop()
+    function show(xs) { const run = ([noop]) => { if (@user is given) { noop()
                 @out = @user.name } }
-        run([clear]) }`)).toBe(1);
+        run(xs) }`)).toBe(1);
   });
 });
 
@@ -1140,7 +1140,12 @@ describe("S462 round 6 — F6-4: a function handler value is the handler, not a 
   test("several parameters, an expression body, a function expression", () => {
     expect(nM(`<div if=@user><button onclick=\${(e, x) => { @out = @user.name }}>go</button></div>`)).toBe(0);
     expect(nM(`<div if=@user><button onclick=\${() => @out = @user.name}>go</button></div>`)).toBe(0);
-    expect(nM(`<div if=@user><button onclick=\${function (e) { @out = @user.name }}>go</button></div>`)).toBe(0);
+    // A function-EXPRESSION handler value lowers to the statement `function (e) { … }`
+    // inside the listener — JS that never parsed. The §2.2.1 parse floor now refuses it
+    // in every compile (S464 Q24 fix round 3; g-emitted-js-invalid-shapes-surfaced-by-
+    // floor-s464); the narrowing itself (the point here) raises no E-TYPE-046.
+    const fx = compile(progM(`<div if=@user><button onclick=\${function (e) { @out = @user.name }}>go</button></div>`));
+    expect(fx.map((e) => e.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
   test("outside a gate it re-tests (Q12)", () => {
     expect(nM(`<button onclick=\${() => { @out = @user.name }}>go</button>`)).toBe(1);

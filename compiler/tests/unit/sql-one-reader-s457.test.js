@@ -173,7 +173,9 @@ describe("(1) compile — false refusals of valid single statements are gone", (
       const r = compileToServer(app(`let r = ?{${BT}INSERT INTO notes (v) VALUES (\${ ${payload} }${after}${BT}}.run()`));
       expect(r.codes).toEqual([]);
       expect(r.serverJs).not.toContain("E-SQL-001");
-      expect(r.serverJs).toContain(`let r = await _scrml_sql${BT}INSERT INTO notes (v) VALUES (\${ ${payload.split("\n")[0]}`);
+      // S465 r4: a payload holding a call is lowered from the tree (`${g("if(") / 2}`),
+      // one without from text (`${ x …`) — compare without the padding after `${`.
+      expect(r.serverJs.replace(/\$\{ /g, "${")).toContain(`let r = await _scrml_sql${BT}INSERT INTO notes (v) VALUES (\${${payload.split("\n")[0]}`);
     });
   }
   test("a scrml-only payload still compiles and lowers (`is not`)", () => {
@@ -198,17 +200,17 @@ describe("(2) rewriteSqlRefs lowers only the sites the checks read", () => {
     }
   });
   test("a `?{` in code — and in a template literal's `${…}` slot — is lowered", () => {
-    expect(rewriteSqlRefs("let r = ?{`SELECT v FROM notes`}.get()", "_scrml_sql")).toBe("let r = (await _scrml_sql`SELECT v FROM notes`)[0] ?? null");
-    expect(rewriteSqlRefs("`a ${?{`SELECT v FROM notes`}.get()} b`", "_scrml_sql")).toBe("`a ${(await _scrml_sql`SELECT v FROM notes`)[0] ?? null} b`");
+    expect(rewriteSqlRefs("let r = ?{`SELECT v FROM notes`}.get()", "_scrml_sql")).toBe("let r = ((await _scrml_sql`SELECT v FROM notes`)[0] ?? null)");
+    expect(rewriteSqlRefs("`a ${?{`SELECT v FROM notes`}.get()} b`", "_scrml_sql")).toBe("`a ${((await _scrml_sql`SELECT v FROM notes`)[0] ?? null)} b`");
   });
   test("a string beside a real site: the site is lowered, the string is not", () => {
     const out = rewriteSqlRefs('f("?{`DELETE FROM log`}", ?{`SELECT v FROM notes`}.all())', "_scrml_sql");
-    expect(out).toBe('f("?{`DELETE FROM log`}", await _scrml_sql`SELECT v FROM notes`)');
+    expect(out).toBe('f("?{`DELETE FROM log`}", (await _scrml_sql`SELECT v FROM notes`))');
   });
   test("`.nobatch()` / `.acrossTenants()` are read from the site's own chain only", () => {
     expect(rewriteSqlRefs("?{`SELECT v FROM notes`}.nobatch().get()", "_scrml_sql")).toBe("(await _scrml_sql`SELECT v FROM notes`)[0] ?? null");
     expect(rewriteSqlRefs("?{`SELECT v FROM notes`}.get().nobatch()", "_scrml_sql")).toBe("(await _scrml_sql`SELECT v FROM notes`)[0] ?? null");
-    expect(rewriteSqlRefs('"a.nobatch()" + ?{`SELECT v FROM notes`}.run()', "_scrml_sql")).toBe('"a.nobatch()" + await _scrml_sql`SELECT v FROM notes`');
+    expect(rewriteSqlRefs('"a.nobatch()" + ?{`SELECT v FROM notes`}.run()', "_scrml_sql")).toBe('"a.nobatch()" + (await _scrml_sql`SELECT v FROM notes`)');
   });
   test("compile: `if (x == \"?{`…; DELETE …`}\")` keeps its string (was lowered into a broken string)", () => {
     const r = compileToServer(app(`if (x == "?{${BT}SELECT 1; DELETE FROM log${BT}}") { return 2 }`));

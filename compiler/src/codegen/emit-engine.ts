@@ -54,6 +54,12 @@
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
+import { CGError } from "./errors.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "../markup-statement-refusal.ts";
+
+/** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
+const _engineSynthRefusalAnchors: Map<string, object> = new Map();
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -897,6 +903,116 @@ function emitPayloadBindingPrelude(
 }
 
 /**
+ * Re-parse a RAW engine statement body (an opener `effect=` body, a message-arm
+ * body) through BS+TAB, wrapped as a `${ … }` logic block, and return its
+ * statement list — null when it does not parse to one. The single parser both
+ * emitters below lower from, and that `detectRuntimeChunks` walks (s462 r3).
+ */
+function parseEngineSynthLogicBody(src: string, filePath: string): any[] | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bs = require("../block-splitter.js") as {
+      runBlockSplitter: (i: { filePath: string; source: string }) => any;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
+    const wrapped = "${\n" + src + "\n}";
+    const bsOut = bs.runBlockSplitter({ filePath, source: wrapped });
+    const built = tab.buildAST(bsOut);
+    // §17.6.10.1 (S464 r1 #4, r2) — markup in statement position in an engine body (a
+    // message-arm body; the opener `effect=`) renders nothing: the body runs for its
+    // effects. Every element of the parsed body is marked reported, so the html-fragment
+    // case of emit-logic does not report it again with a `lift` fix:
+    //   - the OPENER `effect=` body is refused at the TAB, at its real file position
+    //     (ast-builder, the engine opener parse) — nothing is reported here;
+    //   - a message-arm body has no TAB parse: its refusals are recorded here, with the
+    //     "effect" fix, once per body text (the body is re-parsed per emitter). Its
+    //     location is the arm body's, not the file's (deferred — see known-gaps).
+    const isOpener = filePath === "__opener_effect__.scrml";
+    const once = (key: string): object => {
+      let anchor = _engineSynthRefusalAnchors.get(key);
+      if (!anchor) { anchor = {}; _engineSynthRefusalAnchors.set(key, anchor); }
+      return anchor;
+    };
+    if (!isOpener) {
+      for (const e of (built?.errors ?? []) as any[]) {
+        if (e?.code !== "E-MARKUP-STATEMENT-NOT-RENDERED") continue;
+        const tag = (/<([A-Za-z][A-Za-z0-9:-]*)>…/.exec(String(e.message ?? "")) ?? [])[1] ?? "p";
+        recordRefusedLowering(
+          new CGError(e.code, markupNotRenderedMessage(tag, "effect"), e.span ?? { start: 0, end: 0 }),
+          once(filePath + "\u0000" + src + "\u0000" + String(e.span?.start ?? 0)),
+        );
+      }
+    }
+    refuseUnrenderedStatementMarkup(built?.ast ?? null, (lead) => {
+      lead._reportedAtTab = true;
+      if (isOpener) return;
+      recordRefusedLowering(
+        new CGError("E-MARKUP-STATEMENT-NOT-RENDERED", markupNotRenderedMessage(lead.tag, "effect"), (lead.span as any) ?? { start: 0, end: 0 }),
+        once(filePath + "\u0000" + src + "\u0000lead" + String((lead.span as any)?.start ?? 0)),
+      );
+    }, "effect");
+    const nodes: any[] = built?.ast?.nodes ?? [];
+    for (const n of nodes) {
+      if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) return n.body;
+      if (Array.isArray(n?.body) && n.body.length > 0) return n.body;
+      if (Array.isArray(n?.children) && n.children.length > 0) return n.children;
+    }
+  } catch (_e) {
+    // fall through
+  }
+  return null;
+}
+
+/** A message-arm body's source text (block body: surrounding braces stripped). */
+function messageArmInnerSource(arm: MessageArmEntryShape): string {
+  let inner = (arm.bodyRaw || "").trim();
+  if (arm.isBlockBody && inner.startsWith("{") && inner.endsWith("}")) {
+    inner = inner.slice(1, -1).trim();
+  }
+  return inner;
+}
+
+/** A message-arm body's statement list. */
+function parseMessageArmBody(arm: MessageArmEntryShape): any[] | null {
+  return parseEngineSynthLogicBody(messageArmInnerSource(arm), "__msg_arm__.scrml");
+}
+
+/** The opener `effect=` body's statement list. */
+function parseOpenerEffectBody(openerEffect: string): any[] | null {
+  return parseEngineSynthLogicBody(openerEffect, "__opener_effect__.scrml");
+}
+
+/**
+ * s462 r3 — every engine statement body that exists only as RAW TEXT until
+ * emit time (the opener `effect=` body, each `(state × message)` arm body),
+ * parsed exactly as `emitEngineOpenerEffect` / `emitMessageArmBodyFn` parse it.
+ *
+ * `detectRuntimeChunks` (emit-client.ts) walks these like a function body. Before
+ * this, a `reactive-nested-assign` in one (`| .Go :> { @o.a.b = 5; .Busy }`,
+ * `effect=${ @o.a.b = 5 }`) emitted `_scrml_deep_set(...)` while the `utilities`
+ * chunk was pruned → ReferenceError when the arm / boot effect runs. The parse
+ * is a throwaway copy (the walk only reads it), so emission is unchanged.
+ */
+export function engineDeferredStatementBodies(meta: any): any[][] {
+  const out: any[][] = [];
+  if (!meta || typeof meta !== "object") return out;
+  if (typeof meta.openerEffect === "string" && meta.openerEffect.length > 0) {
+    const s = parseOpenerEffectBody(meta.openerEffect);
+    if (s) out.push(s);
+  }
+  const sc: any[] = Array.isArray(meta.stateChildren) ? meta.stateChildren : [];
+  for (const child of sc) {
+    const arms: any[] = Array.isArray(child?.messageArms) ? child.messageArms : [];
+    for (const arm of arms) {
+      const s = parseMessageArmBody(arm);
+      if (s) out.push(s);
+    }
+  }
+  return out;
+}
+
+/**
  * §51.0.S (S155 batch 3) — Lower ONE `(state × message)` arm body into a JS
  * arm fn `function (_scrml_state_data, _scrml_msg_data) { <bindings>; <effects>; return
  * <target>; }`.
@@ -935,33 +1051,8 @@ function emitMessageArmBodyFn(
   // MESSAGE payload prelude (the dispatched message's `.Drop(col)` binding).
   const msgPrelude = emitPayloadBindingPrelude(arm.payloadBindings, msgFields, "_scrml_msg_data");
 
-  // Re-parse the arm body. For a block body, strip the surrounding `{ }` (the
-  // parser retains them); for a bare target, use the body verbatim.
-  let inner = (arm.bodyRaw || "").trim();
-  if (arm.isBlockBody && inner.startsWith("{") && inner.endsWith("}")) {
-    inner = inner.slice(1, -1).trim();
-  }
-
-  let stmts: any[] | null = null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const bs = require("../block-splitter.js") as {
-      runBlockSplitter: (i: { filePath: string; source: string }) => any;
-    };
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
-    const wrapped = "${\n" + inner + "\n}";
-    const bsOut = bs.runBlockSplitter({ filePath: "__msg_arm__.scrml", source: wrapped });
-    const built = tab.buildAST(bsOut);
-    const nodes: any[] = built?.ast?.nodes ?? [];
-    for (const n of nodes) {
-      if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) { stmts = n.body; break; }
-      if (Array.isArray(n?.body) && n.body.length > 0) { stmts = n.body; break; }
-      if (Array.isArray(n?.children) && n.children.length > 0) { stmts = n.children; break; }
-    }
-  } catch (_e) {
-    stmts = null;
-  }
+  // Re-parse the arm body (block body: braces stripped; bare target: verbatim).
+  const stmts = parseMessageArmBody(arm);
 
   const bodyLines: string[] = [...statePrelude, ...msgPrelude];
 
@@ -992,7 +1083,7 @@ function emitMessageArmBodyFn(
     // Defensive: re-parse failed. Fall back to the single-expression rewrite of
     // the whole (bare) body as the target — a malformed multi-statement body
     // surfaces a loud downstream JS parse error rather than silently dropping.
-    bodyLines.push(`return ${rewriteHookExprText(inner)};`);
+    bodyLines.push(`return ${rewriteHookExprText(messageArmInnerSource(arm))};`);
   }
 
   const indented = bodyLines.map((l) => `    ${l}`).join("\n");
@@ -1963,24 +2054,7 @@ export function emitEngineOpenerEffect(
 
   // Re-parse the raw body through BS+TAB so multi-statement bodies + nested
   // `!{}` failable handlers become real AST statements.
-  let stmts: any[] | null = null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const bs = require("../block-splitter.js") as { runBlockSplitter: (i: { filePath: string; source: string }) => any };
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
-    const wrapped = "${\n" + openerEffect + "\n}";
-    const bsOut = bs.runBlockSplitter({ filePath: "__opener_effect__.scrml", source: wrapped });
-    const built = tab.buildAST(bsOut);
-    const nodes: any[] = built?.ast?.nodes ?? [];
-    for (const n of nodes) {
-      if (n?.kind === "logic" && Array.isArray(n.body) && n.body.length > 0) { stmts = n.body; break; }
-      if (Array.isArray(n?.body) && n.body.length > 0) { stmts = n.body; break; }
-      if (Array.isArray(n?.children) && n.children.length > 0) { stmts = n.children; break; }
-    }
-  } catch (_e) {
-    stmts = null;
-  }
+  const stmts = parseOpenerEffectBody(openerEffect);
 
   lines.push(
     `// §51.0.H Form 3 opener effect= (boot-only init effect): ${meta.varName} (${meta.forType})`,
@@ -2534,7 +2608,19 @@ function buildEngineArms(
         // match-arm `looksLikeMarkupStart` branch (emit-match.ts:805).
         body = [];
         try {
-          const synthResult = nativeParseFile(synthLabel, trimmed);
+          // `<md>` (SPEC §67): the native parser has no `<md>` production — live route.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { sourceHasMdElement } = require("../md-lower.ts") as { sourceHasMdElement: (s: string) => boolean };
+          let synthResult: any;
+          if (sourceHasMdElement(trimmed)) {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { splitBlocks } = require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => any };
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { buildAST } = require("../ast-builder.js") as { buildAST: (bs: any) => any };
+            synthResult = buildAST(splitBlocks(synthLabel, trimmed));
+          } else {
+            synthResult = nativeParseFile(synthLabel, trimmed);
+          }
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
           }

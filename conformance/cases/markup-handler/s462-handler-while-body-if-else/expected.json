@@ -1,0 +1,16 @@
+{
+  "id": "markup-handler-s462-handler-while-body-if-else",
+  "description": "S462 review: a one-statement handler whose braceless `while` body is an if/else takes the statement path and runs the loop with the right arm (→ 3). Pre-fix the reroute looked only at a top-level if-with-else and this reached the text path.",
+  "language-version": "1.0",
+  "spec": "§5.2.3, §17, §49",
+  "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
+  "rationale": "§5.2.3: an inline block's statements SHALL run; an `else` binds to the nearest unmatched `if`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#b2" }],
+    "domAnchored": [
+      { "selector": "#oi", "text": "3" }
+    ]
+  }
+}

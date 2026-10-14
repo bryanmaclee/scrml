@@ -638,7 +638,7 @@ Lifecycle on function-return type is fully tracked end-to-end. The transition me
 
 | Lifecycle shape | Pre-type | Transition mechanism |
 |---|---|---|
-| **Presence-progression** | `not` (e.g., `(not to T)`) | **Discrimination IS transition** — `given u = expr {}`, `if (u is not) return`, OR `match u { ... }` AUTO-MARKS |
+| **Presence-progression** | `not` (e.g., `(not to T)`) | **Discrimination IS transition** — `if (u is not) return`, `if (u is given) { … }`, OR `match u { not :> … else :> … }` AUTO-MARKS (see the impl#1 note below the example) |
 | **Variant-progression** | An enum variant (e.g., `(.A to .B)`) | **Explicit `transition(u)`** — call the `transition()` built-in after discriminating the source variant |
 
 **Presence-progression — discrimination IS transition:**
@@ -651,25 +651,16 @@ function loadUser(id: number) -> (not to User) {
 
 const u = loadUser(42)
 
-// Form 1 — given presence-guard (§42.2.3)
-given u :> {
-    const name = u.name                   // OK — discrimination = transition
-}
-
-// Form 2 — if-is-not early-return
+// if-is-not early-return — discrimination = transition
 if (u is not) return
 const name = u.name                       // OK — narrowed + transitioned
-
-// Form 3 — match
-match u {
-    not => handleAbsence()
-    given u :> { const name = u.name }    // OK — arm discriminates + transitions
-}
 
 // Pre-transition access — fires E-TYPE-001
 const u2 = loadUser(42)
 const u2name = u2.name                    // E-TYPE-001 — u2 was not discriminated
 ```
+
+**The block and match forms (S462 currency).** The SPEC canonical block form is `if (u is given) { const name = u.name }` (§42.2.2a / §42.4 statement 8), and the presence match is `match u { not :> handleAbsence()  else :> … }` (the present case is the arm after `not :>`, §42.2.3). **impl#1 gap (measured S465):** the §14.12.6.1 lifecycle tracker does not yet credit `if (u is given) { … }` as the transition — a member read inside it still fires E-TYPE-001 — and `match` on a struct-typed `User | not` subject is E-TYPE-024. Until that lands, write the early-return form above for a lifecycle-annotated return. The pre-S462 guard `given u :> { … }` (and the `given u :>` match arm) is SOFT-DEPRECATED (W-GIVEN-PRESENCE-DEPRECATED, §63) — do not write it in new code.
 
 **Variant-progression — explicit `transition(u)`:**
 
@@ -698,7 +689,7 @@ if (a is .Draft) {
 }
 ```
 
-**Why the asymmetry?** Presence-discrimination (`is not` / `is some` / `given` / `match`) is already a first-class scrml primitive (§42); reusing it as the transition marker keeps the adopter mental model unified. A variant tag like `.Draft` is a positive shape — discriminating it proves the SOURCE variant but does NOT inherently prove the callee advanced the lifecycle. The explicit `transition()` call provides the per-access signal the type-system needs to gate post-transition field access.
+**Why the asymmetry?** Presence-discrimination (`is not` / `is given` / `match`) is already a first-class scrml primitive (§42); reusing it as the transition marker keeps the adopter mental model unified. A variant tag like `.Draft` is a positive shape — discriminating it proves the SOURCE variant but does NOT inherently prove the callee advanced the lifecycle. The explicit `transition()` call provides the per-access signal the type-system needs to gate post-transition field access.
 
 ### `transition()` semantics
 
@@ -717,7 +708,7 @@ The hybrid mechanism specifies the binary case. Multi-variant chains — `(.Draf
 - §14.12 — normative spec (canonical home; promoted from §14.3 sub-content at S130)
 - §6.2 (PRIMER) — Shape 1 plain reactive cells (the §6.2-shape position that receives the annotation)
 - §7 (PRIMER) — engines (the engine-cell carve-out target)
-- §42.2.3 — `given` presence-guard (form 1 of presence-progression discrimination)
+- §42.2.2a / §42.4 — `is given` / `is not` presence tests (the discrimination forms); §42.2.3 — the in-place `given` guard, SOFT-DEPRECATED S462 (§63)
 - `compiler/src/type-system.ts:1444` — Landing 1 per-access tracker (S130 `1feaedc9`)
 - `bun scrml migrate --lifecycle` is NOT yet a CLI verb; `->` → `to` migration is manual during the deprecation window.
 
@@ -861,7 +852,7 @@ Compound state with validators auto-synthesizes a reactive validity surface at T
 
 **Universal-core predicate vocabulary** (§55.1) — 14 predicates; same word at compile site and runtime:
 
-`req`, `is some` (existence-check; `not` is scrml's sole absence value), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`.
+`req`, `is given` (existence-check; `not` is scrml's sole absence value; `is some` is its soft-deprecated spelling, §55.1 / §63 — same `.NotSome` error tag), `length(<rel-arg>)`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`.
 
 **(S66 correction):** earlier primer drafts listed `email`, `url`, `numeric`, `integer`, `custom` here. **Those are NOT universal-core predicates.** `email`/`url`/`numeric`/`integer` are stdlib `scrml:data` library predicate-builders (separate surface; see §10). `custom` is the ValidationError tag at SPEC §55.9 line 24532 ("for developer-defined custom validators (Edge G)") — a tag-level escape hatch for application-defined predicates, NOT a universal-core predicate. The 14 above are the SPEC §55.1 catalog verbatim. Audit at `scrml-support/archive/audits/a1c-roadmap-rule4-audit-2026-05-07.md` §1.1 documents the drift + correction. Per pa.md Rule 4: spec wins.
 
@@ -944,20 +935,33 @@ D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now au
 - Firing semantics: compile-time + runtime boundary check. A non-conforming value cannot inhabit the type. **Stronger** than state validators (runtime-only-reactive) and schema constraints (DBMS-enforced).
 - Type predicate + state validator stack as **independent enforcement layers**. They compose cleanly.
 
-### §9.4 `is some` vs `req` (§42.2.5) — distinct predicates (L5)
+### §9.4 `is given` vs `req` (§42.2.5) — distinct predicates (L5)
 
 | Predicate | Semantics | `""` (empty string) |
 |---|---|---|
-| `is some` | value EXISTS (`not` fails) | TRUE — empty string IS some value |
+| `is given` | value EXISTS (`not` fails) | TRUE — empty string IS a given value |
 | `req` | value is NON-EMPTY / MEANINGFUL | FALSE — empty string fails req |
 
-Both predicates exist; both are needed; they coexist in the validator vocabulary. **Three native loci** of "exists/required" semantic across scrml: schema SQL-mirror (`not null`), state validator (`req` and/or `is some`), refinement type (predicate form). Each fires in its layer's enforcement context — not redundancy.
+Both predicates exist; both are needed; they coexist in the validator vocabulary. **Three native loci** of "exists/required" semantic across scrml: schema SQL-mirror (`not null`), state validator (`req` and/or `is given`), refinement type (predicate form). Each fires in its layer's enforcement context — not redundancy.
 
-**Advanced `not` forms** (§42.2.3 / §42 union form / §42.1.1 — S135 cluster N catch-up, F-045):
+**Advanced `not` forms** (§42.2.2a / §42.4 / §42 union form / §42.1.1 — S135 cluster N catch-up, F-045; S462/S465 currency):
 
-- **`given x :> …` presence-guard** — the canonical narrow-to-present form. `given x :> @x.name` is type-equivalent to `if (@x is some) @x.name` but the bound `x` is narrowed to the non-`not` type within the body. Reach for `given` when you need to USE the value; reach for `if (x is some)` when you only need to BRANCH.
+- **The presence test narrows — `if (x is given) { … }`.** `x is given` is THE explicit presence test, the positive of `x is not`; where `x` is a place (a local, a parameter, a cell or a member path) it narrows `x` from `T | not` to `T` where the test is true (§42.4 statement 8). As a WHOLE condition a bare `T | not` is the same presence test — `if (@user) { … }`, `<p if=@user>` (§42.4 statement 2) — but inside a compound spell it out: `if (@a is given && @b is given)` (a bare `@a && @b` is E-OPERATOR-OPERAND-TYPE, statement 7). There is no separate "narrow-and-use" form any more: one test both BRANCHES and narrows.
+  ```scrml
+  type User:struct = { name: string }
+  <user>: User | not = not
+  <greeting> = ""
+  function greet() {
+    if (@user is given) { @greeting = @user.name }     // @user narrowed to User inside
+  }
+  <p if=@user>Hello, ${@user.name}</p>                 // bare presence test (whole condition)
+  ```
 - **`T | not` union form** — the canonical type for absence-possible values. A server fn returning `User | not` cleanly composes with the §6.8.3 reset × lifecycle semantic. The compiler wire-format envelope (§57) round-trips `not` losslessly.
-- **`""` / `0` / `false` / `[]` / `{}` are DEFINED values, NOT absence** (§42.1.1, S89 ratification). `is some "" → TRUE`; `req "" → FALSE`. Don't conflate "empty" with "absent" — they're distinct concepts in scrml.
+- **`""` / `0` / `false` / `[]` / `{}` are DEFINED values, NOT absence** (§42.1.1, S89 ratification). `"" is given → TRUE`; `req "" → FALSE`. Don't conflate "empty" with "absent" — they're distinct concepts in scrml.
+
+> **Deprecated presence forms (S462, §63 Stage 1 — read them in old code, do not write them).** Both still parse and run identically during the window and fire an Info lint; `scrml fix` rewrites them (default rules `is-some` / `given-presence`).
+> - `x is some` / validator `<x is some>` → `x is given` / `<x is given>` (**W-IS-SOME-DEPRECATED**, §42.2.2a / §55.1; the `.NotSome` error tag is NOT renamed).
+> - In-place guard `given x :> { … }` → `if (x is given) { … }`; `given x, y :> { … }` → `if (x is given && y is given) { … }`; markup `${ given @u :> { … } }` → `${ if (@u is given) { … } }` or `<p if=@u>`; match arm `given x :>` → `else :>` after `not :>` (**W-GIVEN-PRESENCE-DEPRECATED**, §42.2.3). The §66.7.5 **rebind head** `given c = @h :> { … }` is a different form and is NOT deprecated.
 
 ### §9.5 `not` keyword
 
@@ -1085,7 +1089,7 @@ Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS 
   ```scrml
   <visited>: set[NodeId] = [:]
   @visited = @visited.add(n)                  // dedup-by-construction
-  given seen = @visited.has(n) { /* present */ }   // or .remove(k), .size
+  if (@visited.has(n)) { /* present */ }      // .has is a bool; or .remove(k), .size
   <both>: set[K] = ${ @a.union(@b) }          // .union / .intersect / .difference
   <each in=@visited.elements() as v> … </each>     // iterate the elements (the map keys)
   ```
@@ -1101,7 +1105,7 @@ Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS 
   ```scrml
   <seen>: [string: bool] = [:]
   @seen = @seen.insert(key, true)
-  given _ = @seen[key] { /* present */ }      // or @seen.has(key)
+  if (@seen[key] is given) { /* present */ }  // or @seen.has(key)
   ```
 - **Dedup a list** — `unique` (now struct-safe, §59.5-keyed):
   ```scrml
@@ -1127,7 +1131,7 @@ Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS 
 **Crypto + format + patterns:**
 - `scrml:crypto` — `hash`, `verifyHash`, `hmac`, `safeCompare`, `generateUUID`, `generateToken`
 - `scrml:format` — `formatCurrency/Number/Percent/Bytes`, `slug`, `pluralize`, `titleCase`, `capitalize`, `toWords`, `truncate`, `padLeft/Right`, locale-aware Intl: `compactNumber`, `formatList`, `formatRange`, `formatNumberAdvanced`
-- `scrml:time` — `formatDate/Time/DateTime/Relative/Duration`, `parseDate`, `isValidDate`, `startOf/addTime/diffTime`, `debounce/throttle/sleep`; timezone: `formatInTimezone`, `nowInTimezone`, `toTimezoneParts`, `tzOffset`; ISO: `formatISO`, `parseISO`; **`now()` — (S176, DD1 Fork 1 / 1C) capability-scoped wall clock** (`Date.now()` ms): non-deterministic → REJECTED in pure `fn`/`pure` bodies (E-FN-004, binding-aware — a user's own `function now()` is not gated), ALLOWED in `function`/`server function`. The sanctioned centralized clock touch. SPEC §41.19.
+- `scrml:time` — `formatDate/Time/DateTime/Relative/Duration`, `parseDate`, `isValidDate`, `startOf/addTime/diffTime`, `debounce/throttle` (→ a `Debouncer` / `Throttler` STRUCT driven by `run(t, …args)` / `cancel(t)` / `flush(t)` — S464, §41.21; no function-with-methods: `d(q)` / `d.cancel()` is `E-TIMER-STRUCT-MISUSE`; state keyed by the struct's identity — unforgeable, collectable), `sleep`; timezone: `formatInTimezone`, `nowInTimezone`, `toTimezoneParts`, `tzOffset`; ISO: `formatISO`, `parseISO`; **`now()` — (S176, DD1 Fork 1 / 1C) capability-scoped wall clock** (`Date.now()` ms): non-deterministic → REJECTED in pure `fn`/`pure` bodies (E-FN-004, binding-aware — a user's own `function now()` is not gated), ALLOWED in `function`/`server function`. The sanctioned centralized clock touch. SPEC §41.19.
 - `scrml:regex` — vetted `patterns` catalog (email, url, ipv4, uuid, slug, hexColor, semver, isoDate, phoneE164, usZip, etc.); helpers `test`, `match`, `extract`, `replace`, `escape`, `caseInsensitive`, `isValid(name, str)`
 - `scrml:math` — **(S176, DD1 Fork 1 / 1A)** PURE scalar vocabulary: `round`, `floor`, `ceil`, `abs`, `min(...values)`, `max(...values)`, `clamp(value, min, max)`, `parseInt(str, radix=10)`, `parseFloat`, `toNumber`, `isNaN`. The sanctioned centralized host `Math.*`/`Number.*` touch. Every member is pure → CALLABLE in pure `fn` bodies (imports are fn-callable; no E-FN-003). Import-only (no ambient `Math`). Deliberately EXCLUDES `random()` (non-deterministic — its home is the capability-scoped `scrml:random`, §41.20). SPEC §41.18.
 - `scrml:random` — **(DD1 Fork 1 follow-on)** capability-scoped NON-DETERMINISTIC random source: `random()` → float `[0, 1)`; `randomInt(min, max)` → integer in `[min, max]` **INCLUSIVE** (the fair-die / token-mint idiom, replaces `Math.floor(Math.random()*N)`). The sanctioned centralized `Math.random()` touch. Same capability class as the clock: non-deterministic → REJECTED in pure `fn`/`pure` bodies (E-FN-004, binding-aware — a user's own `function random()` is not gated), ALLOWED in `function`/`server function`. Import-only (no ambient random). SPEC §41.20.
@@ -1207,7 +1211,7 @@ Captured in full at `scrml-support/docs/deep-dives/v0next-s56-deliberation-outco
 | L2 | Compound state Variant C with canonical `@formRes.name` access — **→ §66.4** (Variant C spelling superseded: attributes are data, children are validated fields; spec-ahead) |
 | L3 | Decl-coupled-with-render-spec (`<name req> = <input/>`) — **→ §66.5** (the RHS render-spec coupling becomes a `renders` clause; spec-ahead) |
 | L4 | Partial validator vocabulary unification (no bilingual schema) |
-| L5 | `is some` reused from existing scrml primitive (coexists with `req`) |
+| L5 | `is given` (spelled `is some` until S462 — §63 soft-deprecated) reused from existing scrml primitive (coexists with `req`) |
 | L6 | Match Tier 0/1/2 ladder |
 | L7 | Match attributes (rules-inert + `effect=`/`<onTransition>` engine-only) |
 | L8 | Two match shapes coexist (block-form + JS-style) |

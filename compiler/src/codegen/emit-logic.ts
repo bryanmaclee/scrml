@@ -3,10 +3,17 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, type MatchArm } from "./emit-control-flow.ts";
+import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
+import * as acorn from "acorn";
+import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
+import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
+import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
+import { isWholeBraceBlock } from "../brace-pair.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
+import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -20,15 +27,16 @@ import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
 import { FOREIGN_SEAL_FN, foreignSliceSource, templateLiteralOf, foreignSiteLabel, checkForeignSliceSyntax, scanForeignSliceShape, scanForeignSliceTopLevelBindings } from "./foreign-seal.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
-import { sqlQueryExprShape, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { cpsCellWriteStatement } from "./cps-cell-writes.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
-import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
+import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan, currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -642,6 +650,8 @@ interface LogicArm {
   // (`{ fail EnumType::Variant(args) }`). When present, emitArmBody lowers it
   // via the shared fail-expr emitter (`return { __scrml_error, ... }`).
   failExpr?: FailExprLike;
+  /** The handler body's parsed expression, when the builder produced one. */
+  handlerExpr?: ExprNode | null;
 }
 
 /** Shape of the fail-expr node (subset emitFailExpr reads). */
@@ -835,6 +845,33 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   // reactive assignments (@var = expr) are emitted as _scrml_reactive_set() calls
   // rather than _scrml_reactive_get() on the left side of =.
   // When machineBindings is provided, machine-bound assignments emit transition guards (§51.5).
+  // S465 (SPEC §13.2) — on the SERVER a handler arm body is lowered from its
+  // parsed tree, in the guarded expression's own (server) context, so a call to a
+  // Promise-returning import is awaited by the classifier like anywhere else. The
+  // text lowerings below run in a CLIENT context (`_makeExprCtx({})`,
+  // `rewriteBlockBody`) and never await: `!{ _ :> check(pass, h) }` bound a
+  // pending — always truthy — Promise.
+  // A braced handler body is ALWAYS a statement block here (never an object
+  // literal — the text path below reads it the same way), so `{}` stays an empty
+  // block (`resultVar = null`), not the value `{}`.
+  const isBraced = handler.startsWith("{") && handler.endsWith("}");
+  // S465 r2 — FAIL CLOSED: on the server both readers return a tree for every
+  // non-empty body (a refused one is a compile error, arm-structure.ts), so the
+  // client text lowerings below are never reached with server code.
+  if (opts?.boundary === "server") {
+    if (isBraced) {
+      if (!handler.slice(1, -1).trim()) return "";
+      const stmts = serverArmBlockStatements(handler, "server", arm, { alwaysBlock: true }) ?? [];
+      return emitLogicBody(stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
+    }
+    // An unbraced §18.2 leave statement (`_ :> return 7`, `_ :> fail E::X`) is a
+    // statement, not a value: read it as one.
+    const leave = armBlockStatementsDetailed(handler);
+    if (leave && leave.ok) return emitLogicBody(leave.stmts, opts).filter((l: string) => l.trim() !== "").join("\n");
+    const node = serverArmExprNode(handler, "server", arm.handlerExpr, arm);
+    const code = emitExpr(node, _makeExprCtx(opts)).trim();
+    return code.endsWith(";") ? code : code + ";";
+  }
   if (handler.startsWith("{") && handler.endsWith("}")) {
     const inner = handler.slice(1, -1).trim();
     if (!inner) return "";
@@ -1102,6 +1139,38 @@ function givenHeadRef(node: { variableIsCell?: unknown; span?: unknown }, name: 
 /**
  * Build an EmitExprContext from the current EmitLogicOpts.
  */
+/**
+ * S465 r4 — a destructuring pattern's default values are EXPRESSIONS: lowered from
+ * the builder's parsed node through emitExpr (so a call in one is awaited on the
+ * server, and `@x` reads lower on the client), never pasted as source text.
+ */
+export function patternDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer {
+  return (text: string, n: unknown): string => emitExprFromText((n as ExprNode | null) ?? null, text, _makeExprCtx(opts));
+}
+
+/**
+ * S465 r4 — a nested SERVER function's parameter defaults, lowered from the tree
+ * (never pasted as text). A default that needs an `await` cannot be written in a
+ * parameter list (`await` is not allowed there) — a compile error that says where
+ * to move the call. Client: undefined (the default is kept as written).
+ */
+function serverParamDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer | undefined {
+  if (opts.boundary !== "server") return undefined;
+  const lower = patternDefaultLowerer(opts);
+  return (text: string, n: unknown): string => {
+    const out = lower(text, n);
+    if (!/\bawait\b/.test(out)) return out;
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      `the parameter default \`${String(text).replace(/\s+/g, " ").trim().slice(0, 60)}\` calls an async function — ` +
+        "its result must be awaited (§13.2), and a parameter default cannot await. Give the parameter no " +
+        "default and compute the value as the function body's first statement.",
+      currentLoweringSpan(),
+    ), null);
+    return "null";
+  };
+}
+
 function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
   return {
     // R25-Bug-42 (S138): honor opts.boundary so server-mode contexts (e.g.
@@ -1237,6 +1306,146 @@ function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
 }
 
 /**
+ * S465 r4 — a block-bodied arrow / function VALUE in server code (`x => { … }`,
+ * `function (q) { … }`), which the expression parser keeps as an escape hatch, lowered
+ * from the TREE: its body is read by the function-body statement parser and emitted by
+ * the statement emitter in this server context (so every call in it is classified).
+ * The value is a synchronous callback: a body that needs an `await` cannot be written
+ * in it — null is returned and the caller refuses (server-text-guard.ts), as it does
+ * for a head it cannot read (type annotations, a call in a default) or a body the
+ * parser refuses. Returns the JS function text, or null.
+ */
+export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opts: { async?: boolean } = {}): string | null {
+  // S466 r7 (MED-D) — the text (a caller that holds no node) is read by the expression
+  // parser; head and body come from ITS node, never from a hand split of the text.
+  let node: unknown = null;
+  try { node = parseExprToNode(String(raw ?? "").trim(), "<server-fn-value>", 0); } catch { node = null; }
+  return emitServerFnValue(node, ctx, opts);
+}
+
+/**
+ * S466 r7 (MED-D) — `emitServerFnValueFromText` from the expression parser's NODE: a
+ * block-bodied arrow / function expression is an escape hatch that carries acorn's own
+ * structured parameters (`params`, defaults as trees) and its body as acorn delimited it
+ * (`bodyRaw`). Before r7 the head and body were found by a text split (the first `=>`,
+ * paren counting that did not skip strings) and the head was re-checked with a regex:
+ * `function (a, s = ")") { … }`, `(a, k = (x) => x) => { … }` and `(a, s = "=>") => { … }`
+ * were refused as unreadable (Rule 7: don't ask the text what the tree already knows).
+ */
+export function emitServerFnValue(hatchNode: unknown, ctx: EmitExprContext, opts: { async?: boolean } = {}): string | null {
+  const hatch = hatchNode as { kind?: string; nativeKind?: string; params?: unknown; bodyRaw?: unknown; fnName?: unknown; raw?: unknown } | null;
+  if (!hatch || hatch.kind !== "escape-hatch") return null;
+  if (hatch.nativeKind !== "ArrowFunctionExpression" && hatch.nativeKind !== "FunctionExpression") return null;
+  if (!Array.isArray(hatch.params) || typeof hatch.bodyRaw !== "string") return null;
+  if (/^\s*async\b/.test(String(hatch.raw ?? ""))) return null; // an author-written `async` value: not scrml
+  const fnM = hatch.nativeKind === "FunctionExpression";
+  const body = hatch.bodyRaw;
+  if (!isWholeBraceBlock(body)) return null;
+  const emittedParams = emitFnValueParams(hatch.params as never, ctx);
+  // A default the lowering had to await cannot be written in a parameter list (decided
+  // on the syntax of the emitted head: `await` is reserved in a module function head).
+  if (!parsesAsSyncFunctionBody(`(function (${emittedParams.text}) {});`)) {
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      "a parameter default of this function value calls an async function — its result must be awaited " +
+        "(§13.2), and a parameter default cannot await. Give the parameter no default and compute the value " +
+        "as the function body's first statement.",
+      currentLoweringSpanForFnValue(),
+    ), null);
+    return REFUSED_SERVER_TEXT;
+  }
+  const fnName = typeof hatch.fnName === "string" && hatch.fnName ? ` ${hatch.fnName}` : "";
+  const head = fnM ? `function${fnName}(${emittedParams.text})` : `(${emittedParams.text})`;
+  const r = body.slice(1, -1).trim() ? armBlockStatementsDetailed(body) : { ok: true as const, stmts: [] };
+  if (!r) return null;
+  if (!r.ok) {
+    // S465 r5 — a body the statement grammar refuses WITH the front-end's own code
+    // (`switch` E-SWITCH-FORBIDDEN, `try` E-TRY-NOT-IN-SCRML, `throw`
+    // E-THROW-NOT-IN-SCRML, `for … in` E-CTRL-011 — SPEC §7.2.1: not scrml in any
+    // position) reports THAT diagnostic, the one the same statement gets in a
+    // function body, instead of the generic text-guard refusal.
+    if (r.refusal.code) {
+      refuseServerArm(body, r.refusal, null, "in a server function value's body");
+      return REFUSED_SERVER_TEXT;
+    }
+    return null;
+  }
+  // S465 r6 (review MED-2) — the type checker never sees a function VALUE's body (the
+  // expression parser keeps it as text), so a `match` on enum variants in it has no
+  // subject type: lowered from here it compared the variant OBJECT to a string and left
+  // the payload binding unbound — `undefined` at exit 0. SPEC §18: `match` requires a
+  // typed subject (E-TYPE-025, what the same body gets in a `function`). Refused.
+  const variantMatch = variantMatchIn(r.stmts);
+  if (variantMatch) {
+    recordRefusedLowering(new CGError(
+      "E-TYPE-025",
+      "E-TYPE-025: a `match` on enum variants inside a function value (`(r) => { … match r { .Found(n) :> … } }`) " +
+        "has no typed subject — the body of a function value is not type-checked, so the compiler cannot tell which " +
+        "enum the variants belong to or bind their payloads. Declare the helper as a `function` with a typed " +
+        "parameter (`function label(r: R) { … }`) and call it.",
+      currentLoweringSpanForFnValue(),
+    ), null);
+    return REFUSED_SERVER_TEXT;
+  }
+  const base = _logicOptsFromExprCtx(ctx);
+  const declared = new Set<string>([...((base.declaredNames as Set<string> | undefined) ?? []), ...emittedParams.names]);
+  if (fnName) declared.add(fnName.trim());
+  const lines = emitLogicBody(r.stmts, {
+    ...base,
+    boundary: ctx.mode === "server" ? "server" : "client", // S466 r7 — the client copy of an async binding (MED-C) too
+    declaredNames: declared,
+    insideFunctionBody: true,
+    tildeContext: undefined,
+  } as EmitLogicOpts).filter((l: string) => l.trim() !== "");
+  const out = lines.join("\n");
+  // The value is a SYNCHRONOUS callback: a body whose lowering needs an `await` cannot
+  // be written in it (null — the caller refuses). Decided on the emitted JS's own
+  // syntax, not its text (S465 r5: a `/\bawait\b/` test refused `"await " + x`): the
+  // body must parse as a plain function in a module, where `await` is reserved.
+  // S465 r6 — `opts.async`: the value is an async-coloured binding
+  // (fn-valued-bindings.ts), emitted `async` so its body may await.
+  if (!opts.async && !parsesAsSyncFunctionBody(out)) return null;
+  const inner = lines.map((l: string) => "  " + l).join("\n");
+  const asyncKw = opts.async ? "async " : "";
+  return fnM ? `${asyncKw}${head} {\n${inner}\n}` : `${asyncKw}${head} => {\n${inner}\n}`;
+}
+
+/** S465 r6 — the first `match` in `stmts` whose arms name enum variants (`.X`, `T::X`, `T.X(`), or null. */
+function variantMatchIn(stmts: unknown): unknown {
+  const seen = new Set<unknown>();
+  let found: unknown = null;
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const k = (n as { kind?: unknown }).kind;
+    if (k === "match-stmt" || k === "match-expr") {
+      const text = JSON.stringify(n, (key, v) => (key === "span" ? undefined : v));
+      if (/(^|[^\w$])\.\s*[A-Z]|::\s*[A-Z]/.test(text)) { found = n; return; }
+    }
+    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Record<string, unknown>)[key]);
+  };
+  walk(stmts);
+  return found;
+}
+
+function currentLoweringSpanForFnValue(): object {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { currentLoweringSpan } = require("./sql-one-statement-guard.ts") as { currentLoweringSpan: () => object | null };
+  return currentLoweringSpan() ?? {};
+}
+
+/** S465 r5 — true when `body` parses as the body of a NON-async function in a module. */
+function parsesAsSyncFunctionBody(body: string): boolean {
+  try {
+    acorn.parse(`(function () {\n${body}\n});`, { ecmaVersion: "latest", sourceType: "module" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * §19.8.3 (S454) — the `sql` node an expression-position `?{}` query stands for.
  * The query text is read from the block's source exactly as the block builder
  * reads it (`tokenizeSQL` → the `SQL_RAW` body); the chain comes from the
@@ -1270,6 +1479,33 @@ export function emitSqlQueryShape(shape: SqlQueryExprShape, ctx: EmitExprContext
   // emitSqlDriverCall: only the driver call runs inside `_scrml_sql_attempt`.
   const stmt = emitLogicNode(_sqlNodeFromShape(shape), { ...opts, boundary: "server", sqlAttempt: attempt });
   return `(${stmt.replace(/;\s*$/, "")})`;
+}
+
+/**
+ * §19.8.3 / §44.3 (S465, s462 fix round 1) — lower the operand of a `!{}`
+ * handler whose operand STARTS FROM a `?{}` query (sql-attempt.ts
+ * `sqlQueryHeadOfExpr`). Returns null when it does not.
+ *
+ * The query is evaluated through `_scrml_sql_attempt` (a failure becomes a
+ * `SqlError` envelope for the handler's arms) exactly as without a tail. When
+ * the operand is MORE than the query (`?{…}.get().name`, `?{…}.all().length`),
+ * the query's value is bound first (`pre`) and the rest of the expression — the
+ * tail — runs on it only when the query succeeded; a failure envelope passes
+ * through untouched to the arms:
+ *
+ *   const _scrml_query_3 = (await _scrml_sql_attempt(…));
+ *   let _scrml_result_2 = (_scrml_query_3 && _scrml_query_3.__scrml_error) ? _scrml_query_3 : _scrml_query_3.name;
+ */
+function _emitHandledSqlOperand(expr: ExprNode | null | undefined, opts: EmitLogicOpts): { pre: string | null; init: string } | null {
+  const head = sqlQueryHeadOfExpr(expr);
+  if (!head || !expr) return null;
+  const ctx = _makeExprCtx(opts);
+  const attempt = emitSqlQueryShape(head.shape, ctx, true);
+  if (head.query === expr) return { pre: null, init: attempt };
+  const q = genVar("query");
+  const valueRef = { kind: "ident", name: q, span: (head.query as { span?: unknown }).span } as unknown as ExprNode;
+  const tail = emitExpr(replaceSqlQueryHead(expr, head.query, valueRef), ctx);
+  return { pre: `const ${q} = ${attempt};`, init: `(${q} && ${q}.__scrml_error) ? ${q} : ${tail}` };
 }
 
 /**
@@ -2193,6 +2429,25 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
     case "html-fragment":
       // Phase 4: HTML fragment tokens are not JS — drop them in logic context.
       // In lift context, emit-lift handles them for tag reconstruction.
+      //
+      // S462 Q24 "a" / S464 (E-MARKUP-STATEMENT-NOT-RENDERED) — a markup element
+      // written at statement position in a logic body (`_markupLead`, set by the TAB on
+      // the fragment a statement-leading element became: ast-builder
+      // takeStatementMarkupLead) that NO lowering rendered reaches here — it is not the
+      // §17.6.10 implied lift of a single-markup arm (that pass replaces the fragment
+      // with a `lift-expr`), and no `lift` names it. Dropping it would render nothing at
+      // exit 0, so it is refused: fail closed, once per element.
+      // Recorded in the run-wide refused-lowering sink (refused-lowering-errors.ts):
+      // the control-flow emitters rebuild `opts` field by field and do not thread
+      // `opts.errors` into an `if` / loop body, which is exactly where this lands.
+      if ((node as any)._markupLead && !(node as any)._markupLead._reportedAtTab) {
+        const lead = (node as any)._markupLead as { tag: string; span: object };
+        recordRefusedLowering(new CGError(
+          "E-MARKUP-STATEMENT-NOT-RENDERED",
+          markupNotRenderedMessage(lead.tag),
+          lead.span ?? node.span ?? { start: 0, end: 0 },
+        ), lead);
+      }
       return "";
     case "bare-expr": {
       // S458 slice 2 — a refined parameter's guard statement (prepended to the
@@ -2202,6 +2457,29 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if ((node as any).refineParamGuard) {
         const g = (node as any).refineParamGuard as { name: string; judge: any; fn: string };
         return emitParamGuardStatement(g.name, g.judge, g.fn, opts.boundary === "server" ? "throw-server" : "throw").join("\n");
+      }
+      // S465 r2 — a bare `{ … }` block statement (SPEC §7.2.2 "Terms") reaches here
+      // as a `bare-expr` carrying the block TEXT (the front-end does not structure
+      // bare blocks). On the SERVER its body is read by the function-body statement
+      // parser and lowered through this emitter — the text rewriter never awaits —
+      // and a body the parser refuses is a compile error (arm-structure.ts).
+      // S465 r4 — `{ A } { B }` on one line is two bare block statements: each is
+      // read and lowered the same way, in order.
+      const serverBlocks = opts.boundary !== "server"
+        ? null
+        : bareBlockText(node) !== null ? [bareBlockText(node) as string] : bareBlockSequenceTexts(node);
+      if (serverBlocks) {
+        const out: string[] = [];
+        for (const blockText of serverBlocks) {
+          const stmts = serverArmBlockStatements(blockText, "server", node, {
+            alwaysBlock: true,
+            where: "in a server block statement",
+          }) ?? [];
+          const inner = emitLogicBody(stmts, { ...opts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) })
+            .filter((l: string) => l.trim() !== "");
+          out.push(["{", ...inner.map((l: string) => "  " + l), "}"].join("\n"));
+        }
+        return out.join("\n");
       }
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
@@ -2409,7 +2687,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // For codegen purposes, render it back to JS source text. For
       // declaredNames bookkeeping, register each bound ident (the
       // destructured names) rather than the pattern itself.
-      const _letDeclLhs = nameOrPatternText(node.name);
+      const _letDeclLhs = nameOrPatternText(node.name, patternDefaultLowerer(opts));
       if (isDestructurePattern(node.name)) {
         if (opts.declaredNames) {
           for (const bind of _iterDestructureBindNames(node.name)) { opts.declaredNames.add(bind); markDeclaredMutable(opts.declaredNames, bind); }
@@ -2503,7 +2781,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node._compileTimeOnly) return "";
       // A5 (2026-05-17) — same as let-decl: `node.name` may be a structured
       // DestructurePattern (const-decl only; tilde-decl never destructures).
-      const _constDeclLhs = nameOrPatternText(node.name);
+      const _constDeclLhs = nameOrPatternText(node.name, patternDefaultLowerer(opts));
       // S458 slice 2 (position 1) — a reassignment of a REFINED binding
       // (`refineAssign`, stamped by the type-system stage): judge the new value
       // BEFORE the assignment, so the binding keeps its prior value on refusal
@@ -3464,7 +3742,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         // (still `.length` off a pending Promise, still silent). The five
         // emit-control-flow forwarding sites were the SYMPTOM; this hop is where
         // the flag was actually dropped.
-        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
+        ...hostAsyncFacts(opts),
         // #284 — thread the indirect-peer alias set so an aliased peer call
         // (`if (check(rows))` where `const check = isAllowed`) inside an if
         // condition/body awaits (else an always-truthy Promise → auth bypass).
@@ -3514,7 +3792,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         serverFnNames: opts.serverFnNames,
         // F4 (S239 round 2) ROOT — host-async flag travels with serverFnNames
         // (see the if-stmt dispatch above for the full reasoning).
-        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
+        ...hostAsyncFacts(opts),
         // #284 — indirect-peer alias set (see if-stmt dispatch above).
         serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs,
         syncPeerCalls: opts.syncPeerCalls,
@@ -3549,12 +3827,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -4049,10 +4327,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       lines.push(`const ${tmpVar} = ${expr};`);
       // §19.10.3 / §19.5.2 — `?` is a `fail` of the callee's variant: inside a
       // `transaction { }` it rolls back before returning (_markTransactionExits).
+      // The success value may be `not` (`?{…}.get()?` on no row — §19.8.3: no row is
+      // not a failure), so the envelope test reads it guarded, as `emitPropagateArm`
+      // does; unguarded, `null.__scrml_error` threw (S462).
       const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
       lines.push(typeof txnRollback === "string" && txnRollback.length > 0
-        ? `if (${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
-        : `if (${tmpVar}.__scrml_error) return ${tmpVar};`);
+        ? `if (${tmpVar} && ${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
+        : `if (${tmpVar} && ${tmpVar}.__scrml_error) return ${tmpVar};`);
       if (node.binding) {
         lines.push(`const ${node.binding} = ${tmpVar};`);
       }
@@ -4157,6 +4438,9 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       let yieldsResult = false;
       // S454 — the guarded value is a handled `?{}` evaluated through `_scrml_sql_attempt`.
       let handlesSql = false;
+      // S465 — a handled query with a tail (`?{…}.get().name !{…}`): the statement
+      // that binds the attempted query's value before the tail runs on it.
+      let handledSqlPre: string | null = null;
       // D3 (g-handler-recovery-into-cell) — set when the guarded expression is a
       // reactive assignment `@cell = call() !{...}`. In that shape emitLogicNode
       // lowers the guardedNode to the EAGER `_scrml_reactive_set("cell", call())`
@@ -4207,7 +4491,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         // yielded after the arms, as `return` returns it.
         const _isYieldGuard = guardedNode.kind === "yield-stmt";
         if (_handledSqlNode && (_isDeclGuard || guardedNode.kind === "sql" || guardedNode.kind === "return-stmt" || _isLiftGuard || _isCellGuard || _isYieldGuard)) {
-          if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name);
+          if (_isDeclGuard) bindingName = nameOrPatternText(guardedNode.name, patternDefaultLowerer(opts));
           if (_isLiftGuard && opts.boundary === "server") returnsResult = true;
           if (_isYieldGuard) yieldsResult = true;
           if (_isCellGuard) cellWriteNode = guardedNode;
@@ -4227,17 +4511,26 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           if (guardedNode.kind === "return-stmt") returnsResult = true;
         } else if (guardedNode.kind === "let-decl" && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
-          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `let r = (?{…}.get()) !{…}`
+          // §19.8.3 — `let r = (?{…}.get()) !{…}`; S465 — also `let n = ?{…}.get().name !{…}`.
+          const _hq = opts.boundary === "server" ? _emitHandledSqlOperand(guardedNode.initExpr, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
+          } else {
+            initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
           }
         } else if ((guardedNode.kind === "const-decl" || guardedNode.kind === "tilde-decl") && guardedNode.name) {
           bindingName = guardedNode.name;
-          initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
-          if (opts.boundary === "server" && sqlQueryExprShape(guardedNode.initExpr) !== null) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.initExpr)!, _makeExprCtx(opts), true); // §19.8.3 — `const r = (?{…}.get()) !{…}`
+          // §19.8.3 — `const r = (?{…}.get()) !{…}`; S465 — also `const n = ?{…}.get().name !{…}`
+          // and the reassignment `n = ?{…}.all().length !{…}` (a tilde-decl).
+          const _hq = opts.boundary === "server" ? _emitHandledSqlOperand(guardedNode.initExpr, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
+          } else {
+            initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
           }
           // §19.4.3 (S454) — `x = f() !{…}` on an already-declared `x` is an
           // ASSIGNMENT: the guarded value lands in the existing binding. It used
@@ -4268,12 +4561,13 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           // the function returned `undefined`).
           if (guardedNode.kind === "return-stmt" && initExpr) returnsResult = true;
           // §19.8.3 (S454) — the operand is an expression-position `?{}` query.
-          if (
-            initExpr && opts.boundary === "server" &&
-            (guardedNode.kind === "return-stmt" || guardedNode.kind === "bare-expr") &&
-            sqlQueryExprShape(guardedNode.exprNode) !== null
-          ) {
-            initExpr = emitSqlQueryShape(sqlQueryExprShape(guardedNode.exprNode)!, _makeExprCtx(opts), true);
+          // S465 — also a query that is the operand's leftmost operand (`return ?{…}.get().name !{…}`).
+          const _hq = initExpr && opts.boundary === "server" &&
+            (guardedNode.kind === "return-stmt" || guardedNode.kind === "bare-expr")
+            ? _emitHandledSqlOperand(guardedNode.exprNode, opts) : null;
+          if (_hq) {
+            initExpr = _hq.init;
+            if (_hq.pre) handledSqlPre = _hq.pre;
             handlesSql = true;
           }
           // D3 — a reactive assignment `@cell = call()` lowers to a state-decl
@@ -4325,6 +4619,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // level `_autoAwait` remains the source of truth for the peer-call form (init
       // has no `await`), so only skip when the emitted init already carries it.
       const _initHasAwait = /^\s*await\b/.test(initExpr);
+      if (handledSqlPre) lines.push(handledSqlPre);
       lines.push(`let ${resultVar} = ${_autoAwait && !_initHasAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
 
@@ -5072,7 +5367,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       const params: ParamLike[] = (node.params ?? []) as ParamLike[];
       // §7.3.2: param signatures carry `name = defaultValue` when defaults are present.
       // Strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
-      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i));
+      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, serverParamDefaultLowerer(opts)));
       const generatorStar: string = node.isGenerator ? "*" : "";
 
       // Function body has its own scope for declared names. C5: set
@@ -5340,7 +5635,7 @@ function _emitForStmtWithTilde(node: any, opts: EmitLogicOpts): string {
   // A5 (2026-05-17) — destructuring LHS: render pattern back to JS source text.
   let varName: string;
   if (isDestructurePattern(node.variable)) {
-    varName = nameOrPatternText(node.variable);
+    varName = nameOrPatternText(node.variable, patternDefaultLowerer(opts));
   } else {
     varName = (typeof node.variable === "string" && node.variable) || node.name || "item";
   }
@@ -5826,7 +6121,7 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
   // not. g-destructure-pattern-object-object-in-for-comprehension-emit.
   let varName: string;
   if (isDestructurePattern(forExpr.variable)) {
-    varName = nameOrPatternText(forExpr.variable);
+    varName = nameOrPatternText(forExpr.variable, patternDefaultLowerer(opts));
   } else {
     varName = (typeof forExpr.variable === "string" && forExpr.variable) || forExpr.name || "item";
   }
@@ -6204,6 +6499,44 @@ export function emitPropagateArm(operand: string, opts: EmitLogicOpts): { lines:
 }
 
 /**
+ * §18.5 — the lines of a STRUCTURED arm body in a local-decl `match` (route A):
+ * its statements against a per-arm declared-name set, with a value tail assigned
+ * to `tildeVar`. Shared by the `structuredBody` arm path and (S465) a server
+ * block arm parsed from text (`_emitBlockArmValueFromString`), so both lower
+ * identically. Each line is indented two spaces.
+ */
+function _emitStructuredArmToVar(_body: any[], tildeVar: string, opts: EmitLogicOpts, bodyOpts: EmitLogicOpts): string[] {
+  const bodyCode: string[] = [];
+  const _tailIdx = _body.length - 1;
+  const armDeclaredNames = new Set<string>(opts.declaredNames ?? []);
+  const armOpts: EmitLogicOpts = { ...bodyOpts, declaredNames: armDeclaredNames };
+  for (let _i = 0; _i < _body.length; _i++) {
+    const stmt = _body[_i];
+    // §18.5 block-arm value: the block's result is its LAST expression. A
+    // bare tail expression (`{ … "green" }`) must ASSIGN to the active
+    // result var — the shared bare-expr handler (under an active
+    // tildeContext) instead minted a FRESH `let _scrml_tilde_N = …`, so the
+    // outer result var stayed null (silent-wrong). `lift`-form value arms
+    // (`{ lift x }`) already assign to the result var via tildeContext and
+    // are left untouched; only the bare-tail-expr case is redirected. A
+    // non-value tail (assignment/decl → §18.5 void) also falls through.
+    const _exprText = stmt && stmt.kind === "bare-expr"
+      ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
+      : "";
+    if (_i === _tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(_exprText)) {
+      const rhs = _awaitMatchArmServerCalls(emitArmValue(_exprText, _makeExprCtx(opts), stmt.exprNode), opts);
+      bodyCode.push(`  ${tildeVar} = ${rhs};`);
+      continue;
+    }
+    const code = emitLogicNode(stmt, armOpts);
+    if (code) {
+      for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
+    }
+  }
+  return bodyCode;
+}
+
+/**
  * §18.5 block-arm value lowering (raw-string arm path). Given a block-body arm
  * result STRING already confirmed a block via `_matchArmResultIsBlockBody`,
  * emit its leading statements followed by an assignment of its tail expression
@@ -6215,6 +6548,14 @@ function _emitBlockArmValueFromString(result: string, tildeVar: string, opts: Em
   const inner = result.trim().slice(1, -1).trim();
   const lines: string[] = [];
   if (!inner) return `  // §18.5 empty block arm — result is void`;
+  // S465 (SPEC §13.2) — a SERVER block arm is lowered from its parsed statements
+  // through the structured arm path (statement emitter → await classifier), not
+  // re-lowered from its token text (`rewriteBlockBody`, which never awaits).
+  const srvStmts = serverArmBlockStatements(result, opts.boundary === "server" ? "server" : "client");
+  if (srvStmts) {
+    const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: { var: tildeVar, mode: "single" } };
+    return _emitStructuredArmToVar(srvStmts, tildeVar, opts, bodyOpts).join("\n");
+  }
   const plan = planBlockArmLift(inner);
   // Each leading segment is emitted through the established block-body statement
   // emitter one at a time (segments are already top-level-`;`-split, so each is
@@ -6263,7 +6604,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       if (_matchArmResultIsBlockBody(t)) {
         return _emitBlockArmValueFromString(t, resultVar, opts).split("\n").map((l) => l.trim()).filter(Boolean);
       }
-      return [`${resultVar} = ${_awaitMatchArmServerCalls(emitExprField(null, t, _makeExprCtx(opts)), opts)};`];
+      return [`${resultVar} = ${_awaitMatchArmServerCalls(emitArmValue(t, _makeExprCtx(opts)), opts)};`];
     });
     return [`let ${resultVar} = null;`, dispatch, `${keyword} ${name} = ${resultVar};`].join("\n");
   }
@@ -6357,6 +6698,13 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     }
   }
 
+  // S465 (SPEC §13.2) — a server arm whose `{ … }` body arrived as text is parsed
+  // to statements so it takes the structured route below (see structureServerArm).
+  {
+    const _mode = opts.boundary === "server" ? "server" : "client";
+    for (let _k = 0; _k < arms.length; _k++) arms[_k] = structureServerArm(arms[_k], _mode);
+  }
+
   // S22 §1a slice 2: normalize tagged-object variants the same way as emitMatchExpr.
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare; the `::Ok` arm is recognized only via the
@@ -6384,7 +6732,6 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     if (arm.structuredBody) {
       const bodyCode: string[] = [];
       const _body = arm.structuredBody as any[];
-      const _tailIdx = _body.length - 1;
       // §18.5 — the arm's block body is a SCOPE, and the statements in it must be
       // emitted against a shared, accumulating declared-name set. The sibling
       // structuredBody path (emit-control-flow.ts:2321) gets this for free because
@@ -6408,31 +6755,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // and is PER-ARM (so a name declared in one arm does not leak into a sibling
       // arm, which would turn that sibling's fresh declaration into an assignment
       // to an unbound name).
-      const armDeclaredNames = new Set<string>(opts.declaredNames ?? []);
-      const armOpts: EmitLogicOpts = { ...bodyOpts, declaredNames: armDeclaredNames };
-      for (let _i = 0; _i < _body.length; _i++) {
-        const stmt = _body[_i];
-        // §18.5 block-arm value: the block's result is its LAST expression. A
-        // bare tail expression (`{ … "green" }`) must ASSIGN to the active
-        // result var — the shared bare-expr handler (under an active
-        // tildeContext) instead minted a FRESH `let _scrml_tilde_N = …`, so the
-        // outer result var stayed null (silent-wrong). `lift`-form value arms
-        // (`{ lift x }`) already assign to the result var via tildeContext and
-        // are left untouched; only the bare-tail-expr case is redirected. A
-        // non-value tail (assignment/decl → §18.5 void) also falls through.
-        const _exprText = stmt && stmt.kind === "bare-expr"
-          ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
-          : "";
-        if (_i === _tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(_exprText)) {
-          const rhs = _awaitMatchArmServerCalls(emitExprField(null, _exprText, _makeExprCtx(opts)), opts);
-          bodyCode.push(`  ${tildeVar} = ${rhs};`);
-          continue;
-        }
-        const code = emitLogicNode(stmt, armOpts);
-        if (code) {
-          for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
-        }
-      }
+      bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
       if (arm.kind === "wildcard") {
         lines.push(`else {`);
       } else if (arm.kind === "not") {
@@ -6497,7 +6820,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // declared position type (`const e: Expr = match …`), never a by-name guess.
       const _armCtx = _makeExprCtx(opts);
       const rhs = _awaitMatchArmServerCalls(
-        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitExprField(null, a.result, _armCtx), opts);
+        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitArmValue(a.result, _armCtx), opts);
       return `  ${tildeVar} = ${rhs};`;
     };
 

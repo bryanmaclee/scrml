@@ -498,9 +498,14 @@ ${body}
     expect(js).toContain("const w = (await lookup(x)).label;");
     // return statement: member access on peer result wrapped
     expect(js).toContain("(await lookup(x)).ok");
-    // pure-fn peer in return value (no member access) → bare await, NO spurious wrap
-    expect(js).toContain("await norm(out)");
-    expect(js).not.toContain("(await norm(out))");
+    // s464-pure-fn-placement — a plain `fn` is NOT a peer: it is never a route
+    // and never async (§12.4, §13.4, §48.3.5). It is called synchronously and
+    // emitted into the server bundle as an ordinary function.
+    expect(js).toContain("norm(out)");
+    expect(js).not.toContain("await norm(out)");
+    expect(js).toMatch(/^function norm\(s\) \{/m);
+    expect(js).not.toMatch(/async function norm\b/);
+    expect(js).not.toContain("__ri_route_norm");
 
     // CRITICAL: no BARE unawaited peer call survives in these positions.
     expect(js).not.toMatch(/if \(lookup\(x\)\.ok\)/);
@@ -534,8 +539,11 @@ ${body}
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
 
     const js = readFileSync(serverJsPath, "utf-8");
-    // The comparison operand must be the AWAITED value (the post-fix shape).
-    expect(js).toContain("await norm(name)");
+    // s464-pure-fn-placement — `norm` is a plain `fn`: a synchronous call to a
+    // server-bundle function, so the comparison operand is the value itself.
+    expect(js).toContain("norm(name)");
+    expect(js).not.toContain("await norm(name)");
+    expect(js).not.toMatch(/async function norm\b/);
 
     const absDbPath = resolve(tmpDir, "items.db");
     const mod = await patchAndImport(serverJsPath, absDbPath);

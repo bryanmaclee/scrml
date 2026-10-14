@@ -1,0 +1,13 @@
+<program>
+<n> = 3
+<xs> = ["a", "b"]
+<main>
+<div>${ <p>hello</p> }</div>
+<div>${ if (@n > 1) { <p>one</p> <p>two</p> } }</div>
+<div>${ if (@n > 1) {
+  let k = 1
+  <p>after a statement</p>
+} }</div>
+<ul>${ for (const x of @xs) { <li>${x}</li> } }</ul>
+</main>
+</program>

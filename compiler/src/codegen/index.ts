@@ -66,10 +66,15 @@ import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShad
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
-import { resetRefusedLowerings, drainRefusedLowerings } from "./refused-lowering-errors.ts";
+import { resetRefusedLowerings, drainRefusedLowerings, recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { dropCascadeOnlyErrors } from "./server-text-guard.ts";
+import { refuseUnrenderedStatementMarkup, markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { setProgramBodySqlPolicy, setProgramBodySqlFile, resetProgramStatementRefusals, drainProgramStatementRefusals } from "./sql-one-statement-guard.ts";
 import { compilationHasDatabase } from "../tenant-undeclared.ts";
-import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
+import { generateToolJs, generateToolLibraryJs } from "./emit-tool.ts";
+import { setFileSchedulerBindings } from "./async-combinators.ts";
+import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
+import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet } from "./file-async-fns.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -150,6 +155,17 @@ export interface CgRouteMap {
    * `.client.js`. Mirrors `RouteMap.endpointClientSkipIds`.
    */
   endpointClientSkipIds?: Set<string>;
+  /**
+   * s464-pure-fn-placement — plain pure `fn`s a server-placed body reaches;
+   * emit-server emits each as a plain synchronous `function` (never a route).
+   * Mirrors `RouteMap.pureFnServerHelperIds`.
+   */
+  pureFnServerHelperIds?: Set<string>;
+  /**
+   * The subset no client code reaches; emit-functions skips their client body.
+   * Mirrors `RouteMap.pureFnClientSkipIds`.
+   */
+  pureFnClientSkipIds?: Set<string>;
 }
 
 export interface CgAuthMiddleware {
@@ -888,8 +904,9 @@ function computeToolAsyncImportedLocals(
   files: unknown[],
   exportRegistry?: CrossModuleExportRegistry | null,
   importGraph?: unknown,
+  memo?: FileAsyncMemo,
 ): Set<string> {
-  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>(), exportRegistry ?? null, importGraph ?? null);
+  return asyncImportedLocalsOf(toolFileAST, files, memo ?? newFileAsyncMemo(null), exportRegistry ?? null, importGraph ?? null);
 }
 
 /** MOD per-module by-name export metadata threaded through the cross-module
@@ -899,18 +916,28 @@ type CrossModuleExportRegistry = Map<
   Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
 >;
 
+/** S466 r7 — the run-wide memo of per-file async sets (one computation per file) + the
+ *  route map they read the server functions from. */
+type FileAsyncMemo = Map<string, Set<string>> & { routeMap?: { functions?: Map<string, unknown> } | null };
+function newFileAsyncMemo(routeMap: { functions?: Map<string, unknown> } | null): FileAsyncMemo {
+  const m = new Map<string, Set<string>>() as FileAsyncMemo;
+  m.routeMap = routeMap;
+  return m;
+}
+
 /**
- * The EXPORTED fn names of `fileAST` that are async — memoized + cross-file
- * TRANSITIVE. A fn is async if it directly does `?{}` / `_{}`, calls a
- * Promise-returning stdlib primitive (Seam-A Gap 1), transitively CALLS such a
- * local fn, OR calls an async fn IMPORTED from another lib. The import graph is a
- * DAG (cycles are E-IMPORT-002), and `memo` (keyed by filePath, registered
- * BEFORE recursing) makes it cycle-safe + linear.
+ * S466 r7 — THE file's async name set (file-async-fns.ts `computeFileAsyncFnNames`):
+ * every file-scope function (exported or not, server functions, function-valued
+ * bindings) that the server emits / calls async, plus its async imported locals.
+ * Memoized per file and cross-file TRANSITIVE: the same set answers this file's own
+ * emitters (stashed on the FileAST) AND every importer ("is the export I call async?").
+ * The import graph is a DAG (cycles are E-IMPORT-002); `memo` registers the (mutable)
+ * set BEFORE recursing, so it is cycle-safe + linear.
  */
-function asyncExportNamesOf(
+function fileAsyncFnNamesOf(
   fileAST: unknown,
   files: unknown[],
-  memo: Map<string, Set<string>>,
+  memo: FileAsyncMemo,
   exportRegistry?: CrossModuleExportRegistry | null,
   importGraph?: unknown,
 ): Set<string> {
@@ -918,18 +945,18 @@ function asyncExportNamesOf(
   if (fp && memo.has(fp)) return memo.get(fp)!;
   const result = new Set<string>();
   if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
-  // This file's OWN async imported locals seed its local async-coloring fixpoint.
   const seed = asyncImportedLocalsOf(fileAST, files, memo, exportRegistry, importGraph);
-  // Seam-A Gap 1 — thread exportRegistry so a fn calling `safeCallAsync` (etc.)
-  // is recognized async here too, else the importing file never learns this
-  // export is async (repro-crossmodule: main.orchestrate → helper.wrapAsync).
-  for (const n of collectAsyncFnNamesFromFile(fileAST as never, seed, exportRegistry)) result.add(n);
+  adoptFileAsyncSet(result, computeFileAsyncFnNames(fileAST, {
+    asyncImportedLocals: seed,
+    serverFnNames: serverFnNamesOfFile(fileAST, memo.routeMap ?? null),
+    exportRegistry: exportRegistry ?? null,
+  }));
   return result;
 }
 
 /**
  * The LOCAL binding names in `fileAST` that bind an ASYNC fn imported from
- * another `.scrml` lib (recursively resolved via `asyncExportNamesOf`) OR — Seam-A
+ * another `.scrml` lib (recursively resolved via `fileAsyncFnNamesOf`) OR — Seam-A
  * Gap 3 — from a `scrml:` vendor module (a Promise-returning stdlib primitive like
  * `safeCallAsync` / a `scrml:auth`/`http` async export). Used both as the tool's
  * call-site await-set (§64 / Flag C) and as the cross-import seed for a library's
@@ -938,7 +965,7 @@ function asyncExportNamesOf(
 function asyncImportedLocalsOf(
   fileAST: unknown,
   files: unknown[],
-  memo: Map<string, Set<string>>,
+  memo: FileAsyncMemo,
   exportRegistry?: CrossModuleExportRegistry | null,
   importGraph?: unknown,
 ): Set<string> {
@@ -977,7 +1004,7 @@ function asyncImportedLocalsOf(
     const absSource = resolveModulePath(imp.source, filePath);
     const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue;
-    const asyncNames = asyncExportNamesOf(srcFile, files, memo, exportRegistry, importGraph);
+    const asyncNames = fileAsyncFnNamesOf(srcFile, files, memo, exportRegistry, importGraph);
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
     // scrml libs export NAMED bindings only), so only the named arm binds an
     // async imported fn. Await-color each named local whose EXPORTED name is
@@ -1003,7 +1030,7 @@ function asyncImportedLocalsOf(
         if (b && b.filePath !== absSource) {
           const declFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === toPosix(b.filePath));
           if (declFile) {
-            const declAsync = asyncExportNamesOf(declFile, files, memo, exportRegistry, importGraph);
+            const declAsync = fileAsyncFnNamesOf(declFile, files, memo, exportRegistry, importGraph);
             if (declAsync.has(b.localName ?? b.name) || declAsync.has(b.name)) result.add(spec.local);
           }
         }
@@ -1269,6 +1296,7 @@ export function resetCodegenModuleState(): void {
   setLogShadowedInFile(false);
   setRenderShadowedInFile(false);
   setPrintShadowedNames([]);
+  setFileSchedulerBindings(null);
   setSessionShadowedInFile(false);
   setSessionProjectionActive(false);
   setServerSessionUserCell(false);
@@ -1429,6 +1457,17 @@ export function runCG(input: CgInput): CgOutput {
   // §2.2.1 (S456) — the run-wide refused-lowering sink (refused-lowering-errors.ts):
   // a site that declines to lower records here, whatever opts reached it.
   resetRefusedLowerings();
+  // §17.6.10.1 (S464 Q24) — every statement-position element no lowering renders, in
+  // every logic body, before any emitter (several re-parse or special-case bodies).
+  for (const fileAST of files ?? []) {
+    refuseUnrenderedStatementMarkup((fileAST as any).ast ?? fileAST, (lead, context, cause) => {
+      recordRefusedLowering(new CGError(
+        "E-MARKUP-STATEMENT-NOT-RENDERED",
+        markupNotRenderedMessage(lead.tag, context, cause),
+        (lead.span as any) ?? { start: 0, end: 0 },
+      ), lead);
+    });
+  }
   // §14.8.10 item (1) (S457) — the program-body statement refusals codegen records at the
   // lowering point (sql-one-statement-guard.ts); same reset / drain discipline.
   resetProgramStatementRefusals();
@@ -1648,6 +1687,9 @@ export function runCG(input: CgInput): CgOutput {
     // §20.7 — a file-level `function print` / `println` shadows that builtin;
     // the print/println lowering then yields to the user fn (name-precise).
     setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+    // S466 r7 (§13.2) — THIS file's scheduler-name bindings: the one predicate
+    // `isGlobalSchedulerCallee` reads them (async-combinators.ts).
+    setFileSchedulerBindings(schedulerNamesNotProvablyGlobal(fileAST));
     // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
     // token that is unit-local at compile time but process-global at run time
     // (each/match ids, the each-fence comment, the renderer-registry key, the
@@ -2477,6 +2519,9 @@ export function runCG(input: CgInput): CgOutput {
     dialect: compilationTenant.dialect ?? "unknown",
   });
 
+  // S466 r7 — one async name set per file for the whole run (fileAsyncFnNamesOf).
+  const _fileAsyncMemo = newFileAsyncMemo(safeRouteMap as never);
+
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
   // in emit would otherwise leave the last file's token installed in this
@@ -2501,6 +2546,8 @@ export function runCG(input: CgInput): CgOutput {
       setRenderShadowedInFile(fileDeclaresRender(fileAST));
       // §20.7 — a file-level `function print` / `println` shadows that builtin.
       setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+      // S466 r7 (§13.2) — THIS file's scheduler-name bindings (isGlobalSchedulerCallee).
+      setFileSchedulerBindings(schedulerNamesNotProvablyGlobal(fileAST));
       // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
       // token that is unit-local at compile time but process-global at run time
       // (each/match ids, the each-fence comment, the renderer-registry key, the
@@ -2651,20 +2698,22 @@ export function runCG(input: CgInput): CgOutput {
       // into computeAsyncFnNames). Stashed here because emit-server has no `files`
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
-      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
+      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
       // S465 (s465-await-imported-server-fn) — the SAME set is the SERVER call-site
-      // await fact: `buildServerCalleeImportMap` carries it as `asyncImportedLocals`
-      // and `isPromiseReturningImportedCallee` answers true for it, so a server body
-      // calling an async fn imported from another `.scrml` module awaits it exactly
-      // like a same-file peer (the CPS wrapper's client continuation reads it too).
-      // Some emitters hold the TABResult's `.ast` (where the imports are hoisted),
-      // so the set is mirrored there.
+      // await fact (the CPS wrapper's client continuation reads it too). Some emitters
+      // hold the TABResult's `.ast` (where the imports are hoisted), so it is mirrored.
       {
         const _inner = (fileAST as any).ast;
         if (_inner && typeof _inner === "object" && _inner !== fileAST) {
           _inner._asyncImportedLocals = (fileAST as any)._asyncImportedLocals;
         }
       }
+      // S466 r7 — THE file's async name set (file-async-fns.ts): computed ONCE here, by
+      // the same memoized computation every importer of this file asked, and read by
+      // every server emitter (ss1 value exports, the D-5 binding closure, route / peer
+      // call sites through buildServerCalleeImportMap, the CPS wrapper). No emitter runs
+      // its own fixpoint any more.
+      setFileAsyncFnNames(fileAST, fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput));
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
       // value-export block (`export { w as helper } from "./c.server.js"`). A name
@@ -2688,7 +2737,7 @@ export function runCG(input: CgInput): CgOutput {
         // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
         // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
         checkToolImportsAreImportable(fileAST, files, filePath, errors);
-        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
+        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
         // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
         // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
         // route-inference routeMap + the auth/middleware/protect stage results
@@ -3320,7 +3369,7 @@ export function runCG(input: CgInput): CgOutput {
       if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
         // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
         // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
-        const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput);
+        const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
         // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
         // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
         // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with
@@ -4497,6 +4546,11 @@ export function runCG(input: CgInput): CgOutput {
   // afterwards fails closed instead of inheriting this compilation's database scope).
   setProgramBodySqlPolicy(null);
   setProgramBodySqlFile(null);
+  // S465 r4 — the server text guard's refusal is a BACKSTOP: when the compile already
+  // failed with another error (the precise diagnostic for the same construct —
+  // E-SERVER-FN-IN-SYNC-CALLBACK, E-SQL-009, E-SQL-QUERY-NOT-READABLE, …) nothing
+  // ships either way, so the backstop's generic text is dropped (server-text-guard.ts).
+  dropCascadeOnlyErrors(errors);
 
   return {
     outputs,

@@ -231,6 +231,10 @@ ${
     //                           `openerHadSpaceAfterLt`);
     //                 summary   a file-level flag summarizing nodes the shim
     //                           maps one by one (`hasResetExpr`, …).
+    //                 tree twin a fact the shim already has from the tree it
+    //                           walks (`_parentTag` — impl#1's stamp of the
+    //                           enclosing element's tag, S464 §5.2; the shim
+    //                           maps an element inside its parent).
     export fn unmapped(n: INode, what: string, read: string[], redundant: string[]) -> string[] {
         let out: string[] = []
         for (const e of n.entries) {
@@ -751,7 +755,7 @@ ${
         if (rk is not) return notYetV("markup: element synthesized after name resolution (component expansion / meta emit)")
         if (rk != "html-builtin") return notYetV("markup: <" + tag + "> (" + rk + ")")
         let why0: string[] = unmapped(n, "element", ["kind", "tag", "attrs", "children", "isComponent",
-            "resolvedKind", "resolvedCategory"], ["id", "selfClosing", "closerForm", "openerHadSpaceAfterLt"])
+            "resolvedKind", "resolvedCategory"], ["id", "selfClosing", "closerForm", "openerHadSpaceAfterLt", "_parentTag"])
         if (strAt(n, "resolvedCategory") != "html") why0 = why0.concat(["markup: html-builtin element of a non-html category"])
         const a: LA = lowerAttrs(cx, nodesAt(n, "attrs"))
         const kids: LV = lowerViews(cx, nodesAt(n, "children"))

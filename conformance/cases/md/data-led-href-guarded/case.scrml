@@ -1,0 +1,9 @@
+<program>
+<u> = "/safe"
+<div id="w">
+    <md>
+        [go](${@u}) or [profile](/users/${@u})
+    </md>
+</div>
+<button id="evil" onclick=${ @u = "javascript:window.pwned=1" }>evil</button>
+</program>

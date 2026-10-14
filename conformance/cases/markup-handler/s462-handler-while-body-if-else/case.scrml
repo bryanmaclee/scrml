@@ -1,0 +1,4 @@
+<c> = true
+<i> = 0
+<button id="b2" onclick={ while (@i < 3) if (@c) @i = @i + 1 else @i = 9 }>2</button>
+<p id="oi">${@i}</p>

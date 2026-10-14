@@ -39,6 +39,7 @@ import type {
   MapLitExpr,
   MarkupValueExpr,
 } from "../types/ast.ts";
+import { parseExpressionAt as acornParseExpressionAt } from "acorn";
 import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExprArrowBody, rewriteExprWithDerived, setRewriteCurrentUserAmbientActive } from "./rewrite.js";
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { isRefineCall } from "../refinement-obligations.ts";
@@ -47,14 +48,18 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
+import { splitTemplateLiteral, lexicalCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
+import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
-import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw } from "../expression-parser.ts";
+import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
-import { emitSqlQueryShape, emitNestedGuardExpr } from "./emit-logic.js";
+import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
@@ -66,7 +71,7 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, isGlobalSchedulerCallee, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
 import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
@@ -778,6 +783,30 @@ function navigateExplicitVariant(arg: any): "Hard" | "Soft" | null {
  * Emit a JavaScript expression string from an ExprNode tree.
  */
 export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
+  // S465 r3 — an expression the parser read only by DROPPING a following
+  // statement (it warned "statement boundary not detected — trailing content
+  // would be silently dropped") never reaches server output: that statement
+  // (a guard, in the S465 r3 finding) would silently not run. Compile error.
+  // The warning's own test (a newline plus a word in the tail) misses a dropped
+  // tail such as `let ok = 1⏎!(r = guard())` (measured: wrong password →
+  // WELCOME, no warning), so any expression read by dropping content counts.
+  if (ctx.mode === "server" && node && typeof node === "object") {
+    const dropped = droppedStatementTextOf(node) ??
+      (hasLostTrailingContent(node) ? String((node as unknown as Record<string, unknown>)._s441TrailingText ?? "") : null);
+    if (dropped !== null) {
+      const one = dropped.replace(/\s+/g, " ").trim();
+      const shown = one.length > 80 ? one.slice(0, 77) + "..." : one;
+      recordRefusedLowering(new CGError(
+        "E-STMT-UNEXPECTED-TOKEN",
+        `unexpected token — no statement begins at \`${shown}\` in server code. ` +
+          "The statement grammar read the expression before it and could not find where the next statement " +
+          "starts, so this text would be silently dropped (it would never run). End the previous statement with " +
+          "`;`, or put each statement on its own line.",
+        (node as { span?: object }).span ?? {},
+      ), node as object);
+      return "null /* E-STMT-UNEXPECTED-TOKEN */";
+    }
+  }
   switch (node.kind) {
     case "ident":       return emitIdent(node, ctx);
     case "lit":         return emitLit(node, ctx);
@@ -1013,20 +1042,190 @@ export function rawReferencesRegisteredRequest(raw: string, requestIds: Set<stri
  * _scrml_reactive_get). When derivedNames is null/empty, rewriteExprWithDerived
  * delegates to rewriteExpr — char-identical to the previous behavior.
  */
+/**
+ * S465 r4 — THE one place server code is lowered from text (the string rewriter).
+ * Every server text path in codegen reaches the rewriter only through here
+ * (`emitExprField(null, …)` — and with it `rewriteBlockBody` in server mode —, the
+ * server escape hatch, the server `match` expression shim), so the rule holds by
+ * construction: a text that contains a call is refused (server-text-guard.ts) — lowered
+ * from text, the await classifier never sees the call and it runs un-awaited.
+ * `compiler/tests/integration/s465-server-text-guard.test.js` pins that nothing else in
+ * codegen calls the server rewriters.
+ *
+ * A text that holds a call is first LOWERED STRUCTURALLY when the compiler can read
+ * it: an expression the parser reads (a caller that had no node for a readable
+ * expression — `Date.now()`, `{ echo: f(x) }`) is emitted from the tree; a
+ * block-bodied arrow / function value is emitted by the statement emitter
+ * (emit-logic `emitServerFnValueFromText`). Only what neither reads is refused.
+ */
+function serverTextLowering(
+  text: string,
+  ctx: EmitExprContext,
+  what: string,
+  // `checkText`: the part of `text` that is author TEXT, when the rest was already
+  // emitted from a tree (the `match` shim's subject). `noReparse`: the text is the
+  // shim of an emitter the tree would route straight back to.
+  opts: { arrowBody?: boolean; span?: object | null; defaultDb?: boolean; checkText?: string; noReparse?: boolean; literal?: boolean } = {},
+): string {
+  // S465 r6 — `literal`: the caller proved (by parsing) that the text is ONE literal
+  // token (a regex / BigInt literal): no call can be in it, so the guard is skipped.
+  if (!opts.literal && !opts.noReparse && lexicalCallInText(opts.checkText ?? text) !== null) {
+    if (opts.arrowBody) {
+      const fn = emitServerFnValueFromText(text, ctx);
+      if (fn !== null) return fn;
+    } else {
+      const tree = readableExprTree(text);
+      if (tree) return emitExpr(tree, ctx);
+    }
+  }
+  if (!opts.literal && refuseServerTextCall(opts.checkText ?? text, what, opts.span ?? null)) return REFUSED_SERVER_TEXT;
+  const dbVar = opts.defaultDb ? undefined : ctx.dbVar;
+  return opts.arrowBody
+    ? rewriteServerExprArrowBody(text, dbVar, ctx.errors)
+    : rewriteServerExpr(text, dbVar, ctx.errors);
+}
+
+/**
+ * S465 r4 — lower an expression the front-end kept as TEXT only (a default value):
+ * read it with the expression parser and emit the tree; when it does not read
+ * (a parse-error hatch, dropped trailing content), take the text path — which on
+ * the server refuses any text holding a call (serverTextLowering).
+ */
+export function emitExprFromText(node: ExprNode | null | undefined, text: string, ctx: EmitExprContext): string {
+  if (node) return emitExpr(node, ctx);
+  const parsed = readableExprTree(text);
+  return parsed ? emitExpr(parsed, ctx) : emitExprField(null, text, ctx);
+}
+
+/**
+ * The tree of `text` when the expression parser READS it: not an escape hatch at its
+ * root, nothing dropped. (Hatches deeper in the tree are lowered — and guarded — on
+ * their own.) Null otherwise.
+ */
+/** S465 r6 — true when `text` is exactly ONE JavaScript literal token (regex, BigInt, …). */
+function isSingleJsLiteral(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (!t) return false;
+  try {
+    const n = acornParseExpressionAt(t, 0, { ecmaVersion: "latest" }) as { type?: string; end?: number };
+    return n.type === "Literal" && n.end === t.length;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * S465 r6 — rewrite every named-argument payload variant `.Found(name: x, n: y)` in
+ * `text` into its POSITIONAL form in the declared field order (`.Found(x, y)`), so the
+ * expression parser reads it. Null when there is none, or when one cannot be rewritten
+ * exactly: an unknown / ambiguous variant, a name that is not a field, a missing or
+ * repeated field, a positional argument after a named one, or text this scan does not
+ * understand (a template literal). The result is only ever used through the parser — a
+ * text it cannot read is not lowered from here.
+ */
+function positionalizeNamedVariantCalls(text: string): string | null {
+  const t = String(text ?? "");
+  if (t.includes("`")) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
+    getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
+  };
+  const NAMED = /^\s*([A-Za-z_$][\w$]*)\s*:(?!:)\s*([\s\S]+?)\s*$/;
+  let out = "";
+  let changed = false;
+  let i = 0;
+  while (i < t.length) {
+    const c = t[i];
+    if (c === "\"" || c === "'") {
+      let j = i + 1;
+      while (j < t.length && t[j] !== c) j += t[j] === "\\" ? 2 : 1;
+      if (j >= t.length) return null;
+      out += t.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    const prev = out.replace(/\s+$/, "").slice(-1);
+    const m = c === "." && !/[\w$.)\]]/.test(prev) ? /^\.\s*([A-Z][\w]*)\s*\(/.exec(t.slice(i)) : null;
+    if (!m) { out += c; i++; continue; }
+    // Balanced argument list (strings skipped).
+    const open = i + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let j = open; j < t.length; j++) {
+      const ch = t[j];
+      if (ch === "\"" || ch === "'") {
+        let k = j + 1;
+        while (k < t.length && t[k] !== ch) k += t[k] === "\\" ? 2 : 1;
+        if (k >= t.length) return null;
+        j = k;
+        continue;
+      }
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") { depth--; if (depth === 0) { close = j; break; } }
+    }
+    if (close < 0) return null;
+    const argsText = t.slice(open + 1, close);
+    const args = splitTopLevelCommas(argsText);
+    const named = args.map((a) => NAMED.exec(a));
+    if (args.length === 0 || named.every((n) => n === null)) {
+      // Positional (or no) arguments — not this rewrite's shape; keep, but its
+      // arguments may hold named variants too.
+      const inner = positionalizeNamedVariantCalls(argsText);
+      out += `.${m[1]}(${inner ?? argsText})`;
+      if (inner !== null) changed = true;
+      i = close + 1;
+      continue;
+    }
+    const fields = getVariantFieldSchemaFromRewriter(m[1]);
+    if (!fields) return null;
+    // Positional arguments first (field order), then named ones (§18.7 — the same
+    // pairing the text rewriter applies); a positional one after a named one is refused.
+    const byName = new Map<string, string>();
+    let sawNamed = false;
+    for (let a = 0; a < args.length; a++) {
+      const n = named[a];
+      if (n === null) {
+        if (sawNamed || a >= fields.length) return null;
+        const inner = positionalizeNamedVariantCalls(args[a]);
+        byName.set(fields[a], inner ?? args[a]);
+        continue;
+      }
+      sawNamed = true;
+      if (!fields.includes(n[1]) || byName.has(n[1])) return null;
+      const inner = positionalizeNamedVariantCalls(n[2]);
+      byName.set(n[1], inner ?? n[2]);
+    }
+    if (byName.size !== fields.length) return null;
+    out += `.${m[1]}(${fields.map((f) => byName.get(f)).join(", ")})`;
+    changed = true;
+    i = close + 1;
+  }
+  return changed ? out : null;
+}
+
+function readableExprTree(text: string): ExprNode | null {
+  const t = String(text ?? "").trim();
+  if (!t) return null;
+  let parsed: ExprNode | null = null;
+  try { parsed = parseExprToNode(t, "<server-text>", 0) as ExprNode | null; } catch { parsed = null; }
+  if (!parsed || hasLostTrailingContent(parsed)) return null;
+  if ((parsed as { kind?: string }).kind === "escape-hatch") return null;
+  return parsed;
+}
+
 export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
   if (exprNode) return emitExpr(exprNode, ctx);
   // S462 (§19.9.9.7) — in a CPS "cells" server batch a raw-text expression that
   // writes a cell (a match arm's `@role = "ADMIN"`) must record the write, which
-  // only the structured path does. Parse it and emit structurally; text the
-  // parser cannot take falls through to the string rewrite, and the batch's
+  // only the structured path does. Read it and emit structurally; text the
+  // parser cannot read falls through to serverTextLowering, and the batch's
   // fail-closed backstop (emit-server.ts emitCpsCellsBatchBody) refuses any
   // unrecorded write that path produces.
   if (ctx.mode === "server" && ctx.serverCellWrites && /@[A-Za-z_$]/.test(fallbackStr)) {
-    let parsed: ExprNode | null = null;
-    try { parsed = parseExprToNode(fallbackStr, "<cps-cells-arm>", 0) as ExprNode | null; } catch { parsed = null; }
-    if (parsed && (parsed as { kind?: string }).kind !== "escape-hatch") return emitExpr(parsed, ctx);
+    const tree = readableExprTree(fallbackStr);
+    if (tree) return emitExpr(tree, ctx);
   }
-  if (ctx.mode === "server") return rewriteServerExpr(fallbackStr, undefined, ctx.errors);
+  if (ctx.mode === "server") return serverTextLowering(fallbackStr, ctx, "server code", { defaultDb: true });
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — collapse §55 synth-surface reads in the RAW-STRING statement fallback to the
   // SAME dotted synth cell the AST path (emitMember) emits, BEFORE the generic
@@ -1554,6 +1753,37 @@ function emitServerTemplateLit(raw: string, ctx: EmitExprContext): string {
   return out;
 }
 
+/**
+ * S462 — emit a template literal from its STRUCTURE: the quasis' source text
+ * (escapes intact) and each `${…}` interpolation as a parsed ExprNode routed
+ * through `emitExpr` (so `@n` lowers to the cell read). Structure comes from the
+ * node's non-enumerable `_tplQuasiRaws` / `_tplExprs` (esTreeToExprNode); a node
+ * that lost them (a structuredClone) is re-parsed from its own `raw`. Returns
+ * null when no structure is available — the caller then keeps the raw path.
+ */
+function emitTemplateLitStructured(node: LitExpr, ctx: EmitExprContext): string | null {
+  let quasis = (node as unknown as { _tplQuasiRaws?: string[] })._tplQuasiRaws;
+  let exprs = (node as unknown as { _tplExprs?: ExprNode[] })._tplExprs;
+  if (!Array.isArray(quasis) || !Array.isArray(exprs)) {
+    try {
+      const re = parseExprToNode(node.raw, "<client-template>", 0) as unknown as {
+        kind?: string; litType?: string; _tplQuasiRaws?: string[]; _tplExprs?: ExprNode[];
+      };
+      if (re && re.kind === "lit" && re.litType === "template") {
+        quasis = re._tplQuasiRaws;
+        exprs = re._tplExprs;
+      }
+    } catch { /* no structure */ }
+  }
+  if (!Array.isArray(quasis) || !Array.isArray(exprs) || quasis.length !== exprs.length + 1) return null;
+  const inner = { ...ctx, _tplSourceRaw: true } as EmitExprContext;
+  let out = "`" + quasis[0];
+  for (let i = 0; i < exprs.length; i++) {
+    out += "${" + emitExpr(exprs[i], inner) + "}" + quasis[i + 1];
+  }
+  return out + "`";
+}
+
 function emitLit(node: LitExpr, ctx: EmitExprContext): string {
   // The `not` keyword (§42 absence value) compiles to null
   if (node.litType === "not") {
@@ -1568,7 +1798,35 @@ function emitLit(node: LitExpr, ctx: EmitExprContext): string {
     typeof node.raw === "string" &&
     node.raw.includes("${")
   ) {
+    // S462 — the structural emitter first (the text scanner below mis-bounds a
+    // quote inside a regex / comment and loses nested-template escapes); the
+    // scanner remains only for a node with no recoverable structure.
+    const structured = emitTemplateLitStructured(node, ctx);
+    if (structured !== null) return structured;
     return emitServerTemplateLit(node.raw, ctx);
+  }
+  // S462 — a CLIENT-mode template literal whose interpolation reads a cell
+  // (`` `x ${@n}` ``) used to take the raw path below and ship the bare `@n`
+  // (invalid JS → E-CODEGEN-INVALID-LOGIC) in every client function body and
+  // handler statement list (g-client-template-interpolation-lowering-needs-a-
+  // structural-emitter). It is now emitted from the PARSED template — quasi SOURCE
+  // text + each `${…}` as an ExprNode — never by re-scanning template text.
+  // Gated on an `@` in the source: a template with no cell read keeps its raw bytes.
+  if (
+    node.litType === "template" &&
+    ctx.mode !== "server" &&
+    typeof node.raw === "string" &&
+    node.raw.includes("${") &&
+    node.raw.includes("@")
+  ) {
+    const structured = emitTemplateLitStructured(node, ctx);
+    if (structured !== null) return structured;
+  }
+  // Inside a structurally-emitted template, a nested no-interpolation template
+  // keeps its SOURCE text (`raw` is rebuilt from the cooked value and loses `\${`).
+  if (node.litType === "template" && (ctx as { _tplSourceRaw?: boolean })._tplSourceRaw) {
+    const src = (node as unknown as { _tplSourceRaw?: string })._tplSourceRaw;
+    if (typeof src === "string") return src;
   }
   // Use raw source text to preserve exact formatting (string quotes, number format, etc.)
   return node.raw;
@@ -3050,8 +3308,31 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
 
   const obj = emitReceiver(node.object, ctx);
   const dot = node.optional ? "?." : ".";
+  // S465 r5 — SPEC §13.2: "A call the compiler awaits yields the resolved value, not a
+  // Promise. Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile
+  // error (`E-ASYNC-CALL-PROMISE-METHOD`)." On the server the receiver the compiler
+  // awaited is emitted `(await …)` (emitReceiver's precedence wrap) — read off it, the
+  // method is looked up on the resolved value and throws at run time (an HTTP 500).
+  // (Client bodies are checked on the emitted text by js-async-analysis.)
+  if (ctx.mode === "server" && PROMISE_METHOD_NAMES.has(node.property) && /^\(\s*await\b/.test(obj)) {
+    const ce = node.object.kind === "call" ? (node.object as CallExpr).callee : null;
+    const callee = ce && ce.kind === "ident" ? (ce as IdentExpr).name
+      : ce && ce.kind === "member" && typeof (ce as MemberExpr).property === "string" ? `….${(ce as MemberExpr).property}`
+      : "the call";
+    recordRefusedLowering(new CGError(
+      "E-ASYNC-CALL-PROMISE-METHOD",
+      `E-ASYNC-CALL-PROMISE-METHOD: \`.${node.property}(…)\` is called on \`${callee}(…)\`, which the compiler ` +
+        `awaits for you (§13.2) — so \`.${node.property}\` would be read off the RESOLVED value, not a ` +
+        `Promise, and throw a TypeError at run time. Remove \`.${node.property}(…)\` and use the value ` +
+        `directly: \`const r = ${callee}(…)\` then work with \`r\`` +
+        (node.property === "then" ? "." : ` (a failure is handled with \`!{}\`, §19).`),
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+  }
   return `${obj}${dot}${node.property}`;
 }
+
+const PROMISE_METHOD_NAMES = new Set(["then", "catch", "finally"]);
 
 /**
  * Bug 61 helper — walk a `@<compound>[.field].<synthProp>` member chain to its
@@ -3827,14 +4108,14 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // as the combinator branch does. The HOF call ITSELF is NOT awaited (it returns a
   // timer id, not a Promise). A member callee (`obj.setTimeout`) never matches — the
   // discard semantics are only known for the globals; a shadowing local is excluded
-  // via `declaredNames`. NON-async-lambda args (the delay/options) emit unchanged, so
+  // by the one file-level predicate `isGlobalSchedulerCallee` (S466 r7, §13.2 — any binding
+  // of the name anywhere in the file withdraws the exemption). NON-async-lambda args (the delay/options) emit unchanged, so
   // the common `setTimeout(() => syncFn(), 0)` is byte-identical.
   if (
     node.callee.kind === "ident" &&
     !node.optional &&
     typeof node.callee.name === "string" &&
-    KNOWN_DISCARD_HOF.has(node.callee.name) &&
-    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)) &&
+    isGlobalSchedulerCallee(node.callee.name) &&
     node.args.length >= 1
   ) {
     const isAsyncName = (nm: string) => combinatorIsAsyncName(nm, ctx);
@@ -4594,8 +4875,47 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
   return `${asyncPrefix}(${params}) => { /* block body */ }`;
 }
 
+/**
+ * S466 r7 (MED-D) — the parameter list of a block-bodied function VALUE, from the
+ * expression parser's own structured parameters (`EscapeHatchExpr.params`, acorn-
+ * delimited) — never re-read from text. `names` are the bound parameter names (a
+ * destructured parameter's too). Defaults are emitted from their trees in a never-
+ * awaitable context (`await` is illegal in a parameter list).
+ */
+export function emitFnValueParams(params: LambdaParam[], ctx: EmitExprContext): { text: string; names: string[] } {
+  const names: string[] = [];
+  for (const p of params) {
+    if (p.name === "__destructured__" && p.pattern) {
+      for (const n of iterDestructuredNames(p.pattern as never)) names.push(n);
+    } else if (typeof p.name === "string" && p.name) names.push(p.name);
+  }
+  const declared = new Set<string>([...(ctx.declaredNames ?? []), ...names]);
+  const paramCtx: EmitExprContext = { ...ctx, declaredNames: declared, peerAwaitable: false };
+  return { text: params.map((p) => emitLambdaParam(p, paramCtx)).join(", "), names };
+}
+
 function emitLambdaParam(param: LambdaParam, ctx: EmitExprContext): string {
-  let result = param.isRest ? `...${param.name}` : param.name;
+  let name = param.name;
+  if (name === "__destructured__") {
+    // S465 r5 — a destructured parameter is written back from its pattern (defaults
+    // lowered from their trees, in the parameter ctx — never awaitable). Pre-r5 the
+    // placeholder name itself was emitted: `(__destructured__) => a` — a ReferenceError.
+    // A pattern the parser could not structure (a computed key) is refused.
+    if (param.pattern) {
+      name = emitDestructurePatternText(param.pattern, (_text, n) =>
+        n ? emitExpr(n as ExprNode, ctx) : emitExprField(null, _text, ctx));
+    } else {
+      recordRefusedLowering(new CGError(
+        "E-CODEGEN-INVALID-LOGIC",
+        "a destructured function parameter with a computed key or a nested rest pattern cannot be lowered " +
+          "here. Take the value as one parameter and destructure it in the body " +
+          "(`(row) => { const { a } = row … }`).",
+        {},
+      ), param as object);
+      name = "__destructured__ /* E-CODEGEN-INVALID-LOGIC */";
+    }
+  }
+  let result = param.isRest ? `...${name}` : name;
   if (param.defaultValue) {
     result += ` = ${emitExpr(param.defaultValue, ctx)}`;
   }
@@ -4688,7 +5008,11 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");
     const reconstructed = `match ${subject} { ${arms} }`;
-    return rewriteServerExpr(reconstructed, ctx.dbVar, ctx.errors);
+    return serverTextLowering(reconstructed, ctx, "a server `match` expression's arms", {
+      checkText: arms,
+      noReparse: true,
+      span: (node as { span?: object }).span ?? null,
+    });
   }
 
   // The structured emitter uses `emitExprField(headerExpr, header, _matchCtx)`
@@ -4802,6 +5126,49 @@ function emitInputStateRef(node: InputStateRefExpr, ctx: EmitExprContext): strin
 // Escape hatch — falls back to string rewrite pipeline
 // ---------------------------------------------------------------------------
 
+function excerptRaw(t: string): string {
+  const one = String(t ?? "").replace(/\s+/g, " ").trim();
+  return one.length > 60 ? one.slice(0, 57) + "..." : one;
+}
+
+/**
+ * S465 r4 — a tagged template on the SERVER, lowered from its parts (closes
+ * g-server-text-hatch-unawaited-call-s465 for the tagged-template shape). The tag
+ * and each `${ … }` substitution are read by the expression parser and emitted
+ * from the tree; the literal text parts are kept verbatim. Null when the text is
+ * not `<tag>\`…\`` with a readable tag (the caller then takes the guarded text path).
+ */
+function emitTaggedTemplateFromText(raw: string, ctx: EmitExprContext): string | null {
+  const t = String(raw ?? "").trim();
+  if (!t.endsWith("`")) return null;
+  const parse = (s: string): ExprNode | null => {
+    try {
+      const n = parseExprToNode(s, "<tagged-template>", 0) as ExprNode | null;
+      if (!n || hasLostTrailingContent(n)) return null;
+      if ((n as { kind?: string }).kind === "escape-hatch" && (n as { nativeKind?: string }).nativeKind === "ParseError") return null;
+      return n;
+    } catch { return null; }
+  };
+  for (let p = t.indexOf("`"); p > 0; p = t.indexOf("`", p + 1)) {
+    const parts = splitTemplateLiteral(t, p);
+    if (!parts || parts.end !== t.length - 1) continue;
+    const tagNode = parse(t.slice(0, p).trim());
+    if (!tagNode) return null;
+    const subNodes: ExprNode[] = [];
+    for (const s of parts.subs) {
+      const n = parse(s.trim());
+      if (!n) return null;
+      subNodes.push(n);
+    }
+    let out = emitExpr(tagNode, ctx) + "`" + parts.quasis[0];
+    for (let k = 0; k < subNodes.length; k++) {
+      out += "${" + emitExpr(subNodes[k], ctx) + "}" + parts.quasis[k + 1];
+    }
+    return out + "`";
+  }
+  return null;
+}
+
 function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
   // The string pipeline handles whatever the structured parser couldn't parse.
   // This path disappears when all escape hatches are eliminated (Phase 3.5).
@@ -4820,10 +5187,111 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     (node as any).kind === "Function" ||
     node.nativeKind === "ArrowFunctionExpression" ||
     node.nativeKind === "FunctionExpression";
+  // S465 r6 (review LOW-3; ruling S464 cfor-comma "b") — the comma operator is refused
+  // in every VALUE position on the client too (the one admitted comma list, a C-style
+  // `for` header's init / update, is lowered before it reaches here —
+  // emit-control-flow `emitCForHeaderList`).
+  // S466 r7 (MED-C) — the CLIENT copy of an async-coloured function-valued binding:
+  // lowered from the tree as an `async` function in the async-body facts it was emitted
+  // with (emit-reactive-wiring), its calls awaited. A body that cannot be read that way
+  // is refused (a sync text lowering would hand callers an un-awaited Promise).
+  if (ctx.mode !== "server" && isArrowOrFn && (node as { _asyncFnValue?: boolean })._asyncFnValue === true) {
+    const fn = emitServerFnValue(node, ctx, { async: true });
+    if (fn !== null) return fn;
+    recordRefusedLowering(new CGError(
+      "E-ASYNC-FN-ESCAPES-AS-VALUE",
+      "E-ASYNC-FN-ESCAPES-AS-VALUE: this function value calls an async function (a server function or a " +
+        "Promise-returning helper), so the compiler emits it `async` and awaits every call to it — but its body " +
+        "cannot be read here, so its own calls could not be awaited (§13.2). Declare it with `function name(…) " +
+        "{ … }`.",
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-ASYNC-FN-ESCAPES-AS-VALUE */";
+  }
+  if (ctx.mode !== "server" && node.nativeKind === "SequenceExpression") {
+    // cascadeOnly: dropped when the compile already holds a more precise error for the
+    // same text (`defer [1, 2].forEach(f)` outside a function is E-DEFER-OUTSIDE-FUNCTION).
+    const seqErr = new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      `a comma sequence \`${excerptRaw(node.raw)}\` is not a scrml expression — scrml has no comma ` +
+        "operator (§40.8, S441; §4.18.2); a comma list is admitted only in a C-style `for` header's init " +
+        "and update. Write each expression as its own statement, and use the value you need directly.",
+      (node as { span?: object }).span ?? {},
+    );
+    (seqErr as CGError & { cascadeOnly?: boolean }).cascadeOnly = true;
+    recordRefusedLowering(seqErr, node as object);
+    return "null /* E-CODEGEN-INVALID-LOGIC */";
+  }
   if (ctx.mode === "server") {
-    return isArrowOrFn
-      ? rewriteServerExprArrowBody(node.raw, ctx.dbVar, ctx.errors)
-      : rewriteServerExpr(node.raw, ctx.dbVar, ctx.errors);
+    // S465 r3 — a comma SEQUENCE is not a scrml expression (SPEC §40.8, the S441
+    // bullet: "A comma sequence … is not a scrml expression — §4.18.2 lists what a
+    // bare run may be, and scrml has no comma operator"). S465 r4: a C-style `for`
+    // header's comma init / update (`i = 0, j = 5`, `i++, j--`) is the same
+    // operator — the SPEC names no exception for headers — so it is refused here
+    // too (recorded for the owner in progress.md r4). On the server its text fallback was also never
+    // awaited (`(0, check(p, h))` shipped a Promise — truthy — so a wrong
+    // password passed), so it is refused rather than lowered as text.
+    // (Measured r3: refusing EVERY non-arrow hatch on the server also rejects
+    // legal scrml the text rewriter is the designed lowering for — a named-arg
+    // payload variant `.Found(name: "carol")` (ParseError hatch), a §14.8 tagged
+    // template — so only the sequence, which is not scrml at all, is refused here.
+    // See progress.md r3 for the recorded residue.)
+    if (node.nativeKind === "SequenceExpression") {
+      recordRefusedLowering(new CGError(
+        "E-CODEGEN-INVALID-LOGIC",
+        `a comma sequence \`${excerptRaw(node.raw)}\` is not a scrml expression — scrml has no comma ` +
+          "operator (§40.8, S441; §4.18.2) — and it cannot be lowered in server code. Write each expression as its own " +
+          "statement, and use the value you need directly.",
+        (node as { span?: object }).span ?? {},
+      ), node as object);
+      return "null /* E-CODEGEN-INVALID-LOGIC */";
+    }
+    // S465 r4 — a §-ordinary JS tagged template (`String.raw\`…${x}…\``) is lowered
+    // from its parts: the tag and every substitution are read as expressions and
+    // emitted from the tree (so a call in a substitution is awaited like any other).
+    if (node.nativeKind === "TaggedTemplateExpression") {
+      const structured = emitTaggedTemplateFromText(node.raw, ctx);
+      if (structured !== null) return structured;
+    }
+    // S465 r6 (review MED-1) — a LITERAL the expression parser keeps as a hatch (a
+    // regular-expression literal `/[A-Z](\d)/`, a BigInt `10n`) holds no call: its
+    // text is one literal token. Decided by parsing it (acorn — the whole text must be
+    // ONE Literal node), never by scanning it; the lexical guard would read `](` in a
+    // regex as a call.
+    if (node.nativeKind === "Literal" && isSingleJsLiteral(node.raw)) {
+      return serverTextLowering(node.raw, ctx, "a server literal", { literal: true });
+    }
+    // S465 r6 (review LOW-2) — a named-argument payload variant (`.Found(name: x)`) is a
+    // parse-error hatch (`name:` is not an argument). Its arguments are put in the
+    // declared field order (`.Found(x)`) and the result is lowered from the tree, so a
+    // call in an argument is classified (awaited) like any other.
+    if (node.nativeKind === "ParseError") {
+      const positional = positionalizeNamedVariantCalls(node.raw);
+      if (positional !== null) {
+        const tree = readableExprTree(positional);
+        if (tree) return emitExpr(tree, ctx);
+      }
+    }
+    // S465 r6 — an async-coloured function-valued binding (fn-valued-bindings.ts):
+    // lowered from the tree as an `async` function, its calls awaited. A body that
+    // cannot be read that way falls to the guarded text path below (refused when it
+    // holds a call — never shipped sync).
+    if (isArrowOrFn && (node as { _asyncFnValue?: boolean })._asyncFnValue === true) {
+      const fn = emitServerFnValue(node, ctx, { async: true });
+      if (fn !== null) return fn;
+    }
+    // S466 r7 (MED-D) — a block-bodied function value is lowered from THIS node (acorn's
+    // parameters and body), not from a re-read of its text.
+    if (isArrowOrFn && lexicalCallInText(node.raw) !== null) {
+      const fn = emitServerFnValue(node, ctx);
+      if (fn !== null) return fn;
+    }
+    // Everything else on this path is lowered from text: refused when it calls
+    // anything (server-text-guard.ts).
+    return serverTextLowering(node.raw, ctx, isArrowOrFn ? "a server function value" : "a server expression", {
+      arrowBody: isArrowOrFn,
+      span: (node as { span?: object }).span ?? null,
+    });
   }
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — the ACTUAL locus. A STATEMENT-bodied `on mount { if (@f.isValid) {…} }`

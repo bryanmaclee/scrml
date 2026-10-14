@@ -1,6 +1,8 @@
-import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { handledSqlGuardInner, patternCQueryOfInit } from "./sql-attempt.ts";
+import type { ExprNode } from "../types/ast.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { liveSqlInterpolationExprs, sqlHasLiveInterpolation } from "./sql-lex.ts";
+import { tokenizeSQL } from "../tokenizer.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 // FIX3 (S265 review) — a `<theme>` token `@bg` in a `#{}` value is a STATIC
@@ -672,6 +674,30 @@ function collectMetaExprStrings(body: Node[]): string[] {
  * expression nesting depth (small in practice). Defensive against cycles via a
  * visited set is unnecessary — the AST is a tree.
  */
+/**
+ * S465 r6 (review LOW-1) — the text the `?{` sigil test reads. With a parsed tree, a real
+ * query is a `sql-ref` node (`exprTreeContainsSqlRef` answers for it structurally), and a
+ * `?{` inside a STRING literal is text, not SQL (`const s = "?{\`SELECT pw\`}"` was read
+ * as server-only — E-CG-006 in a client function). Only the parts the parser kept as
+ * TEXT (escape hatches) can hide a query from the tree, so only their text is tested.
+ * Without a tree, the whole fallback text is (as before).
+ */
+function sqlSigilText(tree: unknown, fallback: string): string {
+  if (!tree || typeof tree !== "object") return fallback;
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown): void => {
+    if (!v || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) { for (const c of v) walk(c); return; }
+    const o = v as Record<string, unknown>;
+    if (o.kind === "escape-hatch" && typeof o.raw === "string") parts.push(o.raw);
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(tree);
+  return parts.join("\n");
+}
+
 function exprTreeContainsSqlRef(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   const n = node as Record<string, unknown>;
@@ -823,7 +849,11 @@ export function isServerOnlyNode(node: unknown): boolean {
   // Phase 4d: ExprNode-first, string fallback
   if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "state-decl") {
     const init = (n as any).initExpr ? emitStringFromTree((n as any).initExpr) : (typeof n.init === "string" ? n.init : "");
-    if (SQL_SIGIL_PATTERN.test(init)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).initExpr, init))) return true;
+    // S465 — structurally, as for bare-expr below: a query in the initializer
+    // (`?{SELECT …}.get().name` — no backtick, so the sigil regex misses it) is
+    // server-only; it used to reach the client as `null /* sql-ref unresolved */.get()`.
+    if ((n as any).initExpr && exprTreeContainsSqlRef((n as any).initExpr)) return true;
     if (ENV_PATTERN.test(init)) return true;
     // NOTE (S93 cg-006): we intentionally do NOT short-circuit on
     // `(n as any).sqlNode` here. Top-level `@x = ?{...}` (state-decl) is
@@ -848,7 +878,7 @@ export function isServerOnlyNode(node: unknown): boolean {
     // `kind:"sql"` upstream (translate-stmt.js, PRIMARY).
     if ((n as any).exprNode && exprTreeContainsSqlRef((n as any).exprNode)) return true;
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof n.expr === "string" ? n.expr : "");
-    if (SQL_SIGIL_PATTERN.test(expr)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).exprNode, expr))) return true;
     if (ENV_PATTERN.test(expr)) return true;
   }
 
@@ -864,7 +894,7 @@ export function isServerOnlyNode(node: unknown): boolean {
   if (n.kind === "return-stmt" || n.kind === "throw-stmt") {
     if ((n as any).sqlNode && (n as any).sqlNode.kind === "sql") return true;
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof (n as any).expr === "string" ? (n as any).expr : "");
-    if (SQL_SIGIL_PATTERN.test(expr)) return true;
+    if (SQL_SIGIL_PATTERN.test(sqlSigilText((n as any).exprNode, expr))) return true;
     if (ENV_PATTERN.test(expr)) return true;
     // GITI-038 (E-CG-006 defense-in-depth) — a returned function expression
     // (`return function name(){…}`) lives on `fnExprNode`. Scan its direct body so a
@@ -970,6 +1000,11 @@ export function collectServerAuthorityTypes(fileAST: FileAST): Node[] {
  */
 export function callableServerVarDecls(decls: Node[]): Node[] {
   return decls.filter((decl) => {
+    // S465 — an initializer over an inline `?{}` (`<x server> = ?{…}.get().name`)
+    // is a §52.6.5 Pattern C load (its own `/__serverLoad/<var>` route), not a
+    // callable loader: never coalesced into `/__mountHydrate`, never loaded by a
+    // client-side call (its query text must not reach the client).
+    if (serverVarDeclExprQueries(decl) !== null) return false;
     const initExpr: string = (decl as any).initExpr
       ? emitStringFromTree((decl as any).initExpr)
       : (typeof (decl as any).init === "string" ? ((decl as any).init as string) : "");
@@ -1006,6 +1041,55 @@ export function callableServerVarDecls(decls: Node[]): Node[] {
  * the `${` token.
  */
 export type ServerVarLoadKind = "sql-load" | "param-bearing" | "none";
+
+/**
+ * S465 (s462 fix round 1) — §52.6.5 Pattern C over an EXPRESSION. When a
+ * `<x server>` declaration's initializer is an expression that evaluates an
+ * inline `?{}` query — `?{…}.get().name`, `?{…}.all().length`,
+ * `?{…}.all().slice(0, 1)` — rather than the bare query (which the parser
+ * attaches as the structured `sqlNode`), that `?{}` is still the cell's mount
+ * load: the `/__serverLoad/<var>` route evaluates the WHOLE initializer
+ * server-side and serves its value (the tail applies to the query's value —
+ * §8.3 / §44.3 make it ordinary code over `Row | not` / `Row[]`). Returns the
+ * SQL body of that query (a one-element list), or null when the declaration
+ * carries a structured `sqlNode`, or its initializer is not the Pattern C shape
+ * (S465 round 2: the query leftmost, the tail closed — `patternCQueryOfInit`).
+ */
+export function serverVarDeclExprQueries(decl: Node): string[] | null {
+  const d = decl as any;
+  if (d.sqlNode && d.sqlNode.kind === "sql") return null;
+  const init = d.initExpr;
+  if (!init || typeof init !== "object") return null;
+  // S465 (s462 fix round 2) — ONLY the shape §52.6.5 names: the query is the
+  // initializer's leftmost operand and the tail is closed over a server-safe set
+  // (sql-attempt.ts `patternCQueryOfInit`). `wrap(?{…}.get())`, a tail reading a
+  // `@cell` / `@currentUser` / a file-scope function, or a second query is not a
+  // Pattern C load — it keeps the callable-loader path it had before (the route
+  // would run code whose names exist only on the client: a ReferenceError).
+  const head = patternCQueryOfInit(init as ExprNode);
+  if (!head) return null;
+  const toks = tokenizeSQL(head.shape.raw.slice(2, -1), 0, 1, 1);
+  return [toks[0] && toks[0].kind === "SQL_RAW" ? toks[0].text : ""];
+}
+
+/**
+ * The SQL text a §52.6.5 Pattern C `<x server>` declaration's mount load runs —
+ * the structured `sqlNode`'s query, or (S465) the leftmost query of a
+ * closed-tail initializer expression — or null when the declaration is not a
+ * Pattern C load. The ONE reader the load classification
+ * (`serverVarDeclLoadKind`), the row-scope predicate and the W-AUTH-004 check
+ * share, so the bare and the tailed form classify identically.
+ */
+export function serverVarDeclLoadQuery(decl: Node): string | null {
+  const sqlNode = (decl as any).sqlNode;
+  if (sqlNode && sqlNode.kind === "sql") {
+    return typeof sqlNode.query === "string"
+      ? sqlNode.query
+      : (typeof sqlNode.body === "string" ? sqlNode.body : "");
+  }
+  const qs = serverVarDeclExprQueries(decl);
+  return qs === null ? null : qs.join("\n");
+}
 
 /**
  * §52.15.5 (S255) — does the SQL body carry a LIVE `${...}` interpolation? Uses
@@ -1055,11 +1139,10 @@ export function serverVarDeclLoadKind(
   decl: Node,
   ambientCurrentUserActive = false,
 ): ServerVarLoadKind {
-  const sqlNode = (decl as any).sqlNode;
-  if (!sqlNode || sqlNode.kind !== "sql") return "none";
-  const query: string = typeof sqlNode.query === "string"
-    ? sqlNode.query
-    : (typeof sqlNode.body === "string" ? sqlNode.body : "");
+  // S465 — the structured `sqlNode` query, or every query a tailed initializer
+  // (`?{…}.get().name`) evaluates: both are the cell's Pattern C mount load.
+  const query = serverVarDeclLoadQuery(decl);
+  if (query === null) return "none";
   // A param-bearing SELECT interpolates a client-local cell — a LIVE `${...}`
   // (comment-stripped: a commented-out interpolation is inert). The POST-body
   // param-passing path is a bounded follow-on.
@@ -1076,4 +1159,25 @@ export function serverVarDeclLoadKind(
     return "param-bearing";
   }
   return "sql-load";
+}
+
+/**
+ * Collect the top-level logic-block body statements, in source order (every `${ }`
+ * block of the file, at any markup depth — not descending into function bodies).
+ * Moved here from emit-tool.ts (S466 r7) so file-async-fns.ts can read it without
+ * loading the tool emitter (whose module-level constants read emit-server's).
+ */
+export function collectTopLevelStatements(fileAST: any): any[] {
+  const stmts: any[] = [];
+  const nodes = (getNodes(fileAST as never) ?? []) as unknown as any[];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as any;
+    if (n.kind === "logic" && Array.isArray(n.body)) {
+      for (const s of n.body) if (s) stmts.push(s);
+    }
+    if (Array.isArray(n.children)) for (const c of n.children) visit(c);
+  };
+  for (const n of nodes) visit(n);
+  return stmts;
 }

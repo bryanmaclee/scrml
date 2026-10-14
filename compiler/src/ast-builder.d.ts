@@ -50,6 +50,8 @@ export declare function parseLogicBody(
  * only; `null` when there is nothing to check (unparseable, callable or opaque).
  */
 export declare function parseHandlerStatementsForCheck(value: unknown, filePath: string): LogicStatement[] | null;
+/** S464 Q24 r3 — the E-MARKUP-STATEMENT-NOT-RENDERED refusals of an event-handler value (TABErrors). */
+export declare function handlerMarkupRefusals(value: unknown, filePath: string): Array<{ code: string; message: string; tabSpan?: unknown; span?: unknown }>;
 /** The arms of an expression-position `!{ … }` handler, parsed from its source text (S454). */
 export declare function parseGuardArmsFromRaw(rawBang: string, filePath: string): Array<Record<string, unknown>> | null;
 

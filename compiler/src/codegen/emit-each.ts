@@ -45,7 +45,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
-import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering } from "./refused-lowering-errors.ts";
+import { recordRefusedLowering, refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import {
   classifyInterpolatedAttrSink,
   interpolatedAttrSinkMessage,
@@ -1302,6 +1302,15 @@ function renderTemplateChildToJs(
 
   // Text children are typically whitespace-only — skip empty / WS-only runs.
   if (child.kind === "text") {
+    // SPEC §67.6 (S462 md phase 2) — a lowered `<md>` text node: `_mdText` is its plain text,
+    // written as a text node, never parsed and never interpolated. Kept even when it is only
+    // whitespace — a soft break is the `\n` between two words.
+    if (typeof (child as any)._mdText === "string") {
+      if ((child as any)._mdText !== "") {
+        lines.push(`${indent}${fragmentVar}.appendChild(_scrml_g.document.createTextNode(${JSON.stringify((child as any)._mdText)}));`);
+      }
+      return;
+    }
     const txt = String((child as any).value ?? (child as any).text ?? "");
     if (!txt.trim()) return;
     // SPEC §4.17 raw-content (`<pre>`/`<code>`) — emit the body VERBATIM. The
@@ -1384,6 +1393,11 @@ function renderTemplateChildToJs(
     }
 
     const elVar = `_scrml_el_${nextLocalId()}`;
+    // S464 round 5 — each markup child learns its parent's tag (`refuseStaticAttrWrite`: an SVG
+    // animation inside `<image>` animates an image load).
+    for (const gc of ((child as any).children ?? []) as any[]) {
+      if (gc && typeof gc === "object" && gc.kind === "markup") gc._parentTag = tagName;
+    }
     // §4.17 (S462) — codegen backstop: `<script>` / `<style>` are never built, nor a
     // raw-content body holding their start-tag text (pre-Q21 this path asked only the
     // element rule, so such a body in an `<each>` re-parsed at codegen was a silent accept).
@@ -2352,6 +2366,17 @@ function renderTemplateAttrToJs(
   const val = attr.value;
   const valKind = val && typeof val === "object" ? String(val.kind ?? "") : "";
 
+  // ---- (0) §5.2 (S464) — a QUOTED event-handler attribute with no `${…}` is never written
+  // (E-ATTR-QUOTED-HANDLER). A row inside a `<match>` arm is re-parsed in codegen and never
+  // reached VP-3; this is the backstop (one backstop, `refuseStaticAttrWrite`, which also refuses a static executable value).
+  if (valKind === "string-literal" &&
+      refuseStaticAttrWrite(aName, val.value, attr, elNode && typeof elNode.tag === "string" ? elNode.tag : "",
+        elNode && Array.isArray(elNode.attrs) ? elNode.attrs : null,
+        elNode && typeof elNode._parentTag === "string" ? elNode._parentTag : null)) {
+    lines.push(`${indent}/* E-ATTR-QUOTED-HANDLER: quoted "${aName}" handler refused */`);
+    return;
+  }
+
   // ---- (1) class:NAME — conditional classList toggle ----------------------
   if (aName.startsWith("class:")) {
     const className = aName.slice("class:".length);
@@ -2458,11 +2483,8 @@ function renderTemplateAttrToJs(
   }
 
   // ---- (2) event handlers — inline addEventListener -----------------------
-  // A QUOTED (`onclick="hit(it)"`) or bareword event attribute is NOT a handler: SPEC §5.2
-  // rule 1 — "`attr=\"value\"` SHALL produce a static attribute with the literal string
-  // `value`. The compiler SHALL NOT interpret the string contents as an expression." It falls
-  // through to the static-attribute path (4) below, exactly as the same attribute outside an
-  // `<each>` is emitted into the HTML. Until s456 it entered this branch and its listener body
+  // A QUOTED event attribute (`onclick="hit(it)"`) is refused at (0) above (§5.2, S464 —
+  // E-ATTR-QUOTED-HANDLER); a bareword one falls through to the presence path (4) below. Until s456 it entered this branch and its listener body
   // became `/* each: unsupported event handler shape */` — the attribute silently DROPPED.
   const ev = eventNameForAttr(aName);
   if (ev !== null && valKind !== "string-literal" && valKind !== "absent" && val != null) {

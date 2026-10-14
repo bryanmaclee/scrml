@@ -76,9 +76,10 @@ import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
-import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { sqlQueryExprShape, sqlQueryHeadOfExpr, sqlQueriesNotCoveredByHandler, sqlRefsOfExpr, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNode, handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -86,7 +87,7 @@ import { sqlQueryExprShape, SQL_ERROR_EXHAUSTIVE_VARIANTS, handledSqlOfGuardedNo
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
 import { replaceLiveSqlInterpolations } from "./codegen/sql-lex.ts";
-import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
+import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, serverVarDeclLoadQuery, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -118,6 +119,7 @@ import {
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
+import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
@@ -7771,6 +7773,27 @@ function engineNameToProjectedVar(name: string): string {
  * for state-decls whose name matches a projected var AND for bare-expr
  * nodes whose text starts with `@name = ...` where name matches.
  */
+
+/**
+ * §48.3.4 — the non-deterministic calls a pure `fn` body may not make (E-FN-004).
+ * Exported (s464 fix round 3) so server codegen classifies a module value's
+ * initializer with the SAME list before copying it into the server bundle.
+ */
+export const FN_NON_DET_CALLS: readonly string[] = [
+  "Date.now",
+  "new Date",
+  "Math.random",
+  "crypto.randomUUID",
+  "crypto.getRandomValues",
+  "performance.now",
+];
+
+/** §48.3.4 — the non-deterministic `scrml:` stdlib members (DD1 Fork 1), by module. */
+export const FN_NONDET_STDLIB: Record<string, string[]> = {
+  "scrml:time": ["now"],
+  "scrml:random": ["random", "randomInt"],
+};
+
 export function rejectWritesToDerivedVars(
   nodes: ASTNodeLike[],
   projectedVars: Map<string, MachineType>,
@@ -10463,10 +10486,7 @@ function annotateNodes(
   // Registry-driven so the next non-det primitive extends trivially: add a
   // `"scrml:module": ["member", ...]` row.
   // ---------------------------------------------------------------------------
-  const NONDET_STDLIB: Record<string, string[]> = {
-    "scrml:time": ["now"],
-    "scrml:random": ["random", "randomInt"],
-  };
+  const NONDET_STDLIB: Record<string, string[]> = FN_NONDET_STDLIB;
   // local-name → set of bound non-det members (a single local could in theory
   // shadow across modules, but the common case is one binding per name).
   const nonDetStdlibBindings = new Set<string>();
@@ -10526,6 +10546,14 @@ function annotateNodes(
   if (registerMessagesLocals.size > 0) {
     const _rmDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     checkRegisterMessagesCalls(_allTopNodes, registerMessagesLocals, errors, _rmDefaultSpan);
+  }
+
+  // §14.3 / §15.11.5 (S462 "no value holds a function") — an object / array / map literal (or a
+  // spread into one) or a state cell that STORES a function value is refused. A literal written
+  // directly as a host-JS call argument is at the boundary and allowed. See value-function-stored.ts.
+  const _vfsSource = (fileAST as { _sourceText?: unknown })._sourceText ?? ((fileAST as { ast?: { _sourceText?: unknown } }).ast?._sourceText);
+  for (const d of checkValueFunctionStored(_allTopNodes, filePath, importedFnDecls?.keys() ?? [], typeof _vfsSource === "string" ? _vfsSource : undefined)) {
+    errors.push(new TSError(d.code, d.message, d.span as Span));
   }
 
   // ---------------------------------------------------------------------------
@@ -11194,10 +11222,13 @@ function annotateNodes(
         // not inside `${...}`). A text child whose trimmed value begins with
         // `match ` or `partial match ` indicates the author wrote control flow
         // outside any logic context.
+        // Decided by PROVENANCE, never by the text: a raw-content body (`<pre>` / `<code>`, §4.17 —
+        // display text, S462 Q21) and a lowered `<md>` text node (`_mdText`, §67.6) are text by
+        // construction, so a line starting `match ` there is prose or a code sample.
         const markupChildrenForMatch = n.children as ASTNodeLike[] | undefined;
-        if (Array.isArray(markupChildrenForMatch)) {
+        if (Array.isArray(markupChildrenForMatch) && !isRawContentElement(n)) {
           for (const child of markupChildrenForMatch) {
-            if (child && typeof child === "object" && child.kind === "text") {
+            if (child && typeof child === "object" && child.kind === "text" && typeof (child as { _mdText?: unknown })._mdText !== "string") {
               const textVal = (child as { value?: unknown }).value;
               if (typeof textVal === "string" && /(?:^|\n)\s*(?:partial\s+)?match\s+/.test(textVal)) {
                 const mSpan = (child.span as Span | undefined) ?? (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -13086,15 +13117,12 @@ function annotateNodes(
             //     passing (a bounded follow-on, not yet shipped); the cell will
             //     NOT hydrate. Replace the generic W-AUTH-001 with the precise
             //     W-AUTH-004 steer (param-free query, or `on mount`).
-            const _sqlNode = (n as ASTNodeLike).sqlNode as
-              | { kind?: string; query?: string; body?: string }
-              | undefined;
-            const _hasInlineSql = !!_sqlNode && _sqlNode.kind === "sql";
-            const _inlineSqlQuery = _hasInlineSql
-              ? (typeof _sqlNode!.query === "string"
-                  ? _sqlNode!.query
-                  : (typeof _sqlNode!.body === "string" ? _sqlNode!.body : ""))
-              : "";
+            // S465 — the SAME reader codegen classifies with (collect.ts
+            // `serverVarDeclLoadQuery`): the structured `sqlNode` query, or the
+            // queries a tailed initializer (`?{…}.get().name`) evaluates.
+            const _patternCQuery = serverVarDeclLoadQuery(n as any);
+            const _hasInlineSql = _patternCQuery !== null;
+            const _inlineSqlQuery = _patternCQuery ?? "";
             // §52 (S233) Fork-3 — a query whose ONLY `${...}` interpolations are
             // the server-ambient `@currentUser` cell (and the ambient is active —
             // no user `<currentUser>` cell shadows the name) is server-resolvable,
@@ -13763,6 +13791,16 @@ function annotateNodes(
         // structured `sqlNode`, or an expression-position query operand.
         if (!errorTypeName && guardedNode && _guardedNodeHandlesSql(guardedNode)) {
           _checkHandlerExhaustive("SqlError", SQL_ERROR_EXHAUSTIVE_VARIANTS, errorArms.map((a) => String(a.pattern ?? "")), n.span as Span);
+        }
+        // §19.8.3 item 1 (S465, s462 fix round 2) — the handler covers the query it
+        // is ON: the guarded operand itself or its leftmost operand. A query the
+        // operand evaluates elsewhere (not leftmost, or a second one) is not
+        // handled by it — refused, never compiled clean and unhandled.
+        if (!errorTypeName && guardedNode) {
+          const _g = guardedNode as Record<string, unknown>;
+          if (!(_g.sqlNode && typeof _g.sqlNode === "object") && _g.kind !== "sql") {
+            _checkHandlerCoversQueries((_g.initExpr ?? _g.exprNode) as ExprNode | undefined, n.span as Span);
+          }
         }
 
         // S28 — scope-check each arm's handler body with arm.binding pushed
@@ -16720,9 +16758,38 @@ function annotateNodes(
     ));
   }
 
+  /**
+   * §19.8.3 (S465, s462 fix round 2) — E-ERROR-002 for each `?{}` a `!{}`
+   * handler's operand evaluates but the handler does not cover. §19.8.3: "an
+   * unhandled `?{}` SHALL be a compile error, **E-ERROR-002**", and item 1 — "A
+   * `!{}` handler on the query — written after the terminator (`.get()`,
+   * `.all()`, `.run()`)" — handles THAT query: the operand itself, or its
+   * leftmost operand (the tail runs on the success value). A query that is not
+   * leftmost (`"x" + ?{…}.get().name !{…}`) or a second query
+   * (`?{A}.get().name + ?{B}.get().name !{…}`, `?{A}.get() ?? ?{B}.get() !{…}`)
+   * would otherwise run with no handler: its driver failure escaped the
+   * handler the source wrote (an unhandled throw), compiled clean.
+   */
+  function _checkHandlerCoversQueries(operand: ExprNode | null | undefined, span: Span): void {
+    const uncovered = sqlQueriesNotCoveredByHandler(operand);
+    if (uncovered.length === 0) return;
+    const raw = String((uncovered[0] as { raw?: string }).raw ?? "?{…}");
+    const shown = raw.length > 60 ? raw.slice(0, 57) + "…}" : raw;
+    errors.push(new TSError(
+      "E-ERROR-002",
+      `E-ERROR-002: The \`?{}\` query \`${shown}\`${uncovered.length > 1 ? ` (and ${uncovered.length - 1} more)` : ""} is not handled. ` +
+      `A \`!{}\` handler handles the ONE query it is written on — the query that starts the handled expression ` +
+      `(\`?{…}.get().name !{…}\`), §19.8.3 — and this query is ${sqlRefsOfExpr(operand).length > 1 ? "one of several in the handled expression" : "not the expression's leftmost operand"}. ` +
+      `Handle each query at its own site — bind it first (\`const row = ?{…}.get() !{ … }\`) and compute from the binding — ` +
+      `or move the queries into a \`!\` function (§19.8.3).`,
+      span,
+    ));
+  }
+
   /** The error enum's variant names for a handled operand, or null when unknown. */
   function _operandErrorVariants(operand: ExprNode): { typeName: string; variants: readonly string[] } | null {
-    if (sqlQueryExprShape(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
+    // S465 — also a query that is the operand's leftmost operand (`?{…}.get().name !{…}`).
+    if (sqlQueryHeadOfExpr(operand) !== null) return { typeName: "SqlError", variants: SQL_ERROR_EXHAUSTIVE_VARIANTS };
     if (operand.kind === "call" && operand.callee.kind === "ident") {
       const typeName = fnErrorTypes.get(operand.callee.name);
       if (!typeName) return null;
@@ -16751,6 +16818,12 @@ function annotateNodes(
         const arms = known ? parseGuardArmsFromRaw(raw, filePath) : null;
         if (known && arms) {
           _checkHandlerExhaustive(known.typeName, known.variants, arms.map((a) => String(a.pattern ?? "")), (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
+        }
+        // S465 (s462 fix round 2) — unless the operand is a call to a `!` function
+        // (the handler's subject is that call), every query it evaluates must be
+        // the one the handler is on (§19.8.3 item 1).
+        if (!known || known.typeName === "SqlError") {
+          _checkHandlerCoversQueries(operand, (here ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span);
         }
       }
       // A `match` on a `?{}` query (§19.8.3 form 2): `::Ok` plus every SqlError
@@ -28546,6 +28619,18 @@ export function runTS(input: {
   // read off the file being checked. See `compilationUnitHasServerContext`.
   const appHasServerContext = compilationUnitHasServerContext(files);
 
+  // §14.3 E-VALUE-FUNCTION-STORED reads function facts ACROSS imports (an exported closure-returning
+  // function, an exported const arrow), so it is handed the compilation unit's modules for this run.
+  {
+    const _vfsIndex = new Map<string, unknown[]>();
+    for (const f of files) {
+      const fp = (f as { filePath?: unknown }).filePath;
+      const ns = ((f as { nodes?: unknown }).nodes ?? (f as { ast?: { nodes?: unknown } }).ast?.nodes) as unknown[] | undefined;
+      if (typeof fp === "string" && Array.isArray(ns)) _vfsIndex.set(fp, ns);
+    }
+    setValueFnModuleIndex(_vfsIndex);
+  }
+
   for (const fileAST of files) {
     // Look up imported types for this file from the caller-provided map.
     // api.js builds this map in topological order so dependency types are available
@@ -28563,6 +28648,7 @@ export function runTS(input: {
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;
   }
+  setValueFnModuleIndex(null);
 
   return {
     files: typedFiles,
@@ -28628,15 +28714,8 @@ function checkFnBodyProhibitions(
     ));
   }
 
-  // Known non-deterministic call identifiers (§48.3.4)
-  const NON_DET_CALLS = [
-    "Date.now",
-    "new Date",
-    "Math.random",
-    "crypto.randomUUID",
-    "crypto.getRandomValues",
-    "performance.now",
-  ];
+  // Known non-deterministic call identifiers (§48.3.4) — the shared list.
+  const NON_DET_CALLS = FN_NON_DET_CALLS;
 
   // Known DOM mutation identifiers (§48.3.2)
   const DOM_MUTATION_APIS = [

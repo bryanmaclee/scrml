@@ -1,0 +1,24 @@
+{
+  "id": "md-slot-regex-literal-quote",
+  "description": "A regex literal inside an `<md>` slot is pattern text: a quote or a brace inside it neither opens a string nor counts toward the slot's extent, so the slot compiles exactly as the same `${…}` does in a `<p>`.",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY) · review:s465-md finding 2",
+  "rationale": "§67.2: the splitter takes the §4.18.1b token-depth extent, found by lexing the interpolation body. A `/` that the logic tokenizer reads as a regex literal opens one token running to its closing `/` and flags, so `'` and `{` `}` inside it are not string or brace tokens; the slot closes at the `}` that balances its `${`.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#w strong",
+        "text": "its {here}"
+      },
+      {
+        "selector": "#w p",
+        "text": "A its {here} and it's here B"
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+<program>
+<section id="setup">Author-owned id.</section>
+<div id="a">
+    <md>
+        # Setup
+
+        ## Setup
+
+        ## 快速入门
+    </md>
+</div>
+<div id="b">
+    <md>
+        ## Setup
+    </md>
+</div>
+</program>

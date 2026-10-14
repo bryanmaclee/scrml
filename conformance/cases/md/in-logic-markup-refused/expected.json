@@ -1,0 +1,14 @@
+{
+  "id": "md-in-logic-markup-refused",
+  "description": "An `<md>` inside a markup value in an expression is not read by impl#1 yet and is refused by name (E-MD-IN-LOGIC-NOMINAL) instead of rendering its markdown source inside an unknown element.",
+  "language-version": "1.0",
+  "spec": "§67.2",
+  "provenance": "PA reading, s462-md-phase2 (§67.2 Where impl#1 reads it)",
+  "rationale": "§67.2: a static `<md>` is read in every markup body; inside `lift` markup or a markup value in an expression impl#1 refuses it with E-MD-IN-LOGIC-NOMINAL (Nominal in that position) — never a silent render of the markdown source.",
+  "expect": {
+    "codes": ["E-MD-IN-LOGIC-NOMINAL"],
+    "notCodes": ["E-MARKUP-001"],
+    "severity": { "E-MD-IN-LOGIC-NOMINAL": "error" },
+    "codeCounts": { "E-MD-IN-LOGIC-NOMINAL": 1 }
+  }
+}

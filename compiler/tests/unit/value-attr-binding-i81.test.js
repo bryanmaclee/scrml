@@ -491,8 +491,12 @@ describe("§i81.5 — no regressions on the paths that already worked", () => {
       />
     </program>`;
     const r = compile(src);
-    // The exact regression: a codegen crash, not a wrong attribute.
-    expect(diagCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    // S464 Q24 fix round 3 — the §2.2.1 parse floor now also runs on this `write: false`
+    // compile, and it shows the snippet prop's markup-returning ARROW is emitted as raw
+    // markup (`String(((item) => <span>…`), JS that never parsed — a `write: true` compile
+    // already refused it. Pinned as the floor's refusal (g-emitted-js-invalid-shapes-
+    // surfaced-by-floor-s464); the attribute assertions below (the i81 point) still hold.
+    expect(diagCodes(r)).toContain("E-CODEGEN-INVALID-LOGIC");
     // The prop must NOT be lowered as a DOM attribute.
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
     expect(emittedClient(r)).not.toContain('setAttribute("row"');
@@ -597,35 +601,35 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
   // keeps its pre-i81 drop AND says so. Never emit hopeful JS. A silent drop is
   // a bug; a page that loads dead is worse than the bug.
 
-  test("F2: a template literal reading @cell drops with a diagnostic, and the bundle still parses", () => {
+  // S462: F2's template shape is no longer unlowerable. The structural client
+  // template emitter (emit-expr `emitTemplateLitStructured`, closing
+  // g-client-template-interpolation-lowering-needs-a-structural-emitter) lowers
+  // `${@c}` inside the template, so the attribute is now EMITTED and bound — the
+  // pre-S462 warn-and-drop no longer applies to it. The warning itself stays for
+  // genuinely unlowerable values (pinned below with a multi-statement value).
+  test("F2 (S462): a template literal reading @cell now LOWERS — bound, no warning, bundle parses", () => {
     const src = `<program>
       <c> = "red"
       <div style=(\`color: \${@c}\`)>a</div>
     </program>`;
     const r = compile(src);
-    // `emitExprField` emits a template literal verbatim, so the `@c` survives
-    // into the JS. Pre-i81 the attr was dropped and the bundle stayed valid; the
-    // first cut emitted `(\`color: \${@c}\`)` — a SyntaxError — and via the CLI
-    // aborted the WHOLE compile with E-CODEGEN-INVALID-LOGIC on an idiomatic shape.
     const codes = diagCodes(r);
-    expect(codes).toContain("W-CG-VALUE-ATTR-UNLOWERABLE");
+    expect(codes).not.toContain("W-CG-VALUE-ATTR-UNLOWERABLE");
     expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    // The attribute is NOT emitted (pre-i81 parity) …
-    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-style");
-    // … and the bundle is valid JS. THIS is the assertion `r.errors` cannot make.
-    expectParses(emittedClient(r));
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-style");
+    const client = emittedClient(r);
+    expect(client).not.toContain("${@c}");
+    expectParses(client);
   });
 
-  test("F2: the diagnostic is a WARNING — the build still succeeds", () => {
+  test("F2: an unlowerable value attribute is still a WARNING and is dropped", () => {
     const src = `<program>
-      <c> = "red"
-      <div style=(\`color: \${@c}\`)>a</div>
+      <div title=(f(); "t")>a</div>
+      \${ function f() { return 1 } }
     </program>`;
     const r = compile(src);
     const w = r.warnings.find((e) => (e.code ?? "") === "W-CG-VALUE-ATTR-UNLOWERABLE");
     expect(w).toBeTruthy();
-    // Pre-i81 this file compiled clean. Failing the BUILD would be its own
-    // regression, so the disposition must be warn-and-drop, not error.
     expect(w.severity).toBe("warning");
   });
 

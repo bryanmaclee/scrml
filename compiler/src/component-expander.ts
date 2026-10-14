@@ -46,12 +46,14 @@ import { placeholderParam } from "./placeholder-nonce.ts";
 import { readUnquotedAttrValue, unquotedRejectDiagnostic } from "./unquoted-attr-value.ts";
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck } from "./ast-builder.js";
+import { sourceHasMdElement } from "./md-lower.ts";
+import { buildAST, attachHandlerStatementListsInTree, parseHandlerStatementsForCheck, handlerMarkupRefusals } from "./ast-builder.js";
 import { escapeHatchBodyStatements } from "./escape-hatch-body.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { collectRefusedElements, refusedElementMessage } from "./element-refusal.ts";
 import { collectExecutableSinkErrors } from "./validators/attribute-interpolation.ts";
+import { isQuotedStaticHandler, classifyStaticExecutableAttr } from "./attr-injection-sink.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 import {
   substitutePropsInJsSource, propNamesReferencedInUnparsedText, bindingNamesOfForHeader,
@@ -736,10 +738,56 @@ function restoreCssBlocks(s: string, blocks: string[]): string {
   return s.replace(/\x00(\d+)\x00/g, (_m, idx) => blocks[Number(idx)] ?? "");
 }
 
+/**
+ * SPEC §67.2 (S462 md phase 2) — mask every `<md>…</md>` element (opener, markdown body and
+ * closer) so the collapse passes below never touch it: an md body is markdown, where spaces,
+ * blank lines, `#`, `(`, `=` and `-` are structure or text, and its `${…}` slots are taken
+ * verbatim. A component holding an `<md>` reaches here with its markup as written
+ * (ast-builder.js `mdComponentVerbatimRaw`). Self-closing `<md …/>` has no body and is left.
+ */
+function maskMdElements(s: string): { masked: string; mdBlocks: string[] } {
+  const mdBlocks: string[] = [];
+  let out = "";
+  let i = 0;
+  const opener = /<m[dD](?=[\s>\/])/g;
+  for (;;) {
+    opener.lastIndex = i;
+    const m = opener.exec(s);
+    if (!m) break;
+    const start = m.index;
+    // the opener's `>` — skipping quoted attribute values and `{…}` / `${…}` values
+    let j = start + 3;
+    let depth = 0;
+    let q: string | null = null;
+    while (j < s.length) {
+      const c = s[j];
+      if (q !== null) { if (c === q) q = null; j++; continue; }
+      if (c === '"' || c === "'") { q = c; j++; continue; }
+      if (c === "{") { depth++; j++; continue; }
+      if (c === "}") { if (depth > 0) depth--; j++; continue; }
+      if (c === ">" && depth === 0) break;
+      j++;
+    }
+    if (j >= s.length || s[j - 1] === "/") { out += s.slice(i, j + 1); i = j + 1; continue; }
+    const close = s.slice(j + 1).search(/<\/[mM][dD]>/);
+    if (close < 0) break;
+    const end = j + 1 + close + 5;
+    out += s.slice(i, start) + `\x01${mdBlocks.length}\x01`;
+    mdBlocks.push(s.slice(start, end));
+    i = end;
+  }
+  out += s.slice(i);
+  return { masked: out, mdBlocks };
+}
+
 function normalizeTokenizedRaw(raw: string): string {
+  // S462 md phase 2 — `<md>` elements are kept verbatim (maskMdElements).
+  const { masked: mdMasked, mdBlocks } = maskMdElements(raw.trim());
+  const restoreMd = (t: string): string =>
+    mdBlocks.length === 0 ? t : t.replace(/\x01(\d+)\x01/g, (_m, idx) => mdBlocks[Number(idx)] ?? "");
   // Task 3 — protect `#{}` CSS blocks from the markup-focused collapse passes so
   // a CSS descendant / child combinator's whitespace is not miscompiled.
-  const { masked, blocks } = maskCssBlocks(raw.trim());
+  const { masked, blocks } = maskCssBlocks(mdMasked);
   let s = masked;
 
   // Step 0 (Bug-batch S93 — Bug 4): Normalize tokenized HTML comments.
@@ -956,7 +1004,7 @@ function normalizeTokenizedRaw(raw: string): string {
 
   // Task 3 — restore the masked `#{}` CSS blocks (verbatim) so their descendant /
   // child combinators survive the markup collapse passes intact.
-  return restoreCssBlocks(s, blocks);
+  return restoreMd(restoreCssBlocks(s, blocks));
 }
 
 // ---------------------------------------------------------------------------
@@ -1266,6 +1314,11 @@ function sourceNeedsLiveFallback(source: string): boolean {
   if (/\brender\s+[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(source)) {
     return true;
   }
+  // (5) `<md>` (SPEC §67, S462 md phase 2) — the native parser has no `<md>` production;
+  //   the live block splitter + ast-builder read the md body and lower it (md-lower.ts).
+  if (sourceHasMdElement(source)) {
+    return true;
+  }
   return false;
 }
 
@@ -1454,6 +1507,92 @@ function parseComponentDef(
   const { nodes, errors: allParseErrors, bodyEngines, normalizedBody: nb } = parseComponentBody(raw, name, filePath);
   const normalizedBody = nb ?? "";
 
+  // S464 Q24 r2 (§17.6.10.1, review N3) — a statement-position element in the body is
+  // refused by codegen (markup-statement-refusal.ts) at the span its LEAD carries; the
+  // re-parse gave it a span in the normalized body (`comp.scrml#W:3:4`). Map each one
+  // to the definition's own source position, as the other body diagnostics here are.
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    // The re-parse's span does not always address the normalized body (the native
+    // parser numbers a NESTED function body from that body's own start), so the span
+    // is trusted only when the text there is the element; otherwise the element is
+    // found by its tag: the only `<tag` in the body, or the first at/after the span.
+    const elementAt = (tag: string, start: unknown, end: unknown): [number | undefined, number | undefined] => {
+      const opener = new RegExp(`<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`, "g");
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        opener.lastIndex = 0;
+        const head = normalizedBody.slice(start, end).trimStart();
+        if (new RegExp(`^<${tag.replace(/[^A-Za-z0-9:-]/g, "")}(?=[\\s/>])`).test(head)) return [start, end];
+      }
+      const hits: number[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = opener.exec(normalizedBody)) !== null) hits.push(m.index);
+      if (hits.length === 0) return [undefined, undefined];
+      const at = hits.length === 1 ? hits[0] : (hits.find((h) => typeof start === "number" && h >= start) ?? hits[0]);
+      const close = normalizedBody.indexOf(`</${tag}>`, at);
+      const selfClose = normalizedBody.indexOf("/>", at);
+      const stop = close >= 0 ? close + tag.length + 3 : selfClose >= 0 ? selfClose + 2 : at + tag.length + 1;
+      return [at, stop];
+    };
+    const seenNodes = new WeakSet<object>();
+    const seenHandlerRefusals = new Set<string>();
+    const visit = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seenNodes.has(n as object)) return;
+      seenNodes.add(n as object);
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      const rec = n as Record<string, any>;
+      if (rec.kind === "html-fragment" && rec._markupLead) {
+        const [s0, s1] = elementAt(String(rec._markupLead.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._markupLead.span = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      } else if (rec.kind === "bare-expr" && rec.exprNode?.kind === "markup-value") {
+        const [s0, s1] = elementAt(String(rec.exprNode?.node?.tag ?? ""), rec.span?.start, rec.span?.end);
+        rec._refusalSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, s0, s1);
+      }
+      // S464 Q24 r3 (R2-1) — an event handler in the body (`<button onclick=${ @n = 2⏎
+      // <em>z</em> }>`) renders nothing: refuse its statement-position markup with the
+      // handler fix, checked on a copy positioned at the handler text in the FILE (the
+      // re-parse's spans address the normalized body).
+      if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
+        const src = _currentFileSource;
+        for (const a of rec.attrs) {
+          if (!a || typeof a.name !== "string" || !isEventHandlerAttrName(a.name)) continue;
+          const v = a.value;
+          if (!v || v.kind !== "expr" || typeof v.raw !== "string" || v.raw.trim() === "") continue;
+          if (!src || (defSpan.file && defSpan.file !== src.path)) continue;
+          let raw = v.raw;
+          let at = src.text.indexOf(raw, typeof defSpan.start === "number" ? defSpan.start : 0);
+          if (at < 0) {
+            // The normalized body re-spaced the value: map the value's own span to the
+            // source, and read the handler text there (between its `${` and matching `}`).
+            const mapped = bodyDiagnosticSourceSpan(defSpan, normalizedBody, v.span?.start, v.span?.end) as any;
+            const open = typeof mapped?.start === "number" ? src.text.indexOf("${", mapped.start) : -1;
+            if (open < 0 || open > (mapped.end ?? open) + 2) continue;
+            let depth = 0;
+            let k = open + 1;
+            for (; k < src.text.length; k++) {
+              const c = src.text[k];
+              if (c === "{") depth++;
+              else if (c === "}" && --depth === 0) break;
+            }
+            if (k >= src.text.length) continue;
+            at = open + 2;
+            raw = src.text.slice(at, k);
+          }
+          const lc = lineColAt(src.text, at);
+          const copy = { kind: "expr", raw, span: { file: filePath, start: at, end: at + raw.length, line: lc.line, col: lc.col } };
+          for (const e of handlerMarkupRefusals(copy, filePath) as any[]) {
+            const key = `${e.code}@${(e.tabSpan ?? e.span)?.start}`;
+            if (seenHandlerRefusals.has(key)) continue;
+            seenHandlerRefusals.add(key);
+            ceErrors.push(makeCEError(e.code, String(e.message).replace(/ \(line \d+, col \d+\)$/, ""), (e.tabSpan ?? e.span) as Span));
+          }
+        }
+      }
+      for (const k of Object.keys(rec)) if (k !== "span" && k !== "_markupLead") visit(rec[k]);
+    };
+    visit(nodes);
+  }
+
   // §4.17 (S462) — scrml does not admit `<script>` / `<style>` at any position, a
   // component body included. The body is raw text until this re-parse, so this is
   // where its element nodes first exist; the structural check runs over them for
@@ -1546,6 +1685,39 @@ function parseComponentDef(
   // stamp travels with its expanded copies, so VP-3 does not report it again per instance.
   // An attribute whose DEFINITION text is not a sink (`href="${u}"`) is judged again by VP-3
   // on every expanded instance, AFTER the caller's prop text is substituted in.
+  // S464 — every attribute in the body whose STATIC value is a sink (a quoted handler, a static
+  // `srcdoc`, a static URL with an unadmitted scheme) is stamped with its own SOURCE position
+  // (`_srcSpan`), mapped from the re-parsed body. The stamp travels with each expanded copy, so a
+  // refusal is anchored where the author wrote it, once — whichever stage reports it (this
+  // definition check, or VP-3 when a nested component call's attribute falls through onto the
+  // callee's root).
+  {
+    const defSpan = span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    const stack: unknown[] = [nodes];
+    const seenNodes = new Set<object>();
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (!cur || typeof cur !== "object" || seenNodes.has(cur as object)) continue;
+      seenNodes.add(cur as object);
+      if (Array.isArray(cur)) { for (const c of cur) stack.push(c); continue; }
+      const rec = cur as Record<string, unknown>;
+      if (rec.kind === "markup" && Array.isArray(rec.attrs)) {
+        for (const a of rec.attrs as AttrNode[]) {
+          const v = a && (a.value as { kind?: string; value?: unknown } | undefined);
+          if (!a || typeof a.name !== "string" || !v || v.kind !== "string-literal" || typeof v.value !== "string") continue;
+          if (!isQuotedStaticHandler(a.name, v.value) &&
+              classifyStaticExecutableAttr(a.name, v.value, { tag: rec.tag as string, attrs: rec.attrs as unknown[] }) === null) continue;
+          const sp = a.span as Span | undefined;
+          (a as { _srcSpan?: Span })._srcSpan = bodyDiagnosticSourceSpan(defSpan, normalizedBody, sp?.start, sp?.end);
+        }
+      }
+      for (const k of Object.keys(rec)) {
+        if (k === "span") continue;
+        const v = rec[k];
+        if (v && typeof v === "object") stack.push(v);
+      }
+    }
+  }
   for (const e of collectExecutableSinkErrors(nodes, filePath, {
     where: `in component \`${name}\``,
     spanOverride: span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
@@ -2913,7 +3085,21 @@ function substitutePropsInLogicStmt(
     }
     case "bare-expr": {
       const n = stmt as BareExprNode;
-      return { ...n, exprNode: subInExpr(n.exprNode) } satisfies BareExprNode;
+      const newExprNode = subInExpr(n.exprNode);
+      // S465 (s462-md-phase2 round 2) — a bare-expr built by the LEGACY BS+TAB path (a
+      // component body re-parsed through `sourceNeedsLiveFallback`: an `<md>` text slot, a
+      // template literal, an `<each>`/`<match>`) carries its source text in `expr` beside
+      // `exprNode`, and the `<each>` row emitters read a non-empty `expr` first
+      // (emit-each.ts, "LEGACY path stays byte-identical"). Substituting only the tree left
+      // the prop's NAME in that text — `textContent = String(t)`, a ReferenceError in every
+      // row. The text is re-derived from the substituted tree, so the two never disagree.
+      const legacyText = (n as { expr?: unknown }).expr;
+      if (newExprNode !== n.exprNode && newExprNode && typeof legacyText === "string" && legacyText.trim() !== "") {
+        let text: string | null = null;
+        try { text = emitStringFromTree(newExprNode as ExprNode); } catch { text = null; }
+        return { ...n, exprNode: newExprNode, expr: text ?? "" } as BareExprNode;
+      }
+      return { ...n, exprNode: newExprNode } satisfies BareExprNode;
     }
     case "lift-expr": {
       const n = stmt as LiftExprNode;

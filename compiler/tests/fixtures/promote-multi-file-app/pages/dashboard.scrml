@@ -10,6 +10,9 @@
 // harness writes the rewrite to this file's real path, runs compileScrml
 // with `gather: true` so the real import is gathered, then restores the
 // original. Import resolves; gate passes.
+//
+// S464 Q24 fix round 3 — the chain is the only content of its own `<section>`: promote
+// rewrites a chain only where the `<match>` block mount cannot change what renders.
 
 ${
   import { label, APP_NAME } from '../models/labels.scrml'
@@ -20,15 +23,17 @@ ${
 
 <div>
   <h1>${APP_NAME}</h1>
-  ${
-    if (@phase is .Idle) {
-      <p>${label("idle")}</p>
-    } else if (@phase is .Loading) {
-      <p>${label("loading")}</p>
-    } else if (@phase is .Error) {
-      <p>${label("error")}</p>
-    } else if (@phase is .Success) {
-      <p>${label("success")}</p>
+  <section>
+    ${
+      if (@phase is .Idle) {
+        <p>${label("idle")}</p>
+      } else if (@phase is .Loading) {
+        <p>${label("loading")}</p>
+      } else if (@phase is .Error) {
+        <p>${label("error")}</p>
+      } else if (@phase is .Success) {
+        <p>${label("success")}</p>
+      }
     }
-  }
+  </section>
 </>

@@ -230,3 +230,42 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   bootstrap-conformance, severity, delta-lint: PASS. browser-baseline --check: 3 new names — the nested-<each>
   one (identical on origin/main here) + 2 of cps-server-logic-stays-server-s462.browser (that file fails 6/10 on
   d5910316d in this container too: its `settle()` waits 200 ms and argon2 verify measures 236 ms at load ~10).
+
+## FIX ROUND 3 (S466)
+
+- [start] branch s466-cps-r3 from origin/wip/s464-p0-cps-r1 (82856e8c7); brief archived as BRIEF-fix-round-3-S466.md.
+- [merge origin/main 7f2b81418] conflicts and resolutions:
+  - scheduling.ts, index.ts: this branch carried only the r1 await branch (f8309fd64) there, no CPS delta →
+    main's #1424 version wholesale (its ONE per-file async set / scheduler predicate). No second reader kept.
+  - emit-server.ts (2 hunks: imports + the value-export async set): main's (`asyncFnNamesOfFile`). The CPS
+    batch code reads no async set of its own.
+  - emit-functions.ts: imports unioned; the two client-statement hunks keep this branch's no-skip / no-rewrite
+    form (main's side re-added the S455 handled-guard skip of a returnCell write — the receiving statement is a
+    server statement under §19.9.9.8, so it never reaches that branch).
+  - emit-control-flow.ts (5), emit-logic.ts (3): main's lines (hostAsyncFacts, labels, comma headers) +
+    this branch's `serverCellWrites` threaded. emit-expr.ts: the cells-batch structural arm path now uses
+    main's `readableExprTree`, then main's `serverTextLowering`. emit-client.ts: imports unioned.
+  - s465-await-imported-server-fn.test.js / its progress.md (add/add): main's; this branch's CPS retarget
+    re-applied as a patch on top (clean).
+  - generated: TYPES-BASELINE (the same pre-existing TS2345, its type text grew by `serverCellWrites` →
+    re-recorded), SPEC-INDEX, FACTS, bootstrap-conformance, gap-counts regenerated. known-gaps: main's file +
+    this branch's two hand entries re-applied (the counts hunk regenerated, not picked).
+- [merge integration] main's new tests failing on the merged tree (11):
+  - s465-await-r6 (7: libLambda, libFnExpr, libBlockLambda, libLambdaChain, libNegationInside, libIfInside,
+    inFileStdlib) → E-STDLIB-CLIENT-CHUNK-MISSING. Root: a top-level fn-valued binding
+    (`const inner = (p, h) => verifyPassword(p, h)`) is emitted on BOTH sides; on the client it is dead (only
+    server code calls it), but it kept `const { verifyPassword } = _scrml_stdlib.auth;` alive. On main that
+    shipped the auth chunk to the browser (measured on origin/main: `_scrml_stdlib.auth` + `const inner = async
+    …` in lib.client.js); on this branch auth has no client chunk → refused. FIX (emit-client
+    pruneUnusedClientImports, region (3)): a top-level fn-valued binding that reaches a stdlib read and that no
+    remaining client code names is dropped from the client bundle (fixpoint); a binding the client DOES name
+    stays and the chunk gate refuses it as before.
+  - s465-await-arm-bodies (4: CPS continuation filt/someIf in happy-dom with a stub fetch answering `check`):
+    the test encoded the browser continuation calling `check(p, @out.pw)` — the round trip §19.9.9.8 removes.
+    Retargeted to the executed batch route (real argon2 hash): wrong → REJECTED, right → WELCOME, the
+    combinator lowering is in the SERVER module, the client never calls `check`.
+  - module-resolver.js auto-merged into a DUPLICATE `export function isPromiseReturningStdlibImportedCallee`
+    (r1's copy + main's; the first copy also carried the server-only asyncLocals check). Caught by the hook
+    (acorn parse in cli-listen-host). This branch had no CPS delta there → main's file. Verified the other
+    r1-touched files: every resolution == merge-file(main, f8309fd64, branch) with the conflicts resolved as
+    above (emit-server identical; the rest differ only inside the conflict hunks).

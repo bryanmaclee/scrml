@@ -39,6 +39,7 @@ import type {
   UnaryExpr, BinaryExpr, AssignExpr, TernaryExpr,
   MemberExpr, IndexExpr, CallExpr, NewExpr,
   LambdaExpr, LambdaParam,
+  DestructurePattern, DestructureArrayElement, DestructureObjectProperty,
   CastExpr, MatchExpr, MapLitExpr, MapEntry, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
   ResetExpr,
 } from "./types/ast.ts";
@@ -141,6 +142,9 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
   let i = 0;
   const n = input.length;
   let unbalanced: { offset: number; message: string } | undefined;
+  // S465 r5 — the lexical context OUTSIDE a `?{` block: template text, or the code of a
+  // `${ … }` substitution (with its brace depth). Empty = top-level code.
+  const outer: Array<{ kind: "tpl" } | { kind: "code"; depth: number }> = [];
 
   // Mode stack — top of stack is the current lexical context.
   //   "js"        : JS expression context. `{`/`}` track block/object depth.
@@ -157,6 +161,18 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
 
   while (i < n) {
     const ch = input[i];
+
+    // S465 r5 — template-literal TEXT outside a `?{` block is copied as text (see the
+    // string case below).
+    const top = outer.length > 0 ? outer[outer.length - 1] : null;
+    if (top && top.kind === "tpl") {
+      if (ch === "\\") { out += input.slice(i, i + 2); i += 2; continue; }
+      if (ch === "`") { outer.pop(); out += ch; i++; continue; }
+      if (ch === "$" && input[i + 1] === "{") { outer.push({ kind: "code", depth: 1 }); out += "${"; i += 2; continue; }
+      out += ch;
+      i++;
+      continue;
+    }
 
     // Look for `?{` SQL block opener.
     if (ch === "?" && input[i + 1] === "{") {
@@ -222,6 +238,30 @@ function replaceSqlBlockPlaceholder(input: string): SqlPlaceholderResult {
         }
       }
       out += PH_SQL_PLACEHOLDER();
+      continue;
+    }
+    // S465 r5 — a `?{` inside a quoted string or a template literal's TEXT is text,
+    // not a SQL block (the S457 one reader's reading: `x == "?{`…`}"` keeps its
+    // string). Pre-r5 the string's content was replaced by the placeholder —
+    // `const s = "?{`SELECT 1`}"` emitted `"__scrml_sql_placeholder__"`, silently.
+    // Template text is tracked so a quote character in it (`it's ${?{…}}`) opens no
+    // string; a `${ … }` substitution is code again (its `?{` is a query).
+    if (ch === "`") { outer.push({ kind: "tpl" }); out += ch; i++; continue; }
+    if (top && top.kind === "code" && (ch === "{" || ch === "}")) {
+      top.depth += ch === "{" ? 1 : -1;
+      if (top.depth === 0) outer.pop();
+      out += ch;
+      i++;
+      continue;
+    }
+    // A string ends at its closing quote or at a newline (an unterminated quote masks
+    // nothing further on its line).
+    if (ch === "\"" || ch === "'") {
+      let j = i + 1;
+      while (j < n && input[j] !== ch && input[j] !== "\n") j += input[j] === "\\" ? 2 : 1;
+      const end = j < n && input[j] === ch ? j + 1 : j;
+      out += input.slice(i, end);
+      i = end;
       continue;
     }
     out += ch;
@@ -1963,9 +2003,12 @@ function preprocessForAcorn(
   // skips — rewriteMatchExpr re-parses them downstream exactly as before. The
   // negation class is kept unchanged for genuine CODE-position member-access
   // exclusion (`obj.Prop`, `f().Variant`).
+  // S465 r4 — a `.` that ends a spread `...` is not a variant dot: `...Array.from(x)`
+  // / `[...Items]` read as the spread of a capitalised name (they were masked as the
+  // variant `.Array` and the whole expression fell to a parse-error hatch).
   s = rewriteCodeSegments(s, (code) =>
     code.replace(
-      /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
+      /(?<![A-Za-z0-9_$\)\]"'`|.]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
       `${PHP_BARE_VARIANT()}$1__`
     )
   );
@@ -2763,7 +2806,21 @@ export function esTreeToExprNode(
         // `quasis.length === 1` IS the no-interpolation case, by ESTree
         // construction. Stamp it so no consumer has to re-derive it from
         // `raw`/`value` — see `LitExpr.hasInterpolation`.
-        return { kind: "lit", span, raw, value: cooked, litType: "template", hasInterpolation: false } satisfies LitExpr;
+        const single = { kind: "lit", span, raw, value: cooked, litType: "template", hasInterpolation: false } satisfies LitExpr;
+        // S462 — the SOURCE text (escapes intact: `\${`, `` \` ``). `raw` above is
+        // rebuilt from the COOKED value, which loses them; the structural client
+        // template emitter (emit-expr `emitTemplateLitStructured`) needs the source.
+        // Non-enumerable: invisible to walkers, clones and serialization.
+        const sStart = (node as unknown as { start?: number }).start;
+        const sEnd = (node as unknown as { end?: number }).end;
+        if (typeof sStart === "number" && typeof sEnd === "number" && rawSource
+            && sStart >= 0 && sEnd <= rawSource.length && sStart < sEnd) {
+          const src = restoreHandledOperands(rawSource.slice(sStart, sEnd));
+          if (src.startsWith("`") && src.endsWith("`")) {
+            Object.defineProperty(single, "_tplSourceRaw", { value: src, enumerable: false, configurable: true, writable: true });
+          }
+        }
+        return single;
       }
       // Multi-quasi template — reconstruct the original backtick source from
       // the ESTree node's start/end offsets within `rawSource` (which is the
@@ -2801,13 +2858,33 @@ export function esTreeToExprNode(
       // downstream from `raw`, because `templateRaw` may have degraded to
       // "``" through the last-resort fallback above — indistinguishable from a
       // genuinely empty template in `(raw, value)`. See `LitExpr.hasInterpolation`.
-      return {
+      const multi = {
         kind: "lit", span,
         raw: templateRaw,
         value: "",
         litType: "template",
         hasInterpolation: true,
       } satisfies LitExpr;
+      // S462 — the template's STRUCTURE, for the structural client template
+      // emitter (g-client-template-interpolation-lowering-needs-a-structural-emitter):
+      // each quasi's SOURCE text (sliced by its own offsets — escapes intact) and
+      // each `${…}` as a parsed ExprNode (acorn consumed it whole: a quote inside a
+      // regex or comment cannot mis-bound it). Non-enumerable, like `_tplSourceRaw`.
+      const exprsES = (node.expressions as ESNode[]) ?? [];
+      const quasiRaws: string[] = [];
+      let structOk = rawSource != null && quasis.length === exprsES.length + 1;
+      for (const q of quasis) {
+        const qs = (q as unknown as { start?: number }).start;
+        const qe = (q as unknown as { end?: number }).end;
+        if (!structOk || typeof qs !== "number" || typeof qe !== "number" || qs < 0 || qe > (rawSource as string).length || qs > qe) { structOk = false; break; }
+        quasiRaws.push(restoreHandledOperands((rawSource as string).slice(qs, qe)));
+      }
+      if (structOk) {
+        const exprs = exprsES.map((e) => esTreeToExprNode(e, filePath, baseOffset, rawSource));
+        Object.defineProperty(multi, "_tplQuasiRaws", { value: quasiRaws, enumerable: false, configurable: true, writable: true });
+        Object.defineProperty(multi, "_tplExprs", { value: exprs, enumerable: false, configurable: true, writable: true });
+      }
+      return multi;
     }
 
     // ---- Unary ----
@@ -3226,7 +3303,7 @@ export function esTreeToExprNode(
       const isAsync = node.async as boolean ?? false;
       const fnStyle: LambdaExpr["fnStyle"] =
         node.type === "ArrowFunctionExpression" ? "arrow" : "function";
-      const params = convertParams((node.params as ESNode[]) ?? [], filePath, baseOffset);
+      const params = convertParams((node.params as ESNode[]) ?? [], filePath, baseOffset, rawSource);
       const bodyNode = node.body as ESNode;
 
       if (bodyNode.type !== "BlockStatement") {
@@ -3322,18 +3399,31 @@ export function esTreeToExprNode(
 
 /** Create an EscapeHatchExpr for an unsupported ESTree node type. */
 function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): EscapeHatchExpr {
+  // S465 r3 — the hatch carries the text of THIS node, not of the whole
+  // expression it sits in. Pre-r3 `raw` was the entire source, so a hatch nested
+  // in a larger expression re-emitted its siblings: `(0, "x") + "y"` lowered to
+  // `(0, "x") + "y" + "y"` ("xyy"). acorn's span of a parenthesized node omits
+  // the parens; a sequence keeps them (its commas would otherwise bind to the
+  // enclosing context).
+  const s = (node as { start?: number }).start;
+  const e = (node as { end?: number }).end;
+  let text = rawSource;
+  if (typeof s === "number" && typeof e === "number" && s >= 0 && e <= rawSource.length && e > s) {
+    text = rawSource.slice(s, e);
+    if (node.type === "SequenceExpression") text = "(" + text + ")";
+  }
   return {
     kind: "escape-hatch",
     span,
     nativeKind: node.type,
     // S454 — an opaque region carries the author's `?{}` / `!{}` source, not
     // the extractHandledOperands placeholders.
-    raw: restoreHandledOperands(rawSource),
+    raw: restoreHandledOperands(text),
   } satisfies EscapeHatchExpr;
 }
 
 /** Convert ESTree parameter nodes to LambdaParam[]. */
-function convertParams(params: ESNode[], filePath: string, baseOffset: number): LambdaParam[] {
+function convertParams(params: ESNode[], filePath: string, baseOffset: number, rawSource?: string): LambdaParam[] {
   return params.map(p => {
     if (p.type === "Identifier") {
       return { name: p.name as string };
@@ -3348,12 +3438,94 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
       const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
       return { name: left.name as string ?? "", defaultValue };
     }
-    // Destructured patterns (a defaulted / rest one included) — not yet structured. S458:
-    // the names the pattern BINDS are recorded (`boundNames`, the shared binding-names.ts
-    // answer) so a consumer that resolves names in the body (component prop
-    // substitution) sees `({ label }) => label` read the PARAMETER, not a prop.
-    return { name: "__destructured__", boundNames: boundNamesOf(p) };
+    // Destructured patterns (a defaulted / rest one included). S458: the names the
+    // pattern BINDS are recorded (`boundNames`, the shared binding-names.ts answer) so a
+    // consumer that resolves names in the body (component prop substitution) sees
+    // `({ label }) => label` read the PARAMETER, not a prop.
+    // S465 r5 — the pattern itself is structured too (`pattern`, the same
+    // DestructurePattern a `const { a } = …` carries; defaults as ExprNodes), so the
+    // emitter writes the pattern back instead of the `__destructured__` placeholder (a
+    // ReferenceError at run time). A pattern this cannot structure (a computed key)
+    // carries no `pattern`; the emitter refuses it.
+    const out: LambdaParam = { name: "__destructured__", boundNames: boundNamesOf(p) };
+    let target = p;
+    if (p.type === "RestElement") { out.isRest = true; target = (p as unknown as { argument: ESNode }).argument; }
+    let paramDefault: ESNode | null = null;
+    if (target.type === "AssignmentPattern") {
+      paramDefault = (target as unknown as { right: ESNode }).right;
+      target = (target as unknown as { left: ESNode }).left;
+    }
+    const pattern = destructurePatternFromESTree(target, filePath, baseOffset, rawSource);
+    if (pattern) out.pattern = pattern;
+    if (paramDefault) out.defaultValue = esTreeToExprNode(paramDefault, filePath, baseOffset, rawSource);
+    return out;
   });
+}
+
+/**
+ * S465 r5 — an ESTree ObjectPattern / ArrayPattern as a DestructurePattern (the
+ * shape `const { a } = …` carries): every default is kept as its ExprNode
+ * (`defaultExpr`) with its source text (`default`). Null for a shape the
+ * DestructurePattern cannot hold (a computed key, a non-identifier rest).
+ */
+function destructurePatternFromESTree(
+  node: ESNode, filePath: string, baseOffset: number, rawSource?: string,
+): DestructurePattern | null {
+  const defaultOf = (right: ESNode): { default: string; defaultExpr: ExprNode } => {
+    const s = (right as { start?: number }).start;
+    const e = (right as { end?: number }).end;
+    const text = rawSource && typeof s === "number" && typeof e === "number" && s >= 0 && e <= rawSource.length && e > s
+      ? restoreHandledOperands(rawSource.slice(s, e))
+      : "default";
+    return { default: text, defaultExpr: esTreeToExprNode(right, filePath, baseOffset, rawSource) };
+  };
+  const restName = (r: ESNode): string | null => {
+    const a = (r as { argument?: ESNode }).argument;
+    return a && a.type === "Identifier" ? (a.name as string) : null;
+  };
+  if (node.type === "ArrayPattern") {
+    const elements: DestructureArrayElement[] = [];
+    let rest: string | undefined;
+    for (const el of ((node as { elements?: Array<ESNode | null> }).elements ?? [])) {
+      if (el === null) { elements.push({ kind: "hole" }); continue; }
+      if (el.type === "RestElement") { const r = restName(el); if (r === null) return null; rest = r; continue; }
+      let t = el;
+      let def: { default: string; defaultExpr: ExprNode } | null = null;
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as unknown as { right: ESNode }).right); t = (t as unknown as { left: ESNode }).left; }
+      if (t.type === "Identifier") { elements.push({ kind: "name", name: t.name as string, ...(def ?? {}) }); continue; }
+      const nested = destructurePatternFromESTree(t, filePath, baseOffset, rawSource);
+      if (!nested) return null;
+      elements.push({ kind: "nested", pattern: nested, ...(def ?? {}) });
+    }
+    return { kind: "destructure-array", elements, ...(rest !== undefined ? { rest } : {}) };
+  }
+  if (node.type === "ObjectPattern") {
+    const properties: DestructureObjectProperty[] = [];
+    let rest: string | undefined;
+    for (const prop of ((node as { properties?: ESNode[] }).properties ?? [])) {
+      if (prop.type === "RestElement") { const r = restName(prop); if (r === null) return null; rest = r; continue; }
+      if (prop.type !== "Property" || prop.computed) return null;
+      const key = prop.key as ESNode;
+      let fieldName: string;
+      if (key.type === "Identifier") fieldName = key.name as string;
+      else if (key.type === "Literal" && typeof key.value === "string") {
+        fieldName = /^[A-Za-z_$][\w$]*$/.test(key.value) ? key.value : JSON.stringify(key.value);
+      } else if (key.type === "Literal" && typeof key.value === "number") fieldName = String(key.value);
+      else return null;
+      let t = prop.value as ESNode;
+      let def: { default: string; defaultExpr: ExprNode } | null = null;
+      if (t.type === "AssignmentPattern") { def = defaultOf((t as unknown as { right: ESNode }).right); t = (t as unknown as { left: ESNode }).left; }
+      if (t.type === "Identifier") {
+        properties.push({ kind: "name", fieldName, bindName: t.name as string, ...(def ?? {}) });
+        continue;
+      }
+      const nested = destructurePatternFromESTree(t, filePath, baseOffset, rawSource);
+      if (!nested) return null;
+      properties.push({ kind: "nested", fieldName, pattern: nested, ...(def ?? {}) });
+    }
+    return { kind: "destructure-object", properties, ...(rest !== undefined ? { rest } : {}) };
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -3421,6 +3593,18 @@ export function parseScrmlTextToEstree(raw: string, asProgram: boolean): ESNode 
   return r.ast;
 }
 
+/**
+ * S465 r3 — the trailing text the parser dropped when it warned "statement
+ * boundary not detected — trailing content would be silently dropped" for this
+ * node, or null. A server emitter that reaches such a node refuses it
+ * (emit-expr.ts `emitExpr`): the dropped text is a statement that would not run.
+ */
+export function droppedStatementTextOf(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  const t = (node as Record<string, unknown>)._s465DroppedStatement;
+  return typeof t === "string" ? t : null;
+}
+
 export function hasLostTrailingContent(node: unknown): boolean {
   return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
 }
@@ -3449,6 +3633,15 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
     // position instead of dropping it.
     Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
     Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
+  }
+  if (_node && typeof _node === "object" && typeof (_detector as { droppedStatementText?: string }).droppedStatementText === "string") {
+    // S465 r3 — the "statement boundary not detected — trailing content would be
+    // silently dropped" warning fired for this expression. Non-enumerable (like
+    // `_s441Trailing`); read through `droppedStatementTextOf`.
+    Object.defineProperty(_node, "_s465DroppedStatement", {
+      value: (_detector as { droppedStatementText?: string }).droppedStatementText,
+      enumerable: false, configurable: true, writable: true,
+    });
   }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
@@ -3559,6 +3752,9 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
     if (_trailingWarningSink) _trailingWarningSink.push(msg);
     else console.warn(msg);
+    // S465 r3 — the returned node is stamped (see parseExprToNode) so a SERVER
+    // emitter that reaches it fails the compile instead of shipping the prefix.
+    if (_notDetector) (_notDetector as { droppedStatementText?: string }).droppedStatementText = trailingContent.trim();
   }
 
   if (!estree) {
@@ -3948,11 +4144,19 @@ function blankRange(chars: string[], start: number, end: number): void {
  * template's `${ … }` interpolations) is preserved. A `?{ … }` SQL block is
  * preserved as `?{}` (its presence is itself a server signal). Returns `raw`
  * unchanged when it cannot be lexed (fail-closed — see the section header).
+ *
+ * `opts.blankRegex` (s464 fix round 4): ALSO blank the body of every regular-
+ * expression literal, as the tokenizer reads it (`/@n\b/g` → `/    /g`; the slashes
+ * and flags stay). Opt-in so the existing callers are unchanged; the `@`-reference
+ * reader (at-refs.ts) and the server bundle's module-scope reads turn it on, because a
+ * regex body is literal text, not a cell read or a declaration (SPEC §6.6.9).
  */
-export function blankLiteralTextInSource(raw: string): string {
+export function blankLiteralTextInSource(raw: string, opts?: { blankRegex?: boolean }): string {
   if (!raw || typeof raw !== "string") return raw;
-  // Fast path: no quote / backtick / comment opener → nothing to blank.
-  if (!/["'`]|\/\/|\/\*/.test(raw)) return raw;
+  const blankRegex = opts?.blankRegex === true;
+  // Fast path: no quote / backtick / comment opener (and, when regex bodies are
+  // blanked, no `/` at all) → nothing to blank.
+  if (blankRegex ? !/["'`/]/.test(raw) : !/["'`]|\/\/|\/\*/.test(raw)) return raw;
   const sqlScan = replaceSqlBlockPlaceholder(raw);
   if (sqlScan.unbalanced) return raw;
   const processed = sqlScan.result;
@@ -3978,6 +4182,10 @@ export function blankLiteralTextInSource(raw: string): string {
         }
       } else if (tok.type === acorn.tokTypes.template || tok.type === acorn.tokTypes.invalidTemplate) {
         blankRange(chars, tok.start, tok.end);
+      } else if (blankRegex && tok.type === acorn.tokTypes.regexp) {
+        // `/body/flags` — blank the body between the opening and the closing slash.
+        const close = processed.lastIndexOf("/", tok.end - 1);
+        if (processed[tok.start] === "/" && close > tok.start) blankRange(chars, tok.start + 1, close);
       }
     }
   } catch {

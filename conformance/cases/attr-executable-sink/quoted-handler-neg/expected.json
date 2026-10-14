@@ -1,0 +1,12 @@
+{
+  "id": "attr-executable-sink-quoted-handler-neg",
+  "description": "§5.2 rule 1 (S464): a QUOTED event-handler attribute with no `${…}` (`onclick=\"go(1)\"`, any case, top level and `<each>` row) is a compile error; the same text inside a `<pre>` raw-content body (§4.17) is display text and is not refused.",
+  "language-version": "1.0",
+  "spec": "§5.2",
+  "rationale": "§5.2 rule 1 (S464): \"A quoted event-handler attribute whose value holds no `${…}` SHALL be a compile error (E-ATTR-QUOTED-HANDLER)\". Before the fix `onclick=\"go(1)\"` was written into the page as an HTML attribute the browser ran as raw JavaScript, unchecked by scrml.",
+  "expect": {
+    "codes": ["E-ATTR-QUOTED-HANDLER"],
+    "notCodes": ["E-ATTR-INTERP-EXECUTABLE"],
+    "severity": { "E-ATTR-QUOTED-HANDLER": "error" }
+  }
+}

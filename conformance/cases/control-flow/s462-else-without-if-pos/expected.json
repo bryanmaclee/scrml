@@ -1,0 +1,13 @@
+{
+  "id": "control-flow-s462-else-without-if-pos",
+  "description": "An `else` after a statement that is not an `if` is E-STMT-UNEXPECTED-TOKEN (S462). Pre-fix `@r = \"a\" else @r = \"b\"` reached codegen with the `else` glued into the assignment; no input shape may parse an `else` and then discard it or mis-place it.",
+  "language-version": "1.0",
+  "spec": "§17, §34",
+  "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
+  "rationale": "Only an `if` statement takes an `else` (§17.6.1, §50.2.1 if-stmt-logic). An unclaimed `else` starts no statement — E-STMT-UNEXPECTED-TOKEN (§34).",
+  "expect": {
+    "codes": [
+      "E-STMT-UNEXPECTED-TOKEN"
+    ]
+  }
+}

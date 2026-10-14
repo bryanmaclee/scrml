@@ -1,0 +1,12 @@
+<program>
+<v> = "start"
+<div id="w">
+    <md>
+        Value: ${@v}
+
+        **${@v}** and [link ${@v}](/x)
+    </md>
+</div>
+<button id="b1" onclick=${ @v = "**x** [a](javascript:window.pwned=1)" + String.fromCharCode(10) + "## heading" + String.fromCharCode(10) + "- item" }>1</button>
+<button id="b2" onclick=${ @v = String.fromCharCode(60) + "img src=x onerror=window.pwned=2>" }>2</button>
+</program>

@@ -95,7 +95,11 @@ describe("§45.5 — real `is` predicates still work (no regression)", () => {
 
   test("an `is` LHS spanning a REGEX literal (`/a/.test(x) is not`) is not fragmented", () => {
     const { result } = compile(webFn(`       let x = "a"\n       @msg = String(/a/.test(x) is not)`));
-    expect(eErrs(result)).toEqual([]);
+    // The `is` check itself is clean (the point of this test). The LOWERING of the
+    // regex LHS emits `(. test ( x ))` — the regex literal is lost — which never
+    // parsed; the §2.2.1 parse floor now refuses it in every compile, `write: false`
+    // included (S464 Q24 fix round 3; g-emitted-js-invalid-shapes-surfaced-by-floor-s464).
+    expect(eErrs(result)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
   });
 
   test("division is NOT mis-read as regex: `(x / y) is not` processes the `is`", () => {

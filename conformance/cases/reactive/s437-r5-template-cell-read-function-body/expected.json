@@ -24,13 +24,5 @@
         "text": "v=7 n=4 in7"
       }
     ]
-  },
-  "xfail": {
-    "impl1-ts": {
-      "gap": "g-client-template-interpolation-lowering-needs-a-structural-emitter",
-      "fails": {
-        "runtime": "sha256:2c4d204a6cb1283b"
-      }
-    }
   }
 }

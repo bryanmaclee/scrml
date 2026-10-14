@@ -2,6 +2,63 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S464 — 2026-10-11/13 (bryan · ASUS) — landed the S465 AUTO output in parallel + four ruled security/language arcs
+
+Booted Profile A; salvaged the dead S462 agents (patches + `wip/s464-*`); armed AUTO run #2 (S465) and later ran it IN PARALLEL as the landing partner (cloud merges are refused). Landed: #1405 #1407 #1409 #1414 (batch of #1406 #1408 #1410 #1411 #1412 #1413) #1415 #1416 #1419. In CI at wrap: #1417 (Q24 + emitted-JS parse floor), #1418 (no value holds a function + scrml:time struct API; needs a main merge). Await P0 (wrong password accepted, live on main) round 6 done, merge+review owed.
+- **#1416 security (§5.2):** E-ATTR-QUOTED-HANDLER (quoted `on…` handlers refused — they ran as unchecked JS); E-ATTR-STATIC-EXECUTABLE (static unadmitted-scheme URL on a navigate/load attribute, and any static `srcdoc`); a codegen backstop on every attribute writer (closed a live `<each>`-in-`<match>` leak). 7 S239 reviews.
+- **#1419 codegen (§12.4/§13.4/§48.3.5):** a plain `fn` is never a route and never async (it became a public endpoint depending on const-binding; inline it was a ReferenceError per request); server-bundle module-binding closure in dependency order (D-5 chains, TDZ); one `@`-reader; E-REACTIVE-003 reads template interpolations. Fixed trucking-dispatch HOS transitions. 5 reviews.
+- **Rulings (user-voice §S464):** §19.9.9.8 CPS placement ratified + guard rule; md unclosed-quote kept; E-MARKUP-STATEMENT-NOT-RENDERED; `for`-header commas legal; value-fn migration + maps + host-launder closed + closure arrays closed + debounce→struct + fix-land-then-type-rule; enum inference from initializer; quoted handlers refused; ParseError import-only; scrml fix refuses non-compiling files; static javascript:/srcdoc refused (narrowed to navigate/load attrs); E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE / E-TIMER-STRUCT-MISUSE names; template cell-read closed.
+- **Process:** CI-only gates (bootstrap, commands/lsp, types) bit three landings — run them locally before every PR. Agent reports went missing repeatedly — poll branch tips.
+
+## S465 — 2026-10-11/12 (AUTO, unattended cloud run) — 7 PRs ready, none merged (merge refused to AUTO); a P0 found live on main
+
+**Ready to land (each `gate` green; code PRs with a CLEAN S239 review on a frozen commit):**
+- **#1407 (P0):** `?{SELECT name, pw …}.get().name` returned the whole row, password hash included. Tails now apply to the result; a tailed query keeps its `!{}` handler; tailed server cells load only their value.
+- **#1409:** `lift <pre><img onerror=…></pre>` ran the handler; lifted `<pre>`/`<code>` bodies are now raw text (§4.17, Q21).
+- **#1408:** a brace-less `if (c) a else b` dropped its `else`. Fixed, and runtime helpers are now shipped from what the client code actually calls.
+- **#1410:** `<md>` phase 2 — static lowering through the one md reader.
+- **#1411:** 237 `:> { return }` arms → `:> return` (emit byte-identical).
+- **#1412:** PRIMER and kickstarter teach `is given` and the if-forms; maps refreshed.
+- **#1406:** `attr=@cell` unquoted renders the cell's NAME on every attribute — gap raised to HIGH.
+
+**In progress:** P0 — an async helper imported from another `.scrml` file is not awaited on the server (wrong password accepted), live on main; branch `auto/s465-await-imported-server-fn`.
+
+**Blocked on bryan:** the CPS P0 (control-flow guards, §19.9.9.8 rule 3), markup display text (error-code name), E-VALUE-FUNCTION-STORED (6 corpus files newly refused). Questions in `handOffs/auto-questions.md`.
+
+## S462 — 2026-10-10/11 (bryan · ASUS) — 20 PRs; four security holes closed on main; `<md>` designed and its reader landed
+
+**Security (all on main before S462, all S239-reviewed and executed in Chromium or real routes):**
+- **#1399 (P0):** `import { verifyPassword as vp }` left `vp(…)` un-awaited, so a wrong password passed. Seven stdlib functions were declared sync but returned Promises. Optional calls `f?.()` were never awaited.
+- **#1400:** `${ lift <script>${@code}</script> }` ran cell data as JS. `<script>`/`<style>` are now refused at every markup position.
+- **#1402 (Q21):** static active HTML in `<pre>`/`<code>` ran (`onerror`, `srcdoc`, `<link>`). Raw bodies now render as text.
+- **#1398:** the bootstrap admitted `<script>`/`<style>`, and its printer's attribute escape allowed a template breakout.
+- **#1386:** the bootstrap did not judge data-bound URL, srcdoc or handler sinks.
+- **#1387:** `<errors>` rendered messages as HTML (XSS).
+- **#1401 (Q20):** a server condition that tests a `scrml:` stdlib result which is still a Promise now fails closed with a 500.
+
+**Language:**
+- **#1385 / #1392:** `is some` and in-place `given` are retired through §63.
+- **#1395:** statement-position `match` lowers inline; arm leaves leave; bare `:> return` arms (dpa-068 W1).
+- **#1396:** presence narrowing ends on a write (Q3, Q10–Q13). `if=`-gated handlers keep narrowing for user-input events (Q18, allow-list). Render gates settle before user effects.
+- **#1397:** markup `${ if }` arms re-render their reads; else-if → else now switches.
+- **#1394:** E-IMPORT-004 checks `scrml:` imports and named re-exports (Q19).
+- **#1388:** undeclared use-site attributes refused (dpa-069); X specified.
+- **#1390:** own-value inference (dpa-065).
+- **#1384:** E-CHANNEL-006 widened.
+
+**Stdlib:**
+- **#1393:** closure factories became structs; no function is stored in a value (Q15/Q16).
+- **#1389:** scrml:data validator rules are data (Q17b).
+- **#1387:** registerMessages takes templates.
+
+**`<md>`:** designed by deep-dive and four rulings (F1–F4, Q22). **#1403** landed SPEC §67 and the single `scrml:md` reader, written in scrml with a generated shim.
+
+**Tooling:** **#1404** — `scrml fix` migrates markup `given` guards only when the body is pure reads, and the verify fails closed.
+
+**Rulings:** Q1–Q24 and `<md>` F1–F4. Record: `scrml-support/user-voice-scrml.md` §S462.
+
+**In flight at wrap:** see `hand-off.md` §S462.0. It covers the P0 CPS fix, P0 SQL chain truncation, the braceless-else miscompile, markup text parsed as code, and `<md>` phase 2.
+
 ## S462 — stdlib API change: no function is stored in a value (change `s462-stdlib-closure-factories`)
 
 **Breaking stdlib API (no §63 window — these are stdlib functions, not language forms).** Ruling: bryan S462 "go on the package" (no-function-in-value migration). Every former object-of-closures factory now returns DATA and the behaviour lives in free functions:

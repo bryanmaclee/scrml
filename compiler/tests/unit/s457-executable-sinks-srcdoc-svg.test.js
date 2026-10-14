@@ -157,7 +157,7 @@ describe("§4 executableDataWriteSink + the data message", () => {
     expect(m).toContain("event-handler TEXT");
     const s = interpolatedAttrSinkMessage({ kind: "srcdoc" }, "srcdoc", "iframe", "", "data");
     expect(s).toContain("takes its value from data");
-    expect(s).toContain("static string only");
+    expect(s).toContain("admits no `srcdoc` value at all"); // S464 "(a) Refuse both"
   });
 });
 

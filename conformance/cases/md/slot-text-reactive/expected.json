@@ -1,0 +1,41 @@
+{
+  "id": "md-slot-text-reactive",
+  "description": "A `${…}` in a static `<md>` body is text and re-renders when its cell changes; the markdown structure around it never changes.",
+  "language-version": "1.0",
+  "spec": "§67.4",
+  "provenance": "ruling:user-voice-scrml.md S462 `<md>` F1 \"a\" (`${…}` inside `<md>` is TEXT-ONLY)",
+  "rationale": "§67.4: an atom renders exactly as `${expr}` renders in a markup body (§7.4.2) — its string value as a text node, reactive when it reads a cell (only that text re-renders; the structure never changes). An atom in a heading contributes nothing to the slug.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-MD-"
+    ],
+    "input": [
+      {
+        "click": "#rename"
+      }
+    ],
+    "state": {
+      "who": "Bob",
+      "count": 2
+    },
+    "dom": "<div id=\"w\"><div><h2 id=\"hello-\">Hello Bob</h2><p><strong>Bob</strong> has 2 open issues.</p></div></div><button id=\"rename\">rename</button>",
+    "domAnchored": [
+      {
+        "selector": "#w h2",
+        "text": "Hello Bob",
+        "attr": {
+          "id": "hello-"
+        }
+      },
+      {
+        "selector": "#w strong",
+        "text": "Bob"
+      },
+      {
+        "selector": "#w p",
+        "text": "Bob has 2 open issues."
+      }
+    ]
+  }
+}

@@ -218,7 +218,7 @@ export const _SCRML_SVG_ANIMATION_VALUE_ATTRS = new Set(["to", "from", "by", "va
 // is the lowercased URL-valued attribute `attributeName` names when the author wrote it literally, and ""
 // when it is computed at runtime — then each value is judged as a URL on an unknown attribute (a raster
 // `data:image` is not admitted, since the animated attribute may not be an image source).
-function _scrml_animation_value_admitted(lowerName, value, target) {
+export function _scrml_animation_value_admitted(lowerName, value, target) {
   const entries = lowerName === "values" ? value.split(";") : [value];
   for (let i = 0; i < entries.length; i++) {
     if (!_scrml_url_value_admitted(target, entries[i])) return false;

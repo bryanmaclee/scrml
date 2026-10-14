@@ -1,0 +1,30 @@
+{
+  "id": "control-flow-s462-braceless-if-else-same-line",
+  "description": "A braceless `if (c) a else b` with the `else` on the SAME line keeps its else branch (S462). Pre-fix the consequent's expression collector swallowed `a else b` and the else branch was dropped at exit 0: `pick(false)` returned \"\" instead of \"no\", and `if (@r == \"\") @r = … else …` failed E-STMT-MISSING-SEMICOLON. Both branches run here: pick(false) gives \"no\", pick(true) gives \"yes\".",
+  "language-version": "1.0",
+  "spec": "§17, §50.2.1",
+  "source-test": "compiler/tests/unit/braceless-if-else-not-dropped.test.js",
+  "rationale": "§17.6.1 — a bare if-statement has 'standard if-statement semantics'; an `else` that is parsed SHALL NOT be discarded. The braceless body form is exercised by the compiler (#933, #1106 S437) and its else must be kept.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-STMT-MISSING-SEMICOLON",
+      "E-STMT-UNEXPECTED-TOKEN"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "r": "no|yes"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "no|yes"
+      }
+    ]
+  }
+}
