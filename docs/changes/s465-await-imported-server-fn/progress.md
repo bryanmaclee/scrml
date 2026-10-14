@@ -597,3 +597,29 @@
   pass / 3 skip / 0 fail; facts --check PASS (regenerated, +1 module); state --check PASS (regenerated after
   the gaps); regen-spec-index --check OK; corpus-compile-floor --check PASS; host-global-scan --check exit 0
   (the one `[esm]` note, stdlib/auth/password.scrml, is identical on the base tree).
+- 2026-10-14 MERGE of origin/main d840885c0 (#1418 E-VALUE-FUNCTION-STORED, #1422) → 30b333824. No code
+  conflict (compiler/src auto-merged: type-system.ts, value-function-stored.ts, pipeline-seam.ts,
+  runtime-template.js). Doc conflicts: known-gaps.md — the generated count table (regenerated, state --write) and
+  one hunk where both sides appended entries after g-tree-path-destructured-arrow-param-s465 (union; every gap
+  id of both sides verified present: 2064 main ∪ 2058 branch → 2077 merged); FACTS.md regenerated. spec-index,
+  bootstrap-conformance and gen-md-shim current.
+  Interactions with #1418 (checked by execution, none needed a code change): #1418 is a type-stage check on
+  STORED functions; r7's changes are codegen (colouring / emission). (1) The 331-shape probe set on the merged
+  tree: 0 wrong passwords accepted; RUN-OK 226 unchanged; 13 shapes that r7 already refused now ALSO report
+  E-VALUE-FUNCTION-STORED (objArrowProp, topObjOfLambdas, topArrOfLambdas, calleeIndex, topDestructLambda,
+  topObjDestructLambda, libInnerObj, libInnerArr, libDestrLambda …) or report it INSTEAD of
+  E-CODEGEN-INVALID-LOGIC (objMethod, objMethodSync, libObjMethodShorthand); libObjExport moves from a runtime
+  ReferenceError (500) to a compile error. (2) MED-C (client colouring of `const persist = (v) => save(v)`):
+  a local binding NAMING a function is allowed by #1418 (§14.3 "a local binding may NAME one") — the MED-C
+  happy-dom tests pass unchanged; an alias `const z = w` stays refused by r7's backstop. (3) MED-D reads a
+  block body via `hatch.bodyRaw` + the arm statement parser; #1418 / §42.3.5 read the same `bodyRaw` via
+  `escape-hatch-body.ts` (check-time). Same delimited text, two statement parsers — pre-existing (r1/r4 codegen
+  reader vs the S462 check reader), not introduced by the merge; noted, not changed.
+  Tests on the merged tree: s465-* (integration + unit), value-function-stored, stdlib-time-debounce-struct,
+  fn-expr-member-assign, s441-async-escape-f4-f5, handle-request-body-autoawait, is-predicate-1333,
+  s457-handler-call-chain, s462-narrowing-ends-on-write, peer-call-in-template-interp-awaited,
+  protect-error/scalar-egress: 1214 pass / 0 fail.
+  Gates on 30b333824: pre-commit (unit + integration + conformance + compiler/tests/*.test.js) 36392 pass / 58
+  skip / 0 fail; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp +
+  commands 726 / 3 skip / 0; facts, state, spec-index, bootstrap-conformance, corpus-compile-floor --check PASS;
+  host-global-scan exit 0; browser-baseline --check PASS (48 asserted, 0 of 2 env-excluded observed).
