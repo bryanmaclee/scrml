@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 259 | 4 |
-| MED | 637 | 6 |
+| MED | 636 | 6 |
 | LOW | 408 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -25644,11 +25644,13 @@ LATENT: only snippet-lambda / escape-hatch markup, which impl#1 does not emit to
 
 The S239 rounds on `s464-quoted-handler-refused` kept finding scanner-reading bugs (quotes, regex literals, `)<`, postfix ops, mixed readings) — a heuristic standing in for a parser (the "two readers of one text" class). Root fix: parse lambda/snippet markup with the real markup parser (or lower it to structure) so E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE / E-ATTR-INTERP-EXECUTABLE judge parsed attributes, and delete `markupTextSinks`. Gate: before snippet-lambda markup emission lands.
 
-### g-timer-struct-field-write-from-function-body-throws-s464 — writing a `scrml:time` Debouncer/Throttler field from a function body (`function setD() { @d.delay = 10 }`, `@s.a.b.delay = 10`) compiles clean then throws `cannot write .delay of a Object in place; it is a value. Assign the whole cell.` — whose advice yields a dead copy — `NEW S464; MED; open (introduced by s465-value-fn-land round 4)`
+### g-timer-struct-field-write-from-function-body-throws-s464 — writing a `scrml:time` Debouncer/Throttler field from a function body (`function setD() { @d.delay = 10 }`, `@s.a.b.delay = 10`) compiles clean then throws `cannot write .delay of a Object in place; it is a value. Assign the whole cell.` — whose advice yields a dead copy — `NEW S464; MED; RESOLVED S466`
 
-<!-- @gap id=g-timer-struct-field-write-from-function-body-throws-s464 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_deep_set_copy ~2615 — refuses non-plain prototypes) prov=review:s465-value-fn-land-r4-S239 -->
+<!-- @gap id=g-timer-struct-field-write-from-function-body-throws-s464 sev=MED status=resolved locus=compiler/src/runtime-template.js(_scrml_deep_set_copy — branded timer written in place)+compiler/runtime/stdlib/time.js(timerProto brand registry-symbol brand)+stdlib/time/index.scrml(mirror) prov=review:s465-value-fn-land-r4-S239+exec:s466-happy-dom -->
 
 The timer struct is built on its own prototype (so `_scrml_deep_reactive` leaves it unwrapped and the identity-keyed state survives cells). `_scrml_deep_set_copy` refuses any non-plain prototype. The same write in an attribute handler mutates in place and works. Round 3 silently copied the struct (timer went dead) — now loud, but §41.21 says the fields read "as any struct" and `delay` IS the wait. Fix: write in place on a timer struct (keep the prototype), or refuse at compile time with a timer-specific message; the runtime message must name the type and must not advise the dead copy. Reviewer probe `~/.cache/scrml-review-vf-r4/t/c7.scrml`.
+
+> **RESOLVED S466 (branch `s466-timer-field-write`) — fix (A), write in place.** Governing sentence, §41.21: "The struct's `delay` / `limit` IS the wait `run` uses" (and its fields read "as any struct"), so a field write must reach the live timer. `scrml:time` brands `timerProto` with the registry symbol `Symbol.for("scrml:time.timer")` (non-enumerable, on the prototype — not a field; `==` / serialization unchanged); `_scrml_deep_set_copy` returns a branded struct itself instead of refusing, so the function-body path (`_scrml_deep_set`) now mutates the same object the handler path mutates, then the cell set notifies. Every other non-plain prototype (look-alike `{id, delay}` on its own prototype, another brand, Date, URL, class instances) still refuses exactly as before. A write takes effect at the next `run` (re)start — §41.21 says `run` (re)starts the `delay`-ms timer; an already-armed timer is not rescheduled (SPEC silent on that; not invented). Tests: `compiler/tests/unit/stdlib-time-debounce-struct.test.js` (runtime deepSet + happy-dom executed, function body and handler, top-level typed cell and nested; 3 fail on base). **Sibling (not closed):** for a NON-timer non-plain value (e.g. a Date cell) the two paths still disagree — the handler mutates in place untracked (s440 test "a write through a Date cell no longer throws"), the function body refuses.
 
 ### g-vfs-lift-in-block-match-arm-unjudged-s464 — `lift` of a function value inside a block `match` arm (`const n = match k { 1 => { lift g }, _ => { lift g } }`) is not judged by E-VALUE-FUNCTION-STORED — `NEW S464; LOW; open (latent)`
 
