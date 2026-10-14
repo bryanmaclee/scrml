@@ -37,3 +37,5 @@
   components.js (byte 184, line 6, column 25) Unexpected token … export const UserBadge = <span
   class="badge" props={ na…" — the component markup is emitted raw into the library output). The
   same file compiles clean as part of `scrml compile examples/22-multifile`.
+
+- SPEC §63.4 bullet updated for round 1 (project-aware judgement, divergence wording, removed-form exception) + a `PA reading (S466, owner veto)` note recording the §66-dialect question as open; SPEC-INDEX + FACTS regenerated.
