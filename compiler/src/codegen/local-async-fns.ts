@@ -266,7 +266,7 @@ function resolve(name: string, scope: Scope | null): Resolved {
  * `elements`, …). Arrays are transparent — an element's parent is the node that
  * owns the array.
  */
-interface ParentLink {
+export interface ParentLink {
   parent: ASTNode | null;
   key: string | null;
   index: number;
@@ -346,6 +346,30 @@ function walkWithScopes(
   const rootAnchor = hasRealPosition(root.span) ? root.span : undefined;
   visit(root.params, rootScope, { parent: root, key: "params", index: -1, anchor: rootAnchor });
   visit(root.body, rootScope, { parent: root, key: "body", index: -1, anchor: rootAnchor });
+}
+
+/**
+ * s466 fix round 2 — walk a function-shaped `owner` (`{ params, body }`) with its
+ * LEXICAL scope (the model above: parameters, block-scoped `let`/`const`/`lin`/
+ * tilde declarations, nested `function` declarations, lambda parameters). `visit`
+ * sees every node with `isBound(name)`: is `name` bound by a declaration of THIS
+ * owner in scope at that node (a parameter, a local, a nested function, an
+ * enclosing lambda's parameter)? Not bound → the name is free here (file scope,
+ * an import, or a builtin). Uncertain binders (a destructured parameter, a loop
+ * variable, a match binding) are not modelled: a name they bind reads as FREE —
+ * the over-report direction.
+ */
+export function walkScoped(
+  owner: { params?: unknown; body?: unknown; span?: unknown },
+  visit: (node: ASTNode, isBound: (name: string) => boolean, link: ParentLink) => void,
+): void {
+  if (!owner || typeof owner !== "object") return;
+  const scopes = new Map<object, Scope>();
+  const root: Scope = { parent: null, fns: new Map(), others: new Set() };
+  populateScope(owner as ASTNode, root);
+  scopes.set(owner as object, root);
+  walkWithScopes(owner as ASTNode, root, scopes, () => {}, () => {}, false,
+    (n, scope, link) => visit(n, (name) => resolve(name, scope) !== null, link));
 }
 
 export interface LocalAsyncAnnotateOpts {

@@ -585,3 +585,165 @@ describe("s466 fix round 1 — item 8: the SSE auth gate runs before any default
     expect(bind).toBeGreaterThan(gate);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// s466 fix round 2 — identity defaults are decided by PLACEMENT (the default's
+// value reaches server code), not by the CPS flag; `session` is the builtin only
+// when the name is FREE (free-name.ts — one scope model).
+// ---------------------------------------------------------------------------
+
+describe("s466 fix round 2 — item 1: a server-trusted identity default is refused wherever its value reaches the server", () => {
+  const CASES = [
+    ["a CPS-split function (the default runs in the BROWSER, the server batch writes it)", {
+      "app.scrml": `<program db="./x.db" auth="required">
+\${
+  function add(name: string, uid: string = session.userId) {
+    ?{\`INSERT INTO items (name, qty) VALUES (\${name}, \${uid})\`}.run()
+    @last = uid
+  }
+}
+<last> = ""
+<button onclick=\${add("a")}>go</button>
+<p>\${@last}</p>
+</program>
+`,
+    }, 3, "BROWSER"],
+    ["an SSE generator", {
+      "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server function* feed(uid: string = session.userId) {
+    yield uid
+  }
+}
+<p>x</p>
+</program>
+`,
+    }, 3, "server function"],
+    ["a channel `onserver:*` handler", {
+      "app.scrml": `<program db="./c.db" auth="required">
+  <channel name="chat" auth="required" onserver:message=onMsg(msg)>
+    <count> = 0
+    function onMsg(msg, uid = session.userId) {
+      broadcast({ got: msg, by: uid })
+    }
+  </channel>
+  <p>x</p>
+</program>
+`,
+    }, 4, "server function"],
+    ["an exported server fn (its own route)", {
+      "lib.scrml": `\${
+  export server fn who(m: string, uid: string = session.userId) -> string { return m + uid }
+}
+`,
+      "app.scrml": `<program db="./x.db" auth="required">
+\${
+  import { who } from "./lib.scrml"
+  server fn viaImp(m: string) -> string { return who(m) }
+  function go() { return viaImp("x") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+`,
+    }, 2, "server function"],
+  ];
+  const SEED = { "x.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty TEXT)"] };
+  for (const [label, files, line, wording] of CASES) {
+    test(label, () => {
+      const { errors } = compileFiles(files, "app.scrml", "r2-id", SEED);
+      expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+      expect(errors[0].span.line).toBe(line);
+      expect(errors[0].message).toContain(wording);
+    });
+  }
+
+  test("a CLIENT function's `session` default is E-SCOPE-012, as in its body", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program auth="required">
+\${
+  function f(m: string, k: string = session.userId) { @x = m + k }
+}
+<x> = ""
+<button onclick=\${f("a")}>go</button>
+<p>\${@x}</p>
+</program>
+` }, "app.scrml", "r2-client-session");
+    expect(codesOf(errors)).toEqual(["E-SCOPE-012"]);
+    expect(errors[0].span.line).toBe(3);
+  });
+});
+
+describe("s466 fix round 2 — items 2/3: a name `session` bound by a parameter is not the builtin", () => {
+  test("`fn mk(session)` stays a pure synchronous helper; a default calling it runs (id4)", async () => {
+    const { errors, outDir, tmpDir, read } = compileFiles({ "app.scrml": prog(`  fn mk(session: string) -> string { return session + "!" }
+  server fn a3(m: string, k: string = mk("z")) -> string { return k + m }
+  function go() { return a3("q") }`) }, "app.scrml", "r2-id4");
+    expect(errors).toEqual([]);
+    const server = read("app", "server");
+    expect(server).toMatch(/^function mk\(session\) \{/m);
+    expect(server).not.toContain("__ri_route_mk");
+    if (HAPPY_DOM()) return;
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "a3", { m: "q" });
+    expect(r.json).toBe("z!q");
+  }, EXECUTED_TIMEOUT_MS);
+
+  test("…and a body calling it (id5)", async () => {
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": prog(`  fn mk(session: string) -> string { return session + "!" }
+  server fn a3(m: string) -> string { return mk("z") + m }
+  function go() { return a3("q") }`) }, "app.scrml", "r2-id5");
+    expect(errors).toEqual([]);
+    if (HAPPY_DOM()) return;
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "a3", { m: "q" });
+    expect(r.json).toBe("z!q");
+  }, EXECUTED_TIMEOUT_MS);
+
+  const LAM = (auth) => `<program db="./x.db"${auth}>
+\${
+  server fn lam(m: string, f = (session) => session.userId) -> string { return m + f({ userId: "u" }) }
+  function go() { return lam("x") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go2</button>
+<p>\${@out}</p>
+</program>
+`;
+  test("a lambda parameter named `session` in a default is not the builtin (sid `lam`): accepted and runs", async () => {
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": LAM("") }, "app.scrml", "r2-sid");
+    expect(errors).toEqual([]);
+    if (HAPPY_DOM()) return;
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "lam", { m: "x" });
+    expect(r.json).toBe("xu");
+  }, EXECUTED_TIMEOUT_MS);
+
+  test("…and under auth=\"required\" the bundle LOADS (no cookie-session wrap for a lambda's own `session`)", async () => {
+    const { errors, outDir } = compileFiles({ "app.scrml": LAM(' auth="required"') }, "app.scrml", "r2-sid-auth");
+    expect(errors).toEqual([]);
+    const server = readFileSync(join(outDir, "app.server.js"), "utf-8");
+    expect(server).not.toContain("_scrml_session_cookie_wrap(_scrml_handler_lam");
+    const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
+    expect(Array.isArray(mod.routes)).toBe(true);
+  }, EXECUTED_TIMEOUT_MS);
+});
+
+describe("s466 fix round 2 — item 4: E-PARAM-DEFAULT-AWAIT names the way out", () => {
+  const HB = (kw) => prog(`  ${kw} helper2(x: number) -> number { return x * 3 }
+  server function gd(m: number, k: number = helper2(m)) -> number { return k }
+  function go() { return gd(1) }`);
+
+  test("a plain `function` async only by placement: the message says to declare it `fn`", () => {
+    const { errors } = compileFiles({ "app.scrml": HB("function") }, "app.scrml", "r2-hb");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-AWAIT"]);
+    expect(errors[0].message).toContain("declare it `fn` if it is pure");
+    expect(errors[0].message).toContain("treated the same as one that omits the argument");
+  });
+
+  test("…and the `fn` form the message names compiles and runs", async () => {
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": HB("fn") }, "app.scrml", "r2-hb-fn");
+    expect(errors).toEqual([]);
+    if (HAPPY_DOM()) return;
+    const r = await callRoute(join(outDir, "app.server.js"), join(tmpDir, "x.db"), "gd", { m: 1 });
+    expect(r.json).toBe(3);
+  }, EXECUTED_TIMEOUT_MS);
+});

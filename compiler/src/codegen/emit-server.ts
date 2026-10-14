@@ -49,6 +49,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
 import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
+import { jsTextReadsFreeName } from "../free-name.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
@@ -425,11 +426,13 @@ function serverParamDefaults(
   opts: any,
   fnNode: { name?: unknown; span?: unknown },
   coveredCallees: ReadonlySet<string> | null,
+  placementOnlyCallees: ReadonlySet<string> | null = null,
 ): Array<string | null> {
   const site = {
     fnName: typeof fnNode?.name === "string" ? fnNode.name : "<anonymous>",
     fnSpan: fnNode?.span,
     coveredCallees,
+    placementOnlyCallees,
   };
   return params.map((p) => {
     const d = emitParamDefault(p, filePath, opts, site);
@@ -573,6 +576,7 @@ function parseSessionExpirySeconds(raw: string | null | undefined): number {
 function astUsesSessionBuiltin(node: unknown): boolean {
   return astSessionMemberMatch(node, null);
 }
+
 
 /**
  * §20.5 (S265, i29e) — does ANY expression reference the bare `session` builtin
@@ -4512,6 +4516,18 @@ function generateServerJsImpl(
   for (const { fnNode: _af } of serverFns) {
     if (typeof _af?.name === "string" && fnReachesAtName(_af, filePath)) _atReadingServerFns.add(_af.name);
   }
+  // s466 fix round 2 — plain `function`s on the server ONLY by caller-context
+  // propagation (route inference placed them where their callers are): async
+  // only because of that placement. Named in E-PARAM-DEFAULT-AWAIT's message.
+  const _placementOnlyServerFns = new Set<string>();
+  for (const { fnNode: _pf, route: _pr } of serverFns) {
+    if (typeof _pf?.name !== "string" || _pf.fnKind === "fn") continue;
+    const _reasons = (_pr as { escalationReasons?: Array<{ kind?: string; resourceType?: string }> } | undefined)?.escalationReasons;
+    if (Array.isArray(_reasons) && _reasons.length > 0
+        && _reasons.every((r) => r && r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation")) {
+      _placementOnlyServerFns.add(_pf.name);
+    }
+  }
   const _serverFnPeerNames = new Set<string>();
   // #284 (FIX C) — PER-FUNCTION-BODY alias names that resolve to a peer via a
   // first-class reference (`const p = groupByJob; p(rows)` / a dispatch table).
@@ -4989,7 +5005,7 @@ function generateServerJsImpl(
       // string, so a missing key is the omitted argument here. (The stub also
       // leaves out a `not` argument, so on this GET wire a `not` passed to a
       // defaulted parameter cannot be told from an omitted one.)
-      const _sseParamDefaults = serverParamDefaults(params, filePath, _serverFnOptsSSE, fnNode, _atReadingServerFns);
+      const _sseParamDefaults = serverParamDefaults(params, filePath, _serverFnOptsSSE, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       for (let _pi = 0; _pi < fnParamNames.length; _pi++) {
         const _pName = fnParamNames[_pi];
         const _pAbsent = _sseParamDefaults[_pi] ?? "null";
@@ -5468,7 +5484,7 @@ function generateServerJsImpl(
       // never evaluates the default a second time, on the wrong side (s466 fix
       // round 1: a client-side default such as `= @n` lowered here read an
       // untransported `_scrml_body["n"]`).
-      const _paramDefaults = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOpts, fnNode, _atReadingServerFns);
+      const _paramDefaults = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(serverBodyParamLine(paramNames[i], _paramDefaults[i] ?? null, "    "));
       }
@@ -5749,7 +5765,7 @@ function generateServerJsImpl(
 
       // §7.3.2 (s466) — an omitted argument takes its parameter's default
       // (mirror of the CSRF path above).
-      const _paramDefaultsNonCsrf = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode, _atReadingServerFns);
+      const _paramDefaultsNonCsrf = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(serverBodyParamLine(paramNames[i], _paramDefaultsNonCsrf[i] ?? null, "  "));
       }
@@ -6086,9 +6102,15 @@ function generateServerJsImpl(
     // break — see `_scrml_session_bind`). `_webAppShape`-gated: a non-route text
     // ref (SSE / headless) gets no binding and is caught build-blocking by the
     // E-SESSION-CONTEXT scan below (which now also matches the bare form).
+    // s466 fix round 2 — a bare `session.` in the emitted handler counts only when
+    // it is the FREE name: a lambda parameter named `session` (now reachable from
+    // a lowered parameter default, e.g. `f = (session) => session.userId`) is the
+    // lambda's own value, and wrapping for it named a cookie-session helper the
+    // file never emitted. Unparseable text keeps the text test (null → true).
+    const _handlerFreeSession = jsTextReadsFreeName(lines.slice(_sessHandlerStartIdx).join("\n"), "session") !== false;
     {
       const _sessBody = lines.slice(_cuInsertIdx);
-      const _sessBodyRefsBare = _sessBody.some((l) => _SESSION_BARE_TEXT_RE.test(l));
+      const _sessBodyRefsBare = _handlerFreeSession && _sessBody.some((l) => _SESSION_BARE_TEXT_RE.test(l));
       const _sessAlreadyBound = _sessBody.some((l) =>
         l.includes("const session = _scrml_session_bind("));
       if (_webAppShape && _sessBodyRefsBare && !_sessAlreadyBound) {
@@ -6117,7 +6139,7 @@ function generateServerJsImpl(
     // are guarded out), so this does not self-trigger.
     const _sessHandlerRefsSession =
       lines.slice(_sessHandlerStartIdx).some((l) =>
-        l.includes("_scrml_req._scrml_sess.") || _SESSION_BARE_TEXT_RE.test(l));
+        l.includes("_scrml_req._scrml_sess.") || (_handlerFreeSession && _SESSION_BARE_TEXT_RE.test(l)));
     const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
     // §40.3 — NO per-route `_scrml_mw_wrap` here either. The onion moved up to
     // top-level dispatch, so the cookie-session wrapper is now the ONLY per-route
@@ -6472,7 +6494,7 @@ function generateServerJsImpl(
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
       // §7.3.2 (s466) — the in-process callable keeps its defaults: a peer call
       // that omits an argument takes the default, exactly as the HTTP route does.
-      const _peerDefaults = serverParamDefaults(_peerInfo.fnNode.params ?? [], filePath, _peerOpts, _peerInfo.fnNode, _atReadingServerFns);
+      const _peerDefaults = serverParamDefaults(_peerInfo.fnNode.params ?? [], filePath, _peerOpts, _peerInfo.fnNode, _atReadingServerFns, _placementOnlyServerFns);
       const _peerSig = _peerInfo.paramNames.map((n, i) => serverParamSignature(n, _peerDefaults[i] ?? null));
       lines.push(`async function ${_peerName}(${_peerSig.join(", ")}) {`);
       // F4 (documented limitation per upstream review): a server-mode `@cell`
@@ -7091,7 +7113,7 @@ function generateServerJsImpl(
         ...localMapSetOptsFor(fnNode),
       };
       // §7.3.2 (s466) — the handler keeps its parameter defaults.
-      const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode, _atReadingServerFns);
+      const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       const _wsSig = wsParamNames.map((n, i) => serverParamSignature(n, _wsDefaults[i] ?? null));
       lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
       lines.push(`function ${name}(${_wsSig.join(", ")}) {`);

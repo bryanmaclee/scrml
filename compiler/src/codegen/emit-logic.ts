@@ -1238,6 +1238,12 @@ export interface ParamDefaultSite {
    * as well reports one root cause twice.
    */
   coveredCallees?: ReadonlySet<string> | null;
+  /**
+   * s466 fix round 2 — plain `function`s that are async only because route
+   * inference placed them on the server (caller-context propagation). Used only
+   * to word the E-PARAM-DEFAULT-AWAIT message ("declare it `fn` if it is pure").
+   */
+  placementOnlyCallees?: ReadonlySet<string> | null;
 }
 
 /** §7.3.2 — the parameter's name for a diagnostic. */
@@ -1260,8 +1266,9 @@ function paramDefaultAwaitReason(
   node: ExprNode,
   facts: AsyncNameFacts,
   covered: ReadonlySet<string> | null,
-): { reason: string } | { covered: true } | null {
+): { reason: string; callee?: string } | { covered: true } | null {
   let reason: string | null = null;
+  let culprit: string | undefined;
   let sawCovered = false;
   const asyncName = (name: string): boolean => isAsyncCalleeName(name, facts);
   const seen = new WeakSet<object>();
@@ -1275,7 +1282,7 @@ function paramDefaultAwaitReason(
       const callee = r.callee as { kind?: unknown; name?: unknown } | undefined;
       if (callee && callee.kind === "ident" && typeof callee.name === "string" && asyncName(callee.name)) {
         if (covered && covered.has(callee.name)) sawCovered = true;
-        else { reason = `calls \`${callee.name}\`, which runs asynchronously`; return; }
+        else { reason = `calls \`${callee.name}\`, which runs asynchronously`; culprit = callee.name; return; }
       }
     }
     if (r.kind === "escape-hatch" && typeof r.raw === "string") {
@@ -1287,13 +1294,14 @@ function paramDefaultAwaitReason(
         if (!asyncName(m[1])) continue;
         if (covered && covered.has(m[1])) { sawCovered = true; continue; }
         reason = `calls \`${m[1]}\`, which runs asynchronously`;
+        culprit = m[1];
         return;
       }
     }
     for (const k of Object.keys(r)) if (k !== "span") visit(r[k]);
   };
   visit(node);
-  if (reason !== null) return { reason };
+  if (reason !== null) return culprit ? { reason, callee: culprit } : { reason };
   return sawCovered ? { covered: true } : null;
 }
 
@@ -1346,18 +1354,27 @@ export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOp
   if (awaitIssue === null || "covered" in awaitIssue) {
     const raw = rawAsyncUsesOf(p);
     const hit = raw?.calls.find((c) => !(site.coveredCallees && site.coveredCallees.has(c.name)));
-    if (hit) awaitIssue = { reason: `calls \`${hit.name}\`, which runs asynchronously` };
+    if (hit) awaitIssue = { reason: `calls \`${hit.name}\`, which runs asynchronously`, callee: hit.name };
   }
   if (awaitIssue && "covered" in awaitIssue) return "null /* refused: see the callee's diagnostic */";
   if (awaitIssue) {
+    const _callee = "callee" in awaitIssue ? awaitIssue.callee : undefined;
+    // s466 fix round 2 — a plain `function` that is async ONLY because route
+    // inference placed it on the server (its only callers are server code): the
+    // author wrote nothing async, so name the way out.
+    const _placementNote = _callee && site.placementOnlyCallees && site.placementOnlyCallees.has(_callee)
+      ? ` (\`${_callee}\` is a plain \`function\` the compiler runs on the server — and therefore asynchronously — ` +
+        `only because server code calls it; declare it \`fn\` if it is pure, and it stays an ordinary synchronous helper)`
+      : "";
     recordRefusedLowering(new CGError(
       "E-PARAM-DEFAULT-AWAIT",
-      `E-PARAM-DEFAULT-AWAIT: the default of parameter \`${label}\` of \`${site.fnName}\` ${awaitIssue.reason}. ` +
+      `E-PARAM-DEFAULT-AWAIT: the default of parameter \`${label}\` of \`${site.fnName}\` ${awaitIssue.reason}${_placementNote}. ` +
       `A parameter default is evaluated before the function body runs, in a position where the compiler ` +
       `cannot wait for an asynchronous result — the parameter would hold an unfinished operation instead of ` +
       `its value. Compute the value in the function body instead, where the wait is inserted for you: ` +
       `give the parameter the default \`not\` (\`${label}: T | not = not\`) and, in the body, use the computed ` +
-      `value when the argument is \`not\`.`,
+      `value when the argument is \`not\` (a caller that passes \`not\` is then treated the same as one that ` +
+      `omits the argument).`,
       at,
     ), p as object);
     return "null /* E-PARAM-DEFAULT-AWAIT */";
