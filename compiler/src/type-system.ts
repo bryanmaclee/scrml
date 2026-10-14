@@ -15979,7 +15979,7 @@ function annotateNodes(
               const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
               errors.push(new TSError(
                 "E-ERROR-005",
-                `E-ERROR-005: Error variant '${errorTypeDisplayName(errTypeName)}::${v.name}' may occur inside ` +
+                `E-ERROR-005: Error variant '${errorTypeDisplayName(errTypeName ?? "")}::${v.name}' may occur inside ` +
                 `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
                 `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
                 `'fallback' attribute to the boundary.`,
