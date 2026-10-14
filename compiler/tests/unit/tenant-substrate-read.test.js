@@ -346,7 +346,7 @@ describe("not charged — each case is not provable from the AST", () => {
   });
   test("a function-local `session` shadows the builtin", () => {
     expect(codes(prog(`    function f() {
-      const session = { set: (k, v) => v }
+      const session = globalThis.sessionStub
       const u = ${q("SELECT tenant_id FROM users WHERE email = 'a@x'")}.get()
       session.set("tenantId", u.tenant_id)
       return "ok"

@@ -119,6 +119,7 @@ import {
 import { _scrml_url_shape_ok } from "./runtime-url-guard.js";
 import { _SCRML_MESSAGE_SLOTS, _scrml_message_template_parse } from "./runtime-message-templates.js";
 import { rewriteFnKeyword } from "./codegen/rewrite.ts";
+import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-function-stored.ts";
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
@@ -10614,6 +10615,14 @@ function annotateNodes(
   if (registerMessagesLocals.size > 0) {
     const _rmDefaultSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
     checkRegisterMessagesCalls(_allTopNodes, registerMessagesLocals, errors, _rmDefaultSpan);
+  }
+
+  // §14.3 / §15.11.5 (S462 "no value holds a function") — an object / array / map literal (or a
+  // spread into one) or a state cell that STORES a function value is refused. A literal written
+  // directly as a host-JS call argument is at the boundary and allowed. See value-function-stored.ts.
+  const _vfsSource = (fileAST as { _sourceText?: unknown })._sourceText ?? ((fileAST as { ast?: { _sourceText?: unknown } }).ast?._sourceText);
+  for (const d of checkValueFunctionStored(_allTopNodes, filePath, importedFnDecls?.keys() ?? [], typeof _vfsSource === "string" ? _vfsSource : undefined)) {
+    errors.push(new TSError(d.code, d.message, d.span as Span));
   }
 
   // ---------------------------------------------------------------------------
@@ -28723,6 +28732,18 @@ export function runTS(input: {
   // read off the file being checked. See `compilationUnitHasServerContext`.
   const appHasServerContext = compilationUnitHasServerContext(files);
 
+  // §14.3 E-VALUE-FUNCTION-STORED reads function facts ACROSS imports (an exported closure-returning
+  // function, an exported const arrow), so it is handed the compilation unit's modules for this run.
+  {
+    const _vfsIndex = new Map<string, unknown[]>();
+    for (const f of files) {
+      const fp = (f as { filePath?: unknown }).filePath;
+      const ns = ((f as { nodes?: unknown }).nodes ?? (f as { ast?: { nodes?: unknown } }).ast?.nodes) as unknown[] | undefined;
+      if (typeof fp === "string" && Array.isArray(ns)) _vfsIndex.set(fp, ns);
+    }
+    setValueFnModuleIndex(_vfsIndex);
+  }
+
   for (const fileAST of files) {
     // Look up imported types for this file from the caller-provided map.
     // api.js builds this map in topological order so dependency types are available
@@ -28740,6 +28761,7 @@ export function runTS(input: {
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;
   }
+  setValueFnModuleIndex(null);
 
   return {
     files: typedFiles,

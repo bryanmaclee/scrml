@@ -86,12 +86,13 @@ beforeAll(() => {
 </program>
 `);
 
-  // §2 — RHS with return
+  // §2 — RHS with return. S464: no scrml value holds a function (E-VALUE-FUNCTION-STORED), so
+  // the object written to is a HOST object (the host boundary), as in the Bug M repro.
   returnFx = fix("with-return.scrml", `<program>
 \${
   @result = 0
   function setup() {
-    const obj = { cb: not }
+    const obj = new window.Object()
     obj.cb = function() {
       return 42
     }
@@ -103,13 +104,13 @@ beforeAll(() => {
 </program>
 `);
 
-  // §4 — multi-statement body (two sequential reactive writes)
+  // §4 — multi-statement body (two sequential reactive writes). Host target (S464, see §2).
   multiFx = fix("multi-stmt.scrml", `<program>
 \${
   @a = 0
   @b = 0
   function setup() {
-    const target = { handler: not }
+    const target = document.createElement("div")
     target.handler = function() {
       @a = 1
       @b = 2
@@ -121,12 +122,12 @@ beforeAll(() => {
 </program>
 `);
 
-  // §5 — computed member (bracket access)
+  // §5 — computed member (bracket access). Host target (S464, see §2).
   computedFx = fix("computed-member.scrml", `<program>
 \${
   @v = 0
   function setup() {
-    const arr = [not]
+    const arr = new window.Array(1)
     arr[0] = function() {
       @v = 7
     }

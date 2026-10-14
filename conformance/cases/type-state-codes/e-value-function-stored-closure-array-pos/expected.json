@@ -1,0 +1,14 @@
+{
+  "id": "e-value-function-stored-closure-array-pos",
+  "description": "A value built by a callback that returns functions fires E-VALUE-FUNCTION-STORED (§14.3). `items.map((i) => () => pick(i))` builds an array of closures — a value holding functions. Bind the call at the use site instead (`<each in=@items as i><button onclick=pick(i)>`). Incidental W-PROGRAM-SPA-INFERRED is ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/value-function-stored.test.js",
+  "spec": "§14.3",
+  "provenance": "ruling:user-voice-scrml.md S464 \"(a) Close it\" (the closure-array entry — a value built by a callback that returns functions is refused)",
+  "rationale": "§14.3 `.map` / `.flatMap` / `Array.from(xs, f)` / `m.update(k, f)` results are judged by what the callback returns; a callback returning a function builds a value holding functions.",
+  "expect": {
+    "codes": ["E-VALUE-FUNCTION-STORED"],
+    "notCodes": [],
+    "severity": { "E-VALUE-FUNCTION-STORED": "error" }
+  }
+}
