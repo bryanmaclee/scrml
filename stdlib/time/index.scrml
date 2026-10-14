@@ -262,7 +262,11 @@ ${
     // and plain objects, so a timer held in a state cell, a field or a collection is
     // read back as ITSELF — the identity the table is keyed by — not as a Proxy of it.
     // Its own fields are unchanged, so `==` and serialization read it as before.
+    // The prototype carries the timer BRAND (a registry symbol, non-enumerable, not
+    // an own field): a path write (`@d.delay = 10`) reaches a branded struct IN PLACE
+    // — the runtime refuses every other non-plain prototype — since a copy is a dead timer.
     const timerProto = Object.create(Object.prototype)
+    Object.defineProperty(timerProto, Symbol.for("scrml:time.timer"), { value: true })
 
     export type Debouncer:struct = {
         id: number,
