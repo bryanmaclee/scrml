@@ -151,6 +151,9 @@ export function errorSeverityCodes(result) {
   return [...new Set(errorSeverityDiagnostics(result).map((d) => d.code))].sort();
 }
 
+/** The pseudo-code of a compile that threw (the compiler crashed) — it names no file. */
+export const COMPILE_THREW = "(the compile threw)";
+
 /**
  * Compile `files` (absolute paths) together IN PLACE — as `scrml compile <them>` reads them: their
  * imports and databases from disk; nothing is written — and return the error-severity
@@ -171,7 +174,7 @@ export function compileErrorsTogether(files) {
     }
     return errorSeverityDiagnostics(r);
   } catch (e) {
-    return [{ code: "(the compile threw)", file: null, line: null, message: String(e?.message ?? e).split("\n")[0] }];
+    return [{ code: COMPILE_THREW, file: null, line: null, message: String(e?.message ?? e).split("\n")[0] }];
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

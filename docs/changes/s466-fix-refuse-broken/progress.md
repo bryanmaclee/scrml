@@ -39,3 +39,6 @@
   same file compiles clean as part of `scrml compile examples/22-multifile`.
 
 - SPEC §63.4 bullet updated for round 1 (project-aware judgement, divergence wording, removed-form exception) + a `PA reading (S466, owner veto)` note recording the §66-dialect question as open; SPEC-INDEX + FACTS regenerated.
+
+- Acceptance r1 (first pass): examples 0 refused, 23/23 rewrites byte-identical to base, 105/105 trucking sql-failable back. samples + conformance were ALL refused: `scrml compile samples` crashes (stack overflow, no file) and conformance/cases joint compile reports errors with no file (E-IMPORT-002, E-CG-003, E-TYPE-031, E-META-EVAL-002, E-VALIDATOR-INLINE-DYNAMIC). Fix: attributed errors refuse first + recompile; when only no-file errors (or a crash) remain, each remaining file is judged by its own compile; a note says so (stderr + `notes` in --json).
+- Gaps for the PA: `scrml compile samples` crashes (Maximum call stack size exceeded); those five codes carry no file in a joint compile.

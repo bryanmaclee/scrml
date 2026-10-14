@@ -384,6 +384,33 @@ describe("§7 a component module that compiles as part of its project", () => {
   });
 });
 
+describe("§7b an error that names no file does not refuse unrelated files", () => {
+  // E-IMPORT-002 (a circular import) carries no file in a joint compile — measured S466 over
+  // conformance/cases, where such errors refused all 1827 independent cases.
+  const A = "${ import { B } from \"./b.scrml\"\n  export const A = 1 }\n";
+  const B = "${ import { A } from \"./a.scrml\"\n  export const B = 2 }\n";
+
+  test("precondition: the joint compile reports an E-IMPORT-002 with no file", () => {
+    withDir({ "a.scrml": A, "b.scrml": B, "g.scrml": GOOD }, (dir) => {
+      const d = compileErrorsTogether(["a.scrml", "b.scrml", "g.scrml"].map((n) => join(dir, n)));
+      expect(d.some((x) => x.code === "E-IMPORT-002" && x.file === null)).toBe(true);
+    });
+  });
+
+  test("the cycle's files are refused by their own compiles; the unrelated compiling file is rewritten", () => {
+    withDir({ "a.scrml": A, "b.scrml": B, "g.scrml": GOOD }, (dir) => {
+      const r = run([dir]);
+      expect(r.code).toBe(3);
+      expect(r.err).toContain("that name no file");
+      expect(readFileSync(join(dir, "a.scrml"), "utf8")).toBe(A);
+      expect(readFileSync(join(dir, "b.scrml"), "utf8")).toBe(B);
+      expect(readFileSync(join(dir, "g.scrml"), "utf8")).toContain("!{ _ :> not }");
+      const list = r.err.slice(r.err.indexOf("scrml fix: refused"));
+      expect(list).not.toMatch(/g\.scrml/);
+    });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // §8 pre-migrate clears a hard error: E-DEPRECATED-001 (`<machine>`) alone does not refuse
 // ---------------------------------------------------------------------------
