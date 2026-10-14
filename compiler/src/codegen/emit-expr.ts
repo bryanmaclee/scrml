@@ -5157,6 +5157,23 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
   // in every VALUE position on the client too (the one admitted comma list, a C-style
   // `for` header's init / update, is lowered before it reaches here —
   // emit-control-flow `emitCForHeaderList`).
+  // S466 r7 (MED-C) — the CLIENT copy of an async-coloured function-valued binding:
+  // lowered from the tree as an `async` function in the async-body facts it was emitted
+  // with (emit-reactive-wiring), its calls awaited. A body that cannot be read that way
+  // is refused (a sync text lowering would hand callers an un-awaited Promise).
+  if (ctx.mode !== "server" && isArrowOrFn && (node as { _asyncFnValue?: boolean })._asyncFnValue === true) {
+    const fn = emitServerFnValue(node, ctx, { async: true });
+    if (fn !== null) return fn;
+    recordRefusedLowering(new CGError(
+      "E-ASYNC-FN-ESCAPES-AS-VALUE",
+      "E-ASYNC-FN-ESCAPES-AS-VALUE: this function value calls an async function (a server function or a " +
+        "Promise-returning helper), so the compiler emits it `async` and awaits every call to it — but its body " +
+        "cannot be read here, so its own calls could not be awaited (§13.2). Declare it with `function name(…) " +
+        "{ … }`.",
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-ASYNC-FN-ESCAPES-AS-VALUE */";
+  }
   if (ctx.mode !== "server" && node.nativeKind === "SequenceExpression") {
     // cascadeOnly: dropped when the compile already holds a more precise error for the
     // same text (`defer [1, 2].forEach(f)` outside a function is E-DEFER-OUTSIDE-FUNCTION).

@@ -1381,7 +1381,7 @@ export function emitServerFnValue(hatchNode: unknown, ctx: EmitExprContext, opts
   if (fnName) declared.add(fnName.trim());
   const lines = emitLogicBody(r.stmts, {
     ...base,
-    boundary: "server",
+    boundary: ctx.mode === "server" ? "server" : "client", // S466 r7 — the client copy of an async binding (MED-C) too
     declaredNames: declared,
     insideFunctionBody: true,
     tildeContext: undefined,

@@ -4,7 +4,8 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
-import { isServerOnlyNode, collectFunctions } from "./collect.ts";
+import { isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
@@ -585,8 +586,16 @@ export function computeClientAsyncSets(
   const _clientAsyncSeed = new Set<string>();
   const _crossImportSeed = (ctx.fileAST as any)?._asyncImportedLocals as Set<string> | undefined;
   if (_crossImportSeed) for (const n of _crossImportSeed) _clientAsyncSeed.add(n);
+  // S466 r7 (MED-C) — the file's top-level function-valued bindings (`const persist =
+  // (v) => save(v)`) are functions for the CLIENT coloring too (they are in the client
+  // bundle): one that calls something async is emitted `async` on the client
+  // (emit-reactive-wiring.ts) and every client call site awaits it exactly like a
+  // `function` declaration (§13.2: it "MAY be called directly (the compiler awaits
+  // the call)"). The pseudo functions join the fixpoint only — never `clientFns`.
+  const _bindingPseudoFns = fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never))
+    .map((b) => b.pseudoFn as unknown as ASTNode);
   const _clientAsyncFnNames = computeAsyncFnNames(
-    _clientFns,
+    [..._clientFns, ..._bindingPseudoFns],
     null,
     _clientAsyncSeed,
     _calleeMap,
@@ -1252,6 +1261,18 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     ...(_exportRegistry ? { asyncExportRegistry: _exportRegistry } : {}),
     ...(_serverFnNames.size > 0 ? { serverFnNames: _serverFnNames } : {}),
   };
+  // S466 r7 (MED-C) — the async function-valued bindings and the async-body facts they
+  // lower with on the client: emitReactiveWiring (which runs after this) emits each one
+  // `async`, its calls awaited (the same facts an async client fn body / CPS
+  // continuation gets).
+  {
+    const _bindingNames = new Set<string>(
+      fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never)).map((b) => b.name),
+    );
+    const _asyncBindingNames = new Set<string>([..._clientAsyncFnNames].filter((n) => _bindingNames.has(n) && !_localFnNames.has(n)));
+    (ctx as unknown as { _clientAsyncBindingEmit?: unknown })._clientAsyncBindingEmit =
+      { names: _asyncBindingNames, opts: _cpsAsyncOpts };
+  }
 
   // -------------------------------------------------------------------------
   // Step 2: Generate CPS client wrappers for server functions with cpsSplit

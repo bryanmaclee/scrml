@@ -248,7 +248,9 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
   });
   // HIGH-1, client half — the client does not colour a function-valued binding: a client
   // use of an async-coloured one fails closed (it would test a Promise: always "Y").
-  test("client code using an async-coloured function-valued binding is refused", () => {
+  // S466 r7 (MED-C): the client now COLOURS the binding — the call is awaited (executed
+  // in s465-await-r7.test.js: "N" when the server says false), so it compiles clean.
+  test("client code calling an async-coloured function-valued binding awaits it (r7: coloured, was refused)", () => {
     const dir = mkdtempSync(join(tmpdir(), "s465-r6-clienth1-"));
     dirs.push(dir);
     writeFileSync(join(dir, "app.scrml"), `<program db="./app.db">
@@ -265,7 +267,11 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
 </program>
 `);
     const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, gather: true, log: () => {} });
-    expect((r.errors ?? []).map((e) => e.code)).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    expect((r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+    let clientJs = "";
+    for (const o of r.outputs?.values() ?? []) if (o?.clientJs) clientJs += o.clientJs;
+    expect(clientJs).toMatch(/const w = async \(n\) =>/);
+    expect(clientJs).toMatch(/await w\(2\)/);
   });
   test("a client parameter named like an async binding is not a use of it", () => {
     const dir = mkdtempSync(join(tmpdir(), "s465-r6-clientshadow-"));

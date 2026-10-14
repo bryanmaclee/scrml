@@ -55,6 +55,7 @@ import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDE
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
 import { asyncFnNamesOfFile, asyncByBodyOf } from "./file-async-fns.ts";
+import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
 import type { CalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1846,19 +1847,6 @@ function checkUserModuleDeclCollisions(
   return out;
 }
 
-/**
- * S465 r6 — a copy of a function-valued binding's declaration whose value is marked
- * async: a tree lambda gets `isAsync` (emitLambda emits `async (…) => …` and an
- * awaitable body); a block-bodied escape hatch gets `_asyncFnValue` (emitEscapeHatch
- * lowers its body from the tree in an async function).
- */
-function asyncFnValueDecl(decl: any): any {
-  const init = decl?.initExpr;
-  if (!init || typeof init !== "object") return decl;
-  if (init.kind === "lambda") return { ...decl, initExpr: { ...init, isAsync: true } };
-  if (init.kind === "escape-hatch") return { ...decl, initExpr: { ...init, _asyncFnValue: true } };
-  return decl;
-}
 
 /**
  * §61 `<endpoint>` private-arm reachability — emit a LOCAL, non-exported pure

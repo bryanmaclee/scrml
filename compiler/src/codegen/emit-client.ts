@@ -20,7 +20,7 @@ import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
 import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
-import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
+import { getNodes, isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -4533,29 +4533,35 @@ export function generateClientJs(ctx: CompileContext): string {
   }
   });
 
-  // S465 r6 (g-top-level-async-closure-called-later-accept-all, CLIENT half) — an
-  // async-coloured function-valued top-level binding (`const w = (n) => isOk(n)`,
-  // codegen/index.ts `_asyncLocalBindings`) is coloured and awaited on the SERVER; the
-  // client emitters do not colour it, so a client use (`w(2) ? "Y" : "N"`) would test
-  // its Promise — always truthy. Any use of one in the client bundle other than its own
-  // declaration is refused (fail closed) until the client colours it; a `function`
-  // declaration with the same body is coloured on both sides.
+  // S465 r6 / S466 r7 (MED-C) — an async-coloured function-valued top-level binding
+  // (`const persist = (v) => save(v)`) is coloured on the CLIENT too (emit-functions
+  // `_clientAsyncBindingEmit`): emitted `async`, and every call site the client emitters
+  // see is awaited, exactly as for a `function` declaration (§13.2: it "MAY be called
+  // directly (the compiler awaits the call)"). BACKSTOP over the final bundle: any
+  // reference to one that is not an awaited call (`await persist(…)`) — a position no
+  // emitter awaited, or a use as a value — would hand its reader a Promise (always
+  // truthy) and is refused at the binding's own declaration.
   clientStage(ctx, "post-async-binding-scan", () => {
-    const _asyncBindings = asyncFnValuedBindingsOfFile(ctx.fileAST as never);
+    const _colored = ((ctx as unknown as { _clientAsyncBindingEmit?: { names: Set<string> } })._clientAsyncBindingEmit?.names) ?? new Set<string>();
+    const _asyncBindings = new Set<string>([...asyncFnValuedBindingsOfFile(ctx.fileAST as never), ..._colored]);
     if (_asyncBindings.size === 0) return;
     // Scope-aware (module-scope-refs.ts): a parameter or inner declaration named like
-    // the binding (an inlined stdlib helper's `(w) => …`) is not a use. A bundle that does
-    // not parse is not proof of absence — every binding counts as used (fail closed).
-    const used = moduleScopeReferences(clientCode, _asyncBindings, _asyncBindings) ?? _asyncBindings;
+    // the binding is not a use. A bundle that does not parse is not proof of absence —
+    // every binding counts as used (fail closed).
+    const used = moduleScopeReferences(clientCode, _asyncBindings, new Set(), { awaitedCallsAreNotUses: true }) ?? _asyncBindings;
     for (const name of used) {
+      let span: unknown = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      for (const st of collectTopLevelStatements(ctx.fileAST as never) as Array<{ kind?: string; name?: unknown; span?: unknown }>) {
+        if ((st.kind === "const-decl" || st.kind === "let-decl") && st.name === name && st.span) { span = st.span; break; }
+      }
       errors.push(new CGError(
         "E-ASYNC-FN-ESCAPES-AS-VALUE",
-        `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${name}\` is a function VALUE bound at the top level that the ` +
-          "compiler colours async (it calls a server function or a Promise-returning helper), and client code " +
-          "uses it. The client does not await a function value, so the call would yield a Promise — always " +
-          `truthy (§13.2). Declare it with \`function ${name}(…) { … }\`: a function declaration is awaited ` +
-          "on both sides.",
-        { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${name}\` calls an async function (a server function or a Promise-returning ` +
+          `helper), so the compiler emits it \`async\` and awaits every direct call to it — but client code uses it ` +
+          "where the call is not awaited (as a value, or in a position the compiler cannot await). That reader " +
+          `would get a Promise, which is always truthy (§13.2). Call \`${name}(…)\` directly where its result is ` +
+          "needed (a handler, a function body, a markup value).",
+        span as never,
       ));
     }
   });

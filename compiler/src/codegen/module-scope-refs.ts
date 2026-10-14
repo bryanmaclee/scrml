@@ -49,6 +49,9 @@ export function moduleScopeReferences(
   // Declarations whose INITIALIZER is not walked (`const b = (p) => a(p)` with `b` in
   // the set: a use of `a` inside `b` counts only through a use of `b`).
   skipInitsOf: Set<string> = new Set(),
+  // S466 r7 (MED-C) — a call that is the operand of `await` (`await name(…)`) is not a
+  // use: the binding is coloured async and that call is awaited.
+  opts: { awaitedCallsAreNotUses?: boolean } = {},
 ): Set<string> | null {
   let ast: EsNode;
   try {
@@ -69,9 +72,9 @@ export function moduleScopeReferences(
     for (const s of scopes) if (s.has(n)) count++;
     return count !== 1;
   };
-  const walk = (node: unknown, scopes: Array<Set<string>>, parent: EsNode | null, key: string): void => {
+  const walk = (node: unknown, scopes: Array<Set<string>>, parent: EsNode | null, key: string, grand: EsNode | null = null): void => {
     if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { for (const c of node) walk(c, scopes, parent, key); return; }
+    if (Array.isArray(node)) { for (const c of node) walk(c, scopes, parent, key, grand); return; }
     const n = node as EsNode;
     if (typeof n.type !== "string") return;
     if (n.type === "Identifier") {
@@ -85,6 +88,8 @@ export function moduleScopeReferences(
         if ((parent.type === "FunctionDeclaration" || parent.type === "FunctionExpression" || parent.type === "ClassDeclaration") && key === "id") return;
         if (parent.type === "LabeledStatement" || parent.type === "BreakStatement" || parent.type === "ContinueStatement") return;
         if (parent.type === "ImportSpecifier" || parent.type === "ImportDefaultSpecifier" || parent.type === "ImportNamespaceSpecifier") return;
+        if (opts.awaitedCallsAreNotUses && parent.type === "CallExpression" && key === "callee" &&
+          grand && grand.type === "AwaitExpression") return;
       }
       if (!shadowed(scopes, nm)) found.add(nm);
       return;
@@ -114,7 +119,7 @@ export function moduleScopeReferences(
     }
     for (const k of Object.keys(n)) {
       if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
-      walk(n[k], inner, n, k);
+      walk(n[k], inner, n, k, parent);
     }
   };
   walk(ast, [], null, "");

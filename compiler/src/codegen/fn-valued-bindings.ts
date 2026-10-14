@@ -146,3 +146,18 @@ export function asyncValueUsesIn(tree: unknown, isAsync: (name: string) => boole
   walk(tree, false);
   return out;
 }
+
+/**
+ * S465 r6 — a copy of a function-valued binding's declaration whose value is marked
+ * async: a tree lambda gets `isAsync` (emitLambda emits `async (…) => …` and an
+ * awaitable body); a block-bodied escape hatch gets `_asyncFnValue` (emitEscapeHatch
+ * lowers its body from the tree in an async function). S466 r7 — shared by the server
+ * D-5 closure and the client's top-level emission (MED-C).
+ */
+export function asyncFnValueDecl(decl: any): any {
+  const init = decl?.initExpr;
+  if (!init || typeof init !== "object") return decl;
+  if (init.kind === "lambda") return { ...decl, initExpr: { ...init, isAsync: true } };
+  if (init.kind === "escape-hatch") return { ...decl, initExpr: { ...init, _asyncFnValue: true } };
+  return decl;
+}

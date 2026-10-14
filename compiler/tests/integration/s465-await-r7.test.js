@@ -17,6 +17,8 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { hashPassword } from "../../runtime/stdlib/auth.js";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
 const T = 30_000;
 
@@ -225,4 +227,121 @@ describe("S465 r7 HIGH-A — the per-emitter fixpoints are gone (structural)", (
     expect(src("emit-tool.ts")).not.toMatch(/export function collectAsyncFnNamesFromFile/);
     expect(src("scheduling.ts")).not.toMatch(/_asyncLocalBindings/);
   });
+});
+
+// MED-C — a top-level function-valued binding that calls a server function is coloured on
+// the CLIENT too: emitted `async`, every direct call awaited (§13.2 "It MAY be called
+// directly (the compiler awaits the call)"). 22ed85298 refused every client use
+// (E-ASYNC-FN-ESCAPES-AS-VALUE at 1:1); base ran the fire-and-forget shapes but tested a
+// Promise in `w(2) ? "Y" : "N"` (always "Y"). Executed in happy-dom, server routes stubbed.
+async function runClient(src, answers) {
+  const d = mkdtempSync(join(tmpdir(), "s465-r7-client-"));
+  dirs.push(d);
+  const file = join(d, "app.scrml");
+  writeFileSync(file, src);
+  const result = compileScrml({ inputFiles: [file], write: false, outputDir: join(d, "dist"), log: () => {} });
+  const codes = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+  if (codes.length) return { codes };
+  const app = result.outputs.get(file);
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  GlobalRegistrator.register();
+  const calls = [];
+  try {
+    const g = globalThis;
+    const RealResponse = g.Response;
+    g.fetch = async (input) => {
+      const url = typeof input === "string" ? input : input.url;
+      const m = /__ri_route_([A-Za-z]+)_\d+/.exec(String(url));
+      const name = m ? m[1] : "?";
+      calls.push(name);
+      await new Promise((r) => setTimeout(r, 15));
+      return new RealResponse(JSON.stringify(answers[name] ?? null), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const bodyHtml = (/<body[^>]*>([\s\S]*)<\/body>/i.exec(app.html) ?? [null, app.html])[1];
+    g.document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
+    (0, eval)("(function () {\n" + SCRML_RUNTIME + "\n" + app.clientJs + "\n})();");
+    g.document.dispatchEvent(new g.Event("DOMContentLoaded", { bubbles: true }));
+    g.document.querySelector("#go").click();
+    for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 5));
+    return { codes, out: g.document.querySelector("#out").textContent.trim(), calls, clientJs: app.clientJs };
+  } finally {
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  }
+}
+
+describe("S465 r7 MED-C — an async function-valued binding is coloured on the client (executed)", () => {
+  test("cl2: `const persist = (v) => save(v)` from a handler runs, awaited before the next statement", async () => {
+    const r = await runClient(`<program db="./app.db">
+\${
+  function save(v) {
+    ?{\`INSERT INTO users (name) VALUES (\${v})\`}.run()
+    return 1
+  }
+  const persist = (v) => save(v)
+}
+<out> = ""
+<button id="go" onclick={ persist("x"); @out = "after" }>r</button>
+<p id="out">\${@out}</p>
+</program>
+`, { save: 1 });
+    expect(r.codes).toEqual([]);
+    expect(r.calls).toEqual(["save"]);
+    expect(r.out).toBe("after");
+    expect(r.clientJs).toMatch(/await persist\("x"\)/);
+  }, T);
+
+  test("cl3: a block-bodied binding doing `@n = loadCount()` runs", async () => {
+    const r = await runClient(`<program db="./app.db">
+\${
+  function loadCount() {
+    return ?{\`SELECT count(*) AS n FROM users\`}.get().n
+  }
+  const reload = () => {
+    @out = loadCount()
+  }
+}
+<out> = 0
+<button id="go" onclick={ reload() }>r</button>
+<p id="out">\${@out}</p>
+</program>
+`, { loadCount: 7 });
+    expect(r.codes).toEqual([]);
+    expect(r.out).toBe("7");
+  }, T);
+
+  test("a binding's result used as a value is awaited: `w(2) ? \"Y\" : \"N\"` is \"N\" when the server says false", async () => {
+    const r = await runClient(`<program db="./app.db">
+\${
+  server function isOk(n) { return n == 1 }
+  const w = (n) => isOk(n)
+  <out> = ""
+  function h() {
+    @out = w(2) ? "Y" : "N"
+  }
+}
+<button id="go" onclick=h()>go</button>
+<p id="out">\${@out}</p>
+</program>
+`, { isOk: false });
+    expect(r.codes).toEqual([]);
+    expect(r.out).toBe("N");
+  }, T);
+
+  test("a binding aliased as a VALUE on the client is still refused", async () => {
+    const r = await runClient(`<program db="./app.db">
+\${
+  server function isOk(n) { return n == 1 }
+  const w = (n) => isOk(n)
+  <out> = ""
+  function h() {
+    const z = w
+    @out = z(2) ? "Y" : "N"
+  }
+}
+<button id="go" onclick=h()>go</button>
+<p id="out">\${@out}</p>
+</program>
+`, { isOk: false });
+    expect(r.codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  }, T);
 });
