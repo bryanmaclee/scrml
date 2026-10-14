@@ -1,0 +1,9 @@
+${
+    function twice(x) { return x * 2 }
+    function apply(f, v) { return f(v) }
+    const a = apply(twice, 3)
+    const ys = [1, 2].map(twice)
+    const counts = ["a": twice(1), "b": 2]
+    function share() { console.log({ double: twice }) }
+}
+<program><p id="p">${a} ${ys} ${counts.size}</p><button onclick=share()>log</></>

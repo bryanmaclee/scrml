@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 257 | 4 |
-| MED | 630 | 6 |
-| LOW | 400 | 0 |
+| HIGH | 258 | 4 |
+| MED | 638 | 6 |
+| LOW | 410 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -381,6 +381,70 @@ Found by the S465 round-5 review of the await branch (probe `scratchpad/rv7/k.mj
 ### g-tree-path-destructured-arrow-param-s465 — an arrow with a destructured parameter emitted through the tree path becomes `(__destructured__) => k + v` → ReferenceError at run time — `NEW S465; MED; open`
 <!-- @gap id=g-tree-path-destructured-arrow-param-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-expr.ts(arrow param emission on the tree path) prov=review:s465-await-r5 -->
 `[[s, 1]].map(([k, v]) => k + v)` and `({ k }) =>` at server function top level throw on main (probe rv7/g.mjs dTop/dTopObj). The await branch routes block-bodied server function values through this path, so it newly breaks shapes that worked on main — fix this before that branch lands.
+
+### g-value-function-stored-by-type-design-s465 — DESIGN ITEM: E-VALUE-FUNCTION-STORED is POSITION-ENUMERATED (a retrofit that lists the places a function can be put into a value); enforce it BY TYPE instead — a value's type may not contain a function type — `NEW S465; MED; open (design item — owner ruled S464 "(a) Fix + land + type rule" to bank it)`
+<!-- @gap id=g-value-function-stored-by-type-design-s465 sev=MED status=open locus=compiler/src/value-function-stored.ts(position enumeration)+compiler/src/type-system.ts(no function-in-value-type rule) prov=ruling:user-voice-scrml.md S464 "(a) Fix + land + type rule" -->
+Three adversarial review rounds of s465-value-fn-land each found new positions the enumeration missed (block-bodied lambdas, aliases, field writes, enum payloads, host stores, closure-returning callbacks, imports, re-exports, match arms…). Positions still open when the branch landed (evidence for the by-type design): `reduceRight` with a function accumulator (`g-vfs-reduceright-s465`), `Array.prototype.map.call(xs, () => g)` (`g-vfs-proto-call-s465`), `Array(g)` / `new Array(g)` (`g-vfs-array-ctor-s465`), `Object.setPrototypeOf(o, { f: g })` and an aliased `const d = Object.defineProperty` (`g-vfs-host-store-alias-s465`), a function read off host data (`g-host-value-callable-unknown-s465`), a function passed to an imported function that stores its parameter (`g-cross-module-param-store-unjudged-s465`), a value-form `if` inside an expression (`g-value-form-if-in-expression-invalid-js-s465`), a namespace import's members. A type rule closes the class by construction: every value position has a type; refuse any whose type (deep) contains a function type, with the passed/called positions (argument, callback, prop, handler, local binding) typed as such.
+
+### g-timer-struct-misuse-aliases-s465 — E-TIMER-STRUCT-MISUSE fires on a name or state cell initialised by `debounce(…)` / `throttle(…)`, but not through an alias (`const e = d; e(1)`), an array element (`ds[0](1)`) or an object field (`o.s.cancel()`): those compile clean and throw a TypeError at run time — `NEW S465; LOW; open`
+<!-- @gap id=g-timer-struct-misuse-aliases-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(checkTimerMisuse — direct names / cells only) prov=review:s465-value-fn-r4 (tm/t08, tm/t09) -->
+Filed per the round-4 brief (residual RS1). The struct type is not carried through aliases or into collection elements / fields. Closed by giving `Debouncer` / `Throttler` a real struct type the call checker reads (calling a value of struct type, or a missing method on one), or by the by-type design item `g-value-function-stored-by-type-design-s465`.
+
+### g-vfs-reduceright-s465 — `xs.reduceRight((a, x) => twice, thrice)` — a reducer whose accumulator is a function is not judged as storing (the result is a function bound to a local; storing it later is refused) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-reduceright-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(callMayFn reduce/reduceRight) prov=review:s465-value-fn-r3 (ca/h28) -->
+Filed per S464 "(a) Fix + land + type rule" (round 3 files remaining position holes rather than fixing them). Closed by the by-type design item.
+
+### g-vfs-proto-call-s465 — `Array.prototype.map.call(xs, () => twice)` builds an array of functions without E-VALUE-FUNCTION-STORED (the closure-array rule reads `.map` on a receiver, not `.call` on the prototype method) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-proto-call-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(builtFromCallback) prov=review:s465-value-fn-r3 (ca/h13) -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-array-ctor-s465 — `Array(twice)` / `new Array(twice)` kept as a value builds an array holding a function without E-VALUE-FUNCTION-STORED — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-array-ctor-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(kept host results judge storing METHODS, not constructors) prov=review:s465-value-fn-r3 -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-host-store-alias-s465 — `Object.setPrototypeOf(o, { f: twice })` and an aliased host store (`const d = Object.defineProperty; d(o, "f", { value: twice })`) put a function into a scrml value without E-VALUE-FUNCTION-STORED — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-host-store-alias-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(WRITES_INTO_FIRST names a fixed set by spelling) prov=review:s465-value-fn-r3 -->
+Filed per S464 "(a) Fix + land + type rule". Closed by the by-type design item.
+
+### g-vfs-fixpoint-quadratic-s465 — the E-VALUE-FUNCTION-STORED fact solver re-walks the whole file each pass, so a reverse-ordered chain of N bindings costs O(N²) (synthetic 2500-binding files take seconds; real-corpus files converge in a few passes) — `NEW S465; LOW; open`
+<!-- @gap id=g-vfs-fixpoint-quadratic-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(analyze fixpoint loop) prov=review:s465-value-fn-r3 (perf/) -->
+No corpus file is affected (measured). Fix direction: a worklist over the binding-dependency graph instead of whole-file passes, or the by-type design item (types are solved once).
+
+### g-export-list-registers-first-name-only-s465 — a local export list `export { adder2, inc2 }` registers only the FIRST name in the client module registry (`_scrml_modules`): the importer's `inc2` is `undefined` at run time, compiled clean — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-export-list-registers-first-name-only-s465 sev=MED status=open locus=compiler/src/codegen/emit-client.ts(buildModuleRegistryFooter — export-decl exportedName "adder2, inc2" read as one name) prov=review:s465-value-fn-r3 (xi/y01-exportlist) -->
+The export-decl carries `exportedName: "adder2, inc2"` and a `renames` list; the registry footer reads the former. Found by the round-3 review of s465-value-fn-land; not caused by it.
+
+### g-value-form-if-in-expression-invalid-js-s465 — a value-form `if` written INSIDE an expression (`{ f: if (c) { a } else { b } }`, `xs.map((x) => if x > 1 { a } else { b })`) compiles clean and emits it verbatim — invalid JS (`{ f : if ( … ) { … } }`) — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-value-form-if-in-expression-invalid-js-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(ParseError escape hatch kept)+codegen(emits the raw text) prov=review:s465-value-fn-r3 (ca/j01, ca/i08) -->
+The expression parser keeps the text as a ParseError escape hatch and codegen emits it as-is; no diagnostic. The value-form `if` is specified for the declaration initializer (`const a = if (c) { lift v }`), which E-VALUE-FUNCTION-STORED now reads. Fix direction: refuse a value-form `if` in expression position with a named diagnostic (or lower it); until then E-VALUE-FUNCTION-STORED cannot see the arm values there.
+
+### g-match-arm-lambda-value-misread-s465 — a `match` arm whose VALUE is an arrow (`1 => (y) => y, _ => (y) => y + 1`) is split by the shared arm reader as a presence arm `(y) => y`; codegen emits invalid JS (`else { const y = …; return y; }` with no `if`), compiled clean — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-match-arm-lambda-value-misread-s465 sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(splitMultiArmString / parseMatchArm presence-arm form) prov=review:s465-value-fn-r3 (ca/j03) -->
+E-VALUE-FUNCTION-STORED reads arms with the same splitter and fails closed on the unreadable `1 =>` piece, so the stored case is refused; the invalid emission for a non-stored lambda-valued match remains. Fix direction: the arm splitter must not start a presence arm inside an arm's result.
+
+### g-enum-payload-type-accepts-function-s465 — an enum variant whose payload field is typed `string` (`type Op:enum = { Apply(f: string) }`) accepts a FUNCTION argument (`Op.Apply(twice)`, `.Apply(twice)`) with no type error; only E-VALUE-FUNCTION-STORED (the value rule) refuses it — `NEW S465; MED; open (pre-existing on BASE)`
+<!-- @gap id=g-enum-payload-type-accepts-function-s465 sev=MED status=open locus=searched:compiler/src/type-system.ts(enum constructor argument vs declared payload field type) prov=review:s465-value-fn-r2 -->
+Found by the S465 round-2 review of s465-value-fn-land (probes `n7/e1`–`e3`). The payload field's declared type is not checked against the argument at an enum construction (qualified or dot-shorthand), so any value — a function included — is accepted. E-VALUE-FUNCTION-STORED now refuses the function case regardless of the declared type; the general mismatch (`Apply(f: string)` given a number) is the gap. Fix direction: check each constructor argument against its payload field type (E-TYPE-… assignability), both spellings.
+
+### g-host-value-callable-unknown-s465 — a function read off HOST data and stored in a scrml value (`{ h: window.handler }`, `{ cb: someHostObj.method }`, an `import:host` function stored) is not refused: E-VALUE-FUNCTION-STORED knows a host value is callable only for the ECMAScript standard globals and standard-namespace members (`Math.max`, `String`) — `NEW S465; LOW; open`
+<!-- @gap id=g-host-value-callable-unknown-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(isKnownHostCallable — standard globals only) prov=dispatch:s465-value-function-stored -->
+The compiler cannot see a host value's runtime type. Closing the general case needs either a typed host boundary (`import:host` declarations carrying callable-ness) or a fail-closed rule for host member reads in stored positions (which would refuse ordinary host DATA such as `{ w: window.innerWidth }`). Design call owed; recorded by the round-2 fix of s465-value-fn-land.
+
+### g-cross-module-param-store-unjudged-s465 — a function passed to an IMPORTED function that stores its parameter into a value (`lib: export function wrap(cb) { return { cb } }`, main: `wrap(twice)`) is not refused: call-site → parameter facts are propagated within a file only — `NEW S465; LOW; open`
+<!-- @gap id=g-cross-module-param-store-unjudged-s465 sev=LOW status=open locus=compiler/src/value-function-stored.ts(foreign FnInfo — importer call sites do not feed the exporter's parameters) prov=dispatch:s465-value-function-stored -->
+The store is in the exporting file, which is checked on its own and never sees the importer's argument. Function RETURNS and exported const arrows do cross imports (round 2). Fix direction: either judge, in the exporter, a parameter stored into a value when the function is exported (fail closed — may refuse legitimate data-only callers), or carry importer call-site facts back to the exporter's report.
+
+### g-template-interp-helper-not-server-placed-s465 — a plain helper called ONLY inside a template-literal interpolation of a server function (`server function f(n) { return \`v ${doubleIt(n)}\` }`) is not server-placed: the server bundle calls `doubleIt` without defining it → ReferenceError at run time, compiled clean — `NEW S465; HIGH; open (pre-existing on BASE)`
+<!-- @gap id=g-template-interp-helper-not-server-placed-s465 sev=HIGH status=open locus=compiler/src/route-inference.ts(caller edges read structured call nodes; template interpolations are not decomposed)+compiler/src/indirect-callee-resolver.ts(dispatchCalledTargets raw-text scan covers only the dispatch-table shape) prov=dispatch:s465-value-function-stored -->
+Surfaced by the s465-value-fn-land migration of the #284 dispatch-table tests (the table shape is now E-VALUE-FUNCTION-STORED; the migrated direct-call shape exposed this). Repro: `${ function doubleIt(n) { return n * 2 }  server function f(n) { return \`v ${doubleIt(n)}\` } }` — `serverJs` holds `doubleIt(n)` and no `function doubleIt`. The same call outside a template (`const v = doubleIt(n); return \`v ${v}\``) is placed. Pinned as a `test.todo` in compiler/tests/integration/peer-call-in-template-interp-awaited.test.js. Fix direction: give route inference the calls inside template interpolations (decompose them to ExprNodes, or extend the raw-text scan from dispatch calls to plain calls) — mind the S299 note that widening the shared direct-call map over-escalated 72 sites; use the escalation-only indirect map.
+
+### g-fn-expr-map-literal-value-misparsed-s465 — a `fn` expression as a §59 map-literal VALUE (`["k": fn(x) { return x }]`) re-parses as the call `fn(x)` and silently drops the body: the program is refused with a misleading E-SCOPE-001 (`fn`, `x` undeclared) instead of E-VALUE-FUNCTION-STORED — `NEW S465; MED; open`
+<!-- @gap id=g-fn-expr-map-literal-value-misparsed-s465 sev=MED status=open locus=compiler/src/expression-parser.ts(map-literal unmask re-parses each value slice with parseExprToNode, which reads `fn(x) { … }` as a call and drops the trailing block) prov=dispatch:s465-value-function-stored -->
+Found by s465-value-fn-land. `parseExprToNode("fn(x) { return x }")` returns `call fn(x)` (trailing content lost); inside an object literal the same text is a ParseError escape hatch that codegen lowers with `rewriteFnKeyword`. Fails closed (still refused) but with the wrong code and a message that does not name the cause. Fix direction: lower `fn` before the per-entry re-parse (as the object path does), or flag the lost trailing content.
+
+### g-object-method-shorthand-named-rejection-unchecked-s465 — `{ run() { return 7 } }` (object-literal method shorthand) is now refused by E-VALUE-FUNCTION-STORED, but the S440 JS-WAT #4 ruling asked for a NAMED rejection (method shorthand is not scrml); whether that named code fires is unchecked — `NEW S465; LOW; open`
+<!-- @gap id=g-object-method-shorthand-named-rejection-unchecked-s465 sev=LOW status=open locus=searched:compiler/src(no E-*-NOT-IN-SCRML code for method shorthand found) prov=dispatch:s465-value-function-stored -->
+Record: `docs/changes/s441-audit-gap-filing/repro/object-method-shorthand-emits-invalid-js.scrml` (kept as a record, S464). It compiled clean before E-VALUE-FUNCTION-STORED and is refused now — but by the value rule, whose message steers to "pass the function", not by a code that says method shorthand is not scrml syntax. Check whether the named rejection exists; if not, it is owed.
 
 ### g-md-list-marker-tab-column-s462 — scrml:md measures a tab after a list marker from column 0 of the text after the marker, not from its absolute column, so `-\tfoo` (and a marker+tab reaching 5+ columns) gets a different content column than CommonMark (tab stops are absolute), silently — `NEW S462; LOW; open`
 
@@ -25596,3 +25660,21 @@ LATENT: only snippet-lambda / escape-hatch markup, which impl#1 does not emit to
 <!-- @gap id=g-escape-hatch-markup-judged-by-scanner-not-parser-s464 sev=MED status=open locus=compiler/src/validators/attribute-interpolation.ts(markupTextSinks)+compiler/src/expression-parser.ts(lambda markup left as escape-hatch text) prov=rationale:S464-PA-landing-call-after-6-rounds-on-one-heuristic -->
 
 The S239 rounds on `s464-quoted-handler-refused` kept finding scanner-reading bugs (quotes, regex literals, `)<`, postfix ops, mixed readings) — a heuristic standing in for a parser (the "two readers of one text" class). Root fix: parse lambda/snippet markup with the real markup parser (or lower it to structure) so E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE / E-ATTR-INTERP-EXECUTABLE judge parsed attributes, and delete `markupTextSinks`. Gate: before snippet-lambda markup emission lands.
+
+### g-timer-struct-field-write-from-function-body-throws-s464 — writing a `scrml:time` Debouncer/Throttler field from a function body (`function setD() { @d.delay = 10 }`, `@s.a.b.delay = 10`) compiles clean then throws `cannot write .delay of a Object in place; it is a value. Assign the whole cell.` — whose advice yields a dead copy — `NEW S464; MED; open (introduced by s465-value-fn-land round 4)`
+
+<!-- @gap id=g-timer-struct-field-write-from-function-body-throws-s464 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_deep_set_copy ~2615 — refuses non-plain prototypes) prov=review:s465-value-fn-land-r4-S239 -->
+
+The timer struct is built on its own prototype (so `_scrml_deep_reactive` leaves it unwrapped and the identity-keyed state survives cells). `_scrml_deep_set_copy` refuses any non-plain prototype. The same write in an attribute handler mutates in place and works. Round 3 silently copied the struct (timer went dead) — now loud, but §41.21 says the fields read "as any struct" and `delay` IS the wait. Fix: write in place on a timer struct (keep the prototype), or refuse at compile time with a timer-specific message; the runtime message must name the type and must not advise the dead copy. Reviewer probe `~/.cache/scrml-review-vf-r4/t/c7.scrml`.
+
+### g-vfs-lift-in-block-match-arm-unjudged-s464 — `lift` of a function value inside a block `match` arm (`const n = match k { 1 => { lift g }, _ => { lift g } }`) is not judged by E-VALUE-FUNCTION-STORED — `NEW S464; LOW; open (latent)`
+
+<!-- @gap id=g-vfs-lift-in-block-match-arm-unjudged-s464 sev=LOW status=open locus=compiler/src/value-function-stored.ts(match arm value collection — block arms) prov=review:s465-value-fn-land-r4-S239 -->
+
+Masked today: the shape fails E-CODEGEN-INVALID-LOGIC (`{ lift "a"; } else { "b"; }`) even single-file — file the codegen defect with it (it also keeps reviewer probe `ml/g05` from compiling end to end).
+
+### g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464 — `==` with an object-literal operand or inside an attribute handler compiles to JS `===` (reference equality) even for typed structs: `@a == {x:1}`, `p1 == {x:1}`, `d1 == d2` — `NEW S464; MED; open (pre-existing)`
+
+<!-- @gap id=g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464 sev=MED status=open locus=searched:emit-expr.ts,emit-event-wiring.ts(== lowering — _scrml_structural_eq only in the typed function-body form) prov=review:s465-value-fn-land-r4-S239 -->
+
+SPEC §45: single `==`, structural. Structural equality is applied only in the typed function-body form; elsewhere `==` silently becomes reference equality → always false for distinct-but-equal structs. Silent wrong value; reviewer probe `~/.cache/scrml-review-vf-r4/t/c10`.

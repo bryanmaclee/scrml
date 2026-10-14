@@ -255,9 +255,10 @@ const POSITIONS = {
   "arrow with an expression body": [page(`      function probe() {
         if ([5].filter((v) => v is some).length == 1) { @msg = "some" }
       }`), "v !== null && v !== undefined"],
+  // S464: no scrml value holds a function (E-VALUE-FUNCTION-STORED), so the object-literal
+  // method is written where it is still legal — a literal handed directly to a host call.
   "object-literal method (function value)": [page(`      function probe() {
-        const o = { check: function (v) { return v is some } }
-        if (o.check(5)) { @msg = "some" }
+        Object.values({ check: function (v) { return v is some } }).forEach(function (f) { if (f(5)) { @msg = "some" } })
       }`), "v !== null && v !== undefined"],
   "nested function declaration": [page(`      function probe() {
         function inner(v) { return v is some }

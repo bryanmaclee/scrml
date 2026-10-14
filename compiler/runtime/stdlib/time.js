@@ -15,8 +15,10 @@
 //   - startOf(timestamp, unit)                → Date
 //   - addTime(timestamp, amount, unit)        → Date
 //   - diffTime(a, b, unit)                    → number
-//   - debounce(fn, delay)                     → function with cancel/flush
-//   - throttle(fn, limit)                     → function
+//   - debounce(fn, delay)                     → Debouncer { id, delay }   (S464: struct + free fns)
+//   - throttle(fn, limit)                     → Throttler { id, limit }
+//   - run(t, ...args)                         → drive a Debouncer / Throttler
+//   - cancel(t) / flush(t)                    → drop / run the pending call
 //   - sleep(ms)                               → Promise
 //   - formatInTimezone(timestamp, tz, options?, locale?)
 //   - nowInTimezone(tz, options?, locale?)
@@ -151,71 +153,96 @@ export function diffTime(a, b, unit) {
   return diffMs;
 }
 
+// debounce / throttle — S464 "(a) Struct + free fns". A Debouncer / Throttler is
+// DATA ({ id, delay } / { id, limit }); the timed function is kept here in the
+// timer table and driven by run / cancel / flush. Mirrors stdlib/time/index.scrml.
+// The table is a WeakMap keyed by the struct OBJECT: a dropped timer is collected
+// with its struct (nothing to dispose), and only the struct debounce / throttle
+// returned drives its function — a hand-built or copied value drives nothing.
+// The struct's delay / limit IS the wait run uses.
+// struct -> { kind, fn, timer, pendingArgs, cooling }
+const timerState = new WeakMap();
+const timerIds = { next: 0 };
+// A timer struct is built on its OWN prototype (a plain object one level above
+// Object.prototype). The client runtime's deep-reactive wrapper wraps only arrays
+// and plain objects (`_scrml_deep_reactive`, runtime-template.js), so a timer held
+// in a state cell, a field or a collection is read back as ITSELF — the identity
+// the table is keyed by — not as a Proxy of it. Its own enumerable fields are
+// unchanged, so `==` (field by field) and serialization read it as before.
+const timerProto = Object.create(Object.prototype);
+function makeTimer(fields) {
+  return Object.assign(Object.create(timerProto), fields);
+}
+
+function stateOf(t) {
+  return t !== null && typeof t === "object" ? timerState.get(t) : undefined;
+}
+
 export function debounce(fn, delay) {
-  let timer = null;
-  function debounced(...args) {
-    if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      fn.apply(this, args);
-    }, delay);
-  }
-  debounced.cancel = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-  debounced.flush = function (...args) {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-      fn.apply(this, args);
-    }
-  };
-  return debounced;
+  timerIds.next = timerIds.next + 1;
+  const d = makeTimer({ id: timerIds.next, delay });
+  timerState.set(d, { kind: "debounce", fn, timer: null, pendingArgs: null, cooling: false });
+  return d;
 }
 
 export function throttle(fn, limit) {
-  let inThrottle = false;
-  let lastArgs = null;
-  let timer = null;
-  function throttled(...args) {
-    if (!inThrottle) {
-      fn.apply(this, args);
-      inThrottle = true;
-      timer = setTimeout(() => {
-        inThrottle = false;
-        timer = null;
-        if (lastArgs !== null) {
-          fn.apply(this, lastArgs);
-          lastArgs = null;
-        }
-      }, limit);
-    } else {
-      lastArgs = args;
-    }
+  timerIds.next = timerIds.next + 1;
+  const t = makeTimer({ id: timerIds.next, limit });
+  timerState.set(t, { kind: "throttle", fn, timer: null, pendingArgs: null, cooling: false });
+  return t;
+}
+
+export function run(t, ...args) {
+  const st = stateOf(t);
+  if (!st) return;
+  if (st.kind === "debounce") {
+    if (st.timer !== null) clearTimeout(st.timer);
+    st.pendingArgs = args;
+    st.timer = setTimeout(() => {
+      st.timer = null;
+      const pending = st.pendingArgs;
+      st.pendingArgs = null;
+      st.fn(...pending);
+    }, t.delay);
+    return;
   }
-  throttled.cancel = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    inThrottle = false;
-    lastArgs = null;
-  };
-  throttled.flush = function () {
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-      inThrottle = false;
-      if (lastArgs !== null) {
-        fn.apply(this, lastArgs);
-        lastArgs = null;
+  if (!st.cooling) {
+    st.fn(...args);
+    st.cooling = true;
+    st.timer = setTimeout(() => {
+      st.cooling = false;
+      st.timer = null;
+      if (st.pendingArgs !== null) {
+        const pending = st.pendingArgs;
+        st.pendingArgs = null;
+        st.fn(...pending);
       }
-    }
-  };
-  return throttled;
+    }, t.limit);
+  } else {
+    st.pendingArgs = args;
+  }
+}
+
+export function cancel(t) {
+  const st = stateOf(t);
+  if (!st) return;
+  if (st.timer !== null) clearTimeout(st.timer);
+  st.timer = null;
+  st.pendingArgs = null;
+  st.cooling = false;
+}
+
+export function flush(t) {
+  const st = stateOf(t);
+  if (!st) return;
+  if (st.timer !== null) clearTimeout(st.timer);
+  st.timer = null;
+  st.cooling = false;
+  if (st.pendingArgs !== null) {
+    const pending = st.pendingArgs;
+    st.pendingArgs = null;
+    st.fn(...pending);
+  }
 }
 
 export async function sleep(ms) {

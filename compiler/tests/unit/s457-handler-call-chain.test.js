@@ -56,10 +56,11 @@ function compileToOutputs(source) {
 const page = (button, extra = "") => `<program>
 <msg> = "a"
 <count> = 0
-<list> = [{ go: () => 7 }]
-const handlers = [() => 3]
-function fn(x) { return { then: (f) => f(x), x: () => 1 } }
+<list> = [" 7 "]
+const handlers = globalThis.handlers
+function fn(x) { return Promise.resolve(x) }
 function g(v) { @msg = "g" + v }
+function add(x) { return (y) => x + y }
 ${extra}
 ${button}
 <p id="out">\${@msg}</p>
@@ -91,11 +92,11 @@ describe("§1 the whole chain is the handler; nothing leaks into the element", (
 
   const shapes = [
     [`onclick=fn(1).then(g)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
-    [`onclick=fn(1)(2)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\(2\); \}$/],
-    [`onclick=fn()?.x()`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(\)\?\.x\(\); \}$/],
+    [`onclick=add(1)(2)`, /^function\(_scrml_event\) \{ _scrml_add_\d+\(1\)\(2\); \}$/],
+    [`onclick=fn()?.valueOf()`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(\)\?\.valueOf\(\); \}$/],
     [`onclick=fn()[0]`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(\)\[0\]; \}$/],
     [`onclick=handlers[0]()`, /^function\(_scrml_event\) \{ handlers\[0\]\(\); \}$/],
-    [`onclick=@list[0].go()`, /^function\(_scrml_event\) \{ _scrml_cs_reactive_get\("list"\)\[0\]\.go\(\); \}$/],
+    [`onclick=@list[0].trim()`, /^function\(_scrml_event\) \{ _scrml_cs_reactive_get\("list"\)\[0\]\.trim\(\); \}$/],
     [`on:click=fn(1).then(g)`, /^function\(_scrml_event\) \{ _scrml_fn_\d+\(1\)\.then\(_scrml_g_\d+\); \}$/],
   ];
   for (const [attr, want] of shapes) {
@@ -172,14 +173,18 @@ describe("§4 executed: the callback runs", () => {
   test("`fn(1).then(g)` passes 1 to g", async () => {
     const { get } = await load(page(`<button onclick=fn(1).then(g)>go</button>`));
     document.querySelector("button").click();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(get("msg")).toBe("g1");
   });
 
   test("inside an <each> row the chain is the row's handler too", async () => {
     const { get } = await load(page(
-      `<ul><each in=@list as it><li><button class="row" onclick=fn(it.go()).then(g)>r</button></li></each></ul>`,
+      `<ul><each in=@list as it><li><button class="row" onclick=fn(it.trim()).then(g)>r</button></li></each></ul>`,
     ));
     document.querySelector(".row").click();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(get("msg")).toBe("g7");
   });
 });

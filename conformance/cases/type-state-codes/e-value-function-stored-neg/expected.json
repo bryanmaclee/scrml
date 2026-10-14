@@ -1,0 +1,13 @@
+{
+  "id": "e-value-function-stored-neg",
+  "description": "Functions PASSED, CALLED, or handed to a host call do not fire E-VALUE-FUNCTION-STORED (§14.3). `twice` is passed to a scrml function and to `.map` as a callback, called to produce a map value, and appears in an object literal written DIRECTLY as a host-JS call argument (`console.log({ double: twice })` — the host boundary). The clean twin of e-value-function-stored-pos.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/value-function-stored.test.js",
+  "spec": "§14.3",
+  "provenance": "ruling:user-voice-scrml.md S462 \"a\" (functions still flow PASSED and CALLED) + S462 \"go on the package\" item 3 (host boundary)",
+  "rationale": "§14.3 a function may be PASSED (argument, callback) or CALLED; a literal written directly as a host-JS call argument is at the boundary and not judged. None of these stores a function in a scrml value.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VALUE-FUNCTION-STORED"]
+  }
+}
