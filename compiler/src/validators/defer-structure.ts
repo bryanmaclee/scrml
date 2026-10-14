@@ -16,6 +16,7 @@
 // `_emitNestedGuardedArmBody` precedent): a static import of emit-control-flow
 // from a validator closes an import cycle through the codegen modules.
 import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
+import { isWholeBraceBlock, closingBraceIndex } from "../brace-pair.ts";
 /* eslint-disable @typescript-eslint/no-require-imports */
 function splitBlocks(filePath: string, source: string): unknown {
   return (require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => unknown }).splitBlocks(filePath, source);
@@ -39,6 +40,23 @@ const PROBE_FN = "__scrml_defer_probe__";
 export type ParsedBody = { ok: true; stmts: unknown[] } | { ok: false };
 
 /**
+ * Why a text-carried body was refused (`parseStatementTextDetailed`):
+ *   - `code` / `message`: the FIRST fatal diagnostic the front-end raised for the
+ *     body — the code the same statement gets at function top level (`switch` →
+ *     E-SWITCH-FORBIDDEN, `try` → E-TRY-NOT-IN-SCRML, `throw` →
+ *     E-THROW-NOT-IN-SCRML, `for … in` → E-CTRL-011, `let a = 1, b = 2` / `var a` →
+ *     E-STMT-MISSING-SEMICOLON, …);
+ *   - `code: null`: the front-end raised nothing, but a statement it built holds
+ *     text it could not read (a parse-error escape hatch), or an expression it
+ *     read only by DROPPING trailing content (`blk: { … }` read as `blk`). `text`
+ *     is that content.
+ */
+export type BodyRefusal = { code: string | null; message: string; text: string };
+export type DetailedParsedBody =
+  | { ok: true; stmts: unknown[] }
+  | { ok: false; refusal: BodyRefusal };
+
+/**
  * Parse a text-carried statement body (a `!{}` handler arm, a value-form
  * `match` arm body) into a statement tree with the same block-splitter +
  * ast-builder front-end codegen uses to re-parse nested arm bodies
@@ -46,19 +64,60 @@ export type ParsedBody = { ok: true; stmts: unknown[] } | { ok: false };
  * FUNCTION so `return` is grammatical. `{ ok: false }` when the body does not
  * parse cleanly or contains a statement the front-end could not structure
  * (an escape-hatch parse error) — callers fail closed on that.
+ *
+ * S465 r2 — this IS the function-top-level statement parser (the body is parsed
+ * as a function body), so it accepts what a function body accepts. Two statement
+ * forms the front-end carries with a parse-error hatch by design are accepted
+ * when their content is itself readable:
+ *   - a C-style `for` whose init is a declaration (`for (let i = 0; …)`): the
+ *     front-end keeps `cStyleParts.initExpr` as the hatch `let i = 0` (a
+ *     declaration is not an expression) — see `cStyleInitDeclaration`;
+ *   - a bare `{ … }` block statement (SPEC §7.2.2 "Terms"): carried as a
+ *     `bare-expr` whose text is the whole block — read by this same function.
  */
 export function parseStatementText(text: string, filePath = "defer-probe.scrml"): ParsedBody {
+  const r = parseStatementTextDetailed(text, filePath, { lostTrailing: false });
+  return r.ok ? r : { ok: false };
+}
+
+/**
+ * `parseStatementText` with the refusal reason. `opts.lostTrailing` (default
+ * true) also refuses a body holding an expression the parser read only by
+ * dropping trailing content — the codegen arm reader asks for this; the
+ * validators, which need only the tree's shape, keep the lenient reading.
+ */
+export function parseStatementTextDetailed(
+  text: string,
+  filePath = "defer-probe.scrml",
+  opts: { lostTrailing?: boolean } = {},
+): DetailedParsedBody {
+  const checkTrailing = opts.lostTrailing !== false;
   let body = text.trim();
+  const refuse = (code: string | null, message: string, t: string): DetailedParsedBody =>
+    ({ ok: false, refusal: { code, message, text: t } });
+  const unparsed = "the body did not parse as a statement list";
   // A handler / arm BLOCK body `{ … }` — codegen treats the braces as the
   // block delimiters (not an object literal); strip exactly that outer pair.
-  if (body.startsWith("{") && body.endsWith("}")) body = body.slice(1, -1);
+  // S465 r3 — only when a depth scan PROVES the first `{` closes at the last `}`:
+  // `{ A }⏎{ B }` is two blocks, and stripping its ends handed the probe
+  // ` A }⏎{ B ` — which closed the probe function after A and dropped B.
+  if (body.startsWith("{") && body.endsWith("}")) {
+    if (!isWholeBraceBlock(body)) return refuse(null, unparsed, body.trim());
+    body = body.slice(1, -1);
+  }
   const source = "${\nfunction " + PROBE_FN + "() {\n" + body + "\n}\n}";
   try {
-    const bs = splitBlocks(filePath + "#defer-probe", source) as { errors?: unknown[] };
-    if (Array.isArray(bs.errors) && bs.errors.length > 0) return { ok: false };
-    const built = buildAST(bs) as { ast?: unknown; errors?: Array<{ severity?: string }> };
+    const bs = splitBlocks(filePath + "#defer-probe", source) as { errors?: Array<{ code?: string; message?: string }> };
+    if (Array.isArray(bs.errors) && bs.errors.length > 0) {
+      const e = bs.errors[0] ?? {};
+      return refuse(typeof e.code === "string" ? e.code : null, String(e.message ?? unparsed), body.trim());
+    }
+    const built = buildAST(bs) as { ast?: unknown; errors?: Array<{ severity?: string; code?: string; message?: string }> };
     const fatal = (built.errors ?? []).filter((e) => !e || e.severity !== "warning");
-    if (fatal.length > 0) return { ok: false };
+    if (fatal.length > 0) {
+      const e = fatal[0] ?? {};
+      return refuse(typeof e.code === "string" ? e.code : null, String(e.message ?? unparsed), body.trim());
+    }
     let found: unknown[] | null = null;
     const seen = new WeakSet<object>();
     const find = (n: unknown): void => {
@@ -72,24 +131,196 @@ export function parseStatementText(text: string, filePath = "defer-probe.scrml")
       }
       for (const k of Object.keys(nn)) if (k !== "span") find(nn[k]);
     };
-    find(built.ast);
-    if (!found) return { ok: false };
-    let hatch = false;
-    const seen2 = new WeakSet<object>();
-    const scan = (n: unknown): void => {
-      if (hatch || !n || typeof n !== "object" || seen2.has(n as object)) return;
-      seen2.add(n as object);
-      if (Array.isArray(n)) { for (const c of n) scan(c); return; }
-      const nn = n as Node;
-      if (nn.kind === "escape-hatch" && nn.nativeKind === "ParseError") { hatch = true; return; }
-      for (const k of Object.keys(nn)) if (k !== "span") scan(nn[k]);
-    };
-    scan(found);
-    if (hatch) return { ok: false };
+    // S465 r3 — the probe source is ONE logic block holding ONE node, the probe
+    // function. Anything else (a body that closed the probe early, leaving a
+    // sibling statement after it) means the body was not read as written:
+    // refuse rather than return the probe's partial body.
+    const probeFn = soleProbeFunction(built.ast);
+    if (probeFn === null) return refuse(null, unparsed, body.trim());
+    find(probeFn);
+    if (!found) return refuse(null, unparsed, body.trim());
+    const bad = unreadableContentIn(found, filePath, checkTrailing);
+    if (bad !== null) return refuse(null, unparsed, bad);
     return { ok: true, stmts: found };
   } catch {
-    return { ok: false };
+    return refuse(null, unparsed, body.trim());
   }
+}
+
+/**
+ * S465 r3 — the probe function node when the probe source built to exactly one
+ * top-level `logic` node whose body is exactly that function; otherwise null.
+ */
+function soleProbeFunction(ast: unknown): Node | null {
+  const a = ast as { nodes?: unknown } | null;
+  const nodes = (a && Array.isArray(a.nodes)) ? a.nodes as unknown[] : Array.isArray(ast) ? ast as unknown[] : null;
+  if (!nodes) return null;
+  const real = nodes.filter((n) => !isBlankText(n));
+  if (real.length !== 1) return null;
+  const logic = real[0] as Node;
+  if (!logic || logic.kind !== "logic" || !Array.isArray(logic.body)) return null;
+  const inner = (logic.body as unknown[]).filter((n) => !isBlankText(n));
+  if (inner.length !== 1) return null;
+  const fn = inner[0] as Node;
+  if (!fn || fn.kind !== "function-decl" || fn.name !== PROBE_FN || !Array.isArray(fn.body)) return null;
+  return fn;
+}
+
+function isBlankText(n: unknown): boolean {
+  if (!n || typeof n !== "object") return false;
+  const nn = n as Node;
+  if (nn.kind === "comment") return true;
+  return nn.kind === "text" && typeof nn.value === "string" && !(nn.value as string).trim();
+}
+
+/**
+ * The first content of a parsed statement tree the front-end could not read
+ * (`BodyRefusal`, `code: null`), or null. The two by-design hatches
+ * `parseStatementText` documents are accepted when their content reads.
+ */
+function unreadableContentIn(stmts: unknown, filePath: string, checkTrailing: boolean): string | null {
+  let bad: string | null = null;
+  const seen = new WeakSet<object>();
+  const scan = (n: unknown): void => {
+    if (bad !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) scan(c); return; }
+    const nn = n as Node;
+    if (nn.kind === "escape-hatch" && nn.nativeKind === "ParseError") { bad = String(nn.raw ?? ""); return; }
+    if (checkTrailing && exprParser().hasLostTrailingContent(nn)) {
+      const r = nn as Record<string, unknown>;
+      bad = String(r._s441TrailingText ?? "").trim() || String(r.raw ?? r.name ?? "");
+      return;
+    }
+    if (nn.kind === "for-stmt" && nn.cStyleParts && typeof nn.cStyleParts === "object") {
+      const cs = nn.cStyleParts as Record<string, unknown>;
+      // The by-design init hatch is accepted when it is a readable declaration.
+      if (cStyleInitDeclaration(cs.initExpr) === null) scan(cs.initExpr);
+      scan(cs.condExpr);
+      scan(cs.updateExpr);
+      for (const k of Object.keys(nn)) if (k !== "span" && k !== "cStyleParts") scan(nn[k]);
+      return;
+    }
+    const block = bareBlockText(nn);
+    const blocks = block !== null ? [block] : bareBlockSequenceTexts(nn);
+    if (blocks !== null) {
+      // The by-design bare-block hatch (one block, or S465 r4 several on one line):
+      // each body is read by this same parser.
+      for (const b of blocks) {
+        const inner = parseStatementTextDetailed(b, filePath, { lostTrailing: checkTrailing });
+        if (!inner.ok) { bad = inner.refusal.text || b; return; }
+      }
+      return;
+    }
+    for (const k of Object.keys(nn)) if (k !== "span") scan(nn[k]);
+  };
+  scan(stmts);
+  return bad;
+}
+
+/* eslint-disable @typescript-eslint/no-require-imports */
+function exprParser(): {
+  parseExprToNode: (t: string, f: string, o: number) => Node;
+  hasLostTrailingContent: (n: unknown) => boolean;
+  captureTrailingContentWarnings: <T>(fn: () => T) => { result: T };
+} {
+  return require("../expression-parser.ts");
+}
+/* eslint-enable @typescript-eslint/no-require-imports */
+
+/**
+ * A bare `{ … }` block statement as the live front-end carries it: a `bare-expr`
+ * whose text is the whole block and whose expression view is a parse-error hatch
+ * (it is not an object literal). Returns the block text, or null.
+ */
+export function bareBlockText(n: unknown): string | null {
+  if (!n || typeof n !== "object") return null;
+  const nn = n as Node;
+  if (nn.kind !== "bare-expr" || typeof nn.expr !== "string") return null;
+  const t = (nn.expr as string).trim();
+  // S465 r3 — a bare-expr `{ A } { B }` is NOT one block (see isWholeBraceBlock).
+  if (!isWholeBraceBlock(t)) return null;
+  const en = nn.exprNode as Node | undefined;
+  if (!en || en.kind !== "escape-hatch" || en.nativeKind !== "ParseError") return null;
+  return t;
+}
+
+/**
+ * S465 r4 — a bare-expr whose text is TWO OR MORE whole `{ … }` blocks on one
+ * line (`{ A } { B }`, SPEC §7.2.2 "Terms" — each is its own bare block statement):
+ * the block texts in order, or null. The builder keeps the line as one bare-expr
+ * (a ParseError escape hatch); the server reads each block on its own.
+ */
+export function bareBlockSequenceTexts(n: unknown): string[] | null {
+  if (!n || typeof n !== "object") return null;
+  const nn = n as Node;
+  if (nn.kind !== "bare-expr" || typeof nn.expr !== "string") return null;
+  const en = nn.exprNode as Node | undefined;
+  if (!en || en.kind !== "escape-hatch" || en.nativeKind !== "ParseError") return null;
+  const t = (nn.expr as string).trim();
+  const blocks: string[] = [];
+  let i = 0;
+  while (i < t.length) {
+    while (i < t.length && /[\s;]/.test(t[i])) i++;
+    if (i >= t.length) break;
+    if (t[i] !== "{") return null;
+    const close = closingBraceIndex(t, i);
+    if (close < 0) return null;
+    blocks.push(t.slice(i, close + 1));
+    i = close + 1;
+  }
+  return blocks.length >= 2 ? blocks : null;
+}
+
+/** Split `text` at its top-level commas (outside brackets, strings and templates). */
+function splitTopLevelCommas(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === "\\") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "\"" || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) { out.push(text.slice(start, i)); start = i + 1; }
+  }
+  out.push(text.slice(start));
+  return out;
+}
+
+/**
+ * A C-style `for` init carried as the front-end's parse-error hatch whose text is
+ * a declaration — `let i = 0`, `const n = xs.length`, `let i = 0, j = 1` — read
+ * as `{ keyword, declarators }`: one `name = value` assignment ExprNode per
+ * declarator. null when the init is not such a hatch, or a declarator does not
+ * read cleanly as `IDENT = <expression>`.
+ */
+export function cStyleInitDeclaration(initExpr: unknown): { keyword: string; declarators: Node[] } | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  const ie = initExpr as Node;
+  if (ie.kind !== "escape-hatch" || ie.nativeKind !== "ParseError" || typeof ie.raw !== "string") return null;
+  const m = /^\s*(let|const|var)\s+([\s\S]+)$/.exec(ie.raw as string);
+  if (!m) return null;
+  const ep = exprParser();
+  const declarators: Node[] = [];
+  for (const part of splitTopLevelCommas(m[2])) {
+    const t = part.trim();
+    if (!t) return null;
+    const { result } = ep.captureTrailingContentWarnings(() => {
+      try { return ep.parseExprToNode(t, "<for-init>", 0); } catch { return null; }
+    });
+    const d = result as Node | null;
+    if (!d || d.kind !== "assign" || d.op !== "=" || !d.target || (d.target as Node).kind !== "ident") return null;
+    if (ep.hasLostTrailingContent(d) || unreadableContentIn(d, "<for-init>", true) !== null) return null;
+    declarators.push(d);
+  }
+  return declarators.length > 0 ? { keyword: m[1], declarators } : null;
 }
 
 /**

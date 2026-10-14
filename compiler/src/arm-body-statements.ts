@@ -49,6 +49,33 @@ export function armBodyStatementsFromText(text: string): any[] | null {
   return null;
 }
 
+/**
+ * S465 r2 — the codegen reading of a `{ … }` arm block: `armBodyStatementsFromText`
+ * with the refusal reason, and STRICT (an expression the parser could read only
+ * by dropping trailing content refuses the body — `parseStatementTextDetailed`).
+ * A leave statement reads as `[its node]`; a non-block text is not a block (null).
+ */
+export function armBlockStatementsDetailed(text: string):
+  | { ok: true; stmts: any[] }
+  | { ok: false; refusal: { code: string | null; message: string; text: string } }
+  | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseLeaveArmBody } = require("./ast-builder.js") as {
+    parseLeaveArmBody: (t: string, f: string, o: number) => { node?: any; error?: string } | null;
+  };
+  const leave = parseLeaveArmBody(t, "<arm>", 0);
+  if (leave && leave.node) return { ok: true, stmts: [leave.node] };
+  if (!(t.startsWith("{") && t.endsWith("}"))) return null;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseStatementTextDetailed } = require("./validators/defer-structure.ts") as {
+    parseStatementTextDetailed: (t: string, f?: string, o?: { lostTrailing?: boolean }) =>
+      { ok: true; stmts: any[] } | { ok: false; refusal: { code: string | null; message: string; text: string } };
+  };
+  return parseStatementTextDetailed(t, "<arm>");
+}
+
 export function leaveKindOf(n: any): string | null {
   switch (n?.kind) {
     case "return-stmt": return "return";

@@ -70,7 +70,7 @@ describe("§1 for-of + .get() → pre-loop fetch + per-iteration read", () => {
     expect(js).toMatch(/const _scrml_batch_fetch_\d+ = async \(_keys\) => \{/);
     // S455: each read is its own copy of the row (as each per-row query returns).
     expect(js).toContain("return _hit ? { ..._hit } : null;");
-    expect(js).toMatch(/let row = \(await _scrml_batch_read_\d+\(x\.id\)\);/);
+    expect(js).toMatch(/let row = \(?await _scrml_batch_read_\d+\(x\.id\)\)?;/);
   });
 });
 
@@ -94,7 +94,7 @@ describe("§2 .all() → Map<key, Row[]> with array-fallback lookup", () => {
     expect(js).toMatch(/const _group = _scrml_batch_bySlot_\d+\.get\(_s\); if \(_group\) _group\.push\(_r\);/);
     // The read falls back to [] not null
     expect(js).toContain("return (_hit ?? []).map((_r) => ({ ..._r }));");
-    expect(js).toMatch(/let posts = \(await _scrml_batch_read_\d+\(u\.id\)\);/);
+    expect(js).toMatch(/let posts = \(?await _scrml_batch_read_\d+\(u\.id\)\)?;/);
   });
 });
 

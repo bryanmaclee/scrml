@@ -26,6 +26,7 @@ import type { AsyncNameFacts } from "./async-combinators.ts";
 import { colorAsyncStatements, analyzeRawJsFragment } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
+import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
@@ -1398,6 +1399,27 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const groupEmitOpts = groupTildeCtx
       ? { ...emitOpts, ...whenEmitSpread, boundary: "client" as const, tildeContext: groupTildeCtx, declaredNames: groupNames }
       : { ...emitOpts, ...whenEmitSpread, boundary: "client" as const, declaredNames: groupNames };
+    // S466 r7 (MED-C) — an async-coloured function-valued binding (`const persist = (v) =>
+    // save(v)`, emit-functions `_clientAsyncBindingEmit`) is emitted `async` on the client
+    // with the async-body facts, so its own calls are awaited; every client call site
+    // awaits it (the peer-await set), exactly as for a `function` declaration.
+    const _asyncBindingEmit = (ctx as unknown as {
+      _clientAsyncBindingEmit?: { names: Set<string>; opts: Record<string, unknown> };
+    })._clientAsyncBindingEmit;
+    const emitTopStmt = (st: any, o: any): string => {
+      if (_asyncBindingEmit && st && (st.kind === "const-decl" || st.kind === "let-decl") &&
+          typeof st.name === "string" && _asyncBindingEmit.names.has(st.name)) {
+        // The group's declared-name set holds every top-level binding; an async one named
+        // there would read as a shadowing local and its call would not be awaited.
+        const _dn = o.declaredNames instanceof Set
+          ? new Set<string>([...o.declaredNames].filter((n: string) => !_asyncBindingEmit.names.has(n)))
+          : o.declaredNames;
+        const _code = emitLogicNode(asyncFnValueDecl(st), { ...o, ..._asyncBindingEmit.opts, declaredNames: _dn });
+        if (o.declaredNames instanceof Set) o.declaredNames.add(st.name);
+        return _code;
+      }
+      return emitLogicNode(st, o);
+    };
     // Per-statement ranges of the side-channel lists a statement's emission appends
     // to, so a statement re-emitted by the mixed-hoist guard below leaves no
     // duplicate behind.
@@ -1443,7 +1465,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
       const _errsBefore = errors.length;
       const _seededBefore = seededConstFallbackCount();
-      const code = emitStmtRecorded(stmt, sideLists, () => emitLogicNode(stmt, groupEmitOpts));
+      const code = emitStmtRecorded(stmt, sideLists, () => emitTopStmt(stmt, groupEmitOpts));
       // s441 (S440 F4) — a top-level logic statement is module-init code, outside
       // every function body the lexical escape check walks: `${ const checks =
       // [isOk] }` then `checks[0](x)` in a fn handed out a Promise-returning server
@@ -1656,7 +1678,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         pushLiftNonKeyed();
         try {
           const st = codeStmts[i];
-          codes[i] = emitStmtRecorded(st, sideLists, () => emitLogicNode(st, groupEmitOpts));
+          codes[i] = emitStmtRecorded(st, sideLists, () => emitTopStmt(st, groupEmitOpts));
         } finally {
           popLiftNonKeyed();
         }
@@ -1692,7 +1714,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         const r = stmtSideRanges[i] as any;
         if (!r || !r.seededConst || r.onMount) continue;
         const st = codeStmts[i];
-        codes[i] = withSeededConstsOff(groupNames, () => emitStmtRecorded(st, sideLists, () => emitLogicNode(st, groupEmitOpts)));
+        codes[i] = withSeededConstsOff(groupNames, () => emitStmtRecorded(st, sideLists, () => emitTopStmt(st, groupEmitOpts)));
       }
       combinedCode = codes.join("\n");
     }
@@ -1715,8 +1737,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const st = codeStmts[0];
       const seededOff = !!(stmtSideRanges[0] as any)?.seededConst && !groupAtChunkScope;
       const emitPlain = (): string => (seededOff
-        ? withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts))
-        : emitLogicNode(st, groupEmitOpts));
+        ? withSeededConstsOff(groupNames, () => emitTopStmt(st, groupEmitOpts))
+        : emitTopStmt(st, groupEmitOpts));
       const r = emitIfChainForArms(st, sideLists, emitPlain);
       codes[0] = r.code;
       combinedCode = r.code;
