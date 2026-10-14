@@ -2039,6 +2039,31 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
 
   let emitted = lines.join("\n");
 
+  // S466 r8 (g-lib-export-const-lambda-missing-import-s465) — the module's imports the
+  // emitted values reference. A value export can call an import (`export const check =
+  // (p, h) => verifyPassword(p, h)`); the module used to be written with NO import lines
+  // (ReferenceError at the first call). Usage-pruned exactly like the route path's local
+  // imports: a specifier is kept only when its local name is referenced.
+  {
+    const _used = codeTokens(emitted);
+    const _importLines: string[] = [];
+    const _imports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
+    for (const stmt of _imports) {
+      if (!((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0)) continue;
+      if (stmt.isDefault) continue;
+      const specs: Array<{ imported: string; local: string }> = (Array.isArray(stmt.specifiers) && stmt.specifiers.length > 0)
+        ? stmt.specifiers.map((s: any) => ({ imported: String(s.imported ?? s.local), local: String(s.local ?? s.imported) }))
+        : stmt.names.map((n: string) => ({ imported: n, local: n }));
+      const kept = specs.filter((s) => _used.has(s.local));
+      if (kept.length === 0) continue;
+      let jsSource: string = stmt.source;
+      if (jsSource.endsWith(".scrml")) jsSource = distRelativeServerSpecifier(jsSource, filePath, (fileAST as any)?._outputBaseDir);
+      const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
+      _importLines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
+    }
+    if (_importLines.length > 0) emitted = injectAfterHeader(emitted, "\n" + _importLines.join("\n"));
+  }
+
   // Helper inlining — the SAME scans the route-handler path runs, for the
   // helpers a value export can actually introduce (structural-eq / wire / log).
   if (emitted.includes("_scrml_structural_eq(")) {

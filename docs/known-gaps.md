@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 261 | 4 |
-| MED | 643 | 6 |
+| MED | 642 | 6 |
 | LOW | 411 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -182,9 +182,11 @@ Executed on s466-await-r7 and on base (reviewer probes n4 peerSchedShadowTop, s-
 
 Executed in s465 fix round 6 (branch s465-await-r5 and origin/main 3cebd3387 alike): a server function `f` calling a top-level `function g(x = 5) { return x }` as `g()` gets `undefined` (probe `pre.mjs` preParamDefault: "baddefault:undefined"). Silent wrong value at exit 0. Reported in passing by the S239 review of dcbbd64d7. Fix direction: emit the escalated function's parameter list through `paramSignature` with the server default lowerer (as the nested-function path does since s465 r4).
 
-### g-lib-export-const-lambda-missing-import-s465 — a lib's `export const check = (p, h) => verifyPassword(p, h)` emits a server module without the `verifyPassword` import: `ReferenceError` at call time (500) — `NEW S465 r6; MED; open (pre-existing on BASE)`
+### g-lib-export-const-lambda-missing-import-s465 — a lib's `export const check = (p, h) => verifyPassword(p, h)` emits a server module without the `verifyPassword` import: `ReferenceError` at call time (500) — `NEW S465 r6; MED; resolved (s466-await-r8)`
 
-<!-- @gap id=g-lib-export-const-lambda-missing-import-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(emitModuleValueExportLines const branch + the server import prune)—not-traced prov=review:s465-await-r6 -->
+<!-- @gap id=g-lib-export-const-lambda-missing-import-s465 sev=MED status=resolved locus=compiler/src/codegen/emit-server.ts(_generateValueOnlyServerJs wrote no import lines) prov=review:s465-await-r6 -->
+
+**RESOLVED s466-await-r8.** Root: the value-only `.server.js` (a module whose only server content is value exports, `_generateValueOnlyServerJs`) was written with no import lines at all. It now emits the module's imports the emitted values reference, usage-pruned like the route path's local imports. Pinned: integration/s465-await-r8 libExportConstAnnImported / libExportFnExprImported (executed).
 
 Executed in s465 fix round 6 (branch and main alike): the importer's `if (!check(pass, hash))` throws `ReferenceError: verifyPassword is not defined` — fails closed (no wrong password accepted), but the program cannot run. Since r6 the binding is async-coloured (fn-valued-bindings.ts), so the importer awaits it once the import is emitted. Fix direction: the value-export path's free identifiers keep their imports (the server import prune does not see a value-export initializer as a use).
 

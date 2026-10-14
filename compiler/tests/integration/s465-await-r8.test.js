@@ -46,8 +46,11 @@ const RUN = {
   appExportConstAnn: { top: `export const w: (a: string, b: string) => boolean = (a, b) => check(a, b)`, body: R(`!w(pass, row.pw)`) },
   libExportConstAnnInner: { lib: L(`export const inner: (p: string, h: string) => boolean = (p, h) => verifyPassword(p, h)\n  export function check(p, h) {\n    if (!inner(p, h)) { return false }\n    return true\n  }`), body: B },
   libExportConstPlainInner: { lib: L(`export const inner = (p, h) => verifyPassword(p, h)\n  export function check(p, h) {\n    if (!inner(p, h)) { return false }\n    return true\n  }`), body: B },
-  // (A lib whose ONLY use of `verifyPassword` is an exported const lambda ships without the
-  // import — ReferenceError, fails closed: g-lib-export-const-lambda-missing-import-s465.)
+  // A lib whose ONLY server content is an exported value calling an import: its value-only
+  // `.server.js` now carries the import (was a ReferenceError —
+  // g-lib-export-const-lambda-missing-import-s465).
+  libExportConstAnnImported: { lib: L(`export const check: (p: string, h: string) => boolean = (p, h) => verifyPassword(p, h)`), body: B },
+  libExportFnExprImported: { lib: L(`export const check = function (p, h) { return verifyPassword(p, h) }`), body: B },
 };
 
 const dirs = [];
