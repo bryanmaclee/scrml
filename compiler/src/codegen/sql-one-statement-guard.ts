@@ -113,6 +113,17 @@ export function swapSqlLoweringSpan(span: Record<string, unknown> | null): Recor
   return prev;
 }
 
+/**
+ * The source span of the statement the statement emitter is lowering now (see
+ * `swapSqlLoweringSpan`), with its file filled from the per-file loop when the span
+ * carries none — for a text-path refusal elsewhere in codegen (S465 r2, arm bodies).
+ */
+export function currentLoweringSpan(): Record<string, unknown> {
+  const at: Record<string, unknown> = { ...(_loweringSpan ?? { start: 0, end: 0, line: 1, col: 1 }) };
+  if (typeof at.file !== "string" || !at.file) at.file = _policyFile;
+  return at;
+}
+
 /** A program-body statement the allow-list refuses. */
 export interface ProgramStatementRefusal {
   code: "E-SQL-PROGRAM-STATEMENT-NOT-ADMITTED" | "E-TENANT-UNDECLARED" | "E-SQL-MULTIPLE-STATEMENTS";

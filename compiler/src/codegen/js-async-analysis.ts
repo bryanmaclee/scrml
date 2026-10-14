@@ -53,7 +53,7 @@
  */
 
 import { parse as acornParse } from "acorn";
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, SYNC_CALLBACK_CONSUMER_METHODS } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, SYNC_CALLBACK_CONSUMER_METHODS, isGlobalSchedulerCallee } from "./async-combinators.ts";
 import type { AsyncRoot } from "./local-async-fns.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -819,9 +819,8 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
       }
 
       // (b) a global fire-and-forget scheduler DISCARDS its callback's return.
-      if (node.callee && node.callee.type === "Identifier" && KNOWN_DISCARD_HOF.has(node.callee.name) &&
-          refs.has(node.callee) && refs.get(node.callee) === undefined &&
-          !(resolveFree.isBound && resolveFree.isBound(node.callee.name))) {
+      if (node.callee && node.callee.type === "Identifier" && isGlobalSchedulerCallee(node.callee.name) &&
+          refs.has(node.callee) && refs.get(node.callee) === undefined) {
         for (const a of args) {
           if (a && a.type === "Identifier" && asyncOf(a)) consumed.add(a);
           else if (opts.transform && a && (a.type === "ArrowFunctionExpression" || a.type === "FunctionExpression") &&

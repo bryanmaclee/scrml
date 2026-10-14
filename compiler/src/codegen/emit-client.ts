@@ -1,3 +1,4 @@
+import { tokenizer as acornTokenizer } from "acorn";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
@@ -19,7 +20,7 @@ import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync, resetListenerSources } from "./js-async-analysis.ts";
 import { eventUnboundErrors } from "./listener-event-check.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
-import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
+import { getNodes, isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -32,6 +33,8 @@ import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
+import { moduleScopeReferences } from "./module-scope-refs.ts";
 import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -4513,8 +4516,13 @@ export function generateClientJs(ctx: CompileContext): string {
     /\bbun\.eval\s*\(/,
     /\?\{`/,
   ];
+  // S465 r6 (review LOW-1) — a `?{` sigil inside a STRING / template-text literal of
+  // the client JS is text the program carries (`const s = "?{\`SELECT pw\`}"`), not a
+  // query; the sigil pattern reads the code with literal contents blanked (by acorn's
+  // tokenizer — a bundle it cannot tokenize is read raw: fail closed).
+  const _sigilCode = blankStringLiteralContents(clientCode);
   for (const pattern of SQL_LEAK_PATTERNS) {
-    if (pattern.test(clientCode)) {
+    if (pattern.test(pattern.source === "\\?\\{`" ? _sigilCode : clientCode)) {
       errors.push(new CGError(
         "E-CG-006",
         `E-CG-006: Server-only pattern (${pattern}) detected in client JS output. ` +
@@ -4523,6 +4531,39 @@ export function generateClientJs(ctx: CompileContext): string {
       ));
     }
   }
+  });
+
+  // S465 r6 / S466 r7 (MED-C) — an async-coloured function-valued top-level binding
+  // (`const persist = (v) => save(v)`) is coloured on the CLIENT too (emit-functions
+  // `_clientAsyncBindingEmit`): emitted `async`, and every call site the client emitters
+  // see is awaited, exactly as for a `function` declaration (§13.2: it "MAY be called
+  // directly (the compiler awaits the call)"). BACKSTOP over the final bundle: any
+  // reference to one that is not an awaited call (`await persist(…)`) — a position no
+  // emitter awaited, or a use as a value — would hand its reader a Promise (always
+  // truthy) and is refused at the binding's own declaration.
+  clientStage(ctx, "post-async-binding-scan", () => {
+    const _colored = ((ctx as unknown as { _clientAsyncBindingEmit?: { names: Set<string> } })._clientAsyncBindingEmit?.names) ?? new Set<string>();
+    const _asyncBindings = new Set<string>([...asyncFnValuedBindingsOfFile(ctx.fileAST as never), ..._colored]);
+    if (_asyncBindings.size === 0) return;
+    // Scope-aware (module-scope-refs.ts): a parameter or inner declaration named like
+    // the binding is not a use. A bundle that does not parse is not proof of absence —
+    // every binding counts as used (fail closed).
+    const used = moduleScopeReferences(clientCode, _asyncBindings, new Set(), { awaitedCallsAreNotUses: true }) ?? _asyncBindings;
+    for (const name of used) {
+      let span: unknown = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      for (const st of collectTopLevelStatements(ctx.fileAST as never) as Array<{ kind?: string; name?: unknown; span?: unknown }>) {
+        if ((st.kind === "const-decl" || st.kind === "let-decl") && st.name === name && st.span) { span = st.span; break; }
+      }
+      errors.push(new CGError(
+        "E-ASYNC-FN-ESCAPES-AS-VALUE",
+        `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${name}\` calls an async function (a server function or a Promise-returning ` +
+          `helper), so the compiler emits it \`async\` and awaits every direct call to it — but client code uses it ` +
+          "where the call is not awaited (as a value, or in a position the compiler cannot await). That reader " +
+          `would get a Promise, which is always truthy (§13.2). Call \`${name}(…)\` directly where its result is ` +
+          "needed (a handler, a function body, a markup value).",
+        span as never,
+      ));
+    }
   });
 
   // Phase-2 colorless-async — a client-side async-callback collection method
@@ -5031,4 +5072,28 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
   }
 
   return lines;
+}
+
+
+/**
+ * S465 r6 — `code` with the CONTENTS of every string literal and template-literal text
+ * replaced by spaces (delimiters, `${ … }` substitutions and all other code kept), read
+ * with acorn's tokenizer. On a tokenizer error the code is returned unchanged (the
+ * caller's scan then reads everything — fail closed).
+ */
+function blankStringLiteralContents(code: string): string {
+  try {
+    const chars = code.split("");
+    for (const tok of acornTokenizer(code, { ecmaVersion: "latest", sourceType: "module" })) {
+      const label = (tok.type as { label?: string }).label;
+      if (label === "string") {
+        for (let i = tok.start + 1; i < tok.end - 1; i++) if (chars[i] !== "\n") chars[i] = " ";
+      } else if (label === "template") {
+        for (let i = tok.start; i < tok.end; i++) if (chars[i] !== "\n") chars[i] = " ";
+      }
+    }
+    return chars.join("");
+  } catch {
+    return code;
+  }
 }

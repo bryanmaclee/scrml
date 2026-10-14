@@ -398,11 +398,18 @@ export function paramName(p: ParamLike, i: number): string {
  * @param p the param entry from `fnNode.params`
  * @param i the param's index in the list (for synthesizing `_scrml_arg_N`)
  */
-export function paramSignature(p: ParamLike, i: number): string {
+export function paramSignature(
+  p: ParamLike,
+  i: number,
+  // S465 r4 — lowers a default value (an EXPRESSION kept as text by the front-end).
+  // Server callers pass one so a call in a default is read from the tree and awaited
+  // (or refused); without one the text is kept verbatim (client, unchanged).
+  lowerDefault?: (text: string, node: unknown) => string,
+): string {
   if (typeof p === "string") return p.split(":")[0].trim();
   const rest = p.isRest ? "..." : "";
   const def = typeof p.defaultValue === "string" && p.defaultValue.trim().length > 0
-    ? ` = ${p.defaultValue}`
+    ? ` = ${lowerDefault ? lowerDefault(p.defaultValue, null) : p.defaultValue}`
     : "";
   // A5-FUP: structured destructure-pattern in `p.name`. Serialize via the
   // shared codegen helper (also used by emit-logic / emit-control-flow /
@@ -410,7 +417,7 @@ export function paramSignature(p: ParamLike, i: number): string {
   if (p.name && typeof p.name === "object") {
     const pat = p.name as { kind?: unknown };
     if (pat.kind === "destructure-array" || pat.kind === "destructure-object") {
-      return `${rest}${emitDestructurePatternText(pat as Parameters<typeof emitDestructurePatternText>[0])}${def}`;
+      return `${rest}${emitDestructurePatternText(pat as Parameters<typeof emitDestructurePatternText>[0], lowerDefault)}${def}`;
     }
   }
   const name = typeof p.name === "string" ? p.name : `_scrml_arg_${i}`;

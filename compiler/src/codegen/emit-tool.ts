@@ -29,7 +29,8 @@
 import { withHostGlobalAlias, stripHostGlobalAliasDecl, aliasHostGlobalsInRuntimeText } from "./host-global-alias.ts";
 import type { CompileContext } from "./context.ts";
 import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
-import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
+import { getNodes, containsSql, containsSqlOrTransaction, collectTopLevelStatements } from "./collect.ts";
+export { collectTopLevelStatements };
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
@@ -145,22 +146,6 @@ function resolveFileAST(ctxOrFileAST: CompileContext | ASTNode): {
   }
   const fileAST = ctxOrFileAST as ASTNode;
   return { fileAST, filePath: (fileAST.filePath as string) ?? "" };
-}
-
-/** Collect the top-level logic-block body statements, in source order. */
-function collectTopLevelStatements(fileAST: ASTNode): ASTNode[] {
-  const stmts: ASTNode[] = [];
-  const nodes = getNodes(fileAST as never) as unknown as ASTNode[];
-  const visit = (node: unknown): void => {
-    if (!node || typeof node !== "object") return;
-    const n = node as ASTNode;
-    if (n.kind === "logic" && Array.isArray(n.body)) {
-      for (const s of n.body as ASTNode[]) if (s) stmts.push(s);
-    }
-    if (Array.isArray(n.children)) for (const c of n.children as ASTNode[]) visit(c);
-  };
-  for (const n of nodes) visit(n);
-  return stmts;
 }
 
 /** A statement is a function declaration. */
@@ -457,43 +442,6 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
     }
   }
   return parts.length > 0 ? parts.join("\n") + "\n" : "";
-}
-
-/**
- * The set of top-level function names in `fileAST` whose emit is `async` — a fn
- * declared `async`, OR one whose body holds an inline `_{}` / `?{}` (the §23.2.4a
- * async-IIFE injects a boundary `await`, forcing the enclosing fn async; this
- * matches emit-library.ts's async-marking rule for library exports). Consumed by
- * codegen/index.ts to await-color a TOOL's calls to ASYNC IMPORTED library fns:
- * a `<foreign lang>` lib's `export fn runOpen` becomes `export async function`,
- * so the importing tool must `await runOpen(...)`. `computeAsyncFnNames` only
- * sees a file's LOCAL fns — this closes the cross-import boundary (§64 / Flag C).
- */
-export function collectAsyncFnNamesFromFile(
-  ctxOrFileAST: CompileContext | ASTNode,
-  seedAsync?: Set<string>,
-  exportRegistry?: Map<
-    string,
-    Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
-  > | null,
-): Set<string> {
-  const { fileAST } = resolveFileAST(ctxOrFileAST);
-  const sourceText = (fileAST._sourceText ?? null) as string | null;
-  // FIXPOINT over the file's call graph — an EXPORTED fn that is TRANSITIVELY
-  // async (calls a `?{}`/`_{}` fn without its OWN `?{}` — e.g. a `report()`
-  // calling a db `loadRows()`) is async too, so the importing tool `await`s it.
-  // A direct-only scan would leave `report()` un-awaited → `[object Promise]`.
-  // `seedAsync` carries this file's OWN async IMPORTED locals (a fn calling an
-  // async fn imported from ANOTHER lib is async), so the transitive coloring is
-  // cross-file-complete (the caller resolves it recursively + memoized).
-  const fns = collectTopLevelStatements(fileAST).filter(isFunctionDecl);
-  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
-  // fn calling `safeCallAsync` (or a `scrml:auth`/`http` async export) is
-  // recognized async in the cross-module fixpoint too (else the importing file's
-  // seed never learns this file's export is async). `.ast.imports` hoist per MOD.
-  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
-  const calleeMap = exportRegistry ? buildCalleeImportMap(fileAST as any) : null;
-  return computeAsyncFnNames(fns, sourceText, seedAsync, calleeMap, exportRegistry ?? null);
 }
 
 /** True when `name` is a valid bare ECMAScript identifier (safe to emit

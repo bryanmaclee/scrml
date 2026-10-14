@@ -54,8 +54,8 @@ function program(fnBody) {
 const Q = "?{`SELECT id, body FROM notes WHERE id = ${it.id}`}.get()";
 // The per-iteration read (S456: by slot, through the loop's read function, which
 // returns its own copy of the row — S455 review P3).
-const LOOKUP = /\(await _scrml_batch_read_\d+\(it\.id\)\)/;
-const ASSIGN = /\n\s*row = \(await _scrml_batch_read_\d+\(it\.id\)\);/;
+const LOOKUP = /\(?await _scrml_batch_read_\d+\(it\.id\)\)?/;
+const ASSIGN = /\n\s*row = \(?await _scrml_batch_read_\d+\(it\.id\)\)?;/;
 // The key-table pre-fetch pieces (hoist-sql-shape.ts HOIST_KEY_TABLE).
 const KA = `__scrml_batch_k.${HOIST_KEY_ALIAS} AS ${HOIST_KEY_ALIAS}`;
 const KT = `(SELECT column1 AS ${HOIST_KEY_ALIAS}, column2 AS __scrml_batch_val FROM (VALUES __SCRML_BATCH_VALUES__)) AS __scrml_batch_k`;
