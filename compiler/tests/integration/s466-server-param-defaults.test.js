@@ -230,8 +230,9 @@ describe("s466 — a `function` escalated by `?{}` keeps its default", () => {
 
 // ---------------------------------------------------------------------------
 // A CPS-split function: the CLIENT wrapper is the function the caller calls, so
-// it applies the default (its client statements read the parameter too); the
-// server batch handler keeps the default as the backstop for a missing key.
+// it applies the default (its client statements read the parameter too) and
+// always sends the value; the server batch binds the plain value and never
+// evaluates the default a second time (s466 fix round 1).
 // ---------------------------------------------------------------------------
 
 describe("s466 — a CPS-split function", () => {
@@ -249,14 +250,14 @@ describe("s466 — a CPS-split function", () => {
 `;
   const SEED = { "x.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER)"] };
 
-  test("the client wrapper declares `qty = 3`; the server batch binds the same default", async () => {
+  test("the client wrapper declares `qty = 3`; the server batch binds the value it is sent", async () => {
     const { errors, outDir, tmpDir, read } = compileFiles({ "app.scrml": SRC }, "app.scrml", "cps", SEED);
     expect(errors).toEqual([]);
     expect(read("app", "client")).toMatch(/async function _scrml_cps_add_\d+\(name, qty = 3\) \{/);
-    expect(read("app", "server")).toContain(`const qty = _scrml_g.Object.hasOwn(_scrml_body, "qty") ? _scrml_body["qty"] : (3);`);
+    expect(read("app", "server")).toContain(`const qty = _scrml_body["qty"];`);
     if (HAPPY_DOM()) return;
     const dbPath = join(tmpDir, "x.db");
-    const r = await callRoute(join(outDir, "app.server.js"), dbPath, "add", { name: "a" });
+    const r = await callRoute(join(outDir, "app.server.js"), dbPath, "add", { name: "a", qty: 3 });
     expect(r.status).toBe(200);
     await closeOpenedDbHandles();
     const db = new Database(dbPath);
@@ -352,11 +353,235 @@ describe("s466 — refusals", () => {
     expect(errors.map((e) => e.code)).toContain("E-REACTIVE-003");
   });
 
-  test("a default calling a sibling server fn is refused once (E-SERVER-FN-IN-SYNC-CALLBACK), not shipped as a Promise", () => {
-    const { errors } = compileFiles({ "app.scrml": prog(`  server fn h() -> string { return "hh" }
+});
+
+// ---------------------------------------------------------------------------
+// s466 fix round 1 — every decision about a default is made ONCE
+// (emit-logic.ts emitParamDefault; route-inference.ts for the identity reads),
+// whatever site lowers it.
+// ---------------------------------------------------------------------------
+
+const codesOf = (errors) => errors.map((e) => e.code);
+
+describe("s466 fix round 1 — items 1/2: a default that needs an await is E-PARAM-DEFAULT-AWAIT, once", () => {
+  const SEED = { "x.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, qty INTEGER)"] };
+  const CASES = [
+    ["a `?{}` in a CPS-split function's default (client wrapper — no sql placeholder shipped)", `<program db="./x.db">
+\${
+  function add(name: string, qty: number = ?{\`select 3 as v\`}.get().v) {
+    ?{\`INSERT INTO items (name, qty) VALUES (\${name}, \${qty})\`}.run()
+    @last = qty
+  }
+}
+<last> = 0
+<button onclick=\${add("a")}>go</button>
+<p>\${@last}</p>
+</program>
+`, "qty", "add", 3],
+    ["a `?{}` in a server fn's default", prog(`  server fn sq(a: number, k = ?{\`select 1 as v\`}.get()) -> number { return 1 }
+  function go() { return sq(1) }`), "k", "sq", 3],
+    ["…and a peer calls that server fn (in-process callable)", prog(`  server fn sq(a: number, k = ?{\`select 1 as v\`}.get()) -> number { return 1 }
+  server fn callsq() -> number { return sq(1) }
+  function go() { return callsq() }`), "k", "sq", 3],
+    ["`?{}` reached INDIRECTLY through a helper", prog(`  function one() { return ?{\`select 1 as v\`}.get().v }
+  server fn sq(a: number, k: number = one()) -> number { return a + k }
+  function go() { return sq(1) }`), "k", "sq", 4],
+    ["a sibling server fn", prog(`  server fn h() -> string { return "hh" }
   server fn g(m: string, k: string = h()) -> string { return k + m }
-  function go() { return g("x") }`) }, "app.scrml", "peer-in-default");
-    const codes = errors.map((e) => e.code);
-    expect(codes.filter((c) => c === "E-SERVER-FN-IN-SYNC-CALLBACK")).toHaveLength(1);
+  function go() { return g("x") }`), "k", "g", 4],
+    ["an SSE generator's default", `<program db="./x.db">
+\${
+  server function* tick(n: number = ?{\`select 3 as v\`}.get().v) { yield n }
+}
+<p>x</p>
+</program>
+`, "n", "tick", 3],
+  ];
+  for (const [label, src, param, fn, line] of CASES) {
+    test(label, () => {
+      const { errors, read } = compileFiles({ "app.scrml": src }, "app.scrml", "await-" + param + fn, SEED);
+      const codes = codesOf(errors);
+      expect(codes.filter((c) => c === "E-PARAM-DEFAULT-AWAIT")).toHaveLength(1);
+      // One root cause, one diagnostic: no callback-position code, no invalid-JS backstop.
+      expect(codes).not.toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+      expect(codes).not.toContain("E-ASYNC-STDLIB-IN-SYNC-CALLBACK");
+      expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+      const e = errors.find((x) => x.code === "E-PARAM-DEFAULT-AWAIT");
+      // Item 6: the message names the position and the fix, not a callback / `for` loop.
+      expect(e.message).toContain(`parameter \`${param}\` of \`${fn}\``);
+      expect(e.message).toContain("in the function body");
+      expect(e.message).not.toContain("callback");
+      // Item 7: anchored at the default, not the function's first line.
+      expect(e.span.line).toBe(line);
+      expect(read("app", "client")).not.toContain("sql-ref unresolved");
+    });
+  }
+});
+
+describe("s466 fix round 1 — item 6: one root cause is reported once", () => {
+  test("a default calling an `@`-reading fn: E-REACTIVE-003 on the fn, no second default refusal", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db">
+\${
+  <n> = 1
+  fn rd() -> number { return @n }
+  server fn g2(m: number,
+    k: number = rd()) -> number { return m + k }
+  function go() { return g2(1) }
+}
+<out> = 0
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "cascade");
+    expect(codesOf(errors)).toEqual(["E-REACTIVE-003"]);
+  });
+});
+
+describe("s466 fix round 1 — item 3: server identity in a default", () => {
+  test("`session.userId` in a server fn's default is E-PARAM-DEFAULT-SERVER-IDENTITY (a body key would override it)", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn who2(m: string, uid = session.userId) -> string { return m + uid }
+  function go() { return who2("b") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "session-default");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    const e = errors[0];
+    expect(e.message).toContain("const uid = session.userId");
+    expect(e.span.line).toBe(3);
+  });
+
+  test("`@currentUser` in a server fn's default is E-PARAM-DEFAULT-SERVER-IDENTITY", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn who3(m: string, u = @currentUser) -> string { return m }
+  function go() { return who3("b") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "currentuser-default");
+    expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+
+  test("`@session.userId` in a server fn's default is the NAMED E-SESSION-AMBIENT-SERVER, not the internal backstop", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn who(m: string, uid: string = @session.userId) -> string { return m + uid }
+  function go() { return who("a") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "at-session-default");
+    const codes = codesOf(errors);
+    expect(codes).toContain("E-SESSION-AMBIENT-SERVER");
+    expect(codes).not.toContain("E-INTERNAL-SESSION-AMBIENT-SERVER");
+    expect(errors.find((e) => e.code === "E-SESSION-AMBIENT-SERVER").span.line).toBe(3);
+  });
+
+  test("the fix the message names compiles: read it in the body", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server fn who2(m: string) -> string { const uid = session.userId
+    return m + uid }
+  function go() { return who2("b") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "session-body");
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("s466 fix round 1 — item 4: a default that is not ONE expression is refused, never truncated", () => {
+  const CASES = [
+    ["`\"a\" foo`", `server fn tr(a: number, k = "a" foo) -> string { return k }`, "tr", "foo"],
+    ["`1 2` (was re-spelled `12`)", `server fn tr2(a: number, k = 1 2) -> number { return k }`, "tr2", "2"],
+    ["a struct literal head `Pt { … }`", `server fn st(a: number, p: Pt = Pt { x: a, y: 2 }) -> number { return p.x + p.y }`, "st", "{"],
+  ];
+  for (const [label, decl, fn, leftover] of CASES) {
+    test(label, () => {
+      const { errors } = compileFiles({ "app.scrml": prog(`  type Pt:struct = { x: number, y: number }
+  ${decl}
+  function go() { return ${fn}(1) }`) }, "app.scrml", "lost-" + fn);
+      expect(codesOf(errors)).toEqual(["E-PARSE-001"]);
+      expect(errors[0].message).toContain(`\`${fn}\``);
+      expect(errors[0].message).toContain(leftover);
+      expect(errors[0].span.line).toBe(4);
+    });
+  }
+});
+
+describe("s466 fix round 1 — item 5: every function's default is lowered, none spliced as scrml text", () => {
+  test("a client `fn` / `function`: `not` and `.Green` lower", () => {
+    const { errors, read } = compileFiles({ "app.scrml": `<program>
+\${
+  type Color:enum = { Red, Green }
+  fn f(m: number, k: number | not = not, c: Color = .Green) -> string { if (k is not) { return "a" } return "b" }
+  function h(m: number, k: number | not = not) -> string { if (k is not) { return "a" } return "b" }
+}
+<out> = ""
+<button onclick=\${@out = f(1) + h(1)}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "client-lowered");
+    expect(errors).toEqual([]);
+    const client = read("app", "client");
+    expect(client).toMatch(/function _scrml_f_\d+\(m, k = null, c = "Green"\)/);
+    expect(client).toMatch(/function _scrml_h_\d+\(m, k = null\)/);
+    expect(client).not.toMatch(/=\s*not\b/);
+  });
+
+  test("an exported server fn (library member): `not` and `.Green` lower, and it runs", async () => {
+    const FILES = {
+      "lib.scrml": `\${
+  export type Color:enum = { Red, Green }
+  export server fn g(m: string, k: string | not = not, c: Color = .Green) -> string {
+    if (k is not) { return "absent" + m }
+    return k + m
+  }
+}
+`,
+      "app.scrml": prog(`  import { g } from "./lib.scrml"
+  server fn viaImp(m: string) -> string { return g(m) }
+  function go() { return viaImp("x") }`),
+    };
+    const { errors, outDir, tmpDir, read } = compileFiles(FILES, "app.scrml", "lib-lowered");
+    expect(errors).toEqual([]);
+    expect(read("lib", "server")).toMatch(/export function g\(m, k = null, c = "Green"\)/);
+    if (HAPPY_DOM()) return;
+    const db = join(tmpDir, "x.db");
+    expect((await callRoute(join(outDir, "app.server.js"), db, "viaImp", { m: "x" })).json).toBe("absentx");
+    expect((await callRoute(join(outDir, "lib.server.js"), db, "g", { m: "y" })).json).toBe("absenty");
+  }, EXECUTED_TIMEOUT_MS);
+});
+
+describe("s466 fix round 1 — item 8: the SSE auth gate runs before any default", () => {
+  test("`_scrml_auth_check` precedes the query bindings", () => {
+    const { errors, read } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  server function* countdown(from: number = 3) {
+    for (let i = from; i > 0; i--) { yield i }
+  }
+}
+<n> = 0
+<p>\${@n}</p>
+</program>
+` }, "app.scrml", "sse-auth");
+    expect(errors).toEqual([]);
+    const server = read("app", "server");
+    const gate = server.indexOf("_scrml_auth_check(_scrml_req)");
+    const bind = server.indexOf("const from = (() =>");
+    expect(gate).toBeGreaterThan(-1);
+    expect(bind).toBeGreaterThan(gate);
   });
 });

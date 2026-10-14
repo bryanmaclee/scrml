@@ -3,14 +3,14 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, asyncNameFactsOf, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
-import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode, blankLiteralTextInSource } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
@@ -23,14 +23,15 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
-import { localAsyncDeclRoot } from "./local-async-fns.ts";
+import { localAsyncDeclRoot, rawAsyncUsesOf } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
-import { parsedParamDefault } from "../at-refs.ts";
+import { parsedParamDefault, paramDefaultParseProblem, paramDefaultSpan } from "../at-refs.ts";
+import { isAsyncCalleeName, type AsyncNameFacts } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -1211,27 +1212,158 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
 }
 
 /**
+ * Where a parameter default is being lowered — what `emitParamDefault` needs to
+ * know beyond the boundary options.
+ */
+export interface ParamDefaultSite {
+  /** The function's name, for diagnostics. */
+  fnName: string;
+  /** The function's span — a diagnostic's fallback anchor when the default's own position is unknown. */
+  fnSpan?: unknown;
+  /**
+   * Async names in scope that the boundary options do not carry (a library /
+   * tool emitter's transitively-async fn set).
+   */
+  asyncNames?: ReadonlySet<string> | null;
+  /**
+   * The async facts of the emission the function belongs to, when the boundary
+   * options do not carry them (a client function: `clientAsyncFactsOf`). The
+   * parameter names still shadow (from the options' `declaredNames`).
+   */
+  asyncFacts?: AsyncNameFacts | null;
+  /**
+   * Callees whose OWN refusal already covers this default: a server function
+   * that reads client state (`fn rd() { return @n }`) is refused by its @-read
+   * diagnostic (E-REACTIVE-003 and siblings); refusing the default that calls it
+   * as well reports one root cause twice.
+   */
+  coveredCallees?: ReadonlySet<string> | null;
+}
+
+/** §7.3.2 — the parameter's name for a diagnostic. */
+function paramLabel(p: unknown): string {
+  const n = p && typeof p === "object" ? (p as { name?: unknown }).name : null;
+  return typeof n === "string" ? n : "(destructured)";
+}
+
+/**
+ * s466 fix round 1 — why this default cannot be evaluated where a default runs,
+ * or null. A default is evaluated before the body, outside it: never an
+ * awaitable position (§34 E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-
+ * CALLBACK rows: "a parameter default"). Anything that needs an `await` there —
+ * a `?{}` query, a server-function call (a direct peer, or a helper that runs
+ * one), an async stdlib export, an async local function — is decided HERE, once,
+ * from the parsed default and the one asyncness rule (`isAsyncCalleeName`).
+ * Returns `{ covered: true }` when the only async callees are covered elsewhere.
+ */
+function paramDefaultAwaitReason(
+  node: ExprNode,
+  facts: AsyncNameFacts,
+  covered: ReadonlySet<string> | null,
+): { reason: string } | { covered: true } | null {
+  let reason: string | null = null;
+  let sawCovered = false;
+  const asyncName = (name: string): boolean => isAsyncCalleeName(name, facts);
+  const seen = new WeakSet<object>();
+  const visit = (n: unknown): void => {
+    if (reason !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    const r = n as Record<string, unknown>;
+    if (r.kind === "sql" || r.kind === "sql-ref") { reason = "runs a `?{}` query"; return; }
+    if (r.kind === "call") {
+      const callee = r.callee as { kind?: unknown; name?: unknown } | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string" && asyncName(callee.name)) {
+        if (covered && covered.has(callee.name)) sawCovered = true;
+        else { reason = `calls \`${callee.name}\`, which runs asynchronously`; return; }
+      }
+    }
+    if (r.kind === "escape-hatch" && typeof r.raw === "string") {
+      const code = blankLiteralTextInSource(r.raw);
+      if (code.includes("?{")) { reason = "runs a `?{}` query"; return; }
+      const re = /(?<![\w$.])([A-Za-z_$][\w$]*)\s*\(/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(code)) !== null) {
+        if (!asyncName(m[1])) continue;
+        if (covered && covered.has(m[1])) { sawCovered = true; continue; }
+        reason = `calls \`${m[1]}\`, which runs asynchronously`;
+        return;
+      }
+    }
+    for (const k of Object.keys(r)) if (k !== "span") visit(r[k]);
+  };
+  visit(node);
+  if (reason !== null) return { reason };
+  return sawCovered ? { covered: true } : null;
+}
+
+/**
  * §7.3.2 — ONE function parameter's default value, lowered to JavaScript by the
  * expression emitter in the boundary `opts` names, or `null` when the parameter
  * has no default. The parsed tree is the one the `@`-reader checks
  * (at-refs.ts `parsedParamDefault`), so what E-REACTIVE-003 reads is what runs.
- *
- * A default is evaluated before the function body, outside it, so it is never an
- * awaitable position: a peer server-function or async-stdlib call in it is
- * recorded (`peerAwaitable: false`) and refused (E-SERVER-FN-IN-SYNC-CALLBACK /
- * E-ASYNC-STDLIB-IN-SYNC-CALLBACK) rather than emitted as an unawaited Promise.
+ * EVERY site that emits a function's parameters lowers its defaults here, and
+ * every refusal of a default is decided here, once, whatever the site:
+ *   - a default that is not ONE expression (the parse kept a prefix — `"a" foo`,
+ *     `1 2`) is E-PARSE-001, never the prefix;
+ *   - a default that needs an `await` (see `paramDefaultAwaitReason`) is
+ *     E-PARAM-DEFAULT-AWAIT.
+ * A refused default emits a `null` placeholder; the diagnostic fails the build
+ * (refused-lowering-errors.ts — one diagnostic per parameter however many sites
+ * lower it).
  *
  * s466 — server-placed functions used to drop their defaults (the route handler
  * bound `const k = _scrml_body["k"]`, the in-process callable was emitted
  * `async function f(m, k)`), so an omitted argument answered `null`.
  */
-export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOpts, fnSpan?: unknown): string | null {
+export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOpts, site: ParamDefaultSite): string | null {
   const node = parsedParamDefault(p, filePath);
   if (!node) return null;
-  // A default carries no source position of its own (at-refs.ts), so a
-  // diagnostic raised while lowering it is reported at its function.
-  const ctx = _makeExprCtx(opts);
-  return emitExpr(node, { ...ctx, peerAwaitable: false, stmtSpan: (fnSpan as EmitExprContext["stmtSpan"]) ?? ctx.stmtSpan });
+  const at = (paramDefaultSpan(p) ?? site.fnSpan ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2];
+  const label = paramLabel(p);
+  const lost = paramDefaultParseProblem(p, filePath);
+  if (lost !== null) {
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the default of parameter \`${label}\` of \`${site.fnName}\` is not one expression — ` +
+      `\`${lost.length > 60 ? lost.slice(0, 60) + "…" : lost}\` is left over (§7.3.2: a default value is an expression). ` +
+      `Remove the extra text, or write the value you meant as a single expression.`,
+      at,
+    ), p as object);
+    return "null /* E-PARSE-001 */";
+  }
+  const ctx = { ..._makeExprCtx(opts), stmtSpan: (at as EmitExprContext["stmtSpan"]) };
+  const baseFacts: AsyncNameFacts = site.asyncFacts
+    ? { ...site.asyncFacts, declaredNames: ctx.declaredNames ?? site.asyncFacts.declaredNames ?? null }
+    : asyncNameFactsOf(ctx);
+  const facts: AsyncNameFacts = site.asyncNames && site.asyncNames.size > 0
+    ? { ...baseFacts, asyncFnNames: new Set([...(baseFacts.asyncFnNames ?? []), ...site.asyncNames]) }
+    : baseFacts;
+  let awaitIssue = paramDefaultAwaitReason(node, facts, site.coveredCallees ?? null);
+  // The s441 scope-aware pre-pass analysis of the default's text (when it ran for
+  // this function): it resolves a nested async helper the file-scope sets above
+  // cannot see. Same verdict, same refusal.
+  if (awaitIssue === null || "covered" in awaitIssue) {
+    const raw = rawAsyncUsesOf(p);
+    const hit = raw?.calls.find((c) => !(site.coveredCallees && site.coveredCallees.has(c.name)));
+    if (hit) awaitIssue = { reason: `calls \`${hit.name}\`, which runs asynchronously` };
+  }
+  if (awaitIssue && "covered" in awaitIssue) return "null /* refused: see the callee's diagnostic */";
+  if (awaitIssue) {
+    recordRefusedLowering(new CGError(
+      "E-PARAM-DEFAULT-AWAIT",
+      `E-PARAM-DEFAULT-AWAIT: the default of parameter \`${label}\` of \`${site.fnName}\` ${awaitIssue.reason}. ` +
+      `A parameter default is evaluated before the function body runs, in a position where the compiler ` +
+      `cannot wait for an asynchronous result — the parameter would hold an unfinished operation instead of ` +
+      `its value. Compute the value in the function body instead, where the wait is inserted for you: ` +
+      `give the parameter the default \`not\` (\`${label}: T | not = not\`) and, in the body, use the computed ` +
+      `value when the argument is \`not\`.`,
+      at,
+    ), p as object);
+    return "null /* E-PARAM-DEFAULT-AWAIT */";
+  }
+  // Nothing here needs an await, so no non-awaitable site can be recorded.
+  return emitExpr(node, { ...ctx, peerAwaitable: false });
 }
 
 /**
@@ -5121,9 +5253,6 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.fromExport === true) return "";
       const fnName: string = node.name ?? "anon";
       const params: ParamLike[] = (node.params ?? []) as ParamLike[];
-      // §7.3.2: param signatures carry `name = defaultValue` when defaults are present.
-      // Strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
-      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i));
       const generatorStar: string = node.isGenerator ? "*" : "";
 
       // Function body has its own scope for declared names. C5: set
@@ -5171,6 +5300,19 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s427 round 2 (H1): a function body is a new function scope with a set of its
       // own, as it always had — not a lift scope (see declared-name-marks.ts).
       clearLiftScope(fnOpts.declaredNames);
+      // §7.3.2: param signatures carry `name = <lowered default>` (emitParamDefault —
+      // the one lowering every function's defaults go through, s466). A default sees
+      // the enclosing scope and the parameters (a parameter shadows an outer name).
+      const _defaultOpts: EmitLogicOpts = {
+        ...fnOpts,
+        declaredNames: new Set<string>([
+          ...(fnOpts.declaredNames ?? []),
+          ...params.map((p, i) => paramName(p, i)),
+        ]),
+      };
+      const _defaultSite = { fnName, fnSpan: node.span };
+      const _defaultFile: string = (node.span && typeof node.span.file === "string") ? node.span.file : (opts.asyncFilePath ?? "");
+      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, emitParamDefault(p, _defaultFile, _defaultOpts, _defaultSite)));
       const body: any[] = node.body ?? [];
 
       const _emitNestedBody = (o: EmitLogicOpts): string[] => {

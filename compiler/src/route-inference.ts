@@ -89,7 +89,7 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
-import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
+import { fileScopeDeclaresSessionCell, fileScopeDeclaresCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
@@ -97,7 +97,7 @@ import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
-import { isPlainPureFn, forEachAtRef, parsedParamDefaults, fnReachesAtName } from "./at-refs.ts";
+import { isPlainPureFn, forEachAtRef, parsedParamDefaults, parsedParamDefault, paramDefaultSpan, fnReachesAtName } from "./at-refs.ts";
 export { isPlainPureFn, forEachAtRef, parsedParamDefaults } from "./at-refs.ts";
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
@@ -6587,6 +6587,89 @@ export function runRI(input: RIInput): RIOutput {
       ));
     }
   };
+  /**
+   * s466 fix round 1 — a wholly-server function's PARAMETER DEFAULTS.
+   *
+   * (1) An `@session` read in a default is E-SESSION-AMBIENT-SERVER, exactly as in
+   *     the body (the same reader over the parsed default).
+   * (2) A SERVER-TRUSTED identity read in a default — the `session.*` builtin
+   *     (§20.5, the server's own session) or the ambient `@currentUser` (§20.5 /
+   *     §52, server-resolved) — is E-PARAM-DEFAULT-SERVER-IDENTITY. A default
+   *     applies only when the caller OMITS the argument; every server function has
+   *     an HTTP route, so the caller can always SUPPLY it instead, and the
+   *     "identity" becomes whatever the request body says (measured: `server fn
+   *     who2(m, uid = session.userId)` bound `uid` from a client body key). §6.6.9:
+   *     "`@session` is server-only identity and SHALL NEVER be marshalled from the
+   *     client". The fix is to read it in the body (`const uid = session.userId`).
+   */
+  const _fileScopeCurrentUserCell = new Map<string, boolean>();
+  for (const fileAST of files) {
+    _fileScopeCurrentUserCell.set(fileAST.filePath, fileScopeDeclaresCell(fileNodesOf(fileAST), "currentUser"));
+  }
+  const serverIdentityReadIn = (node: unknown, paramNames: ReadonlySet<string>, currentUserAmbient: boolean): string | null => {
+    let hit: string | null = null;
+    const seen = new WeakSet<object>();
+    const visit = (n: unknown): void => {
+      if (hit !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
+      seen.add(n as object);
+      if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+      const r = n as Record<string, unknown>;
+      const obj = r.object as { kind?: unknown; name?: unknown } | undefined;
+      if ((r.kind === "member" || r.kind === "index") && obj && obj.kind === "ident" && obj.name === "session"
+          && !paramNames.has("session")) {
+        hit = r.kind === "member" && typeof r.property === "string" ? `session.${r.property}` : "session[…]";
+        return;
+      }
+      if (currentUserAmbient && r.kind === "ident" && r.name === "@currentUser") { hit = "@currentUser"; return; }
+      for (const k of Object.keys(r)) if (k !== "span") visit(r[k]);
+    };
+    visit(node);
+    return hit;
+  };
+  const reportServerDefaultIdentityReads = (record: AnalysisRecord): void => {
+    const params: unknown[] = Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [];
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    const paramNames = new Set<string>(
+      params.map((p) => (p && typeof p === "object" && typeof (p as any).name === "string") ? (p as any).name : null)
+        .filter((n): n is string => n !== null),
+    );
+    const sessionCellOwnsName = _fileScopeSessionCell.get(record.filePath) === true;
+    const currentUserAmbient = _fileScopeCurrentUserCell.get(record.filePath) !== true;
+    for (const p of params) {
+      const d = parsedParamDefault(p, record.filePath);
+      if (!d) continue;
+      const at = (paramDefaultSpan(p) ?? record.fnNode.span) as Span;
+      const label = typeof (p as any).name === "string" ? (p as any).name : "(destructured)";
+      if (!sessionCellOwnsName) {
+        for (const _r of detectServerAmbientSessionReads([d])) {
+          const _key = `${record.filePath}:${(at as any)?.start ?? -1}:${_r.member ?? ""}`;
+          if (_sessionAmbientSeen.has(_key)) continue;
+          _sessionAmbientSeen.add(_key);
+          errors.push(new RIError(
+            "E-SESSION-AMBIENT-SERVER",
+            sessionAmbientServerMessage(`The default of parameter \`${label}\` of server function \`${_fnName}\``, _r.member) +
+            ` In a parameter default the server's session is not safe either (the caller can send \`${label}\` ` +
+            `itself — E-PARAM-DEFAULT-SERVER-IDENTITY): read it in the function body, ` +
+            `\`const ${label} = ${_r.member ? `session.${_r.member}` : "session.userId"}\`, and remove the parameter.`,
+            at,
+          ));
+        }
+      }
+      const ident = serverIdentityReadIn(d, paramNames, currentUserAmbient);
+      if (ident !== null) {
+        errors.push(new RIError(
+          "E-PARAM-DEFAULT-SERVER-IDENTITY",
+          `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of server function ` +
+          `\`${_fnName}\` reads \`${ident}\`, the server's own identity. A default applies only when the ` +
+          `caller omits the argument, and a server function's caller is an HTTP request: it can always send ` +
+          `\`${label}\` itself, so the value would be whatever the request says, not the server's identity ` +
+          `(§6.6.9: server-only identity SHALL NEVER be marshalled from the client). Read it in the function ` +
+          `body instead — \`const ${label} = ${ident}\` — and remove the parameter.`,
+          at,
+        ));
+      }
+    }
+  };
   // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
   // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
   // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
@@ -6982,6 +7065,13 @@ export function runRI(input: RIInput): RIOutput {
         ? cpsSplit.serverStmtIndices.map((i) => _body[i]).filter((x) => x != null)
         : _body;
       reportServerSessionReads(record, _serverPart);
+      // s466 fix round 1 — a parameter DEFAULT of a wholly-server function is
+      // evaluated on the server too (§7.3.2), so it is the same server context:
+      // the same reader (`detectServerAmbientSessionReads`) over the same parsed
+      // default the codegen lowers (at-refs.ts `parsedParamDefault`). A CPS-split
+      // function's default runs in its CLIENT wrapper (where `@session` is the
+      // §20.5 projection) and is not scanned.
+      if (!cpsSplit) reportServerDefaultIdentityReads(record);
     }
 
     // Build the FunctionRoute entry.

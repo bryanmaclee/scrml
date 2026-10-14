@@ -7,7 +7,7 @@
  * code read reactive state?" reads it the same way, from the parsed expression tree.
  */
 import type { Span, ExprNode } from "./types/ast.ts";
-import { blankLiteralTextInSource, parseExprToNode } from "./expression-parser.ts";
+import { blankLiteralTextInSource, parseExprToNode, hasLostTrailingContent } from "./expression-parser.ts";
 
 /**
  * s464-pure-fn-placement — a plain pure function: `fn` (or the deprecated
@@ -127,6 +127,33 @@ export function parsedParamDefault(p: unknown, filePath: string): ExprNode | nul
   dropSpans(node);
   _parsedDefaultCache.set(p as object, node);
   return node;
+}
+
+/**
+ * s466 fix round 1 — does this parameter's default fail to be ONE expression?
+ * Returns `null` when it parses whole; otherwise the text the parse could not
+ * keep (the lost tail of `"a" foo` is `foo`; an unparseable default returns its
+ * whole text). The parser keeps a valid PREFIX and stamps the loss
+ * (`_s441Trailing`, the body-top S441 oracle); codegen must refuse rather than
+ * ship the prefix (`k = "a" foo` once shipped `("a")`).
+ */
+export function paramDefaultParseProblem(p: unknown, filePath: string): string | null {
+  const node = parsedParamDefault(p, filePath) as unknown as Record<string, unknown> | null;
+  if (!node) return null;
+  if (hasLostTrailingContent(node)) {
+    const t = String(node._s441TrailingText ?? "").trim();
+    return t.length > 0 ? t : String((p as { defaultValue?: unknown }).defaultValue ?? "");
+  }
+  if (node.kind === "escape-hatch" && node.nativeKind === "ParseError") {
+    return String((p as { defaultValue?: unknown }).defaultValue ?? "");
+  }
+  return null;
+}
+
+/** s466 fix round 1 — the source span of a parameter's default (its first token), if the parser kept one. */
+export function paramDefaultSpan(p: unknown): unknown {
+  if (!p || typeof p !== "object") return null;
+  return (p as { defaultSpan?: unknown }).defaultSpan ?? null;
 }
 
 function dropSpans(n: unknown, seen: WeakSet<object> = new WeakSet()): void {

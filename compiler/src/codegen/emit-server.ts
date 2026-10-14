@@ -419,9 +419,20 @@ function topLevelBindingExists(body: string, name: string): boolean {
  * boundary `opts` names (`opts` is the function body's own emit options, so a
  * default sees what the body sees), or `null` when the parameter has none.
  */
-function serverParamDefaults(params: unknown[], filePath: string, opts: any, fnSpan: unknown): Array<string | null> {
+function serverParamDefaults(
+  params: unknown[],
+  filePath: string,
+  opts: any,
+  fnNode: { name?: unknown; span?: unknown },
+  coveredCallees: ReadonlySet<string> | null,
+): Array<string | null> {
+  const site = {
+    fnName: typeof fnNode?.name === "string" ? fnNode.name : "<anonymous>",
+    fnSpan: fnNode?.span,
+    coveredCallees,
+  };
   return params.map((p) => {
-    const d = emitParamDefault(p, filePath, opts, fnSpan);
+    const d = emitParamDefault(p, filePath, opts, site);
     return d === null ? null : serverRewriteEmitted(d);
   });
 }
@@ -1905,7 +1916,7 @@ function emitEndpointServerHelperLines(
     const helperOpts = { boundary: "client" as const, declaredNames, insideFunctionBody: true };
     // §7.3.2 (s466) — defaults lowered with the body's own opts (one lowering
     // for every server-bundle function, see `serverParamDefaults`).
-    const helperDefaults = serverParamDefaults(params, filePath, helperOpts, fnNode.span);
+    const helperDefaults = serverParamDefaults(params, filePath, helperOpts, fnNode, null);
     const paramSigs = params.map((p: any, i: number) => paramSignature(p, i, helperDefaults[i] ?? null));
     const bodyCodes = emitFnShortcutBody(
       fnNode.body,
@@ -4493,6 +4504,14 @@ function generateServerJsImpl(
   // (whose bodies are split or context-bound) keep the pre-fix behavior, and a
   // program that never composes server fns is byte-unchanged.
   const _peerCallableInfo = new Map<string, { fnNode: any; paramNames: string[] }>();
+  // s466 fix round 1 — server functions that read client state (an `@`-name, in
+  // the body or a default). Each is refused by its own @-read diagnostic
+  // (E-REACTIVE-003 and siblings, route-inference.ts); a parameter default that
+  // calls one is not refused a second time for the same root cause.
+  const _atReadingServerFns = new Set<string>();
+  for (const { fnNode: _af } of serverFns) {
+    if (typeof _af?.name === "string" && fnReachesAtName(_af, filePath)) _atReadingServerFns.add(_af.name);
+  }
   const _serverFnPeerNames = new Set<string>();
   // #284 (FIX C) — PER-FUNCTION-BODY alias names that resolve to a peer via a
   // first-class reference (`const p = groupByJob; p(rows)` / a dispatch table).
@@ -4764,38 +4783,9 @@ function generateServerJsImpl(
         ));
       }
 
-      // s440 — DIAGNOSTIC. A NESTED function's parameter default is spliced as RAW
-      // TEXT by `paramSignature` and evaluated eagerly, outside any async body
-      // (`await` is illegal in a default even in an async fn), so an async call
-      // there — a peer, an async-stdlib export, or a nested async helper — can never
-      // be awaited, and emit-expr never sees it. Fail closed.
-      if (n.kind === "function-decl" && Array.isArray(n.params)) {
-        for (const _p of n.params) {
-          const _dv = _p && typeof _p === "object" ? (_p as { defaultValue?: unknown }).defaultValue : undefined;
-          if (typeof _dv !== "string" || _dv.length === 0) continue;
-          // s441 — the scope-aware analysis of the default text, when the pre-pass made one.
-          const _pUses = rawAsyncUsesOf(_p);
-          if (_pUses) {
-            for (const c of _pUses.calls) {
-              const via = c.local ? c.root.via : null;
-              if (c.root.kind === "stdlib") _diagAsyncStdlibSyncCb(c.name, n.span, via);
-              else _diagSyncCb(c.name, n.span, via);
-            }
-            continue;
-          }
-          for (const c of extractCalleeNames(_dv)) {
-            const _local = _nestedAsyncByName.get(c);
-            if (_local) {
-              if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, n.span, _local.via);
-              else _diagSyncCb(c, n.span, _local.via);
-            } else if (_serverFnPeerNames.has(c)) {
-              _diagSyncCb(c, n.span);
-            } else if (_isAsyncStdlibName(c)) {
-              _diagAsyncStdlibSyncCb(c, n.span);
-            }
-          }
-        }
-      }
+      // (A nested function's parameter defaults are lowered and checked where the
+      // function is emitted — emit-logic.ts `emitParamDefault`, s466 fix round 1:
+      // one decision for every default, whatever the site.)
 
       for (const k in n) {
         const v = n[k];
@@ -4984,12 +4974,22 @@ function generateServerJsImpl(
         // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
         ...localMapSetOptsFor(fnNode),
       };
+      // s466 fix round 1 — the auth gate runs BEFORE the query bindings, so an
+      // unauthenticated request evaluates no parameter default.
+      // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
+      // route gates via bearer, not `_scrml_auth_check` which is session-infra).
+      if (authMiddlewareEntry && _webAppShape) {
+        lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
+        lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
+        lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
+      }
+
       // §7.3.2 (s466) — an omitted argument takes its parameter's default. The
       // client EventSource stub leaves an omitted argument out of the query
       // string, so a missing key is the omitted argument here. (The stub also
       // leaves out a `not` argument, so on this GET wire a `not` passed to a
       // defaulted parameter cannot be told from an omitted one.)
-      const _sseParamDefaults = serverParamDefaults(params, filePath, _serverFnOptsSSE, fnNode.span);
+      const _sseParamDefaults = serverParamDefaults(params, filePath, _serverFnOptsSSE, fnNode, _atReadingServerFns);
       for (let _pi = 0; _pi < fnParamNames.length; _pi++) {
         const _pName = fnParamNames[_pi];
         const _pAbsent = _sseParamDefaults[_pi] ?? "null";
@@ -4997,14 +4997,6 @@ function generateServerJsImpl(
         // INTERPOLATION). The `=== null || === undefined` presence check is the
         // exempt paired form (route.query[k] is `undefined` for an absent key).
         lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return ${_pAbsent}; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !_scrml_g.Number.isNaN(_scrml_g.Number(_v))) return _scrml_g.Number(_v); return _v; })();`);
-      }
-
-      // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
-      // route gates via bearer, not `_scrml_auth_check` which is session-infra).
-      if (authMiddlewareEntry && _webAppShape) {
-        lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
-        lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
-        lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
       }
 
       lines.push(`  const _scrml_enc = new _scrml_g.TextEncoder();`);
@@ -5470,8 +5462,13 @@ function generateServerJsImpl(
 
       // §7.3.2 (s466) — an omitted argument takes its parameter's default. The
       // CPS-forwarded batch results (`fwdResultNames`) are not parameters and
-      // have none.
-      const _paramDefaults = serverParamDefaults(params, filePath, _serverFnOpts, fnNode.span);
+      // have none. A CPS-split function's default belongs to its CLIENT wrapper —
+      // the function the caller calls (emit-functions.ts), which applies it and
+      // always sends the value — so its server batch binds the plain value and
+      // never evaluates the default a second time, on the wrong side (s466 fix
+      // round 1: a client-side default such as `= @n` lowered here read an
+      // untransported `_scrml_body["n"]`).
+      const _paramDefaults = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOpts, fnNode, _atReadingServerFns);
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(serverBodyParamLine(paramNames[i], _paramDefaults[i] ?? null, "    "));
       }
@@ -5752,7 +5749,7 @@ function generateServerJsImpl(
 
       // §7.3.2 (s466) — an omitted argument takes its parameter's default
       // (mirror of the CSRF path above).
-      const _paramDefaultsNonCsrf = serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode.span);
+      const _paramDefaultsNonCsrf = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode, _atReadingServerFns);
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(serverBodyParamLine(paramNames[i], _paramDefaultsNonCsrf[i] ?? null, "  "));
       }
@@ -6475,7 +6472,7 @@ function generateServerJsImpl(
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
       // §7.3.2 (s466) — the in-process callable keeps its defaults: a peer call
       // that omits an argument takes the default, exactly as the HTTP route does.
-      const _peerDefaults = serverParamDefaults(_peerInfo.fnNode.params ?? [], filePath, _peerOpts, _peerInfo.fnNode.span);
+      const _peerDefaults = serverParamDefaults(_peerInfo.fnNode.params ?? [], filePath, _peerOpts, _peerInfo.fnNode, _atReadingServerFns);
       const _peerSig = _peerInfo.paramNames.map((n, i) => serverParamSignature(n, _peerDefaults[i] ?? null));
       lines.push(`async function ${_peerName}(${_peerSig.join(", ")}) {`);
       // F4 (documented limitation per upstream review): a server-mode `@cell`
@@ -7094,7 +7091,7 @@ function generateServerJsImpl(
         ...localMapSetOptsFor(fnNode),
       };
       // §7.3.2 (s466) — the handler keeps its parameter defaults.
-      const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode.span);
+      const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode, _atReadingServerFns);
       const _wsSig = wsParamNames.map((n, i) => serverParamSignature(n, _wsDefaults[i] ?? null));
       lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
       lines.push(`function ${name}(${_wsSig.join(", ")}) {`);

@@ -632,6 +632,25 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
  */
 export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap: Map<string, string> } {
   const { filePath, routeMap, depGraph, errors, csrfEnabled } = ctx;
+  // §7.3.2 (s466 fix round 1) — a CLIENT function's parameter default (a client
+  // function, or a CPS-split function's client wrapper, which is the function the
+  // caller calls). Lowered in client mode by the one helper; the file's client
+  // async facts decide what needs an await (a server call, a client async peer, an
+  // async stdlib export). The parameters shadow outer names.
+  const clientParamDefault = (p: unknown, fnNode: ASTNode): string | null => {
+    const ps = ((fnNode.params as unknown[]) ?? []);
+    const names = ps.map((q, i) => paramName(q as Param, i));
+    return emitParamDefault(p, filePath, {
+      boundary: "client",
+      declaredNames: new Set<string>(names),
+      insideFunctionBody: true,
+      ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
+    }, {
+      fnName: typeof fnNode.name === "string" ? fnNode.name : "<anonymous>",
+      fnSpan: fnNode.span,
+      asyncFacts: clientAsyncFactsOf(ctx),
+    });
+  };
   // S89 §13.2 Sub-Phase B Step 3 — pre-compute per-file `callee → sourceModule`
   // resolver map ONCE for the file. The auto-await classifier consults this
   // map per call site to decide whether the callee is a stdlib `Promise<T>`-
@@ -1169,7 +1188,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // client mode: the wrapper runs in the browser, where a CPS function's cell
     // reads are legitimate (§6.6.9 CPS carve-out).
     const cpsParamSigs = params.map((p: Param, i: number) => {
-      const d = emitParamDefault(p, filePath, { boundary: "client", declaredNames: new Set<string>(), insideFunctionBody: true }, fnNode.span);
+      const d = clientParamDefault(p, fnNode);
       return d === null ? paramNames[i] : `${paramNames[i]} = ${d}`;
     });
     lines.push(`async function ${wrapperName}(${cpsParamSigs.join(", ")}) {`);
@@ -1497,10 +1516,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
     // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
     const paramNames = params.map((p: Param, i: number) => paramName(p, i));
-    // §7.3.2: function-decl signatures carry `name = defaultValue` when defaults are present.
-    // A5-FUP: paramSignature also handles DestructurePattern names (emits valid JS
-    // destructuring bindings via emit-destructure-pattern.ts).
-    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i));
+    // §7.3.2: function-decl signatures carry `name = <lowered default>` — the one
+    // lowering every function's defaults go through (emit-logic.ts
+    // `emitParamDefault`, s466 fix round 1: client mode lowers `not`, `.Variant`
+    // and `@cell` reads instead of splicing the scrml text). A5-FUP: paramSignature
+    // also handles DestructurePattern names (emit-destructure-pattern.ts).
+    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i, clientParamDefault(p, fnNode)));
 
     // Seam-A colorless-async Gap 2 (GITI-037) — the `async` prefix now reads the
     // TRANSITIVE fixpoint (`_clientAsyncFnNames`) rather than the flat per-fn

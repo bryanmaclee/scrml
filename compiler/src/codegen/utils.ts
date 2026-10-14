@@ -348,8 +348,9 @@ export const HTML_BOOLEAN_ATTRS = new Set<string>([
  * the pattern back to JS via emitDestructurePatternText.
  *
  * Param.defaultValue, when present, is the RAW source text of the default
- * expression (`"0"`, `"start"`, `'"hello"'`, `"() => 42"`). It compiles
- * directly into the emitted JS via `${name} = ${defaultValue}` per §7.3.2.
+ * expression (`"0"`, `"start"`, `'"hello"'`, `"() => 42"`) — scrml, not
+ * JavaScript. It is lowered by `emitParamDefault` (emit-logic.ts) and the
+ * lowered text is what `paramSignature` writes (§7.3.2, s466).
  */
 export type ParamLike = string | {
   name?: unknown;
@@ -397,18 +398,16 @@ export function paramName(p: ParamLike, i: number): string {
  *
  * @param p the param entry from `fnNode.params`
  * @param i the param's index in the list (for synthesizing `_scrml_arg_N`)
- * @param loweredDefault s466 — the default ALREADY LOWERED to JavaScript by the
- *   caller (`emitParamDefault`), or `null` for none. Omitted (`undefined`), the
- *   default's raw source text is spliced as before.
+ * @param loweredDefault s466 — the default ALREADY LOWERED to JavaScript by
+ *   `emitParamDefault` (emit-logic.ts), or `null` for none. There is no raw-text
+ *   path: a default's source text is scrml, not JavaScript (`k = not`,
+ *   `c = .Green`), and splicing it verbatim shipped invalid or wrong code
+ *   (s466 fix round 1 — every caller lowers through the one helper).
  */
-export function paramSignature(p: ParamLike, i: number, loweredDefault?: string | null): string {
+export function paramSignature(p: ParamLike, i: number, loweredDefault: string | null): string {
   if (typeof p === "string") return p.split(":")[0].trim();
   const rest = p.isRest ? "..." : "";
-  const def = loweredDefault !== undefined
-    ? (loweredDefault === null ? "" : ` = ${loweredDefault}`)
-    : typeof p.defaultValue === "string" && p.defaultValue.trim().length > 0
-      ? ` = ${p.defaultValue}`
-      : "";
+  const def = loweredDefault === null ? "" : ` = ${loweredDefault}`;
   // A5-FUP: structured destructure-pattern in `p.name`. Serialize via the
   // shared codegen helper (also used by emit-logic / emit-control-flow /
   // emit-lift for let/const/for-stmt destructuring).

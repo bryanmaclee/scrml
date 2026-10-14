@@ -33,7 +33,7 @@ import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
-import { emitLogicNode } from "./emit-logic.js";
+import { emitLogicNode, emitParamDefault } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs, localServerImportNameUsed } from "./emit-server.ts";
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
@@ -200,10 +200,19 @@ function collectServeImportReachabilitySrc(fileAST: ASTNode): string {
 }
 
 /** Format ONE tool function-declaration parameter: strip its `:Type`, keep a
- *  `= default` and a `...rest` prefix. Falls back to paramSignature for
- *  structured (destructured) params. */
-function toolParamSignature(p: unknown, i: number): string {
-  if (typeof p !== "string") return paramSignature(p as never, i);
+ *  `= default` and a `...rest` prefix. A structured param (every param the
+ *  parser builds) goes through paramSignature with its default lowered by the one
+ *  helper (emit-logic.ts `emitParamDefault`, s466 fix round 1); the legacy string
+ *  form carries no structured default. */
+function toolParamSignature(p: unknown, i: number, fn: ASTNode, emitOpts: unknown, asyncFnNames: ReadonlySet<string>): string {
+  if (typeof p !== "string") {
+    const sp = fn.span as { file?: unknown } | undefined;
+    const names = ((fn.params ?? []) as unknown[]).map((q) => (q && typeof q === "object" && typeof (q as { name?: unknown }).name === "string") ? (q as { name: string }).name : null).filter((n): n is string => n !== null);
+    const o = emitOpts as { declaredNames?: Set<string> };
+    const opts = { ...o, declaredNames: new Set<string>([...(o.declaredNames ?? []), ...names]) };
+    const d = emitParamDefault(p, typeof sp?.file === "string" ? sp.file : "", opts as never, { fnName: String(fn.name ?? "anon"), fnSpan: fn.span, asyncNames: asyncFnNames });
+    return paramSignature(p as never, i, d);
+  }
   const s = p.trim();
   const colon = s.indexOf(":");
   if (colon < 0) return s; // no type annotation (may carry `= default` / `...rest`)
@@ -717,7 +726,7 @@ export function generateToolJs(
       const name = (stmt.name ?? "anon") as string;
       if (name === "main") mainFn = stmt;
       const params = (stmt.params ?? []) as unknown[];
-      const paramList = params.map((p, i) => toolParamSignature(p, i)).join(", ");
+      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, emitOpts, asyncFnNames)).join(", ");
       const star = stmt.isGenerator ? "*" : "";
       const asyncPrefix = asyncFnNames.has(name) ? "async " : "";
       bodyLines.push(`${asyncPrefix}function${star} ${name}(${paramList}) {`);
@@ -933,7 +942,7 @@ function generateServeHarnessToolJs(
       // The headless already emits route fns + private/value-export helpers.
       if (name !== "main" && (isRouteFn(stmt) || headlessDefinesFn(name))) continue;
       const params = (stmt.params ?? []) as unknown[];
-      const paramList = params.map((p, i) => toolParamSignature(p, i)).join(", ");
+      const paramList = params.map((p, i) => toolParamSignature(p, i, stmt, emitOpts, asyncFnNames)).join(", ");
       const star = stmt.isGenerator ? "*" : "";
       const asyncPrefix = asyncFnNames.has(name) ? "async " : "";
       extraLines.push(`${asyncPrefix}function${star} ${name}(${paramList}) {`);

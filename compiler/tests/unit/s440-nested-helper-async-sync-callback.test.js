@@ -159,7 +159,6 @@ describe("nested async helper where `await` is impossible → E-SERVER-FN-IN-SYN
     ["by-reference `.sort(inner)`", `${NESTED}\n  const r = [3, 1, 2].sort(inner)`, 5],
     ["a sync lambda calling the helper", `${NESTED}\n  const f = (x) => inner(x)\n  const r = f(1)`, 5],
     ["TRANSITIVE chain in a `.sort` comparator", `function b(x) { return isOk(x) }\n  function inner(x) { return b(x) }\n  const r = [3, 1, 2].sort((a, c) => inner(a) ? -1 : 1)`, 6],
-    ["a nested fn's parameter default", `${NESTED}\n  function g(y = inner(1)) { return y }\n  const r = g()`, 5],
   ];
   for (const [side, compile] of SIDES) {
     for (const [label, body, line] of cases) {
@@ -171,6 +170,18 @@ describe("nested async helper where `await` is impossible → E-SERVER-FN-IN-SYN
         expect(e.span.line).toBe(line);
       });
     }
+  }
+  // s466 fix round 1 — a nested fn's PARAMETER DEFAULT is refused where every
+  // default is (emit-logic.ts emitParamDefault), under E-PARAM-DEFAULT-AWAIT, at
+  // the default's own line, once — the callback code no longer applies to it.
+  for (const [side, compile] of SIDES) {
+    test(`${side}: a nested fn's parameter default → E-PARAM-DEFAULT-AWAIT`, () => {
+      const o = compile(`${NESTED}\n  function g(y = inner(1)) { return y }\n  const r = g()`);
+      expect(o.codes).toEqual(["E-PARAM-DEFAULT-AWAIT"]);
+      const e = o.errors.find((x) => x.code === "E-PARAM-DEFAULT-AWAIT");
+      expect(e.span.line).toBe(5);
+      expect(e.message).toContain("`inner`");
+    });
   }
   test("the message names the helper AND the server fn it is async through", () => {
     const o = clientApp(`${NESTED}\n  const r = [3, 1, 2].sort((a, c) => inner(a) ? -1 : 1)`);
