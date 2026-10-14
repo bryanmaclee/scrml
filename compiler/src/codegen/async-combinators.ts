@@ -28,7 +28,7 @@
  * `callbackReachesAsync` detector without an import cycle.
  */
 
-import { localCalleeOf, localFnRefOf, BOUND_CALLEE_MARK } from "./local-async-fns.ts";
+import { localCalleeOf, localFnRefOf } from "./local-async-fns.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -221,6 +221,40 @@ export const KNOWN_DISCARD_HOF: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * S466 r7 (HIGH-B root fix) — THE one answer to "is this callee the GLOBAL fire-and-forget
+ * scheduler?". SPEC §13.2: "The scheduler is global only when the file neither binds its
+ * name in any form (a declaration of any pattern shape, a parameter, a function, class or
+ * method name, a catch parameter, an import alias, an object-literal key) nor writes it
+ * (…); otherwise no exemption is given (fail closed)."
+ *
+ * The file's binding set is `schedulerNamesNotProvablyGlobal(fileAST)` (js-async-analysis.ts
+ * — every binding, key or write of a scheduler name anywhere in the file, structured AST and
+ * code text alike), installed ONCE per file by codegen/index.ts. Before r7 four readers
+ * decided it by name, each with its own shadow test: emit-expr's lowering asked the
+ * enclosing scope's `declaredNames` (a file-scope `function setTimeout` was not in it — the
+ * lambda was re-emitted async, the user function's return not awaited: a wrong password
+ * accepted), the drain and the escape rule read a per-call mark set by a pre-pass that did
+ * not run on every path, and the module-value escape scan (fn-valued-bindings.ts) had its
+ * own name list and no shadow test at all. All of them now ask `isGlobalSchedulerCallee`.
+ *
+ * No file installed (an emitter driven outside codegen) → NOT the global scheduler: fail
+ * closed.
+ */
+let _fileSchedulerBindings: ReadonlySet<string> | null = null;
+
+/** Install (or clear with `null`) the current file's scheduler-name bindings. */
+export function setFileSchedulerBindings(names: ReadonlySet<string> | null): void {
+  _fileSchedulerBindings = names;
+}
+
+/** Is a bare call to `name` a call of the GLOBAL fire-and-forget scheduler (§13.2)? */
+export function isGlobalSchedulerCallee(name: string): boolean {
+  if (!KNOWN_DISCARD_HOF.has(name)) return false;
+  if (_fileSchedulerBindings === null) return false;
+  return !_fileSchedulerBindings.has(name);
+}
+
+/**
  * Is `node` a BARE-IDENT call to a KNOWN-DISCARD-HOF global with at least one
  * lambda argument whose body reaches an async call? True → emit-expr re-emits that
  * lambda async, and the fail-closed drain must walk the callback body as AWAITABLE
@@ -238,11 +272,9 @@ export function isKnownDiscardHofCall(
   if (n.kind !== "call" || n.optional) return false;
   const callee = n.callee as ASTNode | undefined;
   if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return false;
-  if (!KNOWN_DISCARD_HOF.has(callee.name)) return false;
-  // s441 fix round — a scheduler NAME bound by the program (a local or file-scope
-  // `function setTimeout(f) { return f() }`, an import, a param) is not the global
-  // scheduler and does not discard the return (marked by the lexical pre-pass).
-  if (n[BOUND_CALLEE_MARK] === true) return false;
+  // A scheduler NAME the file binds in any form is not the global scheduler and does
+  // not discard the return (S466 r7 — the one predicate).
+  if (!isGlobalSchedulerCallee(callee.name)) return false;
   const args = n.args as unknown[] | undefined;
   if (!Array.isArray(args) || args.length < 1) return false;
   return args.some(

@@ -1160,3 +1160,24 @@ export function serverVarDeclLoadKind(
   }
   return "sql-load";
 }
+
+/**
+ * Collect the top-level logic-block body statements, in source order (every `${ }`
+ * block of the file, at any markup depth — not descending into function bodies).
+ * Moved here from emit-tool.ts (S466 r7) so file-async-fns.ts can read it without
+ * loading the tool emitter (whose module-level constants read emit-server's).
+ */
+export function collectTopLevelStatements(fileAST: any): any[] {
+  const stmts: any[] = [];
+  const nodes = (getNodes(fileAST as never) ?? []) as unknown as any[];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as any;
+    if (n.kind === "logic" && Array.isArray(n.body)) {
+      for (const s of n.body) if (s) stmts.push(s);
+    }
+    if (Array.isArray(n.children)) for (const c of n.children) visit(c);
+  };
+  for (const n of nodes) visit(n);
+  return stmts;
+}

@@ -53,7 +53,8 @@ import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emit
 import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
-import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits, asyncLocalBindingsOfFile } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
+import { asyncFnNamesOfFile, asyncByBodyOf } from "./file-async-fns.ts";
 import type { CalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1105,33 +1106,16 @@ function emitModuleValueExportLines(
   // transitively CALLS one (an orchestrator `report()` calling a `?{}`-doing
   // `loadRows()`), is `async` and awaits its async callees — else the callee's
   // Promise leaks un-awaited (`rows` is a Promise, `rows.length` is undefined).
-  const _sourceText = ((fileAST as any)?._sourceText ?? null) as string | null;
-  // W5b (S239) — the CROSS-IMPORT async seed (LOCAL names binding an async fn
-  // imported from another lib), stashed on the fileAST by codegen/index.ts (which
-  // has the build's `files`). Parity with the tool path: without it, a
-  // server-exported fn that only transitively calls a cross-lib async import via
-  // its imported local is emitted sync → the callee's Promise leaks un-awaited.
-  // S465 r6 — plus this file's async function-valued bindings (`const inner = …`): an
-  // exported function calling one is async and awaits it.
-  const asyncImportedSeed = new Set<string>([
-    ...(((fileAST as any)?._asyncImportedLocals as Set<string> | undefined) ?? []),
-    ...asyncLocalBindingsOfFile(fileAST),
-  ]);
-  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
-  // value-exported fn calling `safeCallAsync` (or a `scrml:auth`/`http`/`redis`
-  // async export) is seeded async + its call awaited. `buildCalleeImportMap` reads
-  // `.imports` off the FileAST; the TABResult wrapper hoists imports to
-  // `.ast.imports`, so fall back to `.ast` when present (mirrors :1096).
-  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
-  // S465 — the server map carries the cross-module async facts (see buildServerCalleeImportMap).
+  //
+  // S466 r7 (HIGH-A root fix) — the value exports no longer run their OWN fixpoint
+  // over the EXPORTED functions alone (a non-exported helper `function inner(p, h) {
+  // return verifyPassword(p, h) }` was invisible to it: `export function check` shipped
+  // sync with `if (!inner(p, h))` — a Promise, always truthy). They read THE file's
+  // async name set (file-async-fns.ts, computed once by codegen/index.ts over every
+  // file-scope function, binding, server function and async import): the same set that
+  // told every importer `check` is async.
   const _veCalleeMap = buildServerCalleeImportMap(fileAST);
-  const asyncFnNames = computeAsyncFnNames(
-    Array.from(fnDeclByName.values()) as any[],
-    _sourceText,
-    asyncImportedSeed,
-    _veCalleeMap,
-    exportRegistry ?? null,
-  );
+  const asyncFnNames = asyncFnNamesOfFile(fileAST);
   // s440 — nested helpers inside a value-exported fn (same facts as the lowering).
   // s441 — the same pass collects every async fn used as a VALUE (S440 F4).
   const _veEscapes: AsyncEscapeSite[] = [];
@@ -1213,7 +1197,12 @@ function emitModuleValueExportLines(
         if (isAlreadyDeclared(name)) continue;
         const fnNode = fnDeclByName.get(name);
         if (!fnNode || !Array.isArray(fnNode.body)) continue;
-        const isAsync = asyncFnNames.has(name);
+        // S466 r7 — the export's OWN signature is async when its body is (it does `?{}` or
+        // reaches anything async — a helper, a peer, an import: `asyncByBodyOf`); a server
+        // function that is in the file set only as itself keeps its pre-r7 sync value
+        // copy (an importer's `await` of it is harmless). Its body's call sites read the
+        // whole set (a call to an async peer is awaited).
+        const isAsync = asyncByBodyOf(asyncFnNames).has(name);
         // W5b / D5 GENERALIZE — an ASYNC fn (its body does `?{}` SQL / `_{}`, OR it
         // transitively CALLS one) emits as a REAL IN-PROCESS callable: the `?{}`
         // lowers SERVER-boundary to `await _scrml_sql\`…\`` against the module's OWN
@@ -1234,7 +1223,7 @@ function emitModuleValueExportLines(
         if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
         // boundary rule as the tool-dep `generateToolLibraryJs`.
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames }));
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, ownAsync: isAsync }));
         continue;
       }
 
@@ -1512,14 +1501,14 @@ function planModuleBindingClosure(
   exportedValues: ExportedModuleValue[] = [],
   /** Identifier tokens of the code this file runs CLIENT-side (N3). */
   clientTokens: Set<string> = new Set(),
-  // S465 r6 — the server await facts: an ASYNC function-valued binding (codegen/index.ts
-  // `_asyncLocalBindings`: `const w = (a, b) => check(a, b)`) is emitted `async`, every
-  // call in its body classified (awaited), exactly as a function declaration with the
-  // same body; its callers await it (buildServerCalleeImportMap).
+  // S465 r6 — the server await facts: an ASYNC function-valued binding (`const w = (a,
+  // b) => check(a, b)`) is emitted `async`, every call in its body classified (awaited),
+  // exactly as a function declaration with the same body; its callers await it
+  // (buildServerCalleeImportMap). S466 r7 — "async" is THE file's set (file-async-fns.ts).
   asyncCalleeMap: CalleeImportMap | null = null,
   asyncExportRegistry: ServerExportRegistry | null = null,
 ): { before: string[]; after: string[]; decls: UserModuleDecl[] } {
-  const asyncBindings = asyncLocalBindingsOfFile(fileAST);
+  const asyncBindings = asyncFnNamesOfFile(fileAST);
   // 1. File-scope bindings, in source order.
   const bindings: D5Binding[] = [];
   const byName = new Map<string, D5Binding>();
@@ -1721,7 +1710,7 @@ function planModuleBindingClosure(
           continue;
         }
       }
-      const _isAsyncBinding = b.names.length === 1 && asyncBindings.has(b.names[0]);
+      const _isAsyncBinding = b.names.length === 1 && asyncByBodyOf(asyncBindings).has(b.names[0]);
       const code = emitLogicNode(_isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
         boundary: "server" as const,
         insideFunctionBody: true,

@@ -363,7 +363,8 @@ describe("C — every position: no placeholder reaches the artifact; the §42 lo
     expect(out.errors.map((e) => e.code)).toEqual([]);
     // S465 r4: the server statement holding a call is lowered from the tree (no
     // longer from text), so the callback is emitted by the statement emitter.
-    expect(out.serverJs).toMatch(/filter\(function \( v \) \{\s*return \(v !== null && v !== undefined\);?\s*\}\)/);
+    // S466 r7: the parameter list comes from the parser's node too (`function(v)`).
+    expect(out.serverJs).toMatch(/filter\(function ?\( ?v ?\) \{\s*return \(v !== null && v !== undefined\);?\s*\}\)/);
     expect(out.serverJs).not.toMatch(PLACEHOLDER);
     expect(out.clientJs).not.toMatch(PLACEHOLDER);
   });

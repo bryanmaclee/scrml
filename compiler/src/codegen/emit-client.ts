@@ -32,7 +32,8 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
-import { _clientServerFnNames, _clientSseFnNames, asyncLocalBindingsOfFile } from "./scheduling.ts";
+import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
 import { moduleScopeReferences } from "./module-scope-refs.ts";
 import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
@@ -4540,7 +4541,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // declaration is refused (fail closed) until the client colours it; a `function`
   // declaration with the same body is coloured on both sides.
   clientStage(ctx, "post-async-binding-scan", () => {
-    const _asyncBindings = asyncLocalBindingsOfFile(ctx.fileAST as never);
+    const _asyncBindings = asyncFnValuedBindingsOfFile(ctx.fileAST as never);
     if (_asyncBindings.size === 0) return;
     // Scope-aware (module-scope-refs.ts): a parameter or inner declaration named like
     // the binding (an inlined stdlib helper's `(w) => …`) is not a use. A bundle that does

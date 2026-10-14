@@ -55,10 +55,11 @@ import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
+import { iterDestructuredNames } from "../type-system.ts";
 import { lowerPresenceCheck, lowerAbsenceCheck, lowerVariantCheck } from "./is-predicate-lowering.ts";
 import { parseExprToNode, splitTopLevelCommas, guardCallArmsRaw, droppedStatementTextOf, hasLostTrailingContent } from "../expression-parser.ts";
 import { sqlQueryExprShape, type SqlQueryExprShape } from "./sql-attempt.ts";
-import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText } from "./emit-logic.js";
+import { emitSqlQueryShape, emitNestedGuardExpr, emitServerFnValueFromText, emitServerFnValue } from "./emit-logic.js";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 // Issue #26 (P0 auth-bypass) — stdlib async classifier for the SERVER-mode
 // expression-level auto-await in emitCall. module-resolver.js imports only node
@@ -70,7 +71,7 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, isGlobalSchedulerCallee, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
 import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
@@ -4073,14 +4074,14 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // as the combinator branch does. The HOF call ITSELF is NOT awaited (it returns a
   // timer id, not a Promise). A member callee (`obj.setTimeout`) never matches — the
   // discard semantics are only known for the globals; a shadowing local is excluded
-  // via `declaredNames`. NON-async-lambda args (the delay/options) emit unchanged, so
+  // by the one file-level predicate `isGlobalSchedulerCallee` (S466 r7, §13.2 — any binding
+  // of the name anywhere in the file withdraws the exemption). NON-async-lambda args (the delay/options) emit unchanged, so
   // the common `setTimeout(() => syncFn(), 0)` is byte-identical.
   if (
     node.callee.kind === "ident" &&
     !node.optional &&
     typeof node.callee.name === "string" &&
-    KNOWN_DISCARD_HOF.has(node.callee.name) &&
-    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)) &&
+    isGlobalSchedulerCallee(node.callee.name) &&
     node.args.length >= 1
   ) {
     const isAsyncName = (nm: string) => combinatorIsAsyncName(nm, ctx);
@@ -4840,6 +4841,25 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
   return `${asyncPrefix}(${params}) => { /* block body */ }`;
 }
 
+/**
+ * S466 r7 (MED-D) — the parameter list of a block-bodied function VALUE, from the
+ * expression parser's own structured parameters (`EscapeHatchExpr.params`, acorn-
+ * delimited) — never re-read from text. `names` are the bound parameter names (a
+ * destructured parameter's too). Defaults are emitted from their trees in a never-
+ * awaitable context (`await` is illegal in a parameter list).
+ */
+export function emitFnValueParams(params: LambdaParam[], ctx: EmitExprContext): { text: string; names: string[] } {
+  const names: string[] = [];
+  for (const p of params) {
+    if (p.name === "__destructured__" && p.pattern) {
+      for (const n of iterDestructuredNames(p.pattern as never)) names.push(n);
+    } else if (typeof p.name === "string" && p.name) names.push(p.name);
+  }
+  const declared = new Set<string>([...(ctx.declaredNames ?? []), ...names]);
+  const paramCtx: EmitExprContext = { ...ctx, declaredNames: declared, peerAwaitable: false };
+  return { text: params.map((p) => emitLambdaParam(p, paramCtx)).join(", "), names };
+}
+
 function emitLambdaParam(param: LambdaParam, ctx: EmitExprContext): string {
   let name = param.name;
   if (name === "__destructured__") {
@@ -5206,7 +5226,13 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     // cannot be read that way falls to the guarded text path below (refused when it
     // holds a call — never shipped sync).
     if (isArrowOrFn && (node as { _asyncFnValue?: boolean })._asyncFnValue === true) {
-      const fn = emitServerFnValueFromText(node.raw, ctx, { async: true });
+      const fn = emitServerFnValue(node, ctx, { async: true });
+      if (fn !== null) return fn;
+    }
+    // S466 r7 (MED-D) — a block-bodied function value is lowered from THIS node (acorn's
+    // parameters and body), not from a re-read of its text.
+    if (isArrowOrFn && lexicalCallInText(node.raw) !== null) {
+      const fn = emitServerFnValue(node, ctx);
       if (fn !== null) return fn;
     }
     // Everything else on this path is lowered from text: refused when it calls

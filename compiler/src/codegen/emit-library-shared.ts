@@ -22,7 +22,7 @@ import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, isSyncCallbackConsumerCall } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, isGlobalSchedulerCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (marks set by `annotateLocalAsyncFns`).
 import {
@@ -34,7 +34,6 @@ import {
   anchorDiagnosticSpan,
   localSyncShadowOf,
   rawAsyncUsesOf,
-  BOUND_CALLEE_MARK,
 } from "./local-async-fns.ts";
 import type { AsyncRoot, AsyncEscapeSite, RawAsyncUses } from "./local-async-fns.ts";
 // s441 — scope-aware analysis of raw JS fragments (FP1) and of emitted handler /
@@ -558,9 +557,8 @@ export function asyncFnArgRole(call: ASTNode, index: number): "allowed" | "own-c
   }
   // Only the GLOBAL scheduler discards the return: a program-bound
   // `function setTimeout(f) { return f(x) }` (local, file-scope, import, param)
-  // hands the Promise back — s441 fix round, the reviewer's accept-all.
-  if (callee && callee.kind === "ident" && typeof callee.name === "string" && KNOWN_DISCARD_HOF.has(callee.name) &&
-      call[BOUND_CALLEE_MARK] !== true) {
+  // hands the Promise back (S466 r7 — the one predicate, §13.2).
+  if (callee && callee.kind === "ident" && typeof callee.name === "string" && isGlobalSchedulerCallee(callee.name)) {
     return "allowed";
   }
   return "escape";
@@ -1127,10 +1125,12 @@ export function collectNonAwaitableAsyncCalls(
  */
 export function emitLibraryFnMember(
   fnNode: ASTNode,
-  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean },
+  // S466 r7 — `ownAsync` overrides the signature decision (the ss1 block passes the
+  // file set's by-body part; the set itself still decides every call site's await).
+  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean; ownAsync?: boolean },
 ): string {
   const name = (fnNode.name ?? "anon") as string;
-  const ownAsync = opts.asyncFnNames.has(name);
+  const ownAsync = opts.ownAsync ?? opts.asyncFnNames.has(name);
   // Q1 — the OWN signature carries `async` only when the fn's own body awaits.
   const signatureAsync = ownAsync;
   // Q2 — the body lowers server-side when it is async OR merely holds a nested

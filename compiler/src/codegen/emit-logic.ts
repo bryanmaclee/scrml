@@ -3,15 +3,14 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
-import { splitFnValueText } from "./fn-valued-bindings.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
-import { isWholeBraceBlock, lexicalCallInText } from "../brace-pair.ts";
+import { isWholeBraceBlock } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
@@ -1306,13 +1305,46 @@ function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
  * parser refuses. Returns the JS function text, or null.
  */
 export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opts: { async?: boolean } = {}): string | null {
-  const split = splitFnValueText(raw);
-  if (!split) return null;
-  const { head, body } = split;
-  const fnM = split.isFunctionKeyword;
-  // The head is kept as written: only a plain parameter list (no annotation, no call).
-  if (!/^[\s\w$,()[\]{}.=]*$/.test(head.replace(/^function\b/, "")) || lexicalCallInText(head) !== null) return null;
+  // S466 r7 (MED-D) — the text (a caller that holds no node) is read by the expression
+  // parser; head and body come from ITS node, never from a hand split of the text.
+  let node: unknown = null;
+  try { node = parseExprToNode(String(raw ?? "").trim(), "<server-fn-value>", 0); } catch { node = null; }
+  return emitServerFnValue(node, ctx, opts);
+}
+
+/**
+ * S466 r7 (MED-D) — `emitServerFnValueFromText` from the expression parser's NODE: a
+ * block-bodied arrow / function expression is an escape hatch that carries acorn's own
+ * structured parameters (`params`, defaults as trees) and its body as acorn delimited it
+ * (`bodyRaw`). Before r7 the head and body were found by a text split (the first `=>`,
+ * paren counting that did not skip strings) and the head was re-checked with a regex:
+ * `function (a, s = ")") { … }`, `(a, k = (x) => x) => { … }` and `(a, s = "=>") => { … }`
+ * were refused as unreadable (Rule 7: don't ask the text what the tree already knows).
+ */
+export function emitServerFnValue(hatchNode: unknown, ctx: EmitExprContext, opts: { async?: boolean } = {}): string | null {
+  const hatch = hatchNode as { kind?: string; nativeKind?: string; params?: unknown; bodyRaw?: unknown; fnName?: unknown; raw?: unknown } | null;
+  if (!hatch || hatch.kind !== "escape-hatch") return null;
+  if (hatch.nativeKind !== "ArrowFunctionExpression" && hatch.nativeKind !== "FunctionExpression") return null;
+  if (!Array.isArray(hatch.params) || typeof hatch.bodyRaw !== "string") return null;
+  if (/^\s*async\b/.test(String(hatch.raw ?? ""))) return null; // an author-written `async` value: not scrml
+  const fnM = hatch.nativeKind === "FunctionExpression";
+  const body = hatch.bodyRaw;
   if (!isWholeBraceBlock(body)) return null;
+  const emittedParams = emitFnValueParams(hatch.params as never, ctx);
+  // A default the lowering had to await cannot be written in a parameter list (decided
+  // on the syntax of the emitted head: `await` is reserved in a module function head).
+  if (!parsesAsSyncFunctionBody(`(function (${emittedParams.text}) {});`)) {
+    recordRefusedLowering(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      "a parameter default of this function value calls an async function — its result must be awaited " +
+        "(§13.2), and a parameter default cannot await. Give the parameter no default and compute the value " +
+        "as the function body's first statement.",
+      currentLoweringSpanForFnValue(),
+    ), null);
+    return REFUSED_SERVER_TEXT;
+  }
+  const fnName = typeof hatch.fnName === "string" && hatch.fnName ? ` ${hatch.fnName}` : "";
+  const head = fnM ? `function${fnName}(${emittedParams.text})` : `(${emittedParams.text})`;
   const r = body.slice(1, -1).trim() ? armBlockStatementsDetailed(body) : { ok: true as const, stmts: [] };
   if (!r) return null;
   if (!r.ok) {
@@ -1345,9 +1377,8 @@ export function emitServerFnValueFromText(raw: string, ctx: EmitExprContext, opt
     return REFUSED_SERVER_TEXT;
   }
   const base = _logicOptsFromExprCtx(ctx);
-  const params = new Set<string>();
-  for (const m of head.replace(/^function\s*[A-Za-z_$][\w$]*/, "").matchAll(/[A-Za-z_$][\w$]*/g)) params.add(m[0]);
-  const declared = new Set<string>([...((base.declaredNames as Set<string> | undefined) ?? []), ...params]);
+  const declared = new Set<string>([...((base.declaredNames as Set<string> | undefined) ?? []), ...emittedParams.names]);
+  if (fnName) declared.add(fnName.trim());
   const lines = emitLogicBody(r.stmts, {
     ...base,
     boundary: "server",

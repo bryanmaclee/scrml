@@ -22,6 +22,7 @@
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
+import { isGlobalSchedulerCallee } from "./async-combinators.ts";
 
 export interface FnValuedBinding {
   name: string;
@@ -35,30 +36,6 @@ export interface FnValuedBinding {
   readable: boolean;
 }
 
-/**
- * Split a function VALUE's text (`(a, b) => { … }`, `function (q) { … }`, `x => x + 1`)
- * into its head (parameter list, with `function NAME`) and body text. Null when the text
- * is not a function value the split can read.
- */
-export function splitFnValueText(raw: string): { head: string; body: string; isFunctionKeyword: boolean } | null {
-  const t = String(raw ?? "").trim();
-  const fnM = /^function\b\s*([A-Za-z_$][\w$]*)?\s*\(/.exec(t);
-  if (fnM) {
-    const open = fnM[0].length - 1;
-    let depth = 0;
-    let close = -1;
-    for (let j = open; j < t.length; j++) {
-      if (t[j] === "(") depth++;
-      else if (t[j] === ")") { depth--; if (depth === 0) { close = j; break; } }
-    }
-    if (close < 0) return null;
-    return { head: t.slice(0, close + 1), body: t.slice(close + 1).trim(), isFunctionKeyword: true };
-  }
-  const arrow = t.indexOf("=>");
-  if (arrow < 0) return null;
-  return { head: t.slice(0, arrow).trim(), body: t.slice(arrow + 2).trim(), isFunctionKeyword: false };
-}
-
 type AnyNode = { kind?: string; [k: string]: unknown };
 
 function isFnValueExpr(e: AnyNode | null | undefined): boolean {
@@ -68,21 +45,19 @@ function isFnValueExpr(e: AnyNode | null | undefined): boolean {
     (e.nativeKind === "ArrowFunctionExpression" || e.nativeKind === "FunctionExpression");
 }
 
-/** The pseudo body of a function value expression: its tree, or null when unreadable. */
+/**
+ * The pseudo body of a function value expression: its tree, or null when unreadable.
+ * S466 r7 (MED-D) — a block-bodied value's body is the one acorn delimited
+ * (`EscapeHatchExpr.bodyRaw`), read by the function-body statement parser; it is never
+ * found by splitting the text (the r6 split took the first `=>` and counted parens
+ * inside strings: `(a, s = "=>") => { … }` was unreadable).
+ */
 function fnValueBody(e: AnyNode): unknown[] | null {
   if (e.kind !== "escape-hatch") return [e];
-  const split = splitFnValueText(String(e.raw ?? ""));
-  if (!split) return null;
-  if (!split.body.startsWith("{")) {
-    // An expression body the parser kept as a hatch only because of the head.
-    try {
-      const n = parseExprToNode(split.body, "<fn-value>", 0) as unknown as AnyNode | null;
-      return n && n.kind !== "escape-hatch" ? [n] : null;
-    } catch { return null; }
-  }
-  if (!isWholeBraceBlock(split.body)) return null;
-  if (!split.body.slice(1, -1).trim()) return [];
-  const r = armBlockStatementsDetailed(split.body);
+  const body = typeof e.bodyRaw === "string" ? e.bodyRaw : null;
+  if (body === null || !isWholeBraceBlock(body)) return null;
+  if (!body.slice(1, -1).trim()) return [];
+  const r = armBlockStatementsDetailed(body);
   return r && r.ok ? r.stmts : null;
 }
 
@@ -124,7 +99,6 @@ export function fnValuedBindingsOf(topStmts: unknown[]): FnValuedBinding[] {
   return out;
 }
 
-const SCHEDULERS = new Set(["setTimeout", "setInterval", "setImmediate", "queueMicrotask", "requestAnimationFrame", "requestIdleCallback"]);
 
 /**
  * S465 r6 — the names in `tree` (an expression node, a statement list, or a function
@@ -155,7 +129,7 @@ export function asyncValueUsesIn(tree: unknown, isAsync: (name: string) => boole
       const args = (Array.isArray(node.args) ? node.args : []) as AnyNode[];
       const method = callee?.kind === "member" && typeof callee.property === "string" ? callee.property : null;
       const isCombinator = method !== null && combinators.has(method);
-      const isScheduler = callee?.kind === "ident" && SCHEDULERS.has(String(callee.name));
+      const isScheduler = callee?.kind === "ident" && isGlobalSchedulerCallee(String(callee.name));
       args.forEach((a, i) => walk(a, (isCombinator && i === 0) || isScheduler));
       return;
     }

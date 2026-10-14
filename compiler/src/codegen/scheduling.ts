@@ -9,6 +9,7 @@ import { replaceLiveSqlInterpolations } from "./sql-lex.ts";
 import { isServerOnlyNode } from "./collect.ts";
 import { resolveModulePath, isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { buildBodyDG } from "../body-dg-builder.ts";
+import { asyncFnValuedBindingsOfFile } from "./file-async-fns.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -132,22 +133,15 @@ export function asyncImportedLocalsOfFile(fileAST: ASTNode | null | undefined): 
  */
 export function buildServerCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
   const out = buildCalleeImportMap(fileAST);
-  const locals = asyncImportedLocalsOfFile(fileAST);
-  // S465 r6 — plus this file's async function-valued top-level bindings
-  // (`const w = (a, b) => check(a, b)`, codegen/index.ts `_asyncLocalBindings`): a
-  // call to one is awaited exactly like a call to an async import.
-  const bindings = asyncLocalBindingsOfFile(fileAST);
-  const all = bindings.size > 0 ? new Set<string>([...locals, ...bindings]) : locals;
+  // S466 r7 — read off THE file's async name set (file-async-fns.ts): its async
+  // imports and its async function-valued bindings (`const w = (a, b) => check(a, b)`).
+  // The set's `function` declarations are not added here: on the server each one is
+  // either an in-process peer (awaited through `serverFnNames`, whose escape facts are
+  // deliberately narrower — #284) or not emitted on the server at all; the ss1 value
+  // exports and the D-5 closure read the full set directly.
+  const all = new Set<string>([...asyncImportedLocalsOfFile(fileAST), ...asyncFnValuedBindingsOfFile(fileAST)]);
   if (all.size > 0) out.asyncImportedLocals = all;
   return out;
-}
-
-/** S465 r6 — the file's async function-valued top-level bindings (stashed by codegen/index.ts). */
-export function asyncLocalBindingsOfFile(fileAST: ASTNode | null | undefined): Set<string> {
-  if (!fileAST) return new Set();
-  const v = (fileAST as { _asyncLocalBindings?: unknown })._asyncLocalBindings
-    ?? ((fileAST as { ast?: { _asyncLocalBindings?: unknown } }).ast)?._asyncLocalBindings;
-  return v instanceof Set ? (v as Set<string>) : new Set();
 }
 
 /**
