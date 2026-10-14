@@ -116,18 +116,39 @@ export function setFileAsyncFnNames(fileAST: unknown, names: Set<string>): void 
 }
 
 /**
- * The file's async name set. Normally the stash codegen/index.ts computed; an emitter
- * driven outside runCG (a unit test) gets the same computation over what the FileAST
- * itself carries (its `server function`s, any stashed async imports; no stdlib registry).
+ * The file's async name set — the stash codegen/index.ts computed.
+ *
+ * S466 r8 — an emitter driven WITHOUT that stash (outside runCG) cannot know which names
+ * are async (no stdlib registry, no imported modules): it FAILS CLOSED, treating every
+ * file-scope function and function-valued binding (and every async import it was told
+ * about) as async — an `await` on a sync value is harmless, a missing one tests a
+ * Promise.
  */
 export function asyncFnNamesOfFile(fileAST: unknown): Set<string> {
   if (!fileAST || typeof fileAST !== "object") return new Set();
   const v = (fileAST as AnyFile)[KEY] ?? ((fileAST as AnyFile).ast as AnyFile | undefined)?.[KEY];
   if (v instanceof Set) return v as Set<string>;
-  return computeFileAsyncFnNames(fileAST, {
-    asyncImportedLocals: asyncImportedLocalsOfFile(fileAST as never),
-    serverFnNames: serverFnNamesOfFile(fileAST, null),
-  });
+  const top = collectTopLevelStatements(fileAST as never) as unknown as AnyFile[];
+  const all = new Set<string>(asyncImportedLocalsOfFile(fileAST as never));
+  for (const st of top) if (st && st.kind === "function-decl" && typeof st.name === "string" && st.name) all.add(st.name);
+  for (const b of fnValuedBindingsOf(top)) all.add(b.name);
+  return all;
+}
+
+/**
+ * S466 r8 (HIGH-1) — THE rule for the declared-name set a MODULE-LEVEL binding is emitted
+ * with, shared by the server D-5 closure and the client's top-level emission. Emitters
+ * use `declaredNames` as the shadow test ("a name declared here is a local, not the
+ * async function of that name"); a module binding is not a local, so an async one must
+ * not appear in it — else `const v = (p, h) => !w(p, h)` reads `w` as a shadowing local
+ * and its call is not awaited (r7 fixed the client copy by hand; the server copy kept the
+ * bug). The binding's own parameters and inner declarations are added by the emitters
+ * as usual, so a real shadow (`const v = (w) => w()`) still shadows.
+ */
+export function moduleLevelDeclaredNames(moduleNames: Iterable<string>, asyncNames: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>();
+  for (const n of moduleNames) if (!asyncNames.has(n)) out.add(n);
+  return out;
 }
 
 /** The file's async FUNCTION-VALUED bindings (`const w = (a) => check(a)`) — the set ∩ the bindings. */

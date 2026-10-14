@@ -1291,6 +1291,13 @@ function _logicOptsFromExprCtx(ctx: EmitExprContext): EmitLogicOpts {
     serverFnNames: ctx.serverFnNames ?? undefined,
     serverFnPeerAliasNames: ctx.serverFnPeerAliasNames ?? undefined,
     serverFnPeerDispatchObjs: ctx.serverFnPeerDispatchObjs ?? undefined,
+    // S466 r8 — the await facts travel too: a function value lowered from an
+    // expression context (the ss1 copy of an async exported binding) awaits its calls.
+    asyncCalleeMap: ctx.asyncCalleeMap ?? undefined,
+    asyncExportRegistry: ctx.asyncExportRegistry ?? undefined,
+    clientAsyncFnNames: ctx.clientAsyncFnNames ?? undefined,
+    clientAsyncBody: ctx.clientAsyncBody ?? undefined,
+    syncPeerCalls: ctx.syncPeerCalls ?? undefined,
   } as EmitLogicOpts;
 }
 

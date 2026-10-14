@@ -54,8 +54,9 @@ import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { asyncFnNamesOfFile, asyncByBodyOf } from "./file-async-fns.ts";
+import { asyncFnNamesOfFile, asyncByBodyOf, moduleLevelDeclaredNames } from "./file-async-fns.ts";
 import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
+import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import type { CalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1182,8 +1183,19 @@ function emitModuleValueExportLines(
         if (init.startsWith("<")) continue;
         // A `?{}`-initialized const is a server-only SQL read, not a pure value.
         if (init.includes("?{")) continue;
-        const initNode = parseExprToNode(init, filePath, 0);
-        const lowered = emitExprField(initNode, init, { mode: "server" });
+        // S466 r8 (HIGH-2) — the builder's parsed init when it has one (Rule 7); an
+        // async function-valued export (in the file's set by its body) is emitted
+        // `async`, its calls awaited, exactly like the D-5 copy of a non-exported one.
+        const initNode = ((stmt as any).valueInitExpr as any) ?? parseExprToNode(init, filePath, 0);
+        const _veAsync = asyncByBodyOf(asyncFnNames).has(name);
+        const lowered = _veAsync
+          ? emitExprField(asyncFnValueDecl({ initExpr: initNode }).initExpr, init, {
+              mode: "server",
+              asyncCalleeMap: _veCalleeMap,
+              asyncExportRegistry: exportRegistry ?? null,
+              serverFnNames: asyncFnNames,
+            } as any)
+          : emitExprField(initNode, init, { mode: "server" });
         const _kw = kind === "var" ? "var" : (kind === "let" ? "let" : "const");
         if (outValues) {
           outValues.push({ name, text: `export ${_kw} ${name} = ${lowered};`, order: (stmt.span?.start ?? 0), initNode });
@@ -1715,7 +1727,8 @@ function planModuleBindingClosure(
       const code = emitLogicNode(_isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
         boundary: "server" as const,
         insideFunctionBody: true,
-        declaredNames: new Set<string>(byName.keys()),
+        // S466 r8 (HIGH-1) — module bindings are not locals (moduleLevelDeclaredNames).
+        declaredNames: moduleLevelDeclaredNames(byName.keys(), asyncBindings),
         ...(_isAsyncBinding ? { asyncCalleeMap, asyncExportRegistry } : {}),
       } as any);
       if (!code) continue;
@@ -7058,6 +7071,7 @@ function generateServerJsImpl(
         typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
       );
       lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
+      const _wsHeadIdx = lines.length;
       lines.push(`function ${name}(${wsParamNames.join(", ")}) {`);
 
       const _wsOwnerChannel = channelFnMap.get(name);
@@ -7100,6 +7114,14 @@ function generateServerJsImpl(
       // change-id progress log.
       if (_wsBodyLines.some(l => l.includes("_scrml_body"))) {
         lines.push(`  const _scrml_body = {};`);
+      }
+      // S466 r8 — a handler whose body awaits at its own level (a call to an async
+      // imported helper, a peer, an async stdlib export — classified like any server
+      // body) is emitted `async`; the WS callbacks await it (emit-channel.ts §19.10.6).
+      // Decided on the emitted body's syntax; was a sync function holding `await`
+      // (E-CODEGEN-INVALID-LOGIC "could not lower this construct").
+      if (bodyTextHasOwnAwait(_wsBodyLines.join("\n")) === true) {
+        lines[_wsHeadIdx] = `async ${lines[_wsHeadIdx]}`;
       }
       for (const l of _wsBodyLines) lines.push(l);
       lines.push(`}`);

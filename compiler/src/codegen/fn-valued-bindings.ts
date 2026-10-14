@@ -28,7 +28,7 @@ export interface FnValuedBinding {
   name: string;
   /** `const` / `let` / `var` — the binding keyword. */
   keyword: string;
-  /** True for an `export const …` (an export-decl, whose init is read from its raw text). */
+  /** True for an `export const …` (an export-decl; its init is the builder-parsed `valueInitExpr`). */
   exported: boolean;
   /** The pseudo function declaration the coloring fixpoint reads. */
   pseudoFn: { kind: "function-decl"; name: string; body: unknown[]; _fnValuedBinding: true };
@@ -79,12 +79,15 @@ export function fnValuedBindingsOf(topStmts: unknown[]): FnValuedBinding[] {
       }
     } else if (s.kind === "export-decl" && (s.exportKind === "const" || s.exportKind === "let" || s.exportKind === "var") &&
       typeof s.exportedName === "string" && !s.reExportSource) {
-      const m = /^\s*export\s+(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*([\s\S]+)$/.exec(String(s.raw ?? ""));
-      if (!m) continue;
+      // S466 r8 (HIGH-2, Rule 7) — the init is the node the AST builder parsed
+      // (`valueInitExpr`, annotated or not), never a regex over `raw`: the r6 regex
+      // could not read past a `: (p: string) => boolean` annotation, so an annotated
+      // exported function value was never coloured async.
+      init = (s.valueInitExpr as AnyNode | undefined) ?? null;
+      if (!init) continue;
       name = s.exportedName;
       keyword = String(s.exportKind);
       exported = true;
-      try { init = parseExprToNode(m[1].trim(), "<fn-value>", 0) as unknown as AnyNode | null; } catch { init = null; }
     }
     if (!name || !isFnValueExpr(init)) continue;
     const body = fnValueBody(init as AnyNode);
