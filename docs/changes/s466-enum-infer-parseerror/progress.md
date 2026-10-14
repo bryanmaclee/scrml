@@ -15,3 +15,12 @@
 - [x] browser suite (not a listed gate): 50 whole-suite failures; the 6 failing files checked
   individually fail IDENTICALLY on base f28b58a31 — pre-existing (env), not this branch
 - [ ] push
+- [x] push (993b4c155) — S239 review: item 1 CLEAN, item 2 FIX (round 1)
+
+## Fix round 1 (S239 review of 993b4c155)
+- merged origin/main 4e8dea5e6 (#1418) — `5548ffb69`; SPEC-INDEX + FACTS regenerated (conflicts were generated docs only)
+- `23414782b` — one existence predicate `isKnownErrorTypeName` (registry + compiler-provided Error/SqlError/ServerCallError) for the arm-qualifier check (items 1/2 HIGH); local-only import names (item 3, incl. generic HostError-as-HE annotation leak); parseVariant failure by identity key `scrml:data/ParseError` (item 4); mismatch hint names bare form + import (item 5)
+  - first cut also gave the three compiler-provided types VARIANT SETS → `s462-p0-sql-chain-truncation` failed (a `! -> SqlError` caller handler became exhaustive-checked) → narrowed: variant-set lookups unchanged from main; reported as an open fork
+  - reviewer probes (37) main vs tip: only intended changes
+  - corpus 3079 files origin/main vs tip: 0 newly refused, 0 artifact diffs (3 already-failing files differ, all item 1, as before)
+- known-gaps: g-parseerror-builtin-or-import-only-s462 resolved; NEW resolved marker g-impl1-handler-arm-undeclared-qualifier-accepted-s466 with prov=pa-ruled:§34-E-SCOPE-001-…-corpus-measured-0
