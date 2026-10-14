@@ -1244,6 +1244,17 @@ export interface ParamDefaultSite {
    * to word the E-PARAM-DEFAULT-AWAIT message ("declare it `fn` if it is pure").
    */
   placementOnlyCallees?: ReadonlySet<string> | null;
+  /**
+   * s466 fix round 4 — is this function SERVER-PLACED (a wholly-server function's
+   * route handler / in-process callable / SSE or `onserver:*` handler, a CPS-split
+   * function, a nested function in server code, an exported function in the
+   * server bundle)? There the closed-set refusal (E-PARAM-DEFAULT-UNSUPPORTED) is
+   * load-bearing: the identity, client-state and await checks must see the whole
+   * default. A client-only function's default is lowered as written (§7.3.2
+   * "Default values are arbitrary expressions") — a construct outside the set is
+   * emitted by the expression emitter, unrefused.
+   */
+  serverPlaced?: boolean;
 }
 
 /** §7.3.2 — the parameter's name for a diagnostic. */
@@ -1338,6 +1349,11 @@ export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOp
   // — text the compiler keeps unparsed, a block-bodied function — cannot be
   // checked for identity reads, client-state reads or awaits, so it is refused.
   const analysed = analyzedParamDefault(p, filePath);
+  if (analysed && "unsupported" in analysed && site.serverPlaced !== true) {
+    // A client-only default (see ParamDefaultSite.serverPlaced): lowered by the
+    // expression emitter like any other client expression.
+    return emitExpr(node, { ...ctx, peerAwaitable: false });
+  }
   if (analysed && "unsupported" in analysed) {
     recordRefusedLowering(new CGError(
       "E-PARAM-DEFAULT-UNSUPPORTED",
@@ -5332,7 +5348,8 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           ...params.map((p, i) => paramName(p, i)),
         ]),
       };
-      const _defaultSite = { fnName, fnSpan: node.span };
+      // A nested function in SERVER code is server-placed (s466 fix round 4).
+      const _defaultSite = { fnName, fnSpan: node.span, serverPlaced: opts.boundary === "server" };
       const _defaultFile: string = (node.span && typeof node.span.file === "string") ? node.span.file : (opts.asyncFilePath ?? "");
       const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, emitParamDefault(p, _defaultFile, _defaultOpts, _defaultSite)));
       const body: any[] = node.body ?? [];

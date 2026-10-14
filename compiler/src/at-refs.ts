@@ -202,7 +202,7 @@ export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode
  * escape-hatch, then the match arms — that every check walked past.)
  *
  *   ident · lit (a template's `${…}` slots are parsed into expressions) · array ·
- *   object (prop / shorthand / spread) · spread · unary · binary · assign ·
+ *   object (prop / shorthand / spread) · spread · unary (not `++` / `--` / `delete`) · binary ·
  *   ternary · member · index · call · new · cast · reset-expr · map-lit ·
  *   input-state-ref · sql-ref (a leaf — the await check refuses it by name) ·
  *   lambda with an EXPRESSION body · match-expr with one subject, whose arms are
@@ -214,7 +214,7 @@ export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode
  * multi-subject or `given`-led match, a block-bodied or unparseable match arm.
  */
 export const DEFAULT_EXPR_KINDS: ReadonlySet<string> = new Set([
-  "ident", "lit", "array", "object", "spread", "unary", "binary", "assign", "ternary",
+  "ident", "lit", "array", "object", "spread", "unary", "binary", "ternary",
   "member", "index", "call", "new", "cast", "reset-expr", "map-lit", "input-state-ref",
   "sql-ref", "lambda", "match-expr",
 ]);
@@ -266,6 +266,7 @@ function normalizeDefault(node: unknown, filePath: string): ExprNode {
         : `\`${String(n.raw ?? "").trim().slice(0, 40)}\`, which the compiler keeps as unparsed text`);
     }
     if (kind === "markup-value") throw new UnsupportedDefault("markup");
+    if (kind === "assign") throw new UnsupportedDefault("an assignment — a default computes a value and writes nothing");
     throw new UnsupportedDefault(`a \`${kind}\` expression`);
   }
   const N = (x: unknown): ExprNode => normalizeDefault(x, filePath);
@@ -291,11 +292,19 @@ function normalizeDefault(node: unknown, filePath: string): ExprNode {
           throw new UnsupportedDefault(`an object entry of kind \`${String(pr.kind)}\``);
         }),
       } as unknown as ExprNode;
-    case "spread": case "unary": return { ...n, argument: N(n.argument) } as unknown as ExprNode;
+    case "unary":
+      // s466 fix round 4 — a default does not WRITE. `k = m++` (like `k = (m = "z")`,
+      // refused as an `assign`, which is outside the set) wrote to a parameter the
+      // route handler binds with `const`: the server module failed to LOAD, so
+      // every route in it was down.
+      if (n.op === "++" || n.op === "--" || n.op === "delete") {
+        throw new UnsupportedDefault(`an update (\`${String(n.op)}\`) — a default computes a value and writes nothing`);
+      }
+      return { ...n, argument: N(n.argument) } as unknown as ExprNode;
+    case "spread": return { ...n, argument: N(n.argument) } as unknown as ExprNode;
     case "cast": return { ...n, expression: N(n.expression) } as unknown as ExprNode;
     case "reset-expr": return { ...n, target: N(n.target) } as unknown as ExprNode;
     case "binary": return { ...n, left: N(n.left), right: N(n.right) } as unknown as ExprNode;
-    case "assign": return { ...n, target: N(n.target), value: N(n.value) } as unknown as ExprNode;
     case "ternary": return { ...n, condition: N(n.condition), consequent: N(n.consequent), alternate: N(n.alternate) } as unknown as ExprNode;
     case "member": return { ...n, object: N(n.object) } as unknown as ExprNode;
     case "index": return { ...n, object: N(n.object), index: N(n.index) } as unknown as ExprNode;

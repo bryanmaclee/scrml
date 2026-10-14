@@ -433,6 +433,8 @@ function serverParamDefaults(
     fnSpan: fnNode?.span,
     coveredCallees,
     placementOnlyCallees,
+    // Every site that calls this is server code (s466 fix round 4).
+    serverPlaced: true,
   };
   return params.map((p) => {
     const d = emitParamDefault(p, filePath, opts, site);
@@ -1279,7 +1281,7 @@ function emitModuleValueExportLines(
         if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
         // boundary rule as the tool-dep `generateToolLibraryJs`.
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames }));
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, serverPlaced: true }));
         continue;
       }
 

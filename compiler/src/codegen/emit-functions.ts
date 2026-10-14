@@ -637,7 +637,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // caller calls). Lowered in client mode by the one helper; the file's client
   // async facts decide what needs an await (a server call, a client async peer, an
   // async stdlib export). The parameters shadow outer names.
-  const clientParamDefault = (p: unknown, fnNode: ASTNode): string | null => {
+  const clientParamDefault = (p: unknown, fnNode: ASTNode, serverPlaced: boolean): string | null => {
     const ps = ((fnNode.params as unknown[]) ?? []);
     const names = ps.map((q, i) => paramName(q as Param, i));
     return emitParamDefault(p, filePath, {
@@ -649,6 +649,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       fnName: typeof fnNode.name === "string" ? fnNode.name : "<anonymous>",
       fnSpan: fnNode.span,
       asyncFacts: clientAsyncFactsOf(ctx),
+      serverPlaced,
     });
   };
   // S89 §13.2 Sub-Phase B Step 3 — pre-compute per-file `callee → sourceModule`
@@ -1188,7 +1189,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // client mode: the wrapper runs in the browser, where a CPS function's cell
     // reads are legitimate (§6.6.9 CPS carve-out).
     const cpsParamSigs = params.map((p: Param, i: number) => {
-      const d = clientParamDefault(p, fnNode);
+      // A CPS-split function is server-placed (its value reaches the server batch).
+      const d = clientParamDefault(p, fnNode, true);
       return d === null ? paramNames[i] : `${paramNames[i]} = ${d}`;
     });
     lines.push(`async function ${wrapperName}(${cpsParamSigs.join(", ")}) {`);
@@ -1521,7 +1523,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // `emitParamDefault`, s466 fix round 1: client mode lowers `not`, `.Variant`
     // and `@cell` reads instead of splicing the scrml text). A5-FUP: paramSignature
     // also handles DestructurePattern names (emit-destructure-pattern.ts).
-    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i, clientParamDefault(p, fnNode)));
+    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i, clientParamDefault(p, fnNode, false)));
 
     // Seam-A colorless-async Gap 2 (GITI-037) — the `async` prefix now reads the
     // TRANSITIVE fixpoint (`_clientAsyncFnNames`) rather than the flat per-fn

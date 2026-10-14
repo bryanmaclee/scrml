@@ -826,7 +826,7 @@ describe("s466 fix round 3 — anything outside the closed set is refused (E-PAR
     expect(errors[0].message).toContain("a function with a block body");
     expect(errors[0].span.line).toBe(3);
   });
-  test("…in a CLIENT function too (every function's defaults go through the one analysis)", () => {
+  test("…but NOT in a client-only function (fix round 4: the refusal is server-scoped — §7.3.2 \"arbitrary expressions\")", () => {
     const { errors } = compileFiles({ "app.scrml": `<program>
 \${
   function c(a: number, f = (x) => { return x + a }) { @out = f(1) }
@@ -836,7 +836,7 @@ describe("s466 fix round 3 — anything outside the closed set is refused (E-PAR
 <p>\${@out}</p>
 </program>
 ` }, "app.scrml", "r3-block-fn-client");
-    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+    expect(errors).toEqual([]);
   });
   test("a regular-expression literal is a leaf, not unparsed code: accepted", () => {
     const { errors } = compileFiles({ "app.scrml": prog(`  server fn rx(a: string, r = /x,\\)=/g) -> string { return a + r.source }
@@ -883,4 +883,116 @@ describe("s466 fix round 3 — LOW: a default may read only EARLIER parameters (
   function go() { return ok(1) }`) }, "app.scrml", "r3-earlier");
     expect(errors).toEqual([]);
   });
+});
+
+
+// ---------------------------------------------------------------------------
+// s466 fix round 4.
+// ---------------------------------------------------------------------------
+
+describe("s466 fix round 4 — item 1: a server-placed default does not WRITE (the module must load)", () => {
+  const CASES = [
+    ["`k = (m = \"z\")`", `k = (m = "z")`],
+    ["`k = m++`", `k = m++`],
+    ["`k = (m += \"z\")`", `k = (m += "z")`],
+    ["`k = [m = \"q\"][0]`", `k = [m = "q"][0]`],
+  ];
+  for (const [label, def] of CASES) {
+    test(`${label} → E-PARAM-DEFAULT-UNSUPPORTED at compile time`, () => {
+      const { errors } = compileFiles({ "app.scrml": prog(`  server fn t(m: string, ${def}) -> string { return String(k) + "|" + m }
+  function go() { return t("a") }`) }, "app.scrml", "r4-assign");
+      expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+      expect(errors[0].message).toMatch(/writes nothing/);
+    });
+  }
+
+  test("every accepted server default here yields a server module that LOADS (import, not just a parse)", async () => {
+    const SRCS = [
+      LITERAL,
+      CHAIN,
+      prog(`  server fn pm(m: string, k = match m { "a" => 1
+    else => 2 }) -> number { return k }
+  function go() { return pm("a") }`),
+      prog(`  server fn neg(m: number, k: number = -m, b = !m) -> number { return k }
+  function go() { return neg(1) }`),
+    ];
+    let i = 0;
+    for (const src of SRCS) {
+      const { errors, outDir } = compileFiles({ "app.scrml": src }, "app.scrml", `r4-load-${++i}`);
+      expect(errors).toEqual([]);
+      const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
+      expect(Array.isArray(mod.routes)).toBe(true);
+      expect(mod.routes.length).toBeGreaterThan(0);
+    }
+  }, EXECUTED_TIMEOUT_MS);
+});
+
+describe("s466 fix round 4 — item 2: a CLIENT-only default accepts what main accepted (no closed-set refusal)", () => {
+  const CLI = `<program>
+\${
+  function cf(m: number, f = (x) => { return x + m }) -> number { return f(1) }
+  fn pf(m: number, k = match m {
+    1 => "one"
+    else => "other" }) -> string { return k }
+  function asg(m: number, k = (m = 5)) -> number { return k + m }
+}
+<out> = 0
+<button onclick=\${@out = cf(1) + asg(1)}>go</button>
+<p>\${pf(1)}</p>
+</program>
+`;
+  test("a block-bodied lambda, a match and an assignment default compile — and the functions run", () => {
+    const { errors, read } = compileFiles({ "app.scrml": CLI }, "app.scrml", "r4-client");
+    expect(errors).toEqual([]);
+    const client = read("app", "client");
+    const grab = (name) => {
+      const m = client.match(new RegExp(`function (_scrml_${name}_\\d+)\\(`));
+      expect(m).not.toBeNull();
+      const start = client.indexOf(m[0]);
+      // the function text runs to its closing brace at column 0
+      const end = client.indexOf("\n}\n", start) + 2;
+      return { fnName: m[1], text: client.slice(start, end) };
+    };
+    const cf = grab("cf");
+    const pf = grab("pf");
+    const asg = grab("asg");
+    const run = (fn, args) => new Function(`${fn.text}\nreturn ${fn.fnName}(${args});`)();
+    expect(run(cf, "1")).toBe(2);
+    expect(run(cf, "1, (x) => x * 10")).toBe(10);
+    expect(run(pf, "1")).toBe("one");
+    expect(run(pf, "2")).toBe("other");
+    expect(run(asg, "1")).toBe(10);
+  });
+  test("…while the SAME block-bodied default on a SERVER function is still refused", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn sf(m: number, f = (x) => { return x + m }) -> number { return f(1) }
+  function go() { return sf(1) }`) }, "app.scrml", "r4-server-block");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+  });
+});
+
+describe("s466 fix round 4 — item 3: a multi-line `match` default keeps its line breaks", () => {
+  test("`.Red => 1⏎.Green => 2⏎else => 9` parses and runs", async () => {
+    const { errors, outDir, tmpDir } = compileFiles({ "app.scrml": `<program db="./x.db">
+\${
+  type Color:enum = { Red, Green, Blue }
+  server fn t(m: string, c: Color = .Green, k = match c {
+    .Red => 1
+    .Green => 2
+    else => 9 }) -> string { return k + "|" + m }
+  function go() { return t("a") }
+}
+<out> = ""
+<button onclick=\${@out = go()}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r4-multiline-match");
+    expect(errors).toEqual([]);
+    const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Math.random()}`);
+    expect(Array.isArray(mod.routes)).toBe(true);
+    if (HAPPY_DOM()) return;
+    const js = join(outDir, "app.server.js");
+    const db = join(tmpDir, "x.db");
+    expect((await callRoute(js, db, "t", { m: "a" })).json).toBe("2|a");
+    expect((await callRoute(js, db, "t", { m: "a", c: "Red" })).json).toBe("1|a");
+  }, EXECUTED_TIMEOUT_MS);
 });

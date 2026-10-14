@@ -15067,6 +15067,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // token after its top-level `=`). The default is kept as re-spelled TEXT, so
     // this is the only source position a diagnostic about it can point at.
     let defStartTok = null;
+    // s466 fix round 4 — the source line of the last token appended to `defBuf`.
+    let defLastLine = null;
 
     function pushParam(nameRaw, defRaw) {
       const def = defRaw == null ? null : defRaw.trim();
@@ -15131,6 +15133,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // s466 fix round 1 — two word-like tokens never fuse: `k = 1 2` was
       // re-spelled `12` (a different, VALID value) instead of the two tokens the
       // author wrote, so the default's "not one expression" check never saw it.
+      // s466 fix round 4 — a default keeps its LINE BREAKS: a newline separates
+      // `match` arms (`.Red => 1⏎.Green => 2`), and joining the lines re-spelled the
+      // default as `1. Green => 2` (a different, unparseable text).
+      const tokLine = tok.span && typeof tok.span.line === "number" ? tok.span.line : null;
+      if (bufName === 'def' && next.length > 0 && tokLine !== null && defLastLine !== null && tokLine > defLastLine) {
+        next = next.replace(/ $/, "") + "\n";
+      }
+      if (bufName === 'def' && tokLine !== null) defLastLine = tokLine;
       if (next.length > 0 && /[\w$]$/.test(next) && /^[\w$]/.test(piece)) next += ' ';
       next += piece;
       if (bufName === 'cur') cur = next;
@@ -15211,6 +15221,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         inDefault = true;
         consume();
         defStartTok = peek();
+        defLastLine = null;
       } else {
         if (inDefault) appendTok('def', tok);
         else appendTok('cur', tok);
