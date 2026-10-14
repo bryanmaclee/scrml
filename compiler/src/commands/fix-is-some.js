@@ -41,8 +41,8 @@ import { buildAST } from "../ast-builder.js";
 import { captureTrailingContentWarnings } from "../expression-parser.ts";
 import { confirmIsSomeSites, IS_SOME_LINT } from "../is-some-deprecation.ts";
 import { compileScrml } from "../api.js";
-import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { errorSeverityCodes, scratchRefusalReason, writeScratchProject } from "./fix-verify-shared.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 
@@ -69,20 +69,6 @@ function lineOf(src, off) {
 }
 const lineStartOf = (src, off) => src.lastIndexOf("\n", off - 1) + 1;
 
-function absKey(filePath, key) {
-  return isAbsolute(key) ? resolve(key) : resolve(dirname(resolve(filePath)), key);
-}
-function commonDir(paths) {
-  let parts = dirname(paths[0]).split(sep);
-  for (const p of paths.slice(1)) {
-    const q = dirname(p).split(sep);
-    let i = 0;
-    while (i < parts.length && i < q.length && parts[i] === q[i]) i++;
-    parts = parts.slice(0, i);
-  }
-  return parts.join(sep) || sep;
-}
-
 /** Fold the one spelling the rewrite changes, so an artifact that echoes source text compares equal. */
 const fold = (s) => s.split("is given").join("is some");
 
@@ -90,25 +76,12 @@ const fold = (s) => s.split("is given").join("is some");
  * Compile `before` and `after` with impl#1 at the SAME scratch path (the project beside it) and
  * compare. Returns null when they agree, else a reason.
  */
-function verifyByCompile(filePath, before, after, auxSources) {
+function verifyByCompile(filePath, before, after, auxSources, inPlaceClean) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-is-some-"));
   const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
   try {
-    const self = resolve(filePath);
-    const files = new Map([[self, before]]);
-    for (const [p, s] of Object.entries(auxSources ?? {})) {
-      const ap = absKey(filePath, p);
-      if (ap !== self) files.set(ap, s);
-    }
-    const root = commonDir([...files.keys()]);
-    let target = null;
-    for (const [ap, s] of files) {
-      const out = join(dir, "src", relative(root, ap));
-      mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, s);
-      if (ap === self) target = out;
-    }
-    mirrorSiblingDatabases(filePath, dirname(target));
+    // The file, its project and every database they name, in one layout (fix-verify-shared.js).
+    const { target } = writeScratchProject(dir, filePath, before, auxSources);
     const run = (text) => {
       writeFileSync(target, text);
       const r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
@@ -139,7 +112,7 @@ function verifyByCompile(filePath, before, after, auxSources) {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
-    if (a.errs.length > 0) return doesNotCompileReason(a.errs);
+    if (a.errs.length > 0) return scratchRefusalReason(a.errs, filePath, before, inPlaceClean);
     // The rewrite must compile too (incl. the emitted-JS parse gate `codes` does not carry here).
     if (b.errs.length > 0) return `the rewrite does not compile (impl#1 reports ${b.errs.join(", ")} after the rewrite)`;
     const strip = (cs) => cs.filter((c) => c !== IS_SOME_LINT).join(",");
@@ -198,7 +171,7 @@ export function fixIsSome(source, opts = {}) {
   }
   // 2. Compile self-check.
   if (opts.verify !== false) {
-    const why = verifyByCompile(filePath, source, output, opts.auxSources);
+    const why = verifyByCompile(filePath, source, output, opts.auxSources, opts.inPlaceClean);
     if (why) {
       block(sites[0].isStart, `${why} — no site in this file rewritten`);
       return none;

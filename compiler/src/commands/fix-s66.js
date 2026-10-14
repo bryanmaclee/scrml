@@ -103,6 +103,7 @@ import { fixGivenPresence } from "./fix-given-presence.js";
 import { fixIsSome } from "./fix-is-some.js";
 import { fixClientServerCall } from "./fix-client-server-call.js";
 import { fixSqlFailable } from "./fix-sql-failable.js";
+import { writeScratchProject, errorSeverityCodes, scratchRefusalReason } from "./fix-verify-shared.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -370,28 +371,16 @@ function parseAst(filePath, source) {
 const SHAPE_LINT_CODES = new Set(["W-PROGRAM-001", "W-PROGRAM-REDUNDANT-LOGIC", "W-PROGRAM-SPA-INFERRED"]);
 
 /**
- * impl#1's full compile of a source (write:false, in a scratch dir with the aux files beside it):
- * the sorted multiset of diagnostic codes, shape lints excluded. null when the compiler throws.
+ * impl#1's full compile of a source (write:false, in a scratch copy of its project — the shared
+ * builder, fix-verify-shared.js `writeScratchProject`: aux files and every database they name in
+ * their relative layout): the sorted multiset of diagnostic codes, shape lints excluded, and
+ * `errs` — the sorted distinct error-severity codes (the compiler's own fatal predicate). null when
+ * the compiler throws.
  */
-function compiledCodes(filePath, source, auxSources) {
+function compiledReading(filePath, source, auxSources) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-verify-"));
   try {
-    // Mirror the file and its project (aux keys are absolute, or relative to the file's directory)
-    // under one scratch root, keeping their relative layout so imports resolve as they do on disk.
-    const self = resolve(filePath);
-    const files = new Map([[self, source]]);
-    for (const [p, s] of Object.entries(auxSources ?? {})) {
-      const ap = absKey(filePath, p);
-      if (ap !== self) files.set(ap, s);
-    }
-    const root = commonDir([...files.keys()]);
-    let f = null;
-    for (const [ap, s] of files) {
-      const out = join(dir, relative(root, ap));
-      mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, s);
-      if (ap === self) f = out;
-    }
+    const { target } = writeScratchProject(dir, filePath, source, auxSources);
     // The verify compile is internal: its terminal output (Note(PA) lines, stage notices) is about
     // a scratch copy, so it is silenced for the duration and restored in `finally`.
     const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
@@ -399,17 +388,23 @@ function compiledCodes(filePath, source, auxSources) {
     try {
       console.log = console.warn = console.error = () => {};
       process.stdout.write = process.stderr.write = () => true;
-      r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
+      r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
     } finally {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
-    return [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d?.code).filter((c) => typeof c === "string" && !SHAPE_LINT_CODES.has(c)).sort();
+    const codes = [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d?.code).filter((c) => typeof c === "string" && !SHAPE_LINT_CODES.has(c)).sort();
+    return { codes, errs: errorSeverityCodes(r) };
   } catch {
     return null;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The codes alone (compiledReading), or null. */
+function compiledCodes(filePath, source, auxSources) {
+  return compiledReading(filePath, source, auxSources)?.codes ?? null;
 }
 
 /** An aux key as an absolute path: absolute keys stay, relative ones resolve against the file's dir. */
@@ -1265,6 +1260,13 @@ function parseDeclSite(src, node, filePath) {
  *               the file for the verify compile.
  *   scanSources further files (path → source) read only for writes to this file's cells.
  *   rules       restrict to a subset of S66_RULES (default: all).
+ *   inPlaceClean the caller (the `scrml fix` CLI gate) compiled the file in place, clean: a rule's
+ *               scratch compile that errors then reports "the scratch compile diverges", not
+ *               "does not compile" (fix-verify-shared.js `scratchRefusalReason`).
+ *   allowNonCompiling  do not refuse pre-migrate / the structural rules on a file that does not
+ *               compile (S464 ruling) — for a caller that twins files which fail to compile BY
+ *               DESIGN (scripts/bootstrap-conformance.ts: the conformance error cases). The CLI
+ *               never sets it.
  *   verify      compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
  *               codes are unchanged (default true).
  * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
@@ -1293,9 +1295,19 @@ export function fixS66(source, opts = {}) {
       // E-DEPRECATED-001, the hard error impl#1 now raises on `<machine>`).
       const PM_LINTS = new Set(["W-WHITESPACE-001", "W-DEPRECATED-001", "E-DEPRECATED-001", "W-PURE-DEPRECATED", "W-CONST-AT-DEPRECATED"]);
       const strip = (cs) => cs && cs.filter((c) => !PM_LINTS.has(c));
-      const a = opts.verify === false ? [] : strip(compiledCodes(filePath, src, opts.auxSources));
-      const b = opts.verify === false ? [] : strip(compiledCodes(filePath, pm.rewritten, opts.auxSources));
-      if (a && b && a.join() === b.join()) {
+      const ra = opts.verify === false ? null : compiledReading(filePath, src, opts.auxSources);
+      const rb = opts.verify === false ? null : compiledReading(filePath, pm.rewritten, opts.auxSources);
+      const a = opts.verify === false ? [] : strip(ra?.codes ?? null);
+      const b = opts.verify === false ? [] : strip(rb?.codes ?? null);
+      // S464 ruling: not verifiable on a file that does not compile. The migrations exist to clear
+      // E-DEPRECATED-001 (impl#1's hard error on `<machine>`), so the original may carry that and no
+      // other error, and the migrated file must then compile — "same codes" alone would be vacuous.
+      const otherErrs = (ra?.errs ?? []).filter((c) => c !== "E-DEPRECATED-001");
+      if (!opts.allowNonCompiling && ra && otherErrs.length > 0) {
+        blockers.push({ rule: "pre-migrate", line: 0, reason: `${scratchRefusalReason(otherErrs, filePath, src, opts.inPlaceClean)} — not applied`, snippet: "" });
+      } else if (!opts.allowNonCompiling && rb && rb.errs.length > 0) {
+        blockers.push({ rule: "pre-migrate", line: 0, reason: `the migrated file does not compile (impl#1 reports ${rb.errs.join(", ")} after the rewrite) — not applied`, snippet: "" });
+      } else if (a && b && a.join() === b.join()) {
         src = pm.rewritten;
         applied.push({ rule: "pre-migrate", line: 0, detail: JSON.stringify(pm.migrations) });
       } else {
@@ -1308,7 +1320,7 @@ export function fixS66(source, opts = {}) {
     // §19.4.5 / §51.0.S.2.3 (S452) — `|`-led `!{}` and message arms → §18.2 match arms. Chained
     // like pre-migrate: its own structural location + verification (commands/fix-arm-pipe.js);
     // a file it cannot verify is left untouched and reported.
-    const ap = fixArmPipe(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    const ap = fixArmPipe(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean });
     if (ap.changed) src = ap.output;
     applied.push(...ap.applied);
     blockers.push(...ap.blockers);
@@ -1320,7 +1332,7 @@ export function fixS66(source, opts = {}) {
   if (enabled.has("client-server-call")) {
     // §19.9.10 (S454 F8) — an unhandled client call of a server function → a local `.Transport`
     // handler. Chained like arm-pipe: its own location (Route Inference + AST) + per-file gate.
-    const cs = fixClientServerCall(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, entry });
+    const cs = fixClientServerCall(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean, entry });
     if (cs.changed) src = cs.output;
     applied.push(...cs.applied);
     blockers.push(...cs.blockers);
@@ -1329,7 +1341,7 @@ export function fixS66(source, opts = {}) {
   if (enabled.has("sql-failable")) {
     // §19.8.3 (S451 R11) — an unhandled `?{}` outside a `!` function → the superseded silent
     // meaning written out. Chained like client-server-call: its own location + per-file gate.
-    const sf = fixSqlFailable(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    const sf = fixSqlFailable(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean });
     if (sf.changed) src = sf.output;
     applied.push(...sf.applied);
     blockers.push(...sf.blockers);
@@ -1339,7 +1351,7 @@ export function fixS66(source, opts = {}) {
     // §42.2.2a / §55.1 (S462) — `is some` → `is given`. Chained after sql-failable (the handler rules keep their place right after arm-pipe); like arm-pipe: its own structural
     // location + verification (commands/fix-is-some.js); a file it cannot verify is left untouched
     // and reported.
-    const is = fixIsSome(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    const is = fixIsSome(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean });
     if (is.changed) src = is.output;
     applied.push(...is.applied);
     blockers.push(...is.blockers);
@@ -1349,7 +1361,7 @@ export function fixS66(source, opts = {}) {
     // §42.2.3 / §63 (S462) — the in-place `given` presence guard / `given x :>` arm → the S460 a′
     // presence test. Chained like arm-pipe: its own structural location + per-site verification
     // (commands/fix-given-presence.js); a site it cannot verify is left untouched and reported.
-    const gp = fixGivenPresence(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    const gp = fixGivenPresence(src, { filePath, auxSources: opts.auxSources, verify: opts.verify, inPlaceClean: opts.inPlaceClean });
     if (gp.changed) src = gp.output;
     applied.push(...gp.applied);
     blockers.push(...gp.blockers);
@@ -1733,11 +1745,18 @@ export function fixS66(source, opts = {}) {
     const after = frontEndReading(filePath, structSrc);
     const badCount = structural && (!after || after.programs !== 1);
     let changedCodes = null;
+    let notVerifiable = null;
     if (before && after && !badCount) {
       if (opts.verify !== false) {
-        const a = compiledCodes(filePath, src, opts.auxSources);
-        const b = compiledCodes(filePath, structSrc, opts.auxSources);
-        if (!a || !b) changedCodes = ["impl#1 compile threw"];
+        const ra = compiledReading(filePath, src, opts.auxSources);
+        const a = ra?.codes ?? null;
+        // S464 ruling: a file that does not compile cannot be verified — "same codes before and
+        // after" is vacuous on it (measured S464: unwrap-logic deleted the `${` / `}` lines of a
+        // file whose other function emits invalid JS).
+        if (!opts.allowNonCompiling && ra && ra.errs.length > 0) notVerifiable = scratchRefusalReason(ra.errs, filePath, src, opts.inPlaceClean);
+        const b = notVerifiable ? a : compiledCodes(filePath, structSrc, opts.auxSources);
+        if (notVerifiable) { /* reported below */ }
+        else if (!a || !b) changedCodes = ["impl#1 compile threw"];
         else if (a.join() !== b.join()) {
           const lost = a.filter((c, i) => a.indexOf(c) === i && a.filter((x) => x === c).length > b.filter((x) => x === c).length);
           const gained = b.filter((c, i) => b.indexOf(c) === i && b.filter((x) => x === c).length > a.filter((x) => x === c).length);
@@ -1748,11 +1767,11 @@ export function fixS66(source, opts = {}) {
         if (fresh.length) changedCodes = fresh.map((c) => `+${c}`);
       }
     }
-    if (!before || !after || badCount || changedCodes) {
+    if (!before || !after || badCount || changedCodes || notVerifiable) {
       const what = structural ? (structural.kind === "wrap" ? "program-wrap" : "program-move") : "unwrap-logic";
       const why = badCount
         ? "the restructured file does not parse to one top-level `<program>` (malformed source)"
-        : `impl#1 reads the restructured file differently (${changedCodes ? changedCodes.join(", ") : "front-end failure"})`;
+        : notVerifiable ?? `impl#1 reads the restructured file differently (${changedCodes ? changedCodes.join(", ") : "front-end failure"})`;
       block(what, 0, `${why} — not restructured, no \`\${}\` unwrapped`);
       structural = null;
       for (let i = edits.length - 1; i >= 0; i--) if (isStructEdit(edits[i])) edits.splice(i, 1);

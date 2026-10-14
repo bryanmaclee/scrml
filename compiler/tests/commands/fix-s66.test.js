@@ -245,11 +245,15 @@ describe("§4 program-wrap / program-move / unwrap-logic", () => {
     blocked("${ <n> = 1 }\nHello there\n<p>\${@n}</p>\n", "top-level prose");
   });
 
-  test("verify: a wrap impl#1 reads differently is WITHDRAWN and reported (an <outlet/> outside a shell)", () => {
+  // The original is E-OUTLET-OUTSIDE-SHELL — it does not compile, so the wrap cannot be verified and
+  // is withdrawn on that ground (S464 ruling) before its before/after comparison is reached.
+  test("verify: a wrap of a file that does not compile is WITHDRAWN and reported (an <outlet/> outside a shell)", () => {
     const src = "<div>\n  <h1>Not a shell</h1>\n  <outlet/>\n</div>\n";
     const r = fix(src);
     expect(r.output).toBe(src);
-    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("file does not compile; cannot verify (impl#1 reports E-OUTLET-OUTSIDE-SHELL before the rewrite) — not restructured");
+    // with the refusal off, the before/after comparison still catches it
+    expect(fix(src, { allowNonCompiling: true }).blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
     // BITE: with verify off the wrap goes through — the compile is what caught it
     const r2 = fix(src, { verify: false });
     expect(r2.output.startsWith('<program reset="none">')).toBe(true);

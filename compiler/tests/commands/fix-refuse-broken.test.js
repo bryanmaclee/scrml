@@ -16,11 +16,15 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { runFixCommand } from "../../src/commands/fix.js";
-import { compileErrorsInPlace, formatCompileError } from "../../src/commands/fix-verify-shared.js";
+import { join, dirname } from "node:path";
+import { Database } from "bun:sqlite";
+import { runFixCommand, judgeTargets, resolveProject } from "../../src/commands/fix.js";
+import {
+  compileErrorsInPlace, compileErrorsTogether, formatCompileError, namedDatabaseFiles, writeScratchProject,
+  scratchRefusalReason, SCRATCH_DIVERGES,
+} from "../../src/commands/fix-verify-shared.js";
 import { fixSqlFailable } from "../../src/commands/fix-sql-failable.js";
 import { compileScrml } from "../../src/api.js";
 
@@ -136,8 +140,28 @@ describe("§2 the refusal names the errors; exit status", () => {
       expect(formatCompileError(d)).toMatch(/^E-IMPORT-006 \(line 2\): Cannot resolve import/);
       const r = run([f]);
       expect(r.code).toBe(3);
-      expect(r.err).toMatch(/app\.scrml:2 E-IMPORT-006 \(line 2\): Cannot resolve import/);
+      expect(r.err).toMatch(/app\.scrml:2 E-IMPORT-006: Cannot resolve import/);
       expect(readFileSync(f, "utf8")).toBe(MISSING_IMPORT);
+    });
+  });
+
+  test("an error with no source line (E-CODEGEN-INVALID-LOGIC) prints the file alone — never `line null`", () => {
+    withDir({ "b3.scrml": BROKEN }, (dir) => {
+      const f = join(dir, "b3.scrml");
+      const d = compileErrorsInPlace(f).find((x) => x.code === "E-CODEGEN-INVALID-LOGIC");
+      expect(d.line).toBe(null);
+      expect(formatCompileError(d)).toMatch(/^E-CODEGEN-INVALID-LOGIC: /);
+      const r = run([f]);
+      expect(r.err).toMatch(/b3\.scrml E-CODEGEN-INVALID-LOGIC: the compiler could not lower/);
+      expect(r.err).not.toContain("null");
+      expect(r.err).not.toMatch(/b3\.scrml:\d/);
+    });
+  });
+
+  test("the emitted-JS check is not run twice: one E-CODEGEN-INVALID-LOGIC per artifact, not two", () => {
+    withDir({ "b3.scrml": BROKEN }, (dir) => {
+      const n = compileErrorsInPlace(join(dir, "b3.scrml")).filter((x) => x.code === "E-CODEGEN-INVALID-LOGIC").length;
+      expect(n).toBe(1);
     });
   });
 
@@ -216,6 +240,191 @@ describe("§5 the rules themselves refuse (direct callers)", () => {
       const r = fixSqlFailable(GOOD, { filePath: join(dir, "b.scrml") });
       expect(r.changed).toBe(true);
       expect(r.output).toContain("!{ _ :> not }");
+    });
+  });
+
+  test("a scratch compile that errors on a file that compiles in place says `diverges`, never `does not compile`", () => {
+    expect(scratchRefusalReason(["E-PA-002"], "/virtual/x.scrml", "", true)).toBe(`${SCRATCH_DIVERGES} (E-PA-002)`);
+    expect(scratchRefusalReason(["E-PA-002"], "/virtual/x.scrml", "", false)).toContain("file does not compile; cannot verify");
+    // the file is on disk with this exact text and compiles in place → diverges, decided by an in-place compile
+    withDir({ "b.scrml": GOOD }, (dir) => {
+      expect(scratchRefusalReason(["E-X"], join(dir, "b.scrml"), GOOD)).toBe(`${SCRATCH_DIVERGES} (E-X)`);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 S466 review (HIGH): a database the source names by a path outside its directory
+// ---------------------------------------------------------------------------
+
+function makeDb(path, ddl) {
+  mkdirSync(dirname(path), { recursive: true });
+  const db = new Database(path);
+  db.exec(ddl);
+  db.close();
+}
+
+/** The review repro (repro/updb2): `../app.db` from sub/, with a `protect=` read. */
+const UP_PAGE = [
+  "<program db=\"../app.db\">",
+  "<db src=\"../app.db\" protect=\"secret\" tables=\"users\">",
+  "${",
+  "  import { K } from \"../lib.scrml\"",
+  "  function one() {",
+  "    const r = ?{`SELECT name FROM users WHERE id = 1`}.get()",
+  "    return K",
+  "  }",
+  "}",
+  "</db>",
+  "<p>x</p>",
+  "</program>",
+  "",
+].join("\n");
+
+/** The trucking shape: a page two directories below its database. */
+const TRUCK_PAGE = [
+  "<program db=\"../../dispatch.db\">",
+  "<db src=\"../../dispatch.db\" tables=\"loads\">",
+  "${",
+  "  function count() {",
+  "    const r = ?{`SELECT id FROM loads WHERE id = 1`}.get()",
+  "    return 1",
+  "  }",
+  "}",
+  "</db>",
+  "<p>x</p>",
+  "</program>",
+  "",
+].join("\n");
+
+describe("§6 databases named by a path outside the file's directory", () => {
+  test("namedDatabaseFiles: `db=` and `<db src=>` resolved from the declaring file; :memory: / drivers / missing files skipped", () => {
+    withDir({}, (dir) => {
+      makeDb(join(dir, "app.db"), "CREATE TABLE t(id integer)");
+      makeDb(join(dir, "x.sqlite"), "CREATE TABLE t(id integer)");
+      const f = join(dir, "a", "b", "page.scrml");
+      const src = `<program db="sqlite:../../app.db">\n<db src='../../x.sqlite' tables="t">\n<db src=":memory:">\n<db src="postgres://u@h/d">\n<db src="../../nope.db">\n`;
+      expect(namedDatabaseFiles(f, src).sort()).toEqual([join(dir, "app.db"), join(dir, "x.sqlite")].sort());
+    });
+  });
+
+  test("the scratch project places a `../../dispatch.db` at the same relative spot", () => {
+    withDir({ "app/pages/board.scrml": TRUCK_PAGE }, (dir) => {
+      makeDb(join(dir, "dispatch.db"), "CREATE TABLE loads(id integer primary key)");
+      const scratch = mkdtempSync(join(tmpdir(), "scrml-fix-scratch-test-"));
+      try {
+        const { target } = writeScratchProject(scratch, join(dir, "app/pages/board.scrml"), TRUCK_PAGE, {});
+        expect(existsSync(join(dirname(target), "../../dispatch.db"))).toBe(true);
+        expect(target.startsWith(scratch)).toBe(true);
+      } finally {
+        rmSync(scratch, { recursive: true, force: true });
+      }
+    });
+  });
+
+  for (const [label, files, page, ddl, dbAt] of [
+    ["the review repro (`../app.db`, protect=)", { "lib.scrml": "${ export const K = 2 }\n", "sub/page.scrml": UP_PAGE }, "sub/page.scrml",
+      "CREATE TABLE users(id integer primary key, name text, secret text)", "app.db"],
+    ["the trucking shape (`../../dispatch.db`)", { "app/pages/board.scrml": TRUCK_PAGE }, "app/pages/board.scrml",
+      "CREATE TABLE loads(id integer primary key)", "dispatch.db"],
+  ]) {
+    test(`${label}: compiles in place, so it is rewritten — not refused, no "does not compile"`, () => {
+      withDir(files, (dir) => {
+        makeDb(join(dir, dbAt), ddl);
+        const f = join(dir, page);
+        expect(compileErrorsInPlace(f)).toEqual([]);
+        const src = readFileSync(f, "utf8");
+        const direct = fixSqlFailable(src, { filePath: f, auxSources: resolveProject(f) });
+        expect(direct.blockers.map((b) => b.reason)).toEqual([]);
+        expect(direct.output).toContain(".get() !{ _ :> not }");
+        const r = run([f, "--dry-run"]);
+        expect(r.code).toBe(0);
+        expect(r.err).not.toContain("does not compile");
+        expect(r.err).not.toContain("diverges");
+        expect(r.out).toContain("+    const r = ?{`SELECT");
+      });
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// §7 S466 review (MED): judged the way `scrml compile` judges the target
+// ---------------------------------------------------------------------------
+
+describe("§7 a component module that compiles as part of its project", () => {
+  const EX = join(import.meta.dir, "../../../examples/22-multifile");
+  const files = () => Object.fromEntries(["app.scrml", "components.scrml", "types.scrml"].map((n) => [n, readFileSync(join(EX, n), "utf8")]));
+
+  test("directory mode (`scrml compile <dir>` compiles it): not refused, exit 0", () => {
+    withDir(files(), (dir) => {
+      expect(compileErrorsTogether(["app.scrml", "components.scrml", "types.scrml"].map((n) => join(dir, n)))).toEqual([]);
+      const r = run([dir, "--check"]);
+      expect(r.err).not.toContain("refused");
+      expect(r.code).toBe(0);
+    });
+  });
+
+  test("file mode mirrors `scrml compile <file>`: that compile fails (a standalone-compile codegen defect), so it is refused", () => {
+    withDir(files(), (dir) => {
+      const f = join(dir, "components.scrml");
+      expect(compileErrorsInPlace(f).map((d) => d.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+      const r = run([f, "--check"]);
+      expect(r.code).toBe(3);
+      expect(readFileSync(f, "utf8")).toBe(files()["components.scrml"]);
+    });
+  });
+
+  test("one file's error does not hide another's: a front-end error stops the joint compile before the emitted-JS check, so the rest is compiled again", () => {
+    withDir({ "a.scrml": BROKEN, "c.scrml": MISSING_IMPORT }, (dir) => {
+      const g = judgeTargets([join(dir, "a.scrml"), join(dir, "c.scrml")], true, ["sql-failable"]);
+      expect([...g.refused.keys()].sort()).toEqual([join(dir, "a.scrml"), join(dir, "c.scrml")]);
+      expect(g.refused.get(join(dir, "a.scrml")).map((d) => d.code)).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+      expect(g.refused.get(join(dir, "c.scrml")).map((d) => d.code)).toContain("E-IMPORT-006");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 pre-migrate clears a hard error: E-DEPRECATED-001 (`<machine>`) alone does not refuse
+// ---------------------------------------------------------------------------
+
+const MACHINE = [
+  "<program>",
+  "${",
+  "  type FlowState:enum = { Idle, Done }",
+  "}",
+  "<machine name=Flow for=FlowState>",
+  "  .Idle => .Done",
+  "</>",
+  "<p>x</p>",
+  "</program>",
+  "",
+].join("\n");
+
+describe("§8 a `<machine>` file (E-DEPRECATED-001) is migrated, and the result compiles", () => {
+  test("default rules: rewritten to `<engine>`, exit 0, compiles after", () => {
+    withDir({ "m.scrml": MACHINE }, (dir) => {
+      const f = join(dir, "m.scrml");
+      expect(compileErrorsInPlace(f).map((d) => d.code)).toEqual(["E-DEPRECATED-001"]);
+      const r = run([f]);
+      expect(r.code).toBe(0);
+      const out = readFileSync(f, "utf8");
+      expect(out).toContain("<engine name=Flow for=FlowState>");
+      expect(compileErrorsInPlace(f)).toEqual([]);
+    });
+  });
+
+  test("without pre-migrate (--rules=unwrap-logic) the same file is refused", () => {
+    withDir({ "m.scrml": MACHINE }, (dir) => {
+      const f = join(dir, "m.scrml");
+      expect(run([f, "--rules=unwrap-logic"]).code).toBe(3);
+      expect(readFileSync(f, "utf8")).toBe(MACHINE);
+    });
+  });
+
+  test("a `<machine>` file with ANOTHER error is refused", () => {
+    withDir({ "m.scrml": MACHINE.replace("<p>x</p>", "<p>x</p>\n${ import { Nope } from \"./nope.scrml\" }") }, (dir) => {
+      expect(run([join(dir, "m.scrml")]).code).toBe(3);
     });
   });
 });
