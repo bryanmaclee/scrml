@@ -397,13 +397,18 @@ export function paramName(p: ParamLike, i: number): string {
  *
  * @param p the param entry from `fnNode.params`
  * @param i the param's index in the list (for synthesizing `_scrml_arg_N`)
+ * @param loweredDefault s466 — the default ALREADY LOWERED to JavaScript by the
+ *   caller (`emitParamDefault`), or `null` for none. Omitted (`undefined`), the
+ *   default's raw source text is spliced as before.
  */
-export function paramSignature(p: ParamLike, i: number): string {
+export function paramSignature(p: ParamLike, i: number, loweredDefault?: string | null): string {
   if (typeof p === "string") return p.split(":")[0].trim();
   const rest = p.isRest ? "..." : "";
-  const def = typeof p.defaultValue === "string" && p.defaultValue.trim().length > 0
-    ? ` = ${p.defaultValue}`
-    : "";
+  const def = loweredDefault !== undefined
+    ? (loweredDefault === null ? "" : ` = ${loweredDefault}`)
+    : typeof p.defaultValue === "string" && p.defaultValue.trim().length > 0
+      ? ` = ${p.defaultValue}`
+      : "";
   // A5-FUP: structured destructure-pattern in `p.name`. Serialize via the
   // shared codegen helper (also used by emit-logic / emit-control-flow /
   // emit-lift for let/const/for-stmt destructuring).

@@ -30,6 +30,7 @@ import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
+import { parsedParamDefault } from "../at-refs.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -1207,6 +1208,30 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // through this emitter with the SAME options (see emitSqlQueryShape).
     logicOpts: opts,
   };
+}
+
+/**
+ * §7.3.2 — ONE function parameter's default value, lowered to JavaScript by the
+ * expression emitter in the boundary `opts` names, or `null` when the parameter
+ * has no default. The parsed tree is the one the `@`-reader checks
+ * (at-refs.ts `parsedParamDefault`), so what E-REACTIVE-003 reads is what runs.
+ *
+ * A default is evaluated before the function body, outside it, so it is never an
+ * awaitable position: a peer server-function or async-stdlib call in it is
+ * recorded (`peerAwaitable: false`) and refused (E-SERVER-FN-IN-SYNC-CALLBACK /
+ * E-ASYNC-STDLIB-IN-SYNC-CALLBACK) rather than emitted as an unawaited Promise.
+ *
+ * s466 — server-placed functions used to drop their defaults (the route handler
+ * bound `const k = _scrml_body["k"]`, the in-process callable was emitted
+ * `async function f(m, k)`), so an omitted argument answered `null`.
+ */
+export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOpts, fnSpan?: unknown): string | null {
+  const node = parsedParamDefault(p, filePath);
+  if (!node) return null;
+  // A default carries no source position of its own (at-refs.ts), so a
+  // diagnostic raised while lowering it is reported at its function.
+  const ctx = _makeExprCtx(opts);
+  return emitExpr(node, { ...ctx, peerAwaitable: false, stmtSpan: (fnSpan as EmitExprContext["stmtSpan"]) ?? ctx.stmtSpan });
 }
 
 /**

@@ -5119,6 +5119,14 @@ export function runRI(input: RIInput): RIOutput {
         fileImportedNamespaces,
         filePrintShadowed,
       );
+      // s466 — a parameter DEFAULT is evaluated where the function runs (§7.3.2
+      // "evaluated at call time"), so a function it calls is a callee of this
+      // function exactly like a body call: `fn f(m, k = rd())` reached from the
+      // server takes `rd` with it (and `rd`'s `@n` read meets E-REACTIVE-003).
+      // Same parsed tree the `@`-reader walks (at-refs.ts parsedParamDefaults).
+      for (const _d of parsedParamDefaults(fnNode, filePath)) {
+        callees.push(...exprNodeCollectCallees(_d));
+      }
 
       // -------------------------------------------------------------
       // Trigger 7 (D2): channel-cell-write / broadcast() / disconnect()

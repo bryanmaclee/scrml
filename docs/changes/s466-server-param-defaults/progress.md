@@ -1,3 +1,9 @@
 # progress s466-server-param-defaults
 
 - 2026-10-13 start; branch created off origin/main f28b58a31; bun install + pretest ok
+- 2026-10-13 governing sentences: §7.3.2 "When a parameter with a default is omitted at the call site, the default value expression is evaluated at call time. Default values are arbitrary expressions and may reference earlier parameters in the same parameter list." + "Default parameters compile directly to JavaScript default parameter syntax." §6.6.9 "Every read position counts (S464)" (param default of a wholly server-escalated fn → E-REACTIVE-003). §34 E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK rows list "a parameter default" as a non-awaitable position.
+- HTTP decision: "omitted at the call site" = MISSING key (client stub JSON.stringify drops undefined). Passed `not` = present null → stays `not`. SSE GET wire cannot distinguish (stub skips null too) → missing ⇒ default; flagged.
+- locus refined: emit-server CSRF + non-CSRF handler bindings, SSE query binding, peer callable signature, onserver:* WS handler signature, pure-fn/endpoint helper (raw splice → lowered), CPS client wrapper (emit-functions), RI call graph (route-inference: default callees were not callees → `k = rd()` missed E-REACTIVE-003 + W-DEAD-FUNCTION false positive).
+- helpers: at-refs `parsedParamDefault` (one parse; spans dropped — offset-0 spans pointed at file line 1); emit-logic `emitParamDefault`; emit-server `serverParamDefaults` / `serverBodyParamLine` / `serverParamSignature`; utils `paramSignature(p, i, loweredDefault?)`.
+- tests: compiler/tests/integration/s466-server-param-defaults.test.js 14 pass on branch; 13/14 FAIL on base f28b58a31 (the direct `@n` E-REACTIVE-003 case is a regression guard).
+- full unit+integration+conformance on branch (before adding the new test file): 33479 pass / 0 fail.

@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { routePath, paramName, paramSignature } from "./utils.ts";
-import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
+import { emitLogicNode, emitLogicBody, emitFnShortcutBody, emitParamDefault } from "./emit-logic.js";
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
@@ -1162,7 +1162,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // Map original name → CPS wrapper so event wiring and post-process regex
     // rewrite bare call sites (e.g. onclick=login() → _scrml_cps_login_X()).
     registerFnName(name, wrapperName);
-    lines.push(`async function ${wrapperName}(${paramNames.join(", ")}) {`);
+    // §7.3.2 (s466) — the wrapper IS the function the caller calls, so an omitted
+    // argument takes its default here, once, before the client statements and
+    // the server batch read it (the batch receives the value; the route
+    // handler's own default is only the backstop for a missing key). Lowered in
+    // client mode: the wrapper runs in the browser, where a CPS function's cell
+    // reads are legitimate (§6.6.9 CPS carve-out).
+    const cpsParamSigs = params.map((p: Param, i: number) => {
+      const d = emitParamDefault(p, filePath, { boundary: "client", declaredNames: new Set<string>(), insideFunctionBody: true }, fnNode.span);
+      return d === null ? paramNames[i] : `${paramNames[i]} = ${d}`;
+    });
+    lines.push(`async function ${wrapperName}(${cpsParamSigs.join(", ")}) {`);
 
     // ----------------------------------------------------------------------
     // Ext 1 M1.5 — multi-batch client wrapper.

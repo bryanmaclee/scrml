@@ -104,6 +104,38 @@ export function forEachAtRef(
  * the same tree shape as the body.
  */
 const _parsedDefaultsCache = new WeakMap<object, ExprNode[]>();
+const _parsedDefaultCache = new WeakMap<object, ExprNode>();
+/**
+ * ONE parameter's default as a PARSED expression, or `null` when it has none.
+ * The same tree the `@`-reader walks is the tree codegen lowers (s466 — a
+ * server function's default is emitted from this parse, so what the
+ * E-REACTIVE-003 check reads and what runs on the server cannot differ).
+ */
+export function parsedParamDefault(p: unknown, filePath: string): ExprNode | null {
+  if (!p || typeof p !== "object") return null;
+  const dv = (p as { defaultValue?: unknown }).defaultValue;
+  if (typeof dv !== "string" || !dv.trim()) return null;
+  const hit = _parsedDefaultCache.get(p as object);
+  if (hit) return hit;
+  let node: ExprNode;
+  try { node = parseExprToNode(dv, filePath, 0); }
+  catch { node = { kind: "escape-hatch", raw: dv } as unknown as ExprNode; }
+  // The parser keeps no source offset for a default, so the parse above runs at
+  // offset 0 and its spans would point into the FILE's first line. Drop them: a
+  // diagnostic about a default then anchors at the function (the readers fall
+  // back to the function's span), never at a wrong line.
+  dropSpans(node);
+  _parsedDefaultCache.set(p as object, node);
+  return node;
+}
+
+function dropSpans(n: unknown, seen: WeakSet<object> = new WeakSet()): void {
+  if (!n || typeof n !== "object" || seen.has(n as object)) return;
+  seen.add(n as object);
+  if (Array.isArray(n)) { for (const c of n) dropSpans(c, seen); return; }
+  delete (n as { span?: unknown }).span;
+  for (const v of Object.values(n as object)) dropSpans(v, seen);
+}
 export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode[] {
   if (!fnNode || typeof fnNode !== "object") return [];
   const hit = _parsedDefaultsCache.get(fnNode as object);
@@ -111,10 +143,8 @@ export function parsedParamDefaults(fnNode: unknown, filePath: string): ExprNode
   const out: ExprNode[] = [];
   const params = (fnNode as any).params;
   for (const p of (Array.isArray(params) ? params : [])) {
-    if (p && typeof p === "object" && typeof p.defaultValue === "string" && p.defaultValue.trim()) {
-      try { out.push(parseExprToNode(p.defaultValue, filePath, 0)); }
-      catch { out.push({ kind: "escape-hatch", raw: p.defaultValue } as unknown as ExprNode); }
-    }
+    const d = parsedParamDefault(p, filePath);
+    if (d) out.push(d);
   }
   _parsedDefaultsCache.set(fnNode as object, out);
   return out;
