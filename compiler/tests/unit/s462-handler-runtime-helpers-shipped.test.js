@@ -175,13 +175,13 @@ describe("S462 r2 — every runtime helper an if/else handler calls is shipped",
     });
   }
 
-  // Bare-variant writes from an if/else handler (round 3, S465 PA ruling — the round-2
-  // enum-context widening for UNANNOTATED cells is REMOVED). §14.10: the resolution source
-  // is "a previously-declared cell or local with a known type (`@cell = .V` where
-  // `@cell: T`)", and an unannotated `let x = .Small` is E-VARIANT-AMBIGUOUS. So:
-  // the annotated cell `<col>: Col = .Red` resolves on every path (handler AND function
-  // body); an UNANNOTATED cell is E-VARIANT-AMBIGUOUS on every path — the handler now
-  // reports exactly what a function body always did. Executed in
+  // Bare-variant writes from an if/else handler. §14.10: the resolution source is "a
+  // previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`)".
+  // The annotated cell `<col>: Col = .Red` resolves on every path (handler AND function
+  // body). S466 — ruling user-voice-scrml.md S464 "(a) Infer from initializer": an
+  // UNANNOTATED `<col> = Col.Red` has type `Col` (§66.3 rule 5: `E.V` is a literal of
+  // `E`), so it resolves on every path too (supersedes the S465 round-3 pin that made it
+  // E-VARIANT-AMBIGUOUS). A STRING-initialised cell still has no enum context. Executed in
   // browser-handler-if-else-helpers-s462.browser.test.js.
   const FORMS = [
     ["oneline", `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n`],
@@ -198,8 +198,10 @@ describe("S462 r2 — every runtime helper an if/else handler calls is shipped",
       expect(errors).toEqual([]);
       expect(undefinedHelperCalls(files)).toEqual([]);
     });
-    test(`en-unannotated-${label}: \`<col> = Col.Red\` is no §14.10 context → E-VARIANT-AMBIGUOUS`, () => {
-      expect(build(ENU + body + `<p id="o">\${@col}</p>\n`, `enu-${label}`).errors).toContain("E-VARIANT-AMBIGUOUS");
+    test(`en-unannotated-${label}: \`<col> = Col.Red\` types the cell \`Col\` (S464 ruling) — resolves`, () => {
+      const { errors, files } = build(ENU + body + `<p id="o">\${@col}</p>\n`, `enu-${label}`);
+      expect(errors).toEqual([]);
+      expect(undefinedHelperCalls(files)).toEqual([]);
     });
   }
   test("en: a variant `Col` does not declare is E-TYPE-063 (annotated cell); a string-initialised cell is E-VARIANT-AMBIGUOUS", () => {

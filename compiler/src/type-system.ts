@@ -9838,6 +9838,49 @@ function extractThemeInitVariant(initExpr: unknown): string | null {
   return null;
 }
 
+/**
+ * §14.10 / §66.3 rule 5 (S464 ruling "(a) Infer from initializer") — the enum
+ * an unannotated cell declaration takes from a QUALIFIED-variant initializer.
+ *
+ *   - `E.V` / `E::V` where `V` is a UNIT variant of enum `E` → `E` (rule 5 (a):
+ *     a qualified unit variant is a literal of `E`).
+ *   - `E.V(…)` / `E::V(…)` where `V` is a PAYLOAD variant of `E` → `E` (rule 5
+ *     (g): a payload variant's construction is a call whose declared type is `E`).
+ *
+ * Returns null for everything else: a bare `.V` (no type context), an unknown
+ * or non-enum `E`, a `V` that `E` does not declare, a unit variant called /
+ * a payload variant left uncalled, an optional member, and an `E` that names a
+ * VALUE in scope (a local / cell / function shadowing the type name).
+ */
+function inferEnumFromQualifiedVariantInit(
+  initExpr: unknown,
+  typeRegistry: Map<string, ResolvedType>,
+  scopeChain: ScopeChain,
+): EnumType | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  const node = initExpr as Record<string, unknown>;
+  let head = node;
+  let isCall = false;
+  if (node.kind === "call") {
+    if (node.optional === true || !node.callee || typeof node.callee !== "object") return null;
+    head = node.callee as Record<string, unknown>;
+    isCall = true;
+  }
+  if (head.kind !== "member" || head.optional === true || typeof head.property !== "string") return null;
+  const obj = head.object as { kind?: string; name?: string } | undefined;
+  if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
+  const enumName = obj.name;
+  const shadow = scopeChain.lookup(enumName) as { kind?: string } | undefined;
+  if (shadow && shadow.kind !== "type" && shadow.kind !== "import") return null;
+  const t = typeRegistry.get(enumName);
+  if (!t || t.kind !== "enum") return null;
+  const variant = (t.variants ?? []).find((v) => v.name === head.property);
+  if (!variant) return null;
+  const hasPayload = variant.payload !== null && variant.payload !== undefined;
+  if (isCall !== hasPayload) return null;
+  return t;
+}
+
 function annotateNodes(
   fileAST: FileAST,
   scopeChain: ScopeChain,
@@ -12817,6 +12860,23 @@ function annotateNodes(
             // Annotation wins — bind the declared contract, not the raw row label.
             resolvedType = _contractAnno;
           }
+        }
+
+        // §14.10 / §66.3 rule 5 (S464 ruling "(a) Infer from initializer") — an
+        // UNANNOTATED cell DECLARATION (`<col> = Col.Red`) whose initializer is a
+        // qualified variant of a known enum has that enum type: `E.V` is a literal
+        // of `E` (rule 5 (a)) and `E.V(…)` is a call whose declared type is `E`
+        // (rule 5 (g)). Only the structural declaration form infers — a collapsed
+        // reassignment (`@col = Col.Blue` in a function body) never retypes its
+        // cell. A bare `.V` initializer stays context-less (E-VARIANT-AMBIGUOUS).
+        if (
+          !reactAnnot &&
+          (n as ASTNodeLike).structuralForm === true &&
+          (resolvedType.kind === "asIs" || resolvedType.kind === "unknown") &&
+          !(n as ASTNodeLike).stateType
+        ) {
+          const _inferredEnum = inferEnumFromQualifiedVariantInit((n as any).initExpr, typeRegistry, scopeChain);
+          if (_inferredEnum) resolvedType = _inferredEnum;
         }
 
         // §2a — E-SCOPE-001 on undeclared idents in the state-decl init.
