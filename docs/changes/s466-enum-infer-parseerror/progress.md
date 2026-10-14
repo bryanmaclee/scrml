@@ -24,3 +24,6 @@
   - reviewer probes (37) main vs tip: only intended changes
   - corpus 3079 files origin/main vs tip: 0 newly refused, 0 artifact diffs (3 already-failing files differ, all item 1, as before)
 - known-gaps: g-parseerror-builtin-or-import-only-s462 resolved; NEW resolved marker g-impl1-handler-arm-undeclared-qualifier-accepted-s466 with prov=pa-ruled:§34-E-SCOPE-001-…-corpus-measured-0
+- `e0bc9c4a3` — types-gate TS2345 (E-ERROR-005 display name) + FACTS / gap-counts regen. First commit attempt bailed on 1 unidentified test under multi-agent load (output truncated); retry passed 35926 tests.
+- final gates: hook 35926 pass; lsp+commands 726 pass/0 fail; types-gate OK (182 unchanged); slices 2280 pass/1 todo/0 fail; lint-no-default-arm 0; facts PASS; state PASS; spec-index OK; bootstrap-conformance current; corpus-compile-floor PASS
+- final corpus (3079 files) origin/main 4e8dea5e6 vs tip: 0 newly refused, 0 newly accepted, 0 artifact diffs on 1892 clean-in-both
