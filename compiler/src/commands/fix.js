@@ -55,7 +55,7 @@
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
 import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges, hasProgramRoot } from "./fix-s66.js";
-import { compileErrorsTogether } from "./fix-verify-shared.js";
+import { compileErrorsTogether, compileErrorsOfText } from "./fix-verify-shared.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -254,7 +254,9 @@ export function applyFixRules(file, source, rel, o, files = [file], extra = {}) 
  *     samples` overflows the stack). All measured S466.
  * pre-migrate exists to clear E-DEPRECATED-001 (impl#1's hard error on `<machine>`): while it runs,
  * that code alone does not refuse; pre-migrate then requires the migrated file to compile (fix-s66.js).
- * @returns {{ refused: Map<string, object[]>, clean: Set<string> }} `clean`: the files whose judging
+ * @returns {{ refused: Map<string, object[]>, clean: Set<string>, deprecatedOnly: Map<string, object[]> }}
+ *   `deprecatedOnly`: the files let through only by that tolerance (with the diagnostics), which
+ *   the caller re-judges after pre-migrate (S466 r2 N1). `clean`: the files whose judging
  *   compile(s) reported nothing fatal at all — for them a rule's scratch compile that errors is a
  *   divergence of the scratch copy, not a file that does not compile.
  */
@@ -262,15 +264,19 @@ export function judgeTargets(files, isDir, rules) {
   const tolerated = (d) => rules.includes("pre-migrate") && d.code === "E-DEPRECATED-001";
   const refused = new Map();
   const clean = new Set();
+  // Files let through ONLY by the E-DEPRECATED-001 tolerance: the CLI requires pre-migrate to
+  // apply to them, and re-judges the migrated text, before any later rule runs (S466 r2 N1).
+  const deprecatedOnly = new Map();
   const judgeAlone = (f) => {
     const diags = compileErrorsTogether([f]);
     const errs = diags.filter((d) => !tolerated(d));
     if (errs.length > 0) refused.set(f, errs);
     else if (diags.length === 0) clean.add(f);
+    else deprecatedOnly.set(f, diags);
   };
   if (!isDir) {
     for (const f of files) judgeAlone(f);
-    return { refused, clean };
+    return { refused, clean, deprecatedOnly };
   }
   const closure = new Map();
   const closureOf = (f) => {
@@ -290,6 +296,7 @@ export function judgeTargets(files, isDir, rules) {
     const errs = diags.filter((d) => !tolerated(d));
     if (errs.length > 0) refused.set(r, errs);
     else if (diags.length === 0) clean.add(r);
+    else deprecatedOnly.set(r, diags);
   }
   for (const m of files) {
     if (rootSet.has(m)) continue;
@@ -306,12 +313,16 @@ export function judgeTargets(files, isDir, rules) {
       }
     }
     if (hits.length > 0) { refused.set(m, hits); continue; }
+    // Every root reaching it stopped with an error (S466 r2 N2: a front-end error in the root skips
+    // the emitted-JS check, so this module's own codegen error never surfaces there): judge it by its
+    // own compile too.
+    if (reaching.every((r) => rootDiags.get(r).length > 0)) { judgeAlone(m); continue; }
     // A reaching root's compile reported an error that names no file (E-IMPORT-002 on an import
     // cycle carries none): it may be this module's, so the module is judged by its own compile too.
     if (reaching.some((r) => rootDiags.get(r).some((d) => d.file === null && !tolerated(d)))) { judgeAlone(m); continue; }
     if (!any && reaching.every((r) => rootDiags.get(r).length === 0)) clean.add(m);
   }
-  return { refused, clean };
+  return { refused, clean, deprecatedOnly };
 }
 
 /** The rules a run applies (parsed options → rule names). */
@@ -374,6 +385,31 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
           }
         }
         continue;
+      }
+      // S466 r2 N1: a file let through only because pre-migrate exists to clear its E-DEPRECATED-001.
+      // E-DEPRECATED-001 is a FRONT-END error — the compile stops there, so "no other error" was never
+      // checked. The tolerance holds only if pre-migrate APPLIES and the migrated text then compiles
+      // (judged as the file, with its project and databases); otherwise the whole file is refused
+      // before any later rule runs (the §66 declaration rules have no verify of their own).
+      if (gate.deprecatedOnly.has(file)) {
+        const pm = applyFixRules(file, source, rel, { ...o, rules: ["pre-migrate"] }, files).r;
+        const migrated = pm.applied.some((a) => a.rule === "pre-migrate") ? pm.output : null;
+        const after = migrated === null ? null : compileErrorsOfText(file, migrated, resolveProject(file));
+        if (migrated === null || after.length > 0) {
+          const why = migrated === null
+            ? [...gate.deprecatedOnly.get(file), ...pm.blockers.map((b) => ({ code: "(pre-migrate)", file, line: null, message: b.reason }))]
+            : after;
+          refused++;
+          report.push({ file: rel, refused: true, compileErrors: why.map((d) => ({ ...d, file: d.file ? relative(cwd, d.file) || d.file : null })), changed: false, applied: [], blockers: [], infos: [] });
+          if (!o.json) {
+            io.err(`${rel}: refused — the file does not compile${migrated === null ? " and pre-migrate could not migrate its `<machine>`" : " after pre-migrate migrates its `<machine>`"}, so no rewrite can be verified; nothing was changed. Fix these first:`);
+            for (const d of why) {
+              const where = d.file ? `${relative(cwd, d.file) || d.file}${d.line != null ? `:${d.line}` : ""}` : "(no file)";
+              io.err(`  ${where} ${d.code}${d.message ? `: ${d.message}` : ""}`);
+            }
+          }
+          continue;
+        }
       }
       const { cls, r } = applyFixRules(file, source, rel, o, files, { inPlaceClean: gate.clean.has(file) });
       report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers, infos: r.infos ?? [] });

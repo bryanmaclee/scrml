@@ -113,7 +113,7 @@ export function writeScratchProject(dir, filePath, source, auxSources) {
       } catch { /* best effort: the compile then runs without that file */ }
     }
   }
-  return { target };
+  return { target, base, root };
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +177,37 @@ export function compileErrorsTogether(files) {
     return [{ code: COMPILE_THREW, file: null, line: null, message: String(e?.message ?? e).split("\n")[0] }];
   } finally {
     rmSync(out, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The error-severity diagnostics of `text` compiled AS `filePath` — the file's project and the
+ * databases it names around it (writeScratchProject), nothing written in place. For text that is
+ * not on disk yet (a migrated file, judged before any later rule runs on it). A diagnostic on the
+ * file itself carries `file: filePath`; one on another file of the project, that file's real path.
+ */
+export function compileErrorsOfText(filePath, text, auxSources) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-fix-rejudge-"));
+  const saved = { log: console.log, warn: console.warn, error: console.error, so: process.stdout.write, se: process.stderr.write };
+  try {
+    const { target, base, root } = writeScratchProject(dir, filePath, text, auxSources);
+    let r;
+    try {
+      console.log = console.warn = console.error = () => {};
+      process.stdout.write = process.stderr.write = () => true;
+      r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
+    } finally {
+      console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
+      process.stdout.write = saved.so; process.stderr.write = saved.se;
+    }
+    return errorSeverityDiagnostics(r).map((d) => ({
+      ...d,
+      file: d.file === null ? null : d.file === target ? resolve(filePath) : d.file.startsWith(base + sep) ? join(root, relative(base, d.file)) : d.file,
+    }));
+  } catch (e) {
+    return [{ code: COMPILE_THREW, file: null, line: null, message: String(e?.message ?? e).split("\n")[0] }];
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

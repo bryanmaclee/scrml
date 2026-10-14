@@ -45074,8 +45074,10 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   applications in one directory are never judged as one program. A rule whose own verify copy of the project reports an error, for a file that
   compiles in place, reports that it cannot verify, not that the file does not compile. One
   exception: a rewrite whose purpose is to clear a removed-form hard error does not refuse a file
-  whose only error is that one, provided the rewritten file compiles. In impl#1 this is the
-  `<machine>` → `<engine>` migration and E-DEPRECATED-001. Over a directory, a refused file is
+  whose only error is that one. The exception holds only if that rewrite applies and the
+  rewritten text then compiles; otherwise the whole file is refused before any other rule runs.
+  A front-end error stops the compile, so "only error" proves nothing about later checks. In
+  impl#1 this is the `<machine>` → `<engine>` migration and E-DEPRECATED-001. Over a directory, a refused file is
   skipped and listed, and the other files are processed. The exit status is non-zero when any file
   was refused (impl#1: 3, ahead of `--check`'s 1 and 2).
 

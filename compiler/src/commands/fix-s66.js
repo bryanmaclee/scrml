@@ -1325,6 +1325,12 @@ export function fixS66(source, opts = {}) {
       } else {
         blockers.push({ rule: "pre-migrate", line: 0, reason: "the chained `scrml migrate` rewrites change impl#1's reading of this file — not applied", snippet: "" });
       }
+      // S466 r2 N1: the original carries E-DEPRECATED-001, a FRONT-END error that stops the compile
+      // before any later check — the file was let through only because pre-migrate clears it. If
+      // pre-migrate did not apply, nothing has shown the file compiles: no later rule runs on it.
+      if (!opts.allowNonCompiling && ra && ra.errs.includes("E-DEPRECATED-001") && src === source) {
+        return { output: source, changed: false, applied: [], blockers, infos: [] };
+      }
     }
   }
 

@@ -51,3 +51,17 @@
   - samples: 881 files, 210 refused (all 210 fail real `scrml compile <file>`), 593/593 rewrites identical, 0 lost.
   - conformance/cases: 1827 files, 888 refused (887 fail `scrml compile <file>`; writer.scrml in tenant/floor-imported-module-write-neg fails inside its importing case.scrml), 571/571 identical, 0 lost.
 - Gaps for the PA: `scrml compile samples` crashes (Maximum call stack size exceeded); E-IMPORT-002/E-CG-003/E-TYPE-031/E-META-EVAL-002/E-VALIDATOR-INLINE-DYNAMIC (+ E-COMPONENT-012/-020/-035, E-THEME-TOKEN-UNKNOWN, E-IF-IN-DISPATCHED-ARM) carry no file in a multi-file compile; protected-field scan (E-CG-001) is compile-unit-global (one program's protect= fails another's client JS in a joint compile).
+
+## Fix round 2 (S239 re-review of 9d59b0141 → N1, N2)
+- N1 (MED): judgeTargets returns `deprecatedOnly` (files let through only by the E-DEPRECATED-001
+  tolerance). The CLI runs pre-migrate alone on such a file first; if it does not apply, or the
+  migrated text does not compile (compileErrorsOfText: the text compiled as the file with its project
+  + databases), the whole file is refused before any later rule. fixS66 also stops (no later rule) when
+  the original carries E-DEPRECATED-001 and pre-migrate did not apply (direct callers; not under
+  allowNonCompiling). r1repro/b1/machbad.scrml: refused, exit 3, under --s66, --s66 --write, default,
+  --dry-run; mach.scrml still migrates.
+- N2 (LOW): a module whose every reaching root has fatal errors is also judged by its own compile.
+  r1repro/a2: app.scrml + mod.scrml both refused.
+- Tests: fix-refuse-broken.test.js §9 (7) + §10 (1); 37 in the file.
+- Acceptance unchanged from 9d59b0141: examples 0 refused / 23 of 23 identical; samples 210 refused
+  (same set) / 593 of 593 identical; conformance 888 refused (same set) / 571 of 571 identical; 0 lost.

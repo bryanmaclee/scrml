@@ -26,6 +26,7 @@ import {
   scratchRefusalReason, SCRATCH_DIVERGES,
 } from "../../src/commands/fix-verify-shared.js";
 import { fixSqlFailable } from "../../src/commands/fix-sql-failable.js";
+import { fixS66, S66_RULES } from "../../src/commands/fix-s66.js";
 import { compileScrml } from "../../src/api.js";
 
 /** The S464 PA repro: `bad` emits invalid client JS (`@nope +`), `load` holds an unhandled read. */
@@ -518,6 +519,101 @@ describe("§8 a `<machine>` file (E-DEPRECATED-001) is migrated, and the result 
   test("a `<machine>` file with ANOTHER error is refused", () => {
     withDir({ "m.scrml": MACHINE.replace("<p>x</p>", "<p>x</p>\n${ import { Nope } from \"./nope.scrml\" }") }, (dir) => {
       expect(run([join(dir, "m.scrml")]).code).toBe(3);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 S466 r2 N1: E-DEPRECATED-001 is a front-end error — it hides every later error
+// ---------------------------------------------------------------------------
+
+/** r1repro/b1/machbad.scrml: a `<machine>` file whose `bad` also emits invalid JS (hidden behind E-DEPRECATED-001). */
+const MACH_BODY = (opener, extra) => [
+  "<program>",
+  "type Book:enum = {",
+  "    Idle,",
+  "    Loaded(title: string, author: string, count: int)",
+  "}",
+  "",
+  "<count> = 0",
+  ...(extra ? [extra] : []),
+  "",
+  `<${opener} for=Book initial=.Idle>`,
+  "    <Idle rule=.Loaded></>",
+  "    <Loaded title=t rule=.Idle>",
+  "        <p>${t}</p>",
+  "    </>",
+  "</>",
+  "",
+  "<div class=\"library\">",
+  "    <button onclick=${@book = Book.Loaded(\"t\", \"a\", 1)}>Load</button>",
+  "    <p>${@count}</p>",
+  "</div>",
+  "</program>",
+  "",
+].join("\n");
+const MACHBAD = MACH_BODY("machine", "${ function bad() { return @nope + } }");
+const MACHOK = MACH_BODY("machine", null);
+
+describe("§9 a `<machine>` file with an error hidden behind E-DEPRECATED-001 is refused", () => {
+  test("precondition: the in-place compile shows ONLY E-DEPRECATED-001 (the front end stops there)", () => {
+    withDir({ "m.scrml": MACHBAD }, (dir) => {
+      expect(compileErrorsInPlace(join(dir, "m.scrml")).map((d) => d.code)).toEqual(["E-DEPRECATED-001"]);
+    });
+  });
+
+  for (const args of [["--s66"], ["--s66", "--write"], [], ["--dry-run"]]) {
+    test(`scrml fix ${args.join(" ") || "(default rules)"}: refused, exit 3, nothing proposed or written`, () => {
+      withDir({ "m.scrml": MACHBAD }, (dir) => {
+        const f = join(dir, "m.scrml");
+        const r = run([f, ...args]);
+        expect(r.code).toBe(3);
+        expect(r.out).toBe("");
+        expect(r.err).toContain("pre-migrate could not migrate its `<machine>`");
+        expect(r.err).toContain("E-CODEGEN-INVALID-LOGIC");
+        expect(readFileSync(f, "utf8")).toBe(MACHBAD);
+      });
+    });
+  }
+
+  test("fixS66 called directly with every rule: no rewrite once pre-migrate is blocked", () => {
+    withDir({ "m.scrml": MACHBAD }, (dir) => {
+      const r = fixS66(MACHBAD, { filePath: join(dir, "m.scrml"), rules: [...S66_RULES] });
+      expect(r.changed).toBe(false);
+      expect(r.output).toBe(MACHBAD);
+    });
+  });
+
+  test("the same file without the hidden error still migrates to `<engine>`", () => {
+    withDir({ "m.scrml": MACHOK }, (dir) => {
+      const f = join(dir, "m.scrml");
+      const r = run([f]);
+      expect(r.code).toBe(0);
+      expect(readFileSync(f, "utf8")).toContain("<engine for=Book initial=.Idle>");
+      expect(compileErrorsInPlace(f)).toEqual([]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 S466 r2 N2: a root's front-end error hides its module's codegen error
+// ---------------------------------------------------------------------------
+
+describe("§10 a module reached only by roots that stop with an error is judged by its own compile", () => {
+  // r1repro/a2: app.scrml has E-SCOPE-001 (stops before the emitted-JS check); mod.scrml alone is
+  // E-CODEGEN-INVALID-LOGIC.
+  const APP = "<program>\n${\n  import { h } from \"./mod.scrml\"\n  function go() { return undefinedThing + h(1) }\n}\n<button onclick=go()>go</button>\n</program>\n";
+  const MOD = "${\n  export function h(x) {\n    if (x is some) { return 1 }\n    return 0\n  }\n  export function bad() { return @nope + }\n}\n";
+
+  test("both refused; mod.scrml untouched (its `is some` is not rewritten)", () => {
+    withDir({ "app.scrml": APP, "mod.scrml": MOD }, (dir) => {
+      expect(compileErrorsInPlace(join(dir, "mod.scrml")).map((d) => d.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+      const g = judgeTargets([join(dir, "app.scrml"), join(dir, "mod.scrml")], true, ["is-some"]);
+      expect(g.refused.get(join(dir, "mod.scrml")).map((d) => d.code)).toContain("E-CODEGEN-INVALID-LOGIC");
+      const r = run([dir]);
+      expect(r.code).toBe(3);
+      expect(readFileSync(join(dir, "mod.scrml"), "utf8")).toBe(MOD);
+      expect(readFileSync(join(dir, "app.scrml"), "utf8")).toBe(APP);
     });
   });
 });
