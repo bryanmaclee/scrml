@@ -623,3 +623,49 @@
   skip / 0 fail; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp +
   commands 726 / 3 skip / 0; facts, state, spec-index, bootstrap-conformance, corpus-compile-floor --check PASS;
   host-global-scan exit 0; browser-baseline --check PASS (48 asserted, 0 of 2 env-excluded observed).
+
+## Fix round 8 (S239 review of f84da20a3) — branch s466-await-r8
+- 2026-10-14 r8 start: `s466-await-r8` cut from origin/s465-await-r5 f84da20a3; brief archived as BRIEF-r8.md
+  (8a7e2f6ec). Reviewer probes3 (m1–m4, 61 shapes) copied; harness gained the reviewer's `files:` support (without
+  it the m1 chain3* shapes read as E-IMPORT-006 — a harness artifact, not a compiler change). REPRODUCED all five:
+  bindNotBinding, libBindChainNot, topBindingAwaitedInBinding, appExportConstAnn, libExportConstAnnInner →
+  wrong password WELCOME.
+- HIGH-1 root CONFIRMED: emit-server `planModuleBindingClosure` emitted each module binding with `declaredNames:
+  new Set(byName.keys())`, and the server await branches (emit-expr `isStdlibAsyncCallee` path, the peer path)
+  treat a declared name as a shadowing local — so `w` in `const v = (p, h) => !w(p, h)` was never awaited. The
+  same bug r7 fixed by hand on the client. FIX: ONE rule, `file-async-fns.ts moduleLevelDeclaredNames(names,
+  asyncNames)` — a module binding is not a local; the async ones leave the set; the binding's own params / inner
+  declarations still shadow (pinned: paramShadowsBinding). Used by the server D-5 copy and the client
+  top-level copy (emit-reactive-wiring `emitTopStmt`, r7's hand-written filter replaced). Other emitters checked:
+  every other `declaredNames` construction is a params / block-scope set (emit-control-flow / emit-logic
+  `blockScopedDeclaredNames`, emitLambda's child set, emitLibraryFnMember's params) — no other module-scope set.
+- HIGH-2 root CONFIRMED: `fn-valued-bindings.ts` read an export's init with a regex over `s.raw` that cannot pass
+  a `: (p: string) => boolean` annotation; the ss1 emitter read `valueInit`. FIX: the AST builder attaches
+  `valueInit` / `valueInitExpr` (the parsed init) to the UNANNOTATED plain function-value export too
+  (`export const f = (…) => …` / `= function …` / `= x => …`; same raw — narrowed to function-value inits after
+  the gate showed the generic path owns `match` / multi-declarator / `?{}` value exports: 7 tests);
+  `fn-valued-bindings` reads `valueInitExpr` (no `raw` read left in fn-valued-bindings.ts / file-async-fns.ts). The
+  ss1 copy of an async exported value is emitted `async` with the await facts (emit-server const branch, from the
+  parsed init; emit-logic `_logicOptsFromExprCtx` now carries the await facts for a function value lowered from
+  an expression context).
+- LOW (both fixed): `asyncFnNamesOfFile` without a stash FAILS CLOSED (every file-scope function / binding / known
+  async import is async). Channel `onserver:*` handler (ch1): emitted `async` when its emitted body awaits at
+  its own level (`bodyTextHasOwnAwait`); the WS callbacks already await it (emit-channel §19.10.6) — was a sync
+  function holding `await` → E-CODEGEN-INVALID-LOGIC.
+- Found and fixed while measuring: with HIGH-2's parsed init, `export const check = function (p, h) { return
+  verifyPassword(p, h) }` in a lib now compiled (r7: E-CODEGEN-INVALID-LOGIC) — and threw `verifyPassword is not
+  defined`: the value-only `.server.js` (`_generateValueOnlyServerJs`) was written with NO import lines. It now
+  emits the referenced imports (usage-pruned). g-lib-export-const-lambda-missing-import-s465 → resolved.
+- MERGE of origin/main 7f2b81418 (#1424 = the squash of r1–r7, tree identical to f84da20a3): the four add/add
+  conflicts resolved by a real 3-way merge against the content base f84da20a3 (`git merge-file`) — every file
+  merged clean to the r8 version; tree unchanged (3ce0d9bed).
+- PROBES (392 = 331 + 61 probes3, executed vs bun:sqlite, final tip): wrong passwords accepted **0**. Old 331:
+  RUN-OK 228 / ERR 92 / runtime-fail-closed 11 (r7: 226 / 92 / 13 — libLambda and libFnExpr now run). probes3
+  61: RUN-OK 25 / ERR 34 / runtime-fail-closed 2 / ACCEPTED 0 (reviewer on f84da20a3: 20 / 34 / 2 / **5**).
+- CORPUS (corpus-emit-differential; base = archive of origin/main 7f2b81418, head = this tree; examples, samples,
+  conformance; 2784 sources): 0 newly failing, 0 newly passing, 0 diagnostic changes, syntax delta 0; 165
+  artifacts differ — ALL by the absolute tree root only (0 real emit changes).
+- GATES: pre-commit (unit + integration + conformance + compiler/tests/*.test.js) 36405 pass / 0 fail on the final
+  code commit; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp + commands
+  726 / 3 skip / 0; facts (regenerated), state, spec-index, bootstrap-conformance, corpus-compile-floor --check
+  PASS; host-global-scan exit 0; gen-md-shim current; browser-baseline --check PASS.
