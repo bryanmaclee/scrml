@@ -496,3 +496,77 @@
 - Gates on 7a45390b6: pre-commit full 36251 pass / 0 fail; types-gate --check OK (180, 0 NEW); self-host-v2 2280 / 0;
   commands + lsp 726 pass / 3 skip / 0 fail (after `bun run pretest`); s465 test files 533 / 0; `pa-verify.mjs`
   high1LibLambda wrong → REJECTED / right → WELCOME; reviewer probes s1–s14 (206): 0 wrong passwords accepted.
+
+## Fix round 7 (S239 review of 22ed85298) — ROOT fixes; branch s466-await-r7 → pushed to s465-await-r5
+- 2026-10-13 r7 start: `git checkout -b s466-await-r7 origin/s465-await-r5` (22ed85298); brief archived as
+  BRIEF-r7.md (6465341a2); bun install + pretest OK. Reviewer probe set copied to
+  $HOME/.cache/scrml-agent-tmp/s466-await-r7 (harness out dir + BR tag adjusted). r6 tip measured: the set is
+  **331** shapes (23 files; the brief's "333" counts 2 more than the files define), **12 wrong passwords
+  accepted** (libFnDecl* ×7 — libFnDeclIf appears in both n7 and n8 — and schedShadow* / stdSchedShadow* ×5).
+- 2026-10-14 the Claude process exited mid-round; resumed on the same worktree, uncommitted work committed
+  hook-gated (2626714f0, full pre-commit suite passed).
+- HIGH-A REPRODUCED + root CONFIRMED: `lib.server.js` "ss1: module value exports" shipped a sync `export
+  function check` with `if (!inner(p, h))` — the ss1 block ran its OWN `computeAsyncFnNames` over the
+  VALUE-EXPORTED functions only. Six readers answered "is this name async" for a file, each over its own
+  subset. FIX (one set, one computation): NEW `codegen/file-async-fns.ts` `computeFileAsyncFnNames` — every
+  file-scope function declaration (exported or not, `server function`s), every function-valued binding, the
+  file's server functions as MEMBERS (each is an async in-process peer on the server) and as triggers, the
+  async imports; one fixpoint over the call graph. `codegen/index.ts` `fileAsyncFnNamesOf` computes it ONCE
+  per file, memoized for the run (`newFileAsyncMemo`), and the same memoized set answers every importer
+  ("is the export I call async?") — the cross-module seed and the file's own emitters cannot disagree.
+  Stashed as `_asyncFnNames` (`setFileAsyncFnNames` / `asyncFnNamesOfFile`).
+  Readers now on the one set: emit-server ss1 value exports (`asyncFnNames = asyncFnNamesOfFile`), the D-5
+  binding closure (`planModuleBindingClosure`), the server callee map (`buildServerCalleeImportMap`: imports
+  ∪ async bindings read off the set), the CPS wrapper (via the map), emit-client's binding backstop.
+  REMOVED second readers: (1) emit-server ss1 `computeAsyncFnNames(fnDeclByName.values() …)`; (2)
+  codegen/index.ts r6 `_asyncLocalBindings` fixpoint; (3) `scheduling.ts asyncLocalBindingsOfFile`; (4)
+  emit-tool.ts `collectAsyncFnNamesFromFile` (the cross-module export analysis, no server functions); (5)
+  index.ts `asyncExportNamesOf` (→ `fileAsyncFnNamesOf`). `collectTopLevelStatements` moved to collect.ts
+  (file-async-fns must not load emit-tool: a module-init TDZ through emit-server).
+  Refinement found while fixing: a server function's ss1 VALUE copy keeps its pre-r7 shape when it is in
+  the set only as itself (`asyncByBodyOf`): emitting `export server function aL() { session.set(…) }` async
+  with a server body raised E-SESSION-CONTEXT (conf-SESSION-PROGRAM-ATTR-SCOPE). Also found: a lib export
+  calling a server-PLACED sync helper (`export function quad(x) { return dbl(dbl(x)) }`) shipped sync against
+  the async peer `dbl` on r6 — now awaited (pinned, executed: quad(1) == 4). A binding is async by its BODY
+  (`asyncFnValuedBindingsOfFile` = by-body ∩ bindings): a top-level `const onOpen` beside a channel's
+  `server function onOpen` is not that function (E-CHANNEL-006 clean negatives).
+  NOT moved onto the set (stated): the client coloring (`computeClientAsyncSets` — a different question: on
+  the client a server fn is a fetch stub), library mode (`emitAsyncLibraryFns`: the GITI-038 guarded walk,
+  a client-facing `.js`), tool mode (`generateToolJs` and the serve/tool-lib paths: no stdlib registry
+  handed in), and emit-server `_genuineAsync` (it decides the ESCAPE rule's narrower outer facts, #284, not an
+  await). Each of those is a remaining per-emitter fixpoint — filed below.
+- HIGH-B REPRODUCED + root CONFIRMED and refined: FOUR readers (not two) decided "is this the global
+  scheduler" by name: emit-expr's lowering (`KNOWN_DISCARD_HOF.has && !ctx.declaredNames.has` — a file-scope
+  `function setTimeout` is not in a body's declaredNames → the lambda went async and the user function's
+  Promise was tested), `isKnownDiscardHofCall` + `asyncFnArgRole` (a per-call BOUND_CALLEE_MARK a pre-pass set
+  on some paths), fn-valued-bindings `asyncValueUsesIn` (own `SCHEDULERS` list, no shadow test) and
+  js-async-analysis (its own `isBound`). SPEC §13.2 (SPEC.md:10311): "The scheduler is global only when the
+  file neither binds its name in any form (a declaration of any pattern shape, a parameter, a function, class
+  or method name, a catch parameter, an import alias, an object-literal key) nor writes it (`setTimeout = …`,
+  `globalThis.setTimeout = …`, `window.setTimeout = …`, a computed write, or a reflective definition such as
+  `Object.defineProperty(globalThis, "setTimeout", …)`); otherwise no exemption is given (fail closed)."
+  FIX: ONE predicate `async-combinators.ts isGlobalSchedulerCallee(name)` over the file's binding set
+  (`schedulerNamesNotProvablyGlobal(fileAST)` — the existing whole-file tree + code-text walk), installed
+  once per file by codegen/index.ts (both per-file loops; reset with the other per-file facts; uninstalled →
+  NOT global, fail closed). All five readers ask it; BOUND_CALLEE_MARK and SCHEDULERS deleted. The five
+  shapes now fail closed (E-ASYNC-STDLIB-IN-SYNC-CALLBACK); the sync-callback and global-scheduler controls
+  run.
+- MED-C (REGRESSION) FIXED by colouring, not by the fallback: the client coloring fixpoint now includes the
+  file's function-valued bindings (`computeClientAsyncSets`), an async one is emitted `async` with the
+  async-body facts (`emit-reactive-wiring emitTopStmt` → shared `asyncFnValueDecl`; a block body lowered from
+  the tree by `emitServerFnValue` in client mode), and every client call site awaits it through the
+  peer-await set (handlers, fn bodies, markup). Found: the group's declaredNames listed the binding names, so
+  `const b = (p, h) => a(p, h)` read `a` as a shadowing local — the async binding's emit drops them. The r6
+  blanket refusal is now a backstop over the final bundle: a reference that is not `await name(…)` is
+  E-ASYNC-FN-ESCAPES-AS-VALUE at the binding's own span (`module-scope-refs awaitedCallsAreNotUses`).
+  Executed (happy-dom, stubbed routes): cl2 `persist("x"); @out = "after"` runs and awaits; cl3 `@n =
+  loadCount()` → 7; `w(2) ? "Y" : "N"` → "N" (base: always "Y"); an alias `const z = w` refused.
+- MED-D FIXED: `emit-logic emitServerFnValue(hatchNode)` takes head and body from the expression parser's own
+  node (`EscapeHatchExpr.params` — acorn's structured parameters, defaults as trees — and `bodyRaw`, acorn's
+  body span); params emitted by `emit-expr emitFnValueParams`; a default that would need `await` is refused by
+  the emitted head's syntax. `splitFnValueText` deleted; `fn-valued-bindings fnValueBody` reads `bodyRaw`
+  (the stray `<fn-value>` stderr warning came from re-parsing a mis-split body). All n5 split* / n6 shapes
+  run. Test-text relaxation: is-predicate-in-function-expression-1333 C (`function ( v )` → `function(v)`).
+- LOW (runLambda code choice) NOT done: the code is chosen at ~7 sink-recording sites in emit-expr and drained
+  by 4+ emitters (server route, ss1, library, client); "passed to a user HOF" is not known at the recording
+  site. Not trivial → filed (g-lambda-to-user-hof-reports-sync-callback-code-s466).
