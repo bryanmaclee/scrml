@@ -792,8 +792,12 @@ function emitCpsCellsBatchBody(
   opts: Record<string, unknown>,
   indent: string,
   span: unknown,
+  /** S466 — the batch can end the function (planBatchCellReturn `exits`). */
+  exits = false,
 ): { lines: string[]; error: CGError | null } {
   const out: string[] = [];
+  // S466 — an exiting batch's statements run one level deeper (cpsCellsPrologue).
+  const stmtIndent = exits ? `${indent}  ` : indent;
   const cellOpts = { ...opts, serverCellWrites: true };
   const bodyStart = out.length;
   for (const idx of [...serverIndices].sort((a, b) => a - b)) {
@@ -809,12 +813,12 @@ function emitCpsCellsBatchBody(
         ...raw,
         guardedNode: { kind: "const-decl", name: tmp, init: inner.init ?? "", initExpr: inner.initExpr, sqlNode: inner.sqlNode, span: inner.span },
       }, cellOpts as any));
-      if (guardCode) for (const l of indentBodyLines(guardCode, indent)) out.push(l);
-      for (const l of indentBodyLines(cpsCellWriteStatement(inner.name, tmp), indent)) out.push(l);
+      if (guardCode) for (const l of indentBodyLines(guardCode, stmtIndent)) out.push(l);
+      for (const l of indentBodyLines(cpsCellWriteStatement(inner.name, tmp), stmtIndent)) out.push(l);
       continue;
     }
     const code = serverRewriteEmitted(emitLogicNode(raw, cellOpts as any));
-    if (code) for (const l of indentBodyLines(code, indent)) out.push(l);
+    if (code) for (const l of indentBodyLines(code, stmtIndent)) out.push(l);
   }
   // Fail-closed backstop: every write of a cell slot in this batch must be a
   // recorded one. A lowering path that built its own expression context (and so
@@ -882,7 +886,7 @@ function emitCpsCellsBatchBody(
     return s;
   };
   return {
-    lines: [...cpsCellsPrologue(indent, cells), ...out.map(retarget), ...cpsCellsEpilogue(indent, cells)],
+    lines: [...cpsCellsPrologue(indent, cells, exits), ...out.map(retarget), ...cpsCellsEpilogue(indent, cells, exits)],
     error: null,
   };
 }
@@ -5640,7 +5644,7 @@ function generateServerJsImpl(
 
       if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
         // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
-        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOpts, "    ", fnNode.span);
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOpts, "    ", fnNode.span, _cellPlan.exits);
         if (_cells.error) errors.push(_cells.error);
         for (const l of _cells.lines) lines.push(l);
       } else if (cpsSplit) {
@@ -5984,7 +5988,7 @@ function generateServerJsImpl(
 
       if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
         // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
-        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOptsNonCsrf, _bodyIndentNonCsrf, fnNode.span);
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOptsNonCsrf, _bodyIndentNonCsrf, fnNode.span, _cellPlan.exits);
         if (_cells.error) errors.push(_cells.error);
         for (const l of _cells.lines) lines.push(l);
       } else if (cpsSplit) {

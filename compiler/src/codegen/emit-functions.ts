@@ -458,7 +458,7 @@ function emitMultiBatchWrapper(opts: {
       // the store so a later batch receives its current value.
       const _batchCellPlan = planBatchCellReturn(body, plan.indices, plan.returnCell);
       if (_batchCellPlan.mode === "cells") {
-        for (const l of cpsCellsApplyLines(resultVar, _batchCellPlan.cells, "    ")) lines.push(l);
+        for (const l of cpsCellsApplyLines(resultVar, _batchCellPlan.cells, "    ", _batchCellPlan.exits)) lines.push(l);
         if (plan.returnCell) {
           const _cur = `_scrml_reactive_get(${JSON.stringify(plan.returnCell)})`;
           if (!boundCells.has(plan.returnCell)) {
@@ -1455,7 +1455,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           lines.push(`    if (_scrml_server_result && typeof _scrml_server_result === 'object' && _scrml_server_result.__scrml_error) {`);
           lines.push(`      return _scrml_server_result;`);
           lines.push(`    }`);
-          for (const l of cpsCellsApplyLines("_scrml_server_result", _cellPlan.cells, "    ")) lines.push(l);
+          for (const l of cpsCellsApplyLines("_scrml_server_result", _cellPlan.cells, "    ", _cellPlan.exits)) lines.push(l);
           serverCallEmitted = true;
         }
       } else if (cpsSplit.serverStmtIndices.includes(i)) {

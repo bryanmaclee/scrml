@@ -269,3 +269,50 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
     (acorn parse in cli-listen-host). This branch had no CPS delta there → main's file. Verified the other
     r1-touched files: every resolution == merge-file(main, f8309fd64, branch) with the conflicts resolved as
     above (emit-server identical; the rest differ only inside the conflict hunks).
+- [d2d9de99b] merge committed (pre-commit 36464 pass / 0 fail). master-list.md: my `state.ts --write` had
+  regenerated its recent-sessions block from this branch's history → restored from origin/main (PA-owned).
+
+### Guard ruling (§19.9.9.8 rule 3, S464 "(a) Guards stay server")
+- Repro on the merged tree (before the change): S465 shape → `__ri_route_post_1__batch_0` (SELECT+vp) and
+  `__batch_1` (the INSERT alone); the guard `if (!@ok) { alert("wrong"); return }` in the client wrapper.
+- route-inference `analyzeCPSEligibility` (the root of tier classification): inside the placement fixpoint, a
+  statement after the first server statement that (i) can end the function (`statementCanEndFunction`:
+  return / fail / `?` / throw / a break-continue leaving it, not inside a nested fn/lambda; raw text read for
+  the keywords with literals blanked — fail-closed), (ii) reads a server-originated value — produced by an
+  earlier server statement OR derived from one by an earlier browser statement — and (iii) has a later server
+  statement, is pulled server-tier (refused, kind "guard", if it needs the browser). For every server statement
+  after a server-tier guard, every statement between them is pulled (or refused) — one request, no route for
+  the guarded work alone. A server-tier control statement (if/for/while/do/match/switch/try, or one that can end
+  the function) that reads a server value and needs the browser (deny-list: `alert`, `document`, lift, markup…)
+  is refused (g4 `if (@ok) { alert(…); ?{INSERT}… }` — it used to emit `alert` into the server module).
+  E-RI-002 message: "…A check that decides whether server work runs stays on the server (§19.9.9.8 rule 3)…
+  Fix: move the browser work after the server work, or split the function (…)".
+- codegen (exit protocol): a `return` in a server batch was REFUSED in cells mode (E-RI-002) and in legacy
+  mode returned a bare value after which the browser ran the rest of the function. Now `planBatchCellReturn`
+  reports `exits` (statementCanEndFunction(…, returnsOnly)) and an exiting batch is never legacy; the batch
+  runs its statements in `await (async () => { … return _scrml_cps_continue; })()`, returns
+  `{ __scrml_cells, __scrml_exit: { value } }` when they returned, and the error envelope itself when a `fail`
+  ended it (so the handler's implicit transaction sees the failure). The client applies the cells, then
+  `if ("__scrml_exit" in r) return r.__scrml_exit.value;`. A `fail` needs no protocol (its envelope already
+  ends the batch, and the client stops on it) — a fail-only batch keeps its legacy shape.
+- Tests: integration/s466-cps-guard-stays-server.test.js (12; 8 FAIL on d2d9de99b) — EXECUTED: every route
+  of the function forged (wrong password; forged `ok: true` / `msg`) → 0 rows written; right password → the
+  row; the S465 shape also run in happy-dom with the browser's fetch wired to the real server module (wrong
+  password: "wrong", ONE request, 0 rows, no hash in any request); variants return-only, browser-safe
+  statement between, `fail`, `break` in a loop holding the INSERT, `if` holding the INSERT, guard after the
+  last server work stays client; refusals: the S465 repro (alert in the guard), alert between guard and
+  INSERT, `if (@ok) { alert; INSERT }`, a guard on a value derived in the browser (localStorage) from @ok.
+  unit/cps-split-server-tier-s462: planBatchCellReturn `exits` (2 retargeted: a `return` is carried, never
+  refused), statementCanEndFunction (3), RI tiering (4).
+- H1–H4 + M1 re-run on the merged+guard tree: cps-server-logic-stays-server-s462 (H1/H2/H4 label loop, H3
+  forged `row`, M1 crypto members) 8/8; the whole file + s465 pre-first + await + arm-bodies + multi-stub +
+  route-inference: 374/0.
+- Corpus differential (2,898 files: examples, samples, conformance/cases, ../giti, ../flogence read-only; each
+  compiled standalone; artifacts hashed with the tree root normalised) head vs origin/main 7f2b81418:
+  newly refused 0; newly compiling 1 (server-fn-writes-reactive-cell-pos — the round-1 retarget); code-set
+  changes 4 (= the round-1 record: 2 derived-reach negatives + E-STDLIB-CLIENT-CHUNK-MISSING, bun-admin and
+  htmx-forms lose E-RI-002 / E-REACTIVE-003); emit changes 4 (= the round-1 record: defer cps-* ×3 client,
+  examples/19-lin-token). giti / flogence: 0 changes. The guard rule and the merge-integration prune are
+  corpus-neutral.
+- SPEC §19.9.9.8 rule 3 amended (guard paragraph) + provenance `ruling:user-voice-scrml.md S464 "(a) Guards
+  stay server"`. The "Ratify" provenance line was already flipped in round 2 (d5910316d).

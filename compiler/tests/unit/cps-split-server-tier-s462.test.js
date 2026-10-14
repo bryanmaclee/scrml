@@ -19,7 +19,7 @@ import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runRI } from "../../src/route-inference.js";
-import { planBatchCellReturn } from "../../src/codegen/cps-cell-writes.ts";
+import { planBatchCellReturn, statementCanEndFunction } from "../../src/codegen/cps-cell-writes.ts";
 
 function ri(source) {
   const fileAST = buildAST(splitBlocks("/t/app.scrml", source));
@@ -283,7 +283,7 @@ ${body}
 
   test("one top-level write as the batch's last statement keeps the legacy bare return", () => {
     const body = bodyOf(SRC("  @a = ?{`SELECT 1 AS n`}.get()"), "f");
-    expect(planBatchCellReturn(body, [0], "a")).toEqual({ mode: "legacy", cells: [], unsupported: [] });
+    expect(planBatchCellReturn(body, [0], "a")).toEqual({ mode: "legacy", cells: [], unsupported: [], exits: false });
   });
 
   test("a write followed by more server work returns the cells (the read must see the batch's value)", () => {
@@ -311,10 +311,77 @@ ${body}
     expect(plan.unsupported.map((u) => u.cell)).toEqual(["o"]);
   });
 
-  test("a `return` inside a cells-mode batch is listed for refusal; the legacy shape keeps it", () => {
+  // S466 (§19.9.9.8 rule 3, ruling S464 "(a) Guards stay server") — a `return` in a
+  // batch is no longer refused: the batch carries it back as `__scrml_exit`, and a batch
+  // that can return is never legacy (the bare value cannot say "the function ended").
+  test("a `return` inside a batch is carried (`exits`), never refused, and forces the cells shape", () => {
     const cells = bodyOf(SRC("  if (?{`SELECT 1 AS n`}.get()) { @a = 1\n return 5 }"), "f");
-    expect(planBatchCellReturn(cells, [0], null).unsupported.length).toBe(1);
-    const legacy = bodyOf(SRC("  if (?{`SELECT 1 AS n`}.get()) { return 5 }"), "f");
-    expect(planBatchCellReturn(legacy, [0], null)).toEqual({ mode: "legacy", cells: [], unsupported: [] });
+    expect(planBatchCellReturn(cells, [0], null)).toEqual({ mode: "cells", cells: ["a"], unsupported: [], exits: true });
+    const noCell = bodyOf(SRC("  if (?{`SELECT 1 AS n`}.get()) { return 5 }"), "f");
+    expect(planBatchCellReturn(noCell, [0], null)).toEqual({ mode: "cells", cells: [], unsupported: [], exits: true });
+  });
+
+  test("a `fail` inside a batch needs no exit protocol (its error envelope ends the batch)", () => {
+    const body = bodyOf(SRC("  if (?{`SELECT 1 AS n`}.get()) { fail E.Bad }"), "f");
+    expect(planBatchCellReturn(body, [0], null)).toEqual({ mode: "legacy", cells: [], unsupported: [], exits: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S466 — §19.9.9.8 rule 3 (ruling user-voice-scrml.md S464 "(a) Guards stay server").
+// ---------------------------------------------------------------------------
+const GSRC = (stmts) => `<program db="sqlite:./n1.db">
+<ok> = false
+<msg> = ""
+\${ import { verifyPassword as vp } from "scrml:auth" }
+type E:enum = { Bad }
+function f(pass: string)! -> E {
+${stmts}
+}
+<button onclick={ f("x") !{ _ :> @msg = "e" } }>f</button>
+</program>
+`;
+
+describe("S466 — statementCanEndFunction", () => {
+  const first = (stmts) => bodyOf(GSRC(stmts), "f")[0];
+  test("return / fail / an exit in either branch end the function", () => {
+    expect(statementCanEndFunction(first("  if (!@ok) { return }"))).toBe(true);
+    expect(statementCanEndFunction(first("  if (!@ok) { fail E.Bad }"))).toBe(true);
+    expect(statementCanEndFunction(first('  if (!@ok) { @msg = "x" } else { return 1 }'))).toBe(true);
+  });
+  test("a break inside the statement's own loop, a return inside a nested function or lambda, a string, do not", () => {
+    expect(statementCanEndFunction(first("  for (const r of [1]) { if (!@ok) { break } }"))).toBe(false);
+    expect(statementCanEndFunction(first("  function g() { return 1 }"))).toBe(false);
+    expect(statementCanEndFunction(first("  @msg = [1].map((x) => x + 1)"))).toBe(false);
+    expect(statementCanEndFunction(first('  @msg = "return"'))).toBe(false);
+  });
+  test("returnsOnly: a fail is not a return", () => {
+    expect(statementCanEndFunction(first("  if (!@ok) { fail E.Bad }"), true)).toBe(false);
+    expect(statementCanEndFunction(first("  if (!@ok) { return }"), true)).toBe(true);
+  });
+});
+
+describe("S466 — a guard on a server value is server-tier; the work it guards shares its batch", () => {
+  const SEL = "  @ok = vp(pass, ?{`SELECT pw FROM users WHERE name = 'bob'`}.get().pw)";
+  const INS = "  ?{`INSERT INTO posts (v) VALUES (1)`}.run()";
+  test("guard + INSERT: one batch holding all three statements", () => {
+    const split = splitOf(ri(GSRC([SEL, '  if (!@ok) { @msg = "wrong"; return }', INS].join("\n"))));
+    expect(split).not.toBeNull();
+    expect(split.serverStmtIndices).toEqual([0, 1, 2]);
+    expect((split.serverBatches ?? [{}]).length).toBe(1);
+  });
+  test("a cell write between the guard and the INSERT joins the batch", () => {
+    const split = splitOf(ri(GSRC([SEL, "  if (!@ok) { return }", '  @msg = "posting"', INS].join("\n"))));
+    expect(split.serverStmtIndices).toEqual([0, 1, 2, 3]);
+  });
+  test("a guard after the last server work stays in the browser", () => {
+    const split = splitOf(ri(GSRC([INS, SEL, '  if (!@ok) { alert("wrong"); return }', '  @msg = "ok"'].join("\n"))));
+    expect(split.serverStmtIndices).toEqual([0, 1]);
+  });
+  test("a guard that needs the browser is E-RI-002 with the ruled fix", () => {
+    const r = ri(GSRC([SEL, '  if (!@ok) { alert("wrong"); return }', INS].join("\n")));
+    const e = r.errors.filter((x) => x.code === "E-RI-002");
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("move the browser work after the server work, or split the function");
   });
 });

@@ -4304,13 +4304,15 @@ export function generateClientJs(ctx: CompileContext): string {
         .filter((b) => !b.exported).map((b) => b.name),
     );
     if (fnNames.size > 0 && stdlibNames.size > 0) {
-      let program: { body?: Array<{ type: string; start: number; end: number; declarations?: Array<{ id?: { type: string; name?: string }; init?: { type: string } | null }> }> } | null = null;
+      type TopStmt = { type: string; start: number; end: number; declarations?: Array<{ id?: { type: string; name?: string }; init?: { type: string } | null }> };
+      let topStmts: TopStmt[] = [];
       try {
-        program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true }) as never;
+        const program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true }) as unknown as { body?: TopStmt[] };
+        topStmts = program.body ?? [];
       } catch {
-        program = null;
+        topStmts = [];
       }
-      for (const st of program?.body ?? []) {
+      for (const st of topStmts) {
         if (st.type !== "VariableDeclaration" || st.declarations?.length !== 1) continue;
         const d = st.declarations[0];
         const name = d.id?.type === "Identifier" ? d.id.name : undefined;

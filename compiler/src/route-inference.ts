@@ -94,7 +94,7 @@ import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-sess
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
-import { planBatchCellReturn, splitBatchesWithReturnCells } from "./codegen/cps-cell-writes.ts";
+import { planBatchCellReturn, splitBatchesWithReturnCells, statementCanEndFunction } from "./codegen/cps-cell-writes.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -455,7 +455,7 @@ interface CPSResult {
    * server (they read / sit between server-originated values) but which need the
    * browser. Each is an E-RI-002 at the call site in runRI.
    */
-  placementRefusals?: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local"; fix?: string }>;
+  placementRefusals?: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local" | "guard"; fix?: string }>;
   /**
    * S465 (§19.9.9.8 rule 4) — locals declared by statements BEFORE the function's
    * first server statement that a server statement reads. Those statements stay
@@ -3475,7 +3475,7 @@ export function analyzeCPSEligibility(
   // never relocated and never fed a client-carried server value. Statements
   // BEFORE the first server statement are never pulled by (a) / (c), so the
   // spinner (`@busy = true` ahead of the query) still renders before the request.
-  const placementRefusals: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local"; fix?: string }> = [];
+  const placementRefusals: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local" | "guard"; fix?: string }> = [];
   // S465 — §19.9.9.8 rule 4: "Statements before the function's first server
   // statement are never moved". The first server statement is fixed by the
   // tiering above; no pull below can create an earlier one (every pull reads a
@@ -3523,6 +3523,40 @@ export function analyzeCPSEligibility(
     pull(i);
     return true;
   };
+  // S466 — §19.9.9.8 rule 3, ruling "(a) Guards stay server": a statement that reads
+  // a server-originated value and can END the function (`return`, `fail`, `?`, a
+  // `break` / `continue` leaving it — statementCanEndFunction) decides whether the
+  // function's later server work runs. In the browser that decision is the
+  // client's: the later work sits in its own batch route, which anyone can call
+  // without passing the check (S465: `@ok = vp(pass, ?{SELECT pw …}.get().pw);
+  // if (!@ok) { alert("wrong"); return }; ?{INSERT …}.run()` left the INSERT route
+  // open). Such a statement is server-tier, and every statement between it and the
+  // later server work joins the same batch, so the check and the work it guards run
+  // in ONE request. A guard (or a statement in between) that needs the browser is
+  // refused (E-RI-002, kind "guard"). A statement after the function's last server
+  // work guards nothing on the server and stays where it is.
+  //
+  // "Server-originated" here includes a value DERIVED in the browser from one
+  // (`@x = localStorage.getItem(@row.role)`; `if (@x != "admin") return`): the guard
+  // then moves to the server and reads `@x` from the request, which rule (d) below
+  // refuses at the browser statement that derived it.
+  const GUARD_FIX = "move the browser work after the server work, or split the function " +
+    "(a server function that does the check and the work, called from a browser function that does the rest)";
+  const guardIdx = new Set<number>();
+  const guardValueAt = new Map<number, string>();
+  const laterServer = (i: number): boolean => {
+    for (let j = i + 1; j < body.length; j++) if (isServerIdx(j)) return true;
+    return false;
+  };
+  const pullGuard = (i: number, value: string, because: string): boolean => {
+    const _before = placementRefusals.length;
+    const pulled = tryPull(i, value, because);
+    for (let r = _before; r < placementRefusals.length; r++) {
+      placementRefusals[r].kind = "guard";
+      placementRefusals[r].fix = GUARD_FIX;
+    }
+    return pulled;
+  };
   for (let changed = true; changed;) {
     changed = false;
     // What each server statement produces, keyed by the EARLIEST producer.
@@ -3538,11 +3572,47 @@ export function analyzeCPSEligibility(
       for (const [n, p] of m) if (p < i) s.add(n);
       return s;
     };
+    // The server-originated names visible at each index: produced by an earlier
+    // server statement, or derived from one by an earlier browser statement.
+    const derivedCellsAt: Array<Set<string>> = [];
+    const derivedLocalsAt: Array<Set<string>> = [];
+    {
+      const dc = new Set<string>();
+      const dl = new Set<string>();
+      for (let i = 0; i < body.length; i++) {
+        derivedCellsAt.push(new Set(dc));
+        derivedLocalsAt.push(new Set(dl));
+        const st = body[i];
+        if (!st || typeof st !== "object") continue;
+        const derives = isServerIdx(i) ||
+          statementReadsAnyCell(st, dc) !== null || [...dl].some((n) => statementReadsAnyLocal(st, new Set([n])));
+        if (!derives) continue;
+        for (const c of cellsWrittenBy(st)) dc.add(c);
+        for (const n of topLevelDeclaredLocals(st)) dl.add(n);
+      }
+    }
+    const serverValueRead = (stmt: unknown, i: number): string | null => {
+      const c = statementReadsAnyCell(stmt, derivedCellsAt[i]);
+      if (c !== null) return `@${c}`;
+      for (const n of derivedLocalsAt[i]) if (statementReadsAnyLocal(stmt, new Set([n]))) return n;
+      return null;
+    };
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt || typeof stmt !== "object") continue;
       const locs = before(producedLocal, i);
       const cells = before(producedCell, i);
+      // A guard: it reads a server value and can end the function before later server work.
+      const guardValue = i > firstServer && statementCanEndFunction(stmt) && laterServer(i) ? serverValueRead(stmt, i) : null;
+      if (guardValue !== null) { guardIdx.add(i); guardValueAt.set(i, guardValue); }
+      if (!isServerIdx(i) && guardValue !== null) {
+        changed = pullGuard(
+          i, guardValue,
+          `it reads \`${guardValue}\`, which the server half computed, and it can end the function before ` +
+          `the function's later server work runs — whether that work runs has to be decided on the server`,
+        ) || changed;
+        continue;
+      }
       if (!isServerIdx(i)) {
         // (a) reads a server-originated value / (b) calls a server function.
         const cell = statementReadsAnyCell(stmt, cells);
@@ -3576,6 +3646,19 @@ export function analyzeCPSEligibility(
       if (from >= 0) {
         for (let k = from + 1; k < i; k++) {
           changed = tryPull(k, value, `it sits between the server work that produces \`${value}\` and the server work that uses it (the value would have to cross the browser to reach the second request)`) || changed;
+        }
+      }
+      // S466 — the guard rule: every statement between a guard and this later server
+      // statement joins the batch, so the guard and the work it guards share ONE request.
+      let lastGuard = -1;
+      for (const g of guardIdx) if (g < i && g > lastGuard && isServerIdx(g)) lastGuard = g;
+      if (lastGuard >= 0) {
+        for (let k = lastGuard + 1; k < i; k++) {
+          changed = pullGuard(
+            k, guardValueAt.get(lastGuard) ?? "a server value",
+            `it sits between a check that reads a server value and can end the function, and server work that ` +
+            `check guards — they must run in one request, or the guarded work could be requested without the check`,
+          ) || changed;
         }
       }
       // A client-declared local the server statement reads moves to the server with
@@ -3685,6 +3768,42 @@ export function analyzeCPSEligibility(
       if (!refusedIdx.has(preDecl.get(n)!)) carriedLocals.push(n);
     }
     carriedFunctionIndices.sort((a, b) => a - b);
+  }
+
+  // S466 — §19.9.9.8 rule 3 (ruling "(a) Guards stay server"): a statement already
+  // server-tier by its own triggers (an `if` / loop / `match` whose body holds server
+  // work, a guard pulled above) that reads a server-originated value decides on the
+  // server whether that work runs. If it also needs the browser (`if (@ok) {
+  // alert("…"); ?{INSERT …}.run() }`), the browser part cannot run there: refused.
+  {
+    const srvCellBefore = new Map<string, number>();
+    const srvLocalBefore = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of topLevelDeclaredLocals(body[p])) if (!srvLocalBefore.has(n)) srvLocalBefore.set(n, p);
+      for (const c of cellsWrittenBy(body[p])) if (!srvCellBefore.has(c)) srvCellBefore.set(c, p);
+    }
+    for (let i = 0; i < body.length; i++) {
+      if (!isServerIdx(i) || refusedIdx.has(i)) continue;
+      const stmt = (handledSqlGuardInner(body[i]) ?? body[i]) as any;
+      if (!stmt || typeof stmt !== "object") continue;
+      const control = statementCanEndFunction(stmt) || CONTROL_STMT_KINDS.has(stmt.kind);
+      if (!control) continue;
+      const cells = new Set<string>();
+      const locals = new Set<string>();
+      for (const [c, p] of srvCellBefore) if (p < i) cells.add(c);
+      for (const [n, p] of srvLocalBefore) if (p < i) locals.add(n);
+      const c = statementReadsAnyCell(stmt, cells);
+      const read = c !== null ? `@${c}` : ([...locals].find((n) => statementReadsAnyLocal(stmt, new Set([n]))) ?? null);
+      if (read === null) continue;
+      const why = clientOnlyDeniedReason(body[i]);
+      if (why === null) continue;
+      refusedIdx.add(i);
+      placementRefusals.push({
+        index: i, value: read, kind: "guard", fix: GUARD_FIX,
+        why: `it reads \`${read}\`, which the server half computed, and decides whether server work runs, so it runs on the server — but ${why}`,
+      });
+    }
   }
 
   // (d) DERIVED THROUGH THE BROWSER. A statement that stays in the browser (it
@@ -3948,6 +4067,11 @@ function statementReadsAnyCell(stmt: unknown, cells: Set<string>): string | null
   walk(stmt, null);
   return hit;
 }
+
+/** S466 — statements whose body runs conditionally or repeatedly: a server value they read decides what runs. */
+const CONTROL_STMT_KINDS = new Set([
+  "if-stmt", "for-stmt", "while-stmt", "do-while-stmt", "match-stmt", "switch-stmt", "try-stmt",
+]);
 
 /** Host globals that exist only in a browser. A statement that touches one cannot run on the server. */
 const CLIENT_ONLY_ROOTS = new Set([
@@ -7661,6 +7785,18 @@ export function runRI(input: RIInput): RIOutput {
           for (const _r of cpsResult?.placementRefusals ?? []) {
             const _fnName = record.fnNode.name ?? "<anonymous>";
             const _node = body[_r.index] as any;
+            if (_r.kind === "guard") {
+              // S466 — §19.9.9.8 rule 3 (ruling S464 "(a) Guards stay server").
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+                `statement has to run in its server half — ${_r.why}. A check that decides whether server work ` +
+                `runs stays on the server (§19.9.9.8 rule 3): in the browser it could be skipped, and the work ` +
+                `requested on its own. Fix: ${_r.fix}.`,
+                (_node && _node.span) ?? record.fnNode.span,
+              ));
+              continue;
+            }
             if (_r.kind === "client-local") {
               // S465 — the value is BROWSER data that cannot reach the request; it is
               // not a server value crossing to the client, so it is not described as one.

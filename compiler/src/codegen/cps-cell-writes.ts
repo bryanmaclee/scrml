@@ -30,6 +30,7 @@
  */
 
 import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { blankLiteralTextInSource } from "../expression-parser.ts";
 
 type Node = Record<string, any>;
 
@@ -42,6 +43,62 @@ export interface CellWriteSite {
   /** True for the TOP-LEVEL `state-decl` statement at `stmtIndex`. */
   topLevelDecl: boolean;
   stmtIndex: number;
+}
+
+/**
+ * S466 — §19.9.9.8 rule 3 (ruling S464 "(a) Guards stay server"): can `stmt` end the
+ * function, or skip what follows it? True for a `return`, a `fail`, a `?` propagation
+ * (a `fail` of the callee's variant), a `throw`, and a `break` / `continue` that
+ * leaves the statement (not one inside a loop or `switch` of its own) — at any depth
+ * except inside a nested function or lambda, whose exits end only itself.
+ *
+ * Route inference asks it to find a GUARD (a statement that reads a server value and
+ * can end the function before later server work: server-tier). The batch emitter asks
+ * it with `returnsOnly` — a `fail` / `?` already ends a batch with its error envelope,
+ * which the browser stops on; only a `return` needs the `__scrml_exit` protocol.
+ *
+ * Text the parser kept as text (an escape hatch, a raw arm body) is read for the
+ * `return` / `fail` keywords with its string literals blanked — fail-closed: a
+ * keyword it cannot place counts as an exit.
+ */
+const EXIT_TEXT_RE = /(?<![\w$.@#])(?:return|fail)(?![\w$])/;
+const RETURN_TEXT_RE = /(?<![\w$.@#])return(?![\w$])/;
+const EXIT_TEXT_KEYS = new Set(["raw", "bodyRaw", "expr", "init", "condition", "iterable", "body"]);
+const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "switch-stmt"]);
+export function statementCanEndFunction(stmt: unknown, returnsOnly = false): boolean {
+  const seen = new WeakSet<object>();
+  let hit = false;
+  const visit = (n: unknown, loopDepth: number): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) visit(c, loopDepth); return; }
+    const node = n as Node;
+    const kind = node.kind;
+    if (kind === "function-decl" || kind === "fn-decl" || kind === "lambda" || kind === "Arrow" || kind === "Function") return;
+    if (kind === "escape-hatch" && (node.nativeKind === "ArrowFunctionExpression" || node.nativeKind === "FunctionExpression")) return;
+    // Markup (a `lift`, an element value): its handlers are functions of their own.
+    if (kind === "markup") return;
+    if (kind === "return-stmt") { hit = true; return; }
+    if (!returnsOnly && (kind === "fail-expr" || kind === "propagate-expr" || kind === "throw-stmt")) { hit = true; return; }
+    if ((kind === "break-stmt" || kind === "continue-stmt") && (loopDepth === 0 || (typeof node.label === "string" && node.label.length > 0))) {
+      hit = true;
+      return;
+    }
+    const depth = typeof kind === "string" && LOOP_KINDS.has(kind) ? loopDepth + 1 : loopDepth;
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key === "id") continue;
+      const v = node[key];
+      if (typeof v === "string") {
+        if (!EXIT_TEXT_KEYS.has(key) || v.length < 4) continue;
+        if (key === "raw" && kind !== "escape-hatch") continue;
+        if ((returnsOnly ? RETURN_TEXT_RE : EXIT_TEXT_RE).test(blankLiteralTextInSource(v) ?? v)) { hit = true; return; }
+      } else {
+        visit(v, depth);
+      }
+    }
+  };
+  visit(stmt, 0);
+  return hit;
 }
 
 /** A write a server batch cannot carry back to the client. */
@@ -139,10 +196,6 @@ function walkStatement(
       return;
     }
 
-    if (kind === "return-stmt" && !inClosure) {
-      returns.push({ cell: null, what: "returns from the function inside server-side work that also writes a cell", fix: "assign a cell instead of returning, or move the return after the server work", span: node.span });
-    }
-
     if (kind === "lambda") {
       for (const key of Object.keys(node)) { if (key !== "span") visit(node[key], true, false); }
       return;
@@ -186,6 +239,14 @@ export interface BatchCellPlan {
   cells: string[];
   /** Write forms the batch cannot carry (refused by route inference). */
   unsupported: UnsupportedBatchWrite[];
+  /**
+   * S466 — a statement of the batch can `return` from the function (a guard,
+   * §19.9.9.8 rule 3). The batch then runs its statements in a function of their
+   * own, and the return comes back as `__scrml_exit`, so the browser runs none of the
+   * function's later statements. (A `fail` needs none of this: its error envelope
+   * already ends the batch, and the browser stops on it.)
+   */
+  exits: boolean;
 }
 
 /**
@@ -223,13 +284,20 @@ export function planBatchCellReturn(
   // no later statement of the batch can read it, so the §19.9.9.7 batch-local
   // read question does not arise. (The decl's own initializer reading the cell —
   // `@n = @n + ?{…}` — reads the client's value by design.)
-  const legacy = sites.length === 0 ||
-    (sites.length === 1 && sites[0].topLevelDecl && sites[0].stmtIndex === indices[indices.length - 1]);
-  // A `return` inside the batch would leave the batch before it hands back its
-  // cells; the legacy shape never had cells to hand back, so it keeps its
-  // pre-S462 behaviour.
-  if (!legacy) unsupported.push(...returns);
-  return { mode: legacy ? "legacy" : "cells", cells: legacy ? [] : cells, unsupported };
+  //
+  // S466 — a batch that can END the function (a guard, §19.9.9.8 rule 3) is never
+  // legacy: the bare legacy value cannot say "the function ended here", and the
+  // browser would run the statements after it.
+  const exits = indices.some((idx) => {
+    const raw = body[idx] as Node | undefined;
+    return !!raw && typeof raw === "object" && statementCanEndFunction(unguard(raw), true);
+  });
+  const legacy = !exits && (sites.length === 0 ||
+    (sites.length === 1 && sites[0].topLevelDecl && sites[0].stmtIndex === indices[indices.length - 1]));
+  // (Before S466 a `return` in a "cells" batch was refused: it left the batch before
+  // the batch handed back its cells. The exit protocol below carries it instead.)
+  void returns;
+  return { mode: legacy ? "legacy" : "cells", cells: legacy ? [] : cells, unsupported, exits };
 }
 
 /**
@@ -288,15 +356,26 @@ export function cpsCellLocal(name: string): string {
  * first write sees the client's value, and the register of which cells it actually
  * wrote (only those go back to the client).
  */
-export function cpsCellsPrologue(indent: string, cells: string[]): string[] {
+export function cpsCellsPrologue(indent: string, cells: string[], exits = false): string[] {
   return [
     `${indent}// §19.9.9.7 (S462) — the cells this batch writes, held by the batch itself. Only`,
     `${indent}// the final values of the ones it writes go back to the client; the data it read`,
     `${indent}// to compute them stays here.`,
     ...cells.map((c) => `${indent}let ${cpsCellLocal(c)} = _scrml_body[${JSON.stringify(c)}];`),
     `${indent}const ${CPS_WRITTEN_VAR} = {};`,
+    ...(exits ? [
+      `${indent}// §19.9.9.8 rule 3 (S466) — a check in this batch can end the function. The`,
+      `${indent}// statements run in a function of their own; reaching the end returns the marker.`,
+      `${indent}const ${CPS_CONTINUE_VAR} = {};`,
+      `${indent}const ${CPS_EXIT_VAR} = await (async () => {`,
+    ] : []),
   ];
 }
+
+/** S466 — the marker a batch's statements return when they ran to the end. */
+export const CPS_CONTINUE_VAR = "_scrml_cps_continue";
+/** S466 — what a batch's statements returned: the marker, or the function's result. */
+export const CPS_EXIT_VAR = "_scrml_cps_exit";
 
 /**
  * Server lines that end a "cells"-mode batch: return the written cells' final
@@ -304,8 +383,15 @@ export function cpsCellsPrologue(indent: string, cells: string[]): string[] {
  * leaves exactly as the cell holds it, so the §14.8.9 egress floor sees a row as
  * the row it is.
  */
-export function cpsCellsEpilogue(indent: string, cells: string[]): string[] {
+export function cpsCellsEpilogue(indent: string, cells: string[], exits = false): string[] {
+  const ended = `${CPS_EXIT_VAR} !== ${CPS_CONTINUE_VAR}`;
   return [
+    ...(exits ? [
+      `${indent}  return ${CPS_CONTINUE_VAR};`,
+      `${indent}})();`,
+      `${indent}// A \`fail\` (or \`?\`) ended the function: its error envelope is the batch's result.`,
+      `${indent}if (${ended} && ${CPS_EXIT_VAR} && typeof ${CPS_EXIT_VAR} === "object" && ${CPS_EXIT_VAR}.__scrml_error) return ${CPS_EXIT_VAR};`,
+    ] : []),
     `${indent}return {`,
     `${indent}  __scrml_cells: {`,
     ...cells.map((c) => {
@@ -313,6 +399,8 @@ export function cpsCellsEpilogue(indent: string, cells: string[]): string[] {
       return `${indent}    ...(${CPS_WRITTEN_VAR}[${k}] ? { ${k}: ${cpsCellLocal(c)} } : {}),`;
     }),
     `${indent}  },`,
+    // The function ended in this batch (a `return`): its result, and the browser stops.
+    ...(exits ? [`${indent}  ...(${ended} ? { __scrml_exit: { value: ${CPS_EXIT_VAR} } } : {}),`] : []),
     `${indent}};`,
   ];
 }
@@ -328,11 +416,16 @@ export function cpsCellWriteStatement(name: string, valueExpr: string): string {
  * Client lines that apply a "cells"-mode batch result: each cell the batch may
  * write, set when the batch did write it.
  */
-export function cpsCellsApplyLines(resultVar: string, cells: string[], indent: string): string[] {
+export function cpsCellsApplyLines(resultVar: string, cells: string[], indent: string, exits = false): string[] {
   const out = [`${indent}// §19.9.9.7 (S462) — the server batch's cell writes, at their final values.`];
   for (const c of cells) {
     const k = JSON.stringify(c);
     out.push(`${indent}if (${k} in ${resultVar}.__scrml_cells) _scrml_reactive_set(${k}, ${resultVar}.__scrml_cells[${k}]);`);
+  }
+  if (exits) {
+    // §19.9.9.8 rule 3 (S466) — a check in the batch ended the function on the server:
+    // none of the function's later statements run.
+    out.push(`${indent}if ("__scrml_exit" in ${resultVar}) return ${resultVar}.__scrml_exit.value;`);
   }
   return out;
 }
