@@ -1,46 +1,59 @@
 # s467-dpa-023-spec progress
 
-Started at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-abcbf96a2fc13f1b3 (base 9d7a6cc2a).
+Started at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-abcbf96a2fc13f1b3 (base 9d7a6cc2a); paused (XPS
+commit-blocker); resumed S467 at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a4674857ebfcad5cc on
+origin/main 9d7a6cc2a.
 
-- [ ] A §13.8 one rule
-- [ ] B §13.9 pending cells
-- [ ] C §34 rows owed (held)
-- [ ] D Phase 1c U1 design amendment (scrml-support)
-- [ ] E Phase 1d record corrections
-- [ ] F SPEC-INDEX / facts / state
+- [x] A §13.8 one rule
+- [x] B §13.9 pending cells
+- [ ] C §34 rows owed (HELD until PR #1427 lands — list below)
+- [x] D Phase 1c U1 design amendment (scrml-support 8c33416)
+- [x] E Phase 1d record corrections (user-voice scrml-support 4ccb423; dpa-queue edited here)
+- [x] F SPEC-INDEX / facts / state
 
-## PAUSED (S467)
+## Commits
 
-**Done (in this commit):**
-- A: SPEC §13.8 "Where a Waiting Value May Stand — the One Rule" (defines a waiting value; (i) suspension point of an action position / (ii) a declared `(not to T)` cell; instance table naming E-VALUE-SERVER-CALL, E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK, E-PARAM-DEFAULT-AWAIT, E-ASYNC-FN-ESCAPES-AS-VALUE; no renames).
-- B: SPEC §13.9 "Pending Cells" (Nominal banner, F5) with §13.9.1 F1/F2 marker, §13.9.2 desugar, §13.9.3 E-TYPE-001 + F3, §13.9.4 F6, §13.9.5 F7, §13.9.6 F4 (Measured migration sentence per PA addendum: 0 newly refused; ~56 test fixtures flip; RediLedger unmeasured), §13.9.7 normative statements. Each with provenance + PA readings flagged.
-- §13.7 message paragraph: S467 note adding the "or declare the cell `(not to T)`" second fix.
-- F4 impl#1 note now says impl#1 ENFORCES F4 (bryan S467 ruling relayed by PA); §13.9 banner names §13.9.6 as the exception to "carried".
+- 570a6fb3a `test(S467): s461 unregisters happy-dom` — the commit-blocker fix (same content as PR branch
+  `s467-test-happydom-unregister`; that branch was not on origin, so it was applied from the
+  s467-error-002-value-position patch plus the two-line `registeredHere` change).
+- 8cf5e8941 WIP — the paused S467 patch (SPEC §13.7 note, §13.8, §13.9; this file). The pause-time backup
+  `spec-13.8-13.9.patch` is removed in the next commit (its content is in SPEC.md now).
+- next commit — PA addendum rulings into §13.9 / §14.12.3, dpa-queue row, regenerated SPEC-INDEX / FACTS / STATE.
 
-**Half-done / not started:**
-- C: §34 rows owed (HELD until s466-server-param-defaults / PR #1427 lands): (1) E-VALUE-SERVER-CALL row — add the `(not to T)` exemption + second fix; (2) E-TYPE-001 row — add §13.9.3 pending-cell trigger (Nominal); (3) E-ASYNC-FN-ESCAPES-AS-VALUE row — add §13.9.6 binding rule (impl#1 enforces → needs emitter note when built); (4) E-ERROR-002 row — §13.9.5 unhandled pending initializer (Nominal); (5) E-PARAM-DEFAULT-AWAIT / sync-callback rows — cross-ref §13.8 as instances.
-- D (U1 design-doc Phase 1c amendment in scrml-support): NOT started.
-- E (Phase 1d record corrections: user-voice appended S467 correction of S337 "it is fixed now" (W7 — type-system.ts:31118 still two-state); dpa-queue row 42 + line ~1027 "1,350 sync hosts"/B6 superseded by S450 (W5); mark dpa-023 row with S467 F1–F7 rulings): NOT started.
-- F (SPEC-INDEX regen + §13 summary, facts/state --check): NOT started.
-- user-voice entry for bryan's "impl#1 will enforce F4" ruling: owed (PA's to write).
+## Done
 
-**Next 3 concrete steps:**
-1. Amend `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md`: dated amendment banner (2026-10-15) + `last-reviewed:` bump + a §3/§8 U1c gate — server printer awaits by construction via a Core `waits` fact on ServerFns checked like C-S8 (DD default), no per-call name classification; acceptance = #1428 probe pack server cases.
-2. Phase 1d: append S467 correction entry to user-voice-scrml.md (quote the S337 "so it is fixed now"); edit handOffs/dpa-queue.md row 42 (S467 rulings, W5/W7 corrections).
-3. `bun run scripts/regen-spec-index.ts`, add S467 §13.8/§13.9 to the §13 row summary, `bun scripts/facts.ts --check`, `bun scripts/state.ts --check`, commit + push.
+- SPEC §13.8 "Where a Waiting Value May Stand — the One Rule" (restatement; no renames).
+- SPEC §13.9 "Pending Cells" (Nominal; F1/F2 marker, desugar, E-TYPE-001 + F3, F6, F7, F4 with measured migration;
+  impl#1 ENFORCES §13.9.6 per ruling "yes on the impl#1 enforce F4").
+- PA addendum (bryan S467 "three §13.9 pending-cell details"): (1) derived cell cannot be a pending cell — PA reading
+  in §13.9.1 replaced by the ruling + provenance "No — keep it refused"; (2) hidden request `.refetch()` / `.loading` /
+  `.stale` not reachable — §13.9.2 ruling + provenance "No — write a <request>"; (3) action-position waiting write
+  into a pending cell is awaited, cell keeps its current value — new paragraph in §13.9.4, normative statement in
+  §13.9.7, and a cross-reference paragraph in §14.12.3 (provenance "No — keep current value"); (4) F4 vs
+  `setTimeout(() => save())` / `typeof f` — one sentence in §13.9.6 marked "PA reading (not a ruling)"; §13.2 left as is.
+- U1 design doc §13 (U1c gate: no per-call classification; default mechanism = Core `waits` fact on server Fns
+  checked like C-S8; fallback = await every scrml call; acceptance = #1428 probe pack server cases; bite test).
+- user-voice correction entry (append-only, under S467): S337 "so it is fixed now" is untrue (W7,
+  `type-system.ts:31125` / `:32068`); S338 refusal unlanded (W8); B6 / "1,350 sync hosts" superseded by S450 (W5).
+- handOffs/dpa-queue.md: dpa-023 row now leads `RATIFIED S467` with F1–F7 + the three details + the record
+  corrections; the S322 "1,350 event-handler hosts" bullet is marked superseded.
 
-### UNCOMMITTED — the pre-commit hook blocks every commit on this machine (S467, XPS)
+## HELD — §34 rows owed (until PR #1427 / `s466-server-param-defaults` lands)
 
-Nothing on this branch is committed or pushed; origin has no `s467-dpa-023-spec`. The hook's full suite fails on one
-test unrelated to this docs-only change: `compiler/tests/integration/foreign-sealed-scope.test.js:355`,
-"§23.2.4a — tool host I/O form > under Node the slice gets a working require too". Its cause is the environment: the
-only Node on PATH is v21.6.0 (linuxbrew; /usr/bin/node is v12), and v21.6 does not auto-detect ESM, so it throws
-`SyntaxError: Cannot use import statement outside a module`. The hook was not bypassed (no --no-verify).
+1. E-VALUE-SERVER-CALL row — add the `(not to T)` exemption (§13.9.1) and the second fix ("or declare the cell
+   `(not to T)`"); derived cells stay refused.
+2. E-TYPE-001 row — add the §13.9.3 pending-cell trigger (Nominal).
+3. E-ASYNC-FN-ESCAPES-AS-VALUE row — add the §13.9.6 binding rule (impl#1 enforces; needs an emitter note when built).
+4. E-ERROR-002 row — §13.9.5 unhandled pending initializer (Nominal); reconcile with `s467-error-002-value-position`.
+5. E-PARAM-DEFAULT-AWAIT / E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK rows — cross-reference §13.8
+   as instances.
 
-Uncommitted working-tree state in this worktree (agent-abcbf96a2fc13f1b3):
-- `compiler/SPEC.md`: the §13.7 message note plus new §13.8 and §13.9 (lines ~10812–11175). The full diff is saved as
-  `docs/changes/s467-dpa-023-spec/spec-13.8-13.9.patch` (385 lines; also in the agent scratchpad).
-- `docs/changes/s467-dpa-023-spec/progress.md` (this file).
+## OPEN — for bryan
 
-To resume: on a machine whose Node runs that test (Node ≥22.7, or the ASUS setup), `git apply` the patch or reuse this
-worktree, then commit and push.
+None of the five questions raised at pause remains open: three were ruled ("three §13.9 pending-cell details"), the
+F4-vs-scheduler/`typeof` one is a recorded PA reading, and the ruling entry is written. New items:
+- PA-reading tension to check: §13.2's async-colored bullet says an argument of a global fire-and-forget scheduler
+  is *not* a use as a value, while the §13.9.6 PA-reading sentence (as relayed) says §13.2 refuses a waiting lambda
+  passed to a non-collection callback (E-SERVER-FN-IN-SYNC-CALLBACK, measured S467). Both can hold (named fn vs a
+  lambda whose body waits, in server code), but the PA should confirm the wording before landing.
+- RediLedger F4 migration is unmeasured (not on this machine).

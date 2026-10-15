@@ -10908,7 +10908,8 @@ function is failable) · §34 (rows for each code).
 > **Status: Nominal / spec-ahead (S467).** NORMATIVE. **impl#1 does not implement it** and is not changed for it.
 > impl#1 is frozen for language semantics (S447), and S467 dpa-023 F5 = (a) grants no rebuild exception. impl#1 stays
 > retrofit-only on the await mandate, and that retrofit is held by the security await probe pack (#1428). The
-> divergence is carried (§34.0). The exception is §13.9.6 (the F4 refusal), which impl#1 enforces (bryan, S467). On impl#1 a `(not to T)` cell with a waiting initializer compiles, and its
+> divergence is carried (§34.0). The exception is §13.9.6 (the F4 refusal), which impl#1 enforces (ruling:user-voice-scrml.md S467 "yes on the impl#1
+> enforce F4"). On impl#1 a `(not to T)` cell with a waiting initializer compiles, and its
 > pre-arrival read throws at mount (record correction W7, the DD's Context table). **The bootstrap builds this
 > section**, after its U1c (the server artifact) and U2 (`<request>`) units and lifecycle typing in `analyze`. The
 > build order is the DD's Phase 3.
@@ -10947,9 +10948,10 @@ The §66 dialect spells the same declaration in an opener: `<users:(not to User[
 > *"or declare the cell `(not to T)` (§13.9)"*. **Direction of change: newly-accepting**, narrow. Measured: `(not to
 > T)` is declared in 0 corpus files, and up to 9 cell-initializer sites in 17 files could adopt it (DD §Q4).
 >
-> *PA reading, flagged:* "a Shape-1 cell declaration" excludes a derived cell (`const <x>: (not to T) = …`). F1
-> names "a cell DECLARED `(not to T)`", and the DD's worked forms are all plain cells. A derived pending cell is not
-> ruled, so it keeps E-VALUE-SERVER-CALL (fail closed).
+> **A derived cell cannot be a pending cell.** "A Shape-1 cell declaration" excludes a derived cell: `const <x>: (not
+> to T) = f(@id)` with a waiting `f` keeps E-VALUE-SERVER-CALL. Provenance: ruling:user-voice-scrml.md S467 "three
+> §13.9 pending-cell details" — *"No — keep it refused"* (*"A DERIVED cell cannot be a pending cell — `const <x>: (not
+> to T) = f(@id)` stays E-VALUE-SERVER-CALL."*).
 
 ```scrml
 <program db="sqlite:./app.db">
@@ -10992,10 +10994,11 @@ body is the declared initializer assigned to the cell:
 > **Provenance:** ruling:user-voice-scrml.md S337 "The Q4 ruling — dpa-023" — *"the marker is SUGAR (no new runtime
 > representation)"* · dd:dpa-023-build-arc-scoping §Q2 "What it desugars to" · **supersedes:** nothing written.
 >
-> *PA reading, flagged:* the desugared request's `id` is compiler-internal, so the author cannot write
-> `<#id>.refetch()` or read `<#id>.loading` / `.stale` for a pending cell. F7 rejected an implicit `@x.error`
-> surface, and the same reasoning is read here as reaching the other request properties. An author who needs them
-> writes the `<request>` by hand (§13.7's fix). This is not ruled.
+> **The hidden request's controls are not reachable.** The desugared request's `id` is compiler-internal. A pending
+> cell exposes no `.refetch()`, `.loading` or `.stale` (and, per §13.9.5, no `.error`). An author who needs them writes
+> the `<request>` by hand (§13.7's fix). Provenance: ruling:user-voice-scrml.md S467 "three §13.9 pending-cell
+> details" — *"No — write a <request>"* (*"The pending cell's hidden request controls (`.refetch()` / `.loading` /
+> `.stale`) are NOT reachable; an author who needs them writes an explicit `<request>`."*).
 
 #### 13.9.3 Reads before discrimination are E-TYPE-001; render positions keep E-VALUE-SERVER-CALL
 
@@ -11048,9 +11051,18 @@ in flight, as `<request>.data` does (§6.7.7, "On re-execution, `<#id>.data` is 
 to `not`. This follows from the desugar: the request writes the cell only when a load settles. It is a run-time
 behaviour only. Statically, §13.9.3 already requires every read to discriminate.
 
+**A waiting write from an action position.** An action-position write of a waiting value into a pending cell
+(`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its suspension point
+(§13.8 (i)) and lands when the value arrives. Until then the cell SHALL keep its current value. It SHALL NOT revert
+to `not` when the write starts, as a reload keeps its last value above. The write does not transition the cell by
+itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point ends narrowing (§42.3.5).
+
 > **Provenance:** ruling:user-voice-scrml.md S467 dpa-023 F6 — *"F6 + F7 "Both recommended""* — *"**F6 (a):** a
-> pending cell keeps its stale value while reloading (as `<request>.data`)"* · dd:dpa-023-build-arc-scoping §Q6 F6 ·
-> **supersedes:** nothing written. **Direction of change: inert** (it follows from §13.9.2).
+> pending cell keeps its stale value while reloading (as `<request>.data`)"* · ruling:user-voice-scrml.md S467 "three
+> §13.9 pending-cell details" — *"No — keep current value"* (*"An action-position write of a waiting value into a
+> pending cell is awaited and lands when the value arrives; the cell keeps its current value meanwhile (consistent
+> with F6) — it does not revert to `not`."*) · dd:dpa-023-build-arc-scoping §Q6 F6 · **supersedes:** nothing written.
+> **Direction of change: inert** (it follows from §13.9.2 and §13.8 (i)).
 
 ```scrml
 <team> = "core"
@@ -11124,10 +11136,10 @@ lambda the awaited combinator consumes in place. The mechanical rewrite is `cons
 > exception. Unlike the rest of §13.9, it is not a carried divergence (bryan, S467; that ruling's user-voice entry is
 > owed). The bootstrap's Core already refuses a function-valued program-level binding (DD probe b10).
 >
-> *PA reading, flagged:* the ruling's "only as the direct argument of an awaited collection method" does not mention
-> §13.2's two other non-value positions: an argument of a global fire-and-forget scheduler (`setTimeout(() =>
-> save())`) and `typeof f`. Neither binds the function, so this subsection leaves them as §13.2 states them. That is
-> not ruled.
+> *PA reading (not a ruling):* this subsection does not change §13.2's rules for a scheduler argument
+> (`setTimeout(() => save())`) or `typeof f`, because neither binds the function; §13.2 already refuses a waiting
+> lambda passed to a callback that is not an awaited collection method (E-SERVER-FN-IN-SYNC-CALLBACK, measured S467),
+> and §13.2 is left as it is.
 
 ```scrml
 ${
@@ -11158,7 +11170,10 @@ ${
 - A waiting value in a markup interpolation or attribute value SHALL remain E-VALUE-SERVER-CALL. No boundary element
   holds a pending render.
 - On a dependency change after the first settle, a pending cell SHALL keep its last value until the new load
-  settles.
+  settles. An action-position write of a waiting value into a pending cell SHALL be awaited, and the cell SHALL keep
+  its current value until the write lands.
+- A derived cell SHALL NOT be a pending cell (E-VALUE-SERVER-CALL). A pending cell's desugared request SHALL expose no
+  `.refetch()`, `.loading`, `.stale` or `.error`.
 - A failable pending initializer SHALL be handled in the declaration (`!{}`). Unhandled, it SHALL be E-ERROR-002.
   The desugared request SHALL NOT handle it, and no implicit `.error` surface exists.
 - An async-colored function SHALL be bound only by a `function` declaration. A binding that holds one SHALL be
@@ -14321,6 +14336,13 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape. Function-return position uses the hybrid transition-marker mechanism — discrimination IS transition for presence-progression `(not to T)` returns, explicit `transition()` for variant-progression `(.VariantA to .VariantB)` returns — per §14.12.6.
 
 **Shape 1 presence-progression — assignment OR discrimination (S160).** A Shape 1 reactive cell carrying an implicit OR explicit **`(not to T)`** annotation (pre-type `not`) transitions to `post` on EITHER a `T`-shaped assignment (`@cell = value`, the base mechanism above) OR a presence-discrimination on the cell (`given c :> …`, `if (@cell is not) return`, `match @cell { … }` — the §14.12.6.1 presence-progression mechanism, reused at the Shape-1 cell locus). This unifies the Shape-1 cell and the function-return cases for presence-progression: discrimination IS transition wherever the pre-type is `not`. **Implicit `(not to T)` (Shape 4, §6.2):** a no-RHS typed cell whose type has no canonical empty (a bare `:struct` / `:enum` / opaque type) initializes to `not` and acquires this `(not to T)` annotation *implicitly* — the developer wrote no annotation, so the E-TYPE-001 message fired on a pre-transition read of such a cell SHALL name that the lifecycle was synthesized from the no-RHS declaration.
+
+**Pending cells — a waiting initializer or write (S467, Nominal; §13.9).** A Shape 1 cell declared `(not to T)` MAY
+take a waiting value (§13.8) as its initializer (a *pending cell*, §13.9). An assignment whose right-hand side waits
+does not transition the cell: an action-position write of a waiting value into a pending cell is awaited and lands
+when the value arrives, and the cell keeps its current value meanwhile — it does not revert to `not` (§13.9.4). Reads
+before a discrimination are E-TYPE-001 (§13.9.3). Provenance: ruling:user-voice-scrml.md S467 "three §13.9
+pending-cell details" — *"No — keep current value"* · S467 dpa-023 F1 / F6.
 
 #### 14.12.4 Engine-cell carve-out
 
