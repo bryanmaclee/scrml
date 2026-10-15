@@ -3491,6 +3491,148 @@ export function analyzeCPSEligibility(
     if (entries.some((e) => resolvedServerFnIds.has(e.fnNodeId))) serverFnNames.add(name);
   }
   const isServerIdx = (i: number) => serverIndices.includes(i) || reactiveServerIndices.includes(i);
+  // S467 (fix round 4) — CALLEE FOLLOWING. A statement does what the functions it
+  // calls do: `if (!@ok) { deny(); return }` with a file-level `function deny() {
+  // alert(…) }` needs the browser exactly as `alert(…)` inline would, and `blk =
+  // isBad()` with `function isBad() { return !@ok }` reads `@ok`. The callees of a
+  // statement are the user functions it names (called, or passed as a value),
+  // transitively — functions declared in this body (which also see its locals) and
+  // file-level ones (`functionIndex`; every same-named entry, over-approximated).
+  // Server-placed functions are not followed: a call to one is a request (rule (b)).
+  const bodyFns = new Map<string, any>();
+  {
+    const seenB = new WeakSet<object>();
+    const w = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seenB.has(n as object)) return;
+      seenB.add(n as object);
+      if (Array.isArray(n)) { for (const c of n) w(c); return; }
+      const o = n as any;
+      if (o.kind === "function-decl" && typeof o.name === "string" && o.name && !bodyFns.has(o.name)) bodyFns.set(o.name, o);
+      for (const k of Object.keys(o)) if (k !== "span") w(o[k]);
+    };
+    w(body);
+  }
+  const fnNamesMentioned = (n: unknown): string[] => {
+    const out: string[] = [];
+    const seenM = new WeakSet<object>();
+    const isFn = (nm: string) => bodyFns.has(nm) || functionIndex.has(nm);
+    const w = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seenM.has(x as object)) return;
+      seenM.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) w(c); return; }
+      const o = x as any;
+      if (o.kind === "ident" && typeof o.name === "string") { if (isFn(o.name)) out.push(o.name); return; }
+      for (const k of Object.keys(o)) {
+        if (k === "span") continue;
+        const v = o[k];
+        if (typeof v === "string") {
+          if (k === "name" || k === "kind" || k === "op" || k === "property") continue;
+          const t = o.kind === "sql" ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ") : v;
+          for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])/g)) if (isFn(m[1])) out.push(m[1]);
+        } else w(v);
+      }
+    };
+    w(n);
+    return out;
+  };
+  // name → callee nodes (a body-declared function shadows file-level ones)
+  const calleeMemo = new WeakMap<object, Array<{ name: string; node: any; nested: boolean }>>();
+  const calleesOf = (stmt: unknown): Array<{ name: string; node: any; nested: boolean }> => {
+    if (!stmt || typeof stmt !== "object") return [];
+    const hit = calleeMemo.get(stmt as object);
+    if (hit) return hit;
+    const out: Array<{ name: string; node: any; nested: boolean }> = [];
+    const done = new Set<string>();
+    const queue = fnNamesMentioned(stmt);
+    while (queue.length > 0) {
+      const nm = queue.shift()!;
+      if (done.has(nm)) continue;
+      done.add(nm);
+      const nested = bodyFns.get(nm);
+      const nodes: Array<{ node: any; nested: boolean }> = nested
+        ? [{ node: nested, nested: true }]
+        : (functionIndex.get(nm) ?? [])
+            .filter((e) => !resolvedServerFnIds.has(e.fnNodeId))
+            .map((e) => ({ node: e.fnNode as any, nested: false }));
+      for (const c of nodes) {
+        // the statement that declares a nested function is not a call of it
+        if (c.node === stmt) continue;
+        out.push({ name: nm, node: c.node, nested: c.nested });
+        for (const m of fnNamesMentioned(c.node.body ?? c.node)) if (!done.has(m)) queue.push(m);
+      }
+    }
+    calleeMemo.set(stmt as object, out);
+    return out;
+  };
+  /** `statementReadsAnyCell`, also through the statement's callees. */
+  const readsCellX = (stmt: unknown, cells: Set<string>): string | null => {
+    const c = statementReadsAnyCell(stmt, cells);
+    if (c !== null || cells.size === 0) return c;
+    for (const f of calleesOf(stmt)) {
+      const r = statementReadsAnyCell(f.node.body ?? f.node, cells);
+      if (r !== null) return r;
+    }
+    return null;
+  };
+  /** `statementReadsAnyLocal`, also through body-declared callees (they close over the locals). */
+  const readsLocalX = (stmt: unknown, names: Set<string>): boolean => {
+    if (statementReadsAnyLocal(stmt, names)) return true;
+    if (names.size === 0) return false;
+    for (const f of calleesOf(stmt)) if (f.nested && statementReadsAnyLocal(f.node.body ?? f.node, names)) return true;
+    return false;
+  };
+  /** The cells a statement writes, also through its callees. */
+  const cellsWrittenX = (stmt: unknown): Set<string> => {
+    const out = cellsWrittenBy(stmt);
+    for (const f of calleesOf(stmt)) for (const c of cellsWrittenBy(f.node.body ?? f.node)) out.add(c);
+    return out;
+  };
+  /**
+   * The locals a statement writes (`localsWrittenBy`), also through body-declared
+   * callees. `mutations` false = direct writes only (a server statement's own
+   * assignments; what the browser holds is never fed from a server-side mutation).
+   */
+  const localsWrittenX = (stmt: unknown, mutations = true): Set<string> => {
+    const out = localsWrittenBy(stmt, mutations);
+    for (const f of calleesOf(stmt)) {
+      if (!f.nested) continue;
+      for (const n of localsWrittenBy(f.node.body ?? f.node, mutations)) out.add(n);
+    }
+    return out;
+  };
+  /** `clientOnlyDeniedReason`, also through the statement's callees. */
+  const deniedX = (stmt: unknown): string | null => {
+    const d = clientOnlyDeniedReason(stmt);
+    if (d !== null) return d;
+    for (const f of calleesOf(stmt)) {
+      const r = clientOnlyDeniedReason(f.node.body ?? f.node);
+      if (r !== null) return `it calls \`${f.name}\`, and ${r.replace(/^it /, "that ")}`;
+    }
+    return null;
+  };
+  /**
+   * `clientOnlyReason` (deny-list + allow-list), also through the statement's
+   * callees: a statement whose callee needs the browser cannot run in a server batch.
+   */
+  const clientOnlyX = (stmt: unknown): string | null => {
+    const d = clientOnlyReason(stmt, movableKnown);
+    if (d !== null) return d;
+    for (const f of calleesOf(stmt)) {
+      const fb = f.node.body ?? f.node;
+      const deny = clientOnlyDeniedReason(fb);
+      if (deny !== null) return `it calls \`${f.name}\`, and ${deny.replace(/^it /, "that ")}`;
+      if (fileKnownNames === null) continue;
+      const known = f.nested
+        ? movableKnown!
+        : new Set<string>([...fileKnownNames, ...functionOwnNames(fb, plainParamNames(f.node))]);
+      const unknownName = serverUnknownName(fb, known);
+      if (unknownName !== null) {
+        return `it calls \`${f.name}\`, which uses \`${unknownName}\` — not a name the file declares or imports, ` +
+          `or a global known to behave the same on the server (moving the call would change what it does)`;
+      }
+    }
+    return null;
+  };
   const pull = (i: number): void => {
     const ri = reactiveIndices.indexOf(i);
     if (ri >= 0) reactiveIndices.splice(ri, 1);
@@ -3513,7 +3655,7 @@ export function analyzeCPSEligibility(
   // consumer of a server value (rule (c)).
   const tryPull = (i: number, value: string, because: string, refuseIfClientOnly = true): boolean => {
     if (isServerIdx(i) || mixedIndices.includes(i) || refusedIdx.has(i)) return false;
-    const why = clientOnlyReason(body[i], movableKnown);
+    const why = clientOnlyX(body[i]);
     if (why !== null) {
       if (!refuseIfClientOnly) return false;
       refusedIdx.add(i);
@@ -3564,8 +3706,8 @@ export function analyzeCPSEligibility(
     const producedCell = new Map<string, number>();
     for (let p = 0; p < body.length; p++) {
       if (!isServerIdx(p)) continue;
-      for (const n of topLevelDeclaredLocals(body[p])) if (!producedLocal.has(n)) producedLocal.set(n, p);
-      for (const c of cellsWrittenBy(body[p])) if (!producedCell.has(c)) producedCell.set(c, p);
+      for (const n of localsWrittenX(body[p], false)) if (!producedLocal.has(n)) producedLocal.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!producedCell.has(c)) producedCell.set(c, p);
     }
     const before = (m: Map<string, number>, i: number): Set<string> => {
       const s = new Set<string>();
@@ -3585,16 +3727,16 @@ export function analyzeCPSEligibility(
         const st = body[i];
         if (!st || typeof st !== "object") continue;
         const derives = isServerIdx(i) ||
-          statementReadsAnyCell(st, dc) !== null || [...dl].some((n) => statementReadsAnyLocal(st, new Set([n])));
+          readsCellX(st, dc) !== null || [...dl].some((n) => readsLocalX(st, new Set([n])));
         if (!derives) continue;
-        for (const c of cellsWrittenBy(st)) dc.add(c);
-        for (const n of topLevelDeclaredLocals(st)) dl.add(n);
+        for (const c of cellsWrittenX(st)) dc.add(c);
+        for (const n of localsWrittenX(st, !isServerIdx(i))) dl.add(n);
       }
     }
     const serverValueRead = (stmt: unknown, i: number): string | null => {
-      const c = statementReadsAnyCell(stmt, derivedCellsAt[i]);
+      const c = readsCellX(stmt, derivedCellsAt[i]);
       if (c !== null) return `@${c}`;
-      for (const n of derivedLocalsAt[i]) if (statementReadsAnyLocal(stmt, new Set([n]))) return n;
+      for (const n of derivedLocalsAt[i]) if (readsLocalX(stmt, new Set([n]))) return n;
       return null;
     };
     for (let i = 0; i < body.length; i++) {
@@ -3615,8 +3757,8 @@ export function analyzeCPSEligibility(
       }
       if (!isServerIdx(i)) {
         // (a) reads a server-originated value / (b) calls a server function.
-        const cell = statementReadsAnyCell(stmt, cells);
-        const local = cell === null ? [...locs].find((n) => statementReadsAnyLocal(stmt, new Set([n]))) ?? null : null;
+        const cell = readsCellX(stmt, cells);
+        const local = cell === null ? [...locs].find((n) => readsLocalX(stmt, new Set([n]))) ?? null : null;
         const callee = cell === null && local === null ? statementCallsAny(stmt, serverFnNames) : null;
         // A `return` that only reads server-written CELLS stays client: the client
         // already holds those cells' values (the batch hands them back), and the
@@ -3624,7 +3766,7 @@ export function analyzeCPSEligibility(
         const isReturn = (handledSqlGuardInner(stmt) ?? stmt as any).kind === "return-stmt";
         if (
           cell !== null && isReturn &&
-          ![...locs].some((n) => statementReadsAnyLocal(stmt, new Set([n]))) &&
+          ![...locs].some((n) => readsLocalX(stmt, new Set([n]))) &&
           statementCallsAny(stmt, serverFnNames) === null
         ) continue;
         if (cell !== null) changed = tryPull(i, `@${cell}`, `it reads \`@${cell}\`, which the server half computed`, false) || changed;
@@ -3636,11 +3778,11 @@ export function analyzeCPSEligibility(
       // every client statement in between joins the server batch.
       let from = -1;
       let value = "";
-      const cell = statementReadsAnyCell(stmt, cells);
+      const cell = readsCellX(stmt, cells);
       if (cell !== null) { from = producedCell.get(cell)!; value = `@${cell}`; }
       else {
         for (const n of locs) {
-          if (statementReadsAnyLocal(stmt, new Set([n]))) { from = producedLocal.get(n)!; value = n; break; }
+          if (readsLocalX(stmt, new Set([n]))) { from = producedLocal.get(n)!; value = n; break; }
         }
       }
       if (from >= 0) {
@@ -3668,7 +3810,7 @@ export function analyzeCPSEligibility(
       for (let k = firstServer; k < i; k++) {
         if (isServerIdx(k)) continue;
         const declared = topLevelDeclaredLocals(body[k]);
-        const used = declared.find((n) => statementReadsAnyLocal(stmt, new Set([n])));
+        const used = declared.find((n) => readsLocalX(stmt, new Set([n])));
         if (used === undefined) continue;
         const _before = placementRefusals.length;
         changed = tryPull(
@@ -3780,8 +3922,8 @@ export function analyzeCPSEligibility(
     const srvLocalBefore = new Map<string, number>();
     for (let p = 0; p < body.length; p++) {
       if (!isServerIdx(p)) continue;
-      for (const n of topLevelDeclaredLocals(body[p])) if (!srvLocalBefore.has(n)) srvLocalBefore.set(n, p);
-      for (const c of cellsWrittenBy(body[p])) if (!srvCellBefore.has(c)) srvCellBefore.set(c, p);
+      for (const n of localsWrittenX(body[p], false)) if (!srvLocalBefore.has(n)) srvLocalBefore.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!srvCellBefore.has(c)) srvCellBefore.set(c, p);
     }
     for (let i = 0; i < body.length; i++) {
       if (!isServerIdx(i) || refusedIdx.has(i)) continue;
@@ -3793,10 +3935,10 @@ export function analyzeCPSEligibility(
       const locals = new Set<string>();
       for (const [c, p] of srvCellBefore) if (p < i) cells.add(c);
       for (const [n, p] of srvLocalBefore) if (p < i) locals.add(n);
-      const c = statementReadsAnyCell(stmt, cells);
-      const read = c !== null ? `@${c}` : ([...locals].find((n) => statementReadsAnyLocal(stmt, new Set([n]))) ?? null);
+      const c = readsCellX(stmt, cells);
+      const read = c !== null ? `@${c}` : ([...locals].find((n) => readsLocalX(stmt, new Set([n]))) ?? null);
       if (read === null) continue;
-      const why = clientOnlyDeniedReason(body[i]);
+      const why = deniedX(body[i]);
       if (why === null) continue;
       refusedIdx.add(i);
       placementRefusals.push({
@@ -3819,8 +3961,8 @@ export function analyzeCPSEligibility(
     const srvLocal = new Map<string, number>();
     for (let p = 0; p < body.length; p++) {
       if (!isServerIdx(p)) continue;
-      for (const n of topLevelDeclaredLocals(body[p])) if (!srvLocal.has(n)) srvLocal.set(n, p);
-      for (const c of cellsWrittenBy(body[p])) if (!srvCell.has(c)) srvCell.set(c, p);
+      for (const n of localsWrittenX(body[p], false)) if (!srvLocal.has(n)) srvLocal.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!srvCell.has(c)) srvCell.set(c, p);
     }
     // name (`@cell` or local) → the browser statement that derived it, and the server value it came from.
     const tainted = new Map<string, { at: number; from: string; blame: number }>();
@@ -3833,9 +3975,9 @@ export function analyzeCPSEligibility(
         if (t.at >= i) continue;
         if (n.startsWith("@")) cells.add(n.slice(1)); else locals.add(n);
       }
-      const c = statementReadsAnyCell(stmt, cells);
+      const c = readsCellX(stmt, cells);
       if (c !== null) return `@${c}`;
-      for (const n of locals) if (statementReadsAnyLocal(stmt, new Set([n]))) return n;
+      for (const n of locals) if (readsLocalX(stmt, new Set([n]))) return n;
       return null;
     };
     const origin = (name: string): string => tainted.get(name)?.from ?? name;
@@ -3846,23 +3988,23 @@ export function analyzeCPSEligibility(
         const read = readOf(stmt, i);
         if (read === null) continue;
         const t = { at: i, from: origin(read), blame: tainted.get(read)?.blame ?? i };
-        for (const c of cellsWrittenBy(stmt)) tainted.set(`@${c}`, t);
-        for (const n of topLevelDeclaredLocals(stmt)) tainted.set(n, t);
+        for (const c of cellsWrittenX(stmt)) tainted.set(`@${c}`, t);
+        for (const n of localsWrittenX(stmt)) tainted.set(n, t);
         continue;
       }
       let read: string | null = null;
       for (const [n, tt] of tainted) {
         if (tt.at >= i) continue;
         const hit = n.startsWith("@")
-          ? statementReadsAnyCell(stmt, new Set([n.slice(1)])) !== null
-          : statementReadsAnyLocal(stmt, new Set([n]));
+          ? readsCellX(stmt, new Set([n.slice(1)])) !== null
+          : readsLocalX(stmt, new Set([n]));
         if (hit) { read = n; break; }
       }
       if (read === null) continue;
       const t = tainted.get(read)!;
       if (refusedIdx.has(t.blame)) continue;
       refusedIdx.add(t.blame);
-      const why = clientOnlyReason(body[t.blame], movableKnown) ?? "it has to run in the browser";
+      const why = clientOnlyX(body[t.blame]) ?? "it has to run in the browser";
       placementRefusals.push({
         index: t.blame,
         value: t.from,
@@ -3977,6 +4119,144 @@ function statementAssignsLocal(stmt: unknown, name: string): boolean {
     return false;
   };
   return walk(stmt);
+}
+
+/**
+ * S467 — methods that never change their receiver (or their arguments). A call
+ * `x.m(…)` with any OTHER method may mutate `x` (`flags.push(1)`, `m.set(k, v)`,
+ * a user object's own method), so `localsWrittenBy` counts `x` as written.
+ */
+const NON_MUTATING_METHODS = new Set([
+  "toString", "toLocaleString", "valueOf", "toFixed", "toPrecision", "toUpperCase", "toLowerCase",
+  "toLocaleUpperCase", "toLocaleLowerCase", "trim", "trimStart", "trimEnd", "padStart", "padEnd",
+  "charAt", "charCodeAt", "codePointAt", "at", "slice", "substring", "substr", "split", "concat",
+  "includes", "indexOf", "lastIndexOf", "startsWith", "endsWith", "repeat", "replace", "replaceAll",
+  "match", "matchAll", "search", "normalize", "localeCompare", "join", "map", "filter", "find",
+  "findIndex", "findLast", "findLastIndex", "some", "every", "reduce", "reduceRight", "flat", "flatMap",
+  "keys", "values", "entries", "has", "get", "toSorted", "toReversed", "toSpliced", "with",
+  "getTime", "toISOString", "toDateString", "toTimeString", "toJSON", "test", "exec",
+]);
+/** S467 — globals whose calls do not mutate their arguments (a call to anything else may). */
+const NON_MUTATING_CALLEE_ROOTS = new Set([
+  "Math", "JSON", "String", "Number", "Boolean", "Array", "Date", "RegExp", "Map", "Set", "Symbol",
+  "BigInt", "Intl", "Error", "TypeError", "RangeError", "parseInt", "parseFloat", "isNaN", "isFinite",
+  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI", "structuredClone",
+  "console", "alert", "confirm", "prompt",
+]);
+/** S467 — `Object.<m>(target, …)` calls that mutate their first argument. */
+const MUTATING_OBJECT_STATICS = new Set(["assign", "defineProperty", "defineProperties", "setPrototypeOf", "freeze", "seal", "preventExtensions"]);
+
+/**
+ * S467 (§19.9.9.8, fix round 4) — the plain (non-cell) names a statement WRITES or
+ * declares, at ANY depth: declarations (nested blocks included — over-approximated,
+ * a nested shadow counts), `x = …` / `x += …` / `x.f = …` / `x[k] = …`, `x++` /
+ * `--x`, destructuring assignment targets, and — when `mutations` — the receiver
+ * of a possibly-mutating method call (`x.push(1)`) and every name passed to a call
+ * that may mutate its arguments (a user function, `Object.assign(x, …)`). Raw
+ * expression text with no parsed tree is scanned too. Over-approximates: a write
+ * that MAY happen counts (fail closed — a value written by a statement that reads a
+ * server-originated value is server-originated, §19.9.9.8 rule 1).
+ *
+ * `topLevelDeclaredLocals` (declarations at the statement's top level only) missed
+ * `if (!@ok) { alert("wrong"); blk = true }`: `blk` was never marked server-derived,
+ * so a later batch read it from the request (`_scrml_body["blk"]`) and trusted it.
+ */
+function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const add = (n: unknown) => { if (typeof n === "string" && n && !n.startsWith("@") && !RAW_NON_NAMES.has(n)) out.add(n); };
+  const rootOf = (t: any): string | null => {
+    let cur = t;
+    while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+    return cur && cur.kind === "ident" && typeof cur.name === "string" ? cur.name : null;
+  };
+  const addIdsIn = (n: unknown): void => {
+    // every identifier inside a pattern / argument subtree (raw text included)
+    const s2 = new WeakSet<object>();
+    const w = (x: unknown): void => {
+      if (!x || typeof x !== "object" || s2.has(x as object)) return;
+      s2.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) w(c); return; }
+      const o = x as any;
+      if (o.kind === "ident") { add(o.name); return; }
+      if (o.kind === "escape-hatch" && typeof o.raw === "string") { addIdsInText(o.raw); return; }
+      for (const k of Object.keys(o)) if (k !== "span" && k !== "property") w(o[k]);
+    };
+    w(n);
+  };
+  const addIdsInText = (raw: string): void => {
+    const t = blankLiteralTextInSource(raw) ?? raw;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*:(?!:))/g)) add(m[1]);
+  };
+  const scanText = (raw: string): void => {
+    const t = blankLiteralTextInSource(raw) ?? raw;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*(?:\.\s*[\w$]+|\[[^\]]*\]))*\s*(?:\*\*|<<|>>>?|\?\?|&&|\|\||[-+*/%&|^])?=(?![=>])/g)) add(m[1]);
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)\s*(?:\+\+|--)/g)) add(m[1]);
+    for (const m of t.matchAll(/(?:\+\+|--)\s*([A-Za-z_$][\w$]*)/g)) add(m[1]);
+    for (const m of t.matchAll(/([[{][^=;]*[\]}])\s*=(?![=>])/g)) addIdsInText(m[1]);
+    for (const m of t.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
+    if (!mutations) return;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*\.\s*[\w$]+)*\s*\.\s*([\w$]+)\s*\(/g)) {
+      if (!NON_MUTATING_METHODS.has(m[2]) && !NON_MUTATING_CALLEE_ROOTS.has(m[1])) add(m[1]);
+    }
+    // a call to anything but a known non-mutating global may mutate what it is passed
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)\s*\(/g)) {
+      if (!NON_MUTATING_CALLEE_ROOTS.has(m[1]) && !RAW_NON_NAMES.has(m[1])) { addIdsInText(t); break; }
+    }
+  };
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "function-decl") add(o.name);
+    if (o.kind === "let-decl" || o.kind === "const-decl" || o.kind === "tilde-decl" || o.kind === "lin-decl") {
+      for (const d of topLevelDeclaredLocals(o)) add(d);
+    }
+    if (o.kind === "assign") {
+      const r = rootOf(o.target);
+      if (r !== null) add(r); else addIdsIn(o.target);
+    }
+    if ((o.kind === "unary" && (o.op === "++" || o.op === "--")) || o.kind === "update") {
+      const r = rootOf(o.argument);
+      if (r !== null) add(r); else addIdsIn(o.argument);
+    }
+    if (o._bareAssign === true) add(o.name);
+    if (mutations && o.kind === "call" && o.callee && typeof o.callee === "object") {
+      const c = o.callee;
+      const args = Array.isArray(o.args) ? o.args : [];
+      if (c.kind === "member" || c.kind === "index") {
+        const r = rootOf(c.object);
+        const method = typeof c.property === "string" ? c.property : (c.property && c.property.name) ?? null;
+        if (r === "Object" && method !== null && MUTATING_OBJECT_STATICS.has(method)) {
+          if (args.length > 0) addIdsIn(args[0]);
+        } else if (r !== null && NON_MUTATING_CALLEE_ROOTS.has(r)) {
+          // a known global's method (`console.log(x)`, `Math.max(a, b)`): nothing mutated
+        } else if (method === null || !NON_MUTATING_METHODS.has(method)) {
+          if (r !== null) add(r); else addIdsIn(c.object);
+          addIdsIn(args);
+        }
+      } else if (c.kind === "ident") {
+        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) addIdsIn(args);
+      } else {
+        addIdsIn(args);
+      }
+    }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        if (o.kind === "sql") continue;
+        if (!(k in RAW_EXPR_KEYS) && k !== "header" && k !== "result") continue;
+        const tree = RAW_EXPR_KEYS[k];
+        if (tree && o[tree] && typeof o[tree] === "object") continue;
+        if (k === "raw" && o.kind !== "escape-hatch") continue;
+        scanText(v);
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return out;
 }
 
 /**

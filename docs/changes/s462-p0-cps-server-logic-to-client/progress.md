@@ -325,3 +325,43 @@ REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly r
   (this commit) · browser-baseline --check: "PARSER DISAGREES 48 vs 47" (the documented flake, as in rounds 1–2)
   → direct name-set comparison after a fresh pretest: 48 failures == the 48 baseline names, none new, none gone.
 - NOT CHANGED: a1/g5 fail-closed 500s (KNOWN LOW, as recorded).
+
+## Fix round 4
+- start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aeb0297cf12facc1b on s467-cps-r4 (base 0bc57c25b).
+
+## PAUSED (S467)
+Env note: system node is v21.6 (no ESM detection / getBuiltinModule) → foreign-sealed-scope "under Node" test
+fails in the hook. Workaround: node 22 at ~/.cache/scrml-agent-tmp/s467-cps-r4/bin (symlink) and commit via
+~/.cache/scrml-agent-tmp/s467-cps-r4/gc.sh <msgfile> (puts it first on PATH). s457-string-url test flaked once under load.
+
+DONE (in route-inference.ts, uncommitted-until-this-commit, gates NOT yet run):
+- `localsWrittenBy(stmt, mutations)`: every local written at ANY depth (decls incl. nested `x = …` tilde-decls,
+  assign roots, ++/--, destructuring, raw-text fallback; with `mutations`: possibly-mutating method receivers
+  `x.push()`, args to user fns / Object.assign). Replaces `topLevelDeclaredLocals` in the taint pass (d), the
+  guard's derivedLocalsAt, producedLocal / srvLocal / srvLocalBefore (server stmts: mutations=false).
+- Callee following inside analyzeCPSEligibility: `calleesOf` (body-nested fns + functionIndex file fns, transitive,
+  server fns excluded) → readsCellX / readsLocalX / cellsWrittenX / localsWrittenX / deniedX / clientOnlyX, wired
+  into tryPull, (a), (c), guard detection, guard-control refusal, (d).
+PROBES so far (r-1, ~/.cache/scrml-agent-tmp/s467-cps-r4/r-1.tsv): pw_local_if, pw_local_return, role_local,
+  pw_array_push, pw_obj_field → E-RI-002 (were FORGED-WRITE / 500). Other rows unchanged vs start
+  (r-start.tsv). Only FORGED-WRITE left: fp_param_guard, fp_alert_noread_between — legit (INSERT not guarded
+  by any server value; the program writes regardless).
+HALF-DONE: fp_helper_guard STILL runs `alert` in the server (alert-in-server) — callee following did not catch
+  it; next: check why `deny` isn't found by calleesOf / deniedX in the guard path (pullGuard→tryPull→clientOnlyX;
+  maybe `deny` resolved as server fn (resolvedServerFnIds) or the guard pulled via another path).
+NEXT 3 STEPS:
+ 1. Debug fp_helper_guard (above); then match_str E-CG-006 (codegen/cps-cell-writes planBatchCellReturn vs a
+    `match` arm cell write in a server-pulled guard) → compile correctly or proper E-RI-002.
+ 2. Permanent tests (integration, executed like s466-cps-guard-stays-server.test.js): pw_local_if, role_local,
+    pw_local_return, match_str, fp_helper_guard (+ array_push/obj_field); unit tests for localsWrittenBy.
+ 3. #1428 pack vs base 10 fails; corpus differential vs origin/main; full gate list; SPEC §19.9.9.8 note
+    (nested writes + callees) if wording needs it.
+UNCOMMITTED STATE (pause): the pre-commit hook blocks every commit on this machine, independent of this work —
+`compiler/tests/unit/s457-string-url-executable-schemes.test.js` "D — run it > server function save(link:
+string(url))" gets 403 instead of 400 in the FULL suite (passes alone, 67/0; it also failed on the untouched
+0bc57c25b tree in the first commit attempt, before any route-inference edit — probably state left behind by an
+earlier test, CSRF/origin). So NOTHING from round 4 is committed or pushed. The full diff is staged in the
+worktree (/home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aeb0297cf12facc1b, branch s467-cps-r4 @ 0bc57c25b)
+and saved as ~/.cache/scrml-agent-tmp/s467-cps-r4/round4-wip.patch (`git apply` onto 0bc57c25b).
+Resume: find which earlier test leaves the 403 state (bisect the files that run before s457), or get PA
+authorisation for the hook, then commit + push.

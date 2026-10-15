@@ -1790,8 +1790,13 @@ describe("§20 — CPS transformation: server/client boundary splitting", () => 
 
     const route = getRoute(routeMap, "/test/app.scrml", 50);
     expect(route.cpsSplit).not.toBeNull();
-    expect(route.cpsSplit.serverStmtIndices).toEqual([1]); // Bun.file is index 1
-    expect(route.cpsSplit.clientStmtIndices).toEqual([0, 2, 3]); // reactive assignments
+    // Bun.file is index 1. S467 (§19.9.9.8 rule 1): `@config = config` reads the
+    // local the server statement declared (in its kept text), so it runs in the
+    // server half too — the client never holds `config`, only the `@config` value the
+    // batch hands back.
+    expect(route.cpsSplit.serverStmtIndices).toEqual([1, 2]);
+    // (a reactive-server statement is in BOTH lists: the client applies the cell value)
+    expect(route.cpsSplit.clientStmtIndices).toEqual([0, 2, 3]);
   });
 
   test("mixed statement (bare-expr with @var AND server resource) — runs in the server half, no E-RI-002 (S462)", () => {
