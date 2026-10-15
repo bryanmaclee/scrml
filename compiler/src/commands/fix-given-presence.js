@@ -96,8 +96,8 @@ import { isUserComponentMarkup } from "../component-expander.ts";
 import { isExecutableEventHandlerAttrName } from "../attr-injection-sink.ts";
 import { compileScrml } from "../api.js";
 import { LIFT_BRANCH_RUN_BANNER, LIFT_BRANCH_RUN_HELPER } from "../codegen/emit-reactive-wiring.ts";
-import { errorSeverityCodes, doesNotCompileReason, mirrorSiblingDatabases } from "./fix-verify-shared.js";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { errorSeverityCodes, scratchRefusalReason, writeScratchProject } from "./fix-verify-shared.js";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 
@@ -383,20 +383,6 @@ function netSites(source) {
 // ---------------------------------------------------------------------------
 // Verify-by-compile
 // ---------------------------------------------------------------------------
-
-function absKey(filePath, key) {
-  return isAbsolute(key) ? resolve(key) : resolve(dirname(resolve(filePath)), key);
-}
-function commonDir(paths) {
-  let parts = dirname(paths[0]).split(sep);
-  for (const p of paths.slice(1)) {
-    const q = dirname(p).split(sep);
-    let i = 0;
-    while (i < parts.length && i < q.length && parts[i] === q[i]) i++;
-    parts = parts.slice(0, i);
-  }
-  return parts.join(sep) || sep;
-}
 
 /**
  * The guard lowers to `if (x !== null && x !== undefined && …)`; `x is given` lowers to the same
@@ -904,8 +890,8 @@ function markupBodyRefusal(body, filePath) {
 
 /** "file does not compile; cannot verify (…)" when the ORIGINAL file reports an error-severity
  * diagnostic, else null (fix-verify-shared.js). One compile of the original. */
-function originalCompileRefusal(filePath, source, auxSources) {
-  return verifyByCompile(filePath, source, null, auxSources);
+function originalCompileRefusal(filePath, source, auxSources, inPlaceClean) {
+  return verifyByCompile(filePath, source, null, auxSources, 0, inPlaceClean);
 }
 
 /**
@@ -914,25 +900,12 @@ function originalCompileRefusal(filePath, source, auxSources) {
  * that many markup guards, whose lift groups are compared as described above. `after === null`:
  * compile only `before`, and return only the "does not compile" reason (or null).
  */
-function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
+function verifyByCompile(filePath, before, after, auxSources, markupSites = 0, inPlaceClean = false) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-given-presence-"));
   const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
   try {
-    const self = resolve(filePath);
-    const files = new Map([[self, before]]);
-    for (const [p, s] of Object.entries(auxSources ?? {})) {
-      const ap = absKey(filePath, p);
-      if (ap !== self) files.set(ap, s);
-    }
-    const root = commonDir([...files.keys()]);
-    let target = null;
-    for (const [ap, s] of files) {
-      const out = join(dir, "src", relative(root, ap));
-      mkdirSync(dirname(out), { recursive: true });
-      writeFileSync(out, s);
-      if (ap === self) target = out;
-    }
-    mirrorSiblingDatabases(filePath, dirname(target));
+    // The file, its project and every database they name, in one layout (fix-verify-shared.js).
+    const { target } = writeScratchProject(dir, filePath, before, auxSources);
     const run = (text) => {
       writeFileSync(target, text);
       const r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [target], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
@@ -966,7 +939,7 @@ function verifyByCompile(filePath, before, after, auxSources, markupSites = 0) {
       console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
       process.stdout.write = saved.out; process.stderr.write = saved.err;
     }
-    if (a.errs.length > 0) return doesNotCompileReason(a.errs);
+    if (a.errs.length > 0) return scratchRefusalReason(a.errs, filePath, before, inPlaceClean);
     if (after === null) return null; // originalCompileRefusal: the original compiles
     // The rewrite must compile too — including the emitted-JS parse gate, which `codes` does not
     // carry on a `write: false` compile (S462 delta review #3).
@@ -1063,7 +1036,7 @@ export function fixGivenPresence(source, opts = {}) {
   // A file that does not compile cannot be verified: every candidate site — including one the
   // body check refuses — gets THAT reason, which is the one an author has to act on first.
   if (opts.verify !== false && (planned.length > 0 || refusedBody.length > 0)) {
-    const notCompiling = originalCompileRefusal(filePath, source, opts.auxSources);
+    const notCompiling = originalCompileRefusal(filePath, source, opts.auxSources, opts.inPlaceClean);
     if (notCompiling) {
       for (const x of [...refusedBody, ...planned]) block(x.site.node.span.start, `${notCompiling} — left as written`);
       return none();
@@ -1093,7 +1066,7 @@ export function fixGivenPresence(source, opts = {}) {
     if (!s.ok) return { out: s.out, why: "impl#1 reads the rewritten file differently (a `given` head it still sees, or a tree it cannot build)" };
     if (opts.verify === false) return { out: s.out, why: null };
     const markupSites = subset.filter((p) => isMarkupGuard(p.site)).length;
-    return { out: s.out, why: verifyByCompile(filePath, source, s.out, opts.auxSources, markupSites) };
+    return { out: s.out, why: verifyByCompile(filePath, source, s.out, opts.auxSources, markupSites, opts.inPlaceClean) };
   };
 
   let accepted = planned;
