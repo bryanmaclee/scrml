@@ -404,7 +404,17 @@ export function paramName(p: ParamLike, i: number): string {
  *   `c = .Green`), and splicing it verbatim shipped invalid or wrong code
  *   (s466 fix round 1 — every caller lowers through the one helper).
  */
-export function paramSignature(p: ParamLike, i: number, loweredDefault: string | null): string {
+export function paramSignature(
+  p: ParamLike,
+  i: number,
+  loweredDefault: string | null,
+  // S465 r4 — lowers a default NESTED in a destructuring pattern (`{ a = g() }`), an
+  // expression kept as text by the front-end. Server callers pass one so a call in it
+  // is read from the tree and awaited (or refused); without one the text is kept
+  // verbatim (client, unchanged). The parameter's OWN default arrives already lowered
+  // (`loweredDefault`, emitParamDefault).
+  lowerPatternDefault?: (text: string, node: unknown) => string,
+): string {
   if (typeof p === "string") return p.split(":")[0].trim();
   const rest = p.isRest ? "..." : "";
   const def = loweredDefault === null ? "" : ` = ${loweredDefault}`;
@@ -414,7 +424,7 @@ export function paramSignature(p: ParamLike, i: number, loweredDefault: string |
   if (p.name && typeof p.name === "object") {
     const pat = p.name as { kind?: unknown };
     if (pat.kind === "destructure-array" || pat.kind === "destructure-object") {
-      return `${rest}${emitDestructurePatternText(pat as Parameters<typeof emitDestructurePatternText>[0])}${def}`;
+      return `${rest}${emitDestructurePatternText(pat as Parameters<typeof emitDestructurePatternText>[0], lowerPatternDefault)}${def}`;
     }
   }
   const name = typeof p.name === "string" ? p.name : `_scrml_arg_${i}`;

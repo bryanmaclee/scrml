@@ -22,7 +22,7 @@ import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, isSyncCallbackConsumerCall } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, isGlobalSchedulerCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (marks set by `annotateLocalAsyncFns`).
 import {
@@ -34,7 +34,6 @@ import {
   anchorDiagnosticSpan,
   localSyncShadowOf,
   rawAsyncUsesOf,
-  BOUND_CALLEE_MARK,
 } from "./local-async-fns.ts";
 import type { AsyncRoot, AsyncEscapeSite, RawAsyncUses } from "./local-async-fns.ts";
 // s441 — scope-aware analysis of raw JS fragments (FP1) and of emitted handler /
@@ -322,10 +321,20 @@ export function asyncStdlibSyncCallbackError(
   span: unknown,
   filePath?: string | null,
   via?: string | null,
+  userModule?: string | null,
 ): CGError {
   const sp = diagnosticSpan(span, filePath);
   const viaNote = via && via !== calleeName
     ? ` (\`${calleeName}\` is a nested helper that the compiler emits async because it calls \`${via}(…)\`.)`
+    : "";
+  // S465 — the code is shared by every async import (the refusal is the same), but
+  // the callee may be an async export of a USER `.scrml` module rather than a
+  // standard-library function: name that module so the message does not send the
+  // reader looking for a `scrml:` import that is not there.
+  const asyncName = via && via !== calleeName ? via : calleeName;
+  const moduleNote = userModule
+    ? ` (\`${asyncName}\` is an async function exported by the user module \`${userModule}\` — ` +
+      `not a standard-library function; this code covers every async import.)`
     : "";
   return new CGError(
     "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
@@ -340,7 +349,7 @@ export function asyncStdlibSyncCallbackError(
       `function (a \`for\` loop over the collection, or a \`const r = ${calleeName}(…)\` binding) ` +
       `rather than inside the value-consuming callback. (Fire-and-forget scheduler callbacks — ` +
       `\`setTimeout\`/\`setInterval\`/… — DISCARD the return and are handled automatically; this ` +
-      `error is only for positions whose value is actually consumed.)` + viaNote,
+      `error is only for positions whose value is actually consumed.)` + viaNote + moduleNote,
     sp,
     "error",
   );
@@ -548,9 +557,8 @@ export function asyncFnArgRole(call: ASTNode, index: number): "allowed" | "own-c
   }
   // Only the GLOBAL scheduler discards the return: a program-bound
   // `function setTimeout(f) { return f(x) }` (local, file-scope, import, param)
-  // hands the Promise back — s441 fix round, the reviewer's accept-all.
-  if (callee && callee.kind === "ident" && typeof callee.name === "string" && KNOWN_DISCARD_HOF.has(callee.name) &&
-      call[BOUND_CALLEE_MARK] !== true) {
+  // hands the Promise back (S466 r7 — the one predicate, §13.2).
+  if (callee && callee.kind === "ident" && typeof callee.name === "string" && isGlobalSchedulerCallee(callee.name)) {
     return "allowed";
   }
   return "escape";
@@ -1095,10 +1103,12 @@ export function collectNonAwaitableAsyncCalls(
  */
 export function emitLibraryFnMember(
   fnNode: ASTNode,
-  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean; serverPlaced?: boolean },
+  // S466 r7 — `ownAsync` overrides the signature decision (the ss1 block passes the
+  // file set's by-body part; the set itself still decides every call site's await).
+  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean; ownAsync?: boolean; serverPlaced?: boolean },
 ): string {
   const name = (fnNode.name ?? "anon") as string;
-  const ownAsync = opts.asyncFnNames.has(name);
+  const ownAsync = opts.ownAsync ?? opts.asyncFnNames.has(name);
   // Q1 — the OWN signature carries `async` only when the fn's own body awaits.
   const signatureAsync = ownAsync;
   // Q2 — the body lowers server-side when it is async OR merely holds a nested

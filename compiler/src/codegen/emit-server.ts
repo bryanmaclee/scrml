@@ -45,15 +45,20 @@ import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
 import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
-import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
+import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHODS } from "./async-combinators.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { asyncValueUsesIn } from "./fn-valued-bindings.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
 import { isPlainPureFn, forEachAtRef, fnReachesAtName, fnReadsServerRefusedAtName } from "../at-refs.ts";
 import { jsTextReadsFreeName } from "../free-name.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
-import { extractCalleeNames, buildCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { isPromiseReturningImportedCallee } from "../module-resolver.js";
+import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
+import { asyncFnNamesOfFile, asyncByBodyOf } from "./file-async-fns.ts";
+import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
+import type { CalleeImportMap } from "./scheduling.ts";
+import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
@@ -1159,27 +1164,16 @@ function emitModuleValueExportLines(
   // transitively CALLS one (an orchestrator `report()` calling a `?{}`-doing
   // `loadRows()`), is `async` and awaits its async callees — else the callee's
   // Promise leaks un-awaited (`rows` is a Promise, `rows.length` is undefined).
-  const _sourceText = ((fileAST as any)?._sourceText ?? null) as string | null;
-  // W5b (S239) — the CROSS-IMPORT async seed (LOCAL names binding an async fn
-  // imported from another lib), stashed on the fileAST by codegen/index.ts (which
-  // has the build's `files`). Parity with the tool path: without it, a
-  // server-exported fn that only transitively calls a cross-lib async import via
-  // its imported local is emitted sync → the callee's Promise leaks un-awaited.
-  const asyncImportedSeed = ((fileAST as any)?._asyncImportedLocals as Set<string> | undefined);
-  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
-  // value-exported fn calling `safeCallAsync` (or a `scrml:auth`/`http`/`redis`
-  // async export) is seeded async + its call awaited. `buildCalleeImportMap` reads
-  // `.imports` off the FileAST; the TABResult wrapper hoists imports to
-  // `.ast.imports`, so fall back to `.ast` when present (mirrors :1096).
-  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
-  const _veCalleeMap = buildCalleeImportMap(fileAST);
-  const asyncFnNames = computeAsyncFnNames(
-    Array.from(fnDeclByName.values()) as any[],
-    _sourceText,
-    asyncImportedSeed,
-    _veCalleeMap,
-    exportRegistry ?? null,
-  );
+  //
+  // S466 r7 (HIGH-A root fix) — the value exports no longer run their OWN fixpoint
+  // over the EXPORTED functions alone (a non-exported helper `function inner(p, h) {
+  // return verifyPassword(p, h) }` was invisible to it: `export function check` shipped
+  // sync with `if (!inner(p, h))` — a Promise, always truthy). They read THE file's
+  // async name set (file-async-fns.ts, computed once by codegen/index.ts over every
+  // file-scope function, binding, server function and async import): the same set that
+  // told every importer `check` is async.
+  const _veCalleeMap = buildServerCalleeImportMap(fileAST);
+  const asyncFnNames = asyncFnNamesOfFile(fileAST);
   // s440 — nested helpers inside a value-exported fn (same facts as the lowering).
   // s441 — the same pass collects every async fn used as a VALUE (S440 F4).
   const _veEscapes: AsyncEscapeSite[] = [];
@@ -1261,7 +1255,12 @@ function emitModuleValueExportLines(
         if (isAlreadyDeclared(name)) continue;
         const fnNode = fnDeclByName.get(name);
         if (!fnNode || !Array.isArray(fnNode.body)) continue;
-        const isAsync = asyncFnNames.has(name);
+        // S466 r7 — the export's OWN signature is async when its body is (it does `?{}` or
+        // reaches anything async — a helper, a peer, an import: `asyncByBodyOf`); a server
+        // function that is in the file set only as itself keeps its pre-r7 sync value
+        // copy (an importer's `await` of it is harmless). Its body's call sites read the
+        // whole set (a call to an async peer is awaited).
+        const isAsync = asyncByBodyOf(asyncFnNames).has(name);
         // W5b / D5 GENERALIZE — an ASYNC fn (its body does `?{}` SQL / `_{}`, OR it
         // transitively CALLS one) emits as a REAL IN-PROCESS callable: the `?{}`
         // lowers SERVER-boundary to `await _scrml_sql\`…\`` against the module's OWN
@@ -1291,7 +1290,7 @@ function emitModuleValueExportLines(
         // outside it) keeps every exported function server-placed.
         const _reached = (fileAST as any)?._serverReachedExports as Set<string> | undefined;
         const _serverPlaced = isAsync || !_reached || _reached.has(name);
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, serverPlaced: _serverPlaced }));
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, ownAsync: isAsync, serverPlaced: _serverPlaced }));
         continue;
       }
 
@@ -1569,7 +1568,14 @@ function planModuleBindingClosure(
   exportedValues: ExportedModuleValue[] = [],
   /** Identifier tokens of the code this file runs CLIENT-side (N3). */
   clientTokens: Set<string> = new Set(),
+  // S465 r6 — the server await facts: an ASYNC function-valued binding (`const w = (a,
+  // b) => check(a, b)`) is emitted `async`, every call in its body classified (awaited),
+  // exactly as a function declaration with the same body; its callers await it
+  // (buildServerCalleeImportMap). S466 r7 — "async" is THE file's set (file-async-fns.ts).
+  asyncCalleeMap: CalleeImportMap | null = null,
+  asyncExportRegistry: ServerExportRegistry | null = null,
 ): { before: string[]; after: string[]; decls: UserModuleDecl[] } {
+  const asyncBindings = asyncFnNamesOfFile(fileAST);
   // 1. File-scope bindings, in source order.
   const bindings: D5Binding[] = [];
   const byName = new Map<string, D5Binding>();
@@ -1742,11 +1748,42 @@ function planModuleBindingClosure(
           continue;
         }
       }
-      const code = emitLogicNode(decl, {
+      // S465 r6 — SPEC §13.2: an async-coloured function SHALL NOT be used as a value.
+      // A module value that aliases / stores / returns one (`const w = w0`, `const o = {
+      // w: w0 }`, `const z = () => w0`), or that CALLS one at module init (`const v =
+      // w0(1)` — it would hold the Promise), is refused rather than shipped un-awaited.
+      {
+        const _isAsyncName = (n: string): boolean =>
+          asyncBindings.has(n) || isPromiseReturningImportedCallee(n, asyncCalleeMap, asyncExportRegistry);
+        const _isFnValue = decl.initExpr.kind === "lambda" ||
+          (decl.initExpr.kind === "escape-hatch" && /^(Arrow|Function)/.test(String(decl.initExpr.nativeKind ?? "")));
+        const _bad: string[] = [];
+        for (const u of asyncValueUsesIn(decl.initExpr, _isAsyncName, ASYNC_COMBINATOR_METHODS)) _bad.push(u.name);
+        if (!_isFnValue) {
+          forEachIdentInExprNode(decl.initExpr, (id: any) => {
+            if (typeof id?.name === "string" && _isAsyncName(id.name) && !_bad.includes(id.name)) _bad.push(id.name);
+          });
+        }
+        if (_bad.length > 0) {
+          refused.add(b);
+          recordRefusedLowering(new CGError(
+            "E-ASYNC-FN-ESCAPES-AS-VALUE",
+            `E-ASYNC-FN-ESCAPES-AS-VALUE: the module value \`${b.names.join(", ")}\` uses \`${_bad[0]}\`, which the compiler emits ` +
+              "`async`, as a value (or calls it while the module loads): whoever reads it would get an un-awaited " +
+              "Promise, which is always truthy (§13.2). Call the function directly where the result is needed — " +
+              `\`${_bad[0]}(…)\` inside a function body — or declare the helper with \`function\`.`,
+            decl.span ?? {},
+          ), decl);
+          continue;
+        }
+      }
+      const _isAsyncBinding = b.names.length === 1 && asyncByBodyOf(asyncBindings).has(b.names[0]);
+      const code = emitLogicNode(_isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
         boundary: "server" as const,
         insideFunctionBody: true,
         declaredNames: new Set<string>(byName.keys()),
-      });
+        ...(_isAsyncBinding ? { asyncCalleeMap, asyncExportRegistry } : {}),
+      } as any);
       if (!code) continue;
       const text = serverRewriteEmitted(code);
       emittedValue.set(b, text);
@@ -1875,6 +1912,7 @@ function checkUserModuleDeclCollisions(
   }
   return out;
 }
+
 
 /**
  * §61 `<endpoint>` private-arm reachability — emit a LOCAL, non-exported pure
@@ -2304,11 +2342,12 @@ function generateServerJsImpl(
   // `const ok = verifyPassword(...)` predicate accepts every password (auth
   // bypass) and a `${hashPassword(...)}` INSERT stores a stringified Promise.
   // `emit-expr.ts:emitCall` consumes these via `_makeExprCtx` and wraps the
-  // call in `await` in every awaitable server-mode position. `buildCalleeImportMap`
-  // reads `.imports` off the FileAST; the TABResult wrapper hoists imports to
-  // `.ast.imports`, so fall back to `.ast` when present (mirrors emit-functions.ts).
-  const _asyncFileAstForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
-  const _asyncCalleeMap = buildCalleeImportMap(_asyncFileAstForImports);
+  // call in `await` in every awaitable server-mode position. (`buildCalleeImportMap`
+  // folds the TABResult's `.ast.imports` hoist internally — Cleanup 8.)
+  // S465 — the server map carries the cross-module async facts, so an async fn
+  // imported from another `.scrml` module is awaited at every server call site
+  // exactly like a same-file peer (see buildServerCalleeImportMap).
+  const _asyncCalleeMap = buildServerCalleeImportMap(fileAST);
   const _asyncExportRegistry = ctxForCache?.exportRegistry ?? exportRegistryLegacy ?? null;
   // §13.2 server Promise trap (S462 Q20) — every boolean-test position whose
   // operand is a direct `scrml:` stdlib call is wrapped in `_scrml_assert_settled`
@@ -4619,8 +4658,20 @@ function generateServerJsImpl(
   // Cleanup 7 (S239) — delegate to the SHARED single-wording builder
   // (emit-library-shared.asyncStdlibSyncCallbackError) so the route-handler,
   // ss1, library, and client paths all emit one identical message.
+  // S465 — a callee that is async because it is an async export of a USER `.scrml`
+  // module (the server map's `asyncImportedLocals`), not a `scrml:` export: the
+  // message names that module (the code stays E-ASYNC-STDLIB-IN-SYNC-CALLBACK).
+  const _userAsyncModuleOf = (name: string): string | null => {
+    if (!_asyncCalleeMap || !_asyncCalleeMap.asyncImportedLocals?.has(name)) return null;
+    if (_asyncExportRegistry && isPromiseReturningStdlibImportedCallee(name, _asyncCalleeMap, _asyncExportRegistry)) return null;
+    const mod = _asyncCalleeMap.get(name) ?? null;
+    if (!mod || !filePath || !mod.startsWith("/")) return mod;
+    const rel = _pathRelative(_pathDirname(filePath), mod);
+    return rel.startsWith(".") ? rel : `./${rel}`;
+  };
   const _diagAsyncStdlibSyncCb = (calleeName: string, span: any, via?: string | null): void => {
-    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null));
+    const _asyncName = via && via !== calleeName ? via : calleeName;
+    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null, _userAsyncModuleOf(_asyncName)));
   };
   // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
   // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's
@@ -7457,14 +7508,26 @@ function generateServerJsImpl(
   // of the value exports (TDZ), `after` appended. See planModuleBindingClosure.
   {
     const _mcSnapshot = getVarCounter();
+    const _mcSinkStart = _syncStdlibAsyncCalls.length;
     const _mc = planModuleBindingClosure(
       fileAST, filePath, lines.join("\n"), errors, _d5ExportedValues,
       clientSideTokens(fileAST, filePath, routeMap),
+      _asyncCalleeMap, _asyncExportRegistry,
     );
     setVarCounter(_mcSnapshot);
     lines.splice(_d5InsertAt, 0, ..._mc.before);
     for (const _l of _mc.after) lines.push(_l);
     for (const _d of _mc.decls) _userModuleDecls.push(_d);
+    // S465 r6 — the module values are lowered after the sync-callback drain above; an
+    // async call one of them could not await (a nested sync lambda — `const mk = (h) =>
+    // (p) => check(p, h)`) fails closed here the same way.
+    const _mcSeen = new Set<string>();
+    for (const _sac of _syncStdlibAsyncCalls.slice(_mcSinkStart)) {
+      const _key = `${_sac.name}@${((_sac.span ?? {}) as { start?: number }).start ?? -1}`;
+      if (_mcSeen.has(_key)) continue;
+      _mcSeen.add(_key);
+      _diagAsyncStdlibSyncCb(_sac.name, _sac.span);
+    }
   }
 
 

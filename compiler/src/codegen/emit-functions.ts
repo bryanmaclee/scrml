@@ -4,8 +4,9 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody, emitParamDefault } fr
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
-import { isServerOnlyNode, collectFunctions } from "./collect.ts";
-import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
+import { isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
+import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
 import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
@@ -377,8 +378,11 @@ function emitMultiBatchWrapper(opts: {
   cpsOptsBase: Record<string, unknown>;
   errors: CGError[];
   filePath: string;
+  /** S465 — the CPS continuation auto-await (see `cpsContinuationAutoAwait`). */
+  autoAwait?: (code: string) => string;
 }): void {
   const { lines, name, body, cpsSplit, batchPlan, batchStubs, fnParamNames, cpsOptsBase, errors, filePath } = opts;
+  const _autoAwait = opts.autoAwait ?? ((c: string): string => c);
 
   // The traversal order: the planner's topological schedule when present,
   // else source order. A single-batch split's schedule equals source order,
@@ -502,7 +506,7 @@ function emitMultiBatchWrapper(opts: {
     ) {
       continue;
     }
-    const code = emitLogicNode(stmt, cpsOptsBase);
+    const code = _autoAwait(emitLogicNode(stmt, cpsOptsBase));
     if (code) {
       for (const line of code.split("\n")) lines.push(`    ${line}`);
     }
@@ -583,8 +587,16 @@ export function computeClientAsyncSets(
   const _clientAsyncSeed = new Set<string>();
   const _crossImportSeed = (ctx.fileAST as any)?._asyncImportedLocals as Set<string> | undefined;
   if (_crossImportSeed) for (const n of _crossImportSeed) _clientAsyncSeed.add(n);
+  // S466 r7 (MED-C) — the file's top-level function-valued bindings (`const persist =
+  // (v) => save(v)`) are functions for the CLIENT coloring too (they are in the client
+  // bundle): one that calls something async is emitted `async` on the client
+  // (emit-reactive-wiring.ts) and every client call site awaits it exactly like a
+  // `function` declaration (§13.2: it "MAY be called directly (the compiler awaits
+  // the call)"). The pseudo functions join the fixpoint only — never `clientFns`.
+  const _bindingPseudoFns = fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never))
+    .map((b) => b.pseudoFn as unknown as ASTNode);
   const _clientAsyncFnNames = computeAsyncFnNames(
-    _clientFns,
+    [..._clientFns, ..._bindingPseudoFns],
     null,
     _clientAsyncSeed,
     _calleeMap,
@@ -592,6 +604,44 @@ export function computeClientAsyncSets(
     _serverFnNames,
   );
   return { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames };
+}
+
+/**
+ * S465 (s465-await-imported-server-fn) — the auto-await for a CPS wrapper's
+ * CLIENT continuation statements. The wrapper (`async function _scrml_cps_<fn>`)
+ * emits its client statements with `emitLogicNode` directly — it never runs
+ * through `scheduleStatements`, so the §13.2 choke-point injector that every
+ * other client fn body gets (`injectFnBodyServerCallAwaits`) never saw them, and
+ * a Promise-returning call in a continuation emitted BARE: `if (!check(p, h))`
+ * on an imported async `check` tested a pending Promise (always truthy) — every
+ * password "accepted". Same candidate set as `scheduleStatements`: this file's
+ * server fns (owning-file filtered, F5) + every Promise-returning stdlib import
+ * (`isPromiseReturningImportedCallee`) + every async fn imported from another
+ * `.scrml` module per that module's own analysis (`asyncImportedLocalsOfFile`). The wrapper
+ * is async, so an await is always legal at statement level; the injector's own
+ * position model leaves sync callback bodies alone.
+ */
+function cpsContinuationAutoAwait(
+  routeMap: CompileContext["routeMap"],
+  filePath: string,
+  calleeMap: ReturnType<typeof buildCalleeImportMap>,
+  exportRegistry: CompileContext["exportRegistry"] | null,
+  asyncImportedLocals: Set<string>,
+): (code: string) => string {
+  const candidates = new Set<string>(routeMap ? _clientServerFnNames(routeMap as any, filePath) : []);
+  for (const n of asyncImportedLocals) candidates.add(n);
+  if (calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0) {
+    for (const localName of calleeMap.keys()) {
+      if (isPromiseReturningImportedCallee(localName, calleeMap, exportRegistry as any)) candidates.add(localName);
+    }
+  }
+  if (candidates.size === 0) return (code) => code;
+  return (code: string): string => {
+    if (!code) return code;
+    let mentions = false;
+    for (const n of candidates) { if (code.includes(n)) { mentions = true; break; } }
+    return mentions ? injectFnBodyServerCallAwaits(code, (n) => candidates.has(n)) : code;
+  };
 }
 
 /**
@@ -685,6 +735,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // Cleanup 8 — buildCalleeImportMap now folds the `.ast.imports` hoist internally.
   const _calleeMap = buildCalleeImportMap(ctx.fileAST as any);
   const _exportRegistry = ctx.exportRegistry ?? null;
+  const _cpsAutoAwait = cpsContinuationAutoAwait(ctx.routeMap, ctx.filePath, _calleeMap, _exportRegistry, asyncImportedLocalsOfFile(ctx.fileAST as any));
   const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
   const machineBindings = buildMachineBindingsMap(ctx.fileAST);
   // C13 (§51.0.F + §51.0.G): mirror machineBindings wiring for new <engine>
@@ -1179,6 +1230,91 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     serverFnBatchStubs.set(name, _batchStubNames);
   }
 
+  // S465 (fix round 1) — the client async facts are computed BEFORE Step 2 so the
+  // CPS wrapper's client continuation (below) lowers with the SAME facts an async
+  // client fn body gets (Step 3): its statements are client code running in an
+  // async function, so a Promise-returning call is awaited by `emitExpr` and a
+  // `.filter` / `.some` callback reaching one takes the async-combinator lowering
+  // (or the fail-closed sync-callback refusal), exactly as in Step 3.
+  const { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames } =
+    computeClientAsyncSets(ctx, fnNodes, _calleeMap, _exportRegistry);
+  // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
+  // auto-await surface owns. `computeAsyncFnNames` returns exactly
+  // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
+  //
+  //   (a) LOCAL client fn names — the GITI-037 same-file fixpoint. Awaited HERE;
+  //       nothing else knows about them.
+  //   (b) a `scrml:` VENDOR async import (`safeCallAsync`, `scrml:http`'s `get`, …).
+  //       OWNED by the stdlib auto-await classifier — `isPromiseReturningStdlibFn`,
+  //       consulted by the statement-level `injectPromiseAwait` (scheduling.ts) and
+  //       the guarded-expr `_autoAwait` (emit-logic.ts). EXCLUDED here: awaiting a
+  //       `safeCallAsync(...) !{}` on both surfaces yields `await await …`.
+  //   (c) a USER `.scrml` module's inferred-async export (`asyncExportNamesOf`
+  //       reached it through a `./lib.scrml` import). Awaited HERE — see below.
+  //
+  // The (b) exclusion predicate is the SAME classifier those surfaces use, so
+  // "owned elsewhere" and "skipped here" cannot drift: they are one predicate.
+  //
+  // (c) IS THE HOLE THIS CLOSES. It was previously lumped with (b) on the claim
+  // that every imported name is covered by the stdlib classifier or the `!{}`
+  // auto-await. Both halves are false for a user `.scrml` export:
+  // `isPromiseReturningCallExpr` classifies server fns + stdlib `isAsync` exports
+  // ONLY (the Q5 `<repo>/stdlib/` carve-out gates `isPromiseReturningStdlibFn`),
+  // and the guarded-expr `_autoAwait` DELEGATES to that same predicate rather than
+  // being an independent surface. So a cross-module `const r = fetchStatus(u)`
+  // emitted BARE and handed back a Promise (`r.status` → `undefined`, SILENT), and
+  // a `fetchStatus(u) !{}` wired its `__scrml_error` arm against a Promise (always
+  // falsy → the recovery arm was dead code). Same-module callers were already
+  // correct via (a), which is why the hole read as closed.
+  const _localFnNames = new Set<string>(
+    _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
+  );
+  // (b) — is this cross-import name already owned by the stdlib auto-await
+  // classifier? Resolves the local binding to its source module and asks the ONE
+  // stdlib-async predicate. A user `.scrml` source fails the `<repo>/stdlib/`
+  // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
+  const _stdlibOwnedImport = (n: string): boolean => {
+    if (!_exportRegistry || _exportRegistry.size === 0) return false;
+    return !!_calleeMap && isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
+  };
+  const _clientPeerAwaitNames = new Set<string>(
+    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
+  );
+  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the markup
+  // interpolation emitter (emit-event-wiring.ts) lowers `<p>${ fetchStatus(@url) }</p>`
+  // on a SEPARATE path that never received this peer-await set, so a cross-module
+  // inferred-async CLIENT import consumed in markup value position emitted bare and
+  // rendered `undefined` (a field read off a Promise). Stash the set on ctx here;
+  // emitFunctions runs before emitEventWiring on the same ctx (emit-client.ts).
+  (ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames = _clientPeerAwaitNames;
+  // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
+  // non-awaitable position (sync callback / param default). Drained after the loop.
+  const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
+  // S465 (fix round 1) — the async facts a CPS continuation lowers with: those of
+  // an ASYNC client fn body (Step 3's `fnOpts` for `_fnIsAsync`), since the wrapper
+  // is always `async`. `emitExpr` then awaits a Promise-returning call itself and
+  // gives a sync-callback position (`[p].filter(p => check(p, h))`) the
+  // async-combinator lowering or records it into the fail-closed sink.
+  const _cpsAsyncOpts: Record<string, unknown> = {
+    clientAsyncBody: true,
+    ...(_clientPeerAwaitNames.size > 0 ? { clientAsyncFnNames: _clientPeerAwaitNames, syncPeerCalls: _clientSyncPeerCalls } : {}),
+    ...(_calleeMap ? { asyncCalleeMap: _calleeMap } : {}),
+    ...(_exportRegistry ? { asyncExportRegistry: _exportRegistry } : {}),
+    ...(_serverFnNames.size > 0 ? { serverFnNames: _serverFnNames } : {}),
+  };
+  // S466 r7 (MED-C) — the async function-valued bindings and the async-body facts they
+  // lower with on the client: emitReactiveWiring (which runs after this) emits each one
+  // `async`, its calls awaited (the same facts an async client fn body / CPS
+  // continuation gets).
+  {
+    const _bindingNames = new Set<string>(
+      fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never)).map((b) => b.name),
+    );
+    const _asyncBindingNames = new Set<string>([..._clientAsyncFnNames].filter((n) => _bindingNames.has(n) && !_localFnNames.has(n)));
+    (ctx as unknown as { _clientAsyncBindingEmit?: unknown })._clientAsyncBindingEmit =
+      { names: _asyncBindingNames, opts: _cpsAsyncOpts };
+  }
+
   // -------------------------------------------------------------------------
   // Step 2: Generate CPS client wrappers for server functions with cpsSplit
   // -------------------------------------------------------------------------
@@ -1237,9 +1373,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         batchPlan: _wrapBatchPlan,
         batchStubs: _batchStubs,
         fnParamNames: paramNames,
+        autoAwait: _cpsAutoAwait,
         cpsOptsBase: {
           declaredNames: new Set<string>(),
           insideFunctionBody: true,
+          ..._cpsAsyncOpts,
           // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
           deferAsync: true,
           // Bug 61 / GH #262 — synth-cell keys for expression-position
@@ -1294,6 +1432,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsOpts: any = {
       declaredNames: new Set<string>(),
       insideFunctionBody: true,
+      ..._cpsAsyncOpts,
       // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
       deferAsync: true,
       // Bug 61 / GH #262 — synth-cell keys for expression-position
@@ -1375,7 +1514,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
           lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
         } else {
-          const code = emitLogicNode(stmt, cpsOpts);
+          const code = _cpsAutoAwait(emitLogicNode(stmt, cpsOpts));
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`    ${line}`);
@@ -1434,60 +1573,6 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       _readOnlyServerFnNames.add(fn.name as string);
     }
   }
-  const { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames } =
-    computeClientAsyncSets(ctx, fnNodes, _calleeMap, _exportRegistry);
-  // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
-  // auto-await surface owns. `computeAsyncFnNames` returns exactly
-  // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
-  //
-  //   (a) LOCAL client fn names — the GITI-037 same-file fixpoint. Awaited HERE;
-  //       nothing else knows about them.
-  //   (b) a `scrml:` VENDOR async import (`safeCallAsync`, `scrml:http`'s `get`, …).
-  //       OWNED by the stdlib auto-await classifier — `isPromiseReturningStdlibFn`,
-  //       consulted by the statement-level `injectPromiseAwait` (scheduling.ts) and
-  //       the guarded-expr `_autoAwait` (emit-logic.ts). EXCLUDED here: awaiting a
-  //       `safeCallAsync(...) !{}` on both surfaces yields `await await …`.
-  //   (c) a USER `.scrml` module's inferred-async export (`asyncExportNamesOf`
-  //       reached it through a `./lib.scrml` import). Awaited HERE — see below.
-  //
-  // The (b) exclusion predicate is the SAME classifier those surfaces use, so
-  // "owned elsewhere" and "skipped here" cannot drift: they are one predicate.
-  //
-  // (c) IS THE HOLE THIS CLOSES. It was previously lumped with (b) on the claim
-  // that every imported name is covered by the stdlib classifier or the `!{}`
-  // auto-await. Both halves are false for a user `.scrml` export:
-  // `isPromiseReturningCallExpr` classifies server fns + stdlib `isAsync` exports
-  // ONLY (the Q5 `<repo>/stdlib/` carve-out gates `isPromiseReturningStdlibFn`),
-  // and the guarded-expr `_autoAwait` DELEGATES to that same predicate rather than
-  // being an independent surface. So a cross-module `const r = fetchStatus(u)`
-  // emitted BARE and handed back a Promise (`r.status` → `undefined`, SILENT), and
-  // a `fetchStatus(u) !{}` wired its `__scrml_error` arm against a Promise (always
-  // falsy → the recovery arm was dead code). Same-module callers were already
-  // correct via (a), which is why the hole read as closed.
-  const _localFnNames = new Set<string>(
-    _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
-  );
-  // (b) — is this cross-import name already owned by the stdlib auto-await
-  // classifier? Resolves the local binding to its source module and asks the ONE
-  // stdlib-async predicate. A user `.scrml` source fails the `<repo>/stdlib/`
-  // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
-  const _stdlibOwnedImport = (n: string): boolean => {
-    if (!_exportRegistry || _exportRegistry.size === 0) return false;
-    return !!_calleeMap && isPromiseReturningImportedCallee(n, _calleeMap, _exportRegistry);
-  };
-  const _clientPeerAwaitNames = new Set<string>(
-    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
-  );
-  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the markup
-  // interpolation emitter (emit-event-wiring.ts) lowers `<p>${ fetchStatus(@url) }</p>`
-  // on a SEPARATE path that never received this peer-await set, so a cross-module
-  // inferred-async CLIENT import consumed in markup value position emitted bare and
-  // rendered `undefined` (a field read off a Promise). Stash the set on ctx here;
-  // emitFunctions runs before emitEventWiring on the same ctx (emit-client.ts).
-  (ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames = _clientPeerAwaitNames;
-  // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
-  // non-awaitable position (sync callback / param default). Drained after the loop.
-  const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
 
   // s441 (S440 F4) — every async-colored fn a client body uses as a VALUE.
   const _clientEscapes: AsyncEscapeSite[] = [];

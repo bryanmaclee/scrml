@@ -23,12 +23,30 @@ import { resolveModulePathNative } from "../../src/module-resolver.js";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, moduleEdges, writeEvents, isInside } from "../../src/commands/fix-s66.js";
-import { runFixCommand, classifyEntry, lineDiff, resolveProject } from "../../src/commands/fix.js";
+import { runFixCommand, classifyEntry, lineDiff, resolveProject, applyFixRules, parseFixArgs } from "../../src/commands/fix.js";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 
 const fix = (src, opts = {}) => fixS66(src, { filePath: "t.scrml", ...opts });
+
+/**
+ * Run `scrml fix <target> --s66 --write` and return the text of `file`. When `refused`, the project
+ * does not compile: assert the CLI refuses it (exit 3, `file` byte-identical, the refusal named) and
+ * return the output of the rule run the CLI would otherwise have made (`applyFixRules`).
+ */
+function cliOrRefused(target, file, original, refused) {
+  const err = [];
+  const code = runFixCommand([target, "--s66", "--write"], { out: () => {}, err: (s) => err.push(s) });
+  if (!refused) {
+    expect(code).toBe(0);
+    return readFileSync(file, "utf8");
+  }
+  expect(code).toBe(3);
+  expect(readFileSync(file, "utf8")).toBe(original);
+  expect(err.join("\n")).toContain("refused — the file does not compile");
+  return applyFixRules(file, original, file, parseFixArgs([file, "--s66", "--write"])).r.output;
+}
 
 /** Run, assert no blockers, assert idempotent; return the output. */
 function clean(src, opts) {
@@ -227,11 +245,15 @@ describe("§4 program-wrap / program-move / unwrap-logic", () => {
     blocked("${ <n> = 1 }\nHello there\n<p>\${@n}</p>\n", "top-level prose");
   });
 
-  test("verify: a wrap impl#1 reads differently is WITHDRAWN and reported (an <outlet/> outside a shell)", () => {
+  // The original is E-OUTLET-OUTSIDE-SHELL — it does not compile, so the wrap cannot be verified and
+  // is withdrawn on that ground (S464 ruling) before its before/after comparison is reached.
+  test("verify: a wrap of a file that does not compile is WITHDRAWN and reported (an <outlet/> outside a shell)", () => {
     const src = "<div>\n  <h1>Not a shell</h1>\n  <outlet/>\n</div>\n";
     const r = fix(src);
     expect(r.output).toBe(src);
-    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("file does not compile; cannot verify (impl#1 reports E-OUTLET-OUTSIDE-SHELL before the rewrite) — not restructured");
+    // with the refusal off, the before/after comparison still catches it
+    expect(fix(src, { allowNonCompiling: true }).blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
     // BITE: with verify off the wrap goes through — the compile is what caught it
     const r2 = fix(src, { verify: false });
     expect(r2.output.startsWith('<program reset="none">')).toBe(true);
@@ -693,8 +715,13 @@ describe("§11 S239 re-review r3 — imports anywhere (fail closed by constructi
 });
 
 describe("§12 S239 re-review r4 — the import graph and the write set come from impl#1's tree", () => {
-  /** Write `files` into a fresh dir, run `scrml fix app.scrml --s66 --write` (the CLI), return app.scrml. */
-  function cli(files) {
+  /**
+   * Write `files` into a fresh dir, run `scrml fix app.scrml --s66 --write` (the CLI), return app.scrml.
+   * `refused`: the project does not compile on impl#1 — the CLI must refuse it (exit 3, file
+   * byte-identical, S464 ruling), and the §66 write analysis is then checked on the rule run the
+   * CLI would have done (`applyFixRules`), which other fixS66 callers still reach.
+   */
+  function cli(files, { refused = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "scrml-fix-r4-"));
     try {
       for (const [p, s] of Object.entries(files)) {
@@ -702,8 +729,7 @@ describe("§12 S239 re-review r4 — the import graph and the write set come fro
         writeFileSync(join(dir, p), s);
       }
       const f = join(dir, "app.scrml");
-      expect(runFixCommand([f, "--s66", "--write"], { out: () => {}, err: () => {} })).toBe(0);
-      return readFileSync(f, "utf8");
+      return cliOrRefused(f, f, files["app.scrml"], refused);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -729,8 +755,8 @@ describe("§12 S239 re-review r4 — the import graph and the write set come fro
     expect(out).toContain("<count:number=0/>");
     expect(out).not.toContain("let <count");
   });
-  test("HIGH A: an import impl#1 cannot resolve (missing file) → every cell `let`", () => {
-    const out = cli({ "app.scrml": appA("<p>x</p>") });
+  test("HIGH A: an import impl#1 cannot resolve (missing file) → every cell `let` (the CLI refuses the file: E-IMPORT-006)", () => {
+    const out = cli({ "app.scrml": appA("<p>x</p>") }, { refused: true });
     expect(out).toContain("let <count:number=0/>");
   });
 
@@ -754,8 +780,9 @@ describe("§12 S239 re-review r4 — the import graph and the write set come fro
   });
 
   // LOW C — a destructuring target writes every cell it names (the LOCK path).
-  test("LOW C: `[@a, @b] = [@b, @a]` makes both cells `let` (CLI)", () => {
-    const out = cli({ "app.scrml": "<program>\n<a> = 1\n<b> = 2\n${ function sw() { [@a, @b] = [@b, @a] } }\n<button onclick=sw()>swap</button>\n<p>${@a} ${@b}</p>\n</program>\n" });
+  // impl#1 emits invalid JS for a destructuring cell write (E-CODEGEN-INVALID-LOGIC), so the CLI refuses the file.
+  test("LOW C: `[@a, @b] = [@b, @a]` makes both cells `let` (CLI refuses: E-CODEGEN-INVALID-LOGIC)", () => {
+    const out = cli({ "app.scrml": "<program>\n<a> = 1\n<b> = 2\n${ function sw() { [@a, @b] = [@b, @a] } }\n<button onclick=sw()>swap</button>\n<p>${@a} ${@b}</p>\n</program>\n" }, { refused: true });
     expect(out).toContain("let <a:number=1/>");
     expect(out).toContain("let <b:number=2/>");
   });
@@ -797,15 +824,17 @@ describe("§13 S239 re-review r5 — every specifier but the bundled stdlib is r
    * Write `files` under a fresh `proj/` dir, run `scrml fix <target> --s66 --write` (the CLI) with
    * target = `proj/<target>`, return proj/src/app.scrml.
    */
-  function cli(files, target) {
+  // A project importing a component through `vendor:` / an unknown prefix / a bare or missing
+  // specifier does not compile on impl#1 (E-COMPONENT-035 / E-IMPORT-006), so the CLI refuses
+  // app.scrml (S464 ruling) and the write analysis is checked on the rule run (cliOrRefused).
+  function cli(files, target, refused = true) {
     const dir = mkdtempSync(join(tmpdir(), "scrml-fix-r5-"));
     try {
       for (const [p, s] of Object.entries(files)) {
         mkdirSync(dirname(join(dir, "proj", p)), { recursive: true });
         writeFileSync(join(dir, "proj", p), s);
       }
-      expect(runFixCommand([join(dir, "proj", target), "--s66", "--write"], { out: () => {}, err: () => {} })).toBe(0);
-      return readFileSync(join(dir, "proj", "src", "app.scrml"), "utf8");
+      return cliOrRefused(join(dir, "proj", target), join(dir, "proj", "src", "app.scrml"), files["src/app.scrml"], refused);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -871,7 +900,7 @@ describe("§13 S239 re-review r5 — every specifier but the bundled stdlib is r
     const out = cli({
       "src/bump.scrml": "${ export const Bump = <span>${@count}</span> }\n^{ }\n",
       "src/app.scrml": app("./bump.scrml"),
-    }, "src/app.scrml");
+    }, "src/app.scrml", false);
     expect(out).toContain("let <count:number=0/>");
   });
 

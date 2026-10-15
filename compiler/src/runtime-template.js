@@ -2612,10 +2612,15 @@ function _scrml_remount_each(root) {
 
 // Spreading a Date/URL/Map/class instance would silently re-type it as a plain
 // object. It is a value, not a record: fail loud.
+// One exception: a scrml:time Debouncer / Throttler (§41.21), branded on its own
+// prototype by the scrml:time module. Its timer state is keyed by its IDENTITY and
+// its delay / limit IS the wait run() uses, so a field write reaches it IN PLACE
+// (a copy would be a dead timer) — the same write an attribute handler makes.
 function _scrml_deep_set_copy(c, key) {
   if (Array.isArray(c)) return [...c];
   const proto = c !== null && typeof c === "object" ? Object.getPrototypeOf(c) : null;
   if (proto !== null && Object.getPrototypeOf(proto) !== null) {
+    if (Object.prototype.hasOwnProperty.call(proto, Symbol.for("scrml:time.timer"))) return c;
     const cls = (proto.constructor && proto.constructor.name) || Object.prototype.toString.call(c).slice(8, -1);
     throw new TypeError("scrml: cannot write ." + String(key) + " of a " + cls + " in place; it is a value. Assign the whole cell.");
   }

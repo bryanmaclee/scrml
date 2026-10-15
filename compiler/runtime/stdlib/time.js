@@ -169,7 +169,12 @@ const timerIds = { next: 0 };
 // in a state cell, a field or a collection is read back as ITSELF — the identity
 // the table is keyed by — not as a Proxy of it. Its own enumerable fields are
 // unchanged, so `==` (field by field) and serialization read it as before.
+// The prototype carries the timer BRAND (a registry symbol, non-enumerable, not an
+// own field of any struct): a path write (`@d.delay = 10`, `@s.a.b.delay = 10`)
+// reaches a branded struct IN PLACE — `_scrml_deep_set_copy` refuses every other
+// non-plain prototype — because a copy would be a dead timer.
 const timerProto = Object.create(Object.prototype);
+Object.defineProperty(timerProto, Symbol.for("scrml:time.timer"), { value: true });
 function makeTimer(fields) {
   return Object.assign(Object.create(timerProto), fields);
 }

@@ -56,3 +56,14 @@
 - Case table (origin/main → 584d3ee0b → round-5 tip), moved only: d4 COMPILED→FORWARD-REF→COMPILED; f1 COMPILED→AWAIT+REACTIVE-003→REACTIVE-003; k2/k3 COMPILED→AWAIT+SESSION-AMBIENT→SESSION-AMBIENT; k4 COMPILED→COMPILED→SERVER-IDENTITY; L3 COMPILED→UNSUPPORTED→COMPILED. i1–i14, r1–r6, k1–k4 refused; acc over HTTP + in-process correct (p1 "ab!|t-ab|{…}|abab|long|fab|0|ab+ab").
 - Corpus (2897 files, origin/main vs tip): 4 diffs, all already-refused files with unrelated codes (E-TYPE-025 / E-SQL-MULTIPLE-STATEMENTS — branch is behind main); 0 newly refused.
 - NEXT: (1) on a machine with node >= 22 (or with --no-verify authorized), commit the staged work (or `git apply --index` the patch onto 584d3ee0b) and push fast-forward; (2) merge origin/main (behind by #1422–#1428 + 9d7a6cc2a), regenerate FACTS/known-gaps counts/SPEC-INDEX, re-run the corpus differential; (3) re-run the full gate on the merged tip and classify the s457 "D — run it" order-dependent failure against base.
+
+## RESUMED (S467, worktree agent-ad2bbcf298bc69458)
+- 2026-10-15: base 584d3ee0b; s461 happy-dom unregister applied as its own commit (7292826aa, same content as main's); round-5 patch committed 1b6283113 and pushed (hook passed: 33731 tests).
+- Merge origin/main 9d7a6cc2a: real conflicts resolved by hand —
+  utils.ts `paramSignature(p, i, loweredDefault, lowerPatternDefault?)`: the parameter's own default stays the s466 pre-lowered value; main's S465 r4 lowerer is kept for defaults NESTED in a destructuring pattern (nested server function passes `serverParamDefaultLowerer(_defaultOpts)`);
+  emit-library-shared `emitLibraryFnMember` opts carry both `ownAsync` (S466 r7) and `serverPlaced` (s466 r5); emit-server ss1 passes both;
+  index.ts: `computeServerReachedExports` seeds from main's one per-file async set (`fileAsyncFnNamesOf`, shared `_fileAsyncMemo`) — `asyncExportNamesOf` no longer exists on main;
+  emit-logic import union; s461 test = main's. Generated docs regenerated (SPEC-INDEX, FACTS, known-gaps counts, state).
+- Cases (61) origin/main vs pre-merge r5 tip vs merged tip: merged tip == r5 tip except d11 (`k = (a, 2)`): COMPILED → E-CODEGEN-INVALID-LOGIC — main's §40.8 comma-sequence refusal now reaches the client default because the default is lowered, not spliced. Correct.
+- Corpus (2897 files) origin/main vs merged tip: 0 status diffs, 0 newly refused.
+- known-gaps: g-top-level-fn-param-default-dropped-server-s465 RESOLVED (executed: 200 "5" vs main 200 "undefined"); NEW g-cps-split-local-from-session-unbound-on-server-s467 (HIGH, case k7) and g-server-fn-calls-cps-split-fn-unbound-s467 (MED), both pre-existing on main.

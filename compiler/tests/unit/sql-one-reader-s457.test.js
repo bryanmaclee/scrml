@@ -173,7 +173,9 @@ describe("(1) compile — false refusals of valid single statements are gone", (
       const r = compileToServer(app(`let r = ?{${BT}INSERT INTO notes (v) VALUES (\${ ${payload} }${after}${BT}}.run()`));
       expect(r.codes).toEqual([]);
       expect(r.serverJs).not.toContain("E-SQL-001");
-      expect(r.serverJs).toContain(`let r = await _scrml_sql${BT}INSERT INTO notes (v) VALUES (\${ ${payload.split("\n")[0]}`);
+      // S465 r4: a payload holding a call is lowered from the tree (`${g("if(") / 2}`),
+      // one without from text (`${ x …`) — compare without the padding after `${`.
+      expect(r.serverJs.replace(/\$\{ /g, "${")).toContain(`let r = await _scrml_sql${BT}INSERT INTO notes (v) VALUES (\${${payload.split("\n")[0]}`);
     });
   }
   test("a scrml-only payload still compiles and lowers (`is not`)", () => {

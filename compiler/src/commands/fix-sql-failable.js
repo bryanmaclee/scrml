@@ -81,6 +81,7 @@ import { captureTrailingContentWarnings, guardCallArmsRaw } from "../expression-
 import { rmSync, readdirSync, copyFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { skipBalanced, endsStatement, lineOf, scratchProject, compileWithRI, promiseAllBatches } from "./fix-client-server-call.js";
+import { scratchRefusalReason } from "./fix-verify-shared.js";
 
 export const SQL_FAILABLE_RULE = "sql-failable";
 
@@ -425,14 +426,10 @@ export function fixSqlFailable(source, opts = {}) {
   const block = (off, reason) => blockers.push({ rule: SQL_FAILABLE_RULE, line: typeof off === "number" ? lineOf(source, off) : 0, reason, snippet: typeof off === "number" ? snippetAt(off) : "" });
 
   const proj = scratchProject(filePath, source, opts.auxSources);
-  // The verify compile reads a `<db src=…>` database beside the file when one exists (its schema
-  // decides e.g. `SELECT *` expansion under `protect=`, I-PROTECT-STRIP-001). Mirror the file's
-  // sibling database files into the scratch project so before/after see what an in-place compile
-  // sees (measured S455 Phase 2: a gate blind to `test.db` passed a file whose in-place codes changed).
-  try {
-    const here = dirname(resolve(filePath));
-    if (existsSync(here)) for (const f of readdirSync(here)) if (/\.(db|sqlite3?)$/i.test(f)) copyFileSync(join(here, f), join(dirname(proj.target), f));
-  } catch { /* best effort: the gate then compiles without the database, as before */ }
+  // The verify compile reads the databases the project names (its schema decides e.g. `SELECT *`
+  // expansion under `protect=`, I-PROTECT-STRIP-001; measured S455 Phase 2: a gate blind to `test.db`
+  // passed a file whose in-place codes changed). `scratchProject` mirrors every one of them at its
+  // relative spot (fix-verify-shared.js `writeScratchProject`).
   try {
     const before = compileWithRI(proj, source);
     if (before.error || !before.ast) {
@@ -482,6 +479,9 @@ export function fixSqlFailable(source, opts = {}) {
       edits.push({ start: point, end: point, text: ` ${SQL_FALLBACK[s.term]}`, line: lineOf(source, st), kind: s.kind, term: s.term, fn: s.fn?.name });
     }
     if (edits.length === 0) return none;
+    // S464 ruling ("your recs"): a file that does not compile before the rewrite is refused — its
+    // before/after comparison would pass any rewrite at all (fix-verify-shared.js).
+    if (opts.verify !== false && before.errs.length > 0) { block(edits[0].start, `${scratchRefusalReason(before.errs, filePath, source, opts.inPlaceClean)} — no \`?{}\` in this file rewritten`); return none; }
 
     edits.sort((a, b) => a.start - b.start);
     const uniq = [];
