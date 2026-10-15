@@ -1117,7 +1117,7 @@ export function emitLibraryFnMember(
   // §7.3.2 (s466 fix round 1) — defaults lowered (and refused) by the one helper,
   // with the body's options; the file's async fn set decides what needs an await.
   const _span = fnNode.span as { file?: unknown } | undefined;
-  const _defaultSite = { fnName: name, fnSpan: fnNode.span, asyncNames: opts.asyncFnNames, serverPlaced: opts.serverPlaced === true };
+  const _defaultSite = { fnName: name, fnSpan: fnNode.span, asyncNames: opts.asyncFnNames, serverPlaced: opts.serverPlaced === true, params };
   const paramList = params
     .map((p, i) => paramSignature(p as never, i, emitParamDefault(p, typeof _span?.file === "string" ? _span.file : "", { ...bodyOpts, declaredNames: new Set(declaredNames) } as never, _defaultSite)))
     .join(", ");

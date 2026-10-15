@@ -1255,6 +1255,12 @@ export interface ParamDefaultSite {
    * emitted by the expression emitter, unrefused.
    */
   serverPlaced?: boolean;
+  /**
+   * s466 fix round 5 — the function's whole parameter list, for
+   * E-PARAM-DEFAULT-FORWARD-REF (a default reading its own or a later
+   * parameter). Checked for server-placed functions only, like the closed set.
+   */
+  params?: readonly unknown[];
 }
 
 /** §7.3.2 — the parameter's name for a diagnostic. */
@@ -1368,6 +1374,38 @@ export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOp
     return "null /* E-PARAM-DEFAULT-UNSUPPORTED */";
   }
   const checked: ExprNode = analysed && "tree" in analysed ? analysed.tree : node;
+  // s466 fix round 3/5 — §7.3.2: a default "may reference earlier parameters in
+  // the same parameter list". A reference to its OWN parameter or a LATER one
+  // reads that parameter before it is bound (a ReferenceError at call time) —
+  // and silently shadows an outer name of the same spelling for the identity
+  // check (`uid = session.userId, session = "x"` hid the session builtin).
+  // Scope-aware (a lambda or match-arm parameter of that name is its own
+  // binding). Server-placed functions only (fix round 5): a client-only
+  // function's default is the JavaScript default it compiles to; whether the
+  // rule is language-wide is an open owner ruling.
+  if (site.serverPlaced === true && Array.isArray(site.params) && analysed && "tree" in analysed) {
+    const idx = site.params.indexOf(p);
+    if (idx >= 0) {
+      const later = new Set(site.params.slice(idx).map((q) => paramLabel(q)).filter((x) => x !== "(destructured)"));
+      let fwd: string | null = null;
+      walkScoped({ params: [], body: [analysed.tree] }, (nd, isBound) => {
+        if (fwd !== null) return;
+        const r = nd as { kind?: unknown; name?: unknown };
+        if (r.kind === "ident" && typeof r.name === "string" && later.has(r.name) && !isBound(r.name)) fwd = r.name;
+      });
+      if (fwd !== null) {
+        recordRefusedLowering(new CGError(
+          "E-PARAM-DEFAULT-FORWARD-REF",
+          `E-PARAM-DEFAULT-FORWARD-REF: the default of parameter \`${label}\` of \`${site.fnName}\` reads \`${fwd}\`, ` +
+          (fwd === label ? `the parameter itself` : `a parameter declared AFTER it`) +
+          `. A default may read only the parameters before it (§7.3.2) — that one is not bound yet ` +
+          `when the default runs. Reorder the parameters, or rename the one you meant.`,
+          at,
+        ), p as object);
+        return "null /* E-PARAM-DEFAULT-FORWARD-REF */";
+      }
+    }
+  }
   let awaitIssue = paramDefaultAwaitReason(checked, facts, site.coveredCallees ?? null);
   // The s441 scope-aware pre-pass analysis of the default's text (when it ran for
   // this function): it resolves a nested async helper the file-scope sets above
@@ -5349,7 +5387,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         ]),
       };
       // A nested function in SERVER code is server-placed (s466 fix round 4).
-      const _defaultSite = { fnName, fnSpan: node.span, serverPlaced: opts.boundary === "server" };
+      const _defaultSite = { fnName, fnSpan: node.span, serverPlaced: opts.boundary === "server", params };
       const _defaultFile: string = (node.span && typeof node.span.file === "string") ? node.span.file : (opts.asyncFilePath ?? "");
       const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, emitParamDefault(p, _defaultFile, _defaultOpts, _defaultSite)));
       const body: any[] = node.body ?? [];

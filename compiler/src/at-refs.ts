@@ -402,6 +402,23 @@ export function analyzedParamDefault(p: unknown, filePath: string): { tree: Expr
  * E-SESSION-AMBIENT-SERVER) instead of shipping a client-cell read into the
  * server bundle.
  */
+/**
+ * s466 fix round 5 — the callees a parameter default's E-PARAM-DEFAULT-AWAIT
+ * defers to the callee's own diagnostic (one root cause): a WHOLLY-server
+ * function (no CPS split — a CPS function's `@` reads are marshalled and not
+ * refused) whose body or defaults read an `@` name that a server body cannot
+ * read — a client cell (E-REACTIVE-003), a channel cell, `@session`
+ * (E-SESSION-AMBIENT-SERVER). `@currentUser` is left out: the server resolves
+ * it, so such a function is not refused and the await must be reported.
+ */
+export function fnReadsServerRefusedAtName(fnNode: unknown, filePath: string): boolean {
+  let found = false;
+  const hit = (bare: string): void => { if (bare !== "currentUser") found = true; };
+  forEachAtRef((fnNode as any)?.body, hit, { descendNestedFns: true, opaqueCode: true });
+  if (!found) forEachAtRef(parsedParamDefaults(fnNode, filePath), hit, { descendNestedFns: true, opaqueCode: true });
+  return found;
+}
+
 export function fnReachesAtName(fnNode: unknown, filePath: string): boolean {
   let found = false;
   const hit = (): void => { found = true; };

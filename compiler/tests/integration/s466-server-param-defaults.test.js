@@ -996,3 +996,162 @@ describe("s466 fix round 4 — item 3: a multi-line `match` default keeps its li
     expect((await callRoute(js, db, "t", { m: "a", c: "Red" })).json).toBe("1|a");
   }, EXECUTED_TIMEOUT_MS);
 });
+
+
+// ---------------------------------------------------------------------------
+// s466 fix round 5.
+// ---------------------------------------------------------------------------
+
+describe("s466 fix round 5 — item 1: a library function is server-placed only when server code reaches it", () => {
+  const LIB_FMT = "  export fn fmt(x, k = (y) => { return y + \"!\" }) { return k(x) }\n";
+  test("L3: called only from the client (beside an unrelated `server fn`) → compiles, as the same fn in the app file does", () => {
+    const { errors } = compileFiles({
+      "lib.scrml": `\${\n${LIB_FMT}  export server fn s(m) { return m + "s" }\n}\n`,
+      "app.scrml": `<program db="./x.db">
+\${
+  import { fmt, s } from "./lib.scrml"
+}
+<out> = ""
+<button onclick=\${@out = fmt("a")}>go</button>
+<button onclick=\${@out = s("a")}>go2</button>
+<p>\${@out}</p>
+</program>
+`,
+    }, "app.scrml", "r5-lib-client-only");
+    expect(errors).toEqual([]);
+  });
+  test("L2: called by a `server fn` in the importer → still E-PARAM-DEFAULT-UNSUPPORTED", () => {
+    const { errors } = compileFiles({
+      "lib.scrml": `\${\n${LIB_FMT}}\n`,
+      "app.scrml": `<program db="./x.db">
+\${
+  import { fmt } from "./lib.scrml"
+  server fn h(m) { return fmt(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`,
+    }, "app.scrml", "r5-lib-server-called");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+  });
+  test("reached through a chain (server fn → lib fn → lib fn) → refused at the far end", () => {
+    const { errors } = compileFiles({
+      "lib.scrml": `\${\n${LIB_FMT}  export fn wrap(x) { return fmt(x) }\n}\n`,
+      "app.scrml": `<program db="./x.db">
+\${
+  import { wrap } from "./lib.scrml"
+  server fn h(m) { return wrap(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`,
+    }, "app.scrml", "r5-lib-chain");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+  });
+  test("a library no file in the compilation imports keeps every export server-placed (its consumers are outside)", () => {
+    const { errors } = compileFiles({ "lib.scrml": `\${\n${LIB_FMT}  export server fn s(m) { return m + "s" }\n}\n` }, "lib.scrml", "r5-lib-alone");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-UNSUPPORTED"]);
+  });
+});
+
+describe("s466 fix round 5 — item 2: the identity check follows local function-valued bindings", () => {
+  const CPS = (decls, dflt, imp = "") => `<program db="./x.db" auth="required">
+\${
+${imp}${decls}
+  function add(name: string, uid: string = ${dflt}) {
+    ?{\`INSERT INTO items (name, qty) VALUES (\${name}, \${uid})\`}.run()
+    @last = uid
+  }
+}
+<last> = ""
+<button onclick=\${add("a")}>go</button>
+<p>\${@last}</p>
+</program>
+`;
+  const one = (src, tag, extra = {}) => compileFiles({ "app.scrml": src, ...extra }, "app.scrml", tag).errors;
+  test("k4: `const getU = () => @session.userId` + `uid = getU()` → E-PARAM-DEFAULT-SERVER-IDENTITY (through `getU`)", () => {
+    const errors = one(CPS("  const getU = () => @session.userId", "getU()"), "r5-k4");
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(errors[0].message).toContain("`@session.userId` (through `getU`)");
+  });
+  test("an alias, a nested helper and a helper used as a value are followed", () => {
+    expect(codesOf(one(CPS("  const getU = () => @session.userId\n  const g2 = getU", "g2()"), "r5-alias"))).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(codesOf(one(CPS("  const inner = () => @session.userId\n  const getU = (x) => x + inner()", "getU(\"a\")"), "r5-nested"))).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(codesOf(one(CPS("  const getU = () => @session.userId", "[getU].map(f => f())[0]"), "r5-value"))).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+  test("a helper imported from a `.scrml` module is followed", () => {
+    const errors = one(CPS("", "getU()", "  import { getU } from \"./lib.scrml\"\n"), "r5-import",
+      { "lib.scrml": "${\n  export const getU = () => @session.userId\n}\n" });
+    expect(codesOf(errors)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+  });
+  test("a wholly-server function's default calling `const getU = () => session.userId` is refused", () => {
+    const errors = one(`<program db="./x.db" auth="required">
+\${
+  const getU = () => session.userId
+  server fn h(m: string, uid: string = getU()) -> string { return m + uid }
+  function go() { return h("a") }
+}
+<last> = ""
+<button onclick=\${@last = go()}>go</button>
+<p>\${@last}</p>
+</program>
+`, "r5-server-session");
+    expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+  test("calling a binding whose function value cannot be followed fails closed", () => {
+    const lets = one(CPS("  let getU = () => \"x\"", "getU()"), "r5-let");
+    expect(codesOf(lets)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(lets[0].message).toContain("cannot follow");
+    expect(codesOf(one(CPS("  fn mk() { return () => \"x\" }\n  const getU = mk()", "getU()"), "r5-callinit"))).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+  });
+  test("pure helpers, plain values and a shadowing lambda parameter are accepted", () => {
+    expect(one(CPS("  const sfx = (x) => x + \"!\"", "sfx(\"a\")"), "r5-pure")).toEqual([]);
+    expect(one(CPS("  const N = 3", "\"a\" + N"), "r5-const")).toEqual([]);
+    expect(one(CPS("  let n = 3", "\"a\" + n"), "r5-letval")).toEqual([]);
+    expect(one(CPS("  const getU = () => @session.userId", "((getU) => getU())(() => \"x\")"), "r5-shadow")).toEqual([]);
+  });
+});
+
+describe("s466 fix round 5 — item 4: E-PARAM-DEFAULT-FORWARD-REF is server-scoped", () => {
+  test("d4: a CLIENT function `go(a, k = b, b = 2)` compiles (the language-wide question is open)", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program>
+\${
+  function go(a, k = b, b = 2) { return "" + k }
+}
+<out> = ""
+<button onclick=\${@out = go(1)}>go</button>
+<p>\${@out}</p>
+</program>
+` }, "app.scrml", "r5-client-forward");
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("s466 fix round 5 — item 5: one root cause is reported once in a CPS default too", () => {
+  test("f1: a CPS default calling an `@`-reading helper → E-REACTIVE-003 only (no E-PARAM-DEFAULT-AWAIT)", () => {
+    const { errors } = compileFiles({ "app.scrml": `<program db="./x.db" auth="required">
+\${
+  function lbl() { return @last + "!" }
+  function add(name: string, tag: string = lbl()) {
+    ?{\`INSERT INTO items (name, qty) VALUES (\${name}, \${tag})\`}.run()
+    @last = tag
+  }
+}
+<last> = ""
+<button onclick=\${add("a")}>go</button>
+<p>\${@last}</p>
+</program>
+` }, "app.scrml", "r5-f1");
+    expect(codesOf(errors)).toEqual(["E-REACTIVE-003"]);
+  });
+  test("a server callee reading only `@currentUser` is not refused, so the await IS reported", () => {
+    const { errors } = compileFiles({ "app.scrml": prog(`  server fn me() { return "" + @currentUser }
+  server fn h(m, k = me()) { return k }
+  function go() { return "" }`) }, "app.scrml", "r5-currentuser-callee");
+    expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-AWAIT");
+  });
+});

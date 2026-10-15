@@ -139,8 +139,15 @@ export function identityReadInDefault(
   params: unknown,
   opts: { currentUserAmbient: boolean; sessionProjection: boolean },
 ): string | null {
+  return identityReadIn({ params, body: [defaultExpr] }, opts);
+}
+
+/** The identity read in `owner` (a function's params + body, or a default wrapped as one). */
+function identityReadIn(
+  owner: { params?: unknown; body?: unknown },
+  opts: { currentUserAmbient: boolean; sessionProjection: boolean },
+): string | null {
   let hit: string | null = null;
-  const owner = { params, body: [defaultExpr] };
   walkScoped(owner, (n, isBound, link) => {
     if (hit !== null) return;
     const r = n as Record<string, unknown>;
@@ -161,4 +168,87 @@ export function identityReadInDefault(
     }
   });
   return hit;
+}
+
+/**
+ * s466 fix round 5 — what a NAME read in a default refers to, for the identity
+ * check: `null` when it is not a local binding the check follows (a builtin, an
+ * import from outside the compilation, a non-function value); `{ fns }` — the
+ * function value(s) it may hold (a `const`-bound lambda, a client `function`),
+ * each scanned as if inlined; `"unresolved"` — a binding whose function value
+ * cannot be followed (a `let`, a `const` initialised from a call, a cell).
+ * Calling an unresolved binding fails closed.
+ */
+export type IdentityNameResolution = null | "unresolved" | { fns: Array<{ params?: unknown; body?: unknown }> };
+
+export interface IdentityRead {
+  /** The identity read as written (`session.userId`, `@session.userId`), or the unresolved name. */
+  read: string;
+  /** The local helper the read was reached through (the first one the default names), or null. */
+  via: string | null;
+  /** The default calls a binding whose function value cannot be followed. */
+  unresolved: boolean;
+}
+
+/**
+ * `identityReadInDefault`, following the default's LOCAL FUNCTION-VALUED
+ * BINDINGS (s466 fix round 5): with `const getU = () => @session.userId`, the
+ * default `uid = getU()` is the same identity read as `uid = @session.userId`.
+ * Every free reference to a resolvable function value is scanned — a reference
+ * that is not a call may still be invoked (`getU.call()`, `[getU].map(f => f())`),
+ * so over-scanning is the fail-closed direction; a CALL of a binding whose
+ * function value cannot be followed is reported as unresolved.
+ */
+export function identityReadInDefaultDeep(
+  defaultExpr: unknown,
+  params: unknown,
+  opts: {
+    currentUserAmbient: boolean;
+    sessionProjection: boolean;
+    /**
+     * Does `@session` count in a FOLLOWED helper? Inside a helper the read is not
+     * the default's own server context: on the server every `@name` lowering reads
+     * the request body, so `@session` there is client-claimed identity too. True
+     * unless a file-scope `<session>` cell owns the name.
+     */
+    helperSessionProjection: boolean;
+    resolveName: (name: string) => IdentityNameResolution;
+  },
+): IdentityRead | null {
+  const visited = new Set<string>();
+  const scan = (owner: { params?: unknown; body?: unknown }, via: string | null): IdentityRead | null => {
+    const direct = identityReadIn(owner, {
+      currentUserAmbient: opts.currentUserAmbient,
+      sessionProjection: via === null ? opts.sessionProjection : opts.helperSessionProjection,
+    });
+    if (direct !== null) return { read: direct, via, unresolved: false };
+    let hit: IdentityRead | null = null;
+    walkScoped(owner, (n, isBound, link) => {
+      if (hit !== null) return;
+      const r = n as Record<string, unknown>;
+      if (r.kind !== "ident" || typeof r.name !== "string") return;
+      const name = r.name;
+      if (name === "session" || name === "@session" || name === "@currentUser") return;
+      if (!name.startsWith("@") && isBound(name)) return;
+      if (visited.has(name)) return;
+      const res = opts.resolveName(name);
+      if (res === null) return;
+      if (res === "unresolved") {
+        const parent = link.parent as Record<string, unknown> | null;
+        const called = !!parent && (
+          (parent.kind === "call" && link.key === "callee") ||
+          (parent.kind === "member" && link.key === "object")
+        );
+        if (called) hit = { read: name, via: via ?? name, unresolved: true };
+        return;
+      }
+      visited.add(name);
+      for (const fn of res.fns) {
+        const sub = scan(fn, via ?? name);
+        if (sub !== null) { hit = sub; return; }
+      }
+    });
+    return hit;
+  };
+  return scan({ params, body: [defaultExpr] }, null);
 }

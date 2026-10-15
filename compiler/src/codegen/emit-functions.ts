@@ -17,6 +17,7 @@ import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // owns from the client peer-await set — see `_stdlibOwnedImport` below.
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { returnTypeAllowsAbsence } from "./wire-format.ts";
+import { fnReadsServerRefusedAtName } from "../at-refs.ts";
 import type { CompileContext } from "./context.ts";
 
 // ---------------------------------------------------------------------------
@@ -637,6 +638,24 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // caller calls). Lowered in client mode by the one helper; the file's client
   // async facts decide what needs an await (a server call, a client async peer, an
   // async stdlib export). The parameters shadow outer names.
+  // s466 fix round 5 — the server functions already refused for the state they
+  // read (wholly server, `fnReadsServerRefusedAtName`): a default that calls one
+  // is not ALSO reported as E-PARAM-DEFAULT-AWAIT (one root cause — the catalog
+  // row; emit-server passes the same set for its sites).
+  let _coveredCallees: Set<string> | null = null;
+  const coveredCalleesOf = (): Set<string> => {
+    if (_coveredCallees) return _coveredCallees;
+    _coveredCallees = new Set<string>();
+    const fns: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
+    for (const f of fns) {
+      const sp = f.span as { start?: unknown } | undefined;
+      if (typeof f.name !== "string" || typeof sp?.start !== "number") continue;
+      const r = routeMap?.functions?.get(`${filePath}::${sp.start}`) as { boundary?: string; cpsSplit?: unknown } | undefined;
+      if (!r || r.boundary !== "server" || r.cpsSplit) continue;
+      if (fnReadsServerRefusedAtName(f, filePath)) _coveredCallees.add(f.name);
+    }
+    return _coveredCallees;
+  };
   const clientParamDefault = (p: unknown, fnNode: ASTNode, serverPlaced: boolean): string | null => {
     const ps = ((fnNode.params as unknown[]) ?? []);
     const names = ps.map((q, i) => paramName(q as Param, i));
@@ -649,7 +668,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       fnName: typeof fnNode.name === "string" ? fnNode.name : "<anonymous>",
       fnSpan: fnNode.span,
       asyncFacts: clientAsyncFactsOf(ctx),
+      coveredCallees: coveredCalleesOf(),
       serverPlaced,
+      params: ps,
     });
   };
   // S89 §13.2 Sub-Phase B Step 3 — pre-compute per-file `callee → sourceModule`

@@ -92,7 +92,8 @@ import { getNodes } from "./codegen/collect.ts";
 import { fileScopeDeclaresSessionCell, fileScopeDeclaresCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
-import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefault } from "./free-name.ts";
+import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDeep, type IdentityNameResolution } from "./free-name.ts";
+import { toPosix } from "./path-canonical.js";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
@@ -4959,6 +4960,14 @@ export interface RIInput {
    * application's entry file (`resolveBuildRoot`, SPEC §40.8 "The build root").
    */
   buildRoot?: string;
+  /**
+   * s466 fix round 5 — the module resolver (`module-resolver.js`
+   * `resolveModulePath`: an import source + the importer's path → the posix key
+   * of the imported file). The identity check on parameter defaults follows a
+   * helper imported from a `.scrml` module through it. Absent (a harness driving
+   * RI directly), a CALL of an imported name in a checked default fails closed.
+   */
+  resolveImport?: (source: string, importerPath: string) => string | null;
 }
 
 /** Output of the RI stage. */
@@ -6622,6 +6631,133 @@ export function runRI(input: RIInput): RIOutput {
   for (const fileAST of files) {
     _fileScopeCurrentUserCell.set(fileAST.filePath, fileScopeDeclaresCell(fileNodesOf(fileAST), "currentUser"));
   }
+  /**
+   * s466 fix round 5 — the identity check follows a default's LOCAL
+   * FUNCTION-VALUED BINDINGS (free-name.ts `identityReadInDefaultDeep`):
+   * `const getU = () => @session.userId` + `uid = getU()` was accepted while
+   * `uid = @session.userId` was refused (a CPS-split function's server part then
+   * bound the browser-supplied `uid`). A name resolves over EVERY binding of it in
+   * the file, at any depth (a union — over-scanning fails closed), and through a
+   * `.scrml` import to the declaring module's file-scope bindings:
+   *   - a `const` whose initialiser is a lambda → that lambda; an identifier → the
+   *     name it aliases; any other non-function value (a literal, array, object,
+   *     operator expression, template) → not a function;
+   *   - a client-placed `function` / `fn` → its body. A server-placed one is not
+   *     followed: calling it from a default is an await, refused as
+   *     E-PARAM-DEFAULT-AWAIT where the default is lowered;
+   *   - anything else (`let` / `lin` / `~` bindings, a `const` initialised from a
+   *     call or a member read, a function-valued cell `@f`) → unresolved: CALLING
+   *     it fails closed.
+   */
+  const _identityFileByPath = new Map<string, FileAST>();
+  for (const fileAST of files) _identityFileByPath.set(toPosix(fileAST.filePath), fileAST);
+  type _IdBinding = { kind: "fn"; node: any; filePath: string } | { kind: "lambda"; node: any } | { kind: "alias"; name: string; filePath: string } | { kind: "value" } | { kind: "unresolved" };
+  const _identityBindingCache = new Map<string, Map<string, _IdBinding[]>>();
+  const _NON_FUNCTION_INIT = new Set(["lit", "array", "object", "binary", "unary", "template", "map-lit"]);
+  const identityBindingsOf = (filePath: string, fileScopeOnly: boolean): Map<string, _IdBinding[]> => {
+    const key = `${fileScopeOnly ? "F" : "A"}:${filePath}`;
+    const cached = _identityBindingCache.get(key);
+    if (cached) return cached;
+    const out = new Map<string, _IdBinding[]>();
+    _identityBindingCache.set(key, out);
+    const fileAST = _identityFileByPath.get(toPosix(filePath));
+    if (!fileAST) return out;
+    const add = (name: unknown, b: _IdBinding): void => {
+      if (typeof name !== "string" || !name) return;
+      const list = out.get(name) ?? [];
+      list.push(b);
+      out.set(name, list);
+    };
+    const seen = new Set<unknown>();
+    const visit = (node: unknown, insideFn: boolean): void => {
+      if (!node || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) visit(c, insideFn); return; }
+      const n = node as Record<string, any>;
+      if (!(fileScopeOnly && insideFn)) {
+        if (n.kind === "function-decl") add(n.name, { kind: "fn", node: n, filePath: fileAST.filePath });
+        else if (n.kind === "const-decl") {
+          const init = n.initExpr as Record<string, unknown> | undefined;
+          if (init && init.kind === "lambda") add(n.name, { kind: "lambda", node: init });
+          else if (init && init.kind === "ident" && typeof init.name === "string") add(n.name, { kind: "alias", name: init.name, filePath: fileAST.filePath });
+          else if (init && _NON_FUNCTION_INIT.has(String(init.kind))) add(n.name, { kind: "value" });
+          else add(n.name, { kind: "unresolved" });
+        } else if (n.kind === "let-decl" || n.kind === "lin-decl" || n.kind === "tilde-decl") {
+          add(n.name, { kind: "unresolved" });
+        } else if (n.kind === "export-decl" && typeof n.exportedName === "string") {
+          // An exported value keeps only its raw text (an exported function also
+          // gets a synthetic `function-decl`, collected above).
+          const ek = String(n.exportKind ?? "");
+          if (typeof n.reExportSource === "string" && n.reExportSource) {
+            add(n.exportedName, { kind: "unresolved" }); // a re-export: not followed — fail closed
+          } else if (ek === "const") {
+            let init: string | null = typeof n.valueInit === "string" ? String(n.valueInit).trim() : null;
+            if (init == null) {
+              const m = String(n.raw ?? "").match(/^\s*export\s+const\s+[A-Za-z_$][\w$]*\s*(?::[^=]*)?=\s*([\s\S]+)$/);
+              init = m ? m[1].trim() : null;
+            }
+            let initNode: Record<string, unknown> | null = null;
+            try { initNode = init ? (parseExprToNode(init, fileAST.filePath, 0) as unknown as Record<string, unknown>) : null; } catch { initNode = null; }
+            if (initNode && initNode.kind === "lambda") add(n.exportedName, { kind: "lambda", node: initNode });
+            else if (initNode && initNode.kind === "ident" && typeof initNode.name === "string") add(n.exportedName, { kind: "alias", name: initNode.name, filePath: fileAST.filePath });
+            else if (initNode && _NON_FUNCTION_INIT.has(String(initNode.kind))) add(n.exportedName, { kind: "value" });
+            else add(n.exportedName, { kind: "unresolved" });
+          } else if (ek === "let" || ek === "var") {
+            add(n.exportedName, { kind: "unresolved" });
+          }
+        }
+      }
+      const inner = insideFn || n.kind === "function-decl";
+      for (const k of Object.keys(n)) {
+        if (k === "span") continue;
+        const v = n[k];
+        if (v && typeof v === "object") visit(v, inner);
+      }
+    };
+    visit(fileNodesOf(fileAST), false);
+    // `.scrml` imports: the local name → the declaring module's file-scope binding.
+    const imports = (((fileAST as any).ast?.imports ?? (fileAST as any).imports ?? []) as any[]);
+    for (const imp of Array.isArray(imports) ? imports : []) {
+      if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string" || !imp.source.endsWith(".scrml")) continue;
+      const abs = input.resolveImport ? input.resolveImport(imp.source, fileAST.filePath) : null;
+      const src = abs ? _identityFileByPath.get(toPosix(abs)) : undefined;
+      for (const spec of (Array.isArray(imp.specifiers) ? imp.specifiers : [])) {
+        if (spec && typeof spec.imported === "string" && typeof spec.local === "string") {
+          // A `.scrml` module this compilation does not hold cannot be followed: fail closed.
+          add(spec.local, src ? { kind: "alias", name: spec.imported, filePath: src.filePath } : { kind: "unresolved" });
+        }
+      }
+    }
+    return out;
+  };
+  const identityNameResolver = (filePath: string) => (name: string): IdentityNameResolution => {
+    if (name.startsWith("@")) {
+      // A cell is not a function binding the check can follow; one that is CALLED
+      // (a function-valued cell) fails closed.
+      return "unresolved";
+    }
+    const fns: Array<{ params?: unknown; body?: unknown }> = [];
+    let unresolved = false;
+    const seenAlias = new Set<string>();
+    const resolveIn = (fp: string, nm: string, fileScopeOnly: boolean): void => {
+      const aliasKey = `${fp}::${nm}`;
+      if (seenAlias.has(aliasKey)) return;
+      seenAlias.add(aliasKey);
+      for (const b of identityBindingsOf(fp, fileScopeOnly).get(nm) ?? []) {
+        if (b.kind === "lambda") fns.push({ params: [], body: [b.node] });
+        else if (b.kind === "fn") {
+          const id = typeof b.node?.span?.start === "number" ? `${b.filePath}::${b.node.span.start}` : null;
+          const esc = id ? escalationResults.get(id) : undefined;
+          if (esc && esc.allReasons.length > 0) continue; // server-placed: E-PARAM-DEFAULT-AWAIT
+          fns.push(b.node);
+        } else if (b.kind === "alias") resolveIn(b.filePath, b.name, b.filePath !== fp ? true : fileScopeOnly);
+        else if (b.kind === "unresolved") unresolved = true;
+      }
+    };
+    resolveIn(filePath, name, false);
+    if (fns.length > 0) return { fns };
+    return unresolved ? "unresolved" : null;
+  };
   const reportServerDefaultIdentityReads = (record: AnalysisRecord, clientEvaluated: boolean): void => {
     const params: unknown[] = Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [];
     const _fnName = record.fnNode.name ?? "<anonymous>";
@@ -6654,26 +6790,50 @@ export function runRI(input: RIInput): RIOutput {
           ));
         }
       }
-      const ident = identityReadInDefault(d, params, {
+      const _deep = identityReadInDefaultDeep(d, params, {
         currentUserAmbient,
         sessionProjection: clientEvaluated && !sessionCellOwnsName,
+        helperSessionProjection: !sessionCellOwnsName,
+        resolveName: identityNameResolver(record.filePath),
       });
-      if (ident !== null) {
+      if (_deep !== null && _deep.unresolved) {
+        errors.push(new RIError(
+          "E-PARAM-DEFAULT-SERVER-IDENTITY",
+          `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of \`${_fnName}\` calls ` +
+          `\`${_deep.read}\`, whose function value the compiler cannot follow (it is not a \`const\` bound to a ` +
+          `function, or a \`function\` / \`fn\` declaration). \`${_fnName}\` runs on the server, and a default that ` +
+          `could read an identity — \`session\`, \`@session\`, \`@currentUser\` — would let the caller supply it ` +
+          `(§6.6.9: server-only identity SHALL NEVER be marshalled from the client), so the default is refused. ` +
+          `Bind the helper with \`const\` to a function, declare it with \`fn\`, or compute the value in the function body.`,
+          at,
+        ));
+        continue;
+      }
+      if (_deep !== null) {
+        // `reads X` — the read as written, and the local helper it was reached through.
+        const readsWhat = _deep.via
+          ? `\`${_deep.read}\` (through \`${_deep.via}\`)`
+          : `\`${_deep.read}\``;
+        // What to write in the server body instead: the server's own `session.*`
+        // for a `@session` projection read, the read itself otherwise.
+        const bodyRead = _deep.read.startsWith("@session")
+          ? `session${_deep.read.slice("@session".length) || ".userId"}`
+          : _deep.read;
         errors.push(new RIError(
           "E-PARAM-DEFAULT-SERVER-IDENTITY",
           clientEvaluated
             ? `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of \`${_fnName}\` reads ` +
-              `\`${ident}\` as an identity. \`${_fnName}\` runs partly on the server (§19.9.9): its default is ` +
+              `${readsWhat} as an identity. \`${_fnName}\` runs partly on the server (§19.9.9): its default is ` +
               `evaluated in the BROWSER and the value is sent to the server part as the parameter, so the server would ` +
               `trust whatever the browser — or any HTTP request — sends (§6.6.9: server-only identity SHALL NEVER be ` +
               `marshalled from the client). Read the identity in a server statement of the body instead — ` +
               `\`const ${label} = session.userId\` — and remove the parameter.`
             : `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of server function ` +
-              `\`${_fnName}\` reads \`${ident}\`, the server's own identity. A default applies only when the ` +
+              `\`${_fnName}\` reads ${readsWhat}, ${_deep.read.startsWith("@session") ? "an identity" : "the server's own identity"}. A default applies only when the ` +
               `caller omits the argument, and a server function's caller is an HTTP request: it can always send ` +
               `\`${label}\` itself, so the value would be whatever the request says, not the server's identity ` +
               `(§6.6.9: server-only identity SHALL NEVER be marshalled from the client). Read it in the function ` +
-              `body instead — \`const ${label} = ${ident}\` — and remove the parameter.`,
+              `body instead — \`const ${label} = ${bodyRead}\` — and remove the parameter.`,
           at,
         ));
       }

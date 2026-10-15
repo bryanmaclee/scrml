@@ -48,7 +48,7 @@ import { FOREIGN_SEAL_FN, SERVER_FOREIGN_SEAL_HELPER } from "./foreign-seal.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
-import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
+import { isPlainPureFn, forEachAtRef, fnReachesAtName, fnReadsServerRefusedAtName } from "../at-refs.ts";
 import { jsTextReadsFreeName } from "../free-name.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
@@ -435,6 +435,7 @@ function serverParamDefaults(
     placementOnlyCallees,
     // Every site that calls this is server code (s466 fix round 4).
     serverPlaced: true,
+    params,
   };
   return params.map((p) => {
     const d = emitParamDefault(p, filePath, opts, site);
@@ -1281,7 +1282,16 @@ function emitModuleValueExportLines(
         if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
         // boundary rule as the tool-dep `generateToolLibraryJs`.
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, serverPlaced: true }));
+        // s466 fix round 5 (§7.3.2) — SERVER-PLACED for the parameter-default
+        // closed set only when server code reaches it (server-reached-exports.ts)
+        // or it is itself a server operation (async). Being emitted into this
+        // bundle is not placement: a library function only client code calls is a
+        // client function, as the same function in the app file is. No reach
+        // entry (a library no file in the compilation imports — its consumers are
+        // outside it) keeps every exported function server-placed.
+        const _reached = (fileAST as any)?._serverReachedExports as Set<string> | undefined;
+        const _serverPlaced = isAsync || !_reached || _reached.has(name);
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, serverPlaced: _serverPlaced }));
         continue;
       }
 
@@ -4515,8 +4525,13 @@ function generateServerJsImpl(
   // (E-REACTIVE-003 and siblings, route-inference.ts); a parameter default that
   // calls one is not refused a second time for the same root cause.
   const _atReadingServerFns = new Set<string>();
-  for (const { fnNode: _af } of serverFns) {
-    if (typeof _af?.name === "string" && fnReachesAtName(_af, filePath)) _atReadingServerFns.add(_af.name);
+  for (const { fnNode: _af, route: _ar } of serverFns) {
+    // s466 fix round 5 — only a function that is itself refused for the read
+    // (wholly server; see `fnReadsServerRefusedAtName`): a covered callee's call
+    // lowers to a placeholder with no diagnostic of its own.
+    if (typeof _af?.name === "string" && !(_ar as { cpsSplit?: unknown })?.cpsSplit && fnReadsServerRefusedAtName(_af, filePath)) {
+      _atReadingServerFns.add(_af.name);
+    }
   }
   // s466 fix round 2 — plain `function`s on the server ONLY by caller-context
   // propagation (route inference placed them where their callers are): async

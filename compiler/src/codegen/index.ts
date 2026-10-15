@@ -78,6 +78,7 @@ import { getElementAttrSchema } from "../attribute-registry.js";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn, localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
+import { computeServerReachedExports } from "./server-reached-exports.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
@@ -2479,6 +2480,26 @@ export function runCG(input: CgInput): CgOutput {
     dialect: compilationTenant.dialect ?? "unknown",
   });
 
+  // s466 fix round 5 (§7.3.2) — the EXPORTED functions of each imported library
+  // that server code in this compilation reaches (server-reached-exports.ts).
+  // emit-server reads it so the closed-set check on parameter defaults is scoped
+  // to functions server code runs, not to everything the library's server bundle
+  // carries. Computed once for the compilation; stashed per file below.
+  const serverReachedExports = (() => {
+    const memo = new Map<string, Set<string>>();
+    return computeServerReachedExports(
+      files,
+      (fp, fnNode) => {
+        const start = (fnNode?.span as { start?: unknown } | undefined)?.start;
+        if (typeof start !== "number") return false;
+        const route = safeRouteMap.functions.get(`${fp}::${start}`) as { boundary?: string } | undefined;
+        return !!route && route.boundary !== "client";
+      },
+      (fa) => asyncExportNamesOf(fa, files, memo, exportRegistryInput),
+      (source, importer) => resolveModulePath(source, importer) ?? null,
+    );
+  })();
+
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
   // in emit would otherwise leave the last file's token installed in this
@@ -2654,6 +2675,9 @@ export function runCG(input: CgInput): CgOutput {
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
       (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+      // s466 fix round 5 — absent for a file no other file imports (its exported
+      // functions serve consumers outside the compilation: all server-placed).
+      (fileAST as any)._serverReachedExports = serverReachedExports.get(toPosix(filePath)) ?? undefined;
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
       // value-export block (`export { w as helper } from "./c.server.js"`). A name
