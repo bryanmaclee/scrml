@@ -35,7 +35,8 @@
  */
 import { computeAsyncFnNames } from "./emit-library-shared.ts";
 import { collectTopLevelStatements } from "./collect.ts";
-import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
+import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName, escapingAsyncValuesOf } from "./fn-valued-bindings.ts";
+import type { FnValuedBinding } from "./fn-valued-bindings.ts";
 import { buildCalleeImportMap, asyncImportedLocalsOfFile } from "./scheduling.ts";
 
 type AnyFile = Record<string, unknown>;
@@ -71,9 +72,10 @@ export function serverFnNamesOfFile(
 /** Compute the file's async name set (see the module docblock). */
 export function computeFileAsyncFnNames(fileAST: unknown, inputs: FileAsyncInputs): Set<string> {
   const top = collectTopLevelStatements(fileAST as never) as unknown as AnyFile[];
+  const bindings = fnValuedBindingsOf(top);
   const fns = [
     ...top.filter((st) => st && st.kind === "function-decl" && typeof st.name === "string"),
-    ...fnValuedBindingsOf(top).map((b) => b.pseudoFn as unknown as AnyFile),
+    ...bindingPseudoFnsOf(bindings) as unknown as AnyFile[],
   ];
   const server = inputs.serverFnNames ?? new Set<string>();
   const registry = inputs.exportRegistry ?? null;
@@ -83,8 +85,26 @@ export function computeFileAsyncFnNames(fileAST: unknown, inputs: FileAsyncInput
     registry ? calleeMap : null, registry as never, server);
   // …and as MEMBERS (each one IS an async peer on the server).
   const all = new Set<string>([...byBody, ...server]);
+  // S467 r9 — the file-scope bindings that hand out an async function value (an alias, an
+  // arm of an expression, a returned function): judged here, on the one set, and
+  // reported by codegen/index.ts (`fileScopeAsyncEscapesOf`). The anonymous function
+  // values were fixpoint members only; no identifier names them, so they leave the set.
+  ESCAPES.set(all, escapingAsyncValuesOf(bindings, (n) => all.has(n)));
+  for (const n of [...all]) if (isAnonFnValueName(n)) all.delete(n);
+  for (const n of [...byBody]) if (isAnonFnValueName(n)) byBody.delete(n);
   BY_BODY.set(all, byBody);
   return all;
+}
+
+const ESCAPES = new WeakMap<Set<string>, Array<{ binding: FnValuedBinding; name: string; what: string }>>();
+/**
+ * S467 r9 — the file-scope bindings of a computed file set whose value hands out an async
+ * function by a route the compiler cannot await (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE): an
+ * alias (`export const inner = vp`), an arm (`c ? (p, h) => verifyPassword(p, h) : …`), a
+ * returned function (`(p) => (h) => verifyPassword(p, h)`), a later `let` write.
+ */
+export function fileScopeAsyncEscapesOf(fileSet: Set<string>): Array<{ binding: FnValuedBinding; name: string; what: string }> {
+  return ESCAPES.get(fileSet) ?? [];
 }
 
 /**
@@ -103,6 +123,7 @@ export function asyncByBodyOf(fileSet: Set<string>): Set<string> {
 export function adoptFileAsyncSet(target: Set<string>, computed: Set<string>): void {
   for (const n of computed) target.add(n);
   BY_BODY.set(target, asyncByBodyOf(computed));
+  ESCAPES.set(target, fileScopeAsyncEscapesOf(computed));
 }
 
 const KEY = "_asyncFnNames";

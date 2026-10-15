@@ -16010,6 +16010,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       }
 
+      // S467 r9 (HIGH-1) — every plain-named value export carries its PARSED init
+      // (`valueInitExpr`), not only the shapes the annotated / function-literal path
+      // above intercepts. The async coloring (codegen/fn-valued-bindings.ts) classifies
+      // that tree — `((p, h) => …)`, `async (p, h) => …`, `c ? (…) => … : …`, an alias,
+      // a curried arrow — so an export it cannot see no longer ships uncoloured. The
+      // tokens are verified (`const|let NAME = …`, not `==`) before the init text is cut
+      // off the collected expression. Parsed WITHOUT diagnostics (the emitters re-parsed
+      // this same text silently before, so no new error can appear here); a markup init
+      // (a component) and a server-only `?{}` / `_{}` init are not values and get none.
+      if ((exportNode.exportKind === "const" || exportNode.exportKind === "let") && exportNode.exportedName &&
+          Array.isArray(tokens) && tokens[_iBeforeCollect + 1]?.text === exportNode.exportedName &&
+          tokens[_iBeforeCollect + 2]?.text === "=" && tokens[_iBeforeCollect + 3]?.text !== "=") {
+        const _initText = expr.replace(/^\s*(?:const|let)\s+[\w$]+\s*=\s*/, "").trim();
+        if (_initText && !_initText.startsWith("<") && !_initText.includes("?{") && !_initText.startsWith("_{")) {
+          let _initNode = null;
+          try { _initNode = parseExprToNode(_initText, filePath, span?.start ?? 0); } catch (_e) { _initNode = null; }
+          if (_initNode) exportNode.valueInitExpr = _initNode;
+        }
+      }
+
       // P3.B (F-ENGINE-001): when exporting a type, ALSO synthesize a type-decl
       // AST node so cross-file machinery (api.js:768-770 importedTypesByFile +
       // type-system.ts processFile) can resolve the imported type. Without this,

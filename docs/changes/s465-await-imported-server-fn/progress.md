@@ -669,3 +669,47 @@
   code commit; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp + commands
   726 / 3 skip / 0; facts (regenerated), state, spec-index, bootstrap-conformance, corpus-compile-floor --check
   PASS; host-global-scan exit 0; gen-md-shim current; browser-baseline --check PASS.
+
+## Fix round 9 (S239 review of e4b2c24e4: DO-NOT-LAND) — branch s467-await-r9
+- 2026-10-15T09:45:53Z r9 start: s467-await-r9 cut from origin/s466-await-r8 e4b2c24e4. Next: reproduce HIGH-1 (paren/async arrow export init unclassified), HIGH-2 (value-only import lines), MED-1 (import of never-emitted .server.js).
+- r9 work (uncommitted until the PAUSED commit below): ast-builder generic export path attaches `valueInitExpr` to every
+  plain-named const/let export; fn-valued-bindings.ts classifies the PARSED init (literal in any spelling = the
+  binding's function, written `async` read off the node; ternary / `||`/`&&`/`??` arms, aliases, returned functions,
+  later `let`/tilde writes = escapes, coloured with the binding via pseudo fns, refused when async —
+  E-ASYNC-FN-ESCAPES-AS-VALUE, reported once per binding from codegen/index.ts via file-async-fns
+  `fileScopeAsyncEscapesOf`); expression-parser escape hatch carries acorn `async`; api.js
+  `reconcileValueOnlyImports` (MED-1/HIGH-2: a value-only .server.js imports only names the target's emitted
+  .server.js exports); security-await-pack brought from main + families x1 (reviewer, verbatim) and r9 (18 new),
+  KNOWN_FAIL emptied, count 463; new test compiler/tests/integration/s467-await-r9.test.js (10 pass).
+
+## PAUSED (S467)
+- DONE: HIGH-1 (root: parsed-init classifier, no token-shape list; `_isFnValueInitAt` kept only as parse routing),
+  HIGH-2 / MED-1 (api.js reconcile), PA addendum p2_ternary (client) → E-ASYNC-FN-ESCAPES-AS-VALUE (pinned in
+  s467-await-r9.test.js). PROBES on the working tree: full pack 424 + x1 21 = 445 shapes → **0 FAIL**
+  (PASS 288 / PASS-REFUSED 138 / PASS-500 14 / PASS-DENY 4 / UNJUDGED 1); base.tsv had 10 FAIL, branch.tsv 4. r9
+  family 18 shapes: 0 FAIL. Moved FAIL→REFUSED: m5 libExportTernaryFn / libExportImportedValue / libExportCurried,
+  x1 parenArrowSingle (E-ASYNC-FN-ESCAPES-AS-VALUE); x1 asyncArrowExport(Await) / voAsyncArrow → E-ASYNC-NOT-IN-SCRML
+  (the async arrow now reaches the checker); m5 libExportParen, x1 voParen → PASS; x1 voTypeImportUse /
+  voComponentImportUnused, m7 voUsesClientOnlyComponent → PASS (was PASS-500); m7 voUsesEnumFromTypeLib PASS-DENY
+  (as base: enums have no server value in a value-only module — open).
+- GATES on the working tree: unit 25837/1 fail (s457-string-url D, flaky under load, passes alone);
+  integration+conformance+compiler/tests/*.test.js 10564/1 fail = foreign-sealed-scope "under Node the slice gets a
+  working require too" — PRE-EXISTING ON origin/main ON THIS MACHINE (Node v21.6.0: no ESM detection /
+  getBuiltinModule). It blocks the pre-commit hook; not bypassed. types:check OK (180 unchanged);
+  commands+lsp 726/3 skip/0.
+- HALF-DONE: corpus differential (base = origin/main archive, head = origin/main + r8/r9 patch, roots examples,
+  samples, conformance/cases, giti + flogence copies) — base captured (2897 / 1776 compiled), head capture was
+  running at pause. Scratch: ~/.cache/scrml-agent-tmp/s467-await-r9/corpus/.
+- NEXT: (1) run the hook on a machine with Node >= 22 (or have the user rule on the env test) and commit/push;
+  (2) finish corpus diff + self-host-v2 bootstrap + facts/state/spec-index/gen-md-shim --check; (3) rerun the
+  463-shape pack via `bun compiler/tests/integration/security-await-pack/classify.js`.
+- RESUME NOTE: bryan ruled S467 that impl#1 will ENFORCE dpa-023 F4 (a waiting function may be bound only by a
+  `function` declaration → E-ASYNC-FN-ESCAPES-AS-VALUE) once the SPEC text lands. That changes round 9's
+  direction from COLOURING fn-valued bindings to REFUSING them: the r6–r9 pseudo-fn colouring of `const f = (…) => …`
+  becomes a refusal; the escape judge here (fileScopeAsyncEscapesOf) is the natural place to widen.
+- 2026-10-15 CORPUS (done after the block above): diff = 0 newly failing / 0 newly passing / 0 diagnostic
+  changes / syntax delta 0 / bare server-fn sites 36 = 36; 170 artifact content diffs NOT yet inspected (r8 saw
+  165, all absolute-tree-root only); the verdict says INCOMPARABLE only because both archive trees lack a git
+  revision. COMMIT BLOCKED by the pre-commit hook (the Node-v21.6 foreign-sealed-scope test above; not bypassed):
+  the r9 change set is STAGED in the worktree, NOT committed or pushed. Backup patch (git apply --index):
+  ~/.cache/scrml-agent-tmp/s467-await-r9/r9-staged.patch

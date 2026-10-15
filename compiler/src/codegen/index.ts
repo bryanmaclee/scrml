@@ -74,7 +74,7 @@ import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs } from "./emit-tool.ts";
 import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
-import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet } from "./file-async-fns.ts";
+import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, fileScopeAsyncEscapesOf } from "./file-async-fns.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -2714,6 +2714,22 @@ export function runCG(input: CgInput): CgOutput {
       // call sites through buildServerCalleeImportMap, the CPS wrapper). No emitter runs
       // its own fixpoint any more.
       setFileAsyncFnNames(fileAST, fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput));
+      // S467 r9 (HIGH-1) — §13.2: a file-scope binding that hands out an async function
+      // other than by BEING one (an alias, an expression arm, a returned function, a later
+      // `let` write) would hand its caller an un-awaited Promise. Refused, once per binding,
+      // judged on the file's one set (client and server alike).
+      for (const esc of fileScopeAsyncEscapesOf(fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput))) {
+        const shown = esc.name.startsWith("#") ? "a function value" : `\`${esc.name}\``;
+        recordRefusedLowering(new CGError(
+          "E-ASYNC-FN-ESCAPES-AS-VALUE",
+          `E-ASYNC-FN-ESCAPES-AS-VALUE: the value of \`${esc.binding.name}\` can be ${shown} (${esc.what}), and ` +
+            "that function is async — it calls a server function or a Promise-returning helper, so the compiler " +
+            "emits it `async`. Handed out as a value, its calls cannot be seen and so cannot be awaited: a caller " +
+            "would test an un-awaited Promise, which is always truthy (§13.2). Declare the function itself with " +
+            "`function name(…) { … }` or `const name = (…) => …` and call it directly.",
+          (esc.binding.node as { span?: object }).span ?? {},
+        ), esc.binding.node as object);
+      }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
       // value-export block (`export { w as helper } from "./c.server.js"`). A name
