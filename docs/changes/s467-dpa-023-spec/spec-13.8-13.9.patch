@@ -1,0 +1,385 @@
+diff --git a/compiler/SPEC.md b/compiler/SPEC.md
+index a7929eb62..1458f9d38 100644
+--- a/compiler/SPEC.md
++++ b/compiler/SPEC.md
+@@ -10719,7 +10719,11 @@ what would wait — the server function called; for a client function (item 2),
+ standard-library call it reaches; for a `?{}` (item 3), the query; for a standard-library call (item 4), the
+ function — and the fix: *"a value position cannot wait for the server; load the value with a
+ `<request>` (§6.7.7) into a cell and read the cell here"* — and, where the cell is server-authoritative, a
+-`<x server>` declaration (§52).
++`<x server>` declaration (§52). *(S467 — the message also offers the second fix: "or declare the cell `(not to T)`
++(§13.9)". It is offered only for a cell initializer, the one value position §13.9 opens. Provenance: ruling:user-voice-scrml.md
++S467 "(a) Opt-in marker (Recommended)" (dpa-023 F1) · dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md`
++§Q2 "Codes retired, subsumed or kept" · supersedes: nothing struck. The `<request>` fix stands, and this adds a second
++fix · Nominal with §13.9.)*
+ 
+ ```scrml
+ <program db="sqlite:./app.db">
+@@ -10805,6 +10809,367 @@ function — and the fix: *"a value position cannot wait for the server; load th
+ §12.2 (server placement) · §13.2 (where server calls are awaited) · §52.4.3 / §52.6.5 (`<x server>` placeholder and
+ load) · §34 (E-VALUE-SERVER-CALL).
+ 
++### 13.8 Where a Waiting Value May Stand — the One Rule
++
++> **Status: a restatement (S467, dpa-023 Phase 1b).** This section adds no new semantics of its own. It states in
++> one place the rule that §13.2, §13.7, §7.3.2 and the sync-callback codes already state position by position, and
++> it names those codes as instances of the rule. **Code names are kept, not renamed.** Item (ii) below is §13.9's,
++> which is Nominal / spec-ahead. Each instance code keeps the status its own section gives it: E-VALUE-SERVER-CALL
++> (§13.7) is Nominal (impl#1 does not implement it), and E-PARAM-DEFAULT-AWAIT (§7.3.2) lands with
++> `s466-server-param-defaults` (PR #1427).
++>
++> **Provenance:** ruling:user-voice-scrml.md S466 "lets move the dpa up" (the dpa-023 build arc starts now) ·
++> ruling:user-voice-scrml.md S467 "(a) Opt-in marker (Recommended)" (dpa-023 F1, which gives item (ii)) ·
++> dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md` §Q5 row 1b (*"a waiting value … may stand
++> only (i) at a suspension point of an action position, where it is awaited, or (ii) … as a `(not to T)` cell's
++> value. Everywhere else it is `E-`."*) and §Q6 *"Not forks — the PA's call … Keeping the existing code names rather
++> than minting one umbrella code"* · **supersedes:** nothing written. **Direction of change (pa-base §8): inert**
++> for this section. Item (ii) is newly-accepting; its direction is stated in §13.9.
++
++**A waiting value.** A *waiting value* is an expression whose value is available only after the program waits:
++
++1. **a call to an async-colored function** (§13.2): a server-placed function (§12.2), a Promise-returning
++   standard-library function, or a function that calls one, directly or transitively;
++2. **a `?{}` query** (§8), written in the position or reached through a function it calls;
++3. **a call to a Promise-returning standard-library function** (`fetch`, the `scrml:http` functions,
++   `scrml:auth` `verifyPassword` / `hashPassword`, and every other standard-library function the compiler emits
++   `async`). This is already included in item 1. It is listed separately because most of the accept-every-password
++   defects that §13.2's codes exist for were calls of this kind.
++
++These are the same three forms as §13.7's items 1–4, and the same set §13.2's *async-colored* defines. This
++definition does not widen either.
++
++**The rule.** A waiting value SHALL stand only in one of two places:
++
++- **(i) At a suspension point of an action position, where the compiler awaits it.** The action positions are
++  the ones §13.7 lists under "What is not affected": an event-handler value, a function body (client or server), a
++  lifecycle element body (`<request>`, `<effect>`, `<onMount>`), an engine `effect=` / `<onTransition>`, and a
++  body-top statement list. A suspension point is a place where the compiler can end a statement, wait, and resume
++  with what follows (§13.2 inserts the `await` there). The S450 sole-root handler write (§13.2) MAY run
++  fire-and-forget instead, because no statement of that handler follows it.
++- **(ii) As the initializer of a cell DECLARED `(not to T)`** (§13.9). The cell holds the in-flight load. Every read
++  before a discrimination is E-TYPE-001.
++
++**Everywhere else a waiting value SHALL be a compile error.** The error is the code already named for the
++position:
++
++| Where the waiting value stands | Why it cannot wait | Code (home) |
++|---|---|---|
++| A value position: a cell initializer without the `(not to T)` marker, a derived formula, a markup `${ … }` interpolation, an attribute value (§6.15) | It produces a value now, at construction, on every recompute or on every render. There is no statement boundary at which to wait. | **E-VALUE-SERVER-CALL** (§13.7) |
++| The body of a synchronous callback in server code: `.sort(cmp)`, `.findLast(f)`, a nested lambda, or a lambda's parameter default | The consumer calls the callback synchronously and uses its return. `await` is illegal there. | **E-SERVER-FN-IN-SYNC-CALLBACK** (a server-function call) / **E-ASYNC-STDLIB-IN-SYNC-CALLBACK** (a standard-library call) (§13.2) |
++| A function declaration's own parameter default | The default is evaluated before the body runs, where no `await` can be inserted. | **E-PARAM-DEFAULT-AWAIT** (§7.3.2) |
++| Behind a function value: an async-colored function aliased, stored, returned, passed to a function that is not an awaited collection method, or (§13.9.6) held by any binding | Each later call of that value produces a waiting value at a call site the compiler cannot see, so nothing awaits it. | **E-ASYNC-FN-ESCAPES-AS-VALUE** (§13.2) |
++
++Two related codes are not instances of the rule, but are part of the same boundary:
++- **E-ASYNC-CALL-PROMISE-METHOD** (§13.2). Once a waiting value has been awaited under (i), it is a `T` and no
++  longer a Promise, so `.then` / `.catch` / `.finally` read off it is an error.
++- **E-ASYNC-HANDLER-UNANALYZABLE** (§13.2). It is a fail-closed backstop for when the compiler cannot tell which
++  position a waiting value stands in.
++
++§13.2's S462 server Promise trap is a run-time backstop for a waiting value that impl#1 failed to await under (i).
++It is not a position rule.
++
++**Failability is a separate question.** A waiting value that is a client call to a server function is also a
++failable call (§19.9.10). Standing in an allowed place does not handle its failure: an unhandled one is still
++E-ERROR-002 under (i), and under (ii) §13.9.5 requires the failure to be handled at the declaration.
++
++```scrml
++<program db="sqlite:./app.db">
++${
++  import { verifyPassword } from "scrml:auth"
++  function teamCount(team: string)! -> LoadError {
++    return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
++  }
++  function anyMatch(pw: string, hashes: string[]) {
++    for (const h of hashes) { if (verifyPassword(pw, h)) return true }   // (i) a function body: awaited
++    return false
++  }
++  function slowest(hashes: string[], pw: string) {
++    return hashes.sort((a, b) => verifyPassword(pw, a) ? 1 : -1)   // E-ASYNC-STDLIB-IN-SYNC-CALLBACK
++  }
++  function lookup(team: string = teamCount("core")) { return team }   // E-PARAM-DEFAULT-AWAIT
++}
++<team> = "core"
++<n> = 0
++<shown> = false
++<members>: int = teamCount(@team) !{ _ :> 0 }          // E-VALUE-SERVER-CALL: no marker, a value position
++<loaded>: (not to int) = teamCount(@team) !{ _ :> not } // (ii): a declared pending cell (§13.9)
++<p>${teamCount(@team)}</p>                              // E-VALUE-SERVER-CALL: an interpolation (§13.9.3)
++<button onclick={ @n = teamCount(@team) !{ _ :> @n }; @shown = true }>Count</button>   // (i) a handler
++</program>
++```
++
++**Cross-references:** §13.2 (async-colored; where calls are awaited) · §13.7 (E-VALUE-SERVER-CALL) · §13.9 (the
++pending cell) · §7.3.2 (E-PARAM-DEFAULT-AWAIT) · §6.15 (value positions) · §19.9.10 (a client call to a server
++function is failable) · §34 (rows for each code).
++
++### 13.9 Pending Cells — the Async Boundary as a `(not to T)` Lifecycle
++
++> **Status: Nominal / spec-ahead (S467).** NORMATIVE. **impl#1 does not implement it** and is not changed for it.
++> impl#1 is frozen for language semantics (S447), and S467 dpa-023 F5 = (a) grants no rebuild exception. impl#1 stays
++> retrofit-only on the await mandate, and that retrofit is held by the security await probe pack (#1428). The
++> divergence is carried (§34.0). The exception is §13.9.6 (the F4 refusal), which impl#1 enforces (bryan, S467). On impl#1 a `(not to T)` cell with a waiting initializer compiles, and its
++> pre-arrival read throws at mount (record correction W7, the DD's Context table). **The bootstrap builds this
++> section**, after its U1c (the server artifact) and U2 (`<request>`) units and lifecycle typing in `analyze`. The
++> build order is the DD's Phase 3.
++>
++> **Provenance:** ruling:user-voice-scrml.md S337 "The Q4 ruling — dpa-023" — *"b"* (the direction is ratified as
++> `not → pending → T`; the conditions: *"the marker is SUGAR (no new runtime representation) · the "does not color
++> the function" pitch is DROPPED as measured-false · the rule must be **`E-` not `I-`**"*) · ruling:user-voice-scrml.md
++> S466 "lets move the dpa up" · ruling:user-voice-scrml.md S467 dpa-023 F1–F7 (each quoted at its subsection) ·
++> dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md` §Q2, §Q6 · prior DD:
++> `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` · **supersedes:** §13.7's
++> *"the async-derived alternative belongs to dpa-023 if ever"* (quoted in §13.7's provenance from S451 R1). That
++> alternative is now this section, and only in cells.
++
++**What this section adds.** §13.7 refuses a waiting value (§13.8) in every value position, and its only fix is a
++hand-built `<request>` that loads the value into a cell. This section lets a cell say the same thing in its
++declaration. The declared type `(not to T)` is the marker: it says the cell starts as `not` and becomes `T` when the
++load arrives. The compiler then accepts the waiting initializer and checks every read.
++
++#### 13.9.1 The marker is the lifecycle type — opt-in
++
++A Shape-1 cell declaration (§6.2) whose declared type is the presence lifecycle `(not to T)` (§14.12, §66.11.6)
++MAY take a waiting value (§13.8) as its initializer. Such a cell is a **pending cell**. No other cell may take one:
++a cell declared with any other type, or with no type, keeps **E-VALUE-SERVER-CALL** (§13.7) for a waiting
++initializer. The compiler SHALL NOT infer `(not to T)` from what the initializer calls.
++
++The §66 dialect spells the same declaration in an opener: `<users:(not to User[])=(loadUsers() !{ _ :> not })/>`
++(S449 item 4: a bare lifecycle type MAY stand in an opener).
++
++> **Provenance:** ruling:user-voice-scrml.md S467 "(a) Opt-in marker (Recommended)" — dpa-023 F1: *"`<users>: (not
++> to User[]) = loadUsers() !{…}` is legal in a value position; reads before discrimination are E-TYPE-001; a cell
++> with no marker whose initializer waits keeps E-VALUE-SERVER-CALL. Rejected: (b) inferred (a callee three hops away
++> silently re-types the cell)."* · ruling:user-voice-scrml.md S467 F2 *"(a) The lifecycle type"* — *"the marker is the
++> lifecycle type `<x>: (not to T) = f() !{…}` — no new keyword"* · dd:dpa-023-build-arc-scoping §Q2 "What the
++> marker is", §Q6 F1/F2 · **supersedes:** §13.7's rule for this one position. A `(not to T)`-declared cell
++> initializer is no longer E-VALUE-SERVER-CALL. §13.7's E-VALUE-SERVER-CALL message SHALL add the second fix:
++> *"or declare the cell `(not to T)` (§13.9)"*. **Direction of change: newly-accepting**, narrow. Measured: `(not to
++> T)` is declared in 0 corpus files, and up to 9 cell-initializer sites in 17 files could adopt it (DD §Q4).
++>
++> *PA reading, flagged:* "a Shape-1 cell declaration" excludes a derived cell (`const <x>: (not to T) = …`). F1
++> names "a cell DECLARED `(not to T)`", and the DD's worked forms are all plain cells. A derived pending cell is not
++> ruled, so it keeps E-VALUE-SERVER-CALL (fail closed).
++
++```scrml
++<program db="sqlite:./app.db">
++${ function teamCount(team: string)! -> LoadError {
++     return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
++   } }
++<team> = "core"
++<members>: (not to int) = teamCount(@team) !{ _ :> not }   // legal: a pending cell, deps [@team]
++<total>: int = teamCount(@team) !{ _ :> 0 }                // E-VALUE-SERVER-CALL: no marker (F1)
++</program>
++```
++
++#### 13.9.2 What it means — a plain cell plus a `<request>`; nothing new at run time
++
++A pending cell declaration SHALL mean exactly a plain cell initialized to `not`, plus a `<request>` (§6.7.7) whose
++body is the declared initializer assigned to the cell:
++
++```scrml
++// written
++<users>: (not to User[]) = loadUsers() !{ _ :> not }
++
++// means exactly
++<users>: (not to User[]) = not
++<request id="‹compiler-internal›">${ @users = loadUsers() !{ _ :> not } }</>
++```
++
++- **deps** are inferred from the initializer's `@` reads, as `<request>` infers them (§6.7.7). A change to one
++  re-runs the load. An initializer that reads no cell loads once, on mount.
++- **Everything else is the `<request>`'s.** Mount, supersede (EC-2: the newest load wins), teardown (EC-3), §6.7.7.1
++  READ / WRITE classification and abort-reads / discard-writes, and §6.7.7.3's rule that a provably-writing request
++  does not run on mount all apply to a pending cell by construction, because the desugar is literal. (DD Open
++  Question 3 asks for this confirmation; this sentence gives it.)
++- **No new runtime representation.** At run time the cell holds `not` until the load settles, which is the existing
++  representation of `(not to T)`. The difference between pending and `T` is **static only**.
++- **The compiler SHALL NOT reset the cell by re-running the initializer outside the request.** A reset of a pending
++  cell (§6.8) is the request's re-run. (impl#1's reset path re-invokes an initializer thunk un-awaited:
++  `_scrml_cs_init_set(x, () => fetch())`, 16 sites in 11 corpus files, DD §Q4. That is the S322 falsifier class,
++  and the desugar makes it unreachable.)
++
++> **Provenance:** ruling:user-voice-scrml.md S337 "The Q4 ruling — dpa-023" — *"the marker is SUGAR (no new runtime
++> representation)"* · dd:dpa-023-build-arc-scoping §Q2 "What it desugars to" · **supersedes:** nothing written.
++>
++> *PA reading, flagged:* the desugared request's `id` is compiler-internal, so the author cannot write
++> `<#id>.refetch()` or read `<#id>.loading` / `.stale` for a pending cell. F7 rejected an implicit `@x.error`
++> surface, and the same reasoning is read here as reaching the other request properties. An author who needs them
++> writes the `<request>` by hand (§13.7's fix). This is not ruled.
++
++#### 13.9.3 Reads before discrimination are E-TYPE-001; render positions keep E-VALUE-SERVER-CALL
++
++A read of a pending cell SHALL be preceded, on every path, by a presence discrimination of that cell: a `given`, an
++`if=` / `if (@x is not) return` early return, an `is given` test, or a `match`. This is the §14.12.3 (S160) rule:
++*discrimination IS transition* wherever the pre-type is `not`. Any other read SHALL be **E-TYPE-001**. That includes
++a whole-cell read (`${@users}`, `f(@users)`), not only a member access. The declaration never transitions the cell
++by itself, because its initializer writes nothing until the load settles. The message SHALL say that the value may
++still be in flight and name the declaration's load.
++
++The rule is the S337 condition that the rule be `E-`, not `I-`. It reuses E-TYPE-001 and mints no new code. A
++suspension point ends every reactive cell's narrowing (§42.3.5), so inside a handler a read after an awaited call
++discriminates again.
++
++**Render positions do not get pending (F3).** A waiting value written directly in a markup interpolation or an
++attribute value stays **E-VALUE-SERVER-CALL** (§13.7). Waiting data enters markup only through a pending cell or a
++`<request>`. There is no boundary element that holds an anonymous pending state, and no Suspense-style re-suspend.
++
++> **Provenance:** ruling:user-voice-scrml.md S467 F1 (quoted in §13.9.1) — *"reads before discrimination are
++> E-TYPE-001"* · ruling:user-voice-scrml.md S467 "(a) Cells only" — dpa-023 F3: *"I need more clarity on this one. is
++> the only real difference validating @users is not in the loading tag, or am I missing something else here?"* /
++> *"I see, a it is."* — *"R1 stands: a server call in an interpolation or attribute stays E-VALUE-SERVER-CALL; async
++> data enters markup through a `(not to T)` cell (F1) or `<request>`. … Rejected: (b) Suspense-style boundary."* ·
++> dd:dpa-023-build-arc-scoping §Q2 (worked code 3 and 4), §Q6 F3 · **supersedes:** nothing written. E-TYPE-001's
++> §14.12 trigger gains the pending case. **Direction of change: newly-rejecting** only for reads of a cell that this
++> section first made legal to declare. The DD measured 0 such reads in the corpus (§Q4), because `(not to T)` is
++> unused.
++
++```scrml
++// lib/users.scrml
++${
++  export function isTaken(name: string)! -> LoadError {
++    return ?{`SELECT 1 FROM users WHERE name = ${name}`}.get() is given
++  }
++}
++// app.scrml
++${ import { isTaken } from "./lib/users.scrml" }
++<name> = ""
++<taken>: (not to bool) = isTaken(@name) !{ _ :> not }      // deps [@name]
++<p if=(@taken is given && !@taken)>available</p>           // discriminated: legal
++<p else>checking…</p>
++<p>${@taken ? "taken" : "free"}</p>                        // E-TYPE-001: read before discrimination
++<p if=${isTaken(@name)}>taken</p>                          // E-VALUE-SERVER-CALL: render position (F3)
++```
++
++#### 13.9.4 Stale while reloading
++
++When a dependency changes after the first load has settled, the cell SHALL keep its last `T` while the new load is
++in flight, as `<request>.data` does (§6.7.7, "On re-execution, `<#id>.data` is NOT cleared"). It SHALL NOT revert
++to `not`. This follows from the desugar: the request writes the cell only when a load settles. It is a run-time
++behaviour only. Statically, §13.9.3 already requires every read to discriminate.
++
++> **Provenance:** ruling:user-voice-scrml.md S467 dpa-023 F6 — *"F6 + F7 "Both recommended""* — *"**F6 (a):** a
++> pending cell keeps its stale value while reloading (as `<request>.data`)"* · dd:dpa-023-build-arc-scoping §Q6 F6 ·
++> **supersedes:** nothing written. **Direction of change: inert** (it follows from §13.9.2).
++
++```scrml
++<team> = "core"
++<members>: (not to int) = teamCount(@team) !{ _ :> not }
++<select bind:value=@team><option>core</option><option>infra</option></select>
++<p if=@members>Members: ${@members}</p>   // switching team keeps the old count until the new one arrives
++<p else>Loading…</p>
++```
++
++#### 13.9.5 Failure is handled at the declaration
++
++When a pending cell's initializer is failable (a client call to a server function always is, §19.9.10; a `?{}` is
++too, §19.8.3), its failure SHALL be handled in the declaration, with `= f() !{ … }` (§19.4.3, value position). An
++unhandled failable initializer SHALL be **E-ERROR-002**. The desugared request does NOT handle the call on the
++author's behalf, and a pending cell has no implicit `@x.error` surface. Each arm SHALL yield a value of the
++declared type or leave (E-ERROR-012). `not` is a value of `(not to T)`: it returns the cell to its pre-state.
++
++> **Provenance:** ruling:user-voice-scrml.md S467 dpa-023 F7 — *"F6 + F7 "Both recommended""* — *"**F7 (a):** a
++> pending load's failure is handled at the declaration (`= f() !{…}`), consistent with E-ERROR-002 / R11"* ·
++> dd:dpa-023-build-arc-scoping §Q6 F7 (*"(b) is the §52 exception, and generalising it reopens "a failure nobody
++> handled""*) · **supersedes:** for this one desugared request, §6.7.7's *"The call that is the right-hand side of the
++> body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002"*. A pending cell's request is
++> compiler-written, its `.error` is unreachable (§13.9.2), so the author handles the failure. **Direction of change:
++> newly-rejecting** for an unhandled pending initializer, which §13.9.1 first made legal. 0 corpus sites.
++>
++> *PA reading, flagged:* how E-ERROR-002 applies to declarations in general is being settled by
++> `s467-error-002-value-position` (the S466 `s466-error-002-decl` re-dispatch). This subsection depends only on the
++> F7 ruling. If that branch words the declaration rule differently, this sentence is reconciled to it.
++
++```scrml
++<members>: (not to int) = teamCount(@team) !{ _ :> not }          // legal: a failed load goes back to `not`
++<members2>: (not to int) = teamCount(@team)                       // E-ERROR-002: the failure is not handled
++```
++
++#### 13.9.6 A waiting function is bound only by a `function` declaration
++
++An async-colored function (§13.2) SHALL be bound only by a `function` declaration, including `export function`
++and a `function` declared inside another function's body. **No binding SHALL hold an async-colored function.** A
++`const` / `let` / `export const` whose initializer is a lambda (or function expression) whose body waits, or whose
++value is an async-colored function produced any other way (a ternary or `||` of function values, an alias of an
++imported async function, a factory or curried call that returns one, an object method), SHALL be
++**E-ASYNC-FN-ESCAPES-AS-VALUE**. A waiting lambda is legal only written directly as the argument of an awaited
++collection method (§13.2: `.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`,
++`.flatMap`). A synchronous lambda is not affected.
++
++The compiler therefore never has to follow "is this function async" through a binding, an alias, a ternary or a
++call that returns a function. A function either waits and has a name from a `function` declaration, or it is a
++lambda the awaited combinator consumes in place. The mechanical rewrite is `const f = (a) => g(a)` →
++`function f(a) { return g(a) }`.
++
++> **Provenance:** ruling:user-voice-scrml.md S467 "b it is" — dpa-023 F4: *"how far does this decision limit
++> functons?"* / *"b it is"* — *"`const f = (…) => waitingCall()` / `export const f = …` / waiting functions produced
++> by ternary, factory or currying → E-ASYNC-FN-ESCAPES-AS-VALUE (narrowed to "no binding holds an async function").
++> Synchronous lambdas unaffected; a waiting lambda stays legal only as the direct argument of an awaited collection
++> method. … Rejected: (a) async-as-part-of-the-function-type propagation."* · dd:dpa-023-build-arc-scoping §Q1 rows
++> 9, 10, 14, 15; §Q6 F4 · **supersedes:** §13.2's opening of the async-colored bullet, *"An async-colored function
++> SHALL NOT be used as a value. It MAY be called directly …"*. That sentence did not say whether *defining* a waiting
++> function by a `const` lambda is a use as a value, and impl#1's r6–r9 rounds treated it as a pseudo-declaration.
++> This subsection answers that it is refused. **Direction of change: newly-rejecting.**
++>
++> **Measured migration** (S467, `~/.cache/scrml-s467-f4-measure/`; method: every file compiled with the compiler's own
++> async analysis, and each binding classified by whether it holds an async-colored function): **0 newly refused
++> sites** across examples/ (71), samples/ (881), conformance/cases/ (1832), stdlib/ (54), benchmarks/ (7),
++> docs/articles/ (197, including 192 Markdown code blocks), giti (82) and flogence (31). The only sources that flip
++> are compiler test fixtures written to test this shape (about 56, in `compiler/tests/security-await-pack/shapes` and
++> the s465 await r6/r7 tests). The adopter repo RediLedger is not on the measuring machine and is **unmeasured**.
++>
++> **impl#1 status (security gap this closes; not normative text):** main today ACCEPTS a ternary-armed waiting
++> binding unawaited. `const chk = flag ? (n) => isOk(n) : (n) => false`, followed by `if (chk(2))`, tests a Promise,
++> which is always truthy. **impl#1 ENFORCES this subsection** once this text lands, as a refusal under the security
++> exception. Unlike the rest of §13.9, it is not a carried divergence (bryan, S467; that ruling's user-voice entry is
++> owed). The bootstrap's Core already refuses a function-valued program-level binding (DD probe b10).
++>
++> *PA reading, flagged:* the ruling's "only as the direct argument of an awaited collection method" does not mention
++> §13.2's two other non-value positions: an argument of a global fire-and-forget scheduler (`setTimeout(() =>
++> save())`) and `typeof f`. Neither binds the function, so this subsection leaves them as §13.2 states them. That is
++> not ruled.
++
++```scrml
++${
++  import { verifyPassword } from "scrml:auth"
++
++  // refused — each binding holds a waiting function
++  const check = (p, h) => verifyPassword(p, h)                          // E-ASYNC-FN-ESCAPES-AS-VALUE
++  export const check2 = strict ? (p, h) => verifyPassword(p, h) : (p, h) => true   // E-ASYNC-FN-ESCAPES-AS-VALUE
++  const mk = (p) => (h) => verifyPassword(p, h)                         // E-ASYNC-FN-ESCAPES-AS-VALUE
++  const vp = verifyPassword                                             // E-ASYNC-FN-ESCAPES-AS-VALUE (alias)
++
++  // legal
++  export function check3(p: string, h: string) { return verifyPassword(p, h) }
++  function anyOk(p: string, hashes: string[]) {
++    return hashes.some((h) => verifyPassword(p, h))   // a waiting lambda as the direct argument of `.some`
++  }
++  const double = (n) => n * 2                         // a synchronous lambda: unaffected
++}
++```
++
++#### 13.9.7 Normative statements
++
++- A Shape-1 cell declared `(not to T)` MAY take a waiting value (§13.8) as its initializer. A cell not so declared
++  SHALL NOT (E-VALUE-SERVER-CALL, §13.7). The compiler SHALL NOT infer `(not to T)`.
++- A pending cell declaration SHALL mean a cell initialized to `not` plus a `<request>` whose body assigns the
++  initializer to the cell, with deps inferred from the initializer's reads. It SHALL add no runtime representation.
++- A read of a pending cell not preceded on every path by a presence discrimination of it SHALL be E-TYPE-001.
++- A waiting value in a markup interpolation or attribute value SHALL remain E-VALUE-SERVER-CALL. No boundary element
++  holds a pending render.
++- On a dependency change after the first settle, a pending cell SHALL keep its last value until the new load
++  settles.
++- A failable pending initializer SHALL be handled in the declaration (`!{}`). Unhandled, it SHALL be E-ERROR-002.
++  The desugared request SHALL NOT handle it, and no implicit `.error` surface exists.
++- An async-colored function SHALL be bound only by a `function` declaration. A binding that holds one SHALL be
++  E-ASYNC-FN-ESCAPES-AS-VALUE. A waiting lambda SHALL be legal only as the direct argument of an awaited collection
++  method.
++
++**Cross-references:** §13.2 (async-colored; E-ASYNC-FN-ESCAPES-AS-VALUE) · §13.7 (E-VALUE-SERVER-CALL) · §13.8 (the
++one rule) · §6.7.7 (`<request>`, the desugar target) · §14.12 / §66.11.6 (the `(A to B)` lifecycle; §14.12.3
++discrimination-as-transition) · §42.3.5 (narrowing ends at a suspension point) · §19.4.3 / §19.9.10 (handling a
++failable call; E-ERROR-002) · §34 (rows owed: `docs/changes/s467-dpa-023-spec/progress.md`).
++
+ ---
+ 
+ ## 14. Type System
