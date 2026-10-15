@@ -25,7 +25,7 @@
  *   F  the string-argument siblings — quotes survive, no E-SCOPE-001
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { resolve } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
@@ -35,7 +35,15 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
-if (!globalThis.document) GlobalRegistrator.register();
+const registeredHere = !globalThis.document;
+if (registeredHere) GlobalRegistrator.register();
+// Leave the process as found: bun runs every test file in ONE process, and a happy-dom
+// registration left behind replaces the host `Request` / `Headers` for every later file
+// (happy-dom drops a `Cookie` request header — s457-string-url-executable-schemes' server
+// run then got 403 from the CSRF check instead of its 400s; S467).
+afterAll(async () => {
+  if (registeredHere && GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});
 
 // ---------------------------------------------------------------------------
 // Harness
