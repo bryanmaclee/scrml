@@ -365,3 +365,25 @@ worktree (/home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aeb0297cf12facc1
 and saved as ~/.cache/scrml-agent-tmp/s467-cps-r4/round4-wip.patch (`git apply` onto 0bc57c25b).
 Resume: find which earlier test leaves the 403 state (bisect the files that run before s457), or get PA
 authorisation for the hook, then commit + push.
+
+## RESUMED (S467, worktree agent-ad3bb3ec86ee8788b)
+- Hook blocker resolved by the s461 happy-dom unregister commit (99666b561).
+- fp_helper_guard root cause: `deny` was not "missed" by calleesOf — it was SKIPPED as server-placed. §12
+  caller-context propagation (route-inference Step 5c) promoted `function deny() { alert(…) }` to a server
+  function because its only caller (`post`) is server-placed, so the guard read it as rule (b) "calls a
+  server fn" and `alert` was emitted into the server module (Bun's `alert` blocks on stdin). Fix:
+  `placedByCallerOnly` — a function whose ONLY escalation reason is caller-context-propagation is followed
+  like a client helper by calleesOf → deniedX catches `alert` → E-RI-002.
+- match_str root cause: a string-literal match arm `"y" :> { @msg = "ok" }` is a `bare-expr` whose
+  `exprNode` is the literal alone; the arm body lives only in `expr` text. planBatchCellReturn's tree walk
+  never saw the `@msg` write, so the batch plan omitted it and the emit backstop refused with internal
+  E-CG-006. Fix: walkStatement scans kept text (`expr`/`bodyRaw`/`body`, `raw` of escape hatches) for cell
+  writes into `rawCells`; a cell found only there joins the plan and rules out legacy mode. Now compiles,
+  runs, and carries `@msg` back.
+- NEW (found writing the accepting-shape tests): a pre-first carried local reassigned in the batch
+  (`let blk = false … if (!@ok) { @msg = "wrong"; blk = true }`) was bound `const blk = _scrml_body["blk"]`
+  in the server handler → the WHOLE server module failed to load. emit-server binds carried locals with
+  `let` (`bindKw`).
+- route-inference.test.js "CPS split with Bun.file server trigger in bare-expr": `@config = config` now joins
+  the server half ([1,2]) — it reads the local the server statement declared (§19.9.9.8 rule 1). Expected.
+- Tests: compiler/tests/integration/s467-cps-nested-writes-and-callees.test.js (10 executed tests).

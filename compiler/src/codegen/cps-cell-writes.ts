@@ -162,6 +162,8 @@ function walkStatement(
   unsupported: UnsupportedBatchWrite[],
   returns: UnsupportedBatchWrite[],
   stmtIsBatchReturnDecl: boolean,
+  /** S467 — cells written in text the parser kept as text (see the key loop). */
+  rawCells?: Set<string>,
 ): void {
   const seen = new WeakSet<object>();
   const visit = (n: unknown, inClosure: boolean, top: boolean): void => {
@@ -221,11 +223,32 @@ function walkStatement(
 
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id") continue;
-      visit(node[key], inClosure, false);
+      const v = node[key];
+      if (typeof v === "string") {
+        // S467 — text the parser kept as text can hold a write its tree does not:
+        // a string-literal match arm `"y" :> { @msg = "ok" }` is a `bare-expr` whose
+        // `exprNode` is the literal alone. The lowering still writes (and records)
+        // the cell, so the plan must list it, or the batch drops the write (the
+        // emit backstop then refused the function with an internal E-CG-006).
+        if (rawCells === undefined || inClosure || !RAW_TEXT_WRITE_KEYS.has(key) || v.length < 3) continue;
+        if (key === "raw" && kind !== "escape-hatch") continue;
+        if (kind === "sql" || kind === "sql-ref") continue;
+        const text = blankLiteralTextInSource(v) ?? v;
+        for (const m of text.matchAll(RAW_WRITE_RE_G)) {
+          const c = m[1] ?? m[2] ?? m[3];
+          if (c && c !== "session" && c !== "currentUser") rawCells.add(c);
+        }
+        continue;
+      }
+      visit(v, inClosure, false);
     }
   };
   visit(stmt, false, true);
 }
+
+/** `RAW_WRITE_RE`, global, and not matching an arrow (`@x => …`). */
+const RAW_WRITE_RE_G = /@([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:[-+*/%&|^]|\*\*|<<|>>>?|\?\?|&&|\|\|)?=(?![=>])|(?:\+\+|--)\s*@([A-Za-z_$][A-Za-z0-9_$]*)|@([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:\+\+|--)/g;
+const RAW_TEXT_WRITE_KEYS = new Set(["expr", "bodyRaw", "raw", "body"]);
 
 /** The statement a `!{}`-guarded `?{}` wraps (S455), or the statement itself. */
 function unguard(stmt: Node): Node {
@@ -265,6 +288,7 @@ export function planBatchCellReturn(
   const sites: CellWriteSite[] = [];
   const unsupported: UnsupportedBatchWrite[] = [];
   const returns: UnsupportedBatchWrite[] = [];
+  const rawCells = new Set<string>();
   const indices = [...serverIndices].sort((a, b) => a - b);
   for (const idx of indices) {
     const raw = body[idx] as Node | undefined;
@@ -273,11 +297,14 @@ export function planBatchCellReturn(
     const isReturnDecl = stmt.kind === "state-decl" && legacyReturnCell !== null && stmt.name === legacyReturnCell;
     // A guarded statement's arms are pure values (S455 guardArmsAreValues) —
     // walk the guarded statement; its arms cannot write.
-    walkStatement(stmt, idx, sites, unsupported, returns, isReturnDecl);
+    walkStatement(stmt, idx, sites, unsupported, returns, isReturnDecl, rawCells);
   }
 
   const cells: string[] = [];
   for (const s of sites) if (!cells.includes(s.cell)) cells.push(s.cell);
+  // S467 — a cell written only in kept text joins the plan (and rules out legacy).
+  let rawOnly = false;
+  for (const c of rawCells) if (!cells.includes(c)) { cells.push(c); rawOnly = true; }
 
   // Legacy holds only for the exact pre-S462 shape: zero writes, or one write —
   // the top-level return decl as the LAST statement of the batch. Being last,
@@ -292,7 +319,7 @@ export function planBatchCellReturn(
     const raw = body[idx] as Node | undefined;
     return !!raw && typeof raw === "object" && statementCanEndFunction(unguard(raw), true);
   });
-  const legacy = !exits && (sites.length === 0 ||
+  const legacy = !exits && !rawOnly && (sites.length === 0 ||
     (sites.length === 1 && sites[0].topLevelDecl && sites[0].stmtIndex === indices[indices.length - 1]));
   // (Before S466 a `return` in a "cells" batch was refused: it left the batch before
   // the batch handed back its cells. The exit protocol below carries it instead.)

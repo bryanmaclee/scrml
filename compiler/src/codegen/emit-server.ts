@@ -5369,6 +5369,19 @@ function generateServerJsImpl(
       // S465 (§19.9.9.8 rule 4) — then the locals the client computed before the
       // function's first server statement (client data, sent like parameters).
       const paramNames: string[] = [...fnParamNames, ...cpsCarriedLocals(_cpsSplit), ..._batch.fwdResultNames];
+      // S467 — a carried local is a name the author declared before the first server
+      // statement; the batch may reassign it (`let blk = false … if (!@ok) { blk = true }`),
+      // so it is bound the way the author bound it: `const` only for a `const`
+      // declaration, `let` otherwise (a `const` binding of a `let` made the whole server
+      // module fail to load: "This assignment will throw because blk is a constant").
+      const _carriedSet = new Set<string>(cpsCarriedLocals(_cpsSplit).filter((n) => !fnParamNames.includes(n)));
+      const _constDeclared = new Set<string>();
+      for (const st of (Array.isArray(fnNode.body) ? fnNode.body : [])) {
+        if (st && typeof st === "object" && (st as any).kind === "const-decl" && typeof (st as any).name === "string") {
+          _constDeclared.add((st as any).name);
+        }
+      }
+      const bindKw = (n: string): string => (_carriedSet.has(n) && !_constDeclared.has(n) ? "let" : "const");
 
       // The CPS-split view this batch's handler runs over. For the single-
       // handler case it is the route's own cpsSplit (or `null` for a non-CPS
@@ -5540,7 +5553,7 @@ function generateServerJsImpl(
       if (!_envelope) lines.push(`    ${_bodyRead}`);
 
       for (let i = 0; i < paramNames.length; i++) {
-        lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
+        lines.push(`    ${bindKw(paramNames[i])} ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
       }
 
       // §53.9.4: Emit server-side boundary checks for predicated params (baseline CSRF path).
@@ -5844,7 +5857,7 @@ function generateServerJsImpl(
       );
 
       for (let i = 0; i < paramNames.length; i++) {
-        lines.push(`  const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
+        lines.push(`  ${bindKw(paramNames[i])} ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
       }
 
       // §53.9.4: Emit server-side boundary checks for predicated params (non-CSRF path).

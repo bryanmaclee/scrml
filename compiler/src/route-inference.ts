@@ -3535,6 +3535,18 @@ export function analyzeCPSEligibility(
     w(n);
     return out;
   };
+  // A function placed on the server ONLY because its callers are server-placed
+  // (§12 caller-context propagation) has no server work of its own: it runs where
+  // its caller's statement runs, so it is followed like a client helper. Without
+  // this, `function deny() { alert(…) }` called only from a guard on a server
+  // value was promoted by that very call, the guard read it as "calls a server
+  // function", and `alert` ran in the server process (S467 fp_helper_guard).
+  const placedByCallerOnly = (fnNodeId: string): boolean => {
+    const rec = analysisMap.get(fnNodeId);
+    const trig = rec?.directTriggers ?? [];
+    return trig.length > 0 && trig.every((t: any) =>
+      t.kind === "server-only-resource" && t.resourceType === "caller-context-propagation");
+  };
   // name → callee nodes (a body-declared function shadows file-level ones)
   const calleeMemo = new WeakMap<object, Array<{ name: string; node: any; nested: boolean }>>();
   const calleesOf = (stmt: unknown): Array<{ name: string; node: any; nested: boolean }> => {
@@ -3552,7 +3564,7 @@ export function analyzeCPSEligibility(
       const nodes: Array<{ node: any; nested: boolean }> = nested
         ? [{ node: nested, nested: true }]
         : (functionIndex.get(nm) ?? [])
-            .filter((e) => !resolvedServerFnIds.has(e.fnNodeId))
+            .filter((e) => !resolvedServerFnIds.has(e.fnNodeId) || placedByCallerOnly(e.fnNodeId))
             .map((e) => ({ node: e.fnNode as any, nested: false }));
       for (const c of nodes) {
         // the statement that declares a nested function is not a call of it
