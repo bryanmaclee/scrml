@@ -750,3 +750,22 @@
   fixpoint, call sites awaited). F4 = widen the same judge so a waiting function bound by anything but a
   `function` declaration is E-ASYNC-FN-ESCAPES-AS-VALUE; the classifier (fn-valued-bindings.ts) already
   identifies exactly those bindings.
+
+## Round 10 (F4 enforcement) — branch s467-await-r10
+- 2026-10-16 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-ae30b00096cd063da, cut from
+  origin/s467-await-r9 e5155a5bb. Rule: dpa-023 F4 (SPEC §13.9.6 on PR #1430; ruling:user-voice-scrml.md S467
+  "b it is" + "yes on the impl#1 enforce F4") — an async-colored function is bound ONLY by a `function`
+  declaration; every binding / later write whose value is or may be one is E-ASYNC-FN-ESCAPES-AS-VALUE.
+- IMPL: codegen/fn-valued-bindings.ts `waitingBindingsOf` (every const/let/lin/tilde decl, every value
+  export, every `=`/`||=`/`&&=`/`??=` write, block-nested tilde re-declarations, an export whose init the
+  builder split into the next statement) judged by `mayHoldWaitingFn` (tree: a function value whose body
+  references an async name at ANY position of the init; an async name used other than as a direct callee;
+  escape hatches re-parsed as ESTree by the same rules; unparsed text by a fail-closed text rule). Legal:
+  direct calls (data), combinator callbacks (searched for a returned function), scheduler args, `typeof`,
+  sync lambdas, parameter shadows. Text-only refusals are `cascadeOnly` (a precise error for the same
+  unreadable text is not displaced; the compile fails either way). file-async-fns.ts `waitingBindingsOfFile`
+  (+ namespace imports of scrml modules count as async; caller-context-propagated SYNC helpers do not — the
+  §12.2 #284 first-class reference, conformance server-db/first-class-fn-ref-server-helper-rt). Reported
+  once per binding from codegen/index.ts with the binding name and the `function name(…) { return … }` fix.
+  Round 9's escape judge (`escapingAsyncValuesOf` / `fileScopeAsyncEscapesOf`) removed; the pseudo-fn
+  colouring KEPT with a comment (dead for shipped output; six emitters still read it on a failing compile).

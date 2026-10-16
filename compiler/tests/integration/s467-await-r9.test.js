@@ -69,12 +69,12 @@ describe("S467 r9 — client: a function value handed out by a file-scope bindin
     expect(errors).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
   }, 30_000);
 
-  test("a parenthesised arrow IS the binding's function: emitted async and awaited", () => {
+  // S467 r10 — dpa-023 F4 (§13.9.6): r9 coloured a parenthesised arrow as the binding's own
+  // function; a `const` may no longer hold a waiting function at all.
+  test("a parenthesised arrow calling a server function: refused (S467 r10, §13.9.6)", () => {
     const { errors, read } = compileFiles("p3", { "app.scrml": clientProbe("const chk = ((n) => isOk(n))") });
-    expect(errors).toEqual([]);
-    const js = read("app.client.js");
-    expect(js).toMatch(/const chk = async \(n\) => await /);
-    expect(js).toContain("if (await chk(2))");
+    expect(errors).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    expect(read("app.client.js")).toBeNull();
   }, 30_000);
 
   test("a sync ternary of functions still compiles (nothing async to escape)", () => {
@@ -117,16 +117,21 @@ describe("S467 r9 — the classifier reads the parsed init", () => {
 });
 
 describe("S467 r9 — a value-only server module imports only emitted server names (MED-1)", () => {
-  const app = appSource({ imports: `import { inner } from "./lib.scrml"`, body: `if (!inner(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"` });
+  // S467 r10 — the r9 probes held the async check in `export const inner = (p, h) => …`, which
+  // §13.9.6 now refuses; with `export function inner` the lib is no longer value-only (it has a
+  // server route), so the value-only module here carries a plain constant the route compares.
+  // (The non-value-only twin — an `export function` lib importing an enum type — still imports
+  // the never-emitted lib2.server.js: g-server-js-imports-module-without-server-file-s467.)
+  const app = appSource({ imports: `import { SECRET } from "./lib.scrml"`, body: `if (pass != SECRET) { return "REJECTED" }\n    return "WELCOME"` });
   test("an imported enum type: no import of the never-emitted lib2.server.js", () => {
     const { errors, read } = compileFiles("enum", {
       "app.scrml": app,
       "lib2.scrml": `\${\n  export type Role:enum = { Admin, User }\n}\n`,
-      "lib.scrml": `\${\n  import { verifyPassword } from "scrml:auth"\n  import { Role } from "./lib2.scrml"\n  export const inner = (p, h) => verifyPassword(p, h)\n  export const r = (x) => x == Role.Admin\n}\n`,
+      "lib.scrml": `\${\n  import { Role } from "./lib2.scrml"\n  export const SECRET = "right-password"\n  export const r = (x) => x == Role.Admin\n}\n`,
     });
     expect(errors).toEqual([]);
     const lib = read("lib.server.js");
-    expect(lib).toContain("import { verifyPassword }");
+    expect(lib).toContain("SECRET");
     expect(lib).not.toContain("lib2.server.js");
     expect(read("lib2.server.js")).toBeNull();
   }, 30_000);
@@ -135,9 +140,11 @@ describe("S467 r9 — a value-only server module imports only emitted server nam
     const { errors, read } = compileFiles("comp", {
       "app.scrml": app,
       "lib2.scrml": `\${\n  export const Badge = <span>hi</span>\n}\n`,
-      "lib.scrml": `\${\n  import { verifyPassword } from "scrml:auth"\n  import { Badge } from "./lib2.scrml"\n  export const inner = (p, h) => verifyPassword(p, h)\n  export const k = (x) => typeof Badge\n}\n`,
+      "lib.scrml": `\${\n  import { Badge } from "./lib2.scrml"\n  export const SECRET = "right-password"\n  export const k = (x) => typeof Badge\n}\n`,
     });
     expect(errors).toEqual([]);
-    expect(read("lib.server.js")).not.toContain("lib2.server.js");
+    const lib = read("lib.server.js");
+    expect(lib).toContain("SECRET");
+    expect(lib).not.toContain("lib2.server.js");
   }, 30_000);
 });

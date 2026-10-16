@@ -15,6 +15,14 @@
  *       sync function holding `await` → E-CODEGEN-INVALID-LOGIC).
  *
  * Executed: server function `f(name, pass)` against bun:sqlite, wrong / right password.
+ *
+ * S467 round 10 — dpa-023 F4 (§13.9.6, ruling:user-voice-scrml.md S467 "b it is"): a waiting
+ * function is bound ONLY by a `function` declaration. Every shape below binds one with
+ * `const` / `export const` (`const w = (a, b) => check(a, b)`, `export const inner = (p, h) =>
+ * verifyPassword(p, h)`), so each is now E-ASYNC-FN-ESCAPES-AS-VALUE (REFUSED); the r8 roots
+ * they pinned (module bindings are not locals; the parsed export init) stay in the code and
+ * are pinned by the structural tests. The MIGRATED form of each — the same function written
+ * `function name(…) { return … }` — runs (MIGRATED).
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync, readFileSync } from "fs";
@@ -35,7 +43,8 @@ const L = (s) => `\${\n  import { verifyPassword } from "scrml:auth"\n  ${s}\n}\
 const B = R(`!check(pass, row.pw)`);
 const W = `const w = (a, b) => check(a, b)`;
 
-const RUN = {
+// S467 r10 — every r8 shape binds a waiting function: REFUSED (§13.9.6).
+const REFUSED = {
   // HIGH-1 (probes3 m3 / m2)
   bindNotBinding: { top: W + `\n  const v = (p, h) => !w(p, h)`, body: R(`v(pass, row.pw)`) },
   bindChainBlock: { top: W + `\n  const v = (p, h) => {\n    return !w(p, h)\n  }`, body: R(`v(pass, row.pw)`) },
@@ -51,6 +60,19 @@ const RUN = {
   // g-lib-export-const-lambda-missing-import-s465).
   libExportConstAnnImported: { lib: L(`export const check: (p: string, h: string) => boolean = (p, h) => verifyPassword(p, h)`), body: B },
   libExportFnExprImported: { lib: L(`export const check = function (p, h) { return verifyPassword(p, h) }`), body: B },
+};
+
+// The same programs with each waiting function declared by `function` (the §13.9.6 rewrite).
+const WF = `function w(a, b) { return check(a, b) }`;
+const RUN = {
+  bindNotBinding: { top: WF + `\n  function v(p, h) { return !w(p, h) }`, body: R(`v(pass, row.pw)`) },
+  bindChainBlock: { top: WF + `\n  function v(p, h) {\n    return !w(p, h)\n  }`, body: R(`v(pass, row.pw)`) },
+  libBindChainNot: { lib: L(`function a1(p, h) { return verifyPassword(p, h) }\n  function a2(p, h) { return !a1(p, h) }\n  export function check(p, h) { return !a2(p, h) }`), body: B },
+  // a real shadow still shadows: the parameter `w` is the sync callback passed in
+  paramShadowsBinding: { top: WF + `\n  const v = (w, p) => w(p)`, body: `if (v((x) => x == "right-password", pass) == false) { return "REJECTED" }\n    return "WELCOME"` },
+  appExportFnAnn: { top: `export function w(a: string, b: string) { return check(a, b) }`, body: R(`!w(pass, row.pw)`) },
+  libExportFnAnnInner: { lib: L(`export function inner(p: string, h: string) { return verifyPassword(p, h) }\n  export function check(p, h) {\n    if (!inner(p, h)) { return false }\n    return true\n  }`), body: B },
+  libExportFnImported: { lib: L(`export function check(p: string, h: string) { return verifyPassword(p, h) }`), body: B },
 };
 
 const dirs = [];
@@ -101,7 +123,17 @@ async function callF(unit, pass) {
   return { status: res.status, body: await res.text() };
 }
 
-describe("S465 r8 — binding → binding (HIGH-1) and annotated exported values (HIGH-2) (executed)", () => {
+describe("S465 r8 shapes under S467 r10 (§13.9.6): a binding holding a waiting function is refused", () => {
+  for (const [name, spec] of Object.entries(REFUSED)) {
+    test(`${name}: E-ASYNC-FN-ESCAPES-AS-VALUE`, async () => {
+      const u = await compileShape(name, spec);
+      expect(u.errors.map((e) => e.split(":")[0])).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+      expect(u.mod).toBeUndefined();
+    }, T);
+  }
+});
+
+describe("S465 r8 — the migrated (`function`-declared) forms run (executed)", () => {
   for (const [name, spec] of Object.entries(RUN)) {
     test(`${name}: wrong → REJECTED, right → WELCOME`, async () => {
       const u = await compileShape(name, spec);
@@ -110,10 +142,10 @@ describe("S465 r8 — binding → binding (HIGH-1) and annotated exported values
     }, T);
   }
 
-  test("HIGH-2: the ss1 copy of an annotated async exported value is `async` and awaits its call", async () => {
-    const u = await compileShape("ss1Ann", RUN.libExportConstAnnInner);
+  test("the ss1 copy of an annotated async exported function is `async` and awaits its call", async () => {
+    const u = await compileShape("ss1Ann", RUN.libExportFnAnnInner);
     const libJs = readFileSync(join(u.outDir, "lib.server.js"), "utf8");
-    expect(libJs).toMatch(/export const inner = async \(p, h\) => await verifyPassword\(p, h\)/);
+    expect(libJs).toMatch(/async function inner\(p, h\)/);
     expect(libJs).toMatch(/!await inner\(p, h\)/);
   }, T);
 });

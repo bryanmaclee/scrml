@@ -1,6 +1,6 @@
 // security-await-pack — the wrong-password probe corpus as a permanent gate (S466, dpa-023 phase 1a).
 //
-// 463 shapes from nine adversarial review rounds (plus the r8 review's x1 and fix round 9's r9) of the §13.2 server-await fix
+// 551 shapes from nine adversarial review rounds (plus the r8 review's x1, fix round 9's r9 and the r9 review's y1–y3) of the §13.2 server-await fix
 // (g-imported-async-server-fn-not-awaited-s465). Each shape is compiled, its server bundle loaded,
 // and its `f` route called with a wrong and a right password. The floor: a wrong password is never
 // answered WELCOME. See pack.js for the classes and README.md for the why.
@@ -18,7 +18,7 @@ import {
 } from "./pack.js";
 import { KNOWN_FAIL, UNJUDGED } from "./known-fail.js";
 
-const EXPECTED_SHAPE_COUNT = 463;
+const EXPECTED_SHAPE_COUNT = 551;
 const families = await loadFamilies();
 const ids = families.flatMap(({ family, shapes }) => Object.keys(shapes).map((n) => `${family}/${n}`));
 

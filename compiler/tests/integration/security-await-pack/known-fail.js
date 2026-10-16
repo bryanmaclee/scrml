@@ -15,6 +15,9 @@
 // S467 fix round 9: all ten close (the parsed-init classifier in codegen/fn-valued-bindings.ts —
 // the r8 binding rule and the r9 escape rule). Measured on s467-await-r9: 0 shapes accept a wrong
 // password. The map stays so a regression has a place to be named.
+// S467 fix round 10 (dpa-023 F4, §13.9.6): + families y1–y3 (the S467 review of r9, which found
+// four y3 shapes and y1/voIife, y2/voIife, y2/voAnnotIife, y1/topLetIfWrite, y2/topLetIfLit
+// answering WELCOME on r9). Measured on s467-await-r10: 551 shapes, 0 accept a wrong password.
 export const KNOWN_FAIL = {
 };
 

@@ -18,9 +18,18 @@
  * expression parser) is read by the function-body statement parser. A body the parser
  * cannot read is `readable: false` — the coloring then cannot see its calls, and the emitter
  * lowering it from text refuses any call in it (server-text-guard.ts: fail closed).
+ *
+ * S467 round 10 — dpa-023 F4 (§13.9.6): a waiting function may be bound ONLY by a `function`
+ * declaration; every binding that holds one is refused (`waitingBindingsOf`, bottom of this
+ * file). The pseudo-function colouring above therefore never reaches a SHIPPED artifact in the
+ * async case: whenever it makes a binding async, the compile fails. It is KEPT (not removed)
+ * because the emitters that read it — emit-functions (client sets), emit-server (D-5 closure,
+ * ss1), emit-reactive-wiring, emit-client, scheduling — still run on a failing compile and
+ * removing every reader widens this round's diff across six emitters for no shipped effect.
+ * Round 9's escape judge (`escapingAsyncValuesOf`) is removed: the F4 judge supersedes it.
  */
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, parseExpression } from "../expression-parser.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { isGlobalSchedulerCallee } from "./async-combinators.ts";
 export interface FnValuedBinding {
@@ -315,23 +324,6 @@ export function isAnonFnValueName(name: string): boolean {
 }
 
 /**
- * S467 r9 — SPEC §13.2: "An async-colored function SHALL NOT be used as a value … aliasing
- * it, storing it …, returning it … SHALL be a compile error (`E-ASYNC-FN-ESCAPES-AS-VALUE`)."
- * The escapes of every file-scope binding (`fnValuedBindingsOf`) that come out async in the
- * file's set — one per binding (its first async escape).
- */
-export function escapingAsyncValuesOf(bindings: FnValuedBinding[], isAsync: (name: string) => boolean):
-  Array<{ binding: FnValuedBinding; name: string; what: string }> {
-  const out: Array<{ binding: FnValuedBinding; name: string; what: string }> = [];
-  for (const b of bindings) {
-    const e = b.escapes.find((x) => isAsync(x.name));
-    if (e) out.push({ binding: b, name: e.name, what: e.what });
-  }
-  return out;
-}
-
-
-/**
  * S465 r6 — the names in `tree` (an expression node, a statement list, or a function
  * value's body) that are used as a VALUE while `isAsync(name)` holds: SPEC §13.2 "An
  * async-colored function SHALL NOT be used as a value … aliasing it, storing it in an
@@ -391,4 +383,462 @@ export function asyncFnValueDecl(decl: any): any {
   if (init.kind === "lambda") return { ...decl, initExpr: { ...init, isAsync: true } };
   if (init.kind === "escape-hatch") return { ...decl, initExpr: { ...init, _asyncFnValue: true } };
   return decl;
+}
+
+// ---------------------------------------------------------------------------
+// S467 round 10 — dpa-023 F4 (§13.9.6): a waiting function is bound only by a
+// `function` declaration.
+// ---------------------------------------------------------------------------
+
+/** A binding (or a write to one) whose value is, or may be, an async-colored function. */
+export interface WaitingBinding {
+  /** The binding's name as written (a destructuring pattern is shown as `{…}` / `[…]`). */
+  name: string;
+  /** The declaration / write node (diagnostic span). */
+  node: AnyNode;
+  /** `declared` — the initializer; `written` — a later write (`name = …`). */
+  how: "declared" | "written";
+  /**
+   * True when only the FAIL-CLOSED text fallback refused it: the value holds text the compiler
+   * did not parse into a tree (an escape hatch, a `match` arm) that mentions an async name.
+   * The refusal stands; it is reported as a backstop (`cascadeOnly`) so a precise diagnostic
+   * for the same unreadable text is not displaced by it.
+   */
+  textOnly: boolean;
+}
+
+const DECL_KINDS_F4 = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
+const WRITE_OPS_F4 = new Set(["=", "||=", "&&=", "??="]);
+/** Keys whose string value is never a reference (tags, names, operators, file paths). */
+const NON_REF_STRING_KEYS = new Set([
+  "kind", "id", "op", "litType", "fnStyle", "nativeKind", "exportKind", "exportedName", "filePath",
+  "typeAnnotation", "name", "property", "fnKind", "boundary", "keyword",
+]);
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Does `text` mention one of `names` as an identifier (not as a `.member`)? */
+function textMentions(text: string, names: readonly string[]): boolean {
+  for (const n of names) {
+    if (!n || n.startsWith("#")) continue;
+    if (new RegExp(`(?<![\\w$.])${escapeRe(n)}(?![\\w$])`).test(text)) return true;
+  }
+  return false;
+}
+
+/**
+ * The fail-closed TEXT rule, for an initializer the compiler did not parse into a tree: the
+ * text may hold a waiting function when it writes a function value (`=>` / `function`) and
+ * names an async function anywhere, or names one other than as the callee of a call
+ * (`vp.bind(…)`, `(0, vp)`, `[vp]`, a tag). `name(…)` / `name?.(…)` alone is a call: its
+ * result, which §13.2 keeps from being a waiting function.
+ */
+function textMayHoldWaitingFn(text: string, names: readonly string[]): boolean {
+  if (!textMentions(text, names)) return false;
+  if (/=>|\bfunction\b/.test(text)) return true;
+  for (const n of names) {
+    if (!n || n.startsWith("#")) continue;
+    const re = new RegExp(`(?<![\\w$.])${escapeRe(n)}(?![\\w$])`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (!/^\s*(?:\?\.\s*)?\(/.test(text.slice(m.index + n.length))) return true;
+    }
+  }
+  return false;
+}
+
+function isFnLiteralNode(e: AnyNode): boolean {
+  return isFnValueExpr(e) || e.kind === "function-decl";
+}
+
+/**
+ * Does the subtree reference an async-colored name in ANY position — a call, a value, a
+ * name inside a nested function value? Fail closed: text the compiler did not parse into
+ * a tree (an escape hatch, a `match` arm, a statement kept as text) counts when it
+ * mentions an async name. The one subtree not counted is a function value handed straight
+ * to a global fire-and-forget scheduler (§13.2: the scheduler discards its return, so it
+ * does not make the enclosing function wait).
+ */
+function refsAsync(tree: unknown, isAsync: (n: string) => boolean, asyncNames: readonly string[]): boolean {
+  const seen = new Set<unknown>();
+  let hit = false;
+  const visible = (names: readonly string[], shadow: ReadonlySet<string>): readonly string[] =>
+    shadow.size === 0 ? names : names.filter((x) => !shadow.has(x));
+  const walk = (n: unknown, key: string | null, owner: AnyNode | null, shadow: ReadonlySet<string>): void => {
+    if (hit || n === null || n === undefined) return;
+    if (typeof n === "string") {
+      // Text kept beside its parsed form (`expr` + `exprNode`, `init` + `initExpr`, …) is read
+      // from the tree; text with no tree is scanned (fail closed).
+      if (key === null || NON_REF_STRING_KEYS.has(key)) return;
+      if (owner && (owner[`${key}Node`] || owner[`${key}Expr`] || (key === "condition" && owner.condExpr))) return;
+      if (textMentions(n, visible(asyncNames, shadow))) hit = true;
+      return;
+    }
+    if (typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, key, owner, shadow); return; }
+    const node = n as AnyNode;
+    if (node.kind === "lit") return; // a string literal is text, not a reference
+    if ((node.kind === "ident" || node.kind === "shorthand") && typeof node.name === "string") {
+      if (!shadow.has(node.name) && isAsync(node.name)) hit = true;
+      return;
+    }
+    if (node.kind === "unary" && node.op === "typeof") return;
+    // A function's parameters shadow an outer name of the same spelling in its whole body
+    // (`const v = (w, p) => w(p)` beside an async `w` calls the parameter).
+    let inner = shadow;
+    if (isFnLiteralNode(node)) {
+      const own = paramNamesOf(node.params);
+      if (own.length) inner = new Set([...shadow, ...own]);
+    }
+    if (node.kind === "call") {
+      const callee = node.callee as AnyNode | undefined;
+      const sched = callee?.kind === "ident" && !shadow.has(String(callee.name)) && isGlobalSchedulerCallee(String(callee.name));
+      walk(callee, "callee", node, inner);
+      for (const a of (Array.isArray(node.args) ? node.args : []) as AnyNode[]) {
+        if (sched && a && typeof a === "object" && isFnLiteralNode(a)) continue;
+        walk(a, "args", node, inner);
+      }
+      return;
+    }
+    if (node.kind === "escape-hatch" && (node.nativeKind === "ArrowFunctionExpression" || node.nativeKind === "FunctionExpression")) {
+      const body = fnValueBody(node);
+      if (body === null) {
+        if (typeof node.raw === "string" && textMentions(node.raw, visible(asyncNames, inner))) hit = true;
+        return;
+      }
+      walk(body, null, node, inner);
+      walk(node.params, null, node, inner);
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      if (k === "span") continue;
+      walk(node[k], k, node, inner);
+    }
+  };
+  walk(tree, null, null, new Set());
+  return hit;
+}
+
+/** The names a parameter list binds (`a`, `a = 1`, `...rest`, a destructured parameter's names). */
+function paramNamesOf(params: unknown): string[] {
+  const out: string[] = [];
+  for (const p of (Array.isArray(params) ? params : [])) {
+    const raw = typeof p === "string" ? p : (p && typeof p === "object" ? (p as AnyNode).name : undefined);
+    if (p && typeof p === "object" && Array.isArray((p as AnyNode).boundNames)) {
+      for (const b of (p as AnyNode).boundNames as unknown[]) if (typeof b === "string") out.push(b);
+    }
+    if (typeof raw !== "string") continue;
+    const m = raw.trim().replace(/^\.\.\./, "").match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+    if (m && m[0] !== "__destructured__") out.push(m[0]);
+  }
+  return out;
+}
+
+/**
+ * May the value of `expr` be — or hold — an async-colored function? (§13.9.6.) Read off the
+ * parsed tree, failing closed:
+ *   - a function value (lambda, function expression) anywhere in it whose body references an
+ *     async-colored name (`refsAsync`) — a waiting function, whatever route takes it to the
+ *     binding: the init itself, a ternary / `||` arm, an IIFE's callee, a returned function,
+ *     an object property, a call argument;
+ *   - an async-colored name used as anything but the callee of a direct call — an alias, a
+ *     member read (`vp.bind(null)`), an element, a sequence operand;
+ *   - text the compiler did not parse into a tree (an escape hatch, a `match` arm) that
+ *     mentions one.
+ * NOT a waiting value: a direct call `f(…)` — an async-colored function's RESULT; §13.2 refuses
+ * every route by which a function body could hand back a waiting function —, a function value
+ * passed as the first argument of an awaited collection method (`xs.some((h) =>
+ * verifyPassword(p, h))` is data; the callback's own body is still searched for a function it
+ * hands back), an argument of a global scheduler, `typeof f`, and a synchronous function value.
+ */
+export function mayHoldWaitingFn(
+  expr: unknown,
+  isAsync: (n: string) => boolean,
+  asyncNames: readonly string[],
+  combinators: ReadonlySet<string>,
+): boolean {
+  const seen = new Set<unknown>();
+  let hit = false;
+  const walk = (n: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const node = n as AnyNode;
+    if (node.kind === "lit") return;
+    if ((node.kind === "ident" || node.kind === "shorthand") && typeof node.name === "string") {
+      if (isAsync(node.name)) hit = true;
+      return;
+    }
+    if (node.kind === "unary" && node.op === "typeof") return;
+    if (isFnLiteralNode(node)) {
+      if (refsAsync(node, isAsync, asyncNames)) hit = true;
+      return;
+    }
+    if (node.kind === "escape-hatch" && typeof node.raw === "string") {
+      // A JS form the scrml tree does not model (a tagged template, a sequence, a
+      // destructuring assignment…): judged on the JS parse of its text by the same rules;
+      // text that does not parse as one JS expression fails closed on any mention.
+      const est = parseExpression(node.raw, { tolerant: true }) as { ast: unknown; error: unknown; trailingContent?: string };
+      if (est.ast && !est.error && !est.trailingContent) {
+        if (estreeMayHoldWaitingFn(est.ast, isAsync, asyncNames, combinators)) hit = true;
+      } else if (textMayHoldWaitingFn(node.raw, asyncNames)) hit = true;
+      return;
+    }
+    if (node.kind === "match-expr") {
+      // The arms are kept as text: each arm's RESULT (after its `=>` / `:>`) is judged by the
+      // text rule (fail closed).
+      for (const arm of (Array.isArray(node.rawArms) ? node.rawArms : []) as unknown[]) {
+        if (typeof arm !== "string") continue;
+        const m = /=>|:>/.exec(arm);
+        if (textMayHoldWaitingFn(m ? arm.slice(m.index + 2) : arm, asyncNames)) { hit = true; return; }
+      }
+      walk(node.subjects ?? node.subject);
+      return;
+    }
+    if (node.kind === "call") {
+      const callee = node.callee as AnyNode | undefined;
+      const args = (Array.isArray(node.args) ? node.args : []) as AnyNode[];
+      const method = callee?.kind === "member" && typeof callee.property === "string" ? callee.property : null;
+      const isCombinator = method !== null && combinators.has(method);
+      const sched = callee?.kind === "ident" && isGlobalSchedulerCallee(String(callee.name));
+      // A direct call's callee name is a call, not a value; any other callee (a member, a
+      // function value — an IIFE —, a call result) is walked as a value.
+      if (callee && callee.kind !== "ident") walk(callee);
+      if (sched) return; // its arguments are discarded (§13.2)
+      args.forEach((a, i) => {
+        if (!a || typeof a !== "object") return;
+        if (isCombinator && i === 0) {
+          // Awaited in place: the callback is consumed, not held. What it RETURNS may still
+          // be a function value — its body is searched for one (and for value uses).
+          if (isFnLiteralNode(a)) { walkFnBody(a); return; }
+          if (a.kind === "ident") return;
+        }
+        walk(a);
+      });
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      if (k === "span") continue;
+      walk(node[k]);
+    }
+  };
+  const walkFnBody = (fn: AnyNode): void => {
+    if (fn.kind === "lambda") { walk((fn.body as AnyNode | undefined) ?? null); return; }
+    const body = fnValueBody(fn);
+    if (body === null) {
+      if (typeof fn.raw === "string" && textMentions(fn.raw, asyncNames)) hit = true;
+      return;
+    }
+    walk(body);
+  };
+  walk(expr);
+  return hit;
+}
+
+type ESN = { type?: string; [k: string]: unknown };
+const ES_FN_TYPES = new Set(["ArrowFunctionExpression", "FunctionExpression", "FunctionDeclaration", "ClassExpression", "ClassDeclaration"]);
+
+/** `refsAsync` over an ESTree subtree: any reference to an async name (a scheduler's function argument excepted). */
+function estreeRefsAsync(tree: unknown, isAsync: (n: string) => boolean): boolean {
+  let hit = false;
+  const walk = (n: unknown, parent: ESN | null, key: string | null, shadow: ReadonlySet<string>): void => {
+    if (hit || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) walk(c, parent, key, shadow); return; }
+    const node = n as ESN;
+    if (node.type === "Identifier" && typeof node.name === "string") {
+      const nonRef = parent && ((parent.type === "MemberExpression" && key === "property" && !parent.computed) ||
+        (parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand) ||
+        (parent.type === "MethodDefinition" && key === "key" && !parent.computed));
+      if (!nonRef && !shadow.has(node.name) && isAsync(node.name)) hit = true;
+      return;
+    }
+    if (node.type === "UnaryExpression" && node.operator === "typeof") return;
+    let inner = shadow;
+    if (ES_FN_TYPES.has(String(node.type)) && Array.isArray(node.params)) {
+      const own: string[] = [];
+      for (const p of node.params as unknown[]) estreePatternNames(p, own);
+      if (own.length) inner = new Set([...shadow, ...own]);
+    }
+    if (node.type === "CallExpression") {
+      const callee = node.callee as ESN | undefined;
+      const sched = callee?.type === "Identifier" && !shadow.has(String(callee.name)) && isGlobalSchedulerCallee(String(callee.name));
+      walk(callee, node, "callee", inner);
+      for (const a of (node.arguments as ESN[] | undefined) ?? []) {
+        if (sched && a && ES_FN_TYPES.has(String(a.type))) continue;
+        walk(a, node, "arguments", inner);
+      }
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      if (k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      walk(node[k], node, k, inner);
+    }
+  };
+  walk(tree, null, null, new Set());
+  return hit;
+}
+
+/** The names an ESTree binding pattern binds. */
+function estreePatternNames(p: unknown, out: string[]): void {
+  if (!p || typeof p !== "object") return;
+  const n = p as ESN;
+  if (n.type === "Identifier" && typeof n.name === "string") out.push(n.name);
+  else if (n.type === "AssignmentPattern") estreePatternNames(n.left, out);
+  else if (n.type === "RestElement") estreePatternNames(n.argument, out);
+  else if (n.type === "ArrayPattern") for (const e of (n.elements as unknown[] | undefined) ?? []) estreePatternNames(e, out);
+  else if (n.type === "ObjectPattern") {
+    for (const pr of (n.properties as ESN[] | undefined) ?? []) {
+      if (pr && pr.type === "RestElement") estreePatternNames(pr.argument, out);
+      else if (pr) estreePatternNames(pr.value, out);
+    }
+  }
+}
+
+/** `mayHoldWaitingFn` over an ESTree expression (an escape hatch's parsed text). */
+function estreeMayHoldWaitingFn(
+  tree: unknown,
+  isAsync: (n: string) => boolean,
+  asyncNames: readonly string[],
+  combinators: ReadonlySet<string>,
+): boolean {
+  void asyncNames;
+  let hit = false;
+  const walk = (n: unknown, parent: ESN | null, key: string | null): void => {
+    if (hit || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) walk(c, parent, key); return; }
+    const node = n as ESN;
+    if (node.type === "Identifier" && typeof node.name === "string") {
+      const nonRef = parent && ((parent.type === "MemberExpression" && key === "property" && !parent.computed) ||
+        (parent.type === "Property" && key === "key" && !parent.computed && !parent.shorthand));
+      if (!nonRef && isAsync(node.name)) hit = true;
+      return;
+    }
+    if (node.type === "UnaryExpression" && node.operator === "typeof") return;
+    if (ES_FN_TYPES.has(String(node.type))) {
+      if (estreeRefsAsync(node, isAsync)) hit = true;
+      return;
+    }
+    if (node.type === "Property" && node.shorthand) { walk(node.value, node, "value"); return; }
+    if (node.type === "CallExpression" || node.type === "TaggedTemplateExpression") {
+      const callee = (node.type === "CallExpression" ? node.callee : node.tag) as ESN | undefined;
+      // A direct call's callee name is a call, not a value (a tag is called too).
+      if (callee && callee.type !== "Identifier") walk(callee, node, "callee");
+      if (node.type === "TaggedTemplateExpression") { walk(node.quasi, node, "quasi"); return; }
+      if (callee?.type === "Identifier" && isGlobalSchedulerCallee(String(callee.name))) return;
+      const method = callee?.type === "MemberExpression" && !callee.computed && (callee.property as ESN | undefined)?.type === "Identifier"
+        ? String((callee.property as ESN).name) : null;
+      const isCombinator = method !== null && combinators.has(method);
+      ((node.arguments as ESN[] | undefined) ?? []).forEach((a, i) => {
+        if (!a || typeof a !== "object") return;
+        if (isCombinator && i === 0) {
+          if (a.type === "Identifier") return;
+          if (a.type === "ArrowFunctionExpression" || a.type === "FunctionExpression") {
+            walk(a.body, a, "body"); // consumed in place; search what it hands back
+            return;
+          }
+        }
+        walk(a, node, "arguments");
+      });
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      if (k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      walk(node[k], node, k);
+    }
+  };
+  walk(tree, null, null);
+  return hit;
+}
+
+function bindingNameOf(n: AnyNode): string {
+  const nm = n.kind === "export-decl" ? n.exportedName : n.name;
+  if (typeof nm === "string" && nm) return nm;
+  if (nm && typeof nm === "object") return (nm as AnyNode).kind === "destructure-array" ? "[…]" : "{…}";
+  return "(binding)";
+}
+
+/**
+ * §13.9.6 — every binding in a file's logic (file scope, value-only library modules, nested
+ * function bodies and blocks: every `const` / `let` / `lin` / tilde declaration and every
+ * `export const` / `let` / `var`) and every later write (`name = …`, `||=` / `&&=` / `??=`, a
+ * block-nested tilde re-declaration, a member store `o.k = …`) whose value is or may be an
+ * async-colored function (`mayHoldWaitingFn`). Each is E-ASYNC-FN-ESCAPES-AS-VALUE.
+ * `isAsync` / `asyncNames` are the file's one async set (file-async-fns.ts).
+ */
+export function waitingBindingsOf(
+  topStmts: unknown[],
+  isAsync: (n: string) => boolean,
+  asyncNames: readonly string[],
+  combinators: ReadonlySet<string>,
+): WaitingBinding[] {
+  const out: WaitingBinding[] = [];
+  if (asyncNames.length === 0) return out;
+  const reported = new Set<string>();
+  const seen = new Set<unknown>();
+  const check = (value: unknown, text: unknown, node: AnyNode, name: string, how: WaitingBinding["how"]): void => {
+    const span = node.span as { start?: number } | undefined;
+    const key = `${name}@${span?.start ?? "?"}`;
+    if (reported.has(key)) return;
+    // `names` = [] turns every text fallback off: the tree-only verdict.
+    const judge = (names: readonly string[]): boolean => {
+      if (value && typeof value === "object") return mayHoldWaitingFn(value, isAsync, names, combinators);
+      if (typeof text === "string" && text.trim()) {
+        // No parsed initializer: parse it; else fail closed on any mention.
+        let parsed: unknown = null;
+        try { parsed = parseExprToNode(text, "<f4>", 0); } catch { parsed = null; }
+        return parsed ? mayHoldWaitingFn(parsed, isAsync, names, combinators) : textMayHoldWaitingFn(text, names);
+      }
+      return false;
+    };
+    if (!judge(asyncNames)) return;
+    reported.add(key);
+    out.push({ name, node, how, textOnly: !judge([]) });
+  };
+  const walk = (n: unknown, nested: boolean): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      n.forEach((c, i) => {
+        // An export whose initializer the builder split off into the NEXT statement
+        // (`export const x = match … { … }` — the export keeps `=` with nothing after it):
+        // the value is that statement, judged by any mention (fail closed).
+        const e = c as AnyNode | null;
+        if (e && typeof e === "object" && e.kind === "export-decl" && !e.valueInitExpr && typeof e.raw === "string" &&
+          /=\s*$/.test(e.raw) && i + 1 < n.length && refsAsync(n[i + 1], isAsync, asyncNames)) {
+          const key = `${bindingNameOf(e)}@${(e.span as { start?: number } | undefined)?.start ?? "?"}`;
+          if (!reported.has(key)) {
+            reported.add(key);
+            out.push({ name: bindingNameOf(e), node: e, how: "declared", textOnly: !refsAsync(n[i + 1], isAsync, []) });
+          }
+        }
+        walk(c, nested);
+      });
+      return;
+    }
+    const node = n as AnyNode;
+    if (typeof node.kind === "string" && DECL_KINDS_F4.has(node.kind)) {
+      // A block-nested tilde declaration of an outer name is a WRITE to it.
+      check(node.initExpr, node.init, node, bindingNameOf(node), node.kind === "tilde-decl" && nested ? "written" : "declared");
+    } else if (node.kind === "export-decl" && (node.exportKind === "const" || node.exportKind === "let" || node.exportKind === "var") &&
+      !node.reExportSource) {
+      const raw = typeof node.raw === "string" ? node.raw : "";
+      const eq = raw.indexOf("=");
+      check(node.valueInitExpr, node.valueInitExpr ? null : (eq >= 0 ? raw.slice(eq + 1) : null), node, bindingNameOf(node), "declared");
+    } else if (node.kind === "assign" && WRITE_OPS_F4.has(String(node.op))) {
+      const t = node.target as AnyNode | undefined;
+      const name = t && t.kind === "ident" && typeof t.name === "string" ? t.name
+        : t && t.kind === "member" && typeof t.property === "string" ? `….${t.property}` : "(target)";
+      check(node.value, null, node, name, "written");
+    }
+    for (const k of Object.keys(node)) {
+      if (k === "span" || k === "valueInitExpr") continue;
+      const c = node[k];
+      if (c && typeof c === "object") walk(c, true);
+    }
+  };
+  walk(Array.isArray(topStmts) ? topStmts : [], false);
+  return out;
 }

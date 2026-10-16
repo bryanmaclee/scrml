@@ -35,8 +35,9 @@
  */
 import { computeAsyncFnNames } from "./emit-library-shared.ts";
 import { collectTopLevelStatements } from "./collect.ts";
-import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName, escapingAsyncValuesOf } from "./fn-valued-bindings.ts";
-import type { FnValuedBinding } from "./fn-valued-bindings.ts";
+import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName, waitingBindingsOf } from "./fn-valued-bindings.ts";
+import type { WaitingBinding } from "./fn-valued-bindings.ts";
+import { ASYNC_COMBINATOR_METHODS } from "./async-combinators.ts";
 import { buildCalleeImportMap, asyncImportedLocalsOfFile } from "./scheduling.ts";
 
 type AnyFile = Record<string, unknown>;
@@ -85,26 +86,91 @@ export function computeFileAsyncFnNames(fileAST: unknown, inputs: FileAsyncInput
     registry ? calleeMap : null, registry as never, server);
   // …and as MEMBERS (each one IS an async peer on the server).
   const all = new Set<string>([...byBody, ...server]);
-  // S467 r9 — the file-scope bindings that hand out an async function value (an alias, an
-  // arm of an expression, a returned function): judged here, on the one set, and
-  // reported by codegen/index.ts (`fileScopeAsyncEscapesOf`). The anonymous function
-  // values were fixpoint members only; no identifier names them, so they leave the set.
-  ESCAPES.set(all, escapingAsyncValuesOf(bindings, (n) => all.has(n)));
+  // The anonymous function values were fixpoint members only; no identifier names them,
+  // so they leave the set.
   for (const n of [...all]) if (isAnonFnValueName(n)) all.delete(n);
   for (const n of [...byBody]) if (isAnonFnValueName(n)) byBody.delete(n);
   BY_BODY.set(all, byBody);
   return all;
 }
 
-const ESCAPES = new WeakMap<Set<string>, Array<{ binding: FnValuedBinding; name: string; what: string }>>();
 /**
- * S467 r9 — the file-scope bindings of a computed file set whose value hands out an async
- * function by a route the compiler cannot await (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE): an
- * alias (`export const inner = vp`), an arm (`c ? (p, h) => verifyPassword(p, h) : …`), a
- * returned function (`(p) => (h) => verifyPassword(p, h)`), a later `let` write.
+ * S467 round 10 — dpa-023 F4 (§13.9.6, ruling:user-voice-scrml.md S467 "b it is" / "yes on the
+ * impl#1 enforce F4"): an async-colored function is bound ONLY by a `function` declaration.
+ * Every binding of the file — file scope, a value-only library module, a nested scope — and
+ * every later write whose value is or may be an async-colored function (codegen/fn-valued-
+ * bindings.ts `waitingBindingsOf`, judged on the file's one set) — reported once per binding
+ * by codegen/index.ts as E-ASYNC-FN-ESCAPES-AS-VALUE. This replaces round 9's escape judge
+ * (which refused only the async values a binding handed out OTHER than by being one, and
+ * treated a call / member / sequence init as "not a function": `export const inner = (() =>
+ * vp)()` and `= vp.bind(null)` were unseen and their callers tested a Promise).
  */
-export function fileScopeAsyncEscapesOf(fileSet: Set<string>): Array<{ binding: FnValuedBinding; name: string; what: string }> {
-  return ESCAPES.get(fileSet) ?? [];
+export function waitingBindingsOfFile(
+  fileAST: unknown,
+  fileSet: Set<string>,
+  routeMap?: { functions?: Map<string, unknown> } | null,
+): WaitingBinding[] {
+  // A namespace import of a scrml module (`import * as auth from "scrml:auth"`) is not
+  // classified member by member, so `auth.verifyPassword` cannot be shown sync: its local
+  // counts as async here (fail closed — §13.9.6 refuses a binding not PROVABLY free of a
+  // waiting function).
+  const ns = namespaceImportLocalsOf(fileAST);
+  // A helper placed on the server ONLY because its callers run there (route inference's
+  // caller-context propagation) and synchronous by its body is not a waiting function: it
+  // runs where its caller runs, and a reference to it is the §12.2 first-class-reference
+  // case (#284 — `const fn = sumAmounts; return fn(rows)`, conformance
+  // server-db/first-class-fn-ref-server-helper-rt), whose calls the compiler resolves and
+  // awaits. It is in the file set only as an in-process peer.
+  const byBody = asyncByBodyOf(fileSet);
+  const propagated = callerPropagatedFnNamesOfFile(fileAST, routeMap ?? null);
+  const isAsync = (n: string): boolean => ns.has(n) || (fileSet.has(n) && (byBody.has(n) || !propagated.has(n)));
+  const names = [...fileSet, ...ns].filter((n) => !isAnonFnValueName(n) && isAsync(n));
+  return waitingBindingsOf(collectTopLevelStatements(fileAST as never) as unknown[], isAsync, names,
+    ASYNC_COMBINATOR_METHODS);
+}
+
+/**
+ * The file-scope functions route inference placed on the server for NO reason but
+ * caller-context propagation (every escalation reason is `caller-context-propagation`;
+ * not written `server function`).
+ */
+function callerPropagatedFnNamesOfFile(
+  fileAST: unknown,
+  routeMap: { functions?: Map<string, unknown> } | null,
+): Set<string> {
+  const out = new Set<string>();
+  if (!routeMap?.functions) return out;
+  const fp = (fileAST as { filePath?: string } | null)?.filePath ?? "";
+  for (const st of collectTopLevelStatements(fileAST as never) as unknown as AnyFile[]) {
+    if (!st || st.kind !== "function-decl" || typeof st.name !== "string" || !st.name || st.isServer === true) continue;
+    const span = st.span as { start?: number } | undefined;
+    if (!span) continue;
+    const r = routeMap.functions.get(`${fp}::${span.start}`) as
+      { boundary?: string; escalationReasons?: Array<{ kind?: string; resourceType?: string }> } | undefined;
+    const reasons = r?.escalationReasons ?? [];
+    if (r?.boundary === "server" && reasons.length > 0 &&
+      reasons.every((x) => x.kind === "server-only-resource" && x.resourceType === "caller-context-propagation")) {
+      out.add(st.name);
+    }
+  }
+  return out;
+}
+
+/** The locals of `import * as NAME from "<scrml module>"` (a `.scrml` file or a `scrml:` module). */
+function namespaceImportLocalsOf(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  const f = fileAST as { ast?: { imports?: unknown }; imports?: unknown } | null;
+  const imports = (f?.ast?.imports ?? f?.imports ?? []) as Array<{ kind?: string; raw?: string; source?: string | null }>;
+  if (!Array.isArray(imports)) return out;
+  for (const imp of imports) {
+    if (!imp || imp.kind !== "import-decl" || typeof imp.raw !== "string") continue;
+    // The builder leaves `source` null for the namespace form: read both off the text.
+    const m = /\*\s*as\s+([A-Za-z_$][\w$]*)\s+from\s+["']([^"']+)["']/.exec(imp.raw);
+    if (!m) continue;
+    const src = typeof imp.source === "string" && imp.source ? imp.source : m[2];
+    if (src.endsWith(".scrml") || src.startsWith("scrml:")) out.add(m[1]);
+  }
+  return out;
 }
 
 /**
@@ -123,7 +189,6 @@ export function asyncByBodyOf(fileSet: Set<string>): Set<string> {
 export function adoptFileAsyncSet(target: Set<string>, computed: Set<string>): void {
   for (const n of computed) target.add(n);
   BY_BODY.set(target, asyncByBodyOf(computed));
-  ESCAPES.set(target, fileScopeAsyncEscapesOf(computed));
 }
 
 const KEY = "_asyncFnNames";

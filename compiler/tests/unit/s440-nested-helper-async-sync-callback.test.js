@@ -189,8 +189,11 @@ describe("arrow-bound helper `const inner = (x) => isOk(x)` — peer-server-fn c
   for (const [side, compile] of SIDES) {
     test(`${side}: E-SERVER-FN-IN-SYNC-CALLBACK at line 4, exactly once`, () => {
       const o = compile("const inner = (x) => isOk(x)\n  const r = [1, 2, 3].some(x => inner(x))");
-      expect(o.codes).toEqual([SERVER_CODE]);
-      expect(o.errors[0].span.line).toBe(4);
+      // S467 r10 — dpa-023 F4 (§13.9.6): the binding itself holds a waiting function, so it is
+      // also E-ASYNC-FN-ESCAPES-AS-VALUE (at the same declaration); each code exactly once.
+      expect([...o.codes].sort()).toEqual(["E-ASYNC-FN-ESCAPES-AS-VALUE", SERVER_CODE]);
+      const sync = o.errors.find((e) => e.code === SERVER_CODE);
+      expect(sync.span.line).toBe(4);
     });
   }
 });

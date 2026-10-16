@@ -74,7 +74,7 @@ import { compilationHasDatabase } from "../tenant-undeclared.ts";
 import { generateToolJs, generateToolLibraryJs } from "./emit-tool.ts";
 import { setFileSchedulerBindings } from "./async-combinators.ts";
 import { schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
-import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, fileScopeAsyncEscapesOf } from "./file-async-fns.ts";
+import { computeFileAsyncFnNames, serverFnNamesOfFile, setFileAsyncFnNames, adoptFileAsyncSet, waitingBindingsOfFile } from "./file-async-fns.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
 import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
 import { getElementAttrSchema } from "../attribute-registry.js";
@@ -2714,21 +2714,34 @@ export function runCG(input: CgInput): CgOutput {
       // call sites through buildServerCalleeImportMap, the CPS wrapper). No emitter runs
       // its own fixpoint any more.
       setFileAsyncFnNames(fileAST, fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput));
-      // S467 r9 (HIGH-1) — §13.2: a file-scope binding that hands out an async function
-      // other than by BEING one (an alias, an expression arm, a returned function, a later
-      // `let` write) would hand its caller an un-awaited Promise. Refused, once per binding,
-      // judged on the file's one set (client and server alike).
-      for (const esc of fileScopeAsyncEscapesOf(fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput))) {
-        const shown = esc.name.startsWith("#") ? "a function value" : `\`${esc.name}\``;
-        recordRefusedLowering(new CGError(
+      // S467 round 10 — dpa-023 F4 (§13.9.6): an async-colored function is bound ONLY by a
+      // `function` declaration. Every binding (any scope) and every later write whose value
+      // is or may be one is refused — once per binding, judged on the file's one set
+      // (client and server alike).
+      for (const wb of waitingBindingsOfFile(fileAST, fileAsyncFnNamesOf(fileAST, files, _fileAsyncMemo, exportRegistryInput, importGraphInput), _fileAsyncMemo.routeMap ?? null)) {
+        const plainName = /^[A-Za-z_$][\w$]*$/.test(wb.name);
+        const fix = plainName
+          ? `declare it as \`function ${wb.name}(…) { return … }\` and call \`${wb.name}(…)\` directly`
+          : "declare the function with `function name(…) { return … }` and call it by name";
+        const why = wb.textOnly
+          ? "holds text the compiler could not read as an expression, and that text names an async function " +
+            "(one that calls a server function or a Promise-returning helper), so the compiler cannot show the " +
+            "value is not a waiting function"
+          : `${wb.how === "written" ? "is assigned" : "holds"} a value that is, or may be, an async function — one ` +
+            "that calls a server function or a Promise-returning helper, so the compiler emits it `async`";
+        const err = new CGError(
           "E-ASYNC-FN-ESCAPES-AS-VALUE",
-          `E-ASYNC-FN-ESCAPES-AS-VALUE: the value of \`${esc.binding.name}\` can be ${shown} (${esc.what}), and ` +
-            "that function is async — it calls a server function or a Promise-returning helper, so the compiler " +
-            "emits it `async`. Handed out as a value, its calls cannot be seen and so cannot be awaited: a caller " +
-            "would test an un-awaited Promise, which is always truthy (§13.2). Declare the function itself with " +
-            "`function name(…) { … }` or `const name = (…) => …` and call it directly.",
-          (esc.binding.node as { span?: object }).span ?? {},
-        ), esc.binding.node as object);
+          `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${wb.name}\` ${why}. A waiting function may be bound only by a ` +
+            "`function` declaration (§13.9.6): through a binding its calls cannot be seen, so they are not " +
+            "awaited, and a caller would test an un-awaited Promise, which is always truthy (§13.2). Fix: " + fix +
+            ". A synchronous function value is unaffected; a waiting lambda is allowed only as the direct " +
+            "argument of an awaited collection method (`.some`, `.every`, `.find`, `.filter`, `.map`, …).",
+          (wb.node as { span?: object }).span ?? {},
+        );
+        // A text-only refusal is a backstop: a precise diagnostic for the same unreadable text
+        // (server-text-guard, …) is not displaced by it; the compile fails either way.
+        if (wb.textOnly) (err as CGError & { cascadeOnly?: boolean }).cascadeOnly = true;
+        recordRefusedLowering(err, wb.node as object);
       }
 
       // s457 (§21.4) — this module's LOCAL `.scrml` re-exports, for emit-server's
