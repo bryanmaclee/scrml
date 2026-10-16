@@ -170,34 +170,75 @@ function identityReadIn(
   return hit;
 }
 
+
 /**
- * s466 fix round 5 — what a NAME read in a default refers to, for the identity
- * check: `null` when it is not a local binding the check follows (a builtin, an
- * import from outside the compilation, a non-function value); `{ fns }` — the
- * function value(s) it may hold (a `const`-bound lambda, a client `function`),
- * each scanned as if inlined; `"unresolved"` — a binding whose function value
- * cannot be followed (a `let`, a `const` initialised from a call, a cell).
- * Calling an unresolved binding fails closed.
+ * What a NAME read in a default refers to, for the identity check (s466 fix
+ * rounds 5–6; binding-provenance.ts supplies the union of everything that gives
+ * the name a value):
+ *   - `null` — not a binding of the compilation the check follows (a builtin, a
+ *     parameter of an enclosing function, a JS / `scrml:` import);
+ *   - `{ owners }` — every value source of the name (a function's params + body,
+ *     a `const` / `let` initialiser, an assignment's right-hand side, a cell's
+ *     initialiser), each scanned as if inlined;
+ *   - `serverCell` — the name is a §52 server-authority cell (`<x server>`): its
+ *     value is server-resolved, so a default reading it is an identity read;
+ *   - `unresolved` — a binding whose provenance cannot be followed (an import from
+ *     a module outside the compilation, a name assigned in raw text). ANY reference
+ *     to it fails closed — a value passed along (`pick(h)`), read (`me`), spread,
+ *     destructured or called alike.
  */
-export type IdentityNameResolution = null | "unresolved" | { fns: Array<{ params?: unknown; body?: unknown }> };
+export type IdentityNameResolution =
+  | null
+  | {
+      owners: Array<{ params?: unknown; body?: unknown }>;
+      serverCell?: string | null;
+      unresolved?: string | null;
+    };
 
 export interface IdentityRead {
-  /** The identity read as written (`session.userId`, `@session.userId`), or the unresolved name. */
+  /** The identity read as written (`session.userId`, `@session.userId`, `@acct`), or the unresolved name. */
   read: string;
-  /** The local helper the read was reached through (the first one the default names), or null. */
+  /** The binding the read was reached through (the first one the default names), or null. */
   via: string | null;
-  /** The default calls a binding whose function value cannot be followed. */
+  /** The default references a binding whose provenance cannot be followed. */
   unresolved: boolean;
+  /** Why the provenance cannot be followed (when `unresolved`). */
+  why?: string;
+}
+
+/** Free names (cells included) a raw fragment reads; unparseable text → every identifier token (over-collects). */
+function rawFreeNames(raw: string): string[] {
+  const ast = parseScrmlTextToEstree(raw, false) ?? parseScrmlTextToEstree(raw, true);
+  if (!ast) {
+    const out: string[] = [];
+    const re = /(?<![.\w$])@?[A-Za-z_$][\w$]*/g;
+    let m: RegExpExecArray | null;
+    const text = blankLiteralTextInSource(raw);
+    while ((m = re.exec(text)) !== null) out.push(m[0]);
+    return out;
+  }
+  const a = ast as unknown as { type?: string };
+  const program = a.type === "Program"
+    ? ast
+    : ({ type: "Program", sourceType: "module", body: [{ type: "ExpressionStatement", expression: ast }] } as unknown as typeof ast);
+  const out: string[] = [];
+  for (const [id, binding] of resolveProgramReferences(program as never)) {
+    const nm = (id as { name?: unknown }).name;
+    if (typeof nm === "string" && binding === undefined) out.push(nm);
+  }
+  return out;
 }
 
 /**
- * `identityReadInDefault`, following the default's LOCAL FUNCTION-VALUED
- * BINDINGS (s466 fix round 5): with `const getU = () => @session.userId`, the
- * default `uid = getU()` is the same identity read as `uid = @session.userId`.
- * Every free reference to a resolvable function value is scanned — a reference
- * that is not a call may still be invoked (`getU.call()`, `[getU].map(f => f())`),
- * so over-scanning is the fail-closed direction; a CALL of a binding whose
- * function value cannot be followed is reported as unresolved.
+ * `identityReadInDefault`, following EVERY binding the default references (s466
+ * fix round 6). With `const getU = () => @session.userId`, `const me =
+ * @session.userId`, `let h = …; pick(h)`, `const o = { u: @session.userId }`,
+ * `const m = @session` — the defaults `getU()`, `me`, `pick(h)`, `o.u`,
+ * `m.userId` are the same identity read as `@session.userId`. A name is followed
+ * by REFERENCE, not by use: a function value passed along may be invoked by the
+ * callee, a value read may carry the identity, so every free reference is
+ * followed into every value source of the name, transitively; a reference to a
+ * binding whose provenance cannot be followed fails closed.
  */
 export function identityReadInDefaultDeep(
   defaultExpr: unknown,
@@ -206,7 +247,7 @@ export function identityReadInDefaultDeep(
     currentUserAmbient: boolean;
     sessionProjection: boolean;
     /**
-     * Does `@session` count in a FOLLOWED helper? Inside a helper the read is not
+     * Does `@session` count in a FOLLOWED binding? Inside a helper the read is not
      * the default's own server context: on the server every `@name` lowering reads
      * the request body, so `@session` there is client-claimed identity too. True
      * unless a file-scope `<session>` cell owns the name.
@@ -223,29 +264,34 @@ export function identityReadInDefaultDeep(
     });
     if (direct !== null) return { read: direct, via, unresolved: false };
     let hit: IdentityRead | null = null;
-    walkScoped(owner, (n, isBound, link) => {
+    const follow = (name: string): void => {
       if (hit !== null) return;
-      const r = n as Record<string, unknown>;
-      if (r.kind !== "ident" || typeof r.name !== "string") return;
-      const name = r.name;
       if (name === "session" || name === "@session" || name === "@currentUser") return;
-      if (!name.startsWith("@") && isBound(name)) return;
       if (visited.has(name)) return;
+      visited.add(name);
       const res = opts.resolveName(name);
       if (res === null) return;
-      if (res === "unresolved") {
-        const parent = link.parent as Record<string, unknown> | null;
-        const called = !!parent && (
-          (parent.kind === "call" && link.key === "callee") ||
-          (parent.kind === "member" && link.key === "object")
-        );
-        if (called) hit = { read: name, via: via ?? name, unresolved: true };
+      if (res.serverCell) { hit = { read: res.serverCell, via: via ?? (name === res.serverCell ? null : name), unresolved: false }; return; }
+      if (res.unresolved) { hit = { read: name, via: via ?? name, unresolved: true, why: res.unresolved }; return; }
+      for (const o of res.owners) {
+        const sub = scan(o, via ?? name);
+        if (sub !== null) { hit = sub; return; }
+      }
+    };
+    walkScoped(owner, (n, isBound) => {
+      if (hit !== null) return;
+      const r = n as Record<string, unknown>;
+      if (r.kind === "ident" && typeof r.name === "string") {
+        if (!r.name.startsWith("@") && isBound(r.name)) return;
+        follow(r.name);
         return;
       }
-      visited.add(name);
-      for (const fn of res.fns) {
-        const sub = scan(fn, via ?? name);
-        if (sub !== null) { hit = sub; return; }
+      for (const frag of rawFragmentsOf(r)) {
+        for (const nm of rawFreeNames(frag)) {
+          if (!nm.startsWith("@") && isBound(nm)) continue;
+          follow(nm);
+          if (hit !== null) return;
+        }
       }
     });
     return hit;
