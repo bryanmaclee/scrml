@@ -10827,7 +10827,7 @@ Parallel shape to the other "what scrml is NOT" rules: §14.1.2 (no unrecognized
 
 ### 14.1.2 Unrecognized type names — every type must be defined
 
-**Canonical rule (S174 follow-on — hard line).** Every type name in a type-annotation position SHALL resolve to a *defined* type: a built-in (`string`, `number`, `boolean`, `int`, the named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/`color`, the built-in error/enum types `NetworkError`/`ValidationError`/`SQLError`/`AuthError`/`TimeoutError`/`ParseError`/`NotFoundError`/`ConflictError`), `asIs`, a type declared in the same file (including a *forward reference* — a type used before its `type` declaration appears in source order), or an imported type (§21.8). An **unrecognized** type name — a typo'd or genuinely undefined name like `Frobnicate` — is rejected with **`E-TYPE-UNKNOWN-NAME`** (§34).
+**Canonical rule (S174 follow-on — hard line).** Every type name in a type-annotation position SHALL resolve to a *defined* type: a built-in (`string`, `number`, `boolean`, `int`, the named-shape vocabulary `email`/`url`/`uuid`/`phone`/`date`/`time`/`color`, the built-in error types `NetworkError`/`ValidationError`/`SQLError`/`AuthError`/`TimeoutError`/`NotFoundError`/`ConflictError`; `ParseError` is NOT built in — it is imported from `scrml:data`, §41.13, S464 ruling "(a) Import-only"), `asIs`, a type declared in the same file (including a *forward reference* — a type used before its `type` declaration appears in source order), or an imported type (§21.8). An **unrecognized** type name — a typo'd or genuinely undefined name like `Frobnicate` — is rejected with **`E-TYPE-UNKNOWN-NAME`** (§34).
 
 Before this rule, an unrecognized type name fell through `resolveTypeExpr`'s unresolvable path to `asIs` with **no diagnostic** — silently masquerading as the sanctioned `asIs` escape hatch, exactly as the literal `any` token did before §14.1.1. This is the *separate, broader gap* §14.1.1 deferred; it is now closed. The sanctioned untyped escape hatch remains **`asIs`** — a deliberate, *named*, greppable opt-out; a misspelled name is not.
 
@@ -13832,6 +13832,8 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 - A bare variant reference is the form `.VariantName` with no preceding type qualifier.
 - A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a `fail` target (`fail .V` where the enclosing function is declared `! T`, §19.3.3), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
 - An enum-payload-variant CONSTRUCTOR argument is such a position. In `<x>: Mode = .OnePlayer(.Easy)` (where `Mode:enum = { OnePlayer(difficulty: Difficulty), ... }`), the argument `.Easy` resolves against the `OnePlayer` payload-field type (`Difficulty`) — NOT the outer enum `Mode`. The constructor callee may be bare (`.OnePlayer(...)`, resolved against the surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` / `Mode::OnePlayer(...)`, resolved directly). A wrong argument variant fails with `E-TYPE-063` naming the PAYLOAD enum (`Difficulty`), not the constructor's enum. (Added ss16 C5 — §14.10 position-3 for variant constructors.)
+- An unannotated cell DECLARATION whose initializer is a qualified variant of a known enum — `<col> = Col.Red` (or `Col::Red`), or a payload construction `<s> = Shape.Line(3)` — SHALL have that enum type (§66.3 rule 5: `E.V` is a literal of `E`; `E.V(…)` is a call whose declared type is `E`), so it is a previously-declared cell with a known type above: a bare variant written to it (`@col = .Blue`) resolves in function bodies and handlers alike, and a variant the enum does not declare is `E-TYPE-063`. A bare `.V` initializer (`<col> = .Red`) gives no type and stays `E-VARIANT-AMBIGUOUS`; a later reassignment (`@x = Col.Red`) never retypes a cell.
+  > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Infer from initializer" · **direction of change:** newly-accepting (E-VARIANT-AMBIGUOUS → compiles), and newly-rejecting only for a write of a variant the inferred enum does not declare (previously unchecked).
 - A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or otherwise ambiguous (e.g., `let x = .Small` with no annotation; the compiler cannot pick which enum has a `.Small` variant).
 - A bare variant reference IS NOT supported in expression positions where no type context exists (top-level expressions, `let`/`const` without annotation in untyped contexts).
 - The fully-qualified form (`MarioState.Small`, `MarioState::Small`) remains legal everywhere bare variants are legal. Writers may always be explicit.
@@ -30855,6 +30857,8 @@ The function lifts untyped JSON (a string to be `JSON.parse`d, or an already-par
 - The second argument SHALL be a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, and arbitrary type expressions SHALL NOT be accepted in argument-2 position. Violations SHALL emit `E-PARSEVARIANT-TYPE-NOT-ENUM` at the type-system stage (cross-ref §34). The compile-time enforcement closes the string-discriminator trap at the type system.
 - The discriminator key SHALL be the enum's own variant names. `parseVariant` does NOT accept a `discriminatorKey=`, `mapping=`, or any name-translation argument. Wire formats whose discriminator does not match the variant name (e.g., `{type: "SUCCESS"}` against an enum variant `Success`) SHALL be normalized in a server function before being passed to `parseVariant`.
 - `parseVariant` returns the constructed enum value typed as `EnumType`. Inside an `!{}` handler installed against the call, the handler's exhaustiveness check (cross-ref §19) sees the four `ParseError` variants and a non-exhaustive handler is `E-MATCH-NOT-EXHAUSTIVE`.
+- `ParseError` is NOT ambient: a program that NAMES it — a qualified handler arm (`ParseError.Malformed(r) :>`, `ParseError::Malformed(r) :>`), a type annotation, or an expression — SHALL import it like every stdlib export (`import { ParseError } from 'scrml:data'`); without the import the name is undeclared (`E-SCOPE-001`; `E-TYPE-UNKNOWN-NAME` in a type annotation, §14.1.2). Bare-variant arms (`.Malformed(r) :>`) in the `!{}` handler of a `parseVariant` call name no type and need no import, and that handler's exhaustiveness is still checked against the four variants.
+  > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Import-only" · **direction of change:** newly-rejecting (an un-imported `ParseError` name previously resolved to a compiler built-in).
 - `parseVariant` does NOT auto-recurse into payload fields whose type is itself an enum. Each level of nested-enum payload SHALL be parsed by an explicit nested call. This forces composition discipline and matches the family's sliver-test minimalism.
 - `parseVariant` is callable in both server-side and client-side contexts; the emitted code is a synchronous monomorphized parser per call site and respects the existing server/client codegen split.
 
@@ -41786,6 +41790,9 @@ Type-as-argument primitives MAY use enum or struct types declared in stdlib modu
 
 The importing file's `typeRegistry` SHALL include any imported stdlib types after MOD resolution. This is a prerequisite for `!{}` handler exhaustiveness checking against stdlib-declared failure types (e.g., `parseVariant(json, T) !{ .ParseError(msg) :> ... }` requires the importer's typeRegistry to contain `ParseError`).
 
+A stdlib-declared type's NAME is in a file's scope only through such an import — none is ambient, `ParseError` included (§41.13: an un-imported `ParseError` is undeclared, while a `parseVariant` handler's bare-variant arms need no import).
+> **Provenance:** ruling:user-voice-scrml.md S464 "(a) Import-only".
+
 ### Cross-references
 
 - §41.13 — `parseVariant` (first general-position family member).
@@ -45105,6 +45112,44 @@ prior `bun scrml migrate --fix` flag-overload is itself SOFT-DEPRECATED in favou
   **designer-card** ruling (the form is rare / zero-corpus / hand-migration is trivial),
   recorded as a version-event decision. Without that waiver, a no-codemod form stays
   SOFT-DEPRECATED indefinitely.
+- **A file that does not compile is refused.** `scrml fix` SHALL NOT rewrite a file that does not
+  compile before the rewrite (any error-severity diagnostic, including a failure of the emitted-JS
+  check). It leaves the file byte-identical and reports the compile errors (code and source line,
+  where the diagnostic carries one). A rewrite of a file the compiler cannot fully read cannot be
+  verified: a verify that compares the compiler's reading before and after passes any rewrite of a
+  file that yields the same errors and no artifacts. The refusal applies to every `scrml fix` rule,
+  with or without `--s66`. A file that compiles with warnings or info diagnostics is not refused.
+  "Does not compile" is judged as `scrml compile` judges the file within the application it
+  belongs to. For a file target, any error of `scrml compile <file>` refuses it. In a directory,
+  a root is compiled on its own, with its imports, and is refused on any error of that compile. A
+  root is a `<program>` file (one application, §40.8) or a file that no other target file imports,
+  such as a route page. Every other file is judged inside the roots that import it, directly or
+  transitively. It is refused for an error in itself, or in a module it imports, in such a
+  compile. A file that no root reaches is judged by its own compile. A module that compiles as
+  part of its application is therefore not refused for failing to compile alone. Unrelated
+  applications in one directory are never judged as one program. A rule whose own verify copy of the project reports an error, for a file that
+  compiles in place, reports that it cannot verify, not that the file does not compile. One
+  exception: a rewrite whose purpose is to clear a removed-form hard error does not refuse a file
+  whose only error is that one. The exception holds only if that rewrite applies and the
+  rewritten text then compiles; otherwise the whole file is refused before any other rule runs.
+  A front-end error stops the compile, so "only error" proves nothing about later checks. In
+  impl#1 this is the `<machine>` → `<engine>` migration and E-DEPRECATED-001. Over a directory, a refused file is
+  skipped and listed, and the other files are processed. The exit status is non-zero when any file
+  was refused (impl#1: 3, ahead of `--check`'s 1 and 2).
+
+> **Provenance:** ruling:user-voice-scrml.md S464 "your recs" — *"The client-server-call / sql-failable / s66 `scrml fix` rules SHALL refuse (no rewrite, a message naming the compile errors) any file that does not compile before the rewrite — a rewrite of a file the compiler cannot fully read cannot be verified (matches the S462 markup-given migration's verify-fail-closed)."* Extended from the three named rules to every rule by the ruling's stated reason (PA reading, bryan's veto window): measured S464, the `unwrap-logic` rule deleted the `${` / `}` lines of a file whose other function emits invalid JS.
+
+> **PA reading (S466, owner veto):** three refinements above follow from the ruling's reason rather
+> than its text. First, "does not compile" is judged per application, as `scrml compile` judges it
+> (S466 review: a component module compiles inside its project but not alone). Compiling a whole
+> directory of unrelated programs as one compile is not used: measured S466, it reported
+> cross-program protect and route conflicts, errors with no file, and a crash. Second, a scratch-copy
+> divergence is reported as "cannot verify", not as a compile failure (S466 review: a `../app.db`
+> page). Third, the removed-form exception exists because the round-1 gate refused every `<machine>`
+> file, blocking the migration `scrml fix` exists to perform. Not settled: a file already rewritten
+> to the §66 dialect does not compile on impl#1 by design (§66 is Nominal there), and impl#1 reports
+> generic codes for it (E-SCOPE-001, E-STATE-UNDECLARED) rather than a §66 class. Such a file is
+> refused, which makes `--s66` re-runs exit 3. Owner decision owed.
 
 ### 63.5 Conformance interaction
 

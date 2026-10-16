@@ -35,7 +35,8 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
-const registeredHere = !globalThis.document; if (registeredHere) GlobalRegistrator.register();
+const registeredHere = !globalThis.document;
+if (registeredHere) GlobalRegistrator.register();
 // Leave the process as found: bun runs every test file in ONE process, and a happy-dom
 // registration left behind replaces the host `Request` / `Headers` for every later file
 // (happy-dom drops a `Cookie` request header — s457-string-url-executable-schemes' server

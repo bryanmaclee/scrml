@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 261 | 4 |
-| MED | 642 | 6 |
-| LOW | 411 | 0 |
+| HIGH | 262 | 4 |
+| MED | 644 | 6 |
+| LOW | 430 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -175,6 +175,144 @@ Fails closed either way (the program does not compile). The code is chosen where
 <!-- @gap id=g-fn-reached-only-through-lambda-not-on-server-s466 sev=MED status=open locus=searched:compiler/src/route-inference.ts(callee collection does not descend lambda arguments for placement)—not-traced prov=review:s466-await-r6 -->
 
 Executed on s466-await-r7 and on base (reviewer probes n4 peerSchedShadowTop, s-probes propagate / sqlInBindingBlock): every request throws a ReferenceError — no wrong value, but a compile that should either place the function or refuse ships a bundle that cannot run. Related: g-cell-reading-fn-called-inline-from-server-undefined-no-diagnostic-s464 (the `@`-reading variant). Fix direction: route inference's callee walk descends lambda / block-arrow bodies (the same tree the emit pass's `_calledPeerNames` walk already reads), or the emit pass refuses a call to a name it will not emit.
+
+### g-cell-array-destructuring-swap-codegen-invalid-s466 — a destructuring assignment to cells, `[@a, @b] = [@b, @a]` (a swap in a function body), fails as E-CODEGEN-INVALID-LOGIC ("compiler defect") instead of compiling or being refused by name — `NEW S466; LOW; open`
+
+<!-- @gap id=g-cell-array-destructuring-swap-codegen-invalid-s466 sev=LOW status=open locus=searched:compiler/src/codegen(assign with an array-pattern target of @cells)—not-traced prov=pa:s466-gap-list -->
+
+PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/app.scrml`: `<a> = 1`, `<b> = 2`, `function swap() { [@a, @b] = [@b, @a] }` wired to a button → E-CODEGEN-INVALID-LOGIC. Fails closed (no artifact), but the code says "compiler defect" and does not name the shape. **Open SPEC question, not settled here:** is a destructuring assignment whose targets are cells legal scrml? If yes, it needs a lowering (each target a cell write); if no, it needs a named refusal. Related: [[g-labeled-loops-and-same-scope-redeclaration-reach-codegen-as-defects]] (`[x] = [x * 3]` on a plain local, same code) and the S451 write-set fix that already treats an array-pattern assign as writing every cell it names (`g-scrml-fix-write-scan-destructuring`, resolved).
+
+### g-incomplete-binary-return-reaches-codegen-s466 — an incomplete expression, `return @n +`, is not refused by the parser: it reaches codegen and fails as E-CODEGEN-INVALID-LOGIC — `NEW S466; LOW; open`
+
+<!-- @gap id=g-incomplete-binary-return-reaches-codegen-s466 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts,compiler/src/ast-builder.js(return operand with a dangling binary operator)—not-traced prov=pa:s466-gap-list -->
+
+PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/inv.scrml`: `${ function bad() { return @n + } }` → E-CODEGEN-INVALID-LOGIC (the compiler-defect code) with no line. A source syntax error should be a parse error at the operator's position. The no-line half is [[g-parse-floor-errors-carry-no-source-location-s464]]; this entry is the missing parse refusal only.
+
+### g-vendor-import-component-035-when-file-exists-s466 — a `vendor:` import is refused with E-COMPONENT-035 even when the imported file exists — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-vendor-import-component-035-when-file-exists-s466 sev=LOW status=open locus=searched:compiler/src/component-expander.ts(E-COMPONENT-035 site)—not-traced prov=dispatch:s466-fix-refuse-broken -->
+
+**RELAYED, not reproduced by the PA or this filer.** Source: the s466-fix-refuse-broken dispatch agent's report, as carried in the S466 PA gap list. No reproducer path was recorded. Reproduce before acting: a file with a `vendor:` import of a file that exists on disk, compiled single-file and as part of its directory.
+
+### g-windows-s441-coverage-invariant-fuzz-timeout-flaky-s466 — test-only flake: `s441-coverage-invariant.test.js` §4 "seeded fuzz" has no explicit timeout and ran 6.7 s against bun's 5 s default on the Windows CI job — `NEW S466; LOW; open`
+
+<!-- @gap id=g-windows-s441-coverage-invariant-fuzz-timeout-flaky-s466 sev=LOW status=open locus=compiler/tests/unit/s441-coverage-invariant.test.js:245(§4 seeded fuzz test — no per-test timeout argument) prov=ci:windows-job-logs-saved-by-pa-s466 -->
+
+Observed in Windows CI logs the PA saved (`~/.cache/scrml-s466-pa/win*.log`): `(fail) §4 seeded fuzz: every prose line is reported; every code/declared marker survives a clean compile (default) [6677.57ms]`. Linux passes. Fix direction: give the fuzz test an explicit timeout sized to the slowest runner, or bound the seed count. Sibling flake on the same job: [[g-windows-timer-audit-test-flaky-s454]] (seen again in the same S466 logs).
+
+### g-timer-brand-forgeable-via-symbol-for-s466 — the `scrml:time` timer brand is the registry symbol `Symbol.for("scrml:time.timer")`, so scrml logic can forge it and make any object take the in-place timer write path — `NEW S466; LOW; open (RELAYED; convention, not a security boundary)`
+
+<!-- @gap id=g-timer-brand-forgeable-via-symbol-for-s466 sev=LOW status=open locus=compiler/runtime/stdlib/time.js(timerProto brand)+compiler/src/runtime-template.js(_scrml_deep_set_copy branded-struct branch) prov=review:s466-timer-field-write -->
+
+**RELAYED** from the S239 review of `05624a120` (#1422, LAND-WITH-NITS), reviewer probe `~/.cache/scrml-review-timer/p/a5.scrml`; not re-run by the PA. The brand was added by #1422 (see [[g-timer-struct-field-write-from-function-body-throws-s464]], resolved). The reviewer rated it LOW: a convention, not a security boundary. Fix direction if it matters: a module-private symbol (or a WeakSet of real timers) instead of a registry symbol.
+
+### g-timer-id-field-writable-distinct-timers-equal-s466 — a timer struct's `id` field is writable, so two distinct timers can be made `==` — `NEW S466; LOW; open (RELAYED; pre-existing on the handler path)`
+
+<!-- @gap id=g-timer-id-field-writable-distinct-timers-equal-s466 sev=LOW status=open locus=searched:compiler/runtime/stdlib/time.js(timer struct fields)—not-traced prov=review:s466-timer-field-write -->
+
+**RELAYED** from the #1422 S239 review (frozen `05624a120`), reviewer probe `~/.cache/scrml-review-timer/p/a3.scrml`; not re-run by the PA. Per the reviewer it is pre-existing on the handler write path; #1422 extended in-place writes to function bodies. Timer state is keyed by the struct's identity (§41.21), so an `id` that can be rewritten is a second identity that can disagree with the first.
+
+### g-struct-unknown-field-write-not-refused-s466 — a write to a field a struct type does not declare is not refused by the type checker — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-struct-unknown-field-write-not-refused-s466 sev=LOW status=open locus=searched:compiler/src/type-system.ts(field-write checks)—not-traced prov=review:s466-timer-field-write -->
+
+**RELAYED** from the #1422 S239 review (frozen `05624a120`), reviewer probe `~/.cache/scrml-review-timer/p/a2.scrml` (found on a timer struct); not re-run by the PA. Whether it holds for every struct or only for stdlib structs was not recorded. Reproduce on a user `type S:struct` first.
+
+### g-alias-cell-shared-timer-display-stale-after-in-place-write-s466 — two cells holding the same timer struct: after an in-place field write through one, the other's rendered display is stale — `NEW S466; LOW (source: INFO); open (RELAYED)`
+
+<!-- @gap id=g-alias-cell-shared-timer-display-stale-after-in-place-write-s466 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_deep_set_copy branded-struct branch — only the written cell notifies)—not-traced prov=review:s466-timer-field-write -->
+
+**RELAYED** from the #1422 S239 review (frozen `05624a120`), reviewer probe `~/.cache/scrml-review-timer/p/a1.scrml`; not re-run by the PA. The reviewer rated it INFO; the ledger has no INFO tier, so it is filed LOW. Cause per the review: #1422 writes a branded timer in place and notifies the written cell; a second cell holding the same object is not notified.
+
+### g-timer-in-refined-cell-dead-via-refine-copy-s466 — a timer struct stored in a refined cell is copied by `_scrml_refine_copy`, and the copy drives nothing (the timer is dead) — `NEW S466; MED; open (RELAYED; pre-existing)`
+
+<!-- @gap id=g-timer-in-refined-cell-dead-via-refine-copy-s466 sev=MED status=open locus=compiler/src/runtime-template.js(_scrml_refine_copy)—not-traced prov=review:s466-timer-field-write -->
+
+**RELAYED** from the #1422 S239 review (frozen `05624a120`), reviewer probe `~/.cache/scrml-review-timer/p/a6.scrml`; not re-run by the PA. Rated MED and pre-existing by the reviewer. §41.21: timer state "is keyed by the struct's identity" and a copy "drives nothing", so a refinement copy-in silently kills the timer. Fix direction: `_scrml_refine_copy` passes a branded timer through by identity, the way `_scrml_deep_set_copy` does since #1422. Related refine-copy entries: [[g-refined-cell-whole-write-gives-nested-elements-new-identity-s460]].
+
+### g-date-cell-handler-vs-function-body-write-disagree-s466 — a field write through a Date (or other non-plain, non-timer) cell has two behaviours: an attribute handler mutates it in place without notifying; a function body refuses it — `NEW S466; LOW; open`
+
+<!-- @gap id=g-date-cell-handler-vs-function-body-write-disagree-s466 sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_deep_set_copy refuses non-plain prototypes)+the handler write path(not traced) prov=review:s466-timer-field-write -->
+
+Recorded, not filed, as the "Sibling (not closed)" note in the RESOLVED block of [[g-timer-struct-field-write-from-function-body-throws-s464]] and listed by the #1422 review (frozen `05624a120`) as a nit. The handler half is pinned as current behaviour by an s440 test ("a write through a Date cell no longer throws"). Not re-run by this filer. One write, two paths, two outcomes: the decision is which is right (in place with notify, or refused everywhere), then one path.
+
+### g-param-default-out-of-scope-residuals-s466 — residuals the s466 parameter-defaults work left out of scope: destructured / rest parameters of server functions are never destructured; a helper used by client and server is missing from the server bundle; E-FN-003 does not read defaults — `NEW S466; LOW (severity not assessed); open (RELAYED)`
+
+<!-- @gap id=g-param-default-out-of-scope-residuals-s466 sev=LOW status=open locus=searched:compiler/src/codegen/emit-server.ts(route handler binds `_scrml_arg_N`, no destructure)—not-traced prov=review:s466-server-param-defaults -->
+
+**RELAYED** from the s466-server-param-defaults reviews and the branch's `docs/changes/s466-server-param-defaults/progress.md` ("Out of scope, NOTED for the PA (not fixed)"), on the UNMERGED branch `origin/s466-server-param-defaults`. Not re-run by the PA. Items: (a) destructured / rest parameters of server functions — the handler binds `_scrml_arg_N` and never destructures (overlaps [[g-lib-exported-fn-destructured-param-codegen-s465]], which covers the exported-lib case); (b) a helper used by both client and server code is missing from the server bundle (reviewer note, no reproducer recorded); (c) E-FN-003 does not read parameter defaults. A fourth item on the S466 list, the CPS backstop `_scrml_body["n"]`, is recorded in that progress file as CLOSED as a side effect of the branch — it closes only when the branch merges. Severity was not assessed by the source; LOW is the ledger default, and (b) may be higher if it is a ReferenceError at run time.
+
+### g-enum-cell-inference-order-and-unknown-variant-initializer-s466 — two edges of enum-cell inference: a function declared BEFORE the cell sees no inferred (or annotated) type for it, and `<col> = Col.Nope` (a variant `Col` does not declare) is silently not inferred — `NEW S466; LOW; open (RELAYED; first half pre-existing)`
+
+<!-- @gap id=g-enum-cell-inference-order-and-unknown-variant-initializer-s466 sev=LOW status=open locus=compiler/src/type-system.ts(enum-cell type from a qualified initializer, #1423)—not-traced prov=review:s466-enum-infer-parseerror -->
+
+**RELAYED** from the #1423 S239 review (round 1 on frozen `cb41a454e`) and the S466 PA list; not re-run by this filer. #1423's body says these were "filed as gaps"; they were not in `docs/known-gaps.md` on main at `c57ac1aea`, so they are filed here. (1) Pre-existing: a function declared before the cell does not see its type, inferred or annotated — a declaration-order dependence. (2) `<col> = Col.Nope`: #1423 declines to infer when the variant is not declared (commit message), but nothing is reported, so the cell is silently untyped. Fix direction for (2): a declared enum name with an undeclared variant in an initializer is E-TYPE-063 (the code #1423 uses for an undeclared variant write).
+
+### g-function-body-lost-tail-silently-dropped-s466 — inside a FUNCTION BODY, tokens after a complete expression are dropped silently: `const k = "a" foo` → `const k = "a"`; `const p = Pt { x: a, y: 2 }` → `const p = Pt` — `NEW S466; HIGH (provisional); open (RELAYED-UNVERIFIED — reproduce)`
+
+<!-- @gap id=g-function-body-lost-tail-silently-dropped-s466 sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(function-body statement collection; the S441 coverage check covers program-body top only)—not-traced prov=dispatch:s466-server-param-defaults(r1) -->
+
+**RELAYED-UNVERIFIED.** Source: the s466-server-param-defaults fix-round-1 agent, recorded in `docs/changes/s466-server-param-defaults/progress.md` item (d) on the unmerged branch `origin/s466-server-param-defaults`: "NEW, pre-existing: in a FUNCTION BODY a lost tail is silently dropped too … (no struct-literal expression form; the S441 check covers body-top only)". Neither the PA nor this filer has reproduced it. The S466 list marks the severity "HIGH?": if it reproduces it is the silent-wrong-output class (HIGH by the legend); if it does not, close it. Reproduce on main with both shapes in a client function and a server function before any dispatch.
+
+### g-placement-only-helper-always-async-peer-s466 — a plain `function` placed on the server only by caller context is always emitted as an async peer with a route: called in a parameter default it is refused, and in a body its call is awaited — `NEW S466; LOW; open (fix direction is an owner question)`
+
+<!-- @gap id=g-placement-only-helper-always-async-peer-s466 sev=LOW status=open locus=searched:compiler/src/route-inference.ts(Step 5c caller-context placement)+compiler/src/codegen/emit-server.ts(peer emission)—not-traced prov=review:s466-server-param-defaults -->
+
+**RELAYED** from the s466-server-param-defaults review, reviewer probe `~/.cache/scrml-review-param-defaults/p/hb.scrml` (`function helper2(x) -> number` used in `server function gd(m, k = helper2(m))`); measured on that unmerged branch, where a default needing an `await` is E-PARAM-DEFAULT-AWAIT. Not re-run by the PA. Proposed fix: emit a sync server-bundle helper, as a `fn` already gets. That fix is **newly-accepting**, so it is listed in `handOffs/s466-owner-questions.md` rather than decided here. Related: [[g-trigger5-server-only-function-helper-still-a-public-route-s464]] (the same helper class also gets a public route).
+
+### g-servercallerror-qualified-arm-never-matches-s466 — a qualified `ServerCallError.X` handler arm compiles but never matches at run time: the fetch stub throws a plain `Error` / rejects, and impl#1 emits a `CpsError` — `NEW S466; MED; open (RELAYED)`
+
+<!-- @gap id=g-servercallerror-qualified-arm-never-matches-s466 sev=MED status=open locus=searched:compiler/src/codegen/emit-functions.ts(client fetch stub error shape)+the CPS error envelope—not-traced prov=review:s466-enum-infer-parseerror(r1) -->
+
+**RELAYED** from the #1423 S239 review round 1, reviewer probes `~/.cache/scrml-review-enum-pe/p/r1/sce_client.scrml`, `sce_only.scrml` (and `p/arms/sce.scrml`); not re-run by the PA. Pre-existing on main. A handler that names `ServerCallError.X` (§19.9) is dead code: the failure value never carries that variant, so the error falls to another arm or escapes. Silent at compile time.
+
+### g-builtin-error-arm-nonexistent-variant-accepted-s466 — qualified handler arms naming variants the built-in error types do not have (`Error.Nope`, `SqlError.Nope`), and arms for a foreign built-in on a `! -> E` call, are accepted silently — `NEW S466; LOW; open (RELAYED; pre-existing)`
+
+<!-- @gap id=g-builtin-error-arm-nonexistent-variant-accepted-s466 sev=LOW status=open locus=compiler/src/type-system.ts(guarded-expr `!{}` arm block — variant sets of Error/SqlError/ServerCallError do not feed mismatch checks) prov=review:s466-enum-infer-parseerror(r1) -->
+
+**RELAYED** from the #1423 S239 review; not re-run by the PA. [[g-impl1-handler-arm-undeclared-qualifier-accepted-s466]] (resolved) records why: the three compiler-provided types have no variant sets wired into exhaustiveness / mismatch, and turning that on is newly-rejecting — that decision is in `handOffs/s466-owner-questions.md`. This entry is the silent acceptance, which the same decision would close.
+
+### g-builtin-error-types-unknown-in-annotation-position-s466 — `Error`, `SqlError` and `ServerCallError` are E-TYPE-UNKNOWN-NAME in a type annotation, though SPEC calls them built-in — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-builtin-error-types-unknown-in-annotation-position-s466 sev=LOW status=open locus=compiler/src/type-system.ts(annotation type resolution vs isKnownErrorTypeName — the arm-qualifier predicate knows them, the annotation resolver does not)—not-traced prov=review:s466-enum-infer-parseerror(r1) -->
+
+**RELAYED** from the #1423 S239 review; not re-run by the PA. SPEC §19.4.2 (`Error`), §19.8.1 (`SqlError`), §19.9 (`ServerCallError`) name them compiler-provided. #1423 made the arm-qualifier check accept them through `isKnownErrorTypeName`; the annotation resolver was not changed, so one name has two answers depending on position (the two-readers shape).
+
+### g-e-error-010-hint-omits-parseerror-import-s466 — E-ERROR-010's hint suggests `! ParseError` without saying `ParseError` must be imported (it is import-only since #1423) — `NEW S466; LOW; open (RELAYED; nit)`
+
+<!-- @gap id=g-e-error-010-hint-omits-parseerror-import-s466 sev=LOW status=open locus=compiler/src/type-system.ts:11961(E-ERROR-010 site — located, not traced to the hint text) prov=review:s466-enum-infer-parseerror -->
+
+**RELAYED** (NIT) from the #1423 review; not re-run by the PA. Following the hint as written gives E-TYPE-UNKNOWN-NAME in a file that does not import `ParseError` from `scrml:data`. Fix: name the import in the hint, as #1423 did for the mismatch hint.
+
+### g-multi-file-compile-diagnostics-without-file-s466 — in a multi-file (directory) compile several codes are reported with no file: E-IMPORT-002, E-CG-003, E-TYPE-031, E-META-EVAL-002, E-VALIDATOR-INLINE-DYNAMIC, E-COMPONENT-012 / -020 / -035, E-THEME-TOKEN-UNKNOWN, E-IF-IN-DISPATCHED-ARM — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-multi-file-compile-diagnostics-without-file-s466 sev=LOW status=open locus=searched:the push sites of each listed code—not-traced prov=dispatch:s466-fix-refuse-broken -->
+
+**RELAYED** from the s466-fix-refuse-broken agent, `docs/changes/s466-fix-refuse-broken/progress.md` ("Gaps for the PA", fix round 1) on the branch of open PR #1425; not re-run by the PA. Measured there on a joint compile of `conformance/cases`. Consequence: `scrml fix` cannot attribute these errors to a file and had to fall back to per-root compiles. A diagnostic without a file cannot be acted on in an editor.
+
+### g-e-cg-001-protected-field-scan-compile-wide-s466 — the E-CG-001 protected-field scan is compile-wide: in a joint compile, one program's `protect=` fails another program's client JS — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-e-cg-001-protected-field-scan-compile-wide-s466 sev=LOW status=open locus=searched:compiler/src/codegen/emit-client.ts(E-CG-001 protected-field scan — the protected set is per compile, not per program)—not-traced prov=dispatch:s466-fix-refuse-broken -->
+
+**RELAYED** from the same s466-fix-refuse-broken progress.md (fix round 1); not re-run by the PA. Measured there: one joint compile of a directory of unrelated programs reported cross-program E-PROTECT-006 / E-CG-001 — 480 false refusals across `conformance/cases`. Fails closed (no leak), but refuses correct programs that share a compile with an unrelated `protect=`.
+
+### g-server-fn-session-param-condition-reads-ambient-session-s466 — in `server fn y4(session)`, the `if (session.userId)` condition is lowered to the real request session while the rest of the function reads the parameter — `NEW S466; LOW; open (RELAYED; pre-existing; correctness, not exploitable)`
+
+<!-- @gap id=g-server-fn-session-param-condition-reads-ambient-session-s466 sev=LOW status=open locus=searched:compiler/src/codegen/emit-expr.ts(server-mode `session` lowering does not respect a parameter named `session`)—not-traced prov=review:s466-server-param-defaults -->
+
+**RELAYED** from the s466-server-param-defaults review, reviewer probe `~/.cache/scrml-review-param-defaults/p/sp5.scrml` (`y4`); also recorded in that branch's progress.md fix round 2 ("emit-expr's server-mode `session` lowering does not respect a PARAMETER named `session`… the typer also rebinds `session` over the param"). Not re-run by the PA. Rated not exploitable by the reviewer (it reads the real session, never a client value), but one name means two things in one function.
+
+### g-e-if-in-dispatched-arm-nondeterministic-output-s466 — E-IF-IN-DISPATCHED-ARM puts a pseudo-file (`"<match:8:Ready>"`) in the diagnostic's file field and a random per-process id in its message, so the same compile prints different output each run — `NEW S466; LOW; open (RELAYED)`
+
+<!-- @gap id=g-e-if-in-dispatched-arm-nondeterministic-output-s466 sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(refuseConditionalInDispatchedArm)—not-traced prov=review:s466-fix-refuse-broken(r2) -->
+
+**RELAYED** from the #1425 S239 review round 2 (`ce7746b9d`); reviewer outputs under `~/.cache/scrml-review-fix-refuse/r2out/` (the conformance JSON shows the pseudo-file); not re-run by the PA. Breaks byte comparison of diagnostics between runs, and the file field names no real file (see also g-multi-file-compile-diagnostics-without-file-s466).
+
+### g-server-emitted-js-check-syntax-only-s466 — the server-side emitted-JS check is syntax-only (`node --check`): a module that throws at LOAD (e.g. a `const` reassignment) passes it — `NEW S466; LOW; open (RELAYED; design item)`
+
+<!-- @gap id=g-server-emitted-js-check-syntax-only-s466 sev=LOW status=open locus=searched:the emitted-JS parse floor (S464)—not-traced prov=review:s466-server-param-defaults(r3) -->
+
+**RELAYED** from the s466-server-param-defaults round-3 review; not re-run by the PA. A parse check cannot see early errors that only fire at module evaluation. Proposal from the review: add a load check (import the server module in an isolated context) to the gates. Cost: a load runs top-level code, so it needs an isolated context with no I/O.
 
 ### g-top-level-fn-param-default-dropped-server-s465 — a top-level `function g(x = 5) { return x }` called from server code returns `undefined` for `g()`: the parameter default is dropped when the function is emitted as a server peer — `NEW S465 r6; HIGH; open (pre-existing on BASE)`
 
@@ -25658,9 +25796,14 @@ The comment justifies emitting `scrml:` / vendor imports inline and unpruned. Kn
 <!-- @gap id=g-stdlib-mcp-shim-exports-allow-listed-by-name-s462 sev=LOW status=open locus=compiler/tests/unit/stdlib-shim-export-parity.test.js:56(SHIM_ONLY_EXPORTS["scrml:mcp"])+stdlib/mcp/index.scrml prov=review:s462-stdlib-import-004 -->
 The parity test pins `.scrml` exports == shim exports in both directions; `scrml:mcp`'s runtime/tool helpers (`install`, `loadSidecars`, `toolGetAppTopology`, `registerMcpTools`, `_resetForTests`, …) are consumed by generated code and the MCP sidecar, not by scrml source, so they were exempted by exact name (each a named exception, never a pattern — fail-closed). Open question, not a defect: should the `.scrml` source declare them (one source of truth for the module surface, at the cost of exposing test/internal helpers to scrml importers), or should the compiler-internal helpers move to a non-`scrml:` internal module so the exemption disappears? Recommendation: move them — a `scrml:` specifier is an adopter surface, and `_resetForTests` should not be importable. Until then the list must grow by hand with each new helper.
 
-### g-parseerror-builtin-or-import-only-s462 — `ParseError` resolves in a file that never imports it (it is a type-checker built-in) while `scrml:data` also declares and exports it; which is canonical is undecided — `NEW S462; LOW; open (RULED S464 "(a) Import-only" — impl#1 must stop resolving `ParseError` without an import; newly-rejecting, measure the corpus first)`
-<!-- @gap id=g-parseerror-builtin-or-import-only-s462 sev=LOW status=open locus=compiler/src/type-system.ts:1534(BUILTIN_TYPES ParseError — kept as built-in)+compiler/tests/unit/stdlib-shim-export-parity.test.js:228(§5 drift guard)+compiler/SPEC.md:10807(the built-in type list names ParseError) prov=review:s462-stdlib-import-004(F5) -->
+### g-parseerror-builtin-or-import-only-s462 — `ParseError` resolves in a file that never imports it (it is a type-checker built-in) while `scrml:data` also declares and exports it; which is canonical is undecided — `NEW S462; LOW; resolved S466 (RULED S464 "(a) Import-only"; corpus measured: 0 newly refused)`
+<!-- @gap id=g-parseerror-builtin-or-import-only-s462 sev=LOW status=resolved resolved-by=s466-enum-infer-parseerror locus=compiler/src/type-system.ts:1534(BUILTIN_TYPES ParseError — kept as built-in)+compiler/tests/unit/stdlib-shim-export-parity.test.js:228(§5 drift guard)+compiler/SPEC.md:10807(the built-in type list names ParseError) prov=review:s462-stdlib-import-004(F5) -->
 s462-stdlib-import-004 seeded stdlib-exported types into the importer's registry (one reader), which made `import { ParseError } from 'scrml:data'` a real path. It kept the built-in (SPEC ~:10807 lists `ParseError` among the built-in error/enum types) and added §5 of the parity test so the two declarations cannot drift. Two declarations of one type is the standing cost. Question for a later ruling: is `ParseError` a built-in (in scope everywhere, like `NetworkError`) or does it belong to `scrml:data` and need an import, like the module's other types? If import-only, the built-in entry, the SPEC sentence and the drift guard go, and files using it without an import get an E-TYPE-UNKNOWN-NAME migration (count them first). Not a defect today — the drift guard holds the two in step.
+**Resolved S466 (s466-enum-infer-parseerror):** `ParseError` left BUILTIN_TYPES; the compiler resolves a `parseVariant` call's failure type by identity (`PARSE_ERROR_ENUM`, never by name — a user's own `type ParseError` no longer hijacks it); naming it un-imported is E-SCOPE-001 (arm, expression) / E-TYPE-UNKNOWN-NAME (annotation); bare arms need no import. SPEC §41.13 + §53.14.6 sentences; §14.1.2's built-in list corrected. Corpus (examples, samples, conformance, stdlib, tests, giti, flogence): 0 newly refused.
+
+### g-impl1-handler-arm-undeclared-qualifier-accepted-s466 — a `!{}` arm qualified with a name that is declared nowhere (`Zork.Malformed(r) :>`) compiled silently: the qualifier-mismatch check skipped any qualifier it could not resolve — `NEW S466; LOW; resolved`
+<!-- @gap id=g-impl1-handler-arm-undeclared-qualifier-accepted-s466 sev=LOW status=resolved resolved-by=s466-enum-infer-parseerror locus=compiler/src/type-system.ts(guarded-expr `!{}` arm block — the undeclared-qualifier check before the S452 qualifier-mismatch loop; resolveFailableErrorType) prov=pa-ruled:§34-E-SCOPE-001-unquoted-identifier-not-resolvable-in-scope-applies-to-a-handler-arm-qualifier-direction-newly-rejecting-corpus-measured-0 -->
+Generalized from the ParseError import-only change so the rule is not a ParseError-only name list: a qualifier that is none of: a known error type (`isKnownErrorTypeName` — registry incl. BUILTIN_TYPES and imports under their LOCAL name, plus the compiler-provided `Error` §19.4.2 / `SqlError` §19.8.1 / `ServerCallError` §19.9), an in-scope binding, a local import name, or a state type is E-SCOPE-001, as the same name is in any other expression. Fix round 1 (S239 review) removed two false refusals of the first cut (`Error.Generic` and `SqlError.QueryFailed` arms) by routing the check through that one predicate. (The variant SETS of those three still do not feed exhaustiveness / mismatch through a `fnErrorTypes` name — unchanged from main; turning that on is newly-rejecting and was left for a ruling.) Corpus measured: 0 newly refused. The owner may veto (PA ruled under the S385 class).
 
 ### g-transaction-arm-exit-refusal-outlives-match-leave-s462 — E-TRANSACTION-CONTROL-FLOW still refuses a `fail` / `return` inside a `match` arm in a `transaction` block, and its message still says "the arm is lowered as a nested function", though S462 match-leave made arm exits return from the enclosing function — `NEW S462; LOW; open`
 <!-- @gap id=g-transaction-arm-exit-refusal-outlives-match-leave-s462 sev=LOW status=open locus=compiler/src/validators/lint-transaction.ts:177(+:274 — the arm-exit limbs and their message text) prov=review:s462-stdlib-import-004(queued-list) -->

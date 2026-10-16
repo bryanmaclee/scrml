@@ -615,8 +615,10 @@ export function planStdlibBundle(names, diagnostics, refusedModules = null) {
  * (`result.errors`) and fails the compile. ONE predicate, read by the final
  * result split AND the §2.2.1 pre-write commit decision, so "this compile
  * reported an error" and "this compile wrote nothing" cannot disagree.
+ * Exported for `scrml fix` (commands/fix-verify-shared.js), whose does-it-compile check must use
+ * this predicate, not a second classification.
  */
-function isNonFatalDiagnostic(e) {
+export function isNonFatalDiagnostic(e) {
   return e.code?.startsWith("W-") ||
     e.code?.startsWith("I-") ||
     e.severity === "warning" ||

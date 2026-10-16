@@ -23,8 +23,10 @@
  *       the same variant names, a unit variant is its name string, a payload
  *       variant is a constructor whose parameters are the payload field names in
  *       order, and `variants` lists the variant names in declaration order;
- *   §5  the type checker's built-in ParseError (type-system.ts BUILTIN_TYPES) is
- *       the same enum stdlib/data/parse.scrml declares (drift guard);
+ *   §5  the type checker's internal ParseError (type-system.ts PARSE_ERROR_ENUM —
+ *       NOT a built-in name since S466; it resolves only a parseVariant call's
+ *       failure type) is the same enum stdlib/data/parse.scrml declares (drift
+ *       guard), and `ParseError` is absent from BUILTIN_TYPES (import-only);
  *   §6  (S462 P0) every exported FUNCTION has the same async-ness in both: the
  *       `.scrml` declaration is `async` exactly when the shim function is an
  *       AsyncFunction, and a sync shim function never hands back a Promise (no
@@ -43,7 +45,7 @@ import { fileURLToPath } from "url";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { listStdlibModules } from "../../src/module-resolver.js";
-import { buildTypeRegistry, BUILTIN_TYPES } from "../../src/type-system.ts";
+import { buildTypeRegistry, BUILTIN_TYPES, PARSE_ERROR_ENUM } from "../../src/type-system.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SHIM_ROOT = resolve(here, "../../runtime/stdlib");
@@ -225,10 +227,11 @@ describe("stdlib shim export parity (.scrml export list vs runtime shim)", () =>
     }
   }
 
-  test("§5 the built-in ParseError is the enum stdlib/data/parse.scrml declares", () => {
+  test("§5 the internal ParseError is the enum stdlib/data/parse.scrml declares; it is not a built-in name", () => {
     const parsePath = modules.find((m) => m.specifier === "scrml:data/parse").absPath;
     const declared = declaredEnums(parsePath).get("ParseError");
-    const builtin = BUILTIN_TYPES.get("ParseError");
+    expect(BUILTIN_TYPES.has("ParseError")).toBe(false);
+    const builtin = PARSE_ERROR_ENUM;
     expect(builtin?.kind).toBe("enum");
     expect(builtin.variants.map((v) => [v.name, v.payload ? [...v.payload.keys()] : null])).toEqual(declared);
   });

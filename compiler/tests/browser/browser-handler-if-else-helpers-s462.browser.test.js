@@ -12,8 +12,9 @@
  *     `compiler/tests/unit/s462-handler-runtime-helpers-shipped.test.js`.)
  *  2. §14.10: a bare-variant write `@col = .Blue` resolves against a cell with a KNOWN
  *     type (`<col>: Col = .Red`) — in every if/else handler spelling AND a function body.
- *     (Round 3, S465 PA ruling: an UNANNOTATED `<col> = Col.Red` is E-VARIANT-AMBIGUOUS on
- *     every path, handler and function body alike; the round-2 widening was removed.)
+ *     (S466: an UNANNOTATED `<col> = Col.Red` has type `Col` — ruling user-voice-scrml.md
+ *     S464 "(a) Infer from initializer" — so it resolves on every path too. This supersedes
+ *     the S465 round-3 PA ruling that made it E-VARIANT-AMBIGUOUS.)
  *  3. (round 3) the same handlers inside `<match>` arms, and engine bodies re-parsed at
  *     emit time (message arm, opener `effect=`).
  *
@@ -210,12 +211,19 @@ describe("S462 r2/r3 F2 — §14.10: `<col>: Col` types the cell, a bare `.V` wr
     expect(compileAndMount(src, "wrong").errors).toContain("E-TYPE-063");
   });
 
-  test("an UNANNOTATED `<col> = Col.Red` is E-VARIANT-AMBIGUOUS in a handler, as in a function body (§14.10; S465 ruling)", () => {
+  // S466 — ruling user-voice-scrml.md S464 "(a) Infer from initializer" (§14.10, §66.3
+  // rule 5): an UNANNOTATED `<col> = Col.Red` HAS type `Col`, so the bare writes resolve
+  // in a handler and a function body alike. (Supersedes the S465 round-3 pin that made
+  // it E-VARIANT-AMBIGUOUS on every path.)
+  test("an UNANNOTATED `<col> = Col.Red` is typed `Col`: bare writes resolve in a handler and a function body (§14.10; S464 ruling)", async () => {
     const U = `type Col:enum = { Red, Blue }\n<c> = true\n<col> = Col.Red\n`;
-    expect(compileAndMount(U + `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n` + ENP, "un1").errors)
-      .toContain("E-VARIANT-AMBIGUOUS");
+    const r1 = compileAndMount(U + `<button id="b" onclick={ if (@c) { @col = .Blue } else { @col = .Red } }>b</button>\n` + ENP, "un1");
+    expect(r1.errors).toEqual([]);
+    const { out, seen } = await bothArms();
+    expect(seen).toEqual([]);
+    expect(out).toEqual(["Blue", "Red"]);
     expect(compileAndMount(U + `\${ function go() { @col = .Blue } }\n<button id="b" onclick=go()>b</button>\n` + ENP, "un2").errors)
-      .toContain("E-VARIANT-AMBIGUOUS");
+      .toEqual([]);
   });
 
   test("a cell with no enum type keeps E-VARIANT-AMBIGUOUS (§14.10: no type context)", () => {
