@@ -2666,7 +2666,7 @@ function _compileScrmlImpl(options = {}) {
   const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
     ? resolve(options.buildRoot)
     : undefined;
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot, resolveImport: resolveModulePath }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;

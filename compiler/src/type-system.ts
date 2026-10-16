@@ -126,6 +126,8 @@ import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-functio
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
+import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
+import { identityReadInDefault } from "./free-name.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -11752,6 +11754,32 @@ function annotateNodes(
         // server-escalated function body).
         if (boundary === "server") {
           scopeChain.bind("session", { kind: "variable", resolvedType: tAsIs() });
+        }
+        // §7.3.2 E-PARAM-DEFAULT-FORWARD-REF (a default reading its own or a later
+        // parameter) is decided where the default is lowered — codegen
+        // `emitParamDefault`, server-placed functions only (s466 fix round 5).
+        // s466 fix round 2 — the same §20.5 rule over the function's PARAMETER
+        // DEFAULTS (evaluated where the function runs): a free `session` in the
+        // default of a function that is not server-escalated is E-SCOPE-012, as
+        // in its body. Scope-aware (free-name.ts): a parameter or a lambda
+        // parameter named `session` is not the builtin.
+        if (boundary !== "server" && Array.isArray(n.params) && !scopeChain.lookup("session")) {
+          for (const _p of (n.params as unknown[])) {
+            const _a = analyzedParamDefault(_p, filePath);
+            const _d = _a && "tree" in _a ? _a.tree : null;
+            if (!_d) continue;
+            const _hit = identityReadInDefault(_d, n.params, { currentUserAmbient: false, sessionProjection: false });
+            if (_hit === null || !_hit.startsWith("session")) continue;
+            errors.push(new TSError(
+              "E-SCOPE-012",
+              `E-SCOPE-012: \`session\` is available only inside a web-app server ROUTE-HANDLER ` +
+              `function body. The default of parameter \`${typeof (_p as ASTNodeLike).name === "string" ? (_p as ASTNodeLike).name : "(destructured)"}\` ` +
+              `of \`${(n.name as string) ?? "anon"}\` reads it, and that function runs in the browser. ` +
+              `For client-side session display use the \`@session\` projection; to use the server's identity, ` +
+              `read \`session\` in a server function's body.`,
+              ((paramDefaultSpan(_p) ?? n.span) as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            ));
+          }
         }
 
         // Walk the body.

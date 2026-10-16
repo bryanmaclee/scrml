@@ -2455,7 +2455,7 @@ export function emitConditionField(exprNode: ExprNode | null | undefined, fallba
  * because `isStdlibAsyncCallee` carries a module-level classifier fallback that the
  * drain paths do not install.
  */
-function asyncNameFactsOf(ctx: EmitExprContext): AsyncNameFacts {
+export function asyncNameFactsOf(ctx: EmitExprContext): AsyncNameFacts {
   return {
     declaredNames: ctx.declaredNames ?? null,
     asyncFnNames: ctx.mode === "client" ? (ctx.clientAsyncFnNames ?? null) : null,
