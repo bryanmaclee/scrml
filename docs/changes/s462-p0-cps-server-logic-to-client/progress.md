@@ -387,3 +387,23 @@ authorisation for the hook, then commit + push.
 - route-inference.test.js "CPS split with Bun.file server trigger in bare-expr": `@config = config` now joins
   the server half ([1,2]) — it reads the local the server statement declared (§19.9.9.8 rule 1). Expected.
 - Tests: compiler/tests/integration/s467-cps-nested-writes-and-callees.test.js (10 executed tests).
+- Merged origin/main 179f9b346 (e46e99221; generated docs regenerated; s461 test = main's #1429).
+- Probes (~/.cache/scrml-review-s467-cps-r3/h/{probes,probes2,probes3}.mjs, 37 rows, on the merged tree): FORGED-WRITE
+  only fp_param_guard + fp_alert_noread_between (INSERT unguarded by design); no alert-in-server, no hash leak, no
+  pw-in-client. Moved vs r-start: pw_local_if, pw_local_return, role_local, pw_array_push, pw_obj_field,
+  fp_helper_guard → E-RI-002; match_str E-CG-006 → compiles (rightRows=1); match_arm loses its E-CG-006 (E-TYPE-025
+  only); if_local_reassign_pre{,2} gain E-RI-002 (already refused by E-NAME-COLLIDES-STATE). Right-password rows
+  unchanged everywhere else.
+- #1428 pack (classify.js): base origin/main and head identical — PASS=250 PASS-REFUSED=133 PASS-500=20 PASS-DENY=10
+  UNJUDGED=1 FAIL=10; per-shape class table identical.
+- Corpus differential (2,897 files: examples, samples, conformance/cases of origin/main, ../giti, ../flogence
+  read-only; standalone compiles, outputs hashed) head vs origin/main 179f9b346: newly refused 0; newly compiling 1
+  (server-fn-writes-reactive-cell-pos); code-set changes 4; emit changes 4 — all = the round-1 record. Round 4 is
+  corpus-neutral.
+- Gates on e46e99221: pre-commit + pre-push suites 34,711/0; compiler/tests/*.test.js 2239/0; e2e-render-map 259/0;
+  types-gate OK; self-host-v2 m1 99, m2 612, m1-lowered 99, m3 60, m4 1343, codec 166, v2-lexer 337 (all 0 fail);
+  lint-no-default-arm; lsp+commands 763/1 — the 1 is dev-watcher-snapshot-identity (ctime), fails 5/5 on base
+  origin/main in this environment too (filesystem timing, pre-existing); snippet, corpus-compile-floor,
+  host-global-scan, facts, state, gen-md-shim, conflict-marker, spec-index, bootstrap-conformance, severity,
+  s34-census all --check PASS.
+- Load flakes seen in hooks (pass alone): conf-TENANT-SOURCE-FILTER r2/r4 (5 s timeout under load 7–9).
