@@ -11133,13 +11133,12 @@ lambda the awaited combinator consumes in place. The mechanical rewrite is `cons
 > **impl#1 status (security gap this closes; not normative text):** main today ACCEPTS a ternary-armed waiting
 > binding unawaited. `const chk = flag ? (n) => isOk(n) : (n) => false`, followed by `if (chk(2))`, tests a Promise,
 > which is always truthy. **impl#1 ENFORCES this subsection** once this text lands, as a refusal under the security
-> exception. Unlike the rest of §13.9, it is not a carried divergence (bryan, S467; that ruling's user-voice entry is
-> owed). The bootstrap's Core already refuses a function-valued program-level binding (DD probe b10).
+> exception. Unlike the rest of §13.9, it is not a carried divergence (ruling:user-voice-scrml.md S467 "yes on the impl#1 enforce F4"). The bootstrap's Core already refuses a function-valued program-level binding (DD probe b10).
 >
-> *PA reading (not a ruling):* this subsection does not change §13.2's rules for a scheduler argument
-> (`setTimeout(() => save())`) or `typeof f`, because neither binds the function; §13.2 already refuses a waiting
-> lambda passed to a callback that is not an awaited collection method (E-SERVER-FN-IN-SYNC-CALLBACK, measured S467),
-> and §13.2 is left as it is.
+> *PA reading (not a ruling):* this subsection governs BINDINGS only. It does not change §13.2's rules for a
+> function passed as an argument — the awaited-collection-method allowance, the global fire-and-forget scheduler
+> exemption (`setTimeout`, … — not a use as a value), `typeof f`, and the sync-callback codes
+> (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) all stand exactly as §13.2 states them.
 
 ```scrml
 ${
