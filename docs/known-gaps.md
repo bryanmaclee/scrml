@@ -30,11 +30,19 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 262 | 4 |
+| HIGH | 263 | 4 |
 | MED | 645 | 6 |
 | LOW | 430 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-unhandled-failable-call-in-value-position-s467 — (P0, security) a `!` call whose result is USED was never E-ERROR-002: `const ok = check(p); if (ok) { … }` compiled at exit 0, and on a failure `ok` held the error object — truthy — so a WRONG PASSWORD LOGGED IN — `NEW S467; HIGH; NARROWED S467 (value positions refused; residual positions open)`
+
+<!-- @gap id=g-unhandled-failable-call-in-value-position-s467 sev=HIGH status=narrowed locus=compiler/src/type-system.ts(checkUnhandledFailableBareCall + the §19 visitStmt bare-expr walker read only a whole-statement call)+compiler/src/failable-value-calls.ts(forEachCallInValuePosition, NEW S467) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");spec:§19.4.4;dispatch:s467-error-002-value-position -->
+
+§19.4.3 and §19.4.4 make every unhandled `!` call E-ERROR-002; impl#1 checked only a call that is a whole statement (PA-reproduced on `c782dd8b0`). **Narrowed S467** (branch `s467-error-002-value-position`): one structural rule — `failable-value-calls.ts` `forEachCallInValuePosition` walks each logic statement's own expression trees and `type-system.ts` `checkFailableCallsInValuePositions` (called from `visitNode`, so the live scope chain resolves shadowing) reports every call whose callee resolves to a failable function unless it is the operand of a handling form: `!{}` (statement-level, and the expression-position `!{}` with the postfix chain it binds to), a `match` head / inline-`match` subject, `?` (incl. a `?` ending a `match` arm), a `<request>` body's right-hand side (§19.4.3 item 5), a render-time call inside `<errorBoundary>` (§19.6.6). Callee classes are the whole-statement check's: declared `!` (and the built-in failable `parseVariant`) → E-ERROR-002; a CPS-split server function not declared `!` → W-CPS-NEEDS-FAILABLE; inside a deferred statement → E-DEFER-UNHANDLED-FAILABLE. Newly-rejecting; measured on 2951 files (`examples/ samples/ conformance/cases/ stdlib/`, `giti`, `flogence`): **0** newly refused. Three `compiler/tests` fixtures relied on the gap and were migrated. Executed: the repro is refused; with `!{ .Denied :> false }` it compiles and a wrong password gives "rejected" (`compiler/tests/unit/e-error-002-value-position-s467.test.js` D).
+
+**Still open (not yet reached):** the statements of a block-bodied arrow used as a value; the arms of an inline expression `match` kept raw; attribute-value expressions; the arguments of a call-ref handler (`onclick=f(risky())`); the arm bodies of a `!{}` handler; the arms of a `match` whose subject is untyped. **Flagged for a ruling:** §19.4.3's list is exhaustive, so `return risky()` inside a `!` function is now reported (remedy `const v = risky()?` then `return v`; `return risky()?` does not parse on impl#1) — 0 corpus sites.
 
 ### g-statement-markup-silently-not-rendered-s462 — (P1) markup written as a statement in a logic body, outside the §17.6.10 single-element branch, renders NOTHING at exit 0: `${ <p>hi</p> }`, two elements in one branch, an element after a statement, a `for` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a nested `${ if }` inside an implied-lift element, and a single-element branch the implied-lift desugar declines (`a < b` or a quoted `"</p>"` in its text) — `NEW S462; HIGH (P1); RESOLVED S464 (E-MARKUP-STATEMENT-NOT-RENDERED, §17.6.10.1)`
 

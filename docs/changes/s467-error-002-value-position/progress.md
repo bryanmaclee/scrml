@@ -78,3 +78,24 @@ NEXT 3 STEPS:
    handler args; `!{}` arm bodies; arms of a match with an asIs subject. Add a Provenance line, add the known-gaps
    entry g-unhandled-failable-call-in-value-position-s467 (sev=HIGH, locus=, prov=), then run the remaining gates
    (types:check, bootstrap, commands+lsp, facts, state, spec-index).
+
+## RESUMED (S467, worktree agent-ad788bfdee5d3b1d2, base origin/main 9d7a6cc2a)
+
+- s461 happy-dom fix committed alone (216496762; PR branch s467-test-happydom-unregister was not on origin).
+- Patch applied clean; the 15 failures of the no-bail run judged:
+  - s454 §4 / §6 (2) — FALSE POSITIVE: an expression-position `!{}` lowers to the guard sentinel
+    `<operand>.__GUARD__("!{…}")`; the walker now treats the operand (its postfix chain) as handled
+    (`guardCallArmsRaw`), and a statement-level `!{}` root uses the same chain rule ("guard-operand").
+  - bug-18 (6) — FIXTURE relied on the gap: `@msg = load()` with `load` declared `! string`. Migrated to
+    a named function holding `@msg = load() !{ _ :> "" }`, called from `on mount`. The same handler written
+    directly inside `on mount { }` is refused on main by CG (E-SERVER-FN-IN-SYNC-CALLBACK; even the
+    statement form `load() !{…}` there gets E-ERROR-002 too) — pre-existing, separate, NOT fixed here.
+  - imported-enum F1 (4) — FIXTURE: `const v = parseVariant(raw, LR)` inside a `!` fn, no `?` → `?`.
+  - imported-enum F3 (3) — FIXTURE: `show(safeDiv(10, b))` (an unhandled `!` result as an argument);
+    the raw value now reaches `show` from the host side (safeDiv/show exported).
+- Measured base 9d7a6cc2a vs fix over examples/ samples/ conformance/cases/ stdlib/ giti flogence
+  (2951 files): 0 newly refused; net E-ERROR-002 delta 0; one added W-CPS-NEEDS-FAILABLE in
+  samples/gauntlet-r13/htmx-forms.scrml (already refused for other codes). `return f()` in a `!` fn: 0 sites.
+- Note: the whole-statement `check(p)` reports E-ERROR-002 twice on main (two whole-statement sites) — pre-existing.
+- SPEC §19.4.3 carried-gaps paragraph updated + Provenance; gap g-unhandled-failable-call-in-value-position-s467
+  filed status=narrowed (residuals listed).
