@@ -4,7 +4,7 @@ import { drainRefusedLowerings } from "./refused-lowering-errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, serverVarDeclLoadQuery, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
-import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
+import { emitLogicNode, emitFnShortcutBody, emitParamDefault } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { SyncCallSite } from "./emit-library-shared.ts";
 import { localAsyncDeclRoot, rawAsyncUsesOf } from "./local-async-fns.ts";
@@ -50,7 +50,8 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { asyncValueUsesIn } from "./fn-valued-bindings.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode, blankLiteralTextInSource, emitStringFromTree } from "../expression-parser.ts";
-import { isPlainPureFn, forEachAtRef, fnReachesAtName } from "../at-refs.ts";
+import { isPlainPureFn, forEachAtRef, fnReachesAtName, fnReadsServerRefusedAtName } from "../at-refs.ts";
+import { jsTextReadsFreeName } from "../free-name.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
@@ -413,6 +414,61 @@ function topLevelBindingExists(body: string, name: string): boolean {
 }
 
 /**
+ * §7.3.2 on the server (s466) — the ONE place a server-placed function's
+ * parameter defaults are lowered. Every site that emits such a function's
+ * parameters (the route handler's request-body bindings, the SSE handler's
+ * query bindings, the in-process peer callable, the §38.6.1 `onserver:*`
+ * handler, a pure-`fn` helper copied into the server bundle) takes its
+ * defaults from here, so no site can drop one again.
+ *
+ * Returns one entry per parameter: the default lowered to JavaScript in the
+ * boundary `opts` names (`opts` is the function body's own emit options, so a
+ * default sees what the body sees), or `null` when the parameter has none.
+ */
+function serverParamDefaults(
+  params: unknown[],
+  filePath: string,
+  opts: any,
+  fnNode: { name?: unknown; span?: unknown },
+  coveredCallees: ReadonlySet<string> | null,
+  placementOnlyCallees: ReadonlySet<string> | null = null,
+): Array<string | null> {
+  const site = {
+    fnName: typeof fnNode?.name === "string" ? fnNode.name : "<anonymous>",
+    fnSpan: fnNode?.span,
+    coveredCallees,
+    placementOnlyCallees,
+    // Every site that calls this is server code (s466 fix round 4).
+    serverPlaced: true,
+    params,
+  };
+  return params.map((p) => {
+    const d = emitParamDefault(p, filePath, opts, site);
+    return d === null ? null : serverRewriteEmitted(d);
+  });
+}
+
+/**
+ * §7.3.2 — a route handler's binding of one parameter from the request body.
+ * "When a parameter with a default is omitted at the call site, the default value
+ * expression is evaluated at call time." Over HTTP an omitted argument is a
+ * MISSING key (the client stub's `JSON.stringify` drops an `undefined` argument);
+ * a passed `not` arrives as a present `null` and stays `not`. So the default
+ * applies exactly when the key is absent — evaluated per request, after the
+ * earlier parameters are bound, so it may read them.
+ */
+function serverBodyParamLine(name: string, dflt: string | null, indent: string): string {
+  const key = JSON.stringify(name);
+  if (dflt === null) return `${indent}const ${name} = _scrml_body[${key}];`;
+  return `${indent}const ${name} = _scrml_g.Object.hasOwn(_scrml_body, ${key}) ? _scrml_body[${key}] : (${dflt});`;
+}
+
+/** §7.3.2 — one parameter of an in-process server function's signature. */
+function serverParamSignature(name: string, dflt: string | null): string {
+  return dflt === null ? name : `${name} = ${dflt}`;
+}
+
+/**
  * S79 audit fix C.1 — parse `<program idempotency-ttl="...">` raw value into
  * a millisecond integer, or `null` for fall-back-to-default-24h.
  *
@@ -528,6 +584,7 @@ function parseSessionExpirySeconds(raw: string | null | undefined): number {
 function astUsesSessionBuiltin(node: unknown): boolean {
   return astSessionMemberMatch(node, null);
 }
+
 
 /**
  * §20.5 (S265, i29e) — does ANY expression reference the bare `session` builtin
@@ -1224,7 +1281,16 @@ function emitModuleValueExportLines(
         if (!isAsync && bodyHasServerOnlyNode(fnNode.body)) continue;
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
         // boundary rule as the tool-dep `generateToolLibraryJs`.
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, ownAsync: isAsync }));
+        // s466 fix round 5 (§7.3.2) — SERVER-PLACED for the parameter-default
+        // closed set only when server code reaches it (server-reached-exports.ts)
+        // or it is itself a server operation (async). Being emitted into this
+        // bundle is not placement: a library function only client code calls is a
+        // client function, as the same function in the app file is. No reach
+        // entry (a library no file in the compilation imports — its consumers are
+        // outside it) keeps every exported function server-placed.
+        const _reached = (fileAST as any)?._serverReachedExports as Set<string> | undefined;
+        const _serverPlaced = isAsync || !_reached || _reached.has(name);
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, ownAsync: isAsync, serverPlaced: _serverPlaced }));
         continue;
       }
 
@@ -1896,15 +1962,19 @@ function emitEndpointServerHelperLines(
     if (!name || !Array.isArray(fnNode.body)) continue;
     if (isAlreadyDeclared(name)) continue;
     const params: any[] = fnNode.params ?? [];
-    const paramSigs = params.map((p: any, i: number) => paramSignature(p, i));
     const asyncPrefix: string = fnNode.isAsync ? "async " : "";
     const declaredNames = new Set<string>(
       params.map((p: any) => (typeof p === "string" ? p : p?.name)).filter(Boolean),
     );
     // Client-boundary lowering → synchronous body (see fn-doc rationale).
+    const helperOpts = { boundary: "client" as const, declaredNames, insideFunctionBody: true };
+    // §7.3.2 (s466) — defaults lowered with the body's own opts (one lowering
+    // for every server-bundle function, see `serverParamDefaults`).
+    const helperDefaults = serverParamDefaults(params, filePath, helperOpts, fnNode, null);
+    const paramSigs = params.map((p: any, i: number) => paramSignature(p, i, helperDefaults[i] ?? null));
     const bodyCodes = emitFnShortcutBody(
       fnNode.body,
-      { boundary: "client", declaredNames, insideFunctionBody: true },
+      helperOpts,
       fnNode.fnKind,
       fnNode.hasReturnType,
     );
@@ -4489,6 +4559,31 @@ function generateServerJsImpl(
   // (whose bodies are split or context-bound) keep the pre-fix behavior, and a
   // program that never composes server fns is byte-unchanged.
   const _peerCallableInfo = new Map<string, { fnNode: any; paramNames: string[] }>();
+  // s466 fix round 1 — server functions that read client state (an `@`-name, in
+  // the body or a default). Each is refused by its own @-read diagnostic
+  // (E-REACTIVE-003 and siblings, route-inference.ts); a parameter default that
+  // calls one is not refused a second time for the same root cause.
+  const _atReadingServerFns = new Set<string>();
+  for (const { fnNode: _af, route: _ar } of serverFns) {
+    // s466 fix round 5 — only a function that is itself refused for the read
+    // (wholly server; see `fnReadsServerRefusedAtName`): a covered callee's call
+    // lowers to a placeholder with no diagnostic of its own.
+    if (typeof _af?.name === "string" && !(_ar as { cpsSplit?: unknown })?.cpsSplit && fnReadsServerRefusedAtName(_af, filePath)) {
+      _atReadingServerFns.add(_af.name);
+    }
+  }
+  // s466 fix round 2 — plain `function`s on the server ONLY by caller-context
+  // propagation (route inference placed them where their callers are): async
+  // only because of that placement. Named in E-PARAM-DEFAULT-AWAIT's message.
+  const _placementOnlyServerFns = new Set<string>();
+  for (const { fnNode: _pf, route: _pr } of serverFns) {
+    if (typeof _pf?.name !== "string" || _pf.fnKind === "fn") continue;
+    const _reasons = (_pr as { escalationReasons?: Array<{ kind?: string; resourceType?: string }> } | undefined)?.escalationReasons;
+    if (Array.isArray(_reasons) && _reasons.length > 0
+        && _reasons.every((r) => r && r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation")) {
+      _placementOnlyServerFns.add(_pf.name);
+    }
+  }
   const _serverFnPeerNames = new Set<string>();
   // #284 (FIX C) — PER-FUNCTION-BODY alias names that resolve to a peer via a
   // first-class reference (`const p = groupByJob; p(rows)` / a dispatch table).
@@ -4772,38 +4867,9 @@ function generateServerJsImpl(
         ));
       }
 
-      // s440 — DIAGNOSTIC. A NESTED function's parameter default is spliced as RAW
-      // TEXT by `paramSignature` and evaluated eagerly, outside any async body
-      // (`await` is illegal in a default even in an async fn), so an async call
-      // there — a peer, an async-stdlib export, or a nested async helper — can never
-      // be awaited, and emit-expr never sees it. Fail closed.
-      if (n.kind === "function-decl" && Array.isArray(n.params)) {
-        for (const _p of n.params) {
-          const _dv = _p && typeof _p === "object" ? (_p as { defaultValue?: unknown }).defaultValue : undefined;
-          if (typeof _dv !== "string" || _dv.length === 0) continue;
-          // s441 — the scope-aware analysis of the default text, when the pre-pass made one.
-          const _pUses = rawAsyncUsesOf(_p);
-          if (_pUses) {
-            for (const c of _pUses.calls) {
-              const via = c.local ? c.root.via : null;
-              if (c.root.kind === "stdlib") _diagAsyncStdlibSyncCb(c.name, n.span, via);
-              else _diagSyncCb(c.name, n.span, via);
-            }
-            continue;
-          }
-          for (const c of extractCalleeNames(_dv)) {
-            const _local = _nestedAsyncByName.get(c);
-            if (_local) {
-              if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, n.span, _local.via);
-              else _diagSyncCb(c, n.span, _local.via);
-            } else if (_serverFnPeerNames.has(c)) {
-              _diagSyncCb(c, n.span);
-            } else if (_isAsyncStdlibName(c)) {
-              _diagAsyncStdlibSyncCb(c, n.span);
-            }
-          }
-        }
-      }
+      // (A nested function's parameter defaults are lowered and checked where the
+      // function is emitted — emit-logic.ts `emitParamDefault`, s466 fix round 1:
+      // one decision for every default, whatever the site.)
 
       for (const k in n) {
         const v = n[k];
@@ -4972,27 +5038,6 @@ function generateServerJsImpl(
       // `countdown(5)` counts numerically (§37.4 / §37.11 worked example).
       // Mirrors the non-SSE path's `const X = _scrml_body[...]` binding, but
       // sourced from `route.query` (SSE is a GET stream — no JSON body).
-      for (const _pName of fnParamNames) {
-        // Absence is canonical JS `null` per SPEC §42.5/§42.8 (W-CG-UNDEFINED-
-        // INTERPOLATION). The `=== null || === undefined` presence check is the
-        // exempt paired form (route.query[k] is `undefined` for an absent key).
-        lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return null; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !_scrml_g.Number.isNaN(_scrml_g.Number(_v))) return _scrml_g.Number(_v); return _v; })();`);
-      }
-
-      // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
-      // route gates via bearer, not `_scrml_auth_check` which is session-infra).
-      if (authMiddlewareEntry && _webAppShape) {
-        lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
-        lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
-        lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
-      }
-
-      lines.push(`  const _scrml_enc = new _scrml_g.TextEncoder();`);
-      lines.push(`  const _scrml_stream = new _scrml_g.ReadableStream({`);
-      lines.push(`    async start(_scrml_ctrl) {`);
-      lines.push(`      try {`);
-      lines.push(`        async function* _scrml_gen() {`);
-
       // S144 (GITI-021 + GITI-022): SSE server-fn* body — shared per-function
       // opts so a `let`/`const` in an outer statement is visible to a nested
       // reassignment (declaredNames Set), mirroring the CSRF/non-CSRF handler
@@ -5013,7 +5058,39 @@ function generateServerJsImpl(
         // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
         ...localMapSetOptsFor(fnNode),
       };
+      // s466 fix round 1 — the auth gate runs BEFORE the query bindings, so an
+      // unauthenticated request evaluates no parameter default.
+      // Fork 2A: the cookie-session auth-check is web-app-only (a headless SSE
+      // route gates via bearer, not `_scrml_auth_check` which is session-infra).
+      if (authMiddlewareEntry && _webAppShape) {
+        lines.push(`  // Auth check for SSE endpoint (compiler-generated)`);
+        lines.push(`  const _scrml_authResult = _scrml_auth_check(_scrml_req);`);
+        lines.push(`  if (_scrml_authResult) return _scrml_authResult;`);
+      }
 
+      // §7.3.2 (s466) — an omitted argument takes its parameter's default. The
+      // client EventSource stub leaves an omitted argument out of the query
+      // string, so a missing key is the omitted argument here. (The stub also
+      // leaves out a `not` argument, so on this GET wire a `not` passed to a
+      // defaulted parameter cannot be told from an omitted one.)
+      const _sseParamDefaults = serverParamDefaults(params, filePath, _serverFnOptsSSE, fnNode, _atReadingServerFns, _placementOnlyServerFns);
+      for (let _pi = 0; _pi < fnParamNames.length; _pi++) {
+        const _pName = fnParamNames[_pi];
+        const _pAbsent = _sseParamDefaults[_pi] ?? "null";
+        // Absence is canonical JS `null` per SPEC §42.5/§42.8 (W-CG-UNDEFINED-
+        // INTERPOLATION). The `=== null || === undefined` presence check is the
+        // exempt paired form (route.query[k] is `undefined` for an absent key).
+        lines.push(`  const ${_pName} = (() => { const _v = route.query[${JSON.stringify(_pName)}]; if (_v === null || _v === undefined) return ${_pAbsent}; if (_v === 'true') return true; if (_v === 'false') return false; if (_v !== '' && !_scrml_g.Number.isNaN(_scrml_g.Number(_v))) return _scrml_g.Number(_v); return _v; })();`);
+      }
+
+      lines.push(`  const _scrml_enc = new _scrml_g.TextEncoder();`);
+      lines.push(`  const _scrml_stream = new _scrml_g.ReadableStream({`);
+      lines.push(`    async start(_scrml_ctrl) {`);
+      lines.push(`      try {`);
+      lines.push(`        async function* _scrml_gen() {`);
+
+      // (`_serverFnOptsSSE` is computed above the query bindings — s466: a
+      // parameter default is lowered with the body's opts.)
       const _authorBodyStartSse = lines.length;
       for (const stmt of body) {
         const code = emitLogicNode(stmt, _serverFnOptsSSE);
@@ -5428,44 +5505,7 @@ function generateServerJsImpl(
 
       if (!_envelope) lines.push(`    ${_bodyRead}`);
 
-      for (let i = 0; i < paramNames.length; i++) {
-        lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
-      }
-
-      // §53.9.4: Emit server-side boundary checks for predicated params (baseline CSRF path).
-      for (let i = 0; i < params.length; i++) {
-        const _pParam = params[i];
-        const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
-        if (_pAnnotation) {
-          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
-          if (_pParsed) {
-            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "    ");
-            // ⚑ GATED ON `_protectActive`. The mark only means anything to the
-            // §14.8.9 guard, which only exists on a protect path — but emitting
-            // it unconditionally referenced `_scrml_protect_mediated`, which
-            // satisfies the helper-injection gate at the bottom of this file and
-            // dragged the whole 127-line `SERVER_PROTECT_HELPER` into apps that
-            // declare no `protect=` column at all. MEASURED on a `protect=`-free
-            // app with one predicated param: the helper was ~66% of the emitted
-            // module and every function in it was dead. That gate's own comment
-            // promises a non-protect app is byte-unchanged; this keeps it true.
-            const _pOut = _protectActive
-              ? _markMediatedResponses(_pLines, "§53.9.4 E-CONTRACT-001-RT param check")
-              : _pLines;
-            for (const l of _pOut) lines.push(l);
-          }
-        }
-      }
-
-      // C18 (§38.6): if this server function is declared inside a channel
-      // body, inject `broadcast(data)` / `disconnect()` as locals so the
-      // user's body can call them. Functions outside any channel scope get
-      // no injection — references to broadcast/disconnect there fire
-      // E-CHANNEL-004 (or, today, the typer's E-SCOPE-001 fallback).
       const _ownerChannel = channelFnMap.get(name);
-      if (_ownerChannel) {
-        for (const l of emitBroadcastInjection(_ownerChannel, "    ")) lines.push(l);
-      }
       // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): the V5-strict channel-
       // cell set visible to this function. Empty/`null` when the function
       // is not channel-owned; the emit-logic bare-expr server arm only
@@ -5503,6 +5543,55 @@ function generateServerJsImpl(
         // runtime surface (empty → nothing spread → byte-unchanged).
         ...localMapSetOptsFor(fnNode),
       };
+
+      // §7.3.2 (s466) — an omitted argument takes its parameter's default. The
+      // CPS-forwarded batch results (`fwdResultNames`) are not parameters and
+      // have none. A CPS-split function's default belongs to its CLIENT wrapper —
+      // the function the caller calls (emit-functions.ts), which applies it and
+      // always sends the value — so its server batch binds the plain value and
+      // never evaluates the default a second time, on the wrong side (s466 fix
+      // round 1: a client-side default such as `= @n` lowered here read an
+      // untransported `_scrml_body["n"]`).
+      const _paramDefaults = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
+      for (let i = 0; i < paramNames.length; i++) {
+        lines.push(serverBodyParamLine(paramNames[i], _paramDefaults[i] ?? null, "    "));
+      }
+
+      // §53.9.4: Emit server-side boundary checks for predicated params (baseline CSRF path).
+      for (let i = 0; i < params.length; i++) {
+        const _pParam = params[i];
+        const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
+        if (_pAnnotation) {
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
+          if (_pParsed) {
+            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "    ");
+            // ⚑ GATED ON `_protectActive`. The mark only means anything to the
+            // §14.8.9 guard, which only exists on a protect path — but emitting
+            // it unconditionally referenced `_scrml_protect_mediated`, which
+            // satisfies the helper-injection gate at the bottom of this file and
+            // dragged the whole 127-line `SERVER_PROTECT_HELPER` into apps that
+            // declare no `protect=` column at all. MEASURED on a `protect=`-free
+            // app with one predicated param: the helper was ~66% of the emitted
+            // module and every function in it was dead. That gate's own comment
+            // promises a non-protect app is byte-unchanged; this keeps it true.
+            const _pOut = _protectActive
+              ? _markMediatedResponses(_pLines, "§53.9.4 E-CONTRACT-001-RT param check")
+              : _pLines;
+            for (const l of _pOut) lines.push(l);
+          }
+        }
+      }
+
+      // C18 (§38.6): if this server function is declared inside a channel
+      // body, inject `broadcast(data)` / `disconnect()` as locals so the
+      // user's body can call them. Functions outside any channel scope get
+      // no injection — references to broadcast/disconnect there fire
+      // E-CHANNEL-004 (or, today, the typer's E-SCOPE-001 fallback).
+      // (`_ownerChannel` and the body opts are computed above the parameter
+      // bindings — s466: a parameter default is lowered with the body's opts.)
+      if (_ownerChannel) {
+        for (const l of emitBroadcastInjection(_ownerChannel, "    ")) lines.push(l);
+      }
 
       const body: any[] = fnNode.body ?? [];
       // ⚑ THE E-PROTECT-005 SCAN WINDOW OPENS **HERE**, NOT AT THE IIFE, AND THE
@@ -5717,30 +5806,7 @@ function generateServerJsImpl(
           : `  const _scrml_body = await _scrml_req.json();`,
       );
 
-      for (let i = 0; i < paramNames.length; i++) {
-        lines.push(`  const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
-      }
-
-      // §53.9.4: Emit server-side boundary checks for predicated params (non-CSRF path).
-      for (let i = 0; i < params.length; i++) {
-        const _pParam = params[i];
-        const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
-        if (_pAnnotation) {
-          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
-          if (_pParsed) {
-            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "  ");
-            for (const l of _pLines) lines.push(l);
-          }
-        }
-      }
-
-      // C18 (§38.6): broadcast/disconnect injection for channel-owned server
-      // functions on the non-CSRF (auth-managed) path. Mirror of the CSRF
-      // path injection above.
       const _ownerChannelNonCsrf = channelFnMap.get(name);
-      if (_ownerChannelNonCsrf) {
-        for (const l of emitBroadcastInjection(_ownerChannelNonCsrf, "  ")) lines.push(l);
-      }
       // Bug-5 follow-on to C18 (§38.4): mirror of the CSRF-path cell-set
       // computation above. Threaded into emit-logic opts so the bare-expr
       // server arm lowers channel-cell writes to broadcast frames.
@@ -5764,6 +5830,35 @@ function generateServerJsImpl(
         // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
         ...localMapSetOptsFor(fnNode),
       };
+
+      // §7.3.2 (s466) — an omitted argument takes its parameter's default
+      // (mirror of the CSRF path above).
+      const _paramDefaultsNonCsrf = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode, _atReadingServerFns, _placementOnlyServerFns);
+      for (let i = 0; i < paramNames.length; i++) {
+        lines.push(serverBodyParamLine(paramNames[i], _paramDefaultsNonCsrf[i] ?? null, "  "));
+      }
+
+      // §53.9.4: Emit server-side boundary checks for predicated params (non-CSRF path).
+      for (let i = 0; i < params.length; i++) {
+        const _pParam = params[i];
+        const _pAnnotation = (typeof _pParam === "object" && _pParam !== null) ? (_pParam as any).typeAnnotation : null;
+        if (_pAnnotation) {
+          const _pParsed = refinementOf((_pParam as any).refinement); // S458 one reader: the TS-resolved refinement
+          if (_pParsed) {
+            const _pLines = emitServerRefinementCheck(_pParsed, paramNames[i], name, "  ");
+            for (const l of _pLines) lines.push(l);
+          }
+        }
+      }
+
+      // C18 (§38.6): broadcast/disconnect injection for channel-owned server
+      // functions on the non-CSRF (auth-managed) path. Mirror of the CSRF
+      // path injection above.
+      // (`_ownerChannelNonCsrf` and the body opts are computed above the
+      // parameter bindings — s466: a parameter default is lowered with them.)
+      if (_ownerChannelNonCsrf) {
+        for (const l of emitBroadcastInjection(_ownerChannelNonCsrf, "  ")) lines.push(l);
+      }
 
       const body: any[] = fnNode.body ?? [];
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
@@ -6075,9 +6170,15 @@ function generateServerJsImpl(
     // break — see `_scrml_session_bind`). `_webAppShape`-gated: a non-route text
     // ref (SSE / headless) gets no binding and is caught build-blocking by the
     // E-SESSION-CONTEXT scan below (which now also matches the bare form).
+    // s466 fix round 2 — a bare `session.` in the emitted handler counts only when
+    // it is the FREE name: a lambda parameter named `session` (now reachable from
+    // a lowered parameter default, e.g. `f = (session) => session.userId`) is the
+    // lambda's own value, and wrapping for it named a cookie-session helper the
+    // file never emitted. Unparseable text keeps the text test (null → true).
+    const _handlerFreeSession = jsTextReadsFreeName(lines.slice(_sessHandlerStartIdx).join("\n"), "session") !== false;
     {
       const _sessBody = lines.slice(_cuInsertIdx);
-      const _sessBodyRefsBare = _sessBody.some((l) => _SESSION_BARE_TEXT_RE.test(l));
+      const _sessBodyRefsBare = _handlerFreeSession && _sessBody.some((l) => _SESSION_BARE_TEXT_RE.test(l));
       const _sessAlreadyBound = _sessBody.some((l) =>
         l.includes("const session = _scrml_session_bind("));
       if (_webAppShape && _sessBodyRefsBare && !_sessAlreadyBound) {
@@ -6106,7 +6207,7 @@ function generateServerJsImpl(
     // are guarded out), so this does not self-trigger.
     const _sessHandlerRefsSession =
       lines.slice(_sessHandlerStartIdx).some((l) =>
-        l.includes("_scrml_req._scrml_sess.") || _SESSION_BARE_TEXT_RE.test(l));
+        l.includes("_scrml_req._scrml_sess.") || (_handlerFreeSession && _SESSION_BARE_TEXT_RE.test(l)));
     const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
     // §40.3 — NO per-route `_scrml_mw_wrap` here either. The onion moved up to
     // top-level dispatch, so the cookie-session wrapper is now the ONLY per-route
@@ -6459,7 +6560,11 @@ function generateServerJsImpl(
       _protectResponseGate(_peerName, _peerBodyLines.join("\n"), _peerInfo.fnNode.span, "statements");
 
       lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
-      lines.push(`async function ${_peerName}(${_peerInfo.paramNames.join(", ")}) {`);
+      // §7.3.2 (s466) — the in-process callable keeps its defaults: a peer call
+      // that omits an argument takes the default, exactly as the HTTP route does.
+      const _peerDefaults = serverParamDefaults(_peerInfo.fnNode.params ?? [], filePath, _peerOpts, _peerInfo.fnNode, _atReadingServerFns, _placementOnlyServerFns);
+      const _peerSig = _peerInfo.paramNames.map((n, i) => serverParamSignature(n, _peerDefaults[i] ?? null));
+      lines.push(`async function ${_peerName}(${_peerSig.join(", ")}) {`);
       // F4 (documented limitation per upstream review): a server-mode `@cell`
       // read lowers to `_scrml_body["cell"]`. The HTTP handler binds `_scrml_body`
       // from the request, but an in-process peer call has no request — so we bind
@@ -7057,13 +7162,7 @@ function generateServerJsImpl(
       const wsParamNames: string[] = params.map((p: any, i: number) =>
         typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
       );
-      lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
-      lines.push(`function ${name}(${wsParamNames.join(", ")}) {`);
-
       const _wsOwnerChannel = channelFnMap.get(name);
-      if (_wsOwnerChannel) {
-        for (const l of emitBroadcastInjection(_wsOwnerChannel, "  ")) lines.push(l);
-      }
       const _wsChannelOwnedCells = _wsOwnerChannel ? channelCellMap.get(_wsOwnerChannel) ?? null : null;
       const _wsFnOpts = {
         boundary: "server" as const,
@@ -7081,6 +7180,14 @@ function generateServerJsImpl(
         // g-value-native-map-set-server-runtime (Part A) — mirror of CSRF path.
         ...localMapSetOptsFor(fnNode),
       };
+      // §7.3.2 (s466) — the handler keeps its parameter defaults.
+      const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
+      const _wsSig = wsParamNames.map((n, i) => serverParamSignature(n, _wsDefaults[i] ?? null));
+      lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
+      lines.push(`function ${name}(${_wsSig.join(", ")}) {`);
+      if (_wsOwnerChannel) {
+        for (const l of emitBroadcastInjection(_wsOwnerChannel, "  ")) lines.push(l);
+      }
       const wsBody: any[] = fnNode.body ?? [];
       const _wsBodyLines: string[] = [];
       for (const stmt of wsBody) {

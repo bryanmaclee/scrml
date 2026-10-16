@@ -49,12 +49,22 @@ import { CGError } from "./errors.ts";
  * declaration.
  */
 export function fileScopeDeclaresSessionCell(nodes: unknown): boolean {
+  return fileScopeDeclaresCell(nodes, "session");
+}
+
+/**
+ * Does the file declare its own FILE-SCOPE `<name>` cell (which then owns
+ * `@name`, shadowing a compiler-provided ambient such as `@session` /
+ * `@currentUser`)? A component-local one does not count. (s466 fix round 1 —
+ * generalized from `fileScopeDeclaresSessionCell`.)
+ */
+export function fileScopeDeclaresCell(nodes: unknown, cellName: string): boolean {
   const visit = (list: unknown): boolean => {
     if (!Array.isArray(list)) return false;
     for (const node of list) {
       if (!node || typeof node !== "object") continue;
       const n = node as Record<string, unknown>;
-      if (n.kind === "state-decl" && n.name === "session") return true;
+      if (n.kind === "state-decl" && n.name === cellName) return true;
       if (n.kind === "component-def" || n.kind === "function-decl" || n.kind === "fn-decl") continue;
       if (n.kind === "markup" && typeof n._expandedFrom === "string") continue;
       if (n.kind === "logic" && visit(n.body)) return true;

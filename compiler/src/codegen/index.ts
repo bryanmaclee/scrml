@@ -82,6 +82,7 @@ import { getElementAttrSchema } from "../attribute-registry.js";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn, localReExportEdges, resolveExportedBinding, isReExportedByAnother } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
+import { computeServerReachedExports } from "./server-reached-exports.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
 import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
@@ -2522,6 +2523,24 @@ export function runCG(input: CgInput): CgOutput {
   // S466 r7 — one async name set per file for the whole run (fileAsyncFnNamesOf).
   const _fileAsyncMemo = newFileAsyncMemo(safeRouteMap as never);
 
+  // s466 fix round 5 (§7.3.2) — the EXPORTED functions of each imported library
+  // that server code in this compilation reaches (server-reached-exports.ts).
+  // emit-server reads it so the closed-set check on parameter defaults is scoped
+  // to functions server code runs, not to everything the library's server bundle
+  // carries. Computed once for the compilation; stashed per file below. A file's
+  // async functions (the one per-file set, S466 r7) are server operations: seeds.
+  const serverReachedExports = computeServerReachedExports(
+    files,
+    (fp, fnNode) => {
+      const start = (fnNode?.span as { start?: unknown } | undefined)?.start;
+      if (typeof start !== "number") return false;
+      const route = safeRouteMap.functions.get(`${fp}::${start}`) as { boundary?: string } | undefined;
+      return !!route && route.boundary !== "client";
+    },
+    (fa) => fileAsyncFnNamesOf(fa, files, _fileAsyncMemo, exportRegistryInput, importGraphInput),
+    (source, importer) => resolveModulePath(source, importer) ?? null,
+  );
+
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
   // in emit would otherwise leave the last file's token installed in this
@@ -2699,6 +2718,9 @@ export function runCG(input: CgInput): CgOutput {
       // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
       // early-returns empty for an import-free file, so the cost is ~O(1) there.
       (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput, importGraphInput, _fileAsyncMemo);
+      // s466 fix round 5 — absent for a file no other file imports (its exported
+      // functions serve consumers outside the compilation: all server-placed).
+      (fileAST as any)._serverReachedExports = serverReachedExports.get(toPosix(filePath)) ?? undefined;
       // S465 (s465-await-imported-server-fn) — the SAME set is the SERVER call-site
       // await fact (the CPS wrapper's client continuation reads it too). Some emitters
       // hold the TABResult's `.ast` (where the imports are hoisted), so it is mirrored.

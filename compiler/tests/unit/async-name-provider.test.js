@@ -159,7 +159,7 @@ describe("isServerBoundaryCallee — shared by the provider and isClientServerFn
 // (3) end-to-end — the shape the old drain could not see
 // ---------------------------------------------------------------------------
 describe("client server fn in a NON-awaitable position now fails closed", () => {
-  test("a fn-SIGNATURE parameter default calling a server fn raises " + SERVER_CODE, () => {
+  test("a fn-SIGNATURE parameter default calling a server fn raises E-PARAM-DEFAULT-AWAIT", () => {
     // A parameter default is spliced as RAW TEXT by `paramSignature`, so it is in
     // neither `fn.body` nor any structural node — emit-expr's own
     // `_clientSyncPeerCalls` sink structurally cannot reach it. Only the drain can,
@@ -177,7 +177,8 @@ describe("client server fn in a NON-awaitable position now fails closed", () => 
       "function go() { usesDefault(1) }",
       "</program>",
     ].join("\n"));
-    expect(codes).toContain(SERVER_CODE);
+    // s466 fix round 1 — a function's own default is refused under one code.
+    expect(codes).toContain("E-PARAM-DEFAULT-AWAIT");
   });
 });
 

@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
-import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, asyncNameFactsOf, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
@@ -17,7 +17,7 @@ import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
-import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode, blankLiteralTextInSource } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
 import { emitRefinementCheck, refinementOf, emitParamGuardStatement, emitRefineExpr, judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { emitTransitionGuard } from "./emit-machines.ts";
@@ -30,13 +30,15 @@ import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { markupNotRenderedMessage } from "../markup-statement-refusal.ts";
 import { rewriteMetaBodyCaptures, META_CAPTURE_VAR } from "./meta-capture-rewrite.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
-import { localAsyncDeclRoot } from "./local-async-fns.ts";
+import { localAsyncDeclRoot, rawAsyncUsesOf, walkScoped } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan, currentLoweringSpan } from "./sql-one-statement-guard.ts";
 import type { ExprNode } from "../types/ast.ts";
+import { parsedParamDefault, analyzedParamDefault, paramDefaultParseProblem, paramDefaultSpan } from "../at-refs.ts";
+import { isAsyncCalleeName, type AsyncNameFacts } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -1140,7 +1142,8 @@ export function patternDefaultLowerer(opts: EmitLogicOpts): DefaultLowerer {
 }
 
 /**
- * S465 r4 — a nested SERVER function's parameter defaults, lowered from the tree
+ * S465 r4 — the defaults NESTED in a nested SERVER function's destructuring
+ * parameter patterns (`{ a = g() }`; the parameter's own default is emitParamDefault), lowered from the tree
  * (never pasted as text). A default that needs an `await` cannot be written in a
  * parameter list (`await` is not allowed there) — a compile error that says where
  * to move the call. Client: undefined (the default is kept as written).
@@ -1275,6 +1278,237 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // through this emitter with the SAME options (see emitSqlQueryShape).
     logicOpts: opts,
   };
+}
+
+/**
+ * Where a parameter default is being lowered — what `emitParamDefault` needs to
+ * know beyond the boundary options.
+ */
+export interface ParamDefaultSite {
+  /** The function's name, for diagnostics. */
+  fnName: string;
+  /** The function's span — a diagnostic's fallback anchor when the default's own position is unknown. */
+  fnSpan?: unknown;
+  /**
+   * Async names in scope that the boundary options do not carry (a library /
+   * tool emitter's transitively-async fn set).
+   */
+  asyncNames?: ReadonlySet<string> | null;
+  /**
+   * The async facts of the emission the function belongs to, when the boundary
+   * options do not carry them (a client function: `clientAsyncFactsOf`). The
+   * parameter names still shadow (from the options' `declaredNames`).
+   */
+  asyncFacts?: AsyncNameFacts | null;
+  /**
+   * Callees whose OWN refusal already covers this default: a server function
+   * that reads client state (`fn rd() { return @n }`) is refused by its @-read
+   * diagnostic (E-REACTIVE-003 and siblings); refusing the default that calls it
+   * as well reports one root cause twice.
+   */
+  coveredCallees?: ReadonlySet<string> | null;
+  /**
+   * s466 fix round 2 — plain `function`s that are async only because route
+   * inference placed them on the server (caller-context propagation). Used only
+   * to word the E-PARAM-DEFAULT-AWAIT message ("declare it `fn` if it is pure").
+   */
+  placementOnlyCallees?: ReadonlySet<string> | null;
+  /**
+   * s466 fix round 4 — is this function SERVER-PLACED (a wholly-server function's
+   * route handler / in-process callable / SSE or `onserver:*` handler, a CPS-split
+   * function, a nested function in server code, an exported function in the
+   * server bundle)? There the closed-set refusal (E-PARAM-DEFAULT-UNSUPPORTED) is
+   * load-bearing: the identity, client-state and await checks must see the whole
+   * default. A client-only function's default is lowered as written (§7.3.2
+   * "Default values are arbitrary expressions") — a construct outside the set is
+   * emitted by the expression emitter, unrefused.
+   */
+  serverPlaced?: boolean;
+  /**
+   * s466 fix round 5 — the function's whole parameter list, for
+   * E-PARAM-DEFAULT-FORWARD-REF (a default reading its own or a later
+   * parameter). Checked for server-placed functions only, like the closed set.
+   */
+  params?: readonly unknown[];
+}
+
+/** §7.3.2 — the parameter's name for a diagnostic. */
+function paramLabel(p: unknown): string {
+  const n = p && typeof p === "object" ? (p as { name?: unknown }).name : null;
+  return typeof n === "string" ? n : "(destructured)";
+}
+
+/**
+ * s466 fix round 1 — why this default cannot be evaluated where a default runs,
+ * or null. A default is evaluated before the body, outside it: never an
+ * awaitable position (§34 E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-
+ * CALLBACK rows: "a parameter default"). Anything that needs an `await` there —
+ * a `?{}` query, a server-function call (a direct peer, or a helper that runs
+ * one), an async stdlib export, an async local function — is decided HERE, once,
+ * from the parsed default and the one asyncness rule (`isAsyncCalleeName`).
+ * Returns `{ covered: true }` when the only async callees are covered elsewhere.
+ */
+function paramDefaultAwaitReason(
+  node: ExprNode,
+  facts: AsyncNameFacts,
+  covered: ReadonlySet<string> | null,
+): { reason: string; callee?: string } | { covered: true } | null {
+  let reason: string | null = null;
+  let culprit: string | undefined;
+  let sawCovered = false;
+  // s466 fix round 3 — `node` is the ANALYSED default (at-refs.ts: a closed set of
+  // expression kinds, no unparsed text), walked with its lexical scope by the one
+  // walker the identity check uses (`walkScoped`): a lambda / match-arm parameter
+  // that shadows an async name is not a call to it.
+  walkScoped({ params: [], body: [node] }, (n, isBound) => {
+    if (reason !== null) return;
+    const r = n as Record<string, unknown>;
+    if (r.kind === "sql" || r.kind === "sql-ref") { reason = "runs a `?{}` query"; return; }
+    if (r.kind !== "call") return;
+    const callee = r.callee as { kind?: unknown; name?: unknown } | undefined;
+    if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return;
+    if (isBound(callee.name) || !isAsyncCalleeName(callee.name, facts)) return;
+    if (covered && covered.has(callee.name)) { sawCovered = true; return; }
+    reason = `calls \`${callee.name}\`, which runs asynchronously`;
+    culprit = callee.name;
+  });
+  if (reason !== null) return culprit ? { reason, callee: culprit } : { reason };
+  return sawCovered ? { covered: true } : null;
+}
+
+/**
+ * §7.3.2 — ONE function parameter's default value, lowered to JavaScript by the
+ * expression emitter in the boundary `opts` names, or `null` when the parameter
+ * has no default. The parsed tree is the one the `@`-reader checks
+ * (at-refs.ts `parsedParamDefault`), so what E-REACTIVE-003 reads is what runs.
+ * EVERY site that emits a function's parameters lowers its defaults here, and
+ * every refusal of a default is decided here, once, whatever the site:
+ *   - a default that is not ONE expression (the parse kept a prefix — `"a" foo`,
+ *     `1 2`) is E-PARSE-001, never the prefix;
+ *   - a default that needs an `await` (see `paramDefaultAwaitReason`) is
+ *     E-PARAM-DEFAULT-AWAIT.
+ * A refused default emits a `null` placeholder; the diagnostic fails the build
+ * (refused-lowering-errors.ts — one diagnostic per parameter however many sites
+ * lower it).
+ *
+ * s466 — server-placed functions used to drop their defaults (the route handler
+ * bound `const k = _scrml_body["k"]`, the in-process callable was emitted
+ * `async function f(m, k)`), so an omitted argument answered `null`.
+ */
+export function emitParamDefault(p: unknown, filePath: string, opts: EmitLogicOpts, site: ParamDefaultSite): string | null {
+  const node = parsedParamDefault(p, filePath);
+  if (!node) return null;
+  const at = (paramDefaultSpan(p) ?? site.fnSpan ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as ConstructorParameters<typeof CGError>[2];
+  const label = paramLabel(p);
+  const lost = paramDefaultParseProblem(p, filePath);
+  if (lost !== null) {
+    recordRefusedLowering(new CGError(
+      "E-PARSE-001",
+      `E-PARSE-001: the default of parameter \`${label}\` of \`${site.fnName}\` is not one expression — ` +
+      `\`${lost.length > 60 ? lost.slice(0, 60) + "…" : lost}\` is left over (§7.3.2: a default value is an expression). ` +
+      `Remove the extra text, or write the value you meant as a single expression.`,
+      at,
+    ), p as object);
+    return "null /* E-PARSE-001 */";
+  }
+  const ctx = { ..._makeExprCtx(opts), stmtSpan: (at as EmitExprContext["stmtSpan"]) };
+  const baseFacts: AsyncNameFacts = site.asyncFacts
+    ? { ...site.asyncFacts, declaredNames: ctx.declaredNames ?? site.asyncFacts.declaredNames ?? null }
+    : asyncNameFactsOf(ctx);
+  const facts: AsyncNameFacts = site.asyncNames && site.asyncNames.size > 0
+    ? { ...baseFacts, asyncFnNames: new Set([...(baseFacts.asyncFnNames ?? []), ...site.asyncNames]) }
+    : baseFacts;
+  // s466 fix round 3 — FAIL CLOSED. Every default check reads the ANALYSED tree
+  // (at-refs.ts `analyzedParamDefault`: a closed set of expression kinds, match
+  // arms and template slots parsed). A default holding anything outside that set
+  // — text the compiler keeps unparsed, a block-bodied function — cannot be
+  // checked for identity reads, client-state reads or awaits, so it is refused.
+  const analysed = analyzedParamDefault(p, filePath);
+  if (analysed && "unsupported" in analysed && site.serverPlaced !== true) {
+    // A client-only default (see ParamDefaultSite.serverPlaced): lowered by the
+    // expression emitter like any other client expression.
+    return emitExpr(node, { ...ctx, peerAwaitable: false });
+  }
+  if (analysed && "unsupported" in analysed) {
+    recordRefusedLowering(new CGError(
+      "E-PARAM-DEFAULT-UNSUPPORTED",
+      `E-PARAM-DEFAULT-UNSUPPORTED: the default of parameter \`${label}\` of \`${site.fnName}\` contains ` +
+      `${analysed.unsupported}. A parameter default must be an expression the compiler can check — for reads ` +
+      `of client state or of the server's identity, and for work that needs an await — before it runs ` +
+      `(§7.3.2). Compute the value in the function body instead: give the parameter the default \`not\` ` +
+      `(\`${label}: T | not = not\`) and, in the body, use the computed value when the argument is \`not\` ` +
+      `(a caller that passes \`not\` is then treated the same as one that omits the argument).`,
+      at,
+    ), p as object);
+    return "null /* E-PARAM-DEFAULT-UNSUPPORTED */";
+  }
+  const checked: ExprNode = analysed && "tree" in analysed ? analysed.tree : node;
+  // s466 fix round 3/5 — §7.3.2: a default "may reference earlier parameters in
+  // the same parameter list". A reference to its OWN parameter or a LATER one
+  // reads that parameter before it is bound (a ReferenceError at call time) —
+  // and silently shadows an outer name of the same spelling for the identity
+  // check (`uid = session.userId, session = "x"` hid the session builtin).
+  // Scope-aware (a lambda or match-arm parameter of that name is its own
+  // binding). Server-placed functions only (fix round 5): a client-only
+  // function's default is the JavaScript default it compiles to; whether the
+  // rule is language-wide is an open owner ruling.
+  if (site.serverPlaced === true && Array.isArray(site.params) && analysed && "tree" in analysed) {
+    const idx = site.params.indexOf(p);
+    if (idx >= 0) {
+      const later = new Set(site.params.slice(idx).map((q) => paramLabel(q)).filter((x) => x !== "(destructured)"));
+      let fwd: string | null = null;
+      walkScoped({ params: [], body: [analysed.tree] }, (nd, isBound) => {
+        if (fwd !== null) return;
+        const r = nd as { kind?: unknown; name?: unknown };
+        if (r.kind === "ident" && typeof r.name === "string" && later.has(r.name) && !isBound(r.name)) fwd = r.name;
+      });
+      if (fwd !== null) {
+        recordRefusedLowering(new CGError(
+          "E-PARAM-DEFAULT-FORWARD-REF",
+          `E-PARAM-DEFAULT-FORWARD-REF: the default of parameter \`${label}\` of \`${site.fnName}\` reads \`${fwd}\`, ` +
+          (fwd === label ? `the parameter itself` : `a parameter declared AFTER it`) +
+          `. A default may read only the parameters before it (§7.3.2) — that one is not bound yet ` +
+          `when the default runs. Reorder the parameters, or rename the one you meant.`,
+          at,
+        ), p as object);
+        return "null /* E-PARAM-DEFAULT-FORWARD-REF */";
+      }
+    }
+  }
+  let awaitIssue = paramDefaultAwaitReason(checked, facts, site.coveredCallees ?? null);
+  // The s441 scope-aware pre-pass analysis of the default's text (when it ran for
+  // this function): it resolves a nested async helper the file-scope sets above
+  // cannot see. Same verdict, same refusal.
+  if (awaitIssue === null || "covered" in awaitIssue) {
+    const raw = rawAsyncUsesOf(p);
+    const hit = raw?.calls.find((c) => !(site.coveredCallees && site.coveredCallees.has(c.name)));
+    if (hit) awaitIssue = { reason: `calls \`${hit.name}\`, which runs asynchronously`, callee: hit.name };
+  }
+  if (awaitIssue && "covered" in awaitIssue) return "null /* refused: see the callee's diagnostic */";
+  if (awaitIssue) {
+    const _callee = "callee" in awaitIssue ? awaitIssue.callee : undefined;
+    // s466 fix round 2 — a plain `function` that is async ONLY because route
+    // inference placed it on the server (its only callers are server code): the
+    // author wrote nothing async, so name the way out.
+    const _placementNote = _callee && site.placementOnlyCallees && site.placementOnlyCallees.has(_callee)
+      ? ` (\`${_callee}\` is a plain \`function\` the compiler runs on the server — and therefore asynchronously — ` +
+        `only because server code calls it; declare it \`fn\` if it is pure, and it stays an ordinary synchronous helper)`
+      : "";
+    recordRefusedLowering(new CGError(
+      "E-PARAM-DEFAULT-AWAIT",
+      `E-PARAM-DEFAULT-AWAIT: the default of parameter \`${label}\` of \`${site.fnName}\` ${awaitIssue.reason}${_placementNote}. ` +
+      `A parameter default is evaluated before the function body runs, in a position where the compiler ` +
+      `cannot wait for an asynchronous result — the parameter would hold an unfinished operation instead of ` +
+      `its value. Compute the value in the function body instead, where the wait is inserted for you: ` +
+      `give the parameter the default \`not\` (\`${label}: T | not = not\`) and, in the body, use the computed ` +
+      `value when the argument is \`not\` (a caller that passes \`not\` is then treated the same as one that ` +
+      `omits the argument).`,
+      at,
+    ), p as object);
+    return "null /* E-PARAM-DEFAULT-AWAIT */";
+  }
+  // Nothing here needs an await, so no non-awaitable site can be recorded.
+  return emitExpr(node, { ...ctx, peerAwaitable: false });
 }
 
 /**
@@ -5327,9 +5561,6 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       if (node.fromExport === true) return "";
       const fnName: string = node.name ?? "anon";
       const params: ParamLike[] = (node.params ?? []) as ParamLike[];
-      // §7.3.2: param signatures carry `name = defaultValue` when defaults are present.
-      // Strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
-      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, serverParamDefaultLowerer(opts)));
       const generatorStar: string = node.isGenerator ? "*" : "";
 
       // Function body has its own scope for declared names. C5: set
@@ -5377,6 +5608,22 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // s427 round 2 (H1): a function body is a new function scope with a set of its
       // own, as it always had — not a lift scope (see declared-name-marks.ts).
       clearLiftScope(fnOpts.declaredNames);
+      // §7.3.2: param signatures carry `name = <lowered default>` (emitParamDefault —
+      // the one lowering every function's defaults go through, s466). A default sees
+      // the enclosing scope and the parameters (a parameter shadows an outer name).
+      const _defaultOpts: EmitLogicOpts = {
+        ...fnOpts,
+        declaredNames: new Set<string>([
+          ...(fnOpts.declaredNames ?? []),
+          ...params.map((p, i) => paramName(p, i)),
+        ]),
+      };
+      // A nested function in SERVER code is server-placed (s466 fix round 4).
+      const _defaultSite = { fnName, fnSpan: node.span, serverPlaced: opts.boundary === "server", params };
+      const _defaultFile: string = (node.span && typeof node.span.file === "string") ? node.span.file : (opts.asyncFilePath ?? "");
+      // A default nested in a destructuring pattern lowers through the S465 r4 server
+      // lowerer (read from the tree, an awaited call refused); client: kept as written.
+      const paramSigs: string[] = params.map((p, i) => paramSignature(p, i, emitParamDefault(p, _defaultFile, _defaultOpts, _defaultSite), serverParamDefaultLowerer(_defaultOpts)));
       const body: any[] = node.body ?? [];
 
       const _emitNestedBody = (o: EmitLogicOpts): string[] => {
