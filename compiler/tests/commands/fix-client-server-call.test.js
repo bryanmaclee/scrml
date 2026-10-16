@@ -266,11 +266,17 @@ describe("client-server-call — sites LISTED for a human (never rewritten)", ()
       "  <button onclick=go()>Go</button>",
       "  <button onclick=touch()>T</button>",
     ]);
-    const r = fixClientServerCall(src, { filePath: "/virtual/pages/home.scrml" });
+    // A route file's `?{}` has no `<program db=…>` here, so it does not compile on impl#1 (E-SQL-004):
+    // the placement logic is checked with verify off; with verify on the file is refused (S464 ruling).
+    const r = fixClientServerCall(src, { filePath: "/virtual/pages/home.scrml", verify: false });
     expect(r.output).toContain("      touch()\n  } }");
     expect(r.output).toContain(`<button onclick={ touch() ${H} }>T</button>`);
     expect(r.infos).toEqual([]);
     expect(reasons(r).some((x) => /module \/ route file.*whole-program/.test(x))).toBe(true);
+    const v = fixClientServerCall(src, { filePath: "/virtual/pages/home.scrml" });
+    expect(v.changed).toBe(false);
+    expect(v.output).toBe(src);
+    expect(reasons(v).some((x) => /file does not compile; cannot verify \(impl#1 reports E-SQL-004/.test(x))).toBe(true);
   });
 
   test("a `<program` inside a COMMENT does not make a route file an entry (decided from the parsed tree)", () => {
