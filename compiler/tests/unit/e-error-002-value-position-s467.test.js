@@ -8,8 +8,13 @@
  * error object — truthy — so a wrong password read as success (the S467 security repro, D below).
  *
  * The rule is structural, not a list of positions: any call whose callee resolves to a failable
- * function is reported unless it is the operand of a handling form (`!{}`, `match`, `?`, a
- * `<request>` body's right-hand side, a render-time call inside `<errorBoundary>`).
+ * function is reported unless its VALUE REACHES a handling form UNCHANGED (`!{}`, `match`, `?`, a
+ * `<request>` body's right-hand side, a render-time call inside `<errorBoundary>`) — through
+ * parentheses, as an operand `||` / `??` return as-is or the right operand of `&&`, or as a ternary
+ * arm. A member access, an argument position or a coercing operator in between means the handler
+ * sees something else: unhandled (fix round 2, E below). Every expression container is walked,
+ * including function bodies written as values, `on mount` bodies, `!{}` arm bodies, C-style `for`
+ * parts, parameter defaults, attribute values and aliases (F below).
  */
 
 import { describe, test, expect, afterAll } from "bun:test";
@@ -170,7 +175,6 @@ describe("B — the handling forms are not reported", () => {
     // An expression-position `!{}` (inside an operator, a condition, parentheses) handles its operand.
     ["`!{}` inside parentheses under an operator", "const v = (check(p) !{ .Denied :> false }) || false\n        @m = v ? 1 : 0"],
     ["`!{}` in an `if` condition", "if (check(p) !{ .Denied :> false }) { @m = 1 }"],
-    ["`!{}` on a postfix chain handles the call at its base", "@m = check(p).toString() !{ .Denied :> \"no\" }"],
   ];
   for (const [name, body] of ok) {
     test(name, () => {
@@ -261,6 +265,185 @@ ${CHECK}
 });
 
 // ---------------------------------------------------------------------------
+// E — fix round 2: a call is handled only when its value reaches the handler unchanged
+// ---------------------------------------------------------------------------
+
+describe("E — `!{}` / `match` handle a call only when its value reaches them unchanged", () => {
+  // Each of these compiled on e1c20986e and logged in with a wrong password: the guard saw a
+  // string / a property / a boolean, never the error object.
+  const refused = [
+    ["a method call on the result (`.toString()`)", "const ok = check(p).toString() !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["a property of the result (`.constructor`)", "const ok = check(p).constructor !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["an index into the result", "const ok = check(p)[\"variant\"] !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["a chain inside a parenthesized guard", "const ok = (check(p).toString() !{ .Denied :> \"\" }) != \"\"\n        @m = ok ? 1 : 0"],
+    ["the LEFT operand of `&&` (tested, then discarded)", "const ok = check(p) && true !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["a template around the call", "const ok = `${check(p)}` !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["a `match` subject reached through `||` (impl#1 compares it as a plain value)",
+      "const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }\n        @m = ok ? 1 : 0"],
+  ];
+  for (const [name, body] of refused) {
+    test(`refused: ${name}`, () => {
+      expect(compileSource(inFn(body)).codes).toEqual(["E-ERROR-002"]);
+    });
+  }
+
+  const handled = [
+    ["the RIGHT operand of `&&` (returned as-is)", "const ok = p != \"\" && check(p) !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["an operand of `||`", "const ok = check(p) || false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["an operand of `??`", "const ok = check(p) ?? false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    ["a ternary arm", "const ok = p ? check(p) : false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+  ];
+  for (const [name, body] of handled) {
+    test(`handled: ${name}`, () => {
+      expect(compileSource(inFn(body)).codes).toEqual([]);
+    });
+  }
+
+  test("`?` sees its operand through `||` / a ternary arm (inside a `!` function)", () => {
+    expect(e002(inFn("const v = (p == \"\" || check(p))?\n        return v", { failable: true }))).toBe(0);
+    expect(e002(inFn("const v = (p == \"\" ? false : check(p))?\n        return v", { failable: true }))).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F — fix round 2: every expression container is walked
+// ---------------------------------------------------------------------------
+
+const TOP = (body) => `${HEAD}\${
+${CHECK}}
+${body}
+<p>\${@m}</p>
+`;
+
+describe("F — positions the round-1 walk did not reach", () => {
+  const fnBodies = [
+    ["a `function () { … }` expression used as a value", "const f = function () { return check(p) }\n        @m = f()"],
+    ["a block-bodied arrow used as a value", "const f = () => { return check(p) }\n        @m = f()"],
+    ["a block-bodied arrow passed as an argument", "@arr = [p].map((q) => { return check(q) })"],
+    ["a C-style `for` initializer", "for (let i = check(p); i; i = false) { @m = 1 }"],
+    ["a C-style `for` test", "for (let i = 0; check(p) && i < 1; i++) { @m = 1 }"],
+    ["a C-style `for` update", "for (let i = 0; i < 1; i = check(p)) { @m = 1 }"],
+    ["an arrow parameter default", "const f = (x = check(p)) => x\n        @m = f()"],
+    ["a `!{}` arm value", "const ok = check(\"secret\") !{ .Denied :> check(p) }\n        @m = ok ? 1 : 0"],
+    ["a `!{}` arm block body", "const ok = check(\"secret\") !{ .Denied :> {\n            const z = check(p)\n            z\n        } }\n        @m = ok ? 1 : 0"],
+    ["an alias: `const g = check`", "const g = check\n        @m = g(p)"],
+    ["an alias of an alias", "const g = check\n        const h = g\n        @m = h(p)"],
+  ];
+  for (const [name, body] of fnBodies) {
+    test(name, () => {
+      expect(compileSource(inFn(body)).codes).toEqual(["E-ERROR-002"]);
+    });
+  }
+
+  test("a function-decl parameter default", () => {
+    const r = compileSource(`${HEAD}\${
+${CHECK}
+    function dflt(x = check("wrong")) { return x }
+}
+<button onclick=dflt()>go</button>
+<p>\${@m}</p>
+`);
+    expect(r.codes).toEqual(["E-ERROR-002"]);
+  });
+
+  test("a top-level alias", () => {
+    const r = compileSource(`${HEAD}\${
+${CHECK}
+    const g = check
+    function t(p) { @m = g(p) }
+}
+<button onclick=t("x")>go</button>
+<p>\${@m}</p>
+`);
+    expect(r.codes).toEqual(["E-ERROR-002"]);
+  });
+
+  const tops = [
+    ["an `on mount` body (declaration)", "${ on mount { const ok = check(\"wrong\"); if (ok) { @m = 1 } } }"],
+    ["an `on mount` body (multi-line)", "${\n    on mount {\n        const ok = check(\"wrong\")\n        if (ok) { @m = 1 }\n    }\n}"],
+    ["a function declared in an `on mount` body", "${ on mount { function f() { return check(\"wrong\") } } }"],
+    ["a `when … changes` body", "${ when @m changes { const ok = check(\"wrong\"); if (ok) { @arr = [] } } }"],
+    ["a `when … changes` whole-statement call", "${ when @m changes { check(\"wrong\") } }"],
+    ["an `if=` attribute value", "<p if=check(\"wrong\")>x</p>"],
+    ["an expression attribute value", "<p title=${check(\"wrong\") ? \"a\" : \"b\"}>x</p>"],
+  ];
+  for (const [name, body] of tops) {
+    test(name, () => {
+      expect(compileSource(TOP(body)).codes).toEqual(["E-ERROR-002"]);
+    });
+  }
+
+  for (const [name, attr] of [
+    ["a bare call-ref handler's argument", "onclick=log(check(\"wrong\"))"],
+    ["a `${…}` handler's argument", "onclick=${log(check(\"wrong\"))}"],
+    ["a braced handler's argument", "onclick={ log(check(\"wrong\")) }"],
+  ]) {
+    test(name, () => {
+      const r = compileSource(TOP(`<button ${attr}>go</button>`));
+      expect(r.codes).toEqual(["E-ERROR-002"]);
+      expect(r.errors[0].message).toContain("in this event handler");
+    });
+  }
+
+  const clean = [
+    ["a local in an `on mount` body that shadows the name", "${ on mount { const check = (x) => true; const ok = check(1); @m = ok ? 1 : 0 } }"],
+  ];
+  for (const [name, body] of clean) {
+    test(`not reported: ${name}`, () => {
+      expect(compileSource(TOP(body)).codes).toEqual([]);
+    });
+  }
+
+  test("not reported: an alias of a NON-failable function", () => {
+    expect(compileSource(inFn("const g = plain\n        @m = g(p)")).codes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G — fix round 2: `<errorBoundary>` contains RENDER-time calls only (§19.6.6)
+// ---------------------------------------------------------------------------
+
+const BOUNDARY = (inner) => `${HEAD}\${
+${CHECK}}
+<errorBoundary fallback={<div>F</>}>
+${inner}
+</>
+<p>\${@m}</p>
+`;
+
+describe("G — the `<errorBoundary>` carve-out covers render-time positions only", () => {
+  test("an arrow body inside a render-time statement is not render-time", () => {
+    const r = compileSource(BOUNDARY(`\${ const f = (q) => check(q) }
+<button onclick={ const ok = f("wrong"); if (ok) { @m = 1 } }>go</button>`));
+    expect(r.codes).toContain("E-ERROR-002");
+  });
+
+  test("an `on mount` body inside a boundary is not render-time", () => {
+    const r = compileSource(BOUNDARY(`\${ on mount { const ok = check("wrong"); if (ok) { @m = 1 } } }`));
+    expect(r.codes).toContain("E-ERROR-002");
+  });
+
+  test("render-time positions stay contained: an interpolation, an attribute, a render-time declaration", () => {
+    expect(compileSource(BOUNDARY(`<p>\${check("x") ? 1 : 2}</p>`)).codes).toEqual([]);
+    expect(compileSource(BOUNDARY(`<p title=\${check("x") ? "a" : "b"}>t</p>`)).codes).toEqual([]);
+    expect(compileSource(BOUNDARY(`\${ const ok = check("x") }\n<p>\${ok ? 1 : 2}</p>`)).codes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H — fix round 2 (F6): one diagnostic per site
+// ---------------------------------------------------------------------------
+
+describe("H — E-ERROR-002 is reported once per site", () => {
+  test("a markup interpolation", () => {
+    expect(e002(TOP(`<p>\${check("x") ? 1 : 2}</p>`))).toBe(1);
+  });
+  test("a whole-statement call in a function body", () => {
+    expect(e002(inFn("check(p)"))).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // D — the security repro, executed
 // ---------------------------------------------------------------------------
 
@@ -311,5 +494,25 @@ describe("D — the wrong-password repro", () => {
     expect(page.text("#out")).toBe("rejected");
     await page.click("#right");
     expect(page.text("#out")).toBe("LOGGED IN");
+  });
+});
+
+describe("D2 — fix round 2: the reviewer's shapes, executed", () => {
+  test("`p != \"\" && check(p) !{ … }` (the error reaches the guard as-is): compiles and rejects", async () => {
+    const page = await boot(LOGIN("const ok = p != \"\" && check(p) !{ .Denied :> false }"));
+    await page.click("#wrong");
+    expect(page.text("#out")).toBe("rejected");
+    await page.click("#right");
+    expect(page.text("#out")).toBe("LOGGED IN");
+  });
+
+  test("`check(p) || false !{ … }`: compiles and rejects", async () => {
+    const page = await boot(LOGIN("const ok = check(p) || false !{ .Denied :> false }"));
+    await page.click("#wrong");
+    expect(page.text("#out")).toBe("rejected");
+  });
+
+  test("`check(p).toString() !{ … }` (the guard sees a string) is refused", () => {
+    expect(compileSource(LOGIN("const ok = check(p).toString() !{ .Denied :> false }")).codes).toEqual(["E-ERROR-002"]);
   });
 });

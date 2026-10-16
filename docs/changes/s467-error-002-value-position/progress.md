@@ -99,3 +99,39 @@ NEXT 3 STEPS:
 - Note: the whole-statement `check(p)` reports E-ERROR-002 twice on main (two whole-statement sites) — pre-existing.
 - SPEC §19.4.3 carried-gaps paragraph updated + Provenance; gap g-unhandled-failable-call-in-value-position-s467
   filed status=narrowed (residuals listed).
+
+## Fix round 2 (S467, worktree agent-aaaf90c53239473db, branch tip e1c20986e; base origin/main 179f9b346)
+
+S239 review of e1c20986e -> FIX. Harness ~/.cache/scrml-review-s467-e002/h.mjs (a c d e).
+
+- F1+F4 — ONE rule for "handled" (failable-value-calls.ts `Walker.operand`): a call is handled by a
+  `!{}` / `?` only when its VALUE REACHES the handler unchanged — parens, an operand `||` / `??` return
+  as-is (both sides), the RIGHT operand of `&&`, a ternary arm. Member access / argument / coercing
+  operator / the LEFT of `&&` = value position. `check(p).toString() !{…}` (and .constructor, ["variant"],
+  paren chain, .ok, .valueOf) now E-ERROR-002; `p != "" && check(p) !{…}` compiles and rejects (executed).
+  `match` subject is narrower (direct call only, `matchSubject`): executed — impl#1's match on
+  `(p == "" || check(p))` emits `_scrml_match_N === "Denied"` and logs in on base AND branch. Gap filed
+  g-match-failable-subject-through-operator-miscompiled-s467. `?` through `||` / ternary executed OK.
+- F2 — the walk reaches every expression container (`forEachCallInStatement` + a statement walker):
+  function bodies written as values (lambda expr/block bodies; FunctionExpression / ArrowFunctionExpression
+  escape hatches — `bodyRaw` parsed with defer-structure.ts `parseStatementText`, the front-end), parameter
+  defaults (function-decl string defaults via parseExprToNode; lambda defaults), on mount / on dismount,
+  when-changes / when-message / onchange bodies, `!{}` arm values + block bodies (statement and
+  expression-position via parseGuardArmsFromRaw), raw inline-match arms (textBodiesOf), C-style for
+  init/test/update (cStyleParts), non-handler markup attribute values (call-ref + expr), aliases
+  (`const g = check` — per-scope alias map in type-system `resolveFailableCallee`; local alias map in the
+  statement walker). g-when-changes-body-failable-call-unchecked resolved by this.
+- F3 — boundary carve-out is render-time only: candidates inside a function written in the statement,
+  `_onMountEffect` bodies, effect bodies and handlers are never exempt.
+  Runtime defect filed: g-errorboundary-runtime-does-not-catch-returned-error-value-s467 (HIGH).
+- F5 — `o.v = check(p) !{…}` stays refused; gap g-member-assign-guard-emitted-after-assign-s467.
+- F6 — E-ERROR-002 deduped after annotateNodes (same code/span/message): the markup-interp double and
+  the whole-statement-in-function double are both gone.
+- Round-1 pre-existing items filed: g-onmount-guarded-failable-call-refused-s467 (server → E-SERVER-FN-
+  IN-SYNC-CALLBACK, client → E-CODEGEN-INVALID-LOGIC; reproduced on 179f9b346), g-hook-flakes-under-load-s467.
+- Harness after: every wrong-password case refused or rejecting except `${ const ok = check() }` inside a
+  boundary (SPEC-legal; the runtime gap above).
+- Corpus base 179f9b346 vs fix (2951 files): 0 newly refused; net E-ERROR-002 delta 0; the one
+  W-CPS-NEEDS-FAILABLE added in samples/gauntlet-r13/htmx-forms.scrml is the round-1 one (already refused).
+- Still not reached (SPEC + gap): unparseable text bodies (skipped); a binding reassigned to a failable fn
+  in an inner block; a failable fn passed as a value (`items.map(check)`). Handler-call arguments (`onclick=f(check(p))`, every form) added late in round 2.
