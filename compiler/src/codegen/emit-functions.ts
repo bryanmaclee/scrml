@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { routePath, paramName, paramSignature } from "./utils.ts";
-import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
+import { emitLogicNode, emitLogicBody, emitFnShortcutBody, emitParamDefault } from "./emit-logic.js";
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
@@ -18,6 +18,7 @@ import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // owns from the client peer-await set — see `_stdlibOwnedImport` below.
 import { isPromiseReturningImportedCallee } from "../module-resolver.js";
 import { returnTypeAllowsAbsence } from "./wire-format.ts";
+import { fnReadsServerRefusedAtName } from "../at-refs.ts";
 import type { CompileContext } from "./context.ts";
 
 // ---------------------------------------------------------------------------
@@ -682,6 +683,46 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
  */
 export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap: Map<string, string> } {
   const { filePath, routeMap, depGraph, errors, csrfEnabled } = ctx;
+  // §7.3.2 (s466 fix round 1) — a CLIENT function's parameter default (a client
+  // function, or a CPS-split function's client wrapper, which is the function the
+  // caller calls). Lowered in client mode by the one helper; the file's client
+  // async facts decide what needs an await (a server call, a client async peer, an
+  // async stdlib export). The parameters shadow outer names.
+  // s466 fix round 5 — the server functions already refused for the state they
+  // read (wholly server, `fnReadsServerRefusedAtName`): a default that calls one
+  // is not ALSO reported as E-PARAM-DEFAULT-AWAIT (one root cause — the catalog
+  // row; emit-server passes the same set for its sites).
+  let _coveredCallees: Set<string> | null = null;
+  const coveredCalleesOf = (): Set<string> => {
+    if (_coveredCallees) return _coveredCallees;
+    _coveredCallees = new Set<string>();
+    const fns: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
+    for (const f of fns) {
+      const sp = f.span as { start?: unknown } | undefined;
+      if (typeof f.name !== "string" || typeof sp?.start !== "number") continue;
+      const r = routeMap?.functions?.get(`${filePath}::${sp.start}`) as { boundary?: string; cpsSplit?: unknown } | undefined;
+      if (!r || r.boundary !== "server" || r.cpsSplit) continue;
+      if (fnReadsServerRefusedAtName(f, filePath)) _coveredCallees.add(f.name);
+    }
+    return _coveredCallees;
+  };
+  const clientParamDefault = (p: unknown, fnNode: ASTNode, serverPlaced: boolean): string | null => {
+    const ps = ((fnNode.params as unknown[]) ?? []);
+    const names = ps.map((q, i) => paramName(q as Param, i));
+    return emitParamDefault(p, filePath, {
+      boundary: "client",
+      declaredNames: new Set<string>(names),
+      insideFunctionBody: true,
+      ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
+    }, {
+      fnName: typeof fnNode.name === "string" ? fnNode.name : "<anonymous>",
+      fnSpan: fnNode.span,
+      asyncFacts: clientAsyncFactsOf(ctx),
+      coveredCallees: coveredCalleesOf(),
+      serverPlaced,
+      params: ps,
+    });
+  };
   // S89 §13.2 Sub-Phase B Step 3 — pre-compute per-file `callee → sourceModule`
   // resolver map ONCE for the file. The auto-await classifier consults this
   // map per call site to decide whether the callee is a stdlib `Promise<T>`-
@@ -1298,7 +1339,18 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // Map original name → CPS wrapper so event wiring and post-process regex
     // rewrite bare call sites (e.g. onclick=login() → _scrml_cps_login_X()).
     registerFnName(name, wrapperName);
-    lines.push(`async function ${wrapperName}(${paramNames.join(", ")}) {`);
+    // §7.3.2 (s466) — the wrapper IS the function the caller calls, so an omitted
+    // argument takes its default here, once, before the client statements and
+    // the server batch read it (the batch receives the value; the route
+    // handler's own default is only the backstop for a missing key). Lowered in
+    // client mode: the wrapper runs in the browser, where a CPS function's cell
+    // reads are legitimate (§6.6.9 CPS carve-out).
+    const cpsParamSigs = params.map((p: Param, i: number) => {
+      // A CPS-split function is server-placed (its value reaches the server batch).
+      const d = clientParamDefault(p, fnNode, true);
+      return d === null ? paramNames[i] : `${paramNames[i]} = ${d}`;
+    });
+    lines.push(`async function ${wrapperName}(${cpsParamSigs.join(", ")}) {`);
 
     // ----------------------------------------------------------------------
     // Ext 1 M1.5 — multi-batch client wrapper.
@@ -1572,10 +1624,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // Bug fix: strip :Type annotations from string params (e.g. "mario:Mario" → "mario").
     // A5-FUP: paramName() resolves DestructurePattern → _scrml_arg_N placeholders.
     const paramNames = params.map((p: Param, i: number) => paramName(p, i));
-    // §7.3.2: function-decl signatures carry `name = defaultValue` when defaults are present.
-    // A5-FUP: paramSignature also handles DestructurePattern names (emits valid JS
-    // destructuring bindings via emit-destructure-pattern.ts).
-    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i));
+    // §7.3.2: function-decl signatures carry `name = <lowered default>` — the one
+    // lowering every function's defaults go through (emit-logic.ts
+    // `emitParamDefault`, s466 fix round 1: client mode lowers `not`, `.Variant`
+    // and `@cell` reads instead of splicing the scrml text). A5-FUP: paramSignature
+    // also handles DestructurePattern names (emit-destructure-pattern.ts).
+    const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i, clientParamDefault(p, fnNode, false)));
 
     // Seam-A colorless-async Gap 2 (GITI-037) — the `async` prefix now reads the
     // TRANSITIVE fixpoint (`_clientAsyncFnNames`) rather than the flat per-fn

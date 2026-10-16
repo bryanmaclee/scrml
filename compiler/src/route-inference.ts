@@ -89,15 +89,17 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
-import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
+import { fileScopeDeclaresSessionCell, fileScopeDeclaresCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
+import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDeep, type IdentityNameResolution } from "./free-name.ts";
+import { toPosix } from "./path-canonical.js";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
-import { isPlainPureFn, forEachAtRef, parsedParamDefaults, fnReachesAtName } from "./at-refs.ts";
+import { isPlainPureFn, forEachAtRef, parsedParamDefaults, analyzedParamDefault, paramDefaultSpan, fnReachesAtName } from "./at-refs.ts";
 export { isPlainPureFn, forEachAtRef, parsedParamDefaults } from "./at-refs.ts";
 import { ifChainChildNodes } from "./ast-if-chain.js";
 import { describeServerTrigger } from "./escalation-reason-text.ts";
@@ -530,7 +532,10 @@ const SERVER_ONLY_PATTERNS: ServerOnlyPattern[] = [
   // server (which would mis-read `_scrml_body["session"]`). Mirrors the
   // `(?<!public )` lookbehind on the `env()` pattern above.
   // (g-markup-session-read-undeclared, S228 ruling.)
-  { pattern: /(?<!@)\bsession\b/, resourceType: "session" },
+  // s466 fix round 2 — NOT a text pattern any more: `session` is server-only only
+  // when the name is FREE. A parameter / local / lambda parameter named `session`
+  // is an ordinary value (`fn mk(session: string)` is pure). Detected
+  // scope-aware in `detectServerOnlyResourceForNode` (free-name.ts).
   // NOTE: `@currentUser` (§20.5 / §52, S233 — the compiler-provided ambient
   // identity cell) deliberately has NO escalation trigger here, mirroring the
   // client `@session` projection precedent above. The canonical Fork-3 read is
@@ -982,6 +987,9 @@ function detectServerOnlyResourceForNode(
 ): string | null {
   const strHit = detectServerOnlyResource(codeOnlyTextForTrigger(exprNode, exprString));
   if (strHit !== null) return strHit;
+  // §20.5 — the server-only `session` object, when the name is FREE here (s466
+  // fix round 2; marks set by `markLocallyBoundSession` before this pass).
+  if (exprReadsFreeSession(exprNode, exprString)) return "session";
   return exprNode
     ? exprNodeCallsServerOnlyResource(exprNode)
     : detectServerOnlyNamespaceString(exprString);
@@ -4952,6 +4960,14 @@ export interface RIInput {
    * application's entry file (`resolveBuildRoot`, SPEC §40.8 "The build root").
    */
   buildRoot?: string;
+  /**
+   * s466 fix round 5 — the module resolver (`module-resolver.js`
+   * `resolveModulePath`: an import source + the importer's path → the posix key
+   * of the imported file). The identity check on parameter defaults follows a
+   * helper imported from a `.scrml` module through it. Absent (a harness driving
+   * RI directly), a CALL of an imported name in a checked default fails closed.
+   */
+  resolveImport?: (source: string, importerPath: string) => string | null;
 }
 
 /** Output of the RI stage. */
@@ -4973,6 +4989,15 @@ export function runRI(input: RIInput): RIOutput {
 
   // Reset the route counter for deterministic output within a single runRI call.
   _routeCounter = 0;
+
+  // s466 fix round 2 — §20.5: the server-only `session` builtin is the FREE name.
+  // Mark every `session` reference a function binds itself (a parameter, a
+  // local, a nested function's or a lambda's parameter) before any trigger
+  // scan reads the trees, so `fn mk(session: string)` stays an ordinary pure
+  // function (free-name.ts — one scope model).
+  for (const fileAST of files) {
+    for (const fn of collectFileFunctions(fileAST)) markLocallyBoundSession(fn);
+  }
 
   const functions = new Map<string, FunctionRoute>();
   const errors: (RIError | { code: string; message: string; severity: string; filePath: string })[] = [];
@@ -5119,6 +5144,14 @@ export function runRI(input: RIInput): RIOutput {
         fileImportedNamespaces,
         filePrintShadowed,
       );
+      // s466 — a parameter DEFAULT is evaluated where the function runs (§7.3.2
+      // "evaluated at call time"), so a function it calls is a callee of this
+      // function exactly like a body call: `fn f(m, k = rd())` reached from the
+      // server takes `rd` with it (and `rd`'s `@n` read meets E-REACTIVE-003).
+      // Same parsed tree the `@`-reader walks (at-refs.ts parsedParamDefaults).
+      for (const _d of parsedParamDefaults(fnNode, filePath)) {
+        callees.push(...exprNodeCollectCallees(_d));
+      }
 
       // -------------------------------------------------------------
       // Trigger 7 (D2): channel-cell-write / broadcast() / disconnect()
@@ -6579,6 +6612,233 @@ export function runRI(input: RIInput): RIOutput {
       ));
     }
   };
+  /**
+   * s466 fix round 1 — a wholly-server function's PARAMETER DEFAULTS.
+   *
+   * (1) An `@session` read in a default is E-SESSION-AMBIENT-SERVER, exactly as in
+   *     the body (the same reader over the parsed default).
+   * (2) A SERVER-TRUSTED identity read in a default — the `session.*` builtin
+   *     (§20.5, the server's own session) or the ambient `@currentUser` (§20.5 /
+   *     §52, server-resolved) — is E-PARAM-DEFAULT-SERVER-IDENTITY. A default
+   *     applies only when the caller OMITS the argument; every server function has
+   *     an HTTP route, so the caller can always SUPPLY it instead, and the
+   *     "identity" becomes whatever the request body says (measured: `server fn
+   *     who2(m, uid = session.userId)` bound `uid` from a client body key). §6.6.9:
+   *     "`@session` is server-only identity and SHALL NEVER be marshalled from the
+   *     client". The fix is to read it in the body (`const uid = session.userId`).
+   */
+  const _fileScopeCurrentUserCell = new Map<string, boolean>();
+  for (const fileAST of files) {
+    _fileScopeCurrentUserCell.set(fileAST.filePath, fileScopeDeclaresCell(fileNodesOf(fileAST), "currentUser"));
+  }
+  /**
+   * s466 fix round 5 — the identity check follows a default's LOCAL
+   * FUNCTION-VALUED BINDINGS (free-name.ts `identityReadInDefaultDeep`):
+   * `const getU = () => @session.userId` + `uid = getU()` was accepted while
+   * `uid = @session.userId` was refused (a CPS-split function's server part then
+   * bound the browser-supplied `uid`). A name resolves over EVERY binding of it in
+   * the file, at any depth (a union — over-scanning fails closed), and through a
+   * `.scrml` import to the declaring module's file-scope bindings:
+   *   - a `const` whose initialiser is a lambda → that lambda; an identifier → the
+   *     name it aliases; any other non-function value (a literal, array, object,
+   *     operator expression, template) → not a function;
+   *   - a client-placed `function` / `fn` → its body. A server-placed one is not
+   *     followed: calling it from a default is an await, refused as
+   *     E-PARAM-DEFAULT-AWAIT where the default is lowered;
+   *   - anything else (`let` / `lin` / `~` bindings, a `const` initialised from a
+   *     call or a member read, a function-valued cell `@f`) → unresolved: CALLING
+   *     it fails closed.
+   */
+  const _identityFileByPath = new Map<string, FileAST>();
+  for (const fileAST of files) _identityFileByPath.set(toPosix(fileAST.filePath), fileAST);
+  type _IdBinding = { kind: "fn"; node: any; filePath: string } | { kind: "lambda"; node: any } | { kind: "alias"; name: string; filePath: string } | { kind: "value" } | { kind: "unresolved" };
+  const _identityBindingCache = new Map<string, Map<string, _IdBinding[]>>();
+  const _NON_FUNCTION_INIT = new Set(["lit", "array", "object", "binary", "unary", "template", "map-lit"]);
+  const identityBindingsOf = (filePath: string, fileScopeOnly: boolean): Map<string, _IdBinding[]> => {
+    const key = `${fileScopeOnly ? "F" : "A"}:${filePath}`;
+    const cached = _identityBindingCache.get(key);
+    if (cached) return cached;
+    const out = new Map<string, _IdBinding[]>();
+    _identityBindingCache.set(key, out);
+    const fileAST = _identityFileByPath.get(toPosix(filePath));
+    if (!fileAST) return out;
+    const add = (name: unknown, b: _IdBinding): void => {
+      if (typeof name !== "string" || !name) return;
+      const list = out.get(name) ?? [];
+      list.push(b);
+      out.set(name, list);
+    };
+    const seen = new Set<unknown>();
+    const visit = (node: unknown, insideFn: boolean): void => {
+      if (!node || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) visit(c, insideFn); return; }
+      const n = node as Record<string, any>;
+      if (!(fileScopeOnly && insideFn)) {
+        if (n.kind === "function-decl") add(n.name, { kind: "fn", node: n, filePath: fileAST.filePath });
+        else if (n.kind === "const-decl") {
+          const init = n.initExpr as Record<string, unknown> | undefined;
+          if (init && init.kind === "lambda") add(n.name, { kind: "lambda", node: init });
+          else if (init && init.kind === "ident" && typeof init.name === "string") add(n.name, { kind: "alias", name: init.name, filePath: fileAST.filePath });
+          else if (init && _NON_FUNCTION_INIT.has(String(init.kind))) add(n.name, { kind: "value" });
+          else add(n.name, { kind: "unresolved" });
+        } else if (n.kind === "let-decl" || n.kind === "lin-decl" || n.kind === "tilde-decl") {
+          add(n.name, { kind: "unresolved" });
+        } else if (n.kind === "export-decl" && typeof n.exportedName === "string") {
+          // An exported value keeps only its raw text (an exported function also
+          // gets a synthetic `function-decl`, collected above).
+          const ek = String(n.exportKind ?? "");
+          if (typeof n.reExportSource === "string" && n.reExportSource) {
+            add(n.exportedName, { kind: "unresolved" }); // a re-export: not followed — fail closed
+          } else if (ek === "const") {
+            let init: string | null = typeof n.valueInit === "string" ? String(n.valueInit).trim() : null;
+            if (init == null) {
+              const m = String(n.raw ?? "").match(/^\s*export\s+const\s+[A-Za-z_$][\w$]*\s*(?::[^=]*)?=\s*([\s\S]+)$/);
+              init = m ? m[1].trim() : null;
+            }
+            let initNode: Record<string, unknown> | null = null;
+            try { initNode = init ? (parseExprToNode(init, fileAST.filePath, 0) as unknown as Record<string, unknown>) : null; } catch { initNode = null; }
+            if (initNode && initNode.kind === "lambda") add(n.exportedName, { kind: "lambda", node: initNode });
+            else if (initNode && initNode.kind === "ident" && typeof initNode.name === "string") add(n.exportedName, { kind: "alias", name: initNode.name, filePath: fileAST.filePath });
+            else if (initNode && _NON_FUNCTION_INIT.has(String(initNode.kind))) add(n.exportedName, { kind: "value" });
+            else add(n.exportedName, { kind: "unresolved" });
+          } else if (ek === "let" || ek === "var") {
+            add(n.exportedName, { kind: "unresolved" });
+          }
+        }
+      }
+      const inner = insideFn || n.kind === "function-decl";
+      for (const k of Object.keys(n)) {
+        if (k === "span") continue;
+        const v = n[k];
+        if (v && typeof v === "object") visit(v, inner);
+      }
+    };
+    visit(fileNodesOf(fileAST), false);
+    // `.scrml` imports: the local name → the declaring module's file-scope binding.
+    const imports = (((fileAST as any).ast?.imports ?? (fileAST as any).imports ?? []) as any[]);
+    for (const imp of Array.isArray(imports) ? imports : []) {
+      if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string" || !imp.source.endsWith(".scrml")) continue;
+      const abs = input.resolveImport ? input.resolveImport(imp.source, fileAST.filePath) : null;
+      const src = abs ? _identityFileByPath.get(toPosix(abs)) : undefined;
+      for (const spec of (Array.isArray(imp.specifiers) ? imp.specifiers : [])) {
+        if (spec && typeof spec.imported === "string" && typeof spec.local === "string") {
+          // A `.scrml` module this compilation does not hold cannot be followed: fail closed.
+          add(spec.local, src ? { kind: "alias", name: spec.imported, filePath: src.filePath } : { kind: "unresolved" });
+        }
+      }
+    }
+    return out;
+  };
+  const identityNameResolver = (filePath: string) => (name: string): IdentityNameResolution => {
+    if (name.startsWith("@")) {
+      // A cell is not a function binding the check can follow; one that is CALLED
+      // (a function-valued cell) fails closed.
+      return "unresolved";
+    }
+    const fns: Array<{ params?: unknown; body?: unknown }> = [];
+    let unresolved = false;
+    const seenAlias = new Set<string>();
+    const resolveIn = (fp: string, nm: string, fileScopeOnly: boolean): void => {
+      const aliasKey = `${fp}::${nm}`;
+      if (seenAlias.has(aliasKey)) return;
+      seenAlias.add(aliasKey);
+      for (const b of identityBindingsOf(fp, fileScopeOnly).get(nm) ?? []) {
+        if (b.kind === "lambda") fns.push({ params: [], body: [b.node] });
+        else if (b.kind === "fn") {
+          const id = typeof b.node?.span?.start === "number" ? `${b.filePath}::${b.node.span.start}` : null;
+          const esc = id ? escalationResults.get(id) : undefined;
+          if (esc && esc.allReasons.length > 0) continue; // server-placed: E-PARAM-DEFAULT-AWAIT
+          fns.push(b.node);
+        } else if (b.kind === "alias") resolveIn(b.filePath, b.name, b.filePath !== fp ? true : fileScopeOnly);
+        else if (b.kind === "unresolved") unresolved = true;
+      }
+    };
+    resolveIn(filePath, name, false);
+    if (fns.length > 0) return { fns };
+    return unresolved ? "unresolved" : null;
+  };
+  const reportServerDefaultIdentityReads = (record: AnalysisRecord, clientEvaluated: boolean): void => {
+    const params: unknown[] = Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [];
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    const sessionCellOwnsName = _fileScopeSessionCell.get(record.filePath) === true;
+    const currentUserAmbient = _fileScopeCurrentUserCell.get(record.filePath) !== true;
+    for (const p of params) {
+      const _a = analyzedParamDefault(p, record.filePath);
+      // s466 fix round 3 — the ANALYSED tree (match arms, template slots parsed); a
+      // default the analysis refuses is refused where it is lowered (emitParamDefault).
+      const d = _a && "tree" in _a ? _a.tree : null;
+      if (!d) continue;
+      const at = (paramDefaultSpan(p) ?? record.fnNode.span) as Span;
+      const label = typeof (p as any).name === "string" ? (p as any).name : "(destructured)";
+      // A server-evaluated default is a server context for `@session`; a CPS-split
+      // function's default is evaluated in the browser, where `@session` is the
+      // projection — and its value is then SENT to the server batch as the
+      // parameter, which makes it a client-claimed identity (checked below).
+      if (!sessionCellOwnsName && !clientEvaluated) {
+        for (const _r of detectServerAmbientSessionReads([d])) {
+          const _key = `${record.filePath}:${(at as any)?.start ?? -1}:${_r.member ?? ""}`;
+          if (_sessionAmbientSeen.has(_key)) continue;
+          _sessionAmbientSeen.add(_key);
+          errors.push(new RIError(
+            "E-SESSION-AMBIENT-SERVER",
+            sessionAmbientServerMessage(`The default of parameter \`${label}\` of server function \`${_fnName}\``, _r.member) +
+            ` In a parameter default the server's session is not safe either (the caller can send \`${label}\` ` +
+            `itself — E-PARAM-DEFAULT-SERVER-IDENTITY): read it in the function body, ` +
+            `\`const ${label} = ${_r.member ? `session.${_r.member}` : "session.userId"}\`, and remove the parameter.`,
+            at,
+          ));
+        }
+      }
+      const _deep = identityReadInDefaultDeep(d, params, {
+        currentUserAmbient,
+        sessionProjection: clientEvaluated && !sessionCellOwnsName,
+        helperSessionProjection: !sessionCellOwnsName,
+        resolveName: identityNameResolver(record.filePath),
+      });
+      if (_deep !== null && _deep.unresolved) {
+        errors.push(new RIError(
+          "E-PARAM-DEFAULT-SERVER-IDENTITY",
+          `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of \`${_fnName}\` calls ` +
+          `\`${_deep.read}\`, whose function value the compiler cannot follow (it is not a \`const\` bound to a ` +
+          `function, or a \`function\` / \`fn\` declaration). \`${_fnName}\` runs on the server, and a default that ` +
+          `could read an identity — \`session\`, \`@session\`, \`@currentUser\` — would let the caller supply it ` +
+          `(§6.6.9: server-only identity SHALL NEVER be marshalled from the client), so the default is refused. ` +
+          `Bind the helper with \`const\` to a function, declare it with \`fn\`, or compute the value in the function body.`,
+          at,
+        ));
+        continue;
+      }
+      if (_deep !== null) {
+        // `reads X` — the read as written, and the local helper it was reached through.
+        const readsWhat = _deep.via
+          ? `\`${_deep.read}\` (through \`${_deep.via}\`)`
+          : `\`${_deep.read}\``;
+        // What to write in the server body instead: the server's own `session.*`
+        // for a `@session` projection read, the read itself otherwise.
+        const bodyRead = _deep.read.startsWith("@session")
+          ? `session${_deep.read.slice("@session".length) || ".userId"}`
+          : _deep.read;
+        errors.push(new RIError(
+          "E-PARAM-DEFAULT-SERVER-IDENTITY",
+          clientEvaluated
+            ? `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of \`${_fnName}\` reads ` +
+              `${readsWhat} as an identity. \`${_fnName}\` runs partly on the server (§19.9.9): its default is ` +
+              `evaluated in the BROWSER and the value is sent to the server part as the parameter, so the server would ` +
+              `trust whatever the browser — or any HTTP request — sends (§6.6.9: server-only identity SHALL NEVER be ` +
+              `marshalled from the client). Read the identity in a server statement of the body instead — ` +
+              `\`const ${label} = session.userId\` — and remove the parameter.`
+            : `E-PARAM-DEFAULT-SERVER-IDENTITY: the default of parameter \`${label}\` of server function ` +
+              `\`${_fnName}\` reads ${readsWhat}, ${_deep.read.startsWith("@session") ? "an identity" : "the server's own identity"}. A default applies only when the ` +
+              `caller omits the argument, and a server function's caller is an HTTP request: it can always send ` +
+              `\`${label}\` itself, so the value would be whatever the request says, not the server's identity ` +
+              `(§6.6.9: server-only identity SHALL NEVER be marshalled from the client). Read it in the function ` +
+              `body instead — \`const ${label} = ${bodyRead}\` — and remove the parameter.`,
+          at,
+        ));
+      }
+    }
+  };
   // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
   // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
   // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
@@ -6974,6 +7234,13 @@ export function runRI(input: RIInput): RIOutput {
         ? cpsSplit.serverStmtIndices.map((i) => _body[i]).filter((x) => x != null)
         : _body;
       reportServerSessionReads(record, _serverPart);
+      // s466 fix round 1 — a parameter DEFAULT of a wholly-server function is
+      // evaluated on the server too (§7.3.2), so it is the same server context:
+      // the same reader (`detectServerAmbientSessionReads`) over the same parsed
+      // default the codegen lowers (at-refs.ts `parsedParamDefault`). A CPS-split
+      // function's default runs in its CLIENT wrapper (where `@session` is the
+      // §20.5 projection) and is not scanned.
+      reportServerDefaultIdentityReads(record, cpsSplit != null);
     }
 
     // Build the FunctionRoute entry.
