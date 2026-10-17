@@ -461,6 +461,12 @@ ${
     export type View:enum = {
         El(tag: string, attrs: Attr[], kids: View[]),
         Text(text: string),
+        // s468 — the text of a `<pre>` / `<code>` raw-content body (SPEC §4.17):
+        // DISPLAY text written with `<` and `>` encoded and `&` NOT encoded ("An
+        // author entity … still decodes at render time and displays as the
+        // character it names; an entity never builds an element"). Never markup:
+        // the printer has no path that writes it unencoded.
+        RawText(text: string),
         Dyn(e: Expr),
         Cond(arms: CondArm[]),
         Each(src: Expr, bind: Sym, key: Expr | not, handles: Sym[], row: View[]),

@@ -136,6 +136,7 @@ ${
         return match v {
             .El(tag: x) :> "El"
             .Text(text: x) :> "Text"
+            .RawText(text: x) :> "RawText"
             .Dyn(e: x) :> "Dyn"
             .Cond(arms: x) :> "Cond"
             .Each(src: x) :> "Each"

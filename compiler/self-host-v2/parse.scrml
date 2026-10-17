@@ -3255,8 +3255,212 @@ ${
             return elemFrom(o, sh, mp)
         }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
+        if (isRawContentOpener(o)) return finishRaw(o, mp)
         const kids: RNodes = parseKids(mp, o.name)
         return elemFrom(o, kids.nodes, kids.mp)
+    }
+
+    // ---- s468: raw-content elements — `<pre>` and `<code>` (SPEC §4.17) -------
+    // "The element names `pre` and `code` (matched case-insensitively) are
+    // raw-content elements. After the opening tag is parsed (including any
+    // attributes per §5), the block splitter SHALL scan the body as a single
+    // text run terminated only by the matching close tag." Inside it no scrml
+    // token is recognized (`${…}`, a tag, `</>`, a sigil, `//`, `<!-- -->`).
+    // "A raw-content body is display text: `<` and `>` are entity-encoded on
+    // output (S462 Q21) … nothing in a raw-content body builds an element, so
+    // nothing in it can execute" — EXCEPT "A nested `<code>…</code>` or
+    // `<pre>…</pre>` pair with NO attributes stays an element … Only a
+    // BALANCED pair qualifies — a closer pairs with the innermost unclosed
+    // opener of the same name, ASCII case-insensitive, optional whitespace
+    // before `>`; an unpaired opener or closer is text."
+    // And, fail closed: "every case-insensitive `<script` / `<style` start-tag
+    // text ANYWHERE in a raw-content body … SHALL be `E-SCRIPT-001` /
+    // `E-STYLE-001`" — inside a comment, an attribute value, an RCDATA /
+    // RAWTEXT element included; "The name is exact: `<script` / `<style`
+    // followed by whitespace, `/`, `>` or the end of the body, ASCII
+    // case-insensitive".
+    // The bootstrap parsed the body as markup (gap
+    // g-bootstrap-raw-content-not-fail-closed-s462): a `<script>` in a comment
+    // or an attribute there was never refused, and tag text in the body built
+    // elements. Now the body is TEXT nodes (plus the balanced attribute-less
+    // `<code>` / `<pre>` elements), which lower.scrml turns into Core
+    // View.RawText and html.scrml prints with `<` / `>` encoded and `&` kept
+    // (escRawText) — so no tag in the body reaches the page as markup, by
+    // construction, and an author entity still displays as its character.
+    // Mirrors impl#1: block-splitter.js (the body runs to the first
+    // case-insensitive `</pre>` / `</code>`; an uppercase-first `<Pre>` is not
+    // raw content), element-refusal.ts `scanRawContentForRefusedTags`,
+    // raw-content-encode.ts (the balanced pairs).
+    fn isRawContentOpener(o: Opener) -> boolean {
+        if (o.star || o.name.length == 0) return false
+        const first: string = o.name.substring(0, 1)
+        if (first >= "A" && first <= "Z") return false
+        const lower: string = o.name.toLowerCase()
+        return lower == "pre" || lower == "code"
+    }
+
+    fn finishRaw(o: Opener, mp: MP) -> RElem {
+        const lower: string = o.name.toLowerCase()
+        const start: int = mp.pos
+        const close: int = rawCloseAt(mp.src, start, lower)
+        let end: int = close
+        if (close < 0) end = mp.src.length
+        const body: string = mp.src.substring(start, end)
+        let m: MP = mp
+        for (const h of rawRefusedTags(body)) {
+            const at: int = start + h.off
+            const name: string = body.substring(h.off + 1, h.off + 1 + h.len)
+            const where: string = "inside <" + o.name + "> raw content, which is display text — to DISPLAY the tag, entity-escape it: &lt;" + name + "&gt;"
+            if (h.style) {
+                m = mDiag(m, "E-STYLE-001", "<" + name + "> blocks are not supported in scrml (" + where + "). Use #{} for CSS (§4.17, §9.1).", at, at + 1 + h.len)
+            } else {
+                m = mDiag(m, "E-SCRIPT-001", "<" + name + "> elements are not supported in scrml (" + where + "). Use " + interpOpen() + "...} for scrml logic (§4.17).", at, at + 1 + h.len)
+            }
+        }
+        const rk: RNodes = rawNodes(m, body, start, rawPairTags(body))
+        m = rk.mp
+        if (close < 0) {
+            m = mDiag(mAt(m, end), "E-PARSE-UNCLOSED", "`<" + o.name + ">` is never closed — a raw-content body runs to its `</" + lower + ">` (§4.17)", o.start, end)
+        } else {
+            m = mAt(m, close + 3 + lower.length)
+        }
+        return elemFrom(o, rk.nodes, m)
+    }
+
+    // ---- the fail-closed `<script` / `<style` scan of a raw body --------------
+    type RawHit:struct = { off: int, len: int, style: boolean }
+
+    fn rawRefusedTags(body: string) -> RawHit[] {
+        let out: RawHit[] = []
+        let i: int = body.indexOf("<")
+        while (i >= 0) {
+            const w6: string = body.substring(i + 1, i + 7).toLowerCase()
+            const w5: string = body.substring(i + 1, i + 6).toLowerCase()
+            if (w6 == "script" && rawNameEnds(body, i + 7)) {
+                out = out.concat([{ off: i, len: 6, style: false }])
+            } else if (w5 == "style" && rawNameEnds(body, i + 6)) {
+                out = out.concat([{ off: i, len: 5, style: true }])
+            }
+            i = body.indexOf("<", i + 1)
+        }
+        return out
+    }
+
+    // After the name: whitespace (tab, LF, FF, CR, space), `/`, `>` or the end.
+    fn rawNameEnds(body: string, at: int) -> boolean {
+        if (at >= body.length) return true
+        const c: string = body.substring(at, at + 1)
+        if (c == "/" || c == ">") return true
+        return rawWs(c)
+    }
+
+    fn rawWs(c: string) -> boolean {
+        if (c.length != 1) return false
+        const k: int = c.charCodeAt(0)
+        return k == 32 || k == 9 || k == 10 || k == 12 || k == 13
+    }
+
+    // ---- the balanced attribute-less `<code>` / `<pre>` pairs -----------------
+    // A structural tag: `<` `/`? (`pre` | `code`, any case) whitespace* `>`.
+    type RawTag:struct = { start: int, end: int, name: string, close: boolean }
+
+    // The KEPT structural tags of `body` in order — those a stack pairs (a closer
+    // pairs only with the innermost open tag of the same name); every other tag
+    // is text.
+    fn rawPairTags(body: string) -> RawTag[] {
+        let toks: RawTag[] = []
+        let i: int = body.indexOf("<")
+        while (i >= 0) {
+            const t: RawTag | not = rawTagAt(body, i)
+            if (t is given) toks = toks.concat([t])
+            i = body.indexOf("<", i + 1)
+        }
+        let kept: int[] = []
+        let open: int[] = []
+        let k: int = 0
+        while (k < toks.length) {
+            if (!toks[k].close) {
+                open = open.concat([k])
+            } else if (open.length > 0 && toks[open[open.length - 1]].name == toks[k].name) {
+                kept = kept.concat([open[open.length - 1], k])
+                open = open.slice(0, open.length - 1)
+            }
+            k = k + 1
+        }
+        let out: RawTag[] = []
+        k = 0
+        while (k < toks.length) {
+            if (kept.indexOf(k) >= 0) out = out.concat([toks[k]])
+            k = k + 1
+        }
+        return out
+    }
+
+    fn rawTagAt(body: string, i: int) -> RawTag | not {
+        let p: int = i + 1
+        let close = false
+        if (body.substring(p, p + 1) == "/") {
+            close = true
+            p = p + 1
+        }
+        let name: string = ""
+        if (body.substring(p, p + 3).toLowerCase() == "pre") {
+            name = "pre"
+        } else if (body.substring(p, p + 4).toLowerCase() == "code") {
+            name = "code"
+        }
+        if (name == "") return not
+        p = p + name.length
+        while (p < body.length && rawWs(body.substring(p, p + 1))) { p = p + 1 }
+        if (body.substring(p, p + 1) != ">") return not
+        return { start: i, end: p + 1, name: name, close: close }
+    }
+
+    // The nodes of a raw body: text runs and the kept pairs as elements (their
+    // own bodies text again, recursively). `base` is the body's source offset.
+    type RRaw:struct = { nodes: ANode[], mp: MP, ti: int, pos: int }
+
+    fn rawNodes(mp: MP, body: string, base: int, toks: RawTag[]) -> RNodes {
+        const r: RRaw = rawLevel(mp, body, base, toks, 0, 0)
+        return { nodes: r.nodes, mp: r.mp }
+    }
+
+    // One level: from `pos`, until a closer (the caller's) or the end. Returns
+    // the index of that closer (or toks.length) and the position it starts at.
+    fn rawLevel(mp: MP, body: string, base: int, toks: RawTag[], ti0: int, pos0: int) -> RRaw {
+        let m: MP = mp
+        let out: ANode[] = []
+        let ti: int = ti0
+        let pos: int = pos0
+        let going = true
+        while (going && ti < toks.length) {
+            const t: RawTag = toks[ti]
+            if (t.close) {
+                going = false
+            } else {
+                if (t.start > pos) {
+                    out = out.concat([{ nid: m.nid, span: mkSpan(base + pos, base + t.start), k: ANodeK.Text(body.substring(pos, t.start)) }])
+                    m = mBump(m)
+                }
+                const inner: RRaw = rawLevel(m, body, base, toks, ti + 1, t.end)
+                m = inner.mp
+                let closeEnd: int = body.length
+                if (inner.ti < toks.length) closeEnd = toks[inner.ti].end
+                const e: AElem = { nid: m.nid, span: mkSpan(base + t.start, base + closeEnd), star: false, tag: t.name, attrs: [], kids: inner.nodes }
+                m = mBump(m)
+                out = out.concat([{ nid: m.nid, span: e.span, k: ANodeK.Elem(e) }])
+                m = mBump(m)
+                ti = inner.ti + 1
+                pos = closeEnd
+            }
+        }
+        let stop: int = body.length
+        if (ti < toks.length) stop = toks[ti].start
+        if (stop > pos) {
+            out = out.concat([{ nid: m.nid, span: mkSpan(base + pos, base + stop), k: ANodeK.Text(body.substring(pos, stop)) }])
+            m = mBump(m)
+        }
+        return { nodes: out, mp: m, ti: ti, pos: stop }
     }
 
     fn noVals(o: Opener) -> Opener {

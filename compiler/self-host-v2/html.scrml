@@ -14,6 +14,8 @@ ${
     export type HNode:enum = {
         HElem(tag: string, attrs: HAttr[], kids: HNode[]),
         HText(text: string),
+        // s468 — a `<pre>` / `<code>` raw-content body (SPEC §4.17, Core View.RawText)
+        HRawText(text: string),
         HComment(text: string),
     }
 
@@ -22,6 +24,19 @@ ${
         const b: string = a.replaceAll("<", "&lt;")
         const c: string = b.replaceAll(">", "&gt;")
         return c
+    }
+
+    // s468 — a raw-content body (SPEC §4.17, S462 Q21): "Every `<` and `>` in a
+    // raw-content body SHALL be written … as `&lt;` / `&gt;`" and "`&` SHALL NOT
+    // be encoded. An author entity (`&lt;b&gt;`, `&amp;`, `&#36;`) still decodes
+    // at render time and displays as the character it names; an entity never
+    // builds an element." With every `<` encoded no text here can open a tag
+    // or spell a closer, so the body can build no element (impl#1
+    // raw-content-encode.ts `encodeAngles`).
+    export fn escRawText(s: string) -> string {
+        const a: string = s.replaceAll("<", "&lt;")
+        const b: string = a.replaceAll(">", "&gt;")
+        return b
     }
 
     // An attribute value escapes `<` and `>` too, not only `&` and `"`. The
@@ -73,6 +88,7 @@ ${
         return match n {
             .HElem(tag: tag, attrs: attrs, kids: kids) :> elemText(tag, attrs, kids)
             .HText(text: t) :> escText(t)
+            .HRawText(text: t) :> escRawText(t)
             .HComment(text: t) :> "<!--" + t + "-->"
         }
     }

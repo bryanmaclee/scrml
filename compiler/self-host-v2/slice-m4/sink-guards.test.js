@@ -204,10 +204,12 @@ ${body}
   test("the quoted `srcdoc=\"…${…}…\"` form: E-ATTR-INTERP-EXECUTABLE, not the reactive-template refusal", () => {
     one(`        <iframe srcdoc="<p>\${@doc}</p>"></iframe>`);
   });
-  test("a static `srcdoc` is written as the author wrote it", async () => {
-    const src = prog(`        <iframe id="fr" srcdoc="<p>static</p>"></iframe>`, PAGE);
-    await loadProgram(clean(src), "sink-srcdoc-static", []);
-    expect($("#fr").getAttribute("srcdoc")).toBe("<p>static</p>");
+  // s468 — the pre-S464 rule this test pinned ("a static `srcdoc` is written as
+  // the author wrote it") is superseded by §5.2 "Static executable values
+  // (S464)" item 1: "Any static `srcdoc` (any case)" is E-ATTR-STATIC-EXECUTABLE;
+  // a bare `<iframe srcdoc>` stays legal (static-executable.test.js).
+  test("a static `srcdoc` is refused (S464: E-ATTR-STATIC-EXECUTABLE — was written as the author wrote it)", () => {
+    expect(codes(prog(`        <iframe id="fr" srcdoc="<p>static</p>"></iframe>`, PAGE))).toEqual(["E-ATTR-STATIC-EXECUTABLE"]);
   });
 });
 

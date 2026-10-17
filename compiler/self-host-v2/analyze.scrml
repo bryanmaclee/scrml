@@ -56,6 +56,7 @@ ${
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
+    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage } from "./url.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -5170,6 +5171,42 @@ ${
             fnCallsFunctionDiag(env, e, cf, " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)")))
     }
 
+    // s468 — the WRITE half of E-FN-003 (SPEC §48.3.3): "A `fn` body SHALL NOT
+    // write to any variable declared outside the `fn`'s own scope boundary.
+    // This includes: … Property mutation on a value declared outside the `fn`
+    // body … Calling a mutating method on an `@` reactive variable declared
+    // outside the `fn` body (e.g., `@list.push(item)`)". The bootstrap enforced
+    // only the call half (above), so `fn f() -> int { @n = 1 … }` compiled clean
+    // (gap g-bootstrap-fn-writes-outer-cells-not-refused). Judged on the effect
+    // summary's own scan of each `fn` body — the SAME write list every write
+    // rule reads (§6.15 "one summary shared by every rule that uses it"): every
+    // reactive write the binder classified (assignment, field / element write,
+    // edit / removal call, spread, `reset(@x)`, transition) and, by shape, one
+    // it refused; an arrow body inside the `fn` is scanned in place. Each write
+    // is reported once, where it stands. A write REACHED through a call needs
+    // no second report: a `fn` may call only another `fn` (E-FN-003, call
+    // half), whose own body is judged here, so the transitive rule (§48.3
+    // "any reachable call chain from the `fn` body") holds by construction.
+    // A `fn` body has no other outer scope it could write in the bootstrap: a
+    // plain local is the `fn`'s own (§48.3.3 "Local `let`/`const`/`lin`
+    // variables declared inside the `fn` body may be freely mutated").
+    fn fnWritePass(g: Globals, s: Summary) -> Diag[] {
+        let out: Diag[] = []
+        for (const fs of g.fns) {
+            if (fs.info.pure) {
+                const i: int = nodeIdx(s.nodes, fs.info.sym.id)
+                if (i >= 0) {
+                    for (const w of s.nodes[i].f.scan.writes) {
+                        let cell: string = w.cell
+                        if (cell.substring(0, 1) != "`") cell = "`" + cell + "`"
+                        out = out.concat([newDiag("E-FN-003", "`fn " + fs.info.name + "` body writes the reactive cell " + cell + " — a `fn` is pure and may not mutate state declared outside its own body (§48.3.3); move the write out of the `fn` (return the new value and write it in the caller), or declare `" + fs.info.name + "` with `function` if the side effect is intended", w.file, w.span)])
+                    }
+                }
+            }
+        }
+        return out
+    }
+
     fn fnCallsFunctionDiag(env: Env, e: AExpr, cf: FnInfo, why: string) -> Diag {
         return newDiag("E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`", env.file, e.span)
     }
@@ -8556,6 +8593,107 @@ ${
                n == "in" || n == "key" || n == "of" || n == "all" || n == "deps" || n == "rule"
     }
 
+    // =========================================================================
+    // s468 — STATIC EXECUTABLE VALUES (SPEC §5.2 "Static executable values
+    // (S464)"): "Two static attribute values (no `${…}`) the browser runs
+    // without scrml checking them SHALL each be a compile error
+    // (E-ATTR-STATIC-EXECUTABLE), reported once per emitted attribute, in every
+    // position rule 2 below names":
+    //   1. "Any static `srcdoc` (any case)" — "A bare `<iframe srcdoc>` (no
+    //      value) is an empty document, runs nothing, and stays legal";
+    //   2. "A static navigate / load attribute whose scheme is not admitted" —
+    //      ONLY the attributes the browser navigates to or loads, element-scoped
+    //      as rule 3 scopes them, and the SVG animation values `to` / `from` /
+    //      `by` / `values` "when `attributeName` names one of them or is not a
+    //      static string"; the schemes are "rule 2's fail-closed ALLOW-list,
+    //      read by the same scheme reader (one definition)" (url.scrml), a
+    //      raster `data:image/…` admitted on every attribute that loads an image.
+    // "A component call's prop is not an element attribute (judged where the
+    // component writes it)" — a use's own attributes are not judged; its slot
+    // content is. A declaration's markup is judged once, at the definition.
+    // The bootstrap wrote both as the author wrote them (gap
+    // g-bootstrap-static-executable-values-not-refused-s464). The decision
+    // is url.scrml `classifyStatic` (impl#1's attr-injection-sink.ts
+    // `classifyStaticExecutableAttr`), the one decision check.scrml C18 asks too.
+    // =========================================================================
+    fn staticExecPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { out = out.concat(staticExecIn(t, ds.file, n, "")) }
+        }
+        return out
+    }
+
+    // `parent`: the tag of the nearest enclosing element ("" — none).
+    fn staticExecIn(t: Tables, file: string, n: ANode, parent: string) -> Diag[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> staticExecElem(t, file, e, parent)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+            .Effect(w: w) :> []
+        }
+    }
+
+    fn staticExecElem(t: Tables, file: string, e: AElem, parent: string) -> Diag[] {
+        let out: Diag[] = []
+        // only an HTML element writes its attributes into output: a use's are
+        // props, and `<db src=…>`, `<each>`, `<errors>`, `<slot>`, a state view
+        // and `<*x>` emit none of their own
+        if (isHtmlFact(elemFact(t.elems, e.nid))) {
+            const ua: UrlAttr[] = urlAttrsOf(e.attrs)
+            for (const a of e.attrs) {
+                const value: string | not = staticQuotedText(a.value)
+                if (value is given) {
+                    const sink: StaticSink | not = classifyStatic(e.tag, a.name, value, ua, parent, true)
+                    if (sink is given) out = out.concat([newDiag("E-ATTR-STATIC-EXECUTABLE", staticExecMessage(sink, a.name, e.tag), file, a.span)])
+                }
+            }
+        }
+        for (const kid of e.kids) { out = out.concat(staticExecIn(t, file, kid, e.tag)) }
+        return out
+    }
+
+    // The attributes as url.scrml's decision reads them: a quoted value with
+    // no `${…}` is static text; a presence attribute has none; anything else
+    // (an expression, a reference, a call, a quoted `${…}`) is computed.
+    fn urlAttrsOf(attrs: AAttr[]) -> UrlAttr[] {
+        let out: UrlAttr[] = []
+        for (const a of attrs) {
+            const s: string | not = staticQuotedText(a.value)
+            const computed: boolean = s is not && !isNoValue(a.value)
+            out = out.concat([{ name: a.name, text: s, computed: computed }])
+        }
+        return out
+    }
+
+    // The static text of a quoted value with no `${…}` (`not` — any other value).
+    fn staticQuotedText(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> staticQuoted(s)
+            .NoValue :> not
+            .Bare(e: x) :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn staticQuoted(s: string) -> string | not {
+        if (s.indexOf("$" + "{") >= 0) return not
+        return s
+    }
+
+    fn isBracedValue(v: AAttrValue) -> boolean {
+        return match v {
+            .Braced(b: b) :> true
+            .NoValue :> false
+            .Quoted(v: s) :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+        }
+    }
+
     fn isUseFact(f: ElemFact) -> boolean {
         return match f {
             .MUse(decl: d) :> true
@@ -9254,6 +9392,23 @@ ${
                 }
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
+            } else if (isBracedValue(a.value)) {
+                // s468 — a `{…}` value on an attribute that is not an event
+                // handler is ONE expression (§5.2.4: "A `(…)`, `{…}` or `${…}`
+                // value of an attribute that is not an event handler … SHALL be
+                // exactly one expression"). The bootstrap does not lower it: it
+                // was filed static and written as `attr=""`, the author's value
+                // dropped with no diagnostic (gap
+                // g-bootstrap-braced-nonhandler-value-and-quoted-handler-silently-empty-s462).
+                // Refused, never dropped: `srcdoc={…}` is data written into an
+                // HTML document — §5.2 rule 2 "`srcdoc` in every form" (the
+                // expression form is named) — and any other name is a value
+                // form the bootstrap does not implement.
+                if (a.name.toLowerCase() == "srcdoc") {
+                    st = addDiag(st, env.file, a.span, "E-ATTR-INTERP-EXECUTABLE", "the `" + a.name + "=` attribute on `<" + e.tag + ">` takes its value from data (a `{…}` expression), and `srcdoc` is an HTML document — data written there can carry script. A `srcdoc` value is never data. Build the frame from a URL (`src=`) or render the content as markup in the page (§5.2).")
+                } else {
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "={…}` on `<" + e.tag + ">` — a `{…}` value on an attribute that is not an event handler is one expression (§5.2.4), which the bootstrap does not lower; it would be written as `" + a.name + "=\"\"` and the value dropped. Write the expression in parentheses: `" + a.name + "=(…)`")
+                }
             } else if (valueExpr(a.value) is given && a.name.toLowerCase() == "srcdoc") {
                 // s462 — §5.2 rule 2 "`srcdoc` in every form": a `srcdoc` whose
                 // value is not a static string "SHALL be a compile error
@@ -9379,6 +9534,22 @@ ${
     // written (§55.17.1: "No other validator is lowered") — the validator is
     // not inert: the §55 surface evaluates it and the §55.17 gate enforces it.
     // (Was: refused, when the HTML attribute was the only enforcement.)
+    //
+    // s468 — several validators lowering to ONE attribute name: the attribute
+    // states their INTERSECTION, never the first one's bound. §55.12:
+    // "Validators on a single cell COMPOSE" — the value must pass every one —
+    // and §55.17.1 item 1 lowers each (`length(>=N)` → `minlength="N"`,
+    // `length(<=N)` → `maxlength="N"`, `min(n)` → `min`, `max(n)` → `max`).
+    // So `length(>2) length(==4)` is `minlength="4" maxlength="4"` (the
+    // tightest of each bound: the largest `minlength` / `min`, the smallest
+    // `maxlength` / `max`). The bootstrap kept the first pair of a name, so
+    // that pair wrote `minlength="3"` — the browser's constraint looser than the
+    // declaration (gap g-bootstrap-two-validators-same-html-attr-first-wins).
+    // `required` repeats as itself. Two DIFFERENT `pattern`s cannot be stated by
+    // one HTML `pattern` (an intersection of two regexes is not a regex the
+    // attribute can carry exactly — §55.17.1 lowers `pattern` "only when the
+    // lowering is exact") — refused, never one silently kept. A hand-written
+    // attribute is judged against the combined value (handAttrConflict).
     fn bindValAttrs(env: Env, e: AElem, a: AAttr, f: FieldInfo, kind: BindKind, st0: AS) -> RPairs {
         let st: AS = st0
         let out: HtmlAttrPair[] = []
@@ -9386,15 +9557,70 @@ ${
         for (const v of f.vals) {
             for (const h of v.attrs) {
                 if (htmlApplies(h.name, e.tag, itype, kind)) {
-                    if (attrNamed(e.attrs, h.name) is given) {
-                        st = handAttrConflict(env, e, f, v.name, h, st)
-                    } else if (!hasPairNamed(out, h.name)) {
+                    const prev: HtmlAttrPair | not = pairNamed(out, h.name)
+                    if (prev is not) {
                         out = out.concat([h])
+                    } else if (h.name == "pattern" && h.value != prev.value) {
+                        st = addDiag(st, env.file, v.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.sym.hint + "` has two `pattern(…)` validators, and one HTML `pattern` attribute on this `<" + e.tag + ">` cannot state both (§55.12: validators compose; §55.17.1 lowers `pattern` only when exact) — the bootstrap would keep one and the browser's constraint would be looser than the declaration; combine them into one pattern")
+                    } else {
+                        out = replacePair(out, { name: h.name, value: tighterBound(h.name, prev.value, h.value) })
                     }
                 }
             }
         }
-        return { ps: out, st: st }
+        for (const h of out) {
+            if (attrNamed(e.attrs, h.name) is given) st = handAttrConflict(env, e, f, validatorsLowering(f, h.name), h, st)
+        }
+        let ps: HtmlAttrPair[] = []
+        for (const h of out) {
+            if (attrNamed(e.attrs, h.name) is not) ps = ps.concat([h])
+        }
+        return { ps: ps, st: st }
+    }
+
+    fn pairNamed(ps: HtmlAttrPair[], n: string) -> HtmlAttrPair | not {
+        for (const p of ps) {
+            if (p.name == n) return p
+        }
+        return not
+    }
+
+    fn replacePair(ps: HtmlAttrPair[], h: HtmlAttrPair) -> HtmlAttrPair[] {
+        let out: HtmlAttrPair[] = []
+        for (const p of ps) {
+            if (p.name == h.name) {
+                out = out.concat([h])
+            } else {
+                out = out.concat([p])
+            }
+        }
+        return out
+    }
+
+    // The tighter of two lowered bounds of one attribute: the larger lower bound
+    // (`minlength`, `min`), the smaller upper bound (`maxlength`, `max`); any
+    // other attribute (`required`, an equal `pattern`) is the same text.
+    fn tighterBound(name: string, a: string, b: string) -> string {
+        const x: number = Number(a)
+        const y: number = Number(b)
+        if (name == "minlength" || name == "min") {
+            if (y > x) return b
+            return a
+        }
+        if (name == "maxlength" || name == "max") {
+            if (y < x) return b
+            return a
+        }
+        return a
+    }
+
+    // The names of the validators of `f` that lower to attribute `name`, for a message.
+    fn validatorsLowering(f: FieldInfo, name: string) -> string {
+        let names: string[] = []
+        for (const v of f.vals) {
+            if (pairNamed(v.attrs, name) is given && names.indexOf(v.name) < 0) names = names.concat([v.name])
+        }
+        return names.join("` + `")
     }
 
     // r2 F6: a hand-written attribute of a lowered validator's name. The same
@@ -9419,13 +9645,6 @@ ${
             .Paren(e: x) :> false
             .Braced(b: b) :> false
         }
-    }
-
-    fn hasPairNamed(ps: HtmlAttrPair[], n: string) -> boolean {
-        for (const p of ps) {
-            if (p.name == n) return true
-        }
-        return false
     }
 
     fn inputType(e: AElem) -> string {
@@ -17758,7 +17977,9 @@ ${
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
-        const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags))
+        // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum))
+        const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags))
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)
         // s454 (U1b): the suspension plan — per client site, after placement (it
@@ -17774,7 +17995,7 @@ ${
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: sf }
-        const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags)
+        const base: Diag[] = domScopeDropped(pl.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags).concat(typed.diags)
         // s462 (fix round 2): the own-value type reports run LAST, over every
         // other pass's diagnostics — so an Error anywhere inside the
         // initializer, or inside the function a failed proof stands in, owns

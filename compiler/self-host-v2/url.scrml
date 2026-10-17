@@ -1,0 +1,422 @@
+// =============================================================================
+// self-host-v2 / url.scrml — the §5.2 URL scheme reader and safe sets, for the
+// COMPILE-TIME half of the executable-sink rules (s468-bootstrap-failopen-gaps).
+//
+// SPEC §5.2 "Static executable values (S464)", item 2: "The schemes are rule
+// 2's fail-closed ALLOW-list, read by the same scheme reader (one definition)".
+// impl#1's one definition is compiler/src/runtime-url-guard.js; the bootstrap
+// RUNTIME already carries that file verbatim (slice-m1/runtime/runtime.js,
+// `sync-bootstrap-url-guard.ts`). The bootstrap COMPILER is scrml, so it cannot
+// inline the JS — this module is that file's reader and sets written in scrml,
+// function for function (`_scrml_read_url_scheme` → readUrlScheme, …), and
+// compiler/self-host-v2/slice-m4/static-executable.test.js runs both over the
+// same inputs and requires the same answer on every one: a drift between the
+// two is a failing test, not a second list.
+//
+// Only the compile-time reader is here (`decodesEscapes` false: a static
+// value is judged as the author wrote it — the page writes it unchanged, `&`
+// escaped, so no character reference is decoded; SPEC §5.2 item 2 last
+// sentence). Element context (which element, its `attributeName`, its `rel`)
+// is analyze.scrml's (staticExecutableDiags): this module knows strings only.
+// =============================================================================
+${
+    // Attributes whose value is a URL (or a list of URLs), lowercased.
+    // runtime-url-guard.js `_SCRML_URL_VALUED_ATTRS`.
+    export fn urlValuedAttrs() -> string[] {
+        return ["action", "archive", "background", "cite", "classid", "codebase", "data", "dynsrc", "formaction",
+                "href", "icon", "imagesrcset", "itemid", "itemtype", "longdesc", "lowsrc", "manifest", "ping",
+                "poster", "profile", "src", "srcset", "usemap", "xlink:href", "xml:base"]
+    }
+
+    // The elements on which an attribute of urlValuedAttrs() is a URL, for the
+    // names HTML scopes to particular elements; `[]` = every element.
+    // runtime-url-guard.js `_SCRML_URL_ATTR_ELEMENTS`.
+    export fn urlAttrElements(lowerName: string) -> string[] {
+        if (lowerName == "action") return ["form"]
+        if (lowerName == "archive") return ["object", "applet"]
+        if (lowerName == "background") return ["body", "table", "thead", "tbody", "tfoot", "tr", "td", "th"]
+        if (lowerName == "cite") return ["blockquote", "q", "del", "ins"]
+        if (lowerName == "classid") return ["object"]
+        if (lowerName == "codebase") return ["object", "applet"]
+        if (lowerName == "data") return ["object"]
+        if (lowerName == "dynsrc") return ["img"]
+        if (lowerName == "formaction") return ["button", "input"]
+        if (lowerName == "icon") return ["command", "menuitem"]
+        if (lowerName == "imagesrcset") return ["link"]
+        if (lowerName == "longdesc") return ["img", "iframe", "frame"]
+        if (lowerName == "lowsrc") return ["img"]
+        if (lowerName == "manifest") return ["html"]
+        if (lowerName == "ping") return ["a", "area"]
+        if (lowerName == "poster") return ["video"]
+        if (lowerName == "profile") return ["head"]
+        if (lowerName == "srcset") return ["img", "source"]
+        if (lowerName == "usemap") return ["img", "object", "input"]
+        return []
+    }
+
+    // Is attribute `name` a URL on element `tag`? `tag` "" = not known: every
+    // URL-valued name counts (fail closed). runtime-url-guard.js `_scrml_is_url_attr`.
+    export fn isUrlAttr(tag: string, name: string) -> boolean {
+        const lowerName: string = name.toLowerCase()
+        if (urlValuedAttrs().indexOf(lowerName) < 0) return false
+        if (tag == "") return true
+        const scope: string[] = urlAttrElements(lowerName)
+        if (scope.length == 0) return true
+        return scope.indexOf(tag.toLowerCase()) >= 0
+    }
+
+    // `_SCRML_SAFE_URL_SCHEMES`.
+    export fn safeUrlSchemes() -> string[] { return ["http", "https", "ftp", "mailto", "tel", "sms"] }
+
+    // `_SCRML_SAFE_DATA_IMAGE_TYPES` — raster images: decoded, never executed.
+    export fn safeDataImageTypes() -> string[] {
+        return ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/avif", "image/bmp",
+                "image/x-icon", "image/vnd.microsoft.icon"]
+    }
+
+    // `_SCRML_IMAGE_SOURCE_ATTRS`.
+    export fn imageSourceAttrs() -> string[] { return ["src", "srcset", "imagesrcset", "poster"] }
+
+    // `_SCRML_SVG_ANIMATION_ELEMENTS` (lowercased tags).
+    export fn animationElements() -> string[] { return ["set", "animate", "animatecolor", "animatemotion", "animatetransform"] }
+
+    // `_SCRML_SVG_ANIMATION_VALUE_ATTRS`.
+    export fn animationValueAttrs() -> string[] { return ["to", "from", "by", "values"] }
+
+    // The scheme a URL text commits to, read the way the WHATWG URL parser reads
+    // it (`_scrml_read_url_scheme(text, false)`): leading C0 controls and spaces
+    // stripped; ASCII tab / LF / CR removed anywhere; the scheme is the run
+    // before the first `:` when it is ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    // and no `/`, `?` or `#` came first, lowercased.
+    //   kind "scheme"   — `scheme` and `rest` (the normalized text after `:`);
+    //   kind "relative" — a `/`, `?`, `#` came first, or the run is no scheme;
+    //   kind "none"     — the text ended before committing either way.
+    export type UrlScheme:struct = { kind: string, scheme: string, rest: string }
+
+    export fn readUrlScheme(text: string) -> UrlScheme {
+        let start: int = 0
+        while (start < text.length && text.charCodeAt(start) <= 32) { start = start + 1 }
+        let s: string = ""
+        let i: int = start
+        while (i < text.length) {
+            const c: string = text.substring(i, i + 1)
+            if (c != "\t" && c != "\n" && c != "\r") s = s + c
+            i = i + 1
+        }
+        let k: int = 0
+        while (k < s.length) {
+            const c: string = s.substring(k, k + 1)
+            if (c == "/" || c == "?" || c == "#") return { kind: "relative", scheme: "", rest: "" }
+            if (c == ":") {
+                const candidate: string = s.substring(0, k)
+                if (isSchemeText(candidate)) return { kind: "scheme", scheme: candidate.toLowerCase(), rest: s.substring(k + 1) }
+                return { kind: "relative", scheme: "", rest: "" }
+            }
+            k = k + 1
+        }
+        return { kind: "none", scheme: "", rest: "" }
+    }
+
+    // ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) — ASCII only.
+    fn isSchemeText(t: string) -> boolean {
+        if (t.length == 0) return false
+        if (!isAsciiAlpha(t.substring(0, 1))) return false
+        let i: int = 1
+        while (i < t.length) {
+            const c: string = t.substring(i, i + 1)
+            if (!isAsciiAlpha(c) && !(c >= "0" && c <= "9") && c != "+" && c != "-" && c != ".") return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn isAsciiAlpha(c: string) -> boolean {
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z")
+    }
+
+    // Does the text after `data:` name a complete raster image media type,
+    // terminated by `;` or `,`? `_scrml_data_url_is_raster_image`.
+    export fn dataUrlIsRasterImage(rest: string) -> boolean {
+        let i: int = 0
+        while (i < rest.length) {
+            const c: string = rest.substring(i, i + 1)
+            if (c == ";" || c == ",") return safeDataImageTypes().indexOf(rest.substring(0, i).trim().toLowerCase()) >= 0
+            i = i + 1
+        }
+        return false
+    }
+
+    // Is a URL whose scheme is `scheme` admitted on attribute `lowerName`?
+    // `_scrml_url_scheme_admitted`.
+    export fn urlSchemeAdmitted(lowerName: string, scheme: string, rest: string) -> boolean {
+        if (safeUrlSchemes().indexOf(scheme) >= 0) return true
+        return scheme == "data" && imageSourceAttrs().indexOf(lowerName) >= 0 && dataUrlIsRasterImage(rest)
+    }
+
+    // One URL — admitted, or not? `_scrml_one_url_admitted`.
+    fn oneUrlAdmitted(lowerName: string, url: string) -> boolean {
+        const r: UrlScheme = readUrlScheme(url)
+        if (r.kind != "scheme") return true      // relative, or no scheme at all
+        return urlSchemeAdmitted(lowerName, r.scheme, r.rest)
+    }
+
+    // The HTML whitespace `srcset` / `ping` read: space, tab, LF, FF, CR (by
+    // code: 32, 9, 10, 12, 13).
+    fn isHtmlWs(c: string) -> boolean {
+        if (c.length != 1) return false
+        const k: int = c.charCodeAt(0)
+        return k == 32 || k == 9 || k == 10 || k == 12 || k == 13
+    }
+
+    // The candidate URLs of a `srcset` / `imagesrcset` value, read as the HTML
+    // "parse a srcset attribute" algorithm reads them. `_scrml_srcset_urls`.
+    export fn srcsetUrls(text: string) -> string[] {
+        let urls: string[] = []
+        const n: int = text.length
+        let i: int = 0
+        while (i < n) {
+            while (i < n && (isHtmlWs(text.substring(i, i + 1)) || text.substring(i, i + 1) == ",")) { i = i + 1 }
+            if (i < n) {
+                const urlStart: int = i
+                while (i < n && !isHtmlWs(text.substring(i, i + 1))) { i = i + 1 }
+                const url: string = text.substring(urlStart, i)
+                let end: int = url.length
+                while (end > 0 && url.substring(end - 1, end) == ",") { end = end - 1 }
+                if (end < url.length) {
+                    // trailing commas: the URL ends there and no descriptors follow
+                    urls = urls.concat([url.substring(0, end)])
+                } else {
+                    urls = urls.concat([url])
+                    let depth: int = 0
+                    let going = true
+                    while (going && i < n) {
+                        const ch: string = text.substring(i, i + 1)
+                        if (ch == "(") {
+                            depth = depth + 1
+                        } else if (ch == ")" && depth > 0) {
+                            depth = depth - 1
+                        } else if (ch == "," && depth == 0) {
+                            going = false
+                        }
+                        i = i + 1
+                    }
+                }
+            }
+        }
+        return urls
+    }
+
+    // `text` split on every run of HTML whitespace (and `,` when `comma`);
+    // empty parts dropped.
+    fn splitRuns(text: string, comma: boolean) -> string[] {
+        let out: string[] = []
+        let cur: string = ""
+        let i: int = 0
+        while (i < text.length) {
+            const c: string = text.substring(i, i + 1)
+            if (isHtmlWs(c) || (comma && c == ",")) {
+                if (cur != "") out = out.concat([cur])
+                cur = ""
+            } else {
+                cur = cur + c
+            }
+            i = i + 1
+        }
+        if (cur != "") out = out.concat([cur])
+        return out
+    }
+
+    // Is `value` admitted on the URL-valued attribute `name`? `srcset` /
+    // `imagesrcset` judge every candidate URL; `ping` (space-separated) and
+    // `archive` (space- or comma-separated) every entry; any other one URL.
+    // `_scrml_url_value_admitted`.
+    export fn urlValueAdmitted(name: string, value: string) -> boolean {
+        const lowerName: string = name.toLowerCase()
+        if (lowerName == "srcset" || lowerName == "imagesrcset") {
+            for (const u of srcsetUrls(value)) {
+                if (!oneUrlAdmitted(lowerName, u)) return false
+            }
+            return true
+        }
+        if (lowerName == "ping" || lowerName == "archive") {
+            for (const p of splitRuns(value, lowerName == "archive")) {
+                if (!oneUrlAdmitted(lowerName, p)) return false
+            }
+            return true
+        }
+        return oneUrlAdmitted(lowerName, value)
+    }
+
+    // An animation value written to `lowerName` (`to` / `from` / `by` /
+    // `values`) of an element animating `target` ("" — computed): `values` is
+    // judged per `;` entry. `_scrml_animation_value_admitted`.
+    export fn animationValueAdmitted(lowerName: string, value: string, target: string) -> boolean {
+        let entries: string[] = [value]
+        if (lowerName == "values") entries = value.split(";")
+        for (const v of entries) {
+            if (!urlValueAdmitted(target, v)) return false
+        }
+        return true
+    }
+
+    // The scheme of a URL text ("" — none), for a message.
+    export fn schemeOfUrl(text: string) -> string {
+        const r: UrlScheme = readUrlScheme(text)
+        if (r.kind == "scheme") return r.scheme
+        return ""
+    }
+
+    // ---- the STATIC rule's own sets (SPEC §5.2 "Static executable values
+    // (S464)" item 2; impl#1 attr-injection-sink.ts) ------------------------
+
+    // The attributes the browser NAVIGATES to or LOADS — the only ones the
+    // static rule judges ("(a) Narrow attrs, allow-list"). `STATIC_NAV_LOAD_URL_ATTRS`.
+    export fn staticNavLoadAttrs() -> string[] {
+        return ["href", "src", "action", "formaction", "data", "poster", "srcset", "ping", "xlink:href", "background",
+                "imagesrcset", "archive", "codebase", "classid", "dynsrc", "lowsrc", "manifest", "icon"]
+    }
+
+    // The `<link rel>` tokens whose `href` loads as an image. `IMAGE_LINK_REL_TOKENS`.
+    export fn imageLinkRelTokens() -> string[] {
+        return ["icon", "apple-touch-icon", "apple-touch-icon-precomposed", "apple-touch-startup-image", "mask-icon", "fluid-icon"]
+    }
+
+    // A `<link rel>` value that loads an image: some token is an image token and
+    // every token is one, or `shortcut`.
+    export fn relLoadsImage(rel: string) -> boolean {
+        const tokens: string[] = splitRuns(rel.toLowerCase(), false)
+        let some = false
+        for (const t of tokens) {
+            if (imageLinkRelTokens().indexOf(t) >= 0) {
+                some = true
+            } else if (t != "shortcut") {
+                return false
+            }
+        }
+        return some
+    }
+
+    // =========================================================================
+    // THE STATIC DECISION (SPEC §5.2 "Static executable values (S464)") — ONE
+    // function, asked by analyze.scrml (the refusal, E-ATTR-STATIC-EXECUTABLE)
+    // and by check.scrml (C18, the Core backstop: no such value reaches a
+    // printed attribute whatever the front end did). impl#1:
+    // attr-injection-sink.ts `classifyStaticExecutableAttr`.
+    //
+    // An element's attributes as this decision sees them: the name as written,
+    // and the value — `text` the text of a static value (`not`: a presence
+    // attribute with no value, or a computed one), `computed` when the value is
+    // an expression / a reference / a call.
+    // =========================================================================
+    export type UrlAttr:struct = { name: string, text: string | not, computed: boolean }
+    // `srcdoc` — any static `srcdoc`; otherwise a URL whose scheme is not
+    // admitted, `scheme` its scheme ("" — none could be read).
+    export type StaticSink:struct = { srcdoc: boolean, scheme: string }
+
+    // Is the static `name="value"` on element `tag` (attributes `attrs`, inside
+    // element `parent` — "" none) an executable sink? `parentKnown` false: the
+    // caller cannot see the parent (Core) — an animation of `href` is then given
+    // the image-load admission whenever an `<image>` parent could grant it, so
+    // the backstop is never stricter than the refusal (it is looser by exactly
+    // a raster `data:image/…` animated onto a non-image `href`, which runs no
+    // script).
+    export fn classifyStatic(tag: string, name: string, value: string, attrs: UrlAttr[], parent: string, parentKnown: boolean) -> StaticSink | not {
+        const lower: string = name.toLowerCase()
+        if (lower == "srcdoc") return { srcdoc: true, scheme: "" }
+        const target: string | not = animationUrlTarget(tag, lower, attrs)
+        if (target is given) {
+            // an animation value writes the attribute `attributeName` names:
+            // judged when that is a navigate / load attribute, or computed ("")
+            if (target != "" && staticNavLoadAttrs().indexOf(target) < 0) return not
+            // inside SVG `<image>` / `<feImage>` (with no `href` of its own in
+            // any form) an animation of `href` animates an image load
+            const pl: string = parent.toLowerCase()
+            const imageParent: boolean = !parentKnown || pl == "image" || pl == "feimage"
+            const imageHref: boolean = (target == "href" || target == "xlink:href") && imageParent &&
+                                       !hasUrlAttr(attrs, "href") && !hasUrlAttr(attrs, "xlink:href")
+            let judged: string = target
+            if (imageHref) judged = "src"
+            if (animationValueAdmitted(lower, value, judged)) return not
+            let entries: string[] = [value]
+            if (lower == "values") entries = value.split(";")
+            for (const v of entries) {
+                if (!urlValueAdmitted(judged, v)) return { srcdoc: false, scheme: schemeOfUrl(v) }
+            }
+            return { srcdoc: false, scheme: "" }
+        }
+        if (staticNavLoadAttrs().indexOf(lower) < 0) return not
+        if (!isUrlAttr(tag, lower)) return not
+        let judgedAs: string = lower
+        if (loadsAnImage(lower, tag, attrs) && imageSourceAttrs().indexOf(lower) < 0) judgedAs = "src"
+        if (urlValueAdmitted(judgedAs, value)) return not
+        return { srcdoc: false, scheme: schemeOfUrl(value) }
+    }
+
+    // §5.2 (S457) — the attribute an SVG animation element's value attribute
+    // (`to` / `from` / `by` / `values`) writes: the lowercased URL-valued
+    // attribute a static `attributeName` names; "" when an `attributeName` is
+    // computed (any attribute may be animated — fail closed); `not` — not an
+    // animation value, or no `attributeName` naming a URL attribute. Every
+    // `attributeName` is read (a repeat is fail-closed). impl#1 `animationUrlTarget`.
+    fn animationUrlTarget(tag: string, lower: string, attrs: UrlAttr[]) -> string | not {
+        if (animationElements().indexOf(tag.toLowerCase()) < 0) return not
+        if (animationValueAttrs().indexOf(lower) < 0) return not
+        let result: string | not = not
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == "attributename") {
+                if (a.computed) return ""
+                const s: string | not = a.text
+                if (s is given) {
+                    const tgt: string = s.trim().toLowerCase()
+                    if (result is not && isUrlAttr("", tgt)) result = tgt
+                }
+            }
+        }
+        return result
+    }
+
+    fn hasUrlAttr(attrs: UrlAttr[], lowerName: string) -> boolean {
+        for (const a of attrs) {
+            if (a.name.toLowerCase() == lowerName) return true
+        }
+        return false
+    }
+
+    // Does `lower` on `tag` LOAD AN IMAGE (a raster `data:image/…` admitted)?
+    // impl#1 `loadsAnImage`.
+    fn loadsAnImage(lower: string, tag0: string, attrs: UrlAttr[]) -> boolean {
+        if (imageSourceAttrs().indexOf(lower) >= 0 || lower == "background" || lower == "dynsrc" || lower == "lowsrc") return true
+        const tag: string = tag0.toLowerCase()
+        if ((lower == "href" || lower == "xlink:href") && (tag == "image" || tag == "feimage")) return true
+        if (lower == "href" && tag == "link") {
+            for (const a of attrs) {
+                // the FIRST `rel` decides; only a static one can name an image load
+                if (a.name.toLowerCase() == "rel") {
+                    const rel: string | not = a.text
+                    if (rel is not || a.computed) return false
+                    return relLoadsImage(rel)
+                }
+            }
+        }
+        return false
+    }
+
+    // The author-facing message (impl#1 `staticExecutableMessage`).
+    export fn staticExecMessage(sink: StaticSink, name: string, tag: string) -> string {
+        const head: string = "the `" + name + "=\"…\"` attribute on `<" + tag + ">`"
+        if (sink.srcdoc) {
+            return head + " is an inline HTML document (`srcdoc`), which the browser runs — script included — without scrml checking it. Point the frame at a page with `src=` instead (§5.2)."
+        }
+        let scheme: string = " whose scheme is not admitted"
+        if (sink.scheme != "") scheme = " whose scheme (`" + sink.scheme + ":`) is not admitted"
+        return head + " navigates to / loads a URL" + scheme + ". Such an attribute may name `http:`, `https:`, `ftp:`, `mailto:`, `tel:` or `sms:` (and, on an attribute that loads an image, a raster `data:image/…`), or be relative; any other scheme (`javascript:`, `vbscript:`, `data:text/html`, …) can run code scrml never checked. For behaviour, use an event handler (`onclick=fn()`) (§5.2)."
+    }
+
+    // §5.2 rule 1's name test: an event-handler attribute — its name, lowercased,
+    // begins with `on`, EXCEPT the exact whole names `one`, `online`, `onboarding`.
+    export fn isEventHandlerName(name: string) -> boolean {
+        const lower: string = name.toLowerCase()
+        if (lower.length <= 2 || lower.substring(0, 2) != "on") return false
+        return lower != "one" && lower != "online" && lower != "onboarding"
+    }
+}
