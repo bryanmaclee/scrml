@@ -56,3 +56,22 @@ match via env.onFailableMatchSubject; emit-expr bridge forwards) all read it. A 
 - known-gaps: both markers flipped to status=resolved with traced locus; parent gap's "still open" note annotated;
   state.ts / facts.ts --write then --check: PASS.
 - First push of 5b7ca8f84 FAILED (pre-push hook; output masked by a pipe) — re-pushed with the log captured (see below).
+
+## 2026-10-17 — FIX ROUND 1 start (review of frozen 7ecae57eb: DO-NOT-LAND)
+- Worktree /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-ae657b908d8b68adf, branch s468-failable-alias-and-match
+  checked out from origin at 7ecae57eb898fb5a6214b0c00cbf1944700ad86c (asserted). bun install (puppeteer postinstall
+  failed, non-fatal) + pretest OK.
+- Prior push outcome (unrecorded above): origin/s468-failable-alias-and-match == 7ecae57eb, so the re-push landed.
+- Reproduced EVERY review item with the reviewer's harnesses (h2.mjs client, hs.mjs server; wrong + right password) on
+  head 7ecae57eb and on base 5c43c3b8e (git archive, own copy at ~/.cache/scrml-agent-tmp/s468-failable-alias-and-match/base):
+  F1 n8 (4 shapes) head LOGGED IN / base E-ERROR-002 · F2 n2 "handler inline match ||", n3 "handler ||"/"ternary" head
+  LOGGED IN / base E-ERROR-002 · F3 s1 "srv match stmt ||", s2 "stmt ||"/"??"/"ternary"/… head 200 LOGGED IN / base
+  E-ERROR-002 · F4 (curried, id(check), apply, IIFE fn-expr, destructure default, param default, closure write, loop
+  write-after-use, map/filter/some callback) LOGGED IN on BOTH · F5 n5 "FR nested same-name getF (plain)" head
+  E-ERROR-002 / base OK-correct · C: n3 "handler direct" LOGGED IN on both; s2 "stmt direct" 200 LOGGED IN on both.
+- NEW (found while reproducing, same class as F1 through a NAME, cases/n9.mjs): `const g = p == "wrong" ? plainDeny : check;
+  match g(p)`, `const g = plainDeny || check`, `match getF(p)(p)` (getF may return plainDeny), `match (c ? plainDeny :
+  check)(p)`, `let g = check; if (…) { g = plainDeny }; match g(p)` — head LOGGED IN (the stamp marks the subject
+  failable because its callee MAY be failable; a plain enum value is classified Ok). Base rejected these (but base is
+  fail-open the other way: when the callee IS check, base compares the error object as a plain value). No lowering is
+  correct for a subject that may or may not be a failable result.
