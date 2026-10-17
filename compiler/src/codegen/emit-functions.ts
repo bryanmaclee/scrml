@@ -4,6 +4,7 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody, emitParamDefault } fr
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
+import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
 import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName } from "./fn-valued-bindings.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
@@ -316,31 +317,26 @@ function buildClientBatchPlan(
     }];
   }
   const plan: ClientBatch[] = [];
-  const fwdSoFar: string[] = [];
   for (let bi = 0; bi < batches.length; bi++) {
     const b = batches[bi];
     const indices = Array.isArray(b.indices)
       ? [...b.indices].sort((a, c) => a - c)
       : [];
-    const isLast = bi === batches.length - 1;
-    let returnCell: string | null = null;
-    if (isLast) {
-      returnCell = cpsSplit.returnVarName ?? null;
-    } else if (indices.length > 0) {
-      const lastRaw = body[indices[indices.length - 1]] as ASTNode | undefined;
-      const last = (handledSqlGuardInner(lastRaw) ?? lastRaw) as ASTNode | undefined; // S455 — `@c = ?{…} !{…}`
-      if (last && last.kind === "state-decl" && typeof last.name === "string") {
-        returnCell = last.name;
-      }
-    }
+    // S462 — every batch, the last included, returns its OWN last statement's
+    // cell (cps-cell-writes.ts multiBatchReturnCell; emit-server.ts uses the same).
+    const returnCell: string | null = multiBatchReturnCell(body, indices);
     plan.push({
       batchIndex: bi,
       indices,
       monotonicity: b.monotonicity,
       returnCell,
-      fwdResultNames: [...fwdSoFar],
+      // S462 P0 fix round 1 — NOTHING is forwarded from one batch to the next
+      // through the client: a value an earlier batch produced would come back
+      // as client-supplied input the later batch trusts (a forged
+      // `{"row":{"role":"admin"}}` ran a DELETE). Route inference keeps every
+      // consumer of a server value in the producing batch (or refuses).
+      fwdResultNames: [],
     });
-    if (returnCell && !fwdSoFar.includes(returnCell)) fwdSoFar.push(returnCell);
   }
   return plan;
 }
@@ -436,7 +432,7 @@ function emitMultiBatchWrapper(opts: {
       // Call args: original fn params, then each prior batch's return cell
       // (cross-batch parameter forwarding — M1.3). The prior cells are bound
       // as `const`s after their batch's await, below.
-      const callArgs = [...fnParamNames, ...plan.fwdResultNames].join(", ");
+      const callArgs = [...fnParamNames, ...cpsCarriedLocals(cpsSplit), ...plan.fwdResultNames].join(", ");
 
       lines.push(`    // Ext 1 M1.5: CPS batch ${owningBatch}`);
       lines.push(`    let ${resultVar};`);
@@ -458,6 +454,23 @@ function emitMultiBatchWrapper(opts: {
       lines.push(`        data: { message: _scrml_g.String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)}, batch: ${owningBatch} },`);
       lines.push(`      };`);
       lines.push(`    }`);
+      // S462 P0 (§19.9.9.7) — a batch in "cells" mode returns the final value of
+      // each cell it wrote; apply them, then bind the forwarded cell (if any) from
+      // the store so a later batch receives its current value.
+      const _batchCellPlan = planBatchCellReturn(body, plan.indices, plan.returnCell);
+      if (_batchCellPlan.mode === "cells") {
+        for (const l of cpsCellsApplyLines(resultVar, _batchCellPlan.cells, "    ", _batchCellPlan.exits)) lines.push(l);
+        if (plan.returnCell) {
+          const _cur = `_scrml_reactive_get(${JSON.stringify(plan.returnCell)})`;
+          if (!boundCells.has(plan.returnCell)) {
+            lines.push(`    let ${plan.returnCell} = ${_cur};`);
+            boundCells.add(plan.returnCell);
+          } else {
+            lines.push(`    ${plan.returnCell} = ${_cur};`);
+          }
+        }
+        continue;
+      }
       // If the batch produces a scrml cell, publish it reactively and bind it
       // by name so later batches / client statements can read it. The local
       // binding uses `let` and is DECLARED once per cell name; a later batch
@@ -494,18 +507,12 @@ function emitMultiBatchWrapper(opts: {
       ));
       continue;
     }
-    // The reactive assignment that receives a batch result is already emitted
-    // as part of that batch's await block (the `returnCell` publish above) —
-    // skip a duplicate emission here.
-    // S455 — a handled `@c = ?{…} !{…}` is the same cell write one level down.
-    const _cellStmt = (handledSqlGuardInner(stmt) ?? stmt) as ASTNode;
-    if (
-      _cellStmt.kind === "state-decl" &&
-      typeof _cellStmt.name === "string" &&
-      batchPlan.some((b) => b.returnCell === _cellStmt.name)
-    ) {
-      continue;
-    }
+    // A client statement is emitted as written. S462: a client-side write to a
+    // cell that some batch also returns (`@msg = "start"` before the batch that
+    // writes `@msg`) used to be SKIPPED here as a presumed duplicate — but the
+    // statement that receives a batch result is a server statement of that batch
+    // (handled above), so the only writes reaching this point are genuine client
+    // writes, and skipping them dropped them.
     const code = _autoAwait(emitLogicNode(stmt, cpsOptsBase));
     if (code) {
       for (const line of code.split("\n")) lines.push(`    ${line}`);
@@ -1029,17 +1036,42 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // (§20.5 / §52) resolved server-side (`_scrml_currentUser`), NEVER from the
     // request body. They are not `state-decl`s, so `allStateCellNames` already
     // excludes them — the client can never spoof identity via this marshal.
-    const _marshalReads = _cps
-      ? collectServerCellReads(_fnBody, allStateCellNames)
-      : [];
+    //
+    // S462 P0 fix round 1 — PER BATCH: a batch's request carries only the cells
+    // ITS OWN statements read. A cell only the client half reads never crosses,
+    // and a later batch is never handed a cell an earlier batch produced (route
+    // inference keeps such a consumer in the producing batch).
+    const _batchesForMarshal: ClientBatch[] = _cps ? buildClientBatchPlan(_cps, _fnBody) : [];
+    const _marshalByBatch = new Map<number, Array<{ name: string; span: unknown }>>();
+    for (const _b of _batchesForMarshal) {
+      // §6.6.9 / §19.9.9.7 (S451 R7): the marshal set is the cells the batch reads
+      // BEFORE (or without) writing them. A cell a top-level declaration of the
+      // batch has already written is read as the batch's own value, so the
+      // client's copy is not sent.
+      const _list: Array<{ name: string; span: unknown }> = [];
+      const _written = new Set<string>();
+      for (const _i of _b.indices) {
+        const _stmt = _fnBody[_i];
+        for (const _mr of collectServerCellReads([_stmt], allStateCellNames)) {
+          if (!_written.has(_mr.name) && !_list.some((x) => x.name === _mr.name)) _list.push(_mr);
+        }
+        const _decl = (handledSqlGuardInner(_stmt) ?? _stmt) as ASTNode;
+        if (_decl && _decl.kind === "state-decl" && typeof _decl.name === "string") _written.add(_decl.name as string);
+      }
+      _marshalByBatch.set(_b.batchIndex, _list);
+    }
+    const _marshalReads: Array<{ name: string; span: unknown }> = [];
+    for (const _list of _marshalByBatch.values()) {
+      for (const _mr of _list) if (!_marshalReads.some((x) => x.name === _mr.name)) _marshalReads.push(_mr);
+    }
     // Emit the marshal key-lines for one `_scrml_body` builder at `indent`,
     // SKIPPING any name already sent as a declared param (`currentParams`) — no
     // duplicate key. Getter mirrors emit-expr.ts client mode: derived →
     // `_scrml_derived_get`, plain reactive / §52 → `_scrml_reactive_get`.
-    const _emitMarshalBodyLines = (indent: string, currentParams: string[]): string[] => {
+    const _emitMarshalBodyLines = (indent: string, currentParams: string[], batchIndex: number): string[] => {
       const _pset = new Set(currentParams);
       const _out: string[] = [];
-      for (const _mr of _marshalReads) {
+      for (const _mr of _marshalByBatch.get(batchIndex) ?? []) {
         if (_pset.has(_mr.name)) continue;
         const _getter = allStateCells.get(_mr.name) === true ? "_scrml_derived_get" : "_scrml_reactive_get";
         _out.push(`${indent}${JSON.stringify(_mr.name)}: ${_getter}(${JSON.stringify(_mr.name)}),`);
@@ -1073,8 +1105,10 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const _batchStubNames: string[] = [];
 
     for (const _sb of _stubBatches) {
-    // Batch-i's param list: original fn params, then prior batch return cells.
-    const paramNames = [...fnParamNames, ..._sb.fwdResultNames];
+    // Batch-i's param list: original fn params, then the locals carried from the
+    // statements before the first server statement (S465, §19.9.9.8 rule 4 — client
+    // data, sent like a parameter), then prior batch return cells.
+    const paramNames = [...fnParamNames, ...cpsCarriedLocals(_cps), ..._sb.fwdResultNames];
     // The route path this stub fetches. Single-stub → the route's own path;
     // multi-batch → the per-batch path emitted by emit-server.ts.
     const batchPath = _isMultiStub ? `${path}__batch_${_sb.batchIndex}` : path;
@@ -1122,7 +1156,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       }
       // §6.6.9 CPS free-client-cell marshal — the client-held cells the server
       // reads via `_scrml_body["<cell>"]`, so the round-trip's inputs cross the wire.
-      for (const _ml of _emitMarshalBodyLines("    ", paramNames)) lines.push(_ml);
+      for (const _ml of _emitMarshalBodyLines("    ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`  });`);
       if (emitIdempotencyKey) {
         // _scrml_fetch_with_csrf_retry's signature is (path, method, body);
@@ -1181,7 +1215,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`      ${JSON.stringify(p)}: ${p},`);
       }
       // §6.6.9 CPS free-client-cell marshal (see the csrf-retry branch above).
-      for (const _ml of _emitMarshalBodyLines("      ", paramNames)) lines.push(_ml);
+      for (const _ml of _emitMarshalBodyLines("      ", paramNames, _sb.batchIndex)) lines.push(_ml);
       lines.push(`    }),`);
       lines.push(`  });`);
     }
@@ -1459,17 +1493,31 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // §19.16.5 — the wrapper body's defer stack (opened at the top of the walk).
     const deferStack = openCpsDeferStack(lines, "    ", body);
     const walkOpts: any = deferStack ? { ...cpsOpts, deferStack: deferStack.ctx, deferAsync: true } : cpsOpts;
+    // S462 P0 (§19.9.9.7) — how the server batch returns its cell writes; the
+    // server handler (emit-server.ts) asks the same question with the same inputs.
+    const _cellPlan = planBatchCellReturn(body, cpsSplit.serverStmtIndices, cpsSplit.returnVarName ?? null);
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt) continue;
 
-      if (cpsSplit.serverStmtIndices.includes(i)) {
+      if (cpsSplit.serverStmtIndices.includes(i) && _cellPlan.mode === "cells") {
+        // The batch ran every server statement and returned the FINAL value of
+        // each cell it wrote (never the rows it read); apply them here.
+        if (!serverCallEmitted && stubName) {
+          lines.push(`    const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+          lines.push(`    if (_scrml_server_result && typeof _scrml_server_result === 'object' && _scrml_server_result.__scrml_error) {`);
+          lines.push(`      return _scrml_server_result;`);
+          lines.push(`    }`);
+          for (const l of cpsCellsApplyLines("_scrml_server_result", _cellPlan.cells, "    ", _cellPlan.exits)) lines.push(l);
+          serverCallEmitted = true;
+        }
+      } else if (cpsSplit.serverStmtIndices.includes(i)) {
         // This is a server statement — replace with a call to the server stub.
         if (!serverCallEmitted && stubName) {
           if (cpsSplit.returnVarName) {
             // The reactive assignment that receives the server result will reference
             // this variable. Emit: const _result = await serverStub(args);
-            lines.push(`    const _scrml_server_result = await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    const _scrml_server_result = await ${stubName}(${[...paramNames, ...cpsCarriedLocals(cpsSplit)].join(", ")});`);
             // A9-Ext-4 D1: detect server-serialized error shape (per §19.9.1)
             // and propagate as-is. The server endpoint (emit-server.ts D1 site)
             // wraps thrown exceptions in this tagged shape with status 500.
@@ -1477,7 +1525,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
             lines.push(`      return _scrml_server_result;`);
             lines.push(`    }`);
           } else {
-            lines.push(`    await ${stubName}(${paramNames.join(", ")});`);
+            lines.push(`    await ${stubName}(${[...paramNames, ...cpsCarriedLocals(cpsSplit)].join(", ")});`);
           }
           serverCallEmitted = true;
         }
@@ -1510,16 +1558,17 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           ));
           continue;
         }
-        // If this is the reactive assignment that receives the server result,
-        // rewrite it to use the server result variable.
-        if (cpsSplit.returnVarName && (stmt as ASTNode).kind === "state-decl" && (stmt as ASTNode).name === cpsSplit.returnVarName) {
-          lines.push(`    _scrml_reactive_set(${JSON.stringify((stmt as ASTNode).name)}, _scrml_server_result);`);
-        } else {
-          const code = _cpsAutoAwait(emitLogicNode(stmt, cpsOpts));
-          if (code) {
-            for (const line of code.split("\n")) {
-              lines.push(`    ${line}`);
-            }
+        // A client statement is emitted as written — including a client-side
+        // write to the SAME cell the server batch returns (`@msg = "start"` before
+        // `@msg = row.name`). S462: this branch used to rewrite such a write to
+        // `_scrml_reactive_set(<cell>, _scrml_server_result)`, which, ahead of the
+        // server call, read `_scrml_server_result` before its declaration (a
+        // TDZ ReferenceError). The statement that receives the server result is
+        // a server statement and never reaches this branch.
+        const code = _cpsAutoAwait(emitLogicNode(stmt, cpsOpts));
+        if (code) {
+          for (const line of code.split("\n")) {
+            lines.push(`    ${line}`);
           }
         }
       }

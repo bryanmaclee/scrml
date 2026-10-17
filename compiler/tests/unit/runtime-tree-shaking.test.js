@@ -267,8 +267,16 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 44 chunks", () => {
-    // 44 chunks since S462 md phase 1: 'stdlib-md' (the scrml:md reader).
+  test("RUNTIME_CHUNK_ORDER has 43 chunks", () => {
+    // 43 chunks after S462 P0 fix round 1: 'stdlib-crypto' RESTORED as a PARTIAL
+    // chunk — only the members its shim labels [browser-safe] (generateToken,
+    // generateUUID, hmac, safeCompare); hash / verifyHash stay server-only.
+    // 42 chunks after S462: 'stdlib-md' (the scrml:md reader, md phase 1) ADDED, and
+    // 'stdlib-auth' + 'stdlib-crypto' REMOVED (S462 P0). Both removed modules are
+    // escalation-server-only (§12.2 Trigger 3) and carried a chunk only as a S95
+    // Bug 18 exception; a CPS split that left `verifyPassword` on the client ran
+    // the password check in the browser on that chunk (un-awaited — every password
+    // accepted). A surviving client reference is now E-STDLIB-CLIENT-CHUNK-MISSING.
     // 43 chunks since S461: 'machine' (the §51.12 / §51.14 machine temporal-transition
     // helpers + _scrml_replay) split out of the always-included 'core' chunk.
     // 42 chunks since S460 (s460-refine-la merge): 'refine' (§53 S458 2a-fix — the refined-cell
@@ -363,6 +371,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(44);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(43);
   });
 });

@@ -1,0 +1,15 @@
+{
+  "id": "server-db-cps-batch-field-write-refused",
+  "description": "S462 P0 — a write INTO a cell's value (`@u.name = row.name`) in the server half of a CPS split is refused (E-RI-002), not relocated to the client. The statement reads `row`, a query result, so running it on the client would mean shipping the raw row there; and the server half returns a cell only as its whole final value (§19.9.9.7), which an in-place field write does not produce. The fix the message names: assign the whole value (`@u = { ...@u, name: row.name }`).",
+  "language-version": "1.0",
+  "spec": "§12.4, §19.9.9.7",
+  "rationale": "§12.4: \"A function that the compiler cannot fully analyze for route placement SHALL be a compile error\" — a split that cannot keep a statement on the server is refused, never silently relocated. §19.9.9.7: \"The client still applies the write to its own store when the batch returns\" — the batch hands back each cell's value; E-RI-002 (§34: \"Server-escalated function mutates `@` reactive variable\") is the code for a cell write the server side cannot carry. Provenance: S462 P0, docs/changes/s462-p0-cps-server-logic-to-client/ — direction of change: newly-rejecting (before S462 this shape compiled with the `const row` mis-tiered onto the client and the query lowered as an unresolved placeholder).",
+  "expect": {
+    "codes": [
+      "E-RI-002"
+    ],
+    "severity": {
+      "E-RI-002": "error"
+    }
+  }
+}

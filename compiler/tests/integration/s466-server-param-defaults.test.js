@@ -1102,11 +1102,14 @@ ${imp}${decls}
 `, "r5-server-session");
     expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
   });
-  test("calling a binding whose function value cannot be followed fails closed", () => {
-    const lets = one(CPS("  let getU = () => \"x\"", "getU()"), "r5-let");
-    expect(codesOf(lets)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
-    expect(lets[0].message).toContain("cannot follow");
-    expect(codesOf(one(CPS("  fn mk() { return () => \"x\" }\n  const getU = mk()", "getU()"), "r5-callinit"))).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+  test("s466 r6: a `let` and a call-initialised `const` are followed — through every value they are given", () => {
+    // Round 5 refused these as unfollowable; round 6 follows every value source.
+    expect(one(CPS("  let getU = () => \"x\"", "getU()"), "r5-let")).toEqual([]);
+    expect(one(CPS("  fn mk() { return () => \"x\" }\n  const getU = mk()", "getU()"), "r5-callinit")).toEqual([]);
+    // A reassignment anywhere in the file is a value source too.
+    const re = one(CPS("  let getU = () => \"x\"\n  function login() { getU = () => @session.userId }", "getU()"), "r6-let-reassign");
+    expect(codesOf(re)).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
+    expect(codesOf(one(CPS("  fn mk() { return () => @session.userId }\n  const getU = mk()", "getU()"), "r6-callinit-id"))).toEqual(["E-PARAM-DEFAULT-SERVER-IDENTITY"]);
   });
   test("pure helpers, plain values and a shadowing lambda parameter are accepted", () => {
     expect(one(CPS("  const sfx = (x) => x + \"!\"", "sfx(\"a\")"), "r5-pure")).toEqual([]);
@@ -1153,5 +1156,157 @@ describe("s466 fix round 5 — item 5: one root cause is reported once in a CPS 
   server fn h(m, k = me()) { return k }
   function go() { return "" }`) }, "app.scrml", "r5-currentuser-callee");
     expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-AWAIT");
+  });
+});
+
+describe("s466 fix round 6 — F2: a default reaching an identity through ANY reference is refused", () => {
+  const CPS = (decls, dflt, imp = "") => `<program db="./x.db" auth="required">
+\${
+${imp}${decls}
+  function add(name: string, uid: string = ${dflt}) {
+    ?{\`INSERT INTO items (name, qty) VALUES (\${name}, \${uid})\`}.run()
+    @last = uid
+  }
+}
+<last> = ""
+<button onclick=\${add("a")}>go</button>
+<p>\${@last}</p>
+</program>
+`;
+  const one = (src, tag, extra = {}) => compileFiles({ "app.scrml": src, ...extra }, "app.scrml", tag).errors;
+  const ID = ["E-PARAM-DEFAULT-SERVER-IDENTITY"];
+  test("p4: a VALUE const `const me = @session.userId` + `uid = me`", () => {
+    const errors = one(CPS("  const me = @session.userId", "me"), "r6-p4");
+    expect(codesOf(errors)).toEqual(ID);
+    expect(errors[0].message).toContain("(through `me`)");
+  });
+  test("p2: a `let` helper PASSED AS A VALUE — `uid = pick(h)`", () => {
+    expect(codesOf(one(CPS("  let h = () => @session.userId\n  const pick = (f) => f()", "pick(h)"), "r6-p2"))).toEqual(ID);
+  });
+  test("p6 / p8 / p11: object, template and whole-`@session` consts", () => {
+    expect(codesOf(one(CPS("  const o = { u: @session.userId }", "o.u"), "r6-p6"))).toEqual(ID);
+    expect(codesOf(one(CPS("  const getU = () => @session.userId\n  const t = `${getU()}`", "t"), "r6-p8"))).toEqual(ID);
+    expect(codesOf(one(CPS("  const m = @session", "m.userId"), "r6-p11"))).toEqual(ID);
+  });
+  test("spread, destructured const, member-assigned object", () => {
+    expect(codesOf(one(CPS("  const o = { u: @session.userId }", "({ ...o }).u"), "r6-spread"))).toEqual(ID);
+    expect(codesOf(one(CPS("  const { userId } = @session", "userId"), "r6-destr"))).toEqual(ID);
+    expect(codesOf(one(CPS("  const o = { u: \"\" }\n  function login() { o.u = @session.userId }", "o.u"), "r6-memberassign"))).toEqual(ID);
+  });
+  test("q4: a helper re-exported through a second module and passed as a value", () => {
+    const errors = one(CPS("  const pick = (f) => f()", "pick(getU)", "  import { getU } from \"./lib2.scrml\"\n"), "r6-q4", {
+      "lib2.scrml": "${\n  export { getU } from \"./lib.scrml\"\n}\n",
+      "lib.scrml": "${\n  export const getU = () => @session.userId\n}\n",
+    });
+    expect(codesOf(errors)).toEqual(ID);
+  });
+  test("q1: a function-declared helper reports the identity code too", () => {
+    const errors = one(CPS("  function getU() { return @session.userId }", "getU()"), "r6-q1");
+    expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+  test("a wholly-server default reaching `session.userId` through a helper passed as a value", () => {
+    const errors = one(`<program db="./x.db" auth="required">
+\${
+  const getU = () => session.userId
+  const pick = (f) => "" + f
+  server fn h(m: string, uid: string = pick(getU)) -> string { return m + uid }
+}
+<last> = ""
+<button onclick=\${@last = h("a")}>go</button>
+<p>\${@last}</p>
+</program>
+`, "r6-server-value");
+    expect(codesOf(errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+  test("non-identity values stay accepted", () => {
+    expect(one(CPS("  const o = { u: \"anon\" }", "o.u"), "r6-ok-obj")).toEqual([]);
+    expect(one(CPS("  const sfx = (x) => x + \"!\"\n  const pick = (f) => f(\"a\")", "pick(sfx)"), "r6-ok-pick")).toEqual([]);
+    expect(one(CPS("  const t = `a-${1 + 2}`", "t"), "r6-ok-tpl")).toEqual([]);
+  });
+});
+
+describe("s466 fix round 6 — F1: server reach follows const / alias / let bindings and channel handlers", () => {
+  const LIB = "${\n  export fn fmt(x, k = (y) => { return y + \"!\" }) { return k(x) }\n}\n";
+  const UNSUP = "E-PARAM-DEFAULT-UNSUPPORTED";
+  const app = (decls, server, markup = "<button onclick=${@out = h(\"a\")}>go</button>") => `<program db="./x.db">
+\${
+  import { fmt } from "./lib.scrml"
+${decls}
+${server}
+}
+<out> = ""
+${markup}
+<p>\${@out}</p>
+</program>
+`;
+  const errs = (files, tag) => codesOf(compileFiles(files, "app.scrml", tag).errors);
+  test("R1: `const w = (m) => fmt(m)` + `server fn h(m) { return w(m) }` reaches fmt", () => {
+    expect(errs({ "app.scrml": app("  const w = (m) => fmt(m)", "  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-R1")).toContain(UNSUP);
+  });
+  test("an alias and a `let` reach it too", () => {
+    expect(errs({ "app.scrml": app("  const w = fmt", "  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-alias")).toContain(UNSUP);
+    expect(errs({ "app.scrml": app("  let w = (m) => fmt(m)","  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-let")).toContain(UNSUP);
+  });
+  test("R6: inside the library — `const w = (m) => fmt(m)` + `export server fn s(m) { return w(m) }`", () => {
+    const lib = "${\n  export fn fmt(x, k = (y) => { return y + \"!\" }) { return k(x) }\n  const w = (m) => fmt(m)\n  export server fn s(m) { return w(m) }\n}\n";
+    const a = `<program db="./x.db">
+\${
+  import { fmt, s } from "./lib.scrml"
+}
+<out> = ""
+<button onclick=\${@out = fmt("a")}>go</button>
+<button onclick=\${@out = s("a")}>go2</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib.scrml": lib }, "r6-R6")).toContain(UNSUP);
+  });
+  test("R7: a lib default reading `@session` reached through `const w` is refused at compile time (main: ReferenceError at run time)", () => {
+    const lib = "${\n  export function tag(x, k = () => { return @session.userId }) { return x + \":\" + k() }\n}\n";
+    const a = `<program db="./x.db">
+\${
+  import { tag } from "./lib.scrml"
+  const w = (m) => tag(m)
+  server fn h(m) { return w(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib.scrml": lib }, "r6-R7").length).toBeGreaterThan(0);
+  });
+  test("a channel `onserver:` handler is server-run code — direct and through `const w`", () => {
+    const ch = (decls, handler) => `<program db="./x.db">
+\${
+  import { fmt } from "./lib.scrml"
+${decls}
+}
+<channel name="chat" onserver:message=${handler}>
+\${
+  <n> = 0
+}
+</channel>
+<p>\${@n}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": ch("", "fmt(msg)"), "lib.scrml": LIB }, "r6-ch-direct")).toContain(UNSUP);
+    expect(errs({ "app.scrml": ch("  const w = (m) => fmt(m)", "w(msg)"), "lib.scrml": LIB }, "r6-ch-const")).toContain(UNSUP);
+  });
+  test("`export *` re-export reaches the source module's function", () => {
+    const a = `<program db="./x.db">
+\${
+  import { fmt } from "./lib2.scrml"
+  server fn h(m) { return fmt(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib2.scrml": "${\n  export * from \"./lib.scrml\"\n}\n", "lib.scrml": LIB }, "r6-star")).toContain(UNSUP);
+  });
+  test("client-only reach stays client (L3 shape): `const w` used only by client code compiles", () => {
+    expect(errs({ "app.scrml": app("  const w = (m) => fmt(m)", "", "<button onclick=${@out = w(\"a\")}>go</button>"), "lib.scrml": LIB }, "r6-client")).toEqual([]);
   });
 });

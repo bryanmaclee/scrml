@@ -11,20 +11,23 @@
  * the app file is.
  *
  * A library function is server-reached when, anywhere in the compilation:
- *   - a function the route map places off the client (server / middleware,
- *     CPS-split included — its whole body is read, an over-read) names it,
- *     directly or through any chain of file-scope functions and `.scrml`
- *     imports; or
+ *   - SERVER-RUN code names it, directly or through any chain of bindings:
+ *     a function the route map places off the client (server / middleware,
+ *     CPS-split included — its whole body is read, an over-read), a channel's
+ *     `onserver:*` handler expression, a §52 server cell's initialiser; or
  *   - it is an async exported function (its body runs a `?{}` query, or calls
  *     one — a server operation), or one of those names it.
  *
- * Reachability is by IDENTIFIER TOKEN over the whole function subtree (every
- * string field at any depth), the same rule as route inference's pure-fn side
- * placement. Over-collection marks too much as server-reached — the check then
- * refuses more, which is the fail-closed direction. A name imported from a
- * `.scrml` module that does not declare it as a file-scope function (a
- * re-export, a const) cannot be followed precisely, so EVERY file-scope
- * function of that module is treated as reached (fail closed).
+ * Reachability is by IDENTIFIER TOKEN over the whole subtree (every string
+ * field at any depth), the same rule as route inference's pure-fn side
+ * placement, followed through EVERY binding the token names (s466 fix round 6,
+ * binding-provenance.ts — the identity check's binding follower): a file-scope
+ * function, a `const w = (m) => fmt(m)` / `const w = fmt` / `let` (every value
+ * it is given), an import, a re-export, `export *`. Over-collection marks too
+ * much as server-reached — the check then refuses more, which is the
+ * fail-closed direction. A binding whose provenance cannot be followed (a name
+ * assigned in raw text, a name the imported module does not declare) marks
+ * EVERY file-scope function of that module reached (fail closed).
  *
  * Only files some other file in the compilation imports get an entry. A file no
  * one imports (a library compiled on its own, an app file with exports) serves
@@ -32,6 +35,7 @@
  * server-placed — callers read a missing entry that way.
  */
 import { toPosix } from "../path-canonical.js";
+import { bindingsOfFile, bindingsOfName, type Binding } from "../binding-provenance.ts";
 
 type AnyNode = Record<string, unknown>;
 
@@ -63,11 +67,13 @@ interface FileFacts {
   fileScopeFns: Map<string, AnyNode[]>;
   /** every function-decl, nested included. */
   allFns: AnyNode[];
-  /** import local name → the `.scrml` module (posix abs path) + imported name. */
-  imports: Map<string, { absSource: string; imported: string }>;
+  /** server-run code that is not a function-decl: `onserver:*` handler values, server-cell initialisers. */
+  serverRunNodes: unknown[];
+  /** the provenance view of the file. */
+  pv: { filePath: string; nodes: unknown; imports: unknown };
 }
 
-function factsOf(fileAST: AnyNode, resolveImport: (source: string, importerPath: string) => string | null): FileFacts | null {
+function factsOf(fileAST: AnyNode): FileFacts | null {
   const rawPath = typeof fileAST.filePath === "string" ? fileAST.filePath : null;
   if (!rawPath) return null;
   const filePath = toPosix(rawPath);
@@ -75,6 +81,7 @@ function factsOf(fileAST: AnyNode, resolveImport: (source: string, importerPath:
   const nodes = (fileAST.nodes ?? (ast ? ast.nodes : null) ?? []) as unknown[];
   const fileScopeFns = new Map<string, AnyNode[]>();
   const allFns: AnyNode[] = [];
+  const serverRunNodes: unknown[] = [];
   const find = (node: unknown, insideFn: boolean, seen: Set<unknown>): void => {
     if (!node || typeof node !== "object" || seen.has(node)) return;
     seen.add(node);
@@ -89,6 +96,12 @@ function factsOf(fileAST: AnyNode, resolveImport: (source: string, importerPath:
         fileScopeFns.set(n.name, list);
       }
       inner = true;
+    } else if (n.kind === "markup" && Array.isArray(n.attrs)) {
+      for (const a of n.attrs as AnyNode[]) {
+        if (a && typeof a.name === "string" && a.name.startsWith("onserver:")) serverRunNodes.push(a.value);
+      }
+    } else if (n.kind === "state-decl" && n.isServer === true) {
+      serverRunNodes.push(n.initExpr ?? null, n.sqlNode ?? null, typeof n.init === "string" ? n.init : null);
     }
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
@@ -97,25 +110,13 @@ function factsOf(fileAST: AnyNode, resolveImport: (source: string, importerPath:
     }
   };
   find(nodes, false, new Set());
-  const imports = new Map<string, { absSource: string; imported: string }>();
-  const importDecls = (ast?.imports ?? fileAST.imports ?? []) as AnyNode[];
-  for (const imp of Array.isArray(importDecls) ? importDecls : []) {
-    if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
-    if (!imp.source.endsWith(".scrml")) continue;
-    const absSource = resolveImport(imp.source, rawPath);
-    if (!absSource) continue;
-    for (const spec of (Array.isArray(imp.specifiers) ? imp.specifiers : []) as AnyNode[]) {
-      if (spec && typeof spec.imported === "string" && typeof spec.local === "string") {
-        imports.set(spec.local, { absSource: toPosix(absSource), imported: spec.imported });
-      }
-    }
-  }
-  return { filePath, rawPath, fileScopeFns, allFns, imports };
+  const imports = (ast?.imports ?? fileAST.imports ?? []) as unknown;
+  return { filePath, rawPath, fileScopeFns, allFns, serverRunNodes, pv: { filePath: rawPath, nodes, imports } };
 }
 
 /**
  * Map: posix absolute path of every library some file in `files` imports →
- * the names of its file-scope functions server code reaches (see above).
+ * the names of its file-scope bindings server code reaches (see above).
  *
  * `resolveImport(source, importerPath)` — module-resolver `resolveModulePath`.
  * `isOffClient(filePath, fnNode)` (the file AST's own path) — the route map places this function off the
@@ -131,15 +132,25 @@ export function computeServerReachedExports(
   const astByPath = new Map<string, unknown>();
   for (const f of files) {
     if (!f || typeof f !== "object") continue;
-    const ff = factsOf(f as AnyNode, resolveImport);
+    const ff = factsOf(f as AnyNode);
     if (!ff) continue;
     facts.set(ff.filePath, ff);
     astByPath.set(ff.filePath, f);
   }
+  const holds = (abs: string): boolean => facts.has(toPosix(abs));
+  const provenanceOf = (fp: string): Map<string, Binding[]> | null => {
+    const ff = facts.get(toPosix(fp));
+    return ff ? bindingsOfFile(ff.pv, resolveImport, holds) : null;
+  };
   const imported = new Set<string>();
-  for (const ff of facts.values()) for (const e of ff.imports.values()) imported.add(e.absSource);
+  for (const ff of facts.values()) {
+    for (const bs of (provenanceOf(ff.filePath) ?? new Map<string, Binding[]>()).values()) {
+      for (const b of bs) if (b.kind === "alias" || b.kind === "star") if (toPosix(b.filePath) !== ff.filePath) imported.add(toPosix(b.filePath));
+    }
+  }
 
   const reached = new Map<string, Set<string>>();
+  const allReached = new Set<string>();
   const stack: Array<[string, string]> = [];
   const reach = (file: string, name: string): void => {
     let set = reached.get(file);
@@ -150,18 +161,15 @@ export function computeServerReachedExports(
   };
   const reachAllOf = (file: string): void => {
     const ff = facts.get(file);
-    if (!ff) return;
+    if (!ff || allReached.has(file)) return;
+    allReached.add(file);
     for (const name of ff.fileScopeFns.keys()) reach(file, name);
   };
-  const follow = (ff: FileFacts, tokens: Set<string>): void => {
+  /** A token SERVER-RUN code in `file` names: reach it if the file binds it. */
+  const follow = (file: string, tokens: Iterable<string>, viaImport: boolean): void => {
     for (const t of tokens) {
-      if (ff.fileScopeFns.has(t)) reach(ff.filePath, t);
-      const imp = ff.imports.get(t);
-      if (!imp) continue;
-      const src = facts.get(imp.absSource);
-      if (!src) continue;
-      if (src.fileScopeFns.has(imp.imported)) reach(src.filePath, imp.imported);
-      else reachAllOf(src.filePath); // not followable precisely — fail closed
+      const bs = bindingsOfName(file, t, viaImport, provenanceOf);
+      if (bs.length > 0) reach(file, t);
     }
   };
 
@@ -171,20 +179,30 @@ export function computeServerReachedExports(
     for (const fn of ff.allFns) {
       if (isOffClient(ff.rawPath, fn)) collectTokens(fn, roots, new Set());
     }
-    follow(ff, roots);
+    for (const n of ff.serverRunNodes) collectTokens(n, roots, new Set());
+    follow(ff.filePath, roots, false);
     for (const name of asyncExportNames(astByPath.get(ff.filePath))) {
       if (ff.fileScopeFns.has(name)) reach(ff.filePath, name);
     }
   }
-  // Closure.
+  // Closure — every value source of a reached name is server-run code too.
   while (stack.length > 0) {
     const [file, name] = stack.pop()!;
-    const ff = facts.get(file);
-    if (!ff) continue;
-    const toks = new Set<string>();
-    for (const fn of ff.fileScopeFns.get(name) ?? []) collectTokens(fn, toks, new Set());
-    toks.delete(name);
-    follow(ff, toks);
+    for (const b of bindingsOfName(file, name, true, provenanceOf)) {
+      if (b.kind === "fn" || b.kind === "expr") {
+        // Reached through `export *`: the binding lives in the source module —
+        // mark it reached THERE (its emitter reads that module's set).
+        if (toPosix(b.filePath) !== file) reach(toPosix(b.filePath), name);
+        const toks = new Set<string>();
+        collectTokens(b.node, toks, new Set());
+        follow(toPosix(b.filePath), toks, false);
+      } else if (b.kind === "alias") {
+        const target = toPosix(b.filePath);
+        if (bindingsOfName(target, b.name, true, provenanceOf).length > 0) reach(target, b.name);
+      } else if (b.kind === "unresolved") {
+        reachAllOf(file); // not followable precisely — fail closed
+      }
+    }
   }
 
   const out = new Map<string, Set<string>>();

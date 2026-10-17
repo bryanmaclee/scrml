@@ -1,0 +1,27 @@
+<program db="./app.db">
+    <schema>
+        users {
+            id: integer primary key
+            name: text
+            pw: text
+        }
+    </schema>
+    import { verifyPassword as vp } from "scrml:auth"
+    <a> = ""
+    <b> = ""
+    // The login idiom: the query writes the cell, and the check that consumes the
+    // row (including the stored hash) decides the cell's final value. Both run in
+    // the server half of the split; only the final value comes back (§19.9.9.7).
+    function loginA(pass: string) {
+        @a = ?{`SELECT name, pw FROM users WHERE name = 'bob'`}.get()
+        if (!vp(pass, @a.pw)) { @a = "REJECTED" } else { @a = "WELCOME " + @a.name }
+    }
+    function loginB(pass: string) {
+        @b = ?{`SELECT name, pw FROM users WHERE name = 'bob'`}.get()
+        if (!vp(pass, @b.pw)) { @b = "REJECTED" } else { @b = "WELCOME " + @b.name }
+    }
+    <button id="wrong" onclick={ loginA("wrong-password") }>wrong</button>
+    <button id="right" onclick={ loginB("right-password") }>right</button>
+    <p id="a">${@a}</p>
+    <p id="b">${@b}</p>
+</program>

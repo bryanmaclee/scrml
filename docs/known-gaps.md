@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 650 | 6 |
-| LOW | 431 | 0 |
+| HIGH | 264 | 4 |
+| MED | 654 | 6 |
+| LOW | 435 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -69,6 +69,42 @@ Executed (S467 fix round 2): `const ok = match (p == "" || check(p)) { .Denied :
 <!-- @gap id=g-onmount-guarded-failable-call-refused-s467 sev=MED status=open locus=compiler/src/codegen(the `_onMountEffect` body is lowered from its raw text; a guarded call there is not read as a guarded statement) prov=empirical:S467-reproduced-on-origin-main-179f9b346;dispatch:s467-error-002-value-position -->
 
 Reproduced on `origin/main` `179f9b346`: `${ on mount { @msg = load() !{ _ :> "" } } }` with `server function load()! -> AuthErr` → E-SERVER-FN-IN-SYNC-CALLBACK ("called inside a synchronous callback" — there is no callback); `${ on mount { const ok = check("wrong") !{ .Denied :> false }; … } }` with a client `check()!` → E-CODEGEN-INVALID-LOGIC. Both are the correct handled form, so an author must move the call into a named function called from `on mount` (the S467 `bug-18` fixture migration did exactly that). Fails closed (no wrong output); an ergonomic and conformance defect.
+
+### g-failable-alias-through-operator-or-returned-fn-s467 — a failable function reached through a ternary / `||` alias or a returned function slips E-ERROR-002: `const g = p ? check : id; const ok = g(p)`, `const g = check || id`, `getF()(p)` compile and a wrong password logs in — `NEW S467 (filed; S239 r2 of #1431 N1); MED; open`
+
+<!-- @gap id=g-failable-alias-through-operator-or-returned-fn-s467 sev=MED status=open locus=compiler/src/type-system.ts(checkFailableCallsInValuePositions alias tracking — follows bare-name aliases only)+compiler/src/failable-value-calls.ts prov=review:S467-e002-r2-N1;empirical:S467-reproduced-branch-and-base -->
+
+#1431's per-scope alias tracking follows `const g = check` (and alias-of-alias) but not an alias whose value is a ternary / logical expression over a failable function, nor a function that returns one. Executed on 486345909 and origin/main 179f9b346: each compiles and a wrong password gives "LOGGED IN". Probes: ~/.cache/scrml-review-s467-e002/f.mjs (XPS). Fix direction: fail closed — a callee whose binding's value MAY be a failable function (any leaf of a ternary / logical / call-returning-function) is failable. Related declared limits in SPEC §19.4.3 "Carried impl#1 gaps": a failable function passed as a value, a binding reassigned in an inner block.
+
+### g-block-bodied-bang-arm-drops-value-s467 — a block-bodied `!{}` arm in value position drops its value: `const ok = check(p) !{ .Denied :> { @msg = "d"⏎ false } }` leaves `ok` holding the error object → a wrong password logs in — `NEW S467 (filed; S239 r2 of #1431 N2; pre-existing); HIGH; open`
+
+<!-- @gap id=g-block-bodied-bang-arm-drops-value-s467 sev=HIGH status=open locus=compiler/src/codegen(the `!{}` guard emission for a value-position handler with a block-bodied arm — emits the arm's last expression as a bare statement, then `var ok = _scrml__scrml_result_N`) prov=review:S467-e002-r2-N2;spec:§19.4.3("the block's last expression is the arm's value") -->
+
+SPEC §19.4.3 says a block-bodied arm's last expression is the arm's value. impl#1 emits `false;` inside the arm and then assigns the guard's raw result, so the error object survives into `ok`. The E-ERROR-002 checker correctly counts the call as handled — the defect is in codegen. Executed on #1431's branch and on main: "LOGGED IN" with a wrong password. Probe: ~/.cache/scrml-review-s467-e002/f.mjs "FP guard block arm" (XPS). Close to but distinct from `g-impl1-value-position-arm-fallthrough-s451` (that entry says the last statement IS assigned).
+
+### g-param-default-identity-via-param-or-mutation-s467 — identity reaching a CPS-split default through a function PARAMETER or a MUTATING call is not refused: `setIt(@session)` writing a cell, `Object.assign(o, {u: @session.userId})`, `arr.push(…)`, `m.set(…)` then `uid = <that>` — the server binds `uid` from the request — `NEW S467 (filed; PA call, not fixed); LOW; open`
+
+<!-- @gap id=g-param-default-identity-via-param-or-mutation-s467 sev=LOW status=open locus=compiler/src/binding-provenance.ts(records where a NAME gets its value; parameter call-site arguments and mutating-call writes are not sources)+compiler/src/free-name.ts prov=review:S467-param-r6-N1;ruling:PA-S467(file-not-fix) -->
+
+#1433's binding-provenance closes every by-NAME route (p2/p4/p6/p8/p11/q4). Left open by PA decision: a CPS-split default is evaluated in the browser and sent, so ANY client-sent value is forgeable however it was computed — an explicit argument `add("a", @session.userId)` is equally spoofable and no default check sees it. The real protection is the server reading identity from the session; the default check is a safety net for the common confused pattern, not a whole-program taint analysis. Probes t3/t4/t7/t8/t16: ~/.cache/scrml-review-s467-param-r5/cases/ (XPS).
+
+### g-cps-server-half-trusts-client-held-cell-s467 — a CPS server half reads a CELL's value back from the request: `const was = @allowed` before the first server statement, or `if (!@ok && !@allowed) return` — if an earlier call's server result set `@allowed`, the browser can forge it — `NEW S467 (filed; pre-existing, narrowed by #1435); MED; open`
+
+<!-- @gap id=g-cps-server-half-trusts-client-held-cell-s467 sev=MED status=open locus=compiler/src/route-inference.ts(carriedValueAdmission — cells are synced client state, not admission-checked locals)+§19.9.9.8 prov=review:S467-cps-r5-INFO;empirical:S467(base 9/9 forged rows, #1435 branch 3/4) -->
+
+The long-standing cell-sync model: a cell is client state and its value travels with the request. When the cell's value came from a server result in an earlier call, the server trusting it later breaks the spirit of §19.9.9.8 ("a server value never travels to the client and back"). #1435 narrows it (forged rows 9→3, 9→4 on probes cell_prev_call / cell_direct in ~/.cache/scrml-review-s467-cps-r4/h/, XPS) but does not close it. Needs a SPEC decision: is a cell written from a server result a server value for §19.9.9.8 purposes?
+
+### g-cps-carried-primitive-message-says-object-s467 — E-RI-002 for a carried PRIMITIVE local written by a closure says "`blk` may hold an object" — fails closed, wrong wording — `NEW S467 (filed); LOW; open`
+
+<!-- @gap id=g-cps-carried-primitive-message-says-object-s467 sev=LOW status=open locus=compiler/src/route-inference.ts(carriedValueAdmission refusal message) prov=review:S467-cps-r5 -->
+
+`let blk = false`, written only with `true` inside a closure, is refused (correctly) with a message about object aliasing. The message should name the actual reason (written after the first server statement through a closure).
+
+### g-dev-watcher-snapshot-ctime-fails-on-xps-s467 — `compiler/tests/commands` `dev-watcher-snapshot-identity` ("ctime moves") fails 5/5 on origin/main on the XPS clone — `NEW S467 (filed; environment); LOW; open`
+
+<!-- @gap id=g-dev-watcher-snapshot-ctime-fails-on-xps-s467 sev=LOW status=open locus=compiler/tests/commands(dev-watcher-snapshot-identity — filesystem ctime resolution assumption) prov=empirical:S467(4 agents, origin/main, XPS) -->
+
+Reported by four S467 agents independently; fails identically on clean main on this machine, so it is the filesystem (ctime granularity), not a change. CI passes it.
 
 ### g-hook-flakes-under-load-s467 — pre-commit hook flakes on a loaded machine: `defer-spec-calls` times out at 55 s; `import-host` "decorators and JSX" fails in-suite but passes alone — `NEW S467 (filed; test-only); LOW; open`
 
@@ -240,6 +276,12 @@ PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/app.scrml`: `<a> =
 
 PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/inv.scrml`: `${ function bad() { return @n + } }` → E-CODEGEN-INVALID-LOGIC (the compiler-defect code) with no line. A source syntax error should be a parse error at the operator's position. The no-line half is [[g-parse-floor-errors-carry-no-source-location-s464]]; this entry is the missing parse refusal only.
 
+### g-nested-match-in-string-arm-block-unlowered-s467 — a `match` nested inside the block body of a string-literal `match` arm (`match (k) { "bob" :> { match (@ok) { true :> { … } else :> { … } } } else :> { … } }`) is never lowered: in a browser function it fails as E-CODEGEN-INVALID-LOGIC ("compiler defect", the inner `match … :>` text reaches the emitted JS verbatim); in the server half of a CPS-split function it is E-STMT-UNEXPECTED-TOKEN at the inner arm's `:>` — `NEW S467; MED; open (pre-existing on BASE; fails closed)`
+
+<!-- @gap id=g-nested-match-in-string-arm-block-unlowered-s467 sev=MED status=open locus=compiler/src/ast-builder.js(string-literal match arm — arm body kept only as `bare-expr` `expr` text, exprNode = the literal alone)+compiler/src/codegen(text lowering of that arm body — rewriteBlockBody-style, no statement parse) prov=review:s467-cps-r4-match_nested+repro:s467-cps-r5 -->
+
+Found by the S467 review of the CPS round-4 branch (probe `match_nested`), then reproduced by the round-5 agent WITHOUT any server work: `function post(name: string, pass: string, body: string) { @ok = pass == "x"; const k: string = name; match (k) { "bob" :> { match (@ok) { true :> { @msg = "ok" } else :> { @msg = "no" } } } else :> { @msg = "x" } } }` → E-CODEGEN-INVALID-LOGIC, emitted `…( _scrml_reactive_get("ok") ) { true :> { _scrml_reactive_se…`. Same shape with a server statement after it (CPS split) → the same; with the nested match AFTER the first server statement (server half) → E-STMT-UNEXPECTED-TOKEN `no statement begins at \`:> { @msg = "ok" }\``. A single (non-nested) string-arm match compiles in every position, and an `if` inside a string arm compiles. Reproducer: `~/.cache/scrml-agent-tmp/s467-cps-r5/w/nm.mjs`. Same root as the S467 round-4 finding that a string-literal arm's body lives only in `expr` text (the batch planner missed its cell writes; fixed there by scanning the text): the arm body is never read by the statement parser, so anything that needs the parser (a nested `match`) breaks. Direction: parse a string-literal arm's block body into statements like every other arm kind. Not a CPS defect; fails closed everywhere.
+
 ### g-vendor-import-component-035-when-file-exists-s466 — a `vendor:` import is refused with E-COMPONENT-035 even when the imported file exists — `NEW S466; LOW; open (RELAYED)`
 
 <!-- @gap id=g-vendor-import-component-035-when-file-exists-s466 sev=LOW status=open locus=searched:compiler/src/component-expander.ts(E-COMPONENT-035 site)—not-traced prov=dispatch:s466-fix-refuse-broken -->
@@ -386,6 +428,12 @@ Executed S467 on origin/main `9d7a6cc2a` and on the s466-server-param-defaults m
 
 Executed S467 on origin/main `9d7a6cc2a` and on the s466-server-param-defaults merged tip (identical): the program compiles clean; `app.server.js` has `add(m);` in `_scrml_handler_outer_N` and no `function add`; calling the `outer` route throws `ReferenceError: add is not defined`. Expected: either an in-process server callable for the CPS function's server half, or a compile error (a CPS function writes client state — `@last` — which a server caller cannot do).
 
+### g-nested-pattern-default-string-literal-dropped-s467 — a string literal inside a default NESTED in a destructuring parameter pattern loses its quotes: client `fn inner({ a = 1, b = { q: [a, "s"] } } = {})` emits `b = { q : [ a , s ] }` (passes `node --check`; `s` is an undeclared identifier at run time — silent wrong behaviour), and the server shape `b = m + "!"` emits `m + !` (refused as E-CODEGEN-INVALID-LOGIC, fails closed) — `NEW S467; MED; open (pre-existing on origin/main)`
+
+<!-- @gap id=g-nested-pattern-default-string-literal-dropped-s467 sev=MED status=open locus=searched:compiler/src/codegen/emit-destructure-pattern.ts(emitDestructurePatternText — pattern default text emitted as stored when no lowerer is passed)+compiler/src/codegen/utils.ts(paramSignature lowerPatternDefault)+the parameter-list parser that stores the nested default as token-joined text—not-traced prov=review:s466-server-param-defaults(r5,cases ds5/ds6) -->
+
+Executed S467 on origin/main `f79a624df` and on pre-#1427 main `179f9b346` (identical): case `ds6` (client `fn inner({ a = 1, b = { q: [a, "s"] } } = {}, [c = a * 2] = [], k = a + 1)`) emits `function _scrml_inner_3({ a = 1, b = { q : [ a , s ] } } = {}, …)` in `app.client.js` — the token-joined text of the nested default with the string token's quotes gone; calling `inner()` reads an undeclared `s`. The server variant (`ds5` with `b = m + "!"` inside a nested function of a server function) emits `m + !` and is refused by the artifact syntax check. The parameter's OWN default is lowered from its parsed tree (s466); a default nested inside a pattern goes through the stored pattern text (client: no lowerer; server: main's S465 r4 lowerer). Fix direction: keep each nested default's source span / parsed tree on the pattern node and lower it with the same expression emitter, client and server.
+
 ### g-lib-export-const-lambda-missing-import-s465 — a lib's `export const check = (p, h) => verifyPassword(p, h)` emits a server module without the `verifyPassword` import: `ReferenceError` at call time (500) — `NEW S465 r6; MED; resolved (s466-await-r8)`
 
 <!-- @gap id=g-lib-export-const-lambda-missing-import-s465 sev=MED status=resolved locus=compiler/src/codegen/emit-server.ts(_generateValueOnlyServerJs wrote no import lines) prov=review:s465-await-r6 -->
@@ -399,6 +447,8 @@ Executed in s465 fix round 6 (branch and main alike): the importer's `if (!check
 <!-- @gap id=g-lib-exported-fn-destructured-param-codegen-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(route handler body-param unpacking reads param.name as a string)—not-traced prov=review:s465-await-r6 -->
 
 Executed in s465 fix round 6 (branch and main alike; probe `pre.mjs` preLibDestr). The handler unpacks `_scrml_body` by parameter NAME; a destructuring pattern has none. Fix direction: unpack positionally into a temp and destructure it with emit-destructure-pattern.
+
+**S467 (s466 fix round 6) — the same root in an APP-FILE server function.** Executed on origin/main `f79a624df`: `server fn f({ a = 1, b = "x" } = {}, [c = 2] = [], z = "zz")` (case `ds1`) and `server fn f({ a, b })` (cases `dsv1`–`dsv4`) are refused with E-CODEGEN-INVALID-LOGIC — the route handler emits `const [object Object] = _scrml_body[…]`. Fails closed (no program runs with it), but a destructured parameter of ANY route-backed server function cannot compile. Same fix direction.
 
 ### g-typed-arrow-param-in-server-fn-value-s465 — a function value with an annotated parameter in server code (`const label = (r: R) => { … }`) emits the annotation into JS — E-CODEGEN-INVALID-LOGIC "Unexpected token" (compiler defect, fails closed) — `NEW S465 r6; LOW; open (pre-existing on BASE)`
 
@@ -810,6 +860,14 @@ Found during s462-p0 (S1 re-exports), confirmed by its S239 review. The importer
 <!-- @gap id=g-trigger3-no-follow-local-reexport-s462 sev=MED status=open locus=compiler/src/route-inference.ts(buildPerFileEscalationServerOnlyBindings — keyed on the import's own specifier) prov=review:s462-p0-unawaited-async-stdlib(S239 F3) -->
 
 `buildPerFileEscalationServerOnlyBindings` maps a local binding to its import's specifier and escalates only when that specifier is a server-only `scrml:` module, so `import { vp } from "./lib.scrml"` never escalates. The client bundle reads `_scrml_modules["lib.client.js"].vp`, which is `undefined` (lib.client.js registers nothing), so the call throws a TypeError on click. No secret ships (the client module is empty), but a server-only capability silently became a client crash. Fix direction: resolve the binding through local re-exports to its terminal module (the registry now carries `stdlibOrigin` for exactly this) and escalate on the terminal stdlib module.
+
+**Re-checked S462 P0 fix round 1 (`s462-p0-cps-server-logic-to-client`): still OPEN.** That round's placement rule (a statement reading a server-originated value, or calling a server-placed function, runs in the server half of a CPS split) re-tiers statements only INSIDE a split function. The F3 shape is a function with no server work at all — `function chk(p) { @ok = vp(p, h) }` with `vp` re-exported by `./lib.scrml` — so it is never split, emits `await vp(…)` against an empty `_scrml_modules["lib.client.js"]`, and throws on click (measured; no secret ships). Inside a split function the same call now lands server-side only when its statement also reads a server value. The fix direction above stands.
+
+### g-cps-cell-concat-sql-member-codegen-invalid-s462 — `@out = "kept " + ?{…}.get().n` (a `?{}` with a member read, inside a larger expression, as a cell write in a split function) fails with E-CODEGEN-INVALID-LOGIC — `NEW S462; LOW; open (pre-existing on BASE; fails closed)`
+
+<!-- @gap id=g-cps-cell-concat-sql-member-codegen-invalid-s462 sev=LOW status=open locus=compiler/src/codegen(sql-ref inside a compound state-decl initializer) prov=review:s462-p0-cps-server-logic-to-client(S239 fix round 1) -->
+
+`` function f() { @out = "kept " + ?{`SELECT count(*) AS n FROM users`}.get().n } `` → `E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output` (CLI compile). Identical on base a9aa81eff, so not introduced by the S462 CPS work, and it fails CLOSED (no artifact ships). Related but separate: the SQL chain truncation (`?{…}.get().name` lowers to the whole row) is being fixed on its own branch; this entry is the codegen refusal for the concatenation shape only. Workaround: `const c = ?{…}.get()` then `@out = "kept " + c.n`. Fix direction: lower a `?{}` placeholder nested inside a compound initializer the way a bare `?{}` initializer is lowered (an awaited driver call), then apply the member chain.
 
 ### g-export-star-misses-stdlib-chain-name-s462 — `export *` from a local module does not forward a name that module re-exports from a stdlib chain, so importing it through the star is a false E-IMPORT-004 (§21.4: `export *` exports every name m exports, "including names m itself re-exports") — `NEW S462; LOW; open`
 

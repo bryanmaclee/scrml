@@ -372,13 +372,32 @@ describe(`${CODE} §8 — message content`, () => {
    * When the sibling position is closed (`g-cell-initialiser-and-markup-interp-server-only-
    * reach-do-not-escalate`), this clause becomes stale and SHOULD be rewritten to point at
    * the sibling's own code — it must not simply be deleted.
+   *
+   * S462 P0 — CLOSED. `scrml:auth` / `scrml:crypto` were the only escalation-server-only
+   * modules that still carried a client chunk; with those gone, a plain cell initialiser
+   * (or a markup interpolation) reaching any of them leaves a client read the bundle cannot
+   * resolve, which is E-STDLIB-CLIENT-CHUNK-MISSING. The clause now names that code, and
+   * the second test below pins that the sibling really is refused.
    */
-  test("REFUSES the perverse path: says deleting `const` is not a fix", () => {
+  test("REFUSES the perverse path: says deleting `const` is not a fix, and names the sibling's code", () => {
     const { out } = runRIOn(programDeriving("scrml:auth", "hashPassword", "hashPassword(@pw)"));
     const msg = errorsWithCode(out, CODE)[0].message;
-    expect(msg).toContain("Do NOT just delete `const`");
-    expect(msg).toContain("NOT yet diagnosed");
-    expect(msg).toContain("restores the leak");
+    expect(msg).toContain("Deleting `const` does not help");
+    expect(msg).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+  });
+
+  test("the sibling position the message names IS refused: a plain cell initialiser reaching scrml:auth (S462)", () => {
+    const { mkdtempSync, writeFileSync } = require("fs");
+    const { join } = require("path");
+    const { tmpdir } = require("os");
+    const { compileScrml } = require("../../src/api.js");
+    const dir = mkdtempSync(join(tmpdir(), "s462-derived-sibling-"));
+    const file = join(dir, "app.scrml");
+    writeFileSync(file, programDeriving("scrml:auth", "hashPassword", "hashPassword(@pw)").replace("const <computed>", "<computed>"));
+    const r = compileScrml({ inputFiles: [file], write: false, log: () => {} });
+    const codes = (r.errors ?? []).map((e) => e.code);
+    expect(codes).not.toContain(CODE);
+    expect(codes).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
   });
 });
 

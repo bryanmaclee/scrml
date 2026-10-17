@@ -1,4 +1,5 @@
-import { tokenizer as acornTokenizer } from "acorn";
+import { tokenizer as acornTokenizer, parse as acornParse } from "acorn";
+import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
@@ -7,7 +8,7 @@ import { localReExportEdges, resolveExportedBinding, isReExportedByAnother } fro
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, chunksForEmittedHelpers } from "./runtime-chunks.ts";
+import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk, stdlibClientChunkMembers, chunksForEmittedHelpers } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
@@ -4210,12 +4211,16 @@ export function generateClientJs(ctx: CompileContext): string {
     if (regions.length === 0) return code;
     regions.sort((a, b) => a.start - b.start);
 
-    // Build the "body" view: blank every removable region so a bound name is
-    // never counted as used by its own declaration line. Iterate from the end
-    // so earlier offsets stay valid.
+    // The "body" view a usage test reads: `blanks` (every removable region, so a
+    // bound name is never counted as used by its own declaration) blanked, the
+    // spliced runtime excised, string-literal bodies masked (each step explained
+    // below, where it was first written).
+    const usageBody = (blanks: Array<{ start: number; end: number }>): string => {
+    // Blank from the end so earlier offsets stay valid.
     let body = code;
-    for (let i = regions.length - 1; i >= 0; i--) {
-      const r = regions[i];
+    const _blanks = [...blanks].sort((a, b) => a.start - b.start);
+    for (let i = _blanks.length - 1; i >= 0; i--) {
+      const r = _blanks[i];
       body = body.slice(0, r.start) + " ".repeat(r.end - r.start) + body.slice(r.end);
     }
 
@@ -4268,40 +4273,103 @@ export function generateClientJs(ctx: CompileContext): string {
     // this read-line alive — the read-line twin of the chunk-prune leak
     // (g-prune-server-only-stdlib-chunks-keeps-chunk-on-textual-occurrence).
     body = maskStringLiteralSpans(body);
+    return body;
+    };
+
+    // g-spread (2026-06-10): a member-access-only lookbehind (a `.` preceded by
+    // ident-char / `)` / `]`, e.g. `obj.makeRange`) plus a word-boundary
+    // lookbehind, so a genuine member access of a DIFFERENT object does not
+    // count as a use, while a spread call (`...makeRange`) does.
+    const usesName = (text: string, name: string): boolean =>
+      new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "").test(text);
+
+    // (3) S466 (s462-p0-cps r3) — a top-level FUNCTION-VALUED binding the client
+    // never calls, whose body reaches a stdlib read (`const inner = (p, h) =>
+    // verifyPassword(p, h)` used only by server code). fn-valued-bindings.ts makes
+    // such a binding a function for the async colouring, but it is still emitted
+    // on both sides; on the client it is dead code, and it alone kept
+    // `const { verifyPassword } = _scrml_stdlib.auth;` alive — so a server-only
+    // module was either shipped (when it had a client chunk) or refused
+    // (E-STDLIB-CLIENT-CHUNK-MISSING) for a use the browser never makes. A binding
+    // drops only when no remaining client code names it (to a fixpoint: dropping
+    // `b` can free the `a` it called). A binding the client DOES name stays, and
+    // with it the read — the gate below then refuses it, exactly as for a direct
+    // client use. Located by acorn on the emitted text (the name set is the
+    // tree's: fnValuedBindingsOf); a bundle acorn cannot read drops nothing.
+    const stdlibNames = new Set<string>();
+    for (const r of regions) if (!r.keepWhole) for (const n of r.names) stdlibNames.add(n);
+    const fnRegions: Array<{ start: number; end: number; name: string; text: string }> = [];
+    const fnNames = new Set(
+      fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never) as unknown[])
+        .filter((b) => !b.exported).map((b) => b.name),
+    );
+    if (fnNames.size > 0 && stdlibNames.size > 0) {
+      type TopStmt = { type: string; start: number; end: number; declarations?: Array<{ id?: { type: string; name?: string }; init?: { type: string } | null }> };
+      let topStmts: TopStmt[] = [];
+      try {
+        const program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true }) as unknown as { body?: TopStmt[] };
+        topStmts = program.body ?? [];
+      } catch {
+        topStmts = [];
+      }
+      for (const st of topStmts) {
+        if (st.type !== "VariableDeclaration" || st.declarations?.length !== 1) continue;
+        const d = st.declarations[0];
+        const name = d.id?.type === "Identifier" ? d.id.name : undefined;
+        const initType = d.init?.type;
+        if (!name || !fnNames.has(name)) continue;
+        if (initType !== "ArrowFunctionExpression" && initType !== "FunctionExpression") continue;
+        fnRegions.push({ start: st.start, end: st.end, name, text: code.slice(st.start, st.end) });
+      }
+    }
+    // Only a binding that (through other such bindings) reaches a stdlib read.
+    const reaching = new Set<number>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = 0; i < fnRegions.length; i++) {
+        if (reaching.has(i)) continue;
+        const t = maskStringLiteralSpans(fnRegions[i].text);
+        const reaches = [...stdlibNames].some((n) => usesName(t, n)) ||
+          [...reaching].some((j) => usesName(t, fnRegions[j].name));
+        if (reaches) { reaching.add(i); changed = true; }
+      }
+    }
+    const fnDropped = new Set<number>();
+    for (let changed = reaching.size > 0; changed;) {
+      changed = false;
+      for (const i of reaching) {
+        if (fnDropped.has(i)) continue;
+        const blanks = [...regions, ...[...fnDropped].map((j) => fnRegions[j]), fnRegions[i]];
+        if (!usesName(usageBody(blanks), fnRegions[i].name)) { fnDropped.add(i); changed = true; }
+      }
+    }
+
+    const body = usageBody([...regions, ...[...fnDropped].map((j) => fnRegions[j])]);
 
     // A region drops only when NONE of its bound names appear in the remaining
     // body (whole-region grain — matches GITI-003 and the brief: strip when
     // bound name(s) are referenced ONLY server-side; KEEP if any name is used
     // in BOTH client and server code).
-    const toDrop: Set<number> = new Set();
+    const drops: Array<{ start: number; end: number }> = [...fnDropped].map((j) => fnRegions[j]);
     for (let i = 0; i < regions.length; i++) {
       const r = regions[i];
       if (r.keepWhole) continue;
-      const usedInBody = r.names.some(name => {
-        // g-spread (2026-06-10): a member-access-only lookbehind (a `.`
-        // preceded by ident-char / `)` / `]`, e.g. `obj.makeRange`) plus a
-        // word-boundary lookbehind, so a genuine member access of a DIFFERENT
-        // object does not count as a use, while a spread call (`...makeRange`)
-        // does.
-        const useRe = new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "");
-        return useRe.test(body);
-      });
-      if (!usedInBody) toDrop.add(i);
+      const usedInBody = r.names.some((name) => usesName(body, name));
+      if (!usedInBody) drops.push(r);
     }
-    if (toDrop.size === 0) return code;
+    if (drops.length === 0) return code;
+    drops.sort((a, b) => a.start - b.start);
 
-    // Rebuild the file with dropped regions removed (regions are sorted by
-    // start; cursor walks left-to-right).
+    // Rebuild the file with dropped regions removed (sorted by start; cursor
+    // walks left-to-right).
     let result = "";
     let cursor = 0;
-    for (let i = 0; i < regions.length; i++) {
-      if (toDrop.has(i)) {
-        result += code.slice(cursor, regions[i].start);
-        // skip the declaration itself; also skip a following newline if present
-        let endCursor = regions[i].end;
-        if (code[endCursor] === "\n") endCursor++;
-        cursor = endCursor;
-      }
+    for (const r of drops) {
+      result += code.slice(cursor, r.start);
+      // skip the declaration itself; also skip a following newline if present
+      let endCursor = r.end;
+      if (code[endCursor] === "\n") endCursor++;
+      cursor = endCursor;
     }
     result += code.slice(cursor);
     return result;
@@ -4413,10 +4481,26 @@ export function generateClientJs(ctx: CompileContext): string {
         if (!seen.has(m[1])) seen.set(m[1], []);
       }
 
-      for (const [mod, names] of seen) {
-        if (hasStdlibClientChunk(mod)) continue;
+      for (const [mod, allNames] of seen) {
+        // S462 P0 fix round 1 (M1) — a PARTIAL chunk (scrml:crypto) carries only its
+        // [browser-safe] members; a client read of any other member resolves to
+        // `undefined` in the browser, so it is refused here like a missing chunk.
+        let names = allNames;
+        let partial = false;
+        if (hasStdlibClientChunk(mod)) {
+          const allowed = stdlibClientChunkMembers(mod);
+          if (allowed === null) continue;
+          names = allNames.filter((n) => !allowed.has(n));
+          if (names.length === 0) continue;
+          partial = true;
+        }
         const serverOnly = isEscalationServerOnlyModule(`scrml:${mod}`);
-        const why = mod.includes("/")
+        const why = partial
+          ? `\`scrml:${mod}\` ships to the browser only its browser-safe members `
+            + `(${[...(stdlibClientChunkMembers(mod) ?? [])].map((n) => `\`${n}\``).join(", ")}); the rest reach a `
+            + `host API that does not exist in a browser (§12.2 Trigger 3). Move this use into a server `
+            + `function — a use reached only from server code does not fire this error.`
+          : mod.includes("/")
           ? `Submodule specifiers have no client registry entry — the emitted read `
             + `\`_scrml_stdlib.${mod}\` parses as a division, not a member access. Import from `
             + `the root module \`scrml:${mod.split("/")[0]}\` instead.`
@@ -4438,10 +4522,14 @@ export function generateClientJs(ctx: CompileContext): string {
         const col = impSpan?.col ?? impSpan?.column ?? impSpan?.startCol ?? 1;
         const err = new CGError(
           "E-STDLIB-CLIENT-CHUNK-MISSING",
-          `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
-          + `in the browser. A client bundle is a classic script, so the import lowers to `
-          + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
-          + `throw at load and the whole page would be dead on arrival. ${why}`,
+          partial
+            ? `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
+              + `in the browser: the client chunk for \`scrml:${mod}\` does not carry ${names.length === 1 ? "that member" : "those members"}, `
+              + `so the call would fail at run time. ${why}`
+            : `E-STDLIB-CLIENT-CHUNK-MISSING: client-side use of ${what}\`scrml:${mod}\` cannot resolve `
+              + `in the browser. A client bundle is a classic script, so the import lowers to `
+              + `\`_scrml_stdlib.${mod}\`, and no runtime chunk defines that property — the bundle would `
+              + `throw at load and the whole page would be dead on arrival. ${why}`,
           { file: filePath, start: impSpan?.start ?? 0, end: impSpan?.end ?? 0, line, col },
         );
         // The compile formatter reads TOP-LEVEL `filePath` / `line` / `column`

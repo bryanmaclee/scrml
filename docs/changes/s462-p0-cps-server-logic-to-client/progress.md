@@ -1,0 +1,490 @@
+# progress — s462-p0-cps-server-logic-to-client
+
+- [start] base a9aa81eff (origin/main). Brief archived.
+- [repro] CONFIRMED on emit AND in happy-dom against the real server module:
+  wrong password renders "WELCOME bob"; the response carries the argon2id hash;
+  `_scrml_stdlib.auth` ships.
+
+## Root causes (measured)
+1. CPS tier classifier (`analyzeCPSEligibility` → `isServerTriggerStatement`)
+   is not the escalation walker. It missed: aliased server-only imports (keys
+   on imported `names`, not the local), any server-only reference in a control-
+   flow HEAD (`condExpr`/`iterExpr`/… — incl. the `sql-ref` in
+   `for (r of ?{}.all())`), and the `sqlNode` on `const x = ?{}…`.
+2. A server batch could not carry cell writes: nested `@x = v` lowered to
+   `_scrml_reactive_set` IN THE SERVER MODULE (ReferenceError); a second
+   top-level write likewise; the §19.9.9.7 R7 read of a just-written cell read
+   the CLIENT-SENT `_scrml_body[x]` (client-controlled: a forged `out` could
+   steer the password check); `_scrml_cps_return` returned only when the decl
+   was the LAST server statement.
+3. `stdlib-auth` / `stdlib-crypto` carried client chunks contrary to the
+   §12.2 Trigger-3 derivation documented in runtime-chunks.ts.
+4. Legacy client wrapper: a client write to the return cell before the server
+   call (`@msg = "start"`) was rewritten to `reactive_set(msg,
+   _scrml_server_result)` ahead of that const (TDZ); multi-batch dropped it.
+
+## Implemented
+- A (RI): `buildCpsStatementServerProbe` — escalation walker + Trigger-3 local
+  binding scan applied per statement; server-tier if it fires. Mixed bare-expr
+  (write + server work) → server tier. Nested writes in server statements count
+  as reactive. Server-local propagation fixpoint (a statement reading a local a
+  server statement declared runs on the server — data minimisation by
+  placement). `findReactiveAssignment` sees compound/update/field/array-
+  mutation writes and ExprNode-field writes (match arms); `@session` /
+  `@currentUser` excluded (ambient, §6.6.9).
+- B (codegen): `codegen/cps-cell-writes.ts` — per-batch plan (legacy bare
+  return kept byte-identical for its exact shape; otherwise "cells"). Cells
+  batch: one local per written cell (`_scrml_cell_<x>`, seeded from the
+  marshalled value), writes recorded in `_scrml_written`, response
+  `{ __scrml_cells: { <written>: <final> } }` built as one literal. Flag
+  `serverCellWrites` threaded emit-logic/emit-expr/emit-control-flow (incl.
+  match ctx and the raw-text arm path). Fail-closed backstop E-CG-006 on an
+  unrecorded write, an unplanned mark, or `_scrml_reactive_set` in the batch.
+  Client single + multi-batch apply. RI refusal E-RI-002 (precise text) for
+  writes a batch cannot carry (field write / in-place array mutation / closure
+  write / `return` inside a cells batch).
+- C: auth/crypto client chunks removed → a surviving client reference is
+  E-STDLIB-CLIENT-CHUNK-MISSING.
+- Conformance: `server-fn-writes-reactive-cell-pos` retargeted (SPEC §6.6.9:
+  a function with a reactive assignment is CPS-split; the old E-RI-002 was an
+  impl#1 mis-tiering artifact, already recorded at S451). New:
+  `cps-login-check-stays-server` (codes-only — the bridge's server harness
+  cannot load a stdlib shim; runtime proof in impl#1 tests),
+  `cps-batch-field-write-refused`.
+
+## SEPARATE P0 FOUND (not fixed here — different blast radius)
+- SQL chain truncation: `?{…}.get().name` lowers to the whole row; the AST
+  records `.name` as chainedCalls {method:"name"} and the lowering honours only
+  calls[0]. `return ?{SELECT name, pw …}.get().name` from a plain server fn
+  returns the full row incl. the hash. Measured on this worktree (SQL lowering
+  untouched by this dispatch).
+
+## Commits
+- 36446dfc8 — A + B + C + tests + conformance.
+- 46df8bc52 — `lin`/`~` decl tiering (found by the corpus diff: examples/
+  19-lin-token `login`); §6.6.19 message + SPEC rewrite (the SPEC's own
+  "SHALL be rewritten" clause); regenerated SPEC-INDEX / FACTS / bootstrap-
+  conformance / TYPES-BASELINE.
+- e0be779aa — multi-batch: the last batch returned the split's FIRST cell
+  (returnVarName) and the client set it to `undefined` after batch 1.
+
+- 11e7540c1 — merge origin/main (Q20 #1401, Q21 #1402): code auto-merged;
+  generated-doc hunks → main's side, regenerated.
+- 47d9c233e — integration test hands handlers a duck-typed request
+  (happy-dom globals from an earlier file drop `Cookie`).
+- 719e49616 — merge origin/main (<md> phase 1 #1403): chunk set = +md
+  −auth −crypto (42); count pins + template interpolation resolved by hand.
+  Gates re-run on this tree: all green incl. browser-baseline --check PASS.
+
+## Corpus differential (final, head = e0be779aa vs base a9aa81eff)
+2919 sources (samples, examples, conformance, stdlib, benchmarks,
+scrml-support gauntlet-r25, ../giti, ../flogence). 20 server functions changed
+in 7 sources; 0 in giti (28 server fns), flogence (243), gauntlet-r25,
+benchmarks; examples: 1 (19-lin-token `login`, broken on base, now correct).
+Newly refused real programs: 0. Harness note: stdlib/ rows differ only
+because stdlib exemptions key on the compiler's own stdlib path.
+
+## Gates
+pre-commit ×3 green; types-gate (re-recorded rename); host-global-scan;
+facts (regen); spec-index (regen); s34-census --check-new; bootstrap-
+conformance (regen; FAIL 55→55); severity; snippet-gate 128/128; corpus-
+compile-floor; lsp+commands 723/0; root-level 2239/0; e2e-render-map 259/0;
+browser tier 48 failures == baseline name set (script refused twice with
+PARSER DISAGREES 48 vs 47 — the documented flake; verified by direct
+name-set comparison).
+
+## FIX ROUND 1 (resumed)
+
+You are a dispatched dev agent on the scrml repo (impl#1, compiler/src). PA session S462. P0 SECURITY. You are CONTINUING a crashed agent's fix round (its context overflowed). Its committed work is on the LOCAL branch `worktree-agent-aaf433dac5f8224df` (HEAD a466175f9, which already merges main 1c1e9eee5). Its UNCOMMITTED round-1 work-in-progress is saved as a patch: /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/ded336eb-40b5-403c-94d8-1f930fdf45e5/scratchpad/cps-round1-wip.patch (17 files, +934/-91).
+
+FIRST:
+1. In your worktree, run `git merge --ff-only worktree-agent-aaf433dac5f8224df` (or a plain merge if you're not on its base), then `git fetch origin && git merge origin/main`.
+2. `git apply` the patch. If hunks conflict, resolve them, and say so.
+3. Read docs/changes/s462-p0-cps-server-logic-to-client/{BRIEF,progress}.md for the original design: the per-statement server probe, the `__scrml_cells` batch return, E-RI-002 / E-CG-006, and the removed auth/crypto chunks.
+4. Append this prompt verbatim to that progress.md as "FIX ROUND 1 (resumed)".
+5. Commit the applied WIP immediately as a checkpoint, so the work isn't lost again. If the pre-commit hook fails because the WIP is incomplete, do NOT bypass it; instead keep the patch file as the anchor and continue.
+
+Commit rules:
+- Commit incrementally.
+- Never use --no-verify, and never disable hooks.
+- Gate each commit on free memory above 6GB and load average below 15, foreground, timeout 600000.
+- Use your own scratch subdir.
+
+CONTEXT DISCIPLINE: the previous agent died from context overflow. Keep tool outputs small:
+- run tests with `--bail` and with filtered output (`| tail -30`);
+- grep instead of reading whole files;
+- don't print large diffs.
+
+The last thing it was doing: a types-gate regression in `compiler/src/runtime-template.d.ts`, whose export list must match runtime-template.js.
+
+THE ROUND-1 TASK. These are the S239 review findings on 533609165. Reproduce each with real routes (bun:sqlite + happy-dom; seed bob with an argon2 hash).
+
+H1 HIGH (also on base): a check through a helper is a full bypass. `function check(p,h){ return vp(p,h) }` plus `if (!check(pass, @out.pw))` in a server function shows WELCOME bob for a wrong password. `check` escalates to its own route; the login route returns the whole row; the client posts the hash; the un-awaited Promise passes the check.
+
+H2 HIGH: `const hash = @out.pw` (or destructuring `const {pw,name} = @out`), then `vp(pass, hash)`. This produces 2 batches: the row with the hash goes to the client and comes back, and batch 1 returns 500.
+
+H3 HIGH (also on base): cross-batch trust. With `@row = ?{SELECT name, role…}.get(); @busy = true; if (@row.role == "admin") { ?{DELETE FROM secrets}.run() … }`, a forged `{"row":{"role":"admin"}}` makes the DELETE run.
+
+H4 MED: `const rows = ?{…}.all(); @out = "REJECTED"; for (const u of rows) { if (vp(pass, u.pw)) … }` used to be E-RI-002. It now compiles, batch 1 500s, and the correct password renders REJECTED.
+
+RULE TO IMPLEMENT (fail-closed):
+(1) Any statement that reads a cell its own function's server batch wrote, or a local derived from one (transitively, through locals and destructuring), is server-tier. A call to a function that itself escalates is server-tier at the call site, so the result is computed and awaited on the server. This closes H1 and H2.
+(2) A server-originated value (a server-written cell, a server local, or anything derived from them) must NEVER round-trip through the client into a later batch as trusted input.
+   - Cell writes like `@busy = true` can be computed on the server and returned in `__scrml_cells`, so they don't by themselves force a split.
+   - Statements BEFORE the first server statement stay client-side. This is the spinner pattern: `@busy = true` must render before the request.
+   - If a later batch would need a server-originated value, merge by moving intervening pure-computation or cell-write statements to the server.
+   - If they genuinely need the client (DOM, client-only APIs, lift), REFUSE with E-RI-002. The message must name the value that would cross.
+   This closes H3 and H4.
+(3) Execute the spinner, optimistic-update and form-submit shapes, and verify their UX semantics are kept.
+
+M1: restore a crypto client chunk limited to the functions the shim labels [browser-safe] (generateUUID, hash, safeCompare, generateToken, hmac — read the labels). Keep auth fully server-only. Non-browser-safe crypto used on the client stays E-STDLIB-CLIENT-CHUNK-MISSING. Corpus impact must stay 0.
+
+known-gaps:
+- F3 (Trigger 3 through a local re-export): mark resolved if (1) closes it; otherwise add an entry.
+- Add a LOW entry: `@out = "kept " + ?{…}.get().n` → E-CODEGEN-INVALID-LOGIC (already on base, fails closed).
+- SQL chain truncation is being fixed on another branch. Don't touch it.
+
+TESTS: every H-shape as an end-to-end route test that fails on base or on 533609165. Required outcomes:
+- a wrong password gives REJECTED, and the correct one gives WELCOME;
+- no hash appears in any request or response body, in either direction;
+- the forged H3 cell does NOT run the DELETE.
+
+GATES:
+- pre-commit, tracking tiers (after pretest), browser-baseline --check (re-run on PARSER DISAGREES), `s34-census --check-new`, host-global-scan, facts / spec-index / bootstrap-conformance / severity --check, types-gate --check, snippet-gate, corpus-compile-floor;
+- a corpus differential including ../giti and ../flogence (read-only). Report every newly refused site.
+
+Resolve generated-doc conflicts by hunk, then regenerate. Restore master-list.md from origin/main. Write only inside your worktree.
+
+REPORT: WORKTREE_PATH, FINAL_SHA, BRANCH, per-H results, the design, M1, newly refused sites, and the gates table. Do NOT push.
+
+### Resume log
+- [resume] ff to a466175f9; origin/main already merged (1c1e9eee5); WIP patch applied cleanly (no conflicts).
+- [checkpoint] 0d182364a — WIP applied + committed (pre-commit green, 741s). New H tests verified FAILING on both 533609165 (12 fail) and a9aa81eff (34 fail) via git-archive trees in scratch.
+- [adversarial probes on the WIP] H1 plain-escalated, helper-returns-row, lift/DOM between, pure copy between, spinner, local→vp: all correct. TWO holes found:
+  (I) `@row = ?{}; @x = localStorage.getItem(@row.role) ?? @row.role; if (@x == "admin") DELETE` — the browser stmt stayed client (reads a server CELL — allowed), its output `@x` round-tripped into batch 2, and a forged `x` ran the DELETE (measured: secrets 1 → 0).
+  (O) `@n = setTimeout(…)` between producer and consumer was silently moved to the server (deny-list `clientOnlyReason` only knew browser globals).
+- [563a4f1e1] rule (d) taint-through-browser pass (refuse at the browser stmt, naming the server value) + fail-closed ALLOW-LIST half of clientOnlyReason (cells, fn own names, file declared/imported names, isomorphic globals). Unit tests added.
+- [corpus diff head 563a4f1e1 vs origin/main 1c1e9eee5] 2875 files (samples 310, examples 71, conformance 1799, benchmarks 7, gauntlet-r25 4 + samples/gauntlet-*, giti 83, flogence 31; per-file standalone compile). Newly refused: 1 = the branch's own negative fixture `cps-batch-field-write-refused`. Newly compiling: 1 (`server-fn-writes-reactive-cell-pos`, retargeted). Code-set changes on already-refused files: 4 (2 e-derived negative cases gain E-STDLIB-CLIENT-CHUNK-MISSING; gauntlet-r10-bun-admin + htmx-forms swap E-RI-002/E-REACTIVE-003 for E-CPS-NONIDEM-NO-STORAGE). Artifact changes (both compile): 5 — 3 defer CPS cases (client), the branch's cps-login fixture, examples/19-lin-token. giti / flogence: 0 changes.
+- [SPEC] §19.9.9.8 added (placement rule; narrowing; provenance = this brief) + §19.9.9.7 bullet 1 amended (it normatively described the H3 round trip). SPEC-INDEX/FACTS regenerated.
+- NOTE (out of scope, pre-existing): a NON-split escalated function (no cell write) containing `localStorage.setItem` runs it on the server (ReferenceError → 500). By design per the S263 CLIENT_ONLY_GLOBAL_ROOTS minimal set (document/window only). Not a CPS round-trip.
+
+## FIX ROUND 2 (S465)
+
+- 2026-10-11 brief (+ PA change of plan) archived as BRIEF-fix-round-2-S465.md. Finding 1 done first on a separate branch from origin/main (auto/s465-await-imported-server-fn @ f8309fd64); merged here next.
+- merged auto/s465-await-imported-server-fn (f8309fd64). Conflicts: emit-functions.ts CPS client-statement
+  emission (kept this branch's no-skip / no-rewrite form, wrapped with the continuation auto-await) and
+  docs/FACTS.md (regenerated). The S465 CPS test is retargeted: under §19.9.9.8 the imported `check` runs IN
+  the server batch (route test: wrong → `__scrml_cells.seen` REJECTED, right → "WELCOME bob", no `$argon2` in
+  the response). On d5910316d 9/17 of the S465 tests FAIL. Gate on the merge tree: 33023 tests, 10 fail — the
+  environmental/flake set recorded on the await branch (dev ×5, bind-host, read-only-as-root, tenant ×3 load).
+- FINDING 2 (o1) REPRODUCED on d5910316d: `const n = @clicks + 1; @clicks = n; ?{INSERT … ${n}}.run()` — both
+  earlier statements in the server batch (`const n = _scrml_cell_clicks + 1; _scrml_cell_clicks = n`), the
+  client only applies `__scrml_cells.clicks` after the response. Root: analyzeCPSEligibility's "a client-declared
+  local the server statement reads moves to the server with it" pulled from k = 0, ignoring rule 4 ("Statements
+  before the function's first server statement are never moved"); the pull of `const n` then made `@clicks = n`
+  a reader of a server local (rule 1 pull).
+  FIX: `firstServer` (fixed by the initial tiering; no later pull can precede it) bounds that pull; a pre-first
+  local read by server work is CLIENT data → `CPSResult.carriedLocals` / `CPSSplit.carriedLocals`, sent after the
+  function's params in every stub's argument list (emit-functions: stub signature + body, single and multi-batch
+  wrapper calls) and bound `const <n> = _scrml_body["<n>"]` in the batch handler (emit-server paramNames).
+  Shapes that cannot be carried are REFUSED (E-RI-002, kind "client-local"), never moved:
+  (i) a nested `function` declared pre-first that server work calls (a function is not request data);
+  (ii) a pre-first local the server half REASSIGNS (`let n = 1 … n = ?{…}` — the copies would diverge).
+  A browser-only local declared AFTER the first server statement and read by later server work stays refused (it
+  cannot join the request already in flight) — now with the accurate message.
+- FINDING 3 (d1): compiles clean now (statement stays client, `draft` carried). The client-local refusals get
+  their own E-RI-002 text ("A browser value reaches the server only as part of the request … statements before
+  the function's first server statement stay in the browser (§19.9.9.8 rule 4)") with a per-shape Fix — never
+  the server-value "sending `x` to the browser and trusting …" text.
+- Tests: integration/s465-cps-pre-first-stays-client.test.js (9; d5910316d: 8 FAIL) — o1 executed in happy-dom
+  with the request held open (`@clicks` shows 1 DURING the request, request carries n = 1) + route stores the
+  carried value; d1 spinner shows during the request, request carries localStorage draft, route stores it; the
+  three refusal shapes with message assertions. unit/cps-split-server-tier-s462: the test that pinned the
+  rule-4-violating pull is retargeted (pre-first local stays client + carried) and a post-first pull test added.
+- NOT CHANGED (per brief): control-dependence g1/g4 (§19.9.9.8 rule 3 last sentence — owner's call); a1/g5
+  fail-closed 500s — KNOWN LOW, left as they are. No SPEC edit: rule 4 is implemented as written; how a
+  pre-first value reaches the server (as request data, like a parameter) and the two refused shapes are
+  implementation consequences the owner may want stated in §19.9.9.8.
+- Gate (rule-4 tree): 33033 tests, 11 fail — the recorded env/flake set + validate-emit-gate trucking-dispatch (35 s timeout under load; passes alone, 3/0).
+- REVISED after the corpus differential (head vs d5910316d: samples/gauntlet-r13/htmx-forms `validateForm`
+  gained an E-RI-002 for its nested helper `checkRequired` — refusing every pre-first nested helper would have
+  been a regression for a common shape): a nested `function` declared before the first server statement that
+  server work calls now STAYS in the browser and is ALSO declared at the top of every batch handler
+  (`carriedFunctionIndices`; a declaration has no effect). Admitted only if it touches no cell and needs
+  nothing browser-only (`clientOnlyReason` allow-list); the pre-first locals it closes over are carried with
+  it (fixpoint); refused (E-RI-002 client-local) if it needs the browser / touches a cell, or reassigns a
+  pre-first local. Executed: `function fmt(x) { return x + "!" }` pre-first → `@v` shows "saving" during the
+  request and the route stores "saving!". htmx-forms back to its d5910316d code set.
+- Corpus differential (2808 files: samples, examples, conformance, stdlib, scrml-support gauntlet-r25; ../giti
+  and ../flogence NOT cloned in this container — skipped; each side compiles its own tree, per-file standalone):
+  head vs d5910316d: code-set changes 0, newly refused 0, emit changes 0 (the round-2 fixes and the merged await
+  fix are corpus-neutral on this branch). head vs origin/main 1c1e9eee5: newly refused (clean → error) 0; code
+  changes 5 = the round-1 record (two derived-reach negatives gain E-STDLIB-CLIENT-CHUNK-MISSING,
+  server-fn-writes-reactive-cell-pos E-RI-002 → clean, gauntlet-r10-bun-admin and gauntlet-r13 htmx-forms lose
+  E-RI-002 / E-REACTIVE-003) + the branch's two new conformance cases; emit changes 4 (defer cps-* ×3 client,
+  examples/19-lin-token client+server — the round-1 `login` fix).
+- Gates (head): pre-commit 33035/10 fail (env/flake set); root 2239/0; e2e-render-map 259/0; self-host-v2 slices
+  2274/0; lsp+commands 713/11 (all `scrml dev`/`serve` bind/watch — container); facts (regen), spec-index,
+  host-global-scan, s34-census --check-new --base 1c1e9eee5 (1 new row, well-formed), state (gap-counts was stale
+  since round 1 — regenerated), conflict-marker, types-gate, snippet-gate 128/128, corpus-compile-floor,
+  bootstrap-conformance, severity, delta-lint: PASS. browser-baseline --check: 3 new names — the nested-<each>
+  one (identical on origin/main here) + 2 of cps-server-logic-stays-server-s462.browser (that file fails 6/10 on
+  d5910316d in this container too: its `settle()` waits 200 ms and argon2 verify measures 236 ms at load ~10).
+
+## FIX ROUND 3 (S466)
+
+- [start] branch s466-cps-r3 from origin/wip/s464-p0-cps-r1 (82856e8c7); brief archived as BRIEF-fix-round-3-S466.md.
+- [merge origin/main 7f2b81418] conflicts and resolutions:
+  - scheduling.ts, index.ts: this branch carried only the r1 await branch (f8309fd64) there, no CPS delta →
+    main's #1424 version wholesale (its ONE per-file async set / scheduler predicate). No second reader kept.
+  - emit-server.ts (2 hunks: imports + the value-export async set): main's (`asyncFnNamesOfFile`). The CPS
+    batch code reads no async set of its own.
+  - emit-functions.ts: imports unioned; the two client-statement hunks keep this branch's no-skip / no-rewrite
+    form (main's side re-added the S455 handled-guard skip of a returnCell write — the receiving statement is a
+    server statement under §19.9.9.8, so it never reaches that branch).
+  - emit-control-flow.ts (5), emit-logic.ts (3): main's lines (hostAsyncFacts, labels, comma headers) +
+    this branch's `serverCellWrites` threaded. emit-expr.ts: the cells-batch structural arm path now uses
+    main's `readableExprTree`, then main's `serverTextLowering`. emit-client.ts: imports unioned.
+  - s465-await-imported-server-fn.test.js / its progress.md (add/add): main's; this branch's CPS retarget
+    re-applied as a patch on top (clean).
+  - generated: TYPES-BASELINE (the same pre-existing TS2345, its type text grew by `serverCellWrites` →
+    re-recorded), SPEC-INDEX, FACTS, bootstrap-conformance, gap-counts regenerated. known-gaps: main's file +
+    this branch's two hand entries re-applied (the counts hunk regenerated, not picked).
+- [merge integration] main's new tests failing on the merged tree (11):
+  - s465-await-r6 (7: libLambda, libFnExpr, libBlockLambda, libLambdaChain, libNegationInside, libIfInside,
+    inFileStdlib) → E-STDLIB-CLIENT-CHUNK-MISSING. Root: a top-level fn-valued binding
+    (`const inner = (p, h) => verifyPassword(p, h)`) is emitted on BOTH sides; on the client it is dead (only
+    server code calls it), but it kept `const { verifyPassword } = _scrml_stdlib.auth;` alive. On main that
+    shipped the auth chunk to the browser (measured on origin/main: `_scrml_stdlib.auth` + `const inner = async
+    …` in lib.client.js); on this branch auth has no client chunk → refused. FIX (emit-client
+    pruneUnusedClientImports, region (3)): a top-level fn-valued binding that reaches a stdlib read and that no
+    remaining client code names is dropped from the client bundle (fixpoint); a binding the client DOES name
+    stays and the chunk gate refuses it as before.
+  - s465-await-arm-bodies (4: CPS continuation filt/someIf in happy-dom with a stub fetch answering `check`):
+    the test encoded the browser continuation calling `check(p, @out.pw)` — the round trip §19.9.9.8 removes.
+    Retargeted to the executed batch route (real argon2 hash): wrong → REJECTED, right → WELCOME, the
+    combinator lowering is in the SERVER module, the client never calls `check`.
+  - module-resolver.js auto-merged into a DUPLICATE `export function isPromiseReturningStdlibImportedCallee`
+    (r1's copy + main's; the first copy also carried the server-only asyncLocals check). Caught by the hook
+    (acorn parse in cli-listen-host). This branch had no CPS delta there → main's file. Verified the other
+    r1-touched files: every resolution == merge-file(main, f8309fd64, branch) with the conflicts resolved as
+    above (emit-server identical; the rest differ only inside the conflict hunks).
+- [d2d9de99b] merge committed (pre-commit 36464 pass / 0 fail). master-list.md: my `state.ts --write` had
+  regenerated its recent-sessions block from this branch's history → restored from origin/main (PA-owned).
+
+### Guard ruling (§19.9.9.8 rule 3, S464 "(a) Guards stay server")
+- Repro on the merged tree (before the change): S465 shape → `__ri_route_post_1__batch_0` (SELECT+vp) and
+  `__batch_1` (the INSERT alone); the guard `if (!@ok) { alert("wrong"); return }` in the client wrapper.
+- route-inference `analyzeCPSEligibility` (the root of tier classification): inside the placement fixpoint, a
+  statement after the first server statement that (i) can end the function (`statementCanEndFunction`:
+  return / fail / `?` / throw / a break-continue leaving it, not inside a nested fn/lambda; raw text read for
+  the keywords with literals blanked — fail-closed), (ii) reads a server-originated value — produced by an
+  earlier server statement OR derived from one by an earlier browser statement — and (iii) has a later server
+  statement, is pulled server-tier (refused, kind "guard", if it needs the browser). For every server statement
+  after a server-tier guard, every statement between them is pulled (or refused) — one request, no route for
+  the guarded work alone. A server-tier control statement (if/for/while/do/match/switch/try, or one that can end
+  the function) that reads a server value and needs the browser (deny-list: `alert`, `document`, lift, markup…)
+  is refused (g4 `if (@ok) { alert(…); ?{INSERT}… }` — it used to emit `alert` into the server module).
+  E-RI-002 message: "…A check that decides whether server work runs stays on the server (§19.9.9.8 rule 3)…
+  Fix: move the browser work after the server work, or split the function (…)".
+- codegen (exit protocol): a `return` in a server batch was REFUSED in cells mode (E-RI-002) and in legacy
+  mode returned a bare value after which the browser ran the rest of the function. Now `planBatchCellReturn`
+  reports `exits` (statementCanEndFunction(…, returnsOnly)) and an exiting batch is never legacy; the batch
+  runs its statements in `await (async () => { … return _scrml_cps_continue; })()`, returns
+  `{ __scrml_cells, __scrml_exit: { value } }` when they returned, and the error envelope itself when a `fail`
+  ended it (so the handler's implicit transaction sees the failure). The client applies the cells, then
+  `if ("__scrml_exit" in r) return r.__scrml_exit.value;`. A `fail` needs no protocol (its envelope already
+  ends the batch, and the client stops on it) — a fail-only batch keeps its legacy shape.
+- Tests: integration/s466-cps-guard-stays-server.test.js (12; 8 FAIL on d2d9de99b) — EXECUTED: every route
+  of the function forged (wrong password; forged `ok: true` / `msg`) → 0 rows written; right password → the
+  row; the S465 shape also run in happy-dom with the browser's fetch wired to the real server module (wrong
+  password: "wrong", ONE request, 0 rows, no hash in any request); variants return-only, browser-safe
+  statement between, `fail`, `break` in a loop holding the INSERT, `if` holding the INSERT, guard after the
+  last server work stays client; refusals: the S465 repro (alert in the guard), alert between guard and
+  INSERT, `if (@ok) { alert; INSERT }`, a guard on a value derived in the browser (localStorage) from @ok.
+  unit/cps-split-server-tier-s462: planBatchCellReturn `exits` (2 retargeted: a `return` is carried, never
+  refused), statementCanEndFunction (3), RI tiering (4).
+- H1–H4 + M1 re-run on the merged+guard tree: cps-server-logic-stays-server-s462 (H1/H2/H4 label loop, H3
+  forged `row`, M1 crypto members) 8/8; the whole file + s465 pre-first + await + arm-bodies + multi-stub +
+  route-inference: 374/0.
+- Corpus differential (2,898 files: examples, samples, conformance/cases, ../giti, ../flogence read-only; each
+  compiled standalone; artifacts hashed with the tree root normalised) head vs origin/main 7f2b81418:
+  newly refused 0; newly compiling 1 (server-fn-writes-reactive-cell-pos — the round-1 retarget); code-set
+  changes 4 (= the round-1 record: 2 derived-reach negatives + E-STDLIB-CLIENT-CHUNK-MISSING, bun-admin and
+  htmx-forms lose E-RI-002 / E-REACTIVE-003); emit changes 4 (= the round-1 record: defer cps-* ×3 client,
+  examples/19-lin-token). giti / flogence: 0 changes. The guard rule and the merge-integration prune are
+  corpus-neutral.
+- SPEC §19.9.9.8 rule 3 amended (guard paragraph) + provenance `ruling:user-voice-scrml.md S464 "(a) Guards
+  stay server"`. The "Ratify" provenance line was already flipped in round 2 (d5910316d).
+- [ea13cd4e9] guard ruling committed — pre-commit 36484 pass / 0 fail (1580 files).
+- Gates on ea13cd4e9: root-level 2239/0 · lsp+commands 726/0 · e2e-render-map 259/0 · types-gate OK (180,
+  unchanged) · bootstrap slice: lint-no-default-arm OK, m1 99/0, m2 612/0, m1-lowered 99/0, m3 60/0, m4 1343/0,
+  codec 166/0, v2-lexer 337/0 · state --check PASS · spec-index OK · bootstrap-conformance --check OK ·
+  corpus-compile-floor PASS · host-global-scan OK · gen-md-shim OK · snippet-gate PASS · s34-census
+  --check-new --base origin/main PASS (1 row, the round-1 one) · facts: stale after the new tests → regenerated
+  (this commit) · browser-baseline --check: "PARSER DISAGREES 48 vs 47" (the documented flake, as in rounds 1–2)
+  → direct name-set comparison after a fresh pretest: 48 failures == the 48 baseline names, none new, none gone.
+- NOT CHANGED: a1/g5 fail-closed 500s (KNOWN LOW, as recorded).
+
+## Fix round 4
+- start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aeb0297cf12facc1b on s467-cps-r4 (base 0bc57c25b).
+
+## PAUSED (S467)
+Env note: system node is v21.6 (no ESM detection / getBuiltinModule) → foreign-sealed-scope "under Node" test
+fails in the hook. Workaround: node 22 at ~/.cache/scrml-agent-tmp/s467-cps-r4/bin (symlink) and commit via
+~/.cache/scrml-agent-tmp/s467-cps-r4/gc.sh <msgfile> (puts it first on PATH). s457-string-url test flaked once under load.
+
+DONE (in route-inference.ts, uncommitted-until-this-commit, gates NOT yet run):
+- `localsWrittenBy(stmt, mutations)`: every local written at ANY depth (decls incl. nested `x = …` tilde-decls,
+  assign roots, ++/--, destructuring, raw-text fallback; with `mutations`: possibly-mutating method receivers
+  `x.push()`, args to user fns / Object.assign). Replaces `topLevelDeclaredLocals` in the taint pass (d), the
+  guard's derivedLocalsAt, producedLocal / srvLocal / srvLocalBefore (server stmts: mutations=false).
+- Callee following inside analyzeCPSEligibility: `calleesOf` (body-nested fns + functionIndex file fns, transitive,
+  server fns excluded) → readsCellX / readsLocalX / cellsWrittenX / localsWrittenX / deniedX / clientOnlyX, wired
+  into tryPull, (a), (c), guard detection, guard-control refusal, (d).
+PROBES so far (r-1, ~/.cache/scrml-agent-tmp/s467-cps-r4/r-1.tsv): pw_local_if, pw_local_return, role_local,
+  pw_array_push, pw_obj_field → E-RI-002 (were FORGED-WRITE / 500). Other rows unchanged vs start
+  (r-start.tsv). Only FORGED-WRITE left: fp_param_guard, fp_alert_noread_between — legit (INSERT not guarded
+  by any server value; the program writes regardless).
+HALF-DONE: fp_helper_guard STILL runs `alert` in the server (alert-in-server) — callee following did not catch
+  it; next: check why `deny` isn't found by calleesOf / deniedX in the guard path (pullGuard→tryPull→clientOnlyX;
+  maybe `deny` resolved as server fn (resolvedServerFnIds) or the guard pulled via another path).
+NEXT 3 STEPS:
+ 1. Debug fp_helper_guard (above); then match_str E-CG-006 (codegen/cps-cell-writes planBatchCellReturn vs a
+    `match` arm cell write in a server-pulled guard) → compile correctly or proper E-RI-002.
+ 2. Permanent tests (integration, executed like s466-cps-guard-stays-server.test.js): pw_local_if, role_local,
+    pw_local_return, match_str, fp_helper_guard (+ array_push/obj_field); unit tests for localsWrittenBy.
+ 3. #1428 pack vs base 10 fails; corpus differential vs origin/main; full gate list; SPEC §19.9.9.8 note
+    (nested writes + callees) if wording needs it.
+UNCOMMITTED STATE (pause): the pre-commit hook blocks every commit on this machine, independent of this work —
+`compiler/tests/unit/s457-string-url-executable-schemes.test.js` "D — run it > server function save(link:
+string(url))" gets 403 instead of 400 in the FULL suite (passes alone, 67/0; it also failed on the untouched
+0bc57c25b tree in the first commit attempt, before any route-inference edit — probably state left behind by an
+earlier test, CSRF/origin). So NOTHING from round 4 is committed or pushed. The full diff is staged in the
+worktree (/home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aeb0297cf12facc1b, branch s467-cps-r4 @ 0bc57c25b)
+and saved as ~/.cache/scrml-agent-tmp/s467-cps-r4/round4-wip.patch (`git apply` onto 0bc57c25b).
+Resume: find which earlier test leaves the 403 state (bisect the files that run before s457), or get PA
+authorisation for the hook, then commit + push.
+
+## RESUMED (S467, worktree agent-ad3bb3ec86ee8788b)
+- Hook blocker resolved by the s461 happy-dom unregister commit (99666b561).
+- fp_helper_guard root cause: `deny` was not "missed" by calleesOf — it was SKIPPED as server-placed. §12
+  caller-context propagation (route-inference Step 5c) promoted `function deny() { alert(…) }` to a server
+  function because its only caller (`post`) is server-placed, so the guard read it as rule (b) "calls a
+  server fn" and `alert` was emitted into the server module (Bun's `alert` blocks on stdin). Fix:
+  `placedByCallerOnly` — a function whose ONLY escalation reason is caller-context-propagation is followed
+  like a client helper by calleesOf → deniedX catches `alert` → E-RI-002.
+- match_str root cause: a string-literal match arm `"y" :> { @msg = "ok" }` is a `bare-expr` whose
+  `exprNode` is the literal alone; the arm body lives only in `expr` text. planBatchCellReturn's tree walk
+  never saw the `@msg` write, so the batch plan omitted it and the emit backstop refused with internal
+  E-CG-006. Fix: walkStatement scans kept text (`expr`/`bodyRaw`/`body`, `raw` of escape hatches) for cell
+  writes into `rawCells`; a cell found only there joins the plan and rules out legacy mode. Now compiles,
+  runs, and carries `@msg` back.
+- NEW (found writing the accepting-shape tests): a pre-first carried local reassigned in the batch
+  (`let blk = false … if (!@ok) { @msg = "wrong"; blk = true }`) was bound `const blk = _scrml_body["blk"]`
+  in the server handler → the WHOLE server module failed to load. emit-server binds carried locals with
+  `let` (`bindKw`).
+- route-inference.test.js "CPS split with Bun.file server trigger in bare-expr": `@config = config` now joins
+  the server half ([1,2]) — it reads the local the server statement declared (§19.9.9.8 rule 1). Expected.
+- Tests: compiler/tests/integration/s467-cps-nested-writes-and-callees.test.js (10 executed tests).
+- Merged origin/main 179f9b346 (e46e99221; generated docs regenerated; s461 test = main's #1429).
+- Probes (~/.cache/scrml-review-s467-cps-r3/h/{probes,probes2,probes3}.mjs, 37 rows, on the merged tree): FORGED-WRITE
+  only fp_param_guard + fp_alert_noread_between (INSERT unguarded by design); no alert-in-server, no hash leak, no
+  pw-in-client. Moved vs r-start: pw_local_if, pw_local_return, role_local, pw_array_push, pw_obj_field,
+  fp_helper_guard → E-RI-002; match_str E-CG-006 → compiles (rightRows=1); match_arm loses its E-CG-006 (E-TYPE-025
+  only); if_local_reassign_pre{,2} gain E-RI-002 (already refused by E-NAME-COLLIDES-STATE). Right-password rows
+  unchanged everywhere else.
+- #1428 pack (classify.js): base origin/main and head identical — PASS=250 PASS-REFUSED=133 PASS-500=20 PASS-DENY=10
+  UNJUDGED=1 FAIL=10; per-shape class table identical.
+- Corpus differential (2,897 files: examples, samples, conformance/cases of origin/main, ../giti, ../flogence
+  read-only; standalone compiles, outputs hashed) head vs origin/main 179f9b346: newly refused 0; newly compiling 1
+  (server-fn-writes-reactive-cell-pos); code-set changes 4; emit changes 4 — all = the round-1 record. Round 4 is
+  corpus-neutral.
+- Gates on e46e99221: pre-commit + pre-push suites 34,711/0; compiler/tests/*.test.js 2239/0; e2e-render-map 259/0;
+  types-gate OK; self-host-v2 m1 99, m2 612, m1-lowered 99, m3 60, m4 1343, codec 166, v2-lexer 337 (all 0 fail);
+  lint-no-default-arm; lsp+commands 763/1 — the 1 is dev-watcher-snapshot-identity (ctime), fails 5/5 on base
+  origin/main in this environment too (filesystem timing, pre-existing); snippet, corpus-compile-floor,
+  host-global-scan, facts, state, gen-md-shim, conflict-marker, spec-index, bootstrap-conformance, severity,
+  s34-census all --check PASS.
+- Load flakes seen in hooks (pass alone): conf-TENANT-SOURCE-FILTER r2/r4 (5 s timeout under load 7–9).
+
+## Fix round 5 (S467, worktree agent-a0059ea973817a2ac, branch s467-cps-r5 from origin/s467-cps-r4 a183cf1cc)
+
+Why: the S467 review of a183cf1cc re-ran seven shapes that all wrote a row with the WRONG password
+(arrow_closure, fnexpr_closure, forof_destr, closure_obj, alias_mut, alias_arr, alias_destr; 0 rows on
+origin/main). Reproduced here (r-start45.tsv: 6/6/6/5/5/4/5 forged rows). Causes confirmed: the taint
+pass only followed `function-decl` callees (a `const set = () => …` closure is an escape-hatch value),
+had no alias tracking, and did not see a `for…of` head as a write.
+
+The approach changed (brief): the ADMISSION of a request value is now an allow-list, not "not tainted".
+
+- `carriedValueAdmission(name, body, firstServer, {isParam, paramTypes, isServerIdx})` in
+  route-inference.ts, run on every carried local (`carriedLocals`) and on every parameter a server
+  statement reads. Admitted only when:
+  (1) a local's writes are all before the first server statement;
+  (2) after the first server statement no statement can write it by any route — `localsWrittenBy`
+      (direct / member / element / ++ / destructuring / for-of head, now added there; with mutations
+      for non-primitives: mutating-method receivers + arguments to any call that may keep them);
+      no call or mention of a body-defined function value that may write it (`const f = () => …`,
+      `function () {}`, nested `function`, transitively); a function value that may write it is
+      only ever called directly before the first server statement (a value handed anywhere may run
+      while the request is in flight); an INLINE closure before the first server statement that writes
+      it is refused unless it is a callback of a synchronous array method (`xs.forEach(…)`);
+  (3) unless provably primitive (literal / arithmetic / comparison / template / primitive-typed
+      param or local / primitive-result call), an alias set to a fixpoint over every binding flow
+      (decl, assign, member store, for-of element, mutating-method edge, unparsed text) — the whole set
+      must satisfy (2); never stored in a cell; never passed (before the first server statement) to a
+      call that may keep it.
+  Parameters: (2) is enforced against BROWSER statements followed by server work reading it.
+- A refusal is E-RI-002 (new placement-refusal kind `carried`), located at the offending statement:
+  "its server half reads `x` from the request — but this statement …".
+- The existing taint machinery (rules a–d) is kept as an additional check.
+- Behaviour change: round 4's accepting shapes that reassigned a pre-first local ON THE SERVER (`let blk
+  = false` before the query, `blk = true` in a server-tier `if`) are now refused — the server would
+  start from whatever the request says. The same logic with the declaration after the first server
+  statement compiles, is never read from the request, and holds under forging (tests updated).
+- Fix-up after the corpus differential: a parameter stored into a cell by a SERVER statement after
+  its last server read (`server function runJob(id) { updateJobStatus(id, …); @selectedJob = id }`,
+  samples/gauntlet-r13+r14 elixir-pipeline) was refused by the cell rule. A cell store counts only
+  when a BROWSER statement does it and a later server statement reads the value (a server-tier cell
+  write reaches the browser as a serialized copy; after the last read nothing is requested).
+- Merged origin/main 02464a9b5 (emit-server param binding moved by #1427 → `serverBodyParamLine(…, kw)`
+  keeps round 4's carried-param `let`; FACTS / SPEC-INDEX / gap counts regenerated).
+- Filed g-nested-match-in-string-arm-block-unlowered-s467 (reviewer's side bug; NOT CPS-specific —
+  reproduces in a plain browser function; reproducer ~/.cache/scrml-agent-tmp/s467-cps-r5/w/nm.mjs).
+
+Probes (harness with dynamic forging of every `_scrml_body` name; probes.mjs…probes5.mjs + probes6.mjs
+(13 new: param_write, param_closure, closure_alias, closure_ret_obj, nested_alias, forof_alias, forin_head,
+push_alias, inline_timer, ok_sync_foreach, ok_carried_prim, ok_carried_read), 84 rows, merged tree):
+FORGED-WRITE only fp_param_guard + fp_alert_noread_between (by design). The seven review shapes →
+E-RI-002 (`reads \`x\` from the request — but …`). Right password writes on every legal flow
+(fp_login_alert_ok, fp_login_local, fp_closure_client, match_str, ok_*; fp_console_after rightRows=0 as at
+start). No leak, no alert-in-server, no pw-in-client. Moved rows vs round-4 tip: arrow_closure,
+fnexpr_closure, forof_destr, closure_obj, alias_mut, alias_arr, alias_destr, param_closure, closure_alias,
+closure_ret_obj, nested_alias, forof_alias, push_alias FORGED → E-RI-002; nested_fn_closure,
+callee_mut_obj, file_callee_mut_obj, elseif_guard, while_write, launder_helper_ret, destr_assign,
+pw_local_if, pw_local_return, pw_array_push, pw_obj_field, role_local, param_write, match_arm keep E-RI-002
+with the admission message; arr_closure adds E-RI-002 to E-VALUE-FUNCTION-STORED.
+
+Tests: compiler/tests/integration/s467-cps-carried-admission.test.js (19 executed: 14 refused shapes
+incl. the seven; 5 legal flows forged with every request name); s467-cps-nested-writes-and-callees
+updated (2 shapes flip to E-RI-002 + 2 declared-after-first variants that compile and hold).
+
+#1428 pack (classify.js, base origin/main 02464a9b5 vs head): identical — PASS=249 PASS-REFUSED=136
+PASS-500=20 PASS-DENY=8 UNJUDGED=1 FAIL=10 (same 10), 0 shapes moved.
+
+Corpus differential (2,897/2,899 files; examples, samples, conformance/cases, ../giti, ../flogence; head
+vs origin/main 02464a9b5): newly refused 0; newly compiling 1 (server-fn-writes-reactive-cell-pos); code-set
+changes 4; emit changes 4 — all = the round-1 record. (The 2 elixir-pipeline code-set changes the first run
+showed are gone after the cell fix-up.)
+
+Open: (1) SPEC §19.9.9.8 has no text for the admission rule (rule 2 "no round trip" is the basis; rule 4
+does not say when a pre-first local may be carried) — a "Direction of change: newly-rejecting" note +
+admission wording is a PA/owner call. (2) The refused round-4 shape (a pre-first `let` the server half
+reassigns, one batch) could be made to compile by REPLICATING a closed-initializer declaration into the
+batch instead of reading it from the request — needs batch-boundary knowledge in RI; not done (fail
+closed; the error's Fix names the declared-after rewrite). (3) An object PARAMETER the CALLER mutates while
+the request is in flight is outside this function's view (no escape check for params).
+
+## Landing merge (S467, origin/main 3ade9bb48 incl. #1433)
+- `carriedValueAdmission` NOT moved onto `binding-provenance.ts`: provenance is a position-free file-wide union, while the carried-value check needs statement-index-ordered write discovery relative to `firstServer` inside one body — not a trivially safe swap; candidate follow-up only.

@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S467 — 2026-10-15/17 (bryan · XPS) — S466 died with the ASUS; its carry-overs landed or re-rounded; dpa-023 ruled F1–F7; two P0s reviewed clean
+
+- **S466 (ASUS) died unwrapped**; its pushed branches survived, its local-only work (`s466-error-002-decl`) did not. S467 adopted everything.
+- **Landed:** #1426 (S466 gaps + review backfill) · #1429 (test-order fix that unblocked every commit on the XPS) · #1427 (server param defaults — auto-merged at round 5) · #1430 (SPEC §13.8 one rule for waiting values; §13.9 pending cells) · #1431 (security: an unhandled failable call used as a value is E-ERROR-002 — `const ok = check(p)` no longer logs a wrong password in) · #1432 (§34 rows) · #1433 (param-default identity follows every reference; reach-set fix).
+- **Reviewed, landing next:** #1434 await P0 rounds 8–10 — impl#1 enforces dpa-023 F4 (a waiting function is bound only by a `function` declaration); 551 pack shapes, 0 wrong passwords accepted. #1435 CPS P0 rounds 1–5 — an allow-list: a later batch admits a request value only if provably browser-only; review CLEAN.
+- **Rulings:** dpa-023 F1–F7 (opt-in `(not to T)` marker; cells only; the lifecycle type is the marker; F4 limit; no impl#1 rebuild; keep stale; failure at the declaration), impl#1 enforces F4, three §13.9 details, E-PARAM-DEFAULT-* names, docs-only PRs keep merging.
+- **Lesson:** both P0s converged only after switching from "detect the dangerous shape" to "admit only the provably safe shape".
+
 ## S464 — 2026-10-11/13 (bryan · ASUS) — landed the S465 AUTO output in parallel + four ruled security/language arcs
 
 Booted Profile A; salvaged the dead S462 agents (patches + `wip/s464-*`); armed AUTO run #2 (S465) and later ran it IN PARALLEL as the landing partner (cloud merges are refused). Landed: #1405 #1407 #1409 #1414 (batch of #1406 #1408 #1410 #1411 #1412 #1413) #1415 #1416 #1419. In CI at wrap: #1417 (Q24 + emitted-JS parse floor), #1418 (no value holds a function + scrml:time struct API; needs a main merge). Await P0 (wrong password accepted, live on main) round 6 done, merge+review owed.

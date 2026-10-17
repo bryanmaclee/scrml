@@ -28,11 +28,11 @@
  * §6  collision guard: importing shim's OWN `_request` wins; the sibling's is skipped.
  * §7  member-access false-positive guard: `import { get }` does NOT pull `retry` (no raw Math leak).
  * §8  spread reference is kept: `...defaults` still drags in a top-level `defaults`.
- * §9  real auth chunk (SCRML_RUNTIME): defines `_request`, IIFE evaluates, no undefined helper.
+ * §9  real auth shim: the inliner carries `_request` into it; since S462 the client runtime ships NO auth chunk.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync, readFileSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -227,21 +227,17 @@ describe("client-inliner inlines same-file private-helper closure (S245)", () =>
     expect(mod.make({ b: 2 })).toEqual({ a: 1, b: 2 });
   });
 
-  test("§9  real auth chunk (SCRML_RUNTIME): defines _request, IIFE evaluates, exports present", () => {
-    const start = SCRML_RUNTIME.indexOf("// --- chunk: stdlib-auth ---");
-    expect(start).toBeGreaterThanOrEqual(0);
-    const rest = SCRML_RUNTIME.slice(start);
-    const nextIdx = rest.indexOf("// --- chunk:", 1);
-    const chunk = nextIdx === -1 ? rest : rest.slice(0, nextIdx);
-    // The fix: the auth chunk (auth.js imports get as httpGet from http.js) now
-    // carries the _request definition its httpGet calls.
+  test("§9  real auth shim: the inliner carries _request into it; the CLIENT runtime ships no auth chunk (S462)", () => {
+    // S462 P0 — `scrml:auth` is escalation-server-only (§12.2 Trigger 3) and no
+    // longer has a client chunk: shipping it let a mis-split password check run in
+    // the browser. The inliner property this case pinned (auth.js imports
+    // `get as httpGet` from http.js, so its inlined body must carry `_request`) is
+    // still checked — on the real shim, assembled exactly as `_loadStdlibChunk`
+    // assembles any chunk.
+    expect(SCRML_RUNTIME).not.toContain("// --- chunk: stdlib-auth ---");
+    const authSrc = readFileSync(join(STDLIB_DIR, "auth.js"), "utf8");
+    const chunk = assemble(authSrc, STDLIB_DIR);
     expect(/function\s+_request\b/.test(chunk)).toBe(true);
     expect(/_request\(/.test(chunk)).toBe(true);
-    // The IIFE evaluates without a ReferenceError and produces the registry.
-    const registry = new Function(
-      "const _scrml_stdlib = {};\n" + chunk + "\nreturn _scrml_stdlib;",
-    )();
-    expect(registry.auth).toBeDefined();
-    expect(Object.keys(registry.auth).length).toBeGreaterThan(0);
   });
 });
