@@ -278,8 +278,6 @@ describe("E — `!{}` / `match` handle a call only when its value reaches them u
     ["a chain inside a parenthesized guard", "const ok = (check(p).toString() !{ .Denied :> \"\" }) != \"\"\n        @m = ok ? 1 : 0"],
     ["the LEFT operand of `&&` (tested, then discarded)", "const ok = check(p) && true !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
     ["a template around the call", "const ok = `${check(p)}` !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
-    ["a `match` subject reached through `||` (impl#1 compares it as a plain value)",
-      "const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }\n        @m = ok ? 1 : 0"],
   ];
   for (const [name, body] of refused) {
     test(`refused: ${name}`, () => {
@@ -292,6 +290,10 @@ describe("E — `!{}` / `match` handle a call only when its value reaches them u
     ["an operand of `||`", "const ok = check(p) || false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
     ["an operand of `??`", "const ok = check(p) ?? false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
     ["a ternary arm", "const ok = p ? check(p) : false !{ .Denied :> false }\n        @m = ok ? 1 : 0"],
+    // S468 — a `match` subject follows the same rule (the lowering now discriminates the error;
+    // executed in failable-alias-and-match-s468.test.js C). Was refused here in S467.
+    ["a `match` subject reached through `||`",
+      "const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }\n        @m = ok ? 1 : 0"],
   ];
   for (const [name, body] of handled) {
     test(`handled: ${name}`, () => {

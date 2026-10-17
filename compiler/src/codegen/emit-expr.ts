@@ -5050,6 +5050,12 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     body: structured && Array.isArray(structured.body)
       ? structured.body
       : node.rawArms.map((arm) => ({ kind: "bare-expr", expr: arm })),
+    // S468 (§19.7.1) — TS stamps an expression-position match whose subject carries a
+    // failable call's result (type-system `stampFailableMatchSubject`); the bridge keeps
+    // the stamp, so the lowering discriminates the error instead of comparing the error
+    // object as a plain value (g-match-failable-subject-through-operator-miscompiled-s467).
+    __matchSubjectFailable: (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable,
+    __matchSubjectVariants: (node as { __matchSubjectVariants?: unknown }).__matchSubjectVariants,
   };
   // Forward the error channel so the structured emitter's D hard-error
   // (E-CG-003 on a zero-lowerable-arm match — gate-emitted-js-parse-invariant-
