@@ -15781,7 +15781,34 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _nameTok2 = peek(1);
         const _hasPlainName = !!_nameTok2 && (_nameTok2.kind === "IDENT" || _nameTok2.kind === "KEYWORD");
         const _hasAnnotation = peek(2)?.text === ":";
-        if (_isConstLet && _hasPlainName && _hasAnnotation) {
+        // S466 r8 (HIGH-2, Rule 7) — the UNANNOTATED plain-named value export
+        // (`export const f = (p, h) => …`) gets the same parsed init (`valueInitExpr`):
+        // a consumer reads the node, never a regex over `raw`. Its raw is the same token
+        // join the generic path built. A markup-valued init (`= <div>…`, a component) is
+        // left to the generic path — collecting from a bare `<` would open markup mode.
+        // A block-valued init (`= ?{…}…`, `= _{…}`) also stays on the generic path, which
+        // splits it for the fail-closed E-CG-006 / server-only handling.
+        // Narrowed to a FUNCTION-VALUE init (the shape the async coloring reads):
+        // `function …`, `x => …`, `(…) => …` — every other unannotated value export
+        // keeps the generic path byte-for-byte (its `match` / multi-declarator / SQL
+        // handling lives there).
+        const _isFnValueInitAt = (k) => {
+          const t0 = peek(k);
+          if (!t0) return false;
+          if (t0.kind === "KEYWORD" && t0.text === "function") return true;
+          if (t0.kind === "IDENT" && peek(k + 1)?.text === "=>") return true;
+          if (t0.text !== "(") return false;
+          let depth = 0;
+          for (let j = k; j < k + 4096; j++) {
+            const t = peek(j);
+            if (!t || t.kind === "EOF") return false;
+            if (t.text === "(") depth++;
+            else if (t.text === ")") { depth--; if (depth === 0) return peek(j + 1)?.text === "=>"; }
+          }
+          return false;
+        };
+        const _plainInit = peek(2)?.text === "=" && peek(3)?.text !== "=" && _isFnValueInitAt(3);
+        if (_isConstLet && _hasPlainName && (_hasAnnotation || _plainInit)) {
           const _valKind = consume().text;             // const | let
           const _valName = consume().text;             // NAME
           const _valTypeAnn = collectTypeAnnotation(); // consumes `: TYPE` (bracket-aware)
@@ -16003,6 +16030,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (declMatch) {
           exportNode.exportKind = declMatch[1];
           exportNode.exportedName = declMatch[2];
+        }
+      }
+
+      // S467 r9 (HIGH-1) — every plain-named value export carries its PARSED init
+      // (`valueInitExpr`), not only the shapes the annotated / function-literal path
+      // above intercepts. The async coloring (codegen/fn-valued-bindings.ts) classifies
+      // that tree — `((p, h) => …)`, `async (p, h) => …`, `c ? (…) => … : …`, an alias,
+      // a curried arrow — so an export it cannot see no longer ships uncoloured. The
+      // tokens are verified (`const|let NAME = …`, not `==`) before the init text is cut
+      // off the collected expression. Parsed WITHOUT diagnostics (the emitters re-parsed
+      // this same text silently before, so no new error can appear here); a markup init
+      // (a component) and a server-only `?{}` / `_{}` init are not values and get none.
+      if ((exportNode.exportKind === "const" || exportNode.exportKind === "let") && exportNode.exportedName &&
+          Array.isArray(tokens) && tokens[_iBeforeCollect + 1]?.text === exportNode.exportedName &&
+          tokens[_iBeforeCollect + 2]?.text === "=" && tokens[_iBeforeCollect + 3]?.text !== "=") {
+        const _initText = expr.replace(/^\s*(?:const|let)\s+[\w$]+\s*=\s*/, "").trim();
+        if (_initText && !_initText.startsWith("<") && !_initText.includes("?{") && !_initText.startsWith("_{")) {
+          let _initNode = null;
+          try { _initNode = parseExprToNode(_initText, filePath, span?.start ?? 0); } catch (_e) { _initNode = null; }
+          if (_initNode) exportNode.valueInitExpr = _initNode;
         }
       }
 
