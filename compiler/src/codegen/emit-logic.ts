@@ -893,6 +893,109 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
 }
 
 /**
+ * §19.4.3 / §18.5 (S468, g-block-bodied-bang-arm-drops-value-s467) — a BLOCK
+ * `!{}` arm whose last statement is an expression: the block's last expression
+ * is the arm's value, so it lands in `resultVar`.
+ *
+ * SPEC §19.4.3: "Yield a value of the call's success type: the arm is an
+ * expression, or a block whose last expression is that value (§18.5)." The text
+ * lowering (`emitArmBody` + `emitArmAssign`) read a multi-statement block as
+ * side effects only and emitted the tail as a bare statement (`false;`), so the
+ * guarded value stayed the error envelope — truthy — and
+ * `const ok = check(p) !{ .Denied :> { @msg = "d"; false } }` accepted a wrong
+ * password.
+ *
+ * The decision is made on the PARSED block (`armBlockStatementsDetailed`, the
+ * one reader of a text-carried arm body), with the same tail rule the `match`
+ * block arms use (`_blockTailIsValueExpr`, as in `_emitStructuredArmToVar`), so
+ * a `!{}` block arm and a `match` block arm agree on what yields a value. The
+ * leading statements go through the statement emitter and the tail through the
+ * expression emitter, from their nodes, on both boundaries. A tail that is
+ * itself a handled call (`… g(p) !{ … }`) yields that handler's value (its
+ * result slot, published through `tildeContext`).
+ *
+ * Returns null — the caller keeps its existing lowering — when the arm is not a
+ * non-empty braced block, the body does not parse (the caller's path records a
+ * server refusal), or the block does not end in an expression (it ends in a
+ * write, a declaration, a leave or a control statement: §19.4.3 "falls through",
+ * whose value-position diagnostic E-ERROR-012 is g-impl1-value-position-arm-
+ * fallthrough-s451).
+ */
+function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitLogicOpts): string[] | null {
+  if (arm.failExpr) return null;
+  const handler = (arm.handler ?? "").trim();
+  if (!(handler.startsWith("{") && handler.endsWith("}"))) return null;
+  if (!handler.slice(1, -1).trim()) return null;
+  const parsed = armBlockStatementsDetailed(handler);
+  if (!parsed || !parsed.ok || !Array.isArray(parsed.stmts) || parsed.stmts.length === 0) return null;
+  const stmts = parsed.stmts;
+  const tail = stmts[stmts.length - 1];
+  if (!tail || typeof tail !== "object") return null;
+
+  let tailKind: "expr" | "guarded" | null = null;
+  let tailText = "";
+  if (tail.kind === "bare-expr" && !tail._onMountEffect) {
+    tailText = tail.expr ?? (tail.exprNode ? (() => { try { return emitStringFromTree(tail.exprNode); } catch { return ""; } })() : "");
+    if (_blockTailIsValueExpr(tailText)) tailKind = "expr";
+  } else if (tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") {
+    tailKind = "guarded";
+  }
+  if (!tailKind) return null;
+
+  // The body was parsed from the arm's text, so its spans are relative to that
+  // text under a probe file name. Anchor them at the arm (its file and start) so
+  // a position-reading lowering — `log()`'s `file:line` (§20.6), a diagnostic —
+  // names the author's file and the arm's line, not the probe.
+  const armSpan = (arm as { span?: { file?: string } }).span;
+  if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(stmts, armSpan);
+
+  // The arm is its own block scope: its declarations see the outer names but go
+  // into their own set (as in `_emitStructuredArmToVar`). Its statements are side
+  // effects, so they neither read nor repoint an outer `~` slot.
+  const armOpts: EmitLogicOpts = { ...opts, declaredNames: new Set<string>(opts.declaredNames ?? []), tildeContext: undefined };
+  const lines: string[] = [];
+  for (let i = 0; i < stmts.length - 1; i++) {
+    const code = emitLogicNode(stmts[i], armOpts);
+    if (code) for (const l of code.split("\n")) lines.push(`    ${l}`);
+  }
+  if (tailKind === "expr") {
+    // The tail is emitted from its parsed node; on the server through the
+    // fail-closed reader (`serverArmExprNode`), as every server arm value is.
+    const node = opts.boundary === "server" ? serverArmExprNode(tailText, "server", tail.exprNode, arm) : (tail.exprNode ?? null);
+    const rhs = _awaitMatchArmServerCalls(emitExprField(node, tailText, _makeExprCtx(armOpts)), opts);
+    lines.push(`    ${resultVar} = ${rhs};`);
+    return lines;
+  }
+  // A handled call as the tail: its handler's value is its result slot, which the
+  // guarded-expr lowering publishes through `tildeContext` (§32 Gap 5).
+  const slot: { var: string | null; mode: "single" } = { var: null, mode: "single" };
+  const code = emitLogicNode(tail, { ...armOpts, tildeContext: slot });
+  if (!slot.var) return null;
+  if (code) for (const l of code.split("\n")) lines.push(`    ${l}`);
+  lines.push(`    ${resultVar} = ${slot.var};`);
+  return lines;
+}
+
+/** Re-anchor every `span` in a freshly parsed subtree at `at` (its file, start and line). */
+function _anchorSpansAt(root: unknown, at: { file?: string; start?: number; end?: number; line?: number; col?: number }): void {
+  const seen = new Set<object>();
+  const walk = (n: any): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    for (const k of Object.keys(n)) {
+      const v = n[k];
+      if (k === "span" && v && typeof v === "object") {
+        n[k] = { ...v, file: at.file, start: at.start, end: at.end ?? at.start, line: at.line, col: at.col };
+        continue;
+      }
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(root);
+}
+
+/**
  * Emit the `const <local> = <resultVar>.data[...]` binding line(s) for a
  * `!{}` failable arm (§19.4.3). The error envelope is
  * `{ __scrml_error, type, variant, data }`.
@@ -4999,7 +5102,11 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
-          const armCode = emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
+          // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
+          // that expression: lowered from its parsed statements, tail into resultVar.
+          const blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
+          const armCode = blockValueLines ? "" : emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
+          const armLines = (isExprBody: boolean): string[] => blockValueLines ?? emitArmAssign(armCode, isExprBody);
           // A non-block, non-re-fail arm body is a single EXPRESSION (emitArmBody
           // routes it through emitExprField); a multi-line one (a template literal)
           // must be assigned to resultVar as a unit, not split as statements.
@@ -5009,7 +5116,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, "", resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
+            for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
           } else {
             const variantName = (arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
@@ -5018,7 +5125,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
+            for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
           }
           isFirst = false;
