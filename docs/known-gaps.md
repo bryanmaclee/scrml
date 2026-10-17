@@ -112,6 +112,12 @@ Reported by four S467 agents independently; fails identically on clean main on t
 
 Observed while committing the S467 branch (hook ~20 min per commit on this machine): `defer-spec-calls` exceeded its 55 s budget under load and passed on rerun; `import-host` "decorators and JSX" failed inside the full suite and passed when run alone (a test-order / shared-state dependency, the same family as the s461 happy-dom leak fixed in #1429). Neither touches compiler source. Fix direction: give `defer-spec-calls` a budget that reflects its work, and find the state the `import-host` case inherits from an earlier file.
 
+### g-cfor-header-comma-list-s468 — a C-style `for` header comma list (`for (let i = 0, j = n; i < j; i++, j--)`) was E-SCOPE-001 on `j` in the loop body (client and server), and a header with an EMPTY clause emitted its clauses as raw text, so a comma in the CONDITION (`for (; i < j, j > 0; i++)`) compiled at exit 0 — `NEW S468 (filed and fixed, ruling S464 "b"); MED; resolved`
+
+<!-- @gap id=g-cfor-header-comma-list-s468 sev=MED status=resolved locus=compiler/src/type-system.ts(case "for-stmt" — init bound by a regex over the init text, first declarator only)+compiler/src/ast-builder.js(cStyleParts dropped when any clause is empty → cStyleClausesRead)+compiler/src/codegen/emit-control-flow.ts(empty clause emits nothing) prov=ruling:user-voice-scrml.md(S464 cfor-comma "b");dispatch:s468-cfor-comma-lists -->
+
+SPEC §40.8 (the S441 bullet's comma-sequence sub-bullet, S468 sentence). Tests: `compiler/tests/integration/s468-cfor-comma-lists.test.js`.
+
 ### g-statement-markup-silently-not-rendered-s462 — (P1) markup written as a statement in a logic body, outside the §17.6.10 single-element branch, renders NOTHING at exit 0: `${ <p>hi</p> }`, two elements in one branch, an element after a statement, a `for` body without `lift`, a logic `match` arm `{ <p>…</p> }`, a nested `${ if }` inside an implied-lift element, and a single-element branch the implied-lift desugar declines (`a < b` or a quoted `"</p>"` in its text) — `NEW S462; HIGH (P1); RESOLVED S464 (E-MARKUP-STATEMENT-NOT-RENDERED, §17.6.10.1)`
 
 <!-- @gap id=g-statement-markup-silently-not-rendered-s462 sev=HIGH status=resolved locus=compiler/src/ast-builder.js(statement-position markup → html-fragment)+compiler/src/implied-lift-desugar.ts(single-element arms only)+compiler/src/codegen/emit-logic.ts(case "html-fragment" returns "") prov=ruling:user-voice-scrml.md(S462 Q24 "a");review:s462-given-body-text-as-code;dispatch:s462-given-body-text-as-code -->
