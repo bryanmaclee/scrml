@@ -15,6 +15,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { SQL_ATTEMPT_FN, SERVER_SQL_ATTEMPT_HELPER, handledSqlGuardInner } from "./sql-attempt.ts";
+import { planBatchCellReturn, cpsCellsPrologue, cpsCellsEpilogue, cpsCellWriteStatement, cpsCellLocal, multiBatchReturnCell, cpsCarriedLocals, cpsCarriedFunctionIndices } from "./cps-cell-writes.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
@@ -457,10 +458,10 @@ function serverParamDefaults(
  * applies exactly when the key is absent — evaluated per request, after the
  * earlier parameters are bound, so it may read them.
  */
-function serverBodyParamLine(name: string, dflt: string | null, indent: string): string {
+function serverBodyParamLine(name: string, dflt: string | null, indent: string, kw: "const" | "let" = "const"): string {
   const key = JSON.stringify(name);
-  if (dflt === null) return `${indent}const ${name} = _scrml_body[${key}];`;
-  return `${indent}const ${name} = _scrml_g.Object.hasOwn(_scrml_body, ${key}) ? _scrml_body[${key}] : (${dflt});`;
+  if (dflt === null) return `${indent}${kw} ${name} = _scrml_body[${key}];`;
+  return `${indent}${kw} ${name} = _scrml_g.Object.hasOwn(_scrml_body, ${key}) ? _scrml_body[${key}] : (${dflt});`;
 }
 
 /** §7.3.2 — one parameter of an in-process server function's signature. */
@@ -819,6 +820,134 @@ function cpsNeedsIdempotencyDedup(
  * per-batch verdict (Stage 5.5 not run) — defensive; in the normal pipeline
  * analyzeMonotonicity always populates `batch.monotonicity`.
  */
+/**
+ * S462 P0 (§19.9.9.7) — the body of a CPS server batch in "cells" mode
+ * (codegen/cps-cell-writes.ts): every statement of the batch runs here, each
+ * cell write is recorded in `_scrml_written`, and the batch returns ONLY the
+ * final values of the cells it wrote — never the rows it read to compute them.
+ *
+ * The batch keeps each cell it writes in its OWN local (`_scrml_cell_<name>`,
+ * cpsCellLocal), seeded from the value the client marshalled (§6.6.9) so a read
+ * before the batch's first write still sees the client's value. The statements
+ * are lowered with the ordinary server-mode `_scrml_body["x"]` cell references,
+ * and the references to the batch's written cells are then pointed at the locals.
+ * Writing into the request body (or any object seeded from it) instead would make
+ * the batch's values part of the REQUEST — the §14.8.9 flow analysis (rightly)
+ * treats the object `_scrml_req.json()` returns as the request's, so a protected
+ * row written there would reach everything the request reaches. A local is only
+ * ever rebound.
+ *
+ * Returns the lines, or the CGError when the emitted body writes a cell this
+ * mode did not record (fail closed: an unrecorded write would be silently
+ * dropped on its way to the client).
+ */
+function emitCpsCellsBatchBody(
+  fnName: string,
+  body: any[],
+  serverIndices: number[],
+  cells: string[],
+  opts: Record<string, unknown>,
+  indent: string,
+  span: unknown,
+  /** S466 — the batch can end the function (planBatchCellReturn `exits`). */
+  exits = false,
+): { lines: string[]; error: CGError | null } {
+  const out: string[] = [];
+  // S466 — an exiting batch's statements run one level deeper (cpsCellsPrologue).
+  const stmtIndent = exits ? `${indent}  ` : indent;
+  const cellOpts = { ...opts, serverCellWrites: true };
+  const bodyStart = out.length;
+  for (const idx of [...serverIndices].sort((a, b) => a - b)) {
+    if (idx >= body.length) continue;
+    const raw = body[idx];
+    if (!raw) continue;
+    // S455 (§19.8.3) — `@c = ?{…} !{…}`: run the handled query (its arms are pure
+    // values, route inference guarantees it) into a local, then write the cell.
+    const inner = handledSqlGuardInner(raw);
+    if (inner && inner.kind === "state-decl" && typeof inner.name === "string") {
+      const tmp = genVar(`cps_${inner.name}`);
+      const guardCode = serverRewriteEmitted(emitLogicNode({
+        ...raw,
+        guardedNode: { kind: "const-decl", name: tmp, init: inner.init ?? "", initExpr: inner.initExpr, sqlNode: inner.sqlNode, span: inner.span },
+      }, cellOpts as any));
+      if (guardCode) for (const l of indentBodyLines(guardCode, stmtIndent)) out.push(l);
+      for (const l of indentBodyLines(cpsCellWriteStatement(inner.name, tmp), stmtIndent)) out.push(l);
+      continue;
+    }
+    const code = serverRewriteEmitted(emitLogicNode(raw, cellOpts as any));
+    if (code) for (const l of indentBodyLines(code, stmtIndent)) out.push(l);
+  }
+  // Fail-closed backstop: every write of a cell slot in this batch must be a
+  // recorded one. A lowering path that built its own expression context (and so
+  // lost `serverCellWrites`) would write `_scrml_body["x"]` without recording it,
+  // and the client would never see the value.
+  const emitted = out.slice(bodyStart).join("\n");
+  // A client-store write lowered into the server module: there is no reactive
+  // store there, so it would throw at request time and drop the value.
+  const clientSet = /_scrml_(?:cs_)?reactive_set\(\s*"([^"]+)"/.exec(emitted);
+  if (clientSet) {
+    return {
+      lines: out,
+      error: new CGError(
+        "E-CG-006",
+        `E-CG-006: the server half of \`${fnName}\` lowered a write of the cell \`@${clientSet[1]}\` to the ` +
+        `client's reactive store, which does not exist on the server (§19.9.9.7). Refusing to emit it. ` +
+        `Assign the cell as its own statement (\`@${clientSet[1]} = …\`).`,
+        (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+      ),
+    };
+  }
+  const writeRe = /_scrml_body\["([^"]+)"\]\s*(?:\+\+|--|(?:[-+*/%&|^]|\*\*|<<|>>>?|\?\?|&&|\|\|)?=(?!=))|(?:\+\+|--)_scrml_body\["([^"]+)"\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = writeRe.exec(emitted)) !== null) {
+    const cell = m[1] ?? m[2];
+    // The recorded forms put the mark right before the write: `(_scrml_written["x"]
+    // = true, _scrml_body["x"] = v)` or `_scrml_written["x"] = true;\n<indent>_scrml_body["x"] = v`.
+    const before = emitted.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, " ");
+    const mark = `_scrml_written["${cell}"] = true`;
+    if (!(before.endsWith(`${mark}, `) || before.endsWith(`${mark}, (`) || before.endsWith(`${mark}; `) || before.endsWith(`${mark},`) || before.endsWith(`${mark};`))) {
+      return {
+        lines: out,
+        error: new CGError(
+          "E-CG-006",
+          `E-CG-006: the server half of \`${fnName}\` writes the cell \`@${cell}\` on a path the compiler ` +
+          `does not carry back to the client (§19.9.9.7). Refusing to emit a server batch that would drop ` +
+          `the write. Assign the cell as its own statement (\`@${cell} = …\`).`,
+          (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+        ),
+      };
+    }
+  }
+  // Every recorded write must be of a cell this batch hands back — a mark for a
+  // cell the plan did not list would be recorded and then never returned.
+  const cellSet = new Set(cells);
+  const markRe = /_scrml_written\["([^"]+)"\] = true/g;
+  while ((m = markRe.exec(emitted)) !== null) {
+    if (!cellSet.has(m[1])) {
+      return {
+        lines: out,
+        error: new CGError(
+          "E-CG-006",
+          `E-CG-006: the server half of \`${fnName}\` writes the cell \`@${m[1]}\` in a form the compiler did ` +
+          `not plan to carry back to the client (§19.9.9.7). Refusing to emit a server batch that would drop ` +
+          `the write. Assign the cell as its own statement (\`@${m[1]} = …\`).`,
+          (span ?? { file: "", start: 0, end: 0, line: 1, col: 1 }) as any,
+        ),
+      };
+    }
+  }
+  // Point the batch's written cells at its own object (see the doc comment).
+  const retarget = (line: string): string => {
+    let s = line;
+    for (const c of cells) s = s.split(`_scrml_body[${JSON.stringify(c)}]`).join(cpsCellLocal(c));
+    return s;
+  };
+  return {
+    lines: [...cpsCellsPrologue(indent, cells, exits), ...out.map(retarget), ...cpsCellsEpilogue(indent, cells, exits)],
+    error: null,
+  };
+}
+
 function cpsBatchMonotonicity(
   cpsSplit: { monotonicity?: string; serverBatches?: Array<{ monotonicity?: string }> } | null | undefined,
   batchIndex: number,
@@ -5274,26 +5403,12 @@ function generateServerJsImpl(
       // and for the single-handler case.
       fwdResultNames: string[];
     };
-    // Compute each batch's return cell — the scrml `state-decl` name of its
-    // LAST server statement (the value the batch sends back, and forwards to
-    // later batches). The function's final `returnVarName` is the last batch's
-    // return; earlier batches return their own last `state-decl` name.
-    function batchReturnCell(serverIndices: number[], isLast: boolean): string | null {
-      if (isLast) return _cpsSplit?.returnVarName ?? null;
-      if (serverIndices.length === 0) return null;
-      const _bodyForRet: any[] = fnNode.body ?? [];
-      const _lastRaw = _bodyForRet[serverIndices[serverIndices.length - 1]];
-      const _last = handledSqlGuardInner(_lastRaw) ?? _lastRaw; // S455 — `@c = ?{…} !{…}`
-      return (_last && _last.kind === "state-decl" && typeof _last.name === "string")
-        ? _last.name
-        : null;
-    }
     const _emitBatches: EmitBatch[] = [];
     if (_isMultiBatch) {
-      // Multi-batch CPS route — one handler per batch. A batch is forwarded
-      // every prior batch's return cell (admissible cross-batch parameter
-      // forwarding, M1.3 — the value rides as a request-body field).
-      const _fwdSoFar: string[] = [];
+      // Multi-batch CPS route — one handler per batch. S462 P0 fix round 1: no
+      // batch is forwarded a prior batch's result through the client (that value
+      // came back as trusted input); route inference keeps every consumer of a
+      // server value in the batch that produced it, or refuses.
       for (let _bi = 0; _bi < _serverBatches.length; _bi++) {
         const _b = _serverBatches[_bi];
         const _bIndices: number[] = Array.isArray(_b.indices)
@@ -5305,11 +5420,9 @@ function generateServerJsImpl(
           batchIndex: _bi,
           batchRouteName: `${routeName}__batch_${_bi}`,
           batchPath: `${path}__batch_${_bi}`,
-          fwdResultNames: [..._fwdSoFar],
+          // S462 P0 fix round 1 — never forwarded through the client (see emit-functions.ts).
+          fwdResultNames: [],
         });
-        // Forward this batch's return cell (if any) to every later batch.
-        const _ret = batchReturnCell(_bIndices, _bi === _serverBatches.length - 1);
-        if (_ret && !_fwdSoFar.includes(_ret)) _fwdSoFar.push(_ret);
       }
     } else {
       // Single handler — non-CPS route, or a single-batch CPS route.
@@ -5330,7 +5443,22 @@ function generateServerJsImpl(
       // batch's forwarded result. The handler destructures all of them from
       // `_scrml_body` identically — the wrapper (emit-functions.ts) places the
       // forwarded results into the request body.
-      const paramNames: string[] = [...fnParamNames, ..._batch.fwdResultNames];
+      // S465 (§19.9.9.8 rule 4) — then the locals the client computed before the
+      // function's first server statement (client data, sent like parameters).
+      const paramNames: string[] = [...fnParamNames, ...cpsCarriedLocals(_cpsSplit), ..._batch.fwdResultNames];
+      // S467 — a carried local is a name the author declared before the first server
+      // statement; the batch may reassign it (`let blk = false … if (!@ok) { blk = true }`),
+      // so it is bound the way the author bound it: `const` only for a `const`
+      // declaration, `let` otherwise (a `const` binding of a `let` made the whole server
+      // module fail to load: "This assignment will throw because blk is a constant").
+      const _carriedSet = new Set<string>(cpsCarriedLocals(_cpsSplit).filter((n) => !fnParamNames.includes(n)));
+      const _constDeclared = new Set<string>();
+      for (const st of (Array.isArray(fnNode.body) ? fnNode.body : [])) {
+        if (st && typeof st === "object" && (st as any).kind === "const-decl" && typeof (st as any).name === "string") {
+          _constDeclared.add((st as any).name);
+        }
+      }
+      const bindKw = (n: string): "const" | "let" => (_carriedSet.has(n) && !_constDeclared.has(n) ? "let" : "const");
 
       // The CPS-split view this batch's handler runs over. For the single-
       // handler case it is the route's own cpsSplit (or `null` for a non-CPS
@@ -5345,17 +5473,8 @@ function generateServerJsImpl(
         if (!_isMultiBatch) {
           _batchReturnVar = _cpsSplit.returnVarName ?? null;
         } else {
-          const _bIdx = _batch.serverIndices ?? [];
-          const _isLastBatch = _batch.batchIndex === _serverBatches.length - 1;
-          if (_isLastBatch) {
-            _batchReturnVar = _cpsSplit.returnVarName ?? null;
-          } else if (_bIdx.length > 0) {
-            const _lastStmtRaw = _batchBody[_bIdx[_bIdx.length - 1]];
-            const _lastStmt = handledSqlGuardInner(_lastStmtRaw) ?? _lastStmtRaw; // S455
-            if (_lastStmt && _lastStmt.kind === "state-decl" && typeof _lastStmt.name === "string") {
-              _batchReturnVar = _lastStmt.name;
-            }
-          }
+          // S462 — the batch's own last statement's cell, the last batch included.
+          _batchReturnVar = multiBatchReturnCell(_batchBody, _batch.serverIndices ?? []);
         }
       }
       // The CPS view the existing handler-body emission consults. For the
@@ -5366,6 +5485,11 @@ function generateServerJsImpl(
         : (_isMultiBatch
             ? { serverStmtIndices: _batch.serverIndices ?? [], returnVarName: _batchReturnVar }
             : _cpsSplit);
+      // S462 P0 (§19.9.9.7) — how THIS batch returns its cell writes. The client
+      // wrapper (emit-functions.ts) asks the same question with the same inputs.
+      const _cellPlan = cpsSplit
+        ? planBatchCellReturn(_batchBody, cpsSplit.serverStmtIndices, cpsSplit.returnVarName ?? null)
+        : null;
 
     const handlerName = genVar(`handler_${name}`);
     // §20.5 (S265, i29e) — mark where this handler's body begins so the
@@ -5554,7 +5678,7 @@ function generateServerJsImpl(
       // untransported `_scrml_body["n"]`).
       const _paramDefaults = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       for (let i = 0; i < paramNames.length; i++) {
-        lines.push(serverBodyParamLine(paramNames[i], _paramDefaults[i] ?? null, "    "));
+        lines.push(serverBodyParamLine(paramNames[i], _paramDefaults[i] ?? null, "    ", bindKw(paramNames[i])));
       }
 
       // §53.9.4: Emit server-side boundary checks for predicated params (baseline CSRF path).
@@ -5606,11 +5730,26 @@ function generateServerJsImpl(
       // and failed the build with a confidentiality error about code the author
       // never wrote. The window must contain ONLY author-lowered lines.
       const _authorBodyStartCsrf = lines.length;
+      // S465 (§19.9.9.8 rule 4) — a nested function declared before the first server
+      // statement and called by server work stays in the browser and is ALSO declared
+      // here (route inference admits only functions that run identically on either side).
+      if (cpsSplit) {
+        for (const _k of cpsCarriedFunctionIndices(_cpsSplit)) {
+          if (_k >= body.length) continue;
+          const _fnCode = serverRewriteEmitted(emitLogicNode(body[_k], _serverFnOpts));
+          if (_fnCode) for (const line of indentBodyLines(_fnCode, "    ")) lines.push(line);
+        }
+      }
       // `cpsSplit` is the per-batch CPS view hoisted at the top of the batch
       // loop — for a multi-batch route it carries THIS batch's index set; for
       // the single-handler case it is `route.cpsSplit` verbatim.
 
-      if (cpsSplit) {
+      if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
+        // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOpts, "    ", fnNode.span, _cellPlan.exits);
+        if (_cells.error) errors.push(_cells.error);
+        for (const l of _cells.lines) lines.push(l);
+      } else if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const _rawStmt = body[idx];
@@ -5835,7 +5974,7 @@ function generateServerJsImpl(
       // (mirror of the CSRF path above).
       const _paramDefaultsNonCsrf = _cpsSplit ? [] : serverParamDefaults(params, filePath, _serverFnOptsNonCsrf, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       for (let i = 0; i < paramNames.length; i++) {
-        lines.push(serverBodyParamLine(paramNames[i], _paramDefaultsNonCsrf[i] ?? null, "  "));
+        lines.push(serverBodyParamLine(paramNames[i], _paramDefaultsNonCsrf[i] ?? null, "  ", bindKw(paramNames[i])));
       }
 
       // §53.9.4: Emit server-side boundary checks for predicated params (non-CSRF path).
@@ -5944,8 +6083,23 @@ function generateServerJsImpl(
       // correct only as long as nothing compiler-emitted is added between here
       // and the author-body loop below.
       const _authorBodyStartNonCsrf = lines.length;
-
+      // S465 (§19.9.9.8 rule 4) — a nested function declared before the first server
+      // statement and called by server work stays in the browser and is ALSO declared
+      // here (route inference admits only functions that run identically on either side).
       if (cpsSplit) {
+        for (const _k of cpsCarriedFunctionIndices(_cpsSplit)) {
+          if (_k >= body.length) continue;
+          const _fnCode = serverRewriteEmitted(emitLogicNode(body[_k], _serverFnOptsNonCsrf));
+          if (_fnCode) for (const line of indentBodyLines(_fnCode, _bodyIndentNonCsrf)) lines.push(line);
+        }
+      }
+
+      if (cpsSplit && _cellPlan && _cellPlan.mode === "cells") {
+        // S462 P0 (§19.9.9.7) — the batch returns the final values of the cells it wrote.
+        const _cells = emitCpsCellsBatchBody(name, body, cpsSplit.serverStmtIndices, _cellPlan.cells, _serverFnOptsNonCsrf, _bodyIndentNonCsrf, fnNode.span, _cellPlan.exits);
+        if (_cells.error) errors.push(_cells.error);
+        for (const l of _cells.lines) lines.push(l);
+      } else if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
           if (idx < body.length) {
             const _rawStmt = body[idx];

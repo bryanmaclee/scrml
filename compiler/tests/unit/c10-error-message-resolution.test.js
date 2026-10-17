@@ -35,7 +35,9 @@ import {
   RUNTIME_CHUNKS,
   RUNTIME_CHUNK_ORDER,
   assembleRuntime,
+  stdlibClientChunkMembers,
 } from "../../src/codegen/runtime-chunks.ts";
+import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
 // ---------------------------------------------------------------------------
 // AST construction helpers — minimal shapes mirroring c7-test patterns.
@@ -149,8 +151,8 @@ describe("C10 §C10.0 — Chunk wiring", () => {
     expect(RUNTIME_CHUNKS.messages).toContain("_SCRML_TAG_TO_VALIDATOR");
   });
 
-  test("RUNTIME_CHUNK_ORDER has 44 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 14 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry, +'md' (the scrml:md reader, S462 md phase 1) — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457 + 'refine' added by §53 S458 2a-fix + 'metaemit' added by §22.4.1 S458 'a' + 'machine' split out of the always-included 'core' chunk by S461)", () => {
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(44);
+  test("RUNTIME_CHUNK_ORDER has 43 chunks total (17 + 'engine' added by C13 + 'prefetch' added by A-4.3 + 'mount' + 'vendor-ref' added by A-4.7 + 'wire' added by v0.3.x SPA tree-shake Phase B 3.2 + 13 'stdlib-*' chunks — 4 from Bug 18 S95, +9 client-safe modules from S368 stdlib-client-registry, +'md' (the scrml:md reader, S462 md phase 1), −'stdlib-auth' at S462 P0 (escalation-server-only, §12.2 Trigger 3), 'stdlib-crypto' kept PARTIAL (its [browser-safe] members only, S462 P0 fix round 1) — + 'modules' added by known-gaps-#6 S152 + 'map' added by §59 map-arc phase-c D3 S169 + 'log' added by §20.6 log-builtin S174 + 'ssr' added by §52.8 ssr-b-substrate + 'ifmount' split out of the always-included 'scope' chunk by §17.1 if= Phase 2 − 'transitions' RETIRED, the §38 keyframes ship in the emitted stylesheet because an inline <style> is refused under headers=\"strict\" + 'urlguard' added by §5.2 rule 3 S457 + 'refine' added by §53 S458 2a-fix + 'metaemit' added by §22.4.1 S458 'a' + 'machine' split out of the always-included 'core' chunk by S461)", () => {
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(43);
   });
 
   // S368 — the stdlib slice of the order is the CLIENT CONTRACT: a client-side
@@ -161,7 +163,6 @@ describe("C10 §C10.0 — Chunk wiring", () => {
   test("the stdlib client-chunk set is exactly the client-safe modules", () => {
     const stdlibChunks = RUNTIME_CHUNK_ORDER.filter((n) => n.startsWith("stdlib-"));
     expect([...stdlibChunks].sort()).toEqual([
-      "stdlib-auth",
       "stdlib-compiler",
       "stdlib-crypto",
       "stdlib-data",
@@ -180,12 +181,28 @@ describe("C10 §C10.0 — Chunk wiring", () => {
 
   // The escalation-server-only modules (§12.2 Trigger 3) MUST NOT get a client
   // chunk — their shims reach Bun.*/process.*/node:* or handle a credential, so
-  // an inlined browser copy could not work. `auth`/`crypto` are the deliberate
-  // pre-existing exceptions (S95 Bug 18); see runtime-chunks.ts for why.
+  // an inlined browser copy could not work. `auth` was an exception until S462
+  // (S95 Bug 18); the S462 P0 removed it — a mis-split password check ran in the
+  // browser on the shipped `scrml:auth`. `crypto` keeps a PARTIAL chunk: only
+  // the members its shim labels [browser-safe] (pinned below).
   test("host-reaching / credential-handling modules have NO client chunk", () => {
-    for (const mod of ["cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"]) {
+    for (const mod of ["auth", "cron", "fs", "mcp", "oauth", "path", "process", "redis", "store"]) {
       expect(RUNTIME_CHUNK_ORDER).not.toContain(`stdlib-${mod}`);
     }
+  });
+
+  test("scrml:crypto's client chunk is PARTIAL: browser-safe members only, no host API (S462 P0 fix round 1)", () => {
+    expect([...stdlibClientChunkMembers("crypto")].sort()).toEqual(["generateToken", "generateUUID", "hmac", "safeCompare"]);
+    expect(stdlibClientChunkMembers("data")).toBeNull();
+    const start = SCRML_RUNTIME.indexOf("// --- chunk: stdlib-crypto ---");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const chunk = SCRML_RUNTIME.slice(start, SCRML_RUNTIME.indexOf("// --- chunk:", start + 5));
+    expect(chunk).not.toMatch(/Bun\./);
+    expect(chunk).not.toMatch(/function (hash|verifyHash)\b/);
+    const registry = new Function("const _scrml_stdlib = {};\n" + chunk + "\nreturn _scrml_stdlib;")();
+    expect(Object.keys(registry.crypto).sort()).toEqual(["generateToken", "generateUUID", "hmac", "safeCompare"]);
+    expect(registry.crypto.safeCompare("a", "a")).toBe(true);
+    expect(registry.crypto.generateToken(4)).toMatch(/^[0-9a-f]{8}$/);
   });
 });
 

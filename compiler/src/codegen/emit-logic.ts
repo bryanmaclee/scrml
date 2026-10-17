@@ -33,6 +33,7 @@ import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
 import { localAsyncDeclRoot, rawAsyncUsesOf, walkScoped } from "./local-async-fns.ts";
 import { bodyTextHasOwnAwait, recordListenerSource } from "./js-async-analysis.ts";
 import { sqlQueryExprShape, sqlQueryHeadOfExpr, replaceSqlQueryHead, unhandledFailureThrow, SQL_ATTEMPT_FN, handledSqlOfGuardedNode, type SqlQueryExprShape } from "./sql-attempt.ts";
+import { cpsCellWriteStatement } from "./cps-cell-writes.ts";
 import { parseGuardArmsFromRaw } from "../ast-builder.js";
 import { tokenizeSQL } from "../tokenizer.ts";
 import { sqlHoldsOneStatement, refuseMultipleStatements, judgeDriverCallDetail, refusedDriverCallExpr, SQL_TEXT_NOT_READ_MESSAGE, recordProgramStatementRefusal, swapSqlLoweringSpan, currentLoweringSpan } from "./sql-one-statement-guard.ts";
@@ -146,6 +147,14 @@ function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: an
 // ---------------------------------------------------------------------------
 
 export interface EmitLogicOpts {
+  /**
+   * S462 P0 (§19.9.9.7) — server boundary, inside a CPS batch that returns its
+   * cell writes ("cells" mode, codegen/cps-cell-writes.ts). A cell write lowers to
+   * a write of `_scrml_body["x"]` that is also recorded in `_scrml_written`, so the
+   * batch hands back exactly the cells it wrote and a later read in the batch sees
+   * the batch's own value.
+   */
+  serverCellWrites?: boolean;
   /**
    * §19.16.3 (S430 round 3, H3) — true while emitting a DEFERRED body (the
    * `finally` of a lowered `defer`). A `!{}` handler there must never emit the
@@ -1177,6 +1186,8 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // throws at runtime on the server and triggers E-CG-006 in post-emission
     // scanning of client.js when the same fn is also visible there.
     mode: opts.boundary === "server" ? "server" : "client",
+    // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
+    ...(opts.boundary === "server" && opts.serverCellWrites ? { serverCellWrites: true } : {}),
     derivedNames: opts.derivedNames ?? null,
     // Bug 61 — forward synth-cell keys so `emitMember` routes
     // `@<compound>.<synthProp>` reads to the dotted synth cell.
@@ -3555,6 +3566,33 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         }
       }
 
+      // S462 P0 (§19.9.9.7) — a cell write inside a CPS server batch that returns
+      // its cell writes ("cells" mode). The server module holds no reactive store
+      // (`_scrml_reactive_set` does not exist there), so the write lands in the
+      // batch's own copy of the cell — `_scrml_body["x"]`, which a later read in
+      // the batch sees — and is recorded in `_scrml_written`, so the batch returns
+      // this cell's FINAL value to the client and nothing else.
+      if (opts.boundary === "server" && opts.serverCellWrites && opts.insideFunctionBody && typeof node.name === "string") {
+        let _cellValue: string;
+        if (node.sqlNode && node.sqlNode.kind === "sql") {
+          _cellValue = emitLogicNode(node.sqlNode, opts).replace(/;\s*$/, "");
+        } else if (node.initExpr) {
+          _cellValue = emitExpr(node.initExpr, _makeExprCtx(opts));
+        } else {
+          const _rawInit: string = typeof node.init === "string" ? node.init : "";
+          _cellValue = _rawInit.trim() === "" ? "null" : emitExprField(null, _rawInit, _makeExprCtx(opts));
+        }
+        if (node.predicateCheck && node.predicateCheck.zone === "boundary") {
+          const _chk = genVar(`_scrml_chk_${node.name}`);
+          return [
+            `const ${_chk} = ${_cellValue};`,
+            ...emitRefinementCheck(refinementOf(node.predicateCheck)!, _chk, node.name, { noValue: true }),
+            cpsCellWriteStatement(node.name, _chk),
+          ].join("\n");
+        }
+        return cpsCellWriteStatement(node.name, _cellValue);
+      }
+
       // fix-cg-cps-return-sql-ref-placeholder (S40 follow-up): when the
       // initializer was `?{...}.method()` (or bare `?{...}`), the AST
       // builder attached a structured `sqlNode` and set `init: ""` /
@@ -3956,7 +3994,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         insideFunctionBody: opts.insideFunctionBody,
         returnExitsWrapper: opts.returnExitsWrapper,
         boundary: opts.boundary,
-        channelOwnedCells: opts.channelOwnedCells,
+        channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites,
         ...(opts.engineBindings ? { engineBindings: opts.engineBindings } : {}),
         ...(opts.engineVarNames ? { engineVarNames: opts.engineVarNames } : {}),
         ...(opts.enginesWithHooks ? { enginesWithHooks: opts.enginesWithHooks } : {}),
@@ -4001,7 +4039,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         returnExitsWrapper: opts.returnExitsWrapper,
         fnBodyRegistry: opts.fnBodyRegistry,
         boundary: opts.boundary,
-        channelOwnedCells: opts.channelOwnedCells,
+        channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites,
         ...(opts.engineBindings ? { engineBindings: opts.engineBindings } : {}),
         ...(opts.engineVarNames ? { engineVarNames: opts.engineVarNames } : {}),
         ...(opts.enginesWithHooks ? { enginesWithHooks: opts.enginesWithHooks } : {}),
@@ -4023,12 +4061,12 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverCellWrites: opts.serverCellWrites, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ ...hostAsyncFacts(opts), serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);

@@ -1,0 +1,11 @@
+{
+  "id": "server-db-cps-login-check-stays-server",
+  "description": "S462 P0 — the login idiom: a query writes a cell, then a check that calls a server-only `scrml:auth` binding (aliased: `verifyPassword as vp`) decides the cell's final value. The query AND the check run in the server half of the split; the client receives only the final value, and no client reference to `scrml:auth` survives (`scrml:auth` has no client chunk, so a surviving one would be E-STDLIB-CLIENT-CHUNK-MISSING). Before S462 the split put the `if` on the CLIENT (the classifier keyed imports on the imported name and never read an `if` head): the server returned the row, password hash included, and the browser ran `!vp(...)` on an un-awaited Promise — every password read WELCOME. That pre-S462 build compiled CLEAN, so this codes-only case does not by itself discriminate it; the runtime half (REJECTED / WELCOME against a real argon2id hash, a response body that never carries the hash, a client bundle with no `scrml:auth` code) is pinned by impl#1's compiler/tests/integration/cps-server-logic-stays-server-s462.test.js and compiler/tests/browser/cps-server-logic-stays-server-s462.browser.test.js. (This corpus's server harness evaluates a bundle without a module context and cannot load the `scrml:auth` shim.)",
+  "language-version": "1.0",
+  "spec": "§12.2, §19.9.9.1, §19.9.9.7",
+  "rationale": "§12.2 Trigger 3: \"calling a binding imported from any of them escalates the function that calls it\" — `scrml:auth` is escalation-server-only, so the statement calling it is server work. §19.9.9.1: a statement is server-tier when it uses a \"server-only resource\". §19.9.9.7: \"When a statement of a batch writes a reactive cell … and a LATER statement of the same batch reads that cell, the read SHALL yield the value the earlier statement wrote\" and \"The client still applies the write to its own store when the batch returns\". Provenance: S462 P0, docs/changes/s462-p0-cps-server-logic-to-client/.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"]
+  }
+}

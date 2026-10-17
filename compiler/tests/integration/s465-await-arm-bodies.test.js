@@ -300,8 +300,15 @@ describe("S465 r1 — a Promise-returning call in a server arm body is awaited (
 });
 
 // ---------------------------------------------------------------------------
-// Finding 3 — the CPS continuation (browser): `.filter` / `.some` callbacks that
-// reach the imported async helper.
+// Finding 3 — `.filter` / `.some` callbacks that reach the imported async helper.
+//
+// S466 (s462-p0-cps r3, merged with this test) — under SPEC §19.9.9.8 a CPS-split
+// function's statement that reads a server-originated value (`@out`, written by
+// the query) is SERVER work: it runs in the server batch, where the callback's
+// combinator lowering and the await happen on the server, and the row with the
+// hash never reaches the browser. The CPS cases are therefore executed against
+// the real batch route (bun:sqlite, a real argon2 hash); the ordinary async
+// client fn cases still run in happy-dom.
 // ---------------------------------------------------------------------------
 
 const CPS_APP = `<program db="./app.db">
@@ -381,8 +388,6 @@ async function runClient(appSrc, button, checkAnswer) {
 
 describe("S465 r1 — an async import in a .filter / .some callback is lowered, not tested as a Promise (happy-dom)", () => {
   const CASES = [
-    ["CPS continuation", CPS_APP, "filt", "_scrml_filterAsync"],
-    ["CPS continuation", CPS_APP, "someIf", "_scrml_someAsync"],
     ["async client fn", CLIENT_APP, "someIf", "_scrml_someAsync"],
     ["async client fn", CLIENT_APP, "whileSome", "_scrml_someAsync"],
   ];
@@ -394,6 +399,60 @@ describe("S465 r1 — an async import in a .filter / .some callback is lowered, 
     }, EXECUTED_DB_TIMEOUT_MS);
     test(`${where} \`${button}\`: the helper answers true → WELCOME`, async () => {
       expect((await runClient(src, button, true)).seen).toBe("WELCOME");
+    }, EXECUTED_DB_TIMEOUT_MS);
+  }
+});
+
+// The CPS cases (S466): the batch route itself, with a real hash. A wrong
+// password is REJECTED, the right one WELCOME, the callback is lowered to the
+// combinator in the SERVER module, and the request never carries the hash.
+describe("S466 — a CPS-split .filter / .some callback reaching an async import runs in the server batch (executed)", () => {
+  let dir, mod, serverJs, clientJs;
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "s466-arms-cps-"));
+    const outDir = join(dir, "dist");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(dir, "lib.scrml"), LIB);
+    writeFileSync(join(dir, "app.scrml"), CPS_APP);
+    const db = new Database(join(dir, "app.db"), { create: true });
+    db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT)");
+    db.run("INSERT INTO users (name, pw) VALUES ('bob', ?)", [await hashPassword("right-password")]);
+    db.close();
+    const result = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: outDir, log: () => {} });
+    expect((result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+    serverJs = require("fs").readFileSync(join(outDir, "app.server.js"), "utf8");
+    clientJs = require("fs").readFileSync(join(outDir, "app.client.js"), "utf8");
+    mod = await import(`file://${join(outDir, "app.server.js")}?v=${Date.now()}-${Math.random()}`);
+  }, EXECUTED_DB_TIMEOUT_MS);
+  afterAll(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+
+  async function call(fn, pass) {
+    const route = mod.routes.find((r) => new RegExp(`__ri_route_${fn}_\\d+`).test(r.path));
+    expect(route).toBeDefined();
+    const body = JSON.stringify({ pass });
+    expect(body).not.toContain("$argon2");
+    const res = await mod.fetch(new Request(`http://localhost${route.path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: "scrml_csrf=tok", "X-CSRF-Token": "tok" },
+      body,
+    }));
+    expect(res.status).toBe(200);
+    // (The response DOES carry the hash here: this program writes the whole row,
+    // `pw` included, to the cell `@out` — a cell is browser state by the
+    // author's choice, and its final value is what a batch returns.)
+    return JSON.parse(await res.text()).__scrml_cells;
+  }
+
+  for (const [fn, combinator] of [["filt", "_scrml_filterAsync"], ["someIf", "_scrml_someAsync"]]) {
+    test(`\`${fn}\`: the callback is lowered in the server module (${combinator}), the browser never calls check`, () => {
+      expect(serverJs).toContain(combinator);
+      expect(clientJs).not.toMatch(/\bcheck\(/);
+    });
+    test(`\`${fn}\`: a WRONG password is REJECTED`, async () => {
+      expect((await call(fn, "wrong-password")).seen).toBe("REJECTED");
+    }, EXECUTED_DB_TIMEOUT_MS);
+    test(`\`${fn}\`: the right password is WELCOME`, async () => {
+      expect((await call(fn, "right-password")).seen).toBe("WELCOME");
     }, EXECUTED_DB_TIMEOUT_MS);
   }
 });

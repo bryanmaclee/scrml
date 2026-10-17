@@ -41,7 +41,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, readdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { RUNTIME_CHUNK_ORDER } from "../../src/codegen/runtime-chunks.ts";
+import { RUNTIME_CHUNK_ORDER, stdlibClientChunkMembers } from "../../src/codegen/runtime-chunks.ts";
 import { isEscalationServerOnlyModule } from "../../src/route-inference.ts";
 import { tmpdir } from "os";
 
@@ -125,6 +125,10 @@ function clientProgram(mod, fn) {
  * that LOOKS like a registry defect and is not one.
  */
 function firstExportOf(mod) {
+  // S462 P0 fix round 1 — a PARTIAL client chunk (scrml:crypto) carries only its
+  // browser-safe members; the client test uses the first one it carries.
+  const partial = stdlibClientChunkMembers(mod);
+  if (partial) return [...partial][0];
   const src = readFileSync(resolve(import.meta.dir, "../../runtime/stdlib", `${mod}.js`), "utf8");
   const fn = /^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/m.exec(src);
   if (fn) return fn[1];

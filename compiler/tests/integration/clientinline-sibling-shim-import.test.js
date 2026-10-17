@@ -24,7 +24,7 @@
  *
  * §1  data chunk inlines math (mathMin/mathMax/ceil), no bare import.
  * §2  data.clamp / data.paginate are CALLABLE + correct in the evaluated runtime.
- * §3  auth chunk inlines floor/mathMax/clockNow, no bare import, clock via scrml:time.
+ * §3  auth chunk (loaded directly — no client chunk since S462) inlines floor/mathMax/clockNow, no bare import.
  * §4  auth.createRateLimiter is CALLABLE + correct (the local-`max` collision case).
  * §5  the de-leaked shims emit NO bare `import` anywhere in SCRML_RUNTIME.
  * §6  EXTERNAL imports still STRIP (synthetic shim importing `bun:sqlite`).
@@ -40,7 +40,7 @@ import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { compileScrml } from "../../src/api.js";
-import { SCRML_RUNTIME, _inlineSiblingShimImports } from "../../src/runtime-template.js";
+import { SCRML_RUNTIME, _inlineSiblingShimImports, _loadStdlibChunk } from "../../src/runtime-template.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -125,7 +125,11 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
   });
 
   test("§3  auth chunk inlines floor/mathMax/clockNow, no bare import, clock via scrml:time", () => {
-    const chunk = sliceChunk(SCRML_RUNTIME, "auth");
+    // S462 P0 — `scrml:auth` ships NO client chunk (it is escalation-server-only,
+    // §12.2 Trigger 3). The inliner is still exercised on the real auth shim,
+    // loaded through the same `_loadStdlibChunk` that builds every chunk.
+    expect(sliceChunk(SCRML_RUNTIME, "auth")).toBe("");
+    const chunk = _loadStdlibChunk("auth");
     expect(chunk.length).toBeGreaterThan(0);
     expect(/function floor\b/.test(chunk)).toBe(true);
     expect(/function mathMax\b/.test(chunk)).toBe(true);
@@ -148,7 +152,10 @@ describe("client-inliner follows sibling-shim imports (S177)", () => {
   });
 
   test("§4  auth.createRateLimiter is CALLABLE + correct (local-`max` collision case)", () => {
-    const stdlib = loadStdlibRegistry();
+    // The auth chunk is not in the client runtime (S462); evaluate the chunk the
+    // loader builds, in isolation, exactly as a classic script would.
+    // eslint-disable-next-line no-new-func
+    const stdlib = new Function("const _scrml_stdlib = {};\n" + _loadStdlibChunk("auth") + "\nreturn _scrml_stdlib;")();
     // S462: the limiter is a struct; check / peek are free functions.
     const { createRateLimiter, check, peek } = stdlib.auth;
     const rl = createRateLimiter({ windowMs: 60000, max: 3 });

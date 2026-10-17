@@ -11,7 +11,7 @@
     "compiler/src/codegen/emit-client.ts :: TS7016 :: Could not find a declaration file for module '../module-resolver.js'. 'compiler/src/module-resolver.js' implicitly has an 'any' type.": 1,
     "compiler/src/codegen/emit-control-flow.ts :: TS2339 :: Property 'auditTarget' does not exist on type 'MachineBindingInfo'.": 1,
     "compiler/src/codegen/emit-control-flow.ts :: TS2344 :: Type 'typeof CGError' does not satisfy the constraint '(...args: any) => any'.": 2,
-    "compiler/src/codegen/emit-control-flow.ts :: TS2345 :: Argument of type '{ declaredNames: Set<string> | undefined; orderedMapVarNames?: Set<string> | undefined; setVarNames?: Set<string> | undefined; mapVarNames?: Set<string> | undefined; ... 31 more ...; channelOwnedCells: Set<...> | ... 1 more ... | undefined; }' is not assignable to parameter of type 'EmitLogicOpts'.": 2,
+    "compiler/src/codegen/emit-control-flow.ts :: TS2345 :: Argument of type '{ declaredNames: Set<string> | undefined; orderedMapVarNames?: Set<string> | undefined; setVarNames?: Set<string> | undefined; mapVarNames?: Set<string> | undefined; ... 32 more ...; serverCellWrites: boolean | undefined; }' is not assignable to parameter of type 'EmitLogicOpts'.": 2,
     "compiler/src/codegen/emit-css.ts :: TS2345 :: Argument of type 'object[]' is not assignable to parameter of type 'Node[]'.": 1,
     "compiler/src/codegen/emit-css.ts :: TS7016 :: Could not find a declaration file for module '../tailwind-classes.js'. 'compiler/src/tailwind-classes.js' implicitly has an 'any' type.": 1,
     "compiler/src/codegen/emit-each.ts :: TS2769 :: No overload matches this call.": 1,

@@ -90,6 +90,16 @@ const FIXTURE_SCRML = `\${
 h1 "OQ-2 smoke"
 `;
 
+// S462 — the end-to-end smoke's client-registry half uses a CLIENT-SAFE module.
+// (`scrml:auth` has no client chunk since S462; FIXTURE_SCRML above is now the
+// refused shape.)
+const FIXTURE_SCRML_CLIENT_SAFE = `\${
+    import { round } from 'scrml:math'
+    <n> = round(2.6)
+}
+p "\${@n}"
+`;
+
 // ---------------------------------------------------------------------------
 // §1. Helpers
 // ---------------------------------------------------------------------------
@@ -175,9 +185,21 @@ describe("OQ-2 §1: helpers (unit)", () => {
 // ---------------------------------------------------------------------------
 
 describe("OQ-2 §2: end-to-end smoke — emitted JS uses bundled shim and loads in Bun", () => {
-  test("minimal `scrml:auth` consumer compiles, bundles shim, and loads in Bun", async () => {
+  test("a CLIENT cell initializer calling `scrml:auth` is refused at compile time (S462 P0)", () => {
+    // `<hash> = hashPassword("demo")` runs in the browser. Until S462 this compiled
+    // and shipped the `scrml:auth` implementation (Bun.password, argon2id) into the
+    // client bundle. `scrml:auth` is escalation-server-only (§12.2 Trigger 3) and
+    // has no client chunk, so the surviving client read is the compile-time
+    // E-STDLIB-CLIENT-CHUNK-MISSING (§41) — never a page carrying the module.
+    const ROOT = join(TMP, "e2e-auth-client");
+    const src = fx("e2e-auth-client/app.scrml", FIXTURE_SCRML);
+    const result = compileScrml({ inputFiles: [src], outputDir: join(ROOT, "dist"), write: true, log: () => {} });
+    expect((result.errors ?? []).map((e) => e.code)).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+  });
+
+  test("minimal `scrml:math` consumer compiles, bundles shim, and loads in Bun", async () => {
     const ROOT = join(TMP, "e2e-1");
-    const src = fx("e2e-1/app.scrml", FIXTURE_SCRML);
+    const src = fx("e2e-1/app.scrml", FIXTURE_SCRML_CLIENT_SAFE);
     const outDir = join(ROOT, "dist");
 
     const result = compileScrml({
@@ -190,29 +212,29 @@ describe("OQ-2 §2: end-to-end smoke — emitted JS uses bundled shim and loads 
     // Compilation itself must succeed.
     expect(result.errors).toEqual([]);
 
-    // Bundling fired: hand-written shim exists at <outputDir>/_scrml/auth.js.
-    expect(existsSync(join(outDir, "_scrml/auth.js"))).toBe(true);
+    // Bundling fired: hand-written shim exists at <outputDir>/_scrml/math.js.
+    expect(existsSync(join(outDir, "_scrml/math.js"))).toBe(true);
 
     // CLIENT JS path (Bug 18 S95): `scrml:NAME` imports lower to
     // `const { ... } = _scrml_stdlib.<name>;`. Browsers cannot resolve
     // bare ES-module specifiers and the client.js script tag is a
     // classic (non-module) script. The runtime's `stdlib-<name>` chunk
     // populates the registry at load time. No bare `scrml:` left;
-    // no `./_scrml/auth.js` filesystem ref left either (server path).
+    // no `./_scrml/math.js` filesystem ref left either (server path).
     const clientJs = readFileSync(join(outDir, "app.client.js"), "utf8");
-    expect(clientJs).toContain(`_scrml_stdlib.auth`);
+    expect(clientJs).toContain(`_scrml_stdlib.math`);
     expect(clientJs).not.toContain(`from "scrml:`);
-    expect(clientJs).not.toContain(`from "./_scrml/auth.js"`);
+    expect(clientJs).not.toContain(`from "./_scrml/math.js"`);
 
     // The shared runtime file emitted alongside this app ships the
-    // stdlib-auth chunk (the only consumer of scrml:auth is this file).
+    // stdlib-math chunk (the only consumer of scrml:math is this file).
     // Verify it contains the registry assignment so the client's
     // destructure resolves at runtime when both scripts load.
     const fs2 = require("fs");
     const runtimeFile = fs2.readdirSync(outDir).find((f) => /^scrml-runtime\./.test(f));
     expect(runtimeFile).toBeDefined();
     const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
-    expect(runtimeJs).toContain(`_scrml_stdlib.auth = (function()`);
+    expect(runtimeJs).toContain(`_scrml_stdlib.math = (function()`);
   });
 });
 

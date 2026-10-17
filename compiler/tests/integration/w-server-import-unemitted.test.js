@@ -160,13 +160,16 @@ describe("W-SERVER-IMPORT-UNEMITTED §4: no-value-export module still fires + no
     // A markup-component const is resolved at markup-mount time, NOT a runtime
     // JS value — generateValueOnlyServerJs emits nothing for it, so the import
     // is genuinely unresolvable and the MISSING-FILE warning still fires.
+    // (S462: the write reads `r`, the query's result, so it runs in the server
+    // half of the split and the server module imports `Card`. A bare `@n = Card`
+    // reads nothing from the server and stays a client statement since S462.)
     fx(join(dir, "src/comp.scrml"), `\${ export const Card = <div>card</div> }\n`);
     const app = fx(join(dir, "src/app.scrml"), `<program db="sqlite::memory:">
 \${ import { Card } from './comp.scrml' }
 <n> = 0
 function loadIt() {
   const r = ?{ select 1 as n }
-  @n = Card
+  @n = [r, Card]
 }
 <button onclick=loadIt()>go</button>
 <p>\${@n}</p>
