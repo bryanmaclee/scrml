@@ -64,6 +64,7 @@ import {
   resolveImportedMarkupLocalNames,
 } from "../markup-return-scan.js";
 import { nsId } from "./chunk-namespace.ts";
+import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import { rawContentDomLines, isRawContentElement } from "../raw-content-encode.ts";
 
 // ---------------------------------------------------------------------------
@@ -2056,6 +2057,11 @@ function rewriteIterValueExpr(text: string, iterVarName: string | null): string 
   let expr = text.replace(/@\s*\.\s*/g, "@.");
   expr = rewriteContextualSigil(expr, iterVarName);
   expr = rewriteAtCellAccess(expr);
+  // §45.1 / §45.4 (S468) — this text path ran NO equality lowering, so a per-item
+  // `class=${it == @sel ? "on" : "off"}` shipped JS loose `==` (reference
+  // equality for a struct row). Lower `==` / `!=` from the parsed tree, exactly
+  // as the client string pipeline's Pass 18 does; unparseable text is left as is.
+  expr = lowerEqualityOps(expr, { onUnparsed: "keep" });
   return expr;
 }
 

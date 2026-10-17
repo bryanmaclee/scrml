@@ -400,9 +400,9 @@ describe("B17.4 §B17.4.7 — if=expr gating", () => {
       ],
     });
     const out = emitEngineHookFiringFunction(m).join("\n");
-    // @gameOver should be rewritten to _scrml_reactive_get("gameOver"). The
-    // rewriter normalises `==` to `===` (smart-equality pass) so accept either.
-    expect(out).toMatch(/if \(_scrml_reactive_get\("gameOver"\) ==[=]? false\)/);
+    // @gameOver should be rewritten to _scrml_reactive_get("gameOver"). §45.4
+    // (S468): `==` with a non-provably-primitive operand is structural.
+    expect(out).toContain('if (_scrml_structural_eq(_scrml_reactive_get("gameOver"), false))');
     expect(out).toContain('log("regression")');
   });
 

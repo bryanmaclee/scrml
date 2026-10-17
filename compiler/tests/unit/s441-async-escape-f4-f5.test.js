@@ -102,7 +102,7 @@ function m(n) { return isOk(n) }
       [`onclick=\${ @v = isOk(1) ? "a" : "b" }`, /await _scrml_fetch_isOk_\d+\(1\) \?/],
       [`onclick=\${ if (isOk(1) && true) { @v = "a" } }`, /if \(await _scrml_fetch_isOk_\d+\(1\) &&/],
       [`onclick=\${ if (isOk(1) || false) { @v = "a" } }`, /if \(await _scrml_fetch_isOk_\d+\(1\) \|\|/],
-      [`onclick=\${ if (isOk(1) == true) { @v = "a" } }`, /if \(await _scrml_fetch_isOk_\d+\(1\) ===/],
+      [`onclick=\${ if (isOk(1) == true) { @v = "a" } }`, /if \(_scrml_structural_eq\(await _scrml_fetch_isOk_\d+\(1\), true\)\)/],
       [`onclick={ let i = 0; while (isOk(i)) { i = i + 1 } }`, /while \(await _scrml_fetch_isOk_\d+\(i\)\)/],
       [`onclick=\${ @v = \`t \${isOk(1)}\` }`, /\$\{await _scrml_fetch_isOk_\d+\(1\)\}/],
       [`onclick={ const { a = isOk(1) } = {}; @v = a }`, /a = await _scrml_fetch_isOk_\d+/],
