@@ -8958,6 +8958,82 @@ export function runRI(input: RIInput): RIOutput {
             ));
           }
 
+          // s468 (g-cps-split-local-from-session-unbound-on-server-s467) — §6.6.9:
+          // "`@session` is server-only identity and SHALL NEVER be marshalled from
+          // the client — doing so would be a spoofing hole." A local the server
+          // half reads from the request (`carriedLocals`, computed in the browser
+          // before the first server statement, §19.9.9.8 rule 4) whose value
+          // reaches an identity read — `const uid = @session.userId`, through any
+          // binding (`const s = @session; const o = { u: s.userId }`, `const getU =
+          // () => @session.userId`) — would make the server trust whatever the
+          // browser, or any HTTP request, sends as that local. The admission
+          // allow-list admits browser DATA; identity is not data the browser may
+          // supply. The statement cannot move to the server either (`@session` is
+          // not read there — E-SESSION-AMBIENT-SERVER), so the function is refused,
+          // and the message names the server's own read, `session.<field>` (§20.5).
+          // The follower is the §7.3.2 parameter-default one (free-name.ts
+          // `identityReadInDefaultDeep`), with the function's own locals resolved
+          // in the function's body first (a same-named local elsewhere in the file
+          // is not this one) and a parameter not followed (it is request input).
+          if (cpsResult && cpsResult.eligible && (cpsResult.carriedLocals ?? []).length > 0) {
+            const _fnName = record.fnNode.name ?? "<anonymous>";
+            const _sessionCellOwns = _fileScopeSessionCell.get(record.filePath) === true;
+            const _params = Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [];
+            const _paramNames = plainParamNames(record.fnNode);
+            const _ownProv = bindingsOfFile({ filePath: record.filePath, nodes: body, imports: [] }, null, () => false);
+            const _fileResolve = identityNameResolver(record.filePath);
+            // A local of this function: every value source binding-provenance reads,
+            // plus every top-level statement that may write it by any route
+            // (`localsWrittenBy` with mutations — raw text, `xs.forEach((x) => { n = … })`,
+            // `o.push(…)`, a call it is passed to) scanned whole. A write the provenance
+            // follower cannot read precisely is therefore scanned rather than refused:
+            // the question here is "can this value carry an identity", and the statement
+            // that writes it is where an identity read would be.
+            const _resolve = (nm: string): IdentityNameResolution => {
+              if (_paramNames.has(nm)) return null;
+              const own = _ownProv.get(nm) ?? [];
+              const owners: Array<{ params?: unknown; body?: unknown }> = [];
+              for (const b of own) {
+                if (b.kind === "fn") owners.push(b.node);
+                else if (b.kind === "expr") owners.push({ params: [], body: [b.node] });
+              }
+              for (const s of body) if (localsWrittenBy(s, true).has(nm)) owners.push({ params: [], body: [s] });
+              if (own.length === 0 && owners.length === 0) return _fileResolve(nm);
+              return { owners, serverCell: null, unresolved: null };
+            };
+            for (const _local of cpsResult.carriedLocals ?? []) {
+              const _id = identityReadInDefaultDeep({ kind: "ident", name: _local }, _params, {
+                currentUserAmbient: _fileScopeCurrentUserCell.get(record.filePath) !== true,
+                sessionProjection: !_sessionCellOwns,
+                helperSessionProjection: !_sessionCellOwns,
+                resolveName: _resolve,
+              });
+              if (_id === null) continue;
+              const _declIdx = body.findIndex((s: any) => s && typeof s === "object" &&
+                (s.kind === "let-decl" || s.kind === "const-decl" || s.kind === "lin-decl" || s.kind === "tilde-decl") &&
+                (s.name === _local || (s.name && typeof s.name === "object" && patternBoundNames(s.name).includes(_local))));
+              const _at = ((_declIdx >= 0 ? (body[_declIdx] as any)?.span : null) ?? record.fnNode.span) as Span;
+              const _serverRead = _id.read.startsWith("@session")
+                ? `session${_id.read.slice("@session".length) || ".userId"}`
+                : (_id.read.startsWith("session") ? _id.read : null);
+              const _what = _id.unresolved
+                ? `its value comes from \`${_id.read}\`, which the compiler cannot follow (${_id.why ?? "its provenance is not readable"}), so it may carry an identity`
+                : `\`${_local}\` holds an identity: it is computed in the browser from \`${_id.read}\`` +
+                  (_id.via && _id.via !== _local && _id.via !== _id.read ? ` (through \`${_id.via}\`)` : "");
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and its server ` +
+                `half reads \`${_local}\` from the request — but ${_what}. Identity is never taken from the ` +
+                `request (§6.6.9: \`@session\` is server-only identity and SHALL NEVER be marshalled from the ` +
+                `client): the server would trust whatever the browser, or any HTTP request, sends as ` +
+                `\`${_local}\`. Fix: read the identity in a server statement from the server's own session ` +
+                `object${_serverRead ? ` — \`const ${_local} = ${_serverRead}\`` : " (`session.<field>`, §20.5)"} — ` +
+                `instead of computing it in the browser.`,
+                _at,
+              ));
+            }
+          }
+
           if (cpsResult && cpsResult.eligible) {
             // §19.16.5 (S430 P3) — E-DEFER-SERVER-IN-SPLIT, both limbs. The
             // split itself is still installed below so no cascading E-RI-002
@@ -9300,6 +9376,114 @@ export function runRI(input: RIInput): RIOutput {
       cpsSplit,
       isChannelWsHandler: _isChannelWsHandler,
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Step 6b: §12.4 (S451 R2) E-ROUTE-002 — server code calling a CPS-split
+  // function (s468, g-server-fn-calls-cps-split-fn-unbound-s467).
+  //
+  // A CPS-split function writes a reactive cell (that is why it is split,
+  // §19.9.9: `findReactiveAssignment` gates the split), and reactive cells are
+  // client-only (§12.4 "Reactive cells are client-only"): "A server-escalated
+  // function whose static call graph reaches such an access through a callee,
+  // directly or transitively, SHALL be E-ROUTE-002". Code generation has no
+  // server-side callable for a split function (its server half is a route the
+  // browser calls, its cell writes run in the browser), so before this check the
+  // call compiled to a bare `add(m)` in the server module with nothing binding
+  // `add` — `ReferenceError` on every request (measured S467, re-measured s468).
+  //
+  // Server code = the whole body of a wholly-server function (an RPC function, an
+  // SSE generator, a `handle()` middleware, a channel `onserver:*` handler) and the
+  // server-batch statements of a CPS-split function (§19.9.9.8 rule 1 places a
+  // call of a server-placed function there). The walk follows the callees the
+  // server module emits as in-process peers (server-placed, not split) to any
+  // depth. Callee resolution is the Step 5c-bis rule: SAME-FILE declarations only,
+  // fire only when every same-file candidate is split; a name the calling body
+  // declares itself (a nested function, a local, a parameter) is not the
+  // file-level function.
+  // ------------------------------------------------------------------
+  {
+    const _splitIds = new Set<string>();
+    for (const [id, fr] of functions) if (fr.cpsSplit) _splitIds.add(id);
+    if (_splitIds.size > 0) {
+      const _calleesOfServerCode = (id: string): string[] => {
+        const rec = analysisMap.get(id);
+        const fr = functions.get(id);
+        if (!rec || !fr) return [];
+        const body: LogicStatement[] = Array.isArray(rec.fnNode.body) ? rec.fnNode.body : [];
+        const own = functionOwnNames(body, new Set(plainParamNames(rec.fnNode)));
+        let names: string[];
+        if (fr.cpsSplit) {
+          const srv = new Set<number>(fr.cpsSplit.serverStmtIndices);
+          const stmts = [...srv].sort((a, b) => a - b).map((i) => body[i]).filter((s) => s != null);
+          names = walkBodyForTriggers(
+            stmts, allProtectedFields, stateBlockIdByField, rec.filePath, false,
+            perFileImportedServerNamespaces.get(rec.filePath) ?? new Set<string>(),
+            perFilePrintShadowed.get(rec.filePath) ?? new Set<string>(),
+          ).callees;
+        } else {
+          names = rec.callees;
+        }
+        return [...new Set(names)].filter((n) => !own.has(n));
+      };
+      for (const [rootId, rootRoute] of functions) {
+        if (rootRoute.boundary === "client") continue;
+        const rootRec = analysisMap.get(rootId);
+        if (!rootRec) continue;
+        const rootName = rootRec.fnNode.name ?? "<anonymous>";
+        const visited = new Set<string>([rootId]);
+        const reported = new Set<string>();
+        const queue: Array<{ id: string; path: string[] }> = [{ id: rootId, path: [rootName] }];
+        while (queue.length > 0) {
+          const { id, path } = queue.shift()!;
+          const callerFile = analysisMap.get(id)?.filePath;
+          for (const calleeName of _calleesOfServerCode(id)) {
+            const resolved = (fnNameToNodeIds.get(calleeName) ?? [])
+              .filter((cid) => analysisMap.get(cid)?.filePath === callerFile && cid !== id);
+            if (resolved.length === 0) continue;
+            const chain = [...path, calleeName];
+            if (resolved.every((cid) => _splitIds.has(cid))) {
+              const target = resolved.find((cid) => !reported.has(cid));
+              if (target === undefined) continue;
+              reported.add(target);
+              const tRec = analysisMap.get(target)!;
+              const tBody: LogicStatement[] = Array.isArray(tRec.fnNode.body) ? tRec.fnNode.body : [];
+              const w = findReactiveAssignment(tBody) as any;
+              const cell = w && typeof w.name === "string" ? w.name : (w && typeof w.target === "string" ? w.target : null);
+              const writes = cell ? `it writes the reactive cell \`@${cell}\`` : "it writes a reactive cell";
+              const where = rootRoute.cpsSplit
+                ? `the server half of \`${rootName}\` (\`${rootName}\` is itself split across the client/server boundary, §19.9.9)`
+                : `the server function \`${rootName}\``;
+              const err = new RIError(
+                "E-ROUTE-002",
+                `E-ROUTE-002: ${where} calls \`${calleeName}\`, which is split across the client/server ` +
+                `boundary (§19.9.9) because ${writes}. Reactive cells live in the browser (§12.4: a server ` +
+                `function SHALL NOT reach a function that reads or writes a cell, directly or transitively), and a ` +
+                `split function's server part is a route the browser calls — there is no server-side \`${calleeName}\` ` +
+                `to call, so this call cannot run. Call chain: ${chain.join(" -> ")}. Fix by one of: call ` +
+                `\`${calleeName}\` from the browser (a client function or an event handler) instead; move the server ` +
+                `work of \`${calleeName}\` into a function without the cell write and call that from both sides, ` +
+                `writing the cell in the browser from its result; or return the value from \`${rootName}\` and write ` +
+                `the cell where it is called.`,
+                (rootRec.fnNode.span ?? tRec.fnNode.span) as Span,
+              );
+              err.severity = "error";
+              errors.push(err);
+              continue;
+            }
+            for (const cid of resolved) {
+              if (_splitIds.has(cid) || visited.has(cid)) continue;
+              const cr = functions.get(cid);
+              // follow only what the server module runs in-process (a client
+              // function is not emitted there — a separate defect class)
+              if (!cr || cr.boundary === "client") continue;
+              visited.add(cid);
+              queue.push({ id: cid, path: chain });
+            }
+          }
+        }
+      }
+    }
   }
 
   // ------------------------------------------------------------------
