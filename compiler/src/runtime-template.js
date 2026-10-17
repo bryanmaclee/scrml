@@ -4181,7 +4181,9 @@ function _scrml_error_boundary_uncaught(envelope) {
   return e;
 }
 
-// §19.6.6 — a render-time '!' call inside a boundary RETURNS its error. The
+// ---------------------------------------------------------------------------
+// §19.6.6 errorBoundary render-time call check (chunk: 'boundary')
+// A render-time '!' call inside a boundary RETURNS its error. The
 // compiler wraps each such call: a success passes through; an error envelope is
 // raised (an Error carrying it on '.scrmlError', as above) so the rest of the
 // render stops and the boundary's catch gets the TYPED failure. A Promise result

@@ -58,3 +58,28 @@
   call evaluated once, not twice) + newly-rejecting (render positions with no boundary catch site: attribute values,
   each rows, arm bodies, mount-deferred lift groups, text-carried positions; and E-ERROR-005 for value-position calls in a
   boundary without fallback). Corpus measurement: below.
+- 2026-10-17T16:20 commit cf1bd5836 (hook: 37118 pass / 0 fail / 125 skip). Push BLOCKED by the pre-push generated-doc
+  gate (docs/FACTS.md facts-table stale) — regen after the last content commit, as the gate says.
+- CORPUS (scripts/corpus-emit-differential.ts; roots examples, samples, conformance/cases, stdlib; base = `git archive
+  origin/main` 5c43c3b8e, head = cf1bd5836 tree): 2840 sources both sides, compile outcome 1700 ok / 1140 failed on BOTH;
+  compile-failure SET delta 0 newly failing / 0 newly passing; diagnostic-CODE changes 0; diagnostic-text-only 1
+  (samples/login.scrml — an already-failing sample whose E-CG-001 message cites a client-bundle line number that moved
+  with the runtime). => **newly-rejecting: 0 corpus sites.** The tool prints "NOT A VALID COMPARISON" only because the
+  base side is an archive (git rev-parse fails at capture) — the enumeration and compile sets are identical.
+  Artifact diffs: every page shipping the 'errors' runtime chunk grew by the helpers (+2279 B raw) — not minimal.
+- Security await pack (classify.js --json), base vs head: 424 shapes each, identical class per shape (PASS 249,
+  PASS-REFUSED 136, PASS-500 20, FAIL 10, PASS-DENY 8, UNJUDGED 1) — 0 new FAIL.
+- 2026-10-17T16:35 MINIMAL RUNTIME: the four helpers moved to their own runtime chunk 'boundary' (runtime-chunks.ts
+  RUNTIME_CHUNK_ORDER + marker + CHUNK_DEPENDENCIES boundary -> errors), shipped only when the client names one; the
+  interpolation render fn emits the typed-failure routing only when its expression lowered a check, so a boundary with
+  no render-time `!` call is byte-identical to base. Chunk-count pins 43 -> 44 (runtime-tree-shaking, c10).
+- 2026-10-17T16:55 CORPUS re-measured after the 'boundary' chunk (head2 = working tree): 2840 / 2840 sources; compile-failure
+  delta 0 / 0; diagnostic changes 0 code / 0 text-only; syntax delta 0. Client artifacts (client.js / html / runtime /
+  client-assets) differ in EXACTLY 7 sources — conformance/cases/error-boundary/{fallback, nested-inner-catches,
+  no-renders-falls-to-fallback, renders-multifield-payload, success-transparent, terse-fallback-closer, variant-renders},
+  each a render-time `!` call inside a boundary (the call is now checked; its module-init duplicate is gone). Every other
+  client artifact in the corpus is byte-identical to base. The remaining 188 diffs are `*.server.js` whose only change is
+  the absolute `_scrml_project_root` path of the two capture trees.
+- 2026-10-17T17:15 full gate (unit + integration + conformance) on the working tree: 34880 pass / 0 fail / 125 skip
+  (35018 tests, 1578 files). `bun scripts/facts.ts --write` (FACTS facts-table: compiler/src file/line counts) and
+  `bun scripts/state.ts --write`; both `--check` PASS. No SPEC edit (none authorized), so no spec-index regen.

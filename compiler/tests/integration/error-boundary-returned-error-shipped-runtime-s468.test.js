@@ -111,5 +111,19 @@ describe("the shipped (pruned) runtime catches a returned error at the call", ()
     expect(b.errors).toEqual([]);
     expect(b.clientJs).not.toContain("_scrml_error_boundary_check");
     expect(b.clientJs).not.toContain("_scrml_error_boundary_run");
+    // The helpers live in their own runtime chunk ('boundary'), shipped only when named.
+    expect(b.runtimeJs).not.toContain("function _scrml_error_boundary_check(");
+    expect(b.runtimeJs).not.toContain("function _scrml_error_boundary_run(");
+  });
+
+  test("a boundary interpolation with no `!` call keeps the 'errors' chunk but not the 'boundary' chunk", () => {
+    const b = build(`\${ function load(x) { return x } }
+<errorBoundary fallback={<div>FALLBACK</>}>
+    <p>\${load("a")}</p>
+</>
+`);
+    expect(b.errors).toEqual([]);
+    expect(b.runtimeJs).toContain("function _scrml_error_boundary_log(");
+    expect(b.runtimeJs).not.toContain("function _scrml_error_boundary_check(");
   });
 });
