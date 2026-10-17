@@ -10137,7 +10137,11 @@ For each server-escalated function, the compiler SHALL generate:
   singletons `@currentUser` / `@session` (§6.6.9 — not cells); channel-declared cells
   (E-CHANNEL-SERVER-CELL-READ, §38.4); and a CPS-split function's own reads, which are
   marshalled (§6.6.9) — the rule applies when a server-placed body CALLS a function that
-  touches a cell. The DOM-global limb of E-ROUTE-002 keeps its narrow root set (`document`,
+  touches a cell. Also not covered: a call made from the **server batch of a CPS-split
+  function** to a function that is itself CPS-split (§19.9.5) — that call is composed into
+  the batch (§19.9.9.8 rule 5, S468; Nominal — impl#1 keeps E-ROUTE-002 for it, fail-closed).
+  A wholly server-placed function that calls a CPS-split function is still covered: S468
+  ruled only the split-caller case. The DOM-global limb of E-ROUTE-002 keeps its narrow root set (`document`,
   `window`) below; this bullet adds the reactive-cell limb beside it.
   > **Provenance:** ruling:user-voice-scrml.md S451 "yes on all seven" (R2: *"any reactive-cell
   > read or write reached (transitively) from a server-placed body is E-ROUTE-002 with the chain
@@ -10149,6 +10153,12 @@ For each server-escalated function, the compiler SHALL generate:
   > reactive value"; R2 widens that to any cell read or write). **Direction of change:
   > newly-rejecting.** impl#1 does not fire it (filed `g-impl1-route-002-reactive-cell-chain-s451`:
   > the helper is left out of the server module and the call fails at run time).
+  > **Provenance:** ruling:user-voice-scrml.md S468 "your recos on both" (1) = (c) compose —
+  > quoted at §19.9.9.8 rule 5 · amends: this bullet's "Not covered here" list (the split →
+  > split call from a server batch is composed, not chain-refused; before S468 this bullet's
+  > chain refusal was the only rule that reached it, and it is what impl#1 enforces with
+  > `s468-cps-unbound-cluster` / PR #1442) · **Direction of change: newly-accepting (by
+  > ruling)** for that one call shape; no other caller changes.
 - When E-ROUTE-002 fires, the compiler error message SHALL identify: (a) the server function
   by name, (b) the client-only callee by name, and (c) the call chain between them. The
   message SHALL suggest one of the following resolutions: extract the shared logic into a
@@ -20715,6 +20725,32 @@ In a function the CPS split divides, the tier of each top-level statement is dec
 
    **A guard stays on the server.** A statement that reads a server-originated value (directly, or through a value a browser statement derived from one) and can skip or end the rest of the function — it holds a `return`, a `fail`, a `?` propagation, or a `break` / `continue` that leaves the statement, outside any nested function — and that is followed by a later server statement, SHALL be server-tier: whether the later server work runs is decided on the server. Every statement between the guard and that later server work SHALL join the same server batch, so the guard and the work it guards run in one request and no route performs the guarded work without the guard. A control statement (`if`, `match`, a loop) whose body holds server work and whose condition or body reads a server-originated value is server-tier the same way. If the guard, a statement between it and the guarded work, or such a control statement needs the browser, the function is refused with **`E-RI-002`**, whose message SHALL say to move the browser work after the server work, or split the function. A statement after the function's last server statement guards no server work and is not moved. When a server batch ends the function (a guard's `return`), the batch returns the cells it wrote so far together with the function's result, and the browser runs none of the function's later statements; a `fail` (or `?`) ends it with the error envelope, exactly as an unsplit server function's `fail` does.
 4. **The spinner shape is preserved.** Statements before the function's first server statement are never moved: `@busy = true` ahead of the query renders before the request leaves.
+5. **A split callee is composed into the caller's batch (S468).** *(Nominal — impl#1 refuses this shape; see the status note after the provenance below.)* A function the CPS split itself divides (§19.9.5) is a function placed on the server for rule 1. When a statement of a CPS-split function's server batch calls such a function, the call SHALL stay server-tier at the call site (rule 1, unchanged), and the caller's server batch SHALL run the callee in-process, in the same request — the composition of §13.4 applied to a split callee. No second request is made and the callee's own CPS route is not called.
+   - **The callee's statements run in the batch.** The callee's statements run at the call site, in the callee's source order, inside the caller's batch: its server statements exactly as in its own server batch, and its other statements by rule 3 — a callee statement that rule 3 permits to move runs in the batch; a callee statement that needs the browser cannot, and the **caller** is refused with **`E-RI-002`**, whose message SHALL name the callee, that statement and the call site. Rule 4 governs the function the client calls, not a composed callee: a callee statement before the callee's first server statement (a `@loading = true`) runs in the batch like the rest, and the client observes only the final value it returns.
+   - **The callee's cell writes join the caller's returned cell set.** The batch returns ONE `{ __scrml_cells: { … } }` carrying the final value of every cell written by the caller's batch or by any callee composed into it; a cell written more than once carries its last write in execution order.
+   - **The callee's cell reads follow §19.9.9.7.** A cell that an earlier statement of the batch — the caller's or a composed callee's — wrote reads that batch-local value; any other cell the callee reads is a marshal read (§6.6.9), and the caller's marshal set SHALL include it.
+   - **Result, values and failure stay on the server.** The callee's result is returned to the caller's batch in-process (rule 1, "its result is awaited there"); its locals, rows and other server-originated values are the batch's server-originated values and do not reach the client (rule 1, last sentence). A `return` in the callee — a guard's included — ends the callee, not the caller's batch. The callee's failure set at this call is its declared one (§19.9.10, "A server→server call"): the CPS-implicit `!` (§19.9.5) is a transport failure and does not arise, since no request is made; a declared failure is handled at the call site like any `!` call (§19.4.3).
+   - **One round trip.** The caller's server statements and every composed callee's run in one request, inside whatever transactional envelope the caller's batch has (§19.10.2, §19.10.5) — so in the "INSERT then reload" idiom the reload sees the row the `INSERT` wrote, and under an envelope it commits or rolls back with it.
+   - **Composition is transitive.** A composed callee whose own server statement calls a split function composes that function the same way.
+   - **Scope.** The rule governs a call made from the **server batch of a CPS-split function**. It does not change: a client call to a split function (the callee's own CPS stub, §19.9.5, §19.9.10); a call written in a browser statement the caller keeps after its last server statement (a client call); or a call from a **wholly server-placed** function to a split function, which S468 did not rule and which §12.4 (S451 R2) keeps as **`E-ROUTE-002`**.
+
+   ```scrml
+   <program db="sqlite:./shop.db">
+     <products> = []
+     <msg> = ""
+     ${ function loadProducts() {
+         @products = ?{`SELECT id, name FROM products ORDER BY id`}.all()
+     } }
+     ${ function save(name) {
+         ?{`INSERT INTO products (name) VALUES (${name})`}.run()
+         @msg = "saved"
+         loadProducts()
+     } }
+     <button onclick={ save("lamp") !{ _ :> log("save failed") } }>Save</button>
+   </program>
+   ```
+
+   `loadProducts` is split (it writes `@products` from server work); `save`'s server batch calls it. Under this rule `save` is ONE request: the `INSERT`, `@msg = "saved"` and `loadProducts`'s `SELECT` run in order in `save`'s batch, and the batch returns `{ __scrml_cells: { msg: "saved", products: [ … ] } }`, the new row included. A browser click on a button bound to `loadProducts()` alone still calls `loadProducts`'s own stub.
 
 > **Provenance:** ruling:user-voice-scrml.md S464 "Ratify (Recommended)" (bryan ratified §19.9.9.8 as normative; drafted in S462 P0 fix round 1, dispatch brief `docs/changes/s462-p0-cps-server-logic-to-client/progress.md` §FIX ROUND 1, relayed from the S239 review of `533609165`: H1 helper-check bypass, H2 hash through a local, H3 forged cross-batch cell runs a `DELETE`, H4 loop after a write) · supersedes: the §19.9.9.7 first bullet's "marshalled forward as a parameter to the later stub".
 >
@@ -20723,6 +20759,14 @@ In a function the CPS split divides, the tier of each top-level statement is dec
 > **Provenance:** ruling:user-voice-scrml.md S464 "(a) Guards stay server" (*"amend §19.9.9.8 rule 3: a statement that reads a server-originated value and can skip or end the function (`return` / `fail` / `break`, or an `if` whose body holds later server statements) is server-tier; if it also needs the browser, E-RI-002 (message: move the browser work after the server work, or split the function)"*; the motivating hole, PA-reproduced by emission in S465: `@ok = vp(pass, ?{SELECT pw…}.get().pw); if (!@ok) { alert("wrong"); return }; ?{INSERT …}.run()` split the guard into the browser and left the `INSERT` in its own batch route, callable without the check — the review's control-dependence findings g1/g4) · amends: the S464 "Ratify" text of rule 3, whose last sentence permitted that browser guard · implemented S466 (`docs/changes/s462-p0-cps-server-logic-to-client/progress.md` §FIX ROUND 3). The `?` propagation and the "every statement between" clause are the ruling's "can skip or end" and "the `INSERT` route callable by anyone" read through: a `?` is a `fail` (§19.5.2), and a statement left in the browser between the guard and the work splits them into two routes again.
 >
 > **Direction of change (pa-base §8): newly-rejecting.** A guard (or a statement between it and the guarded work) that needs the browser was accepted and is now `E-RI-002`; a browser-safe guard that was split into the browser now runs in the server batch (semantics-changed: the guarded work is no longer reachable without it). Measured S466 over examples, samples, conformance cases, `../giti` and `../flogence` (2,898 files, each compiled standalone, against `origin/main` `7f2b81418`): no previously-compiling program is newly refused, and no emitted artifact changes beyond the §19.9.9.8 round-1 record. **Target:** impl#1 (`analyzeCPSEligibility`; `codegen/cps-cell-writes.ts` `statementCanEndFunction` and the batch exit `__scrml_exit`).
+
+> **Provenance:** ruling:user-voice-scrml.md S468 "your recos on both" — item (1): *"**(1) = (c) compose.** `g-cps-rule1-split-callee-placement-ruling-s468`: in `save() { ?{INSERT…}.run(); @msg = "saved"; loadProducts() }` where `loadProducts` is itself CPS-split, §19.9.9.8 rule 1 keeps the call server-tier ("A statement that calls a function placed on the server SHALL be server-tier at the call site"), and the caller's server batch runs the callee's server half IN-PROCESS; the callee's cell writes join the caller's returned cell set — one round trip, atomic with the INSERT. Rejected: (a) keep refusing as the language rule; (b) re-tier the call into the browser as a second request. Under S435: SPEC text + a BOOTSTRAP build; impl#1 keeps the s468 E-ROUTE-002 refusal (fail-closed), the same split as dpa-023 F4/F5."* · amends: §12.4's S451 R2 bullet, whose "Not covered here" list now names this call (reconciled in the same edit, below) · supersedes: nothing written — §19.9.9.8 was silent on whether a split callee is "a function placed on the server".
+>
+> **Read-through (PA-drafted, S468, fail-closed).** The ruling speaks of the callee's "server half"; a split callee also has non-server statements. The text above runs those that rule 3 permits to move in the batch and refuses the caller (`E-RI-002`) when one needs the browser — the ruling rejected moving the call to the browser (b), and a browser statement inside a one-round-trip composition has nowhere else to run. "Atomic with the INSERT" is stated as "the same request, inside the caller's transactional envelope": §19.10.5 synthesizes an envelope only for a `!` handler with two or more queries, so a non-`!` caller has one request but no transaction. Both readings narrow, never widen, what the ruling admits; the owner may revisit either.
+>
+> **Status: Nominal / spec-ahead (S468).** impl#1 does not compose. With `s468-cps-unbound-cluster` (PR #1442, open when this was written) it refuses the shape with **`E-ROUTE-002`** (§12.4 R2 — the callee touches a cell), fail-closed; without that PR it emits a bare callee call into the server module that throws `ReferenceError` at run time. impl#1 is frozen for language semantics (S447) and keeps the refusal; the bootstrap builds composition (S435 split, as dpa-023 F4/F5). Ledger: `g-cps-split-callee-composition-nominal-s468`.
+>
+> **Direction of change (pa-base §8): newly-accepting (by ruling).** A program whose CPS-split function's server batch calls another split function — refused by impl#1 with PR #1442, miscompiled without it — is accepted under this rule and compiles to one request. Licensed by the S468 ruling above; no compiler changes in this edit.
 
 #### 19.9.10 A Client Call to a Server Function Is Failable (S451)
 
