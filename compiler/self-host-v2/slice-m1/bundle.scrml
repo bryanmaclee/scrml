@@ -10,6 +10,7 @@
     import { mkSym } from "../core.scrml"
     import { allNodes } from "../walk.scrml"
     import { printProgram } from "../print.scrml"
+    import { printServer } from "../print-server.scrml"
     import { checkCore } from "../check.scrml"
     import { countNodes } from "../measure.scrml"
     import { counterCore } from "./counter.core.scrml"

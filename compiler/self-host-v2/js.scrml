@@ -36,6 +36,9 @@ ${
         JArray(elems: JsExpr[]),
         JObject(props: JsProp[]),
         JAnnot(e: JsExpr, note: string),
+        // s468 (U1c): `await e` — printed ONLY for a Core Suspend in the server
+        // artifact (print.scrml serverStmtsJs; the S467 §13 gate's one await rule)
+        JAwait(e: JsExpr),
     }
 
     export type JsStmt:enum = {
@@ -49,6 +52,11 @@ ${
         SIf(test: JsExpr, thenB: JsStmt[], elseB: JsStmt[]),
         STry(body: JsStmt[], fin: JsStmt[]),      // s451: `try { body } finally { fin }` (the `defer` lowering)
         SFunc(name: string, params: string[], body: JsStmt[]),
+        // s468 (U1c): the server artifact — a function that waits (Core `waits`),
+        // and the two module exports (`manifest`, `createServer`)
+        SAsyncFunc(name: string, params: string[], body: JsStmt[]),
+        SExportConst(name: string, e: JsExpr),
+        SExportFunc(name: string, params: string[], body: JsStmt[]),
         SComment(text: string),
         SImportAll(name: string, from: string),
         SBlank,
@@ -135,6 +143,7 @@ ${
             .JArrow :> 2
             .JArrowE :> 2
             .JAnnot(e: inner) :> prec(inner)
+            .JAwait :> 15
         }
     }
 
@@ -179,6 +188,7 @@ ${
             .JCond :> false
             .JArray :> false
             .JAnnot :> false
+            .JAwait :> false
         }
     }
 
@@ -203,6 +213,7 @@ ${
             .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]"
             .JObject(props: ps) :> objectText(ps, ind)
             .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
+            .JAwait(e: x) :> "await " + wrap(x, 15, ind)
         }
     }
 
@@ -281,6 +292,11 @@ ${
             .STry(body: a, fin: f) :> ind + "try {\n" + stmts(a, ind + "  ") + ind + "} finally {\n" + stmts(f, ind + "  ") + ind + "}\n"
             .SFunc(name: n, params: ps, body: body) :>
                 ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
+            .SAsyncFunc(name: n, params: ps, body: body) :>
+                ind + "async function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
+            .SExportConst(name: n, e: e) :> ind + "export const " + n + " = " + expr(e, ind) + ";\n"
+            .SExportFunc(name: n, params: ps, body: body) :>
+                ind + "export function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
             .SComment(text: t) :> ind + "// " + t + "\n"
             .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n"
             .SBlank :> "\n"

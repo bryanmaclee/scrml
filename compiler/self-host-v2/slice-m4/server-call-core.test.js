@@ -146,8 +146,13 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
     const src = P(NOTES + `\n    function helper(id: string) -> int {\n        return wordCount(id)\n    }\n    function srv(id: string) -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        return helper(id)\n    }`);
     const r = clean(src);
     expect(r.typed.tables.server.inherited).toContain(fnInfo(r, "helper").sym.id);
-    expect(fnCore(r, "helper").waits).toBe(false);
-    expect(v(fnCore(r, "helper").body.stmts[0].data.e)).toBe("Call");       // a plain call, in place
+    // s468 (U1c, the S467 §13 gate): the call is in place (a Call, never a ServerCall) — and
+    // because wordCount WAITS on the server (it runs a query), it is a Suspend: helper waits too
+    expect(fnCore(r, "helper").waits).toBe(true);
+    const s0 = fnCore(r, "helper").body.stmts[0];
+    expect(v(s0)).toBe("Suspend");
+    expect(v(s0.data.on)).toBe("Call");
+    expect(s0.data.on.data.callee.hint).toBe("wordCount");
     const out = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js");
     expect(out.js).not.toContain("function helper");
   });
@@ -173,11 +178,11 @@ describe("S2 — §19.9.10 F5 (a): \"remote\" is a whole-program placement fact"
     expect(errCodes(P(NOTES, `        <p>\${wordCount("n1")}</p>`))).toEqual(["E-VALUE-SERVER-CALL"]);
   });
 
-  test("a server function calling a client function that waits → refused (an ambient function emitted per side is U1c)", () => {
+  test("a server function calling a client function that waits → refused (its server-side copy is not built — s468 U1c emits a function per side only as it is)", () => {
     const src = P(NOTES + "\n" + RECOUNT + `\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        recount()\n        return 1\n    }`);
     const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED");
     expect(d).toBeDefined();
-    expect(d.message).toContain("U1c");
+    expect(d.message).toContain("a second, server-side copy of `recount()`");
   });
 });
 
@@ -249,7 +254,14 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
   test("1 (twin): a total handler without `.Transport` at an own-trigger server site is valid and lowers to the callee's own enum", () => {
     const r = clean(P(WF + `\n    function sv9() -> int {\n        const r = ${SQ}\`SELECT 2\`}.get() !{ _ :> not }\n        const n = wf("a") !{ .Bad :> 1 }\n        return n\n    }`));
     const sv = r.core.server.find((x) => x.sym.hint === "sv9");
-    const at = sv.body.stmts.find((x) => v(x) === "Attempt" && x.data.call.data.fn && x.data.call.data.fn.hint === "wf");
+    // s468 (U1c): wf waits on the server (its query) — the in-place call is a Suspend, its Attempt over the outcome
+    const sus = [];
+    const walk = (n) => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === "object") { if (n.variant === "Suspend") sus.push(n); Object.values(n).forEach(walk); } };
+    walk(sv.body);
+    const onWf = sus.find((x) => v(x.data.on) === "Call" && x.data.on.data.callee.hint === "wf");
+    expect(onWf).toBeDefined();
+    const at = onWf.data.then.stmts[0];
+    expect(v(at.data.call)).toBe("FSettled");
     expect(at.data.err.hint).toBe("E");
     expect(mods.check.checkCore(r.core)).toEqual([]);
   });
@@ -262,9 +274,9 @@ describe("S2 fix round — own-trigger server sites, owner-named messages", () =
     expect(d.message).not.toContain("event handler runs");
   });
 
-  test("3: the U1c refusal names the chain once (no doubled parens, no repeated head)", () => {
+  test("3: the waiting-client-function refusal names the chain once (no doubled parens, no repeated head)", () => {
     const src = P(NOTES + `\n    function wc2() {\n        @words = wordCount("n1") !{ .Transport(t) :> 0 }\n    }\n    function hp() {\n        wc2()\n    }\n    function srv() -> int {\n        const r = ${SQ}\`SELECT 1\`}.get() !{ _ :> not }\n        hp()\n        return 1\n    }`);
-    const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("U1c"));
+    const d = run(src).diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("server-side copy"));
     expect(d).toBeDefined();
     expect(d.message).not.toContain("()()");
     expect(d.message).toContain("`hp() → wc2() → wordCount()`");

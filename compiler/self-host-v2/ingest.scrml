@@ -1060,6 +1060,7 @@ ${
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
         }
     }
 
@@ -1321,6 +1322,7 @@ ${
             .SeqCall(op: x) :> "Expr.SeqCall"
             .Validity(of: x) :> "Expr.Validity"
             .ServerCall(fn: x) :> "Expr.ServerCall"
+            .Query(q: x) :> "Expr.Query"
         }
     }
 

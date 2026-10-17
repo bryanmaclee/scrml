@@ -43,7 +43,8 @@ ${
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
              SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
-             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName } from "./analyze.scrml"
+             failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
+             sqlParamRep, distinctSqlParams } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
@@ -192,6 +193,7 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
     }
 
@@ -220,6 +222,7 @@ ${
             .SeqCall(op: x) :> op
             .Validity(of: x) :> op
             .ServerCall(fn: x) :> op
+            .Query(q: x) :> op
         }
     }
 
@@ -278,6 +281,7 @@ ${
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
         }
     }
 
@@ -521,6 +525,7 @@ ${
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
+            .Query(q: x) :> missing()
         }
     }
 
@@ -847,6 +852,7 @@ ${
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
             .ServerCall(fn: x) :> missing()
+            .Query(q: x) :> missing()
         }
     }
 
@@ -1626,9 +1632,18 @@ ${
                 // s454 (U1b): a WAITING function (the suspension plan's `waiting`) — its
                 // body in explicit continuations, every path ending in a Return (its
                 // Promise settles on every exit, print.scrml waiting functions)
+                // s468 (U1c): a SERVER-side waiting function (server-placed, or server-only by
+                // §12.2 Trigger 5) is printed as native `async` — a path that falls off simply
+                // ends the function, so it takes no Return tail
                 const waits: boolean = t.server.plan.waiting.indexOf(info.sym.id) >= 0
                 let body: Block = lowerBlock(c, s.f.body)
-                if (waits) body = cpsBody(body, [Stmt.Return(Expr.Lit(Literal.Absent))])
+                if (waits) {
+                    if (!remoteCaller(t, info.sym.id)) {
+                        body = cpsBody(body, [])
+                    } else {
+                        body = cpsBody(body, [Stmt.Return(Expr.Lit(Literal.Absent))])
+                    }
+                }
                 return { sym: info.sym, params: params, body: body, pure: info.pure, err: info.err, waits: waits }
             }
         }
@@ -1645,7 +1660,7 @@ ${
         // success-type slot, §19.4.1) the one its returns prove (the plan's `rets`)
         let ret: Type | not = info.ret
         if (ret is not) ret = retOf(t.server.plan, info.sym.id)
-        return { sym: f.sym, params: f.params, ret: ret, body: f.body, err: f.err }
+        return { sym: f.sym, params: f.params, ret: ret, body: f.body, err: f.err, waits: f.waits }
     }
 
     // =========================================================================
@@ -1688,8 +1703,12 @@ ${
         if (h.stmt) result = not
         const hd: AHandled | not = handledOfK(e.k)
         if (hd is not) {
-            // an implicit `?{}` propagation (§19.8.2): the query is the call
-            return Stmt.Attempt(result, failableOf(c, e), h.err, plainOk(h), retagArms(c, h))
+            // an implicit `?{}` propagation (§19.8.2): the query's settled outcome
+            // (s468 U1c: a query is a Suspend's `on` — the S467 §13 gate)
+            let icall: Failable = failableOf(c, e)
+            const isa: SuspendAt | not = suspendAtOf(c.t.server.plan, e.nid)
+            if (isa is given) icall = Failable.FSettled(isa.bind)
+            return Stmt.Attempt(result, icall, h.err, plainOk(h), retagArms(c, h))
         }
         // s454 (U1b): a handling form that suspends inspects the SETTLED outcome
         // (design §2.1 "Suspend waits, Attempt inspects"); its failure set is the
@@ -1733,10 +1752,11 @@ ${
         return { bind: h.ok, body: block([]), value: Expr.Local(h.ok) }
     }
 
-    // The call: a `!` function's (FCall) or a query (FSql).
+    // The call: a `!` function's (FCall). (s468 U1c: a query is never a Failable —
+    // the suspension plan makes every query a Suspend's `on`, inspected through
+    // FSettled; a query reaching here unplanned lowers to the no-call FCall, which
+    // check.scrml C-E2 reports — fail closed, never a query run unawaited.)
     fn failableOf(c: LC, e: AExpr) -> Failable {
-        const q: ASql | not = sqlOfExpr(e.k)
-        if (q is given) return Failable.FSql(sqlQueryOf(c, e, q))
         const k: AExprK = e.k
         return match k {
             .Call(callee: cal, args: args) :> failableCall(c, nameFact(c.t.names, cal.nid), args)
@@ -2091,7 +2111,8 @@ ${
         let params: Expr[] = []
         let slots: int[] = []
         for (const p of q.params) {
-            const x: Expr = lowerExpr(c, p)
+            // §8.2: a value lowers as the FIRST syntactically identical one (one slot, evaluated once)
+            const x: Expr = lowerExpr(c, sqlParamRep(q.params, p))
             const at: int = exprIndex(params, x)
             if (at < 0) {
                 params = params.concat([x])
@@ -2220,7 +2241,7 @@ ${
             .ObjectLit(props: ps) :> propValues(ps)
             .Spread(e: x) :> [x]
             .Index(obj: o, idx: i) :> [o, i]
-            .Sql(q: q) :> q.params
+            .Sql(q: q) :> distinctSqlParams(q.params)
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -2269,7 +2290,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: lp) :> []
-            .Sql(q: q) :> []
+            .Sql(q: q) :> distinctSqlParams(q.params)     // s468 (U1c): a query's distinct values (§8.2), evaluated before it waits
             .Handled(h: x) :> []
         }
     }
@@ -2282,11 +2303,24 @@ ${
         const on: Expr = match kd {
             .SRemote(callee: f) :> Expr.ServerCall(f, args)
             .SWaits(callee: f) :> Expr.Call(f, args)
+            .SLocal(callee: f) :> Expr.Call(f, args)       // s468 (U1c): an in-place server→server call that waits
+            .SQuery :> queryAt(c, e)                       // s468 (U1c): a `?{}` — a wait on the server
         }
         const sus: Stmt = Stmt.Suspend(sa.bind, on, block([]))
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
-        if (h is given && handledOfK(e.k) is given) return [sus, attemptOf(c, e, h)]
+        if (h is given && (handledOfK(e.k) is given || sqlOfExpr(e.k) is given)) return [sus, attemptOf(c, e, h)]
         return [sus]
+    }
+
+    // s468 (U1c) — the query a `?{}` suspension point runs: the handling form's
+    // subject, or (an implicit §19.8.2 propagation) the `?{}` node itself.
+    fn queryAt(c: LC, e: AExpr) -> Expr {
+        let node: AExpr = e
+        const h: AHandled | not = handledOfK(e.k)
+        if (h is given) node = h.subject
+        const q: ASql | not = sqlOfExpr(node.k)
+        if (q is not) return missing()
+        return Expr.Query(sqlQueryOf(c, node, q))
     }
 
     // An `if` / `given` that suspends in a branch with statements after it: a
@@ -2695,6 +2729,7 @@ ${
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
+            .Query(q: x) :> []
         }
     }
 

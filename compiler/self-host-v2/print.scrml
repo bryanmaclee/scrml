@@ -30,7 +30,7 @@ ${
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
-             Failable, OkArm, ErrArm, ServerFn,
+             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
@@ -48,7 +48,8 @@ ${
     // `routes` is the manifest — every server function the client calls, by
     // name, the route path its client call POSTs to, and whether it answers with a
     // value (`value: false` — the 204 no-value contract). The server artifact
-    // (the route handlers, the server half of the §57 codec) is unit U1c's.
+    // (the route handlers, the server half of the §57 codec) is print-server.scrml's
+    // (s468, U1c) — whose manifest is this same list.
     export type RouteOut:struct = { fn: string, path: string, value: boolean }
     export type Output:struct = { js: string, html: string, refused: string[], routes: RouteOut[] }
 
@@ -57,7 +58,7 @@ ${
 
     // The print environment: how each InstRef / local / handle is reached from
     // the code being printed. A value, extended by copy — never mutated.
-    type Ctx:struct = {
+    export type Ctx:struct = {
         p: CoreProgram,
         names: NameTable,
         lexical: JsExpr[],
@@ -69,6 +70,12 @@ ${
         // s454 (U1b): "" — ordinary code; else the name of the RESOLVE function a
         // waiting function's body returns through (`return ret$(v)`, below).
         ret: string,
+        // s468 (U1c): printing the SERVER artifact (print-server.scrml). A Suspend
+        // prints as `const b = await on;` followed by its `then` (the server has no
+        // task, no batch, no cell — design §3(a) "ServerFn bodies print as native
+        // `async function` with `await` in place"); a Join's body follows its If and
+        // a Jump prints nothing; a waiting function takes no task.
+        server: boolean,
     }
 
     type Rendered:struct = { stmts: JsStmt[], templates: Template[] }
@@ -98,6 +105,7 @@ ${
     }
 
     fn symName(ctx: Ctx, s: Sym) -> string { return nameOf(ctx.names, NameKey.OfSym(s.id)) }
+    export fn symNameOf(ctx: Ctx, s: Sym) -> string { return symName(ctx, s) }
     fn rtName(ctx: Ctx) -> string { return nameOf(ctx.names, NameKey.Runtime) }
     fn rtCall(ctx: Ctx, f: string, args: JsExpr[]) -> JsExpr { return jcall(jmember(jid(rtName(ctx)), f), args) }
 
@@ -301,8 +309,35 @@ ${
             .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
             .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")])
+            .Query(q: q) :> queryJs(ctx, q)
         }
     }
+
+    // s468 (U1c) — a `?{}` query (§8), on the SERVER: `rt.query(db$<id>, "<mode>",
+    // sql$<site>, [v0, …], [slot0, …])`. The text is the site's frozen literal
+    // runs (print-server.scrml prints `const sql$<site> = rt.sqlText([…])`); each
+    // DISTINCT value is evaluated ONCE, in order (§8.2 "a single positional
+    // parameter slot"), and `slots` maps the template's i-th `${}` to its value —
+    // the driver receives values only as bound parameters (§8.1). It stands only
+    // as a Suspend's `on` (check.scrml C-SQL2), so it is always awaited.
+    fn queryJs(ctx: Ctx, q: SqlQuery) -> JsExpr {
+        let slots: JsExpr[] = []
+        for (const i of q.slots) { slots = slots.concat([jnum(i)]) }
+        return rtCall(ctx, "query", [jid(dbVarName(q.db)), jstr(sqlModeName(q.mode)), jid(sqlTextName(q.site.n)), JsExpr.JArray(exprsJs(ctx, q.params)), JsExpr.JArray(slots)])
+    }
+
+    fn sqlModeName(m: SqlMode) -> string {
+        return match m {
+            .All :> "all"
+            .Get :> "get"
+            .Run :> "run"
+        }
+    }
+
+    // The printer-reserved names (`$` never survives NameSupply's sanitize, so no
+    // program name collides): a database's connection, a query site's text.
+    export fn dbVarName(db: Sym) -> string { return "db$" + db.id }
+    export fn sqlTextName(site: int) -> string { return "sql$" + site }
 
     // s454 (U1b) — a call of a WAITING client function (Fn.waits, §13.2 async
     // colour) hands it the caller's task first: its continuations run in that
@@ -311,7 +346,7 @@ ${
     // as a Suspend's `on` (check.scrml C-S7 / C12), so `task$` is bound there.
     fn callJs(ctx: Ctx, f: Sym, args: Expr[]) -> JsExpr {
         const fd: Fn | not = findFn(ctx.p, f)
-        if (fd is given) {
+        if (fd is given && !ctx.server) {
             if (fd.waits) return jcall(jid(symName(ctx, f)), [jid("task$")].concat(exprsJs(ctx, args)))
         }
         return jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
@@ -319,7 +354,7 @@ ${
 
     // s454 (U1b) — the module constant describing server function `f`'s route
     // (path + the §57 wire tables its client call encodes / decodes with).
-    fn routeName(f: Sym) -> string { return "route$" + f.hint.replaceAll("$", "_") }
+    export fn routeName(f: Sym) -> string { return "route$" + f.hint.replaceAll("$", "_") }
 
     // s449 — the validity surface (§55.5 / §55.6): `rt.validity(inst, i)` is
     // field i's record, `rt.compound(inst)` the declaration's; a property is
@@ -517,9 +552,107 @@ ${
     fn blockJs(ctx: Ctx, b: Block) -> JsStmt[] {
         const assigned: int[] = assignedSyms(Node.NBlock(b))
         let out: JsStmt[] = []
-        for (const s of b.stmts) { out = out.concat(stmtJs(ctx, s, assigned)) }
+        if (ctx.server) {
+            out = serverStmtsJs(ctx, b.stmts, assigned)
+        } else {
+            for (const s of b.stmts) { out = out.concat(stmtJs(ctx, s, assigned)) }
+        }
         if (holdsDefer(b)) return deferBlockJs(ctx, out)    // s451
         return out
+    }
+
+    // s468 (U1c) — a block in SERVER mode: the explicit continuations of Core
+    // print as straight-line async JavaScript. `Suspend(b, on, then)` is
+    // `const b = await on;` then `then`'s statements (they are the rest of the
+    // block, C12); `Join(k, body)` + the If it precedes is the If, then `body`
+    // (every path through the If that does not leave ends in Jump(k) — C12 — so
+    // falling off the If IS the jump); `Jump(k)` prints nothing. THE ONE `await`
+    // RULE (S467 §13 gate): `await` is printed here, at a Suspend, and nowhere
+    // else. The `then` is printed as its own block (its own `defer` stack, if it
+    // holds one) flattened in place — its statements run in this function.
+    fn serverStmtsJs(ctx: Ctx, ss: Stmt[], assigned: int[]) -> JsStmt[] {
+        let out: JsStmt[] = []
+        let pendingJoin: Block | not = not
+        for (const s of ss) {
+            const sp: SuspendParts | not = suspendPartsOf(s)
+            const jb: Block | not = joinBodyOf(s)
+            if (sp is given) {
+                out = out.concat([JsStmt.SConst(symName(ctx, sp.bind), JsExpr.JAwait(exprJs(ctx, sp.on)))])
+                out = out.concat(blockJs(ctx, sp.then))
+            } else if (jb is given) {
+                pendingJoin = jb
+            } else if (!isJump(s)) {
+                out = out.concat(stmtJs(ctx, s, assigned))
+                const k: Block | not = pendingJoin
+                if (k is given) {
+                    out = out.concat(blockJs(ctx, k))
+                    pendingJoin = not
+                }
+            }
+        }
+        return out
+    }
+
+    type SuspendParts:struct = { bind: Sym, on: Expr, then: Block }
+
+    fn suspendPartsOf(s: Stmt) -> SuspendParts | not {
+        return match s {
+            .Suspend(bind: b, on: on, then: t) :> { bind: b, on: on, then: t }
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Join(k: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn joinBodyOf(s: Stmt) -> Block | not {
+        return match s {
+            .Join(k: k, body: b) :> b
+            .Suspend(bind: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
+            .Jump(k: x) :> not
+        }
+    }
+
+    fn isJump(s: Stmt) -> boolean {
+        return match s {
+            .Jump(k: x) :> true
+            .Join(k: x) :> false
+            .Suspend(bind: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
+        }
     }
 
     // s451 — `defer` (§19.16.6, the informative shape): a block that holds a
@@ -625,7 +758,6 @@ ${
     fn failableJs(ctx: Ctx, c: Failable) -> JsExpr {
         return match c {
             .FCall(fn: f, args: args) :> jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
-            .FSql(q: q) :> JsExpr.JNull     // unreachable: a query stands only in a ServerFn (C-S2), which the client artifact omits
             .FSettled(outcome: o) :> localRead(ctx, o)   // s454 (U1b): the Suspend's settled outcome
         }
     }
@@ -960,7 +1092,7 @@ ${
     // its instances when it mounts: those are the conditional ones (§66.7.5).
     fn nested(ctx: Ctx) -> Ctx {
         return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
-                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret }
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server }
     }
 
     // F16: one arm binds a field (a match over an imported payload enum).
@@ -1195,6 +1327,7 @@ ${
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
+            .Query(q: x) :> []
         }
     }
 
@@ -1258,7 +1391,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false, ret: ctx.ret, server: ctx.server,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -1304,6 +1437,7 @@ ${
             .JArray :> false
             .JObject :> false
             .JAnnot :> false
+            .JAwait :> false
         }
     }
 
@@ -1426,7 +1560,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "" }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: false }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -1436,7 +1570,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "" }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true, ret: "", server: false }
     }
 
     fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[]) -> Rendered {
@@ -1654,6 +1788,7 @@ ${
             .SeqCall(op: o) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
         }
     }
 
@@ -1763,7 +1898,7 @@ ${
         }
         let ret: string = ""
         if (f.waits) ret = "ret$"
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false, ret: ret, server: false }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         if (!f.waits) return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
@@ -1775,6 +1910,28 @@ ${
         // a scrml failure: a `fail` resolves with the Failure value.
         return JsStmt.SFunc(symName(ctx, f.sym), ["task$"].concat(params),
             prologue.concat([JsStmt.SReturn(rtCall(ctx, "waiting", [jid("task$"), JsExpr.JArrow(["ret$"], blockJs(fctx, f.body))]))]))
+    }
+
+    // -------------------------------------------------------------------------
+    // s468 (U1c) — the SERVER artifact's pieces (print-server.scrml assembles
+    // them). The names: the client's NameTable with every ServerFn minted after
+    // (so no client name changes), the runtime as `rt`. A server-side function
+    // is `async function` iff Core says it WAITS (Fn.waits / ServerFn.waits —
+    // check.scrml C-S8 / C-S8s), its body printed in server mode (blockJs:
+    // `await` at each Suspend and nowhere else). No prologue: a server-reached
+    // body touches no shared instance (check.scrml C-S1).
+    // -------------------------------------------------------------------------
+    export fn serverCtx(p: CoreProgram) -> Ctx {
+        let names: NameTable = planNames(p)
+        for (const sf of p.server) { names = mint(names, NameKey.OfSym(sf.sym.id), sf.sym.hint) }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false, ret: "", server: true }
+    }
+
+    export fn serverFnJs(ctx: Ctx, sym: Sym, params: Param[], body: Block, waits: boolean) -> JsStmt {
+        let ps: string[] = []
+        for (const prm of params) { ps = ps.concat([symName(ctx, prm.sym)]) }
+        if (waits) return JsStmt.SAsyncFunc(symName(ctx, sym), ps, blockJs(ctx, body))
+        return JsStmt.SFunc(symName(ctx, sym), ps, blockJs(ctx, body))
     }
 
     // -------------------------------------------------------------------------
@@ -1791,13 +1948,13 @@ ${
     fn sqlSigil() -> string { return "?" + "{" }
 
     // s454 (U1b): the refusal of a program WITH server functions is lifted —
-    // the client artifact is printed, its server half omitted (U1c). A query
+    // the client artifact is printed (s468: print-server.scrml prints the server half). A query
     // anywhere but a server function is still refused (C-S2 makes it
     // unrepresentable; this keeps the printer fail-closed on a bad Core).
     fn serverRefusal(p: CoreProgram) -> string[] {
         let out: string[] = []
         if (holdsQuery(p) && p.server.length == 0) {
-            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `" + sqlSigil() + "}` query outside a server function — the client printer has no SQL (unit U1c)"])
+            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `" + sqlSigil() + "}` query outside a server function — the client printer has no SQL (a query stands only in a server function, check.scrml C-S2)"])
         }
         return out
     }
@@ -1811,8 +1968,8 @@ ${
 
     fn nodeIsQuery(n: Node) -> boolean {
         return match n {
-            .NStmt(s: s) :> stmtIsQuery(s)
-            .NExpr(e: x) :> false
+            .NExpr(e: e) :> exprIsQuery(e)
+            .NStmt(s: x) :> false
             .NProgram(p: x) :> false
             .NDecl(d: x) :> false
             .NField(f: x) :> false
@@ -1828,31 +1985,24 @@ ${
         }
     }
 
-    fn stmtIsQuery(s: Stmt) -> boolean {
-        return match s {
-            .Attempt(call: c) :> failableIsQuery(c)
-            .Let(sym: x) :> false
-            .Assign(local: x) :> false
-            .Write(cap: x) :> false
-            .Commit(writes: x) :> false
-            .If(cond: x) :> false
-            .Return(e: x) :> false
-            .Eval(e: x) :> false
-            .Suspend(bind: x) :> false
-            .ResetSurface(of: x) :> false
-            .Defer(body: x) :> false
-            .Unpersist(decl: x) :> false
-            .Fail(err: x) :> false
-            .Join(k: x) :> false
-            .Jump(k: x) :> false
-        }
-    }
-
-    fn failableIsQuery(c: Failable) -> boolean {
-        return match c {
-            .FSql(q: x) :> true
-            .FCall(fn: x) :> false
-            .FSettled(outcome: x) :> false
+    fn exprIsQuery(e: Expr) -> boolean {
+        return match e {
+            .Query(q: x) :> true
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+            .ServerCall(fn: x) :> false
         }
     }
 
@@ -1876,7 +2026,7 @@ ${
         // s454 (U1b): the routes of the server functions the client calls
         const called: ServerFn[] = calledServerFns(p)
         let routes: RouteOut[] = []
-        if (called.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("server routes (the client half of each call — the server artifact is unit U1c)")])
+        if (called.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("server routes (the client half of each call — the server artifact holds the other half)")])
         for (const sf of called) {
             body = body.concat([routeJs(p, sf)])
             routes = routes.concat([{ fn: sf.sym.hint, path: routePath(sf.sym), value: sf.ret is given }])
@@ -1884,7 +2034,8 @@ ${
         // s454 (U1b): a function whose calls reach a server function IN PLACE
         // (§12.2 Trigger 5 — server-placed by inheritance) is server code: it
         // is not in the client artifact.
-        const serverOnly: int[] = serverOnlyFns(p)
+        // s468 (U1c): nor is one only server functions reach ("Trigger 5 is emission").
+        const serverOnly: int[] = serverOnlyFns(p).concat(reachedOnlyByServer(p))
         let clientFns: Fn[] = []
         for (const f of p.fns) { if (!hasInt(serverOnly, f.sym.id)) clientFns = clientFns.concat([f]) }
         if (clientFns.length > 0) body = body.concat([JsStmt.SBlank, JsStmt.SComment("functions")])
@@ -1931,7 +2082,7 @@ ${
     // =========================================================================
     export fn routePath(s: Sym) -> string { return "/_scrml/call/" + s.id }
 
-    fn routeJs(p: CoreProgram, sf: ServerFn) -> JsStmt {
+    export fn routeJs(p: CoreProgram, sf: ServerFn) -> JsStmt {
         let params: JsExpr[] = []
         for (const prm of sf.params) { params = params.concat([wireOrNull(p, prm.ty)]) }
         let result: JsExpr = JsExpr.JNull
@@ -1956,7 +2107,7 @@ ${
     }
 
     // The ServerFns a ServerCall names, in program order, each once.
-    fn calledServerFns(p: CoreProgram) -> ServerFn[] {
+    export fn calledServerFns(p: CoreProgram) -> ServerFn[] {
         let ids: int[] = []
         for (const n of allNodes(Node.NProgram(p))) {
             const s: Sym | not = nodeServerCall(n)
@@ -1989,6 +2140,7 @@ ${
     fn exprServerCall(e: Expr) -> Sym | not {
         return match e {
             .ServerCall(fn: f) :> f
+            .Query(q: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -2004,6 +2156,54 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
         }
+    }
+
+    // s468 (U1c) — "Trigger 5 is emission" (U1 design §2: "The server artifact
+    // contains the transitive closure (over Core `Call` Syms) of every ServerFn;
+    // the client artifact the closure of the client roots"): a function only
+    // server functions reach — through a call in their bodies, in a query's
+    // value, or through other functions — is in the server artifact and not
+    // here. One the client also reaches is printed in both (§13.4 "TWO
+    // representations"); one nobody reaches stays here (dead either way).
+    fn reachedOnlyByServer(p: CoreProgram) -> int[] {
+        let croots: int[] = []
+        for (const d of p.decls) { croots = croots.concat(fnCalleesIn(p, Node.NDecl(d))) }
+        const client: int[] = fnClosure(p, croots)
+        let sroots: int[] = []
+        for (const sf of p.server) { sroots = sroots.concat(fnCalleesIn(p, Node.NServerFn(sf))) }
+        const server: int[] = fnClosure(p, sroots)
+        let out: int[] = []
+        for (const id of server) { if (!hasInt(client, id)) out = out.concat([id]) }
+        return out
+    }
+
+    // The Fns (not ServerFns) a node tree calls.
+    fn fnCalleesIn(p: CoreProgram, root: Node) -> int[] {
+        let out: int[] = []
+        for (const n of allNodes(root)) {
+            const c: Sym | not = nodePlainCallee(n)
+            if (c is given) {
+                if (findFn(p, c) is given && !hasInt(out, c.id)) out = out.concat([c.id])
+            }
+        }
+        return out
+    }
+
+    // `start` and every Fn they reach by a call, transitively.
+    fn fnClosure(p: CoreProgram, start: int[]) -> int[] {
+        let out: int[] = []
+        let todo: int[] = start
+        while (todo.length > 0) {
+            const id: int = todo[0]
+            todo = todo.slice(1)
+            if (!hasInt(out, id)) {
+                out = out.concat([id])
+                for (const f of p.fns) {
+                    if (f.sym.id == id) todo = todo.concat(fnCalleesIn(p, Node.NFn(f)))
+                }
+            }
+        }
+        return out
     }
 
     // The Fns that call a server function IN PLACE — a plain Call of a ServerFn,
@@ -2057,6 +2257,7 @@ ${
         return match e {
             .Call(callee: f) :> f
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -2096,7 +2297,6 @@ ${
     fn failableCallee(c: Failable) -> Sym | not {
         return match c {
             .FCall(fn: f) :> f
-            .FSql(q: x) :> not
             .FSettled(outcome: x) :> not
         }
     }

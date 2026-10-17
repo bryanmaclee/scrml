@@ -31,3 +31,85 @@
    SAME position table as the client (amendment §13 item 2 last bullet), and print-server emits `await` at
    each Suspend and nowhere else. CPS (body split) is OUT of U1c: the design puts it in U1d (row U1d), and
    U1c keeps Split refused.
+
+## 2026-10-17T23:40Z — step 1: the §13 gate + the server artifact (Core, analyze, lower, check, print, print-server, runtimes)
+
+### Governing sentences (quoted)
+- §13.2: "The compiler SHALL insert `await` at every call site where a server-generated fetch call is made." · "The
+  compiler SHALL wrap any function containing at least one server call in an `async` function in generated code."
+- §13.8 (S467, the one rule): "A waiting value SHALL stand only in one of two places: (i) At a suspension point of an
+  action position, where the compiler awaits it. The action positions are … a function body (client or server) …"
+  · "Everywhere else a waiting value SHALL be a compile error." · item 2 of "a waiting value": "a `?{}` query (§8),
+  written in the position or reached through a function it calls".
+- §13.4: "The callee SHALL NOT generate an additional HTTP route when called from a server-escalated caller." · "If
+  function A (server-escalated) calls function B (server-escalated), and function B is also referenced from client
+  code, the compiler SHALL generate TWO representations of B".
+- §12.3: "For each server-escalated function, the compiler SHALL generate: A server-side route handler. … Serialization
+  and deserialization for all arguments and return values." · route names: "the developer SHALL NOT reference,
+  configure, or even observe it in scrml source."
+- §12.5.3: "A generated route handler SHALL produce a COMPLETE HTTP RESPONSE, not a bare value … on every path".
+- §8.1 / §8.2: "`${}` inside a SQL template SHALL be compiled to a positional bound parameter" · "If the same expression
+  appears more than once in a single SQL template, the compiler SHALL assign it a single positional parameter slot …
+  Complex expressions (function calls, member accesses) are NOT deduplicated unless they are syntactically identical."
+- §19.9.1 / §19.9.2: the `fail` envelope `{ __scrml_error: true, type, variant, data }` and the status heuristic
+  (NotFound 404, Auth/Forbidden/Unauthorized 403, Validation/Invalid 400, else 500).
+- §39.2.3: "without `auth=`, baseline double-submit cookie helpers are auto-emitted on routes that mutate state."
+- §57.4 (R10): the decoder on a compiler-internal route "SHALL be strict".
+- U1 design §13 (S467, BINDING): "print-server SHALL NOT decide whether to await a call by looking at the callee's
+  name … It prints what Core says." · "a Core `waits` fact on server Fns … `checkCore` re-verifies it (a new check
+  C-S8s, or C-S8 widened to ServerFns). The printer emits `await` exactly at each Suspend".
+
+### Locus (PA-located-verify) — traced
+The brief's locus was the design doc's U1c row (print-server, srt, route, server-executor seam). Traced from the entry:
+`print.scrml printProgram` printed the client half only; server bodies were lowered (`lower.scrml lowerServerFn`) with
+queries as `Attempt(FSql)` and in-place server→server calls as plain `Call`s — no wait was represented in Core on the
+server side at all (C-S1 forbade a Suspend in a ServerFn). So the hypothesis "U1c = a printer over the existing server
+Core" was REFINED: the server half needed its waits made Core FIRST (the §13 gate), then the printer.
+
+### What changed (one mechanism, each fact in one place)
+- core.scrml: `Expr.Query(q)` (a query is a Suspend's `on`); `Failable.FSql` removed; `ServerFn.waits`.
+- analyze.scrml: summary dimension `swaits` (own `?{}`, closed over CALLS — computed once); the suspension plan now
+  covers SERVER bodies (server-placed + Trigger-5 inherited) with kinds `SQuery` / `SLocal(callee)` and the SAME
+  position table as the client (refused: `&&`/`||` right operand, ternary branch, `!{}`/`match` arm, `defer` body,
+  lambda, indexed-write value — amendment item 2 last bullet); §8.2 dedup decided on the syntax tree
+  (`sqlParamKey` / `distinctSqlParams` / `sqlParamRep`) so a waiting value in a query is ONE slot evaluated ONCE.
+- lower.scrml: queries lower to `Suspend(o, Query(q), [Attempt(…, FSettled(o), SqlError, …) …])`, in-place waiting
+  calls to `Suspend(b, Call(f, args), …)`; server-side bodies through the continuation pass with no Return tail;
+  `ServerFn.waits` / `Fn.waits` from the plan.
+- check.scrml: C-S8s (ServerFn.waits ⟺ holds a Suspend; a call of a waiting Fn OR ServerFn only as a Suspend's `on`),
+  C-SQL2 (a Query only as a Suspend's `on`), C-S7 extended to a Query (`SqlError` set) and to a `!` ServerFn callee,
+  C12 widened (a server body is a continuation owner), C-S1: a Suspend is no longer client state (its `on` is judged —
+  a ServerCall there still is).
+- print.scrml: a server mode (`Ctx.server`): a Suspend prints `const b = await on;` + its `then` flattened, a Join's body
+  follows its If, a Jump prints nothing — `await` is printed THERE AND NOWHERE ELSE; `queryJs` →
+  `rt.query(db$<id>, mode, sql$<site>, [distinct values], [slots])`; the client artifact omits a function only server
+  functions reach (design §2 "Trigger 5 is emission").
+- print-server.scrml (NEW): `printServer(core) → { js, refused, routes }` — `manifest`, `route$<fn>` (the SAME
+  `routeJs` tables as the client), `sql$<site>` texts frozen at load, `createServer(host$)` with one injected
+  connection per database, the reached server/ambient functions (async iff Core waits), `rt.server(host$, [rt.route…])`.
+- slice-m1/runtime/server-runtime.js (NEW): `connection` (host.connect, default Bun.SQL), `query` (bound values only,
+  a driver error → a `SqlError` Failure + a server log line), `route` / `server` (POST only, §39.2.3 double-submit,
+  strict decode → 400 before the body, 200 / 204 / the `fail` envelope with §19.9.2 status / a fixed 500 on a throw —
+  a complete response on every path, built by `host.respond` or the global `Response`).
+- slice-m1/runtime/runtime.js: `call` sends `X-CSRF-Token` from the `scrml_csrf` cookie and retries ONCE when a 403
+  plants a new token; `CSRF_COOKIE` / `CSRF_HEADER` one definition (server-runtime.js imports them).
+- js.scrml: `JAwait`, `SAsyncFunc`, `SExportConst`, `SExportFunc`.
+
+### Readings flagged (for veto)
+- R-a: a `defer` in a waiting SERVER function is NOT refused (the client refuses it): native `async` + the `try … finally`
+  the printer already emits runs it at the real exit (§19.16.2). A `defer` body still cannot wait (C16).
+- R-b: the waiting AMBIENT function (one a client root reaches that makes a client call of a server function) called
+  from a server function stays REFUSED (E-BOOTSTRAP-UNSUPPORTED, message reworded): its two representations differ in
+  body, and Core holds one body per function. Non-waiting ambient functions ARE emitted per side.
+- R-c: the server builds responses through `host.respond(status, headers, body)` when given (default: the host's global
+  `Response`) — §12.5.3 binds observable behaviour, not a JS shape (S278).
+
+### Evidence (executed)
+- `bun test ./compiler/self-host-v2/` — 2347 pass / 1 todo / 0 fail (69 files; +66 = slice-m4/server-artifact.test.js,
+  +1 C12 bite). `SLICE_CORE=lowered … slice-m1` 99/0 · self-host-v2-lexer 337/0 · lint-no-default-arm 0 violations.
+- `bootstrap-conformance.ts` — identical to baseline (189/74/674/858; per-case diff empty).
+- The await probes (slice-m4/server-await-probes.js, 31 shapes): 25 PASS (wrong → REJECTED, right → WELCOME), 6
+  REFUSED at compile time (andRight, ternaryBranch, lambdaFilter, armBody, fnValueAlias → E-BOOTSTRAP-UNSUPPORTED;
+  valuePosition → E-VALUE-SERVER-CALL). 0 FAIL.
+- Bite: f's `Suspend(Call(check))` unsuspended → checkCore C-S8s RED; `check.waits` forced false → C-S8s RED; the
+  unsuspended program printed anyway ANSWERS "WELCOME" TO A WRONG PASSWORD (the defect class, reproduced and gated).

@@ -15675,6 +15675,15 @@ ${
         return { chain: fxChain(s, s.waits, i, a), what: "" }
     }
 
+    // s468 (U1c): does `sym` wait when it runs on the server — and through which chain?
+    fn swaitsOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.swaits[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.swaits, i, a), what: "" }
+    }
+
     // The functions' own facts, as the summary read them (one scan per body).
     fn fnFactsOf(s: Summary) -> FnFacts[] {
         let out: FnFacts[] = []
@@ -16109,7 +16118,7 @@ ${
             } else if (sum.inherited.indexOf(f.sym) >= 0) {
                 // s454 (U1b): server-placed by inheritance (§12.2 T5) — its calls
                 // run in place on the server: a waiting client function there is
-                // an ambient function emitted per side (U1c)
+                // a server-side copy of an ambient function (s468: not built — waitingCallees)
                 st = waitingCallees(f, all, places, sum, st)
             }
             // (s454: a client function's call of a server function is judged by the
@@ -16162,13 +16171,18 @@ ${
     // inheritance) calling a client function that WAITS (it makes a client
     // call of a server function): on the server that callee would have to run
     // its server calls in place, which is the per-side emission of an ambient
-    // function (unit U1c). Refused, fail closed.
+    // function. s468 (U1c): U1c emits an ambient function on each side that
+    // reaches it (§13.4 "TWO representations") — but THIS one's two
+    // representations differ in their bodies (its server calls are client
+    // calls on one side and in-place calls on the other), and Core holds one
+    // body per function. Still refused, fail closed (a later slice: a binder-
+    // minted server copy, lowered under the server plan).
     fn waitingCallees(f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
         for (const r of fnRefs(all, f)) {
             if (placeOf(ps, r.sym) != PlaceK.Server && sum.inherited.indexOf(r.sym) < 0 && !r.asValue) {
                 const w: Reach | not = waitsOf(sum, r.sym)
-                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs `" + r.name + "` emitted for each side (the bootstrap's unit U1c). Until then call the server function directly")
+                if (w is given) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` runs on the server and calls `" + r.name + "`, a client function that waits for the server (`" + w.chain.join(" → ") + "`) — on the server that call would be made in place, which needs a second, server-side copy of `" + r.name + "` whose server calls are made in place (not in the bootstrap: Core holds one body per function — the server artifact emits a shared function as it is, which is right only for one that waits on nothing). Until then call the server function directly")
             }
         }
         return st
@@ -16406,6 +16420,12 @@ ${
     //   routeOpen   §12.4 R3 — the unresolvable calls of a function, through non-server functions
     //   waits       §13.2 / §13.7 item 2 — async colour: a server or split
     //               function, through every function reference
+    //   swaits      s468 (U1c, the S467 §13 gate) — it WAITS WHEN IT RUNS ON THE
+    //               SERVER: its own body runs a `?{}` query (§13.8 item 2), or it
+    //               CALLS a function that does (in place — §13.4), transitively.
+    //               ONE place computes it; the suspension plan turns it into a
+    //               Suspend at each such call in a server-side body, lower attaches
+    //               it as ServerFn.waits / Fn.waits, check.scrml C-S8s re-verifies.
     //   clock       §48.6 / §33.3 item 7 — a body that reads the clock, through
     //               function CALLS (§48.6.2 is a rule about calls; a function
     //               value is refused in the bootstrap)
@@ -16429,6 +16449,7 @@ ${
         client: FxAtom[][],
         routeOpen: FxAtom[][],
         waits: FxAtom[][],
+        swaits: FxAtom[][],
         clock: FxAtom[][],
         noValue: FxAtom[][],
         // s454 (U1b): the functions server-placed by INHERITANCE (§12.2 Trigger 5),
@@ -16520,8 +16541,13 @@ ${
         let edgeK: int[][] = []
         let ownV: FxAtom[][] = []
         let edgeV: int[][] = []
+        let ownQ: FxAtom[][] = []
         i = 0
         for (const c of nodes) {
+            // s468 (U1c): a server-side wait — its own `?{}` (closed over CALLS below)
+            let q: FxAtom[] = []
+            if (c.kind == CallableK.KFn && c.f.sqls.length > 0) q = [ownAtom("q", i, 0)]
+            ownQ = ownQ.concat([q])
             if (c.kind == CallableK.KFn) {
                 const pk: PlaceK = placeOf(places, c.f.sym)
                 ownR = ownR.concat([openAtoms(c.f.scan.unproven, i)])
@@ -16557,7 +16583,7 @@ ${
             i = i + 1
         }
         return { nodes: nodes, writes: closeDim(ownW, all), writesOpen: closeDim(ownU, all), places: places,
-                 client: client, routeOpen: closeDim(ownR, edgeR), waits: closeDim(ownA, edgeF),
+                 client: client, routeOpen: closeDim(ownR, edgeR), waits: closeDim(ownA, edgeF), swaits: closeDim(ownQ, callE),
                  clock: closeDim(ownK, edgeK), noValue: closeDim(ownV, edgeV), inherited: inherited, causes: causes }
     }
 
@@ -17083,7 +17109,9 @@ ${
     // continuations are minted here. `waiting`: the client functions whose
     // body holds a suspension point — Core's Fn.waits (check.scrml C-S8).
     // =========================================================================
-    export type SuspendK:enum = { SRemote(callee: Sym), SWaits(callee: Sym) }
+    // s468 (U1c): SQuery — a `?{}` in a server-side body; SLocal — an in-place call
+    // (server→server, §13.4) of a function that waits on the server (`swaits`).
+    export type SuspendK:enum = { SRemote(callee: Sym), SWaits(callee: Sym), SQuery, SLocal(callee: Sym) }
     export type SuspendAt:struct = { nid: int, bind: Sym, kind: SuspendK }
     export type TempFact:struct = { nid: int, sym: Sym }
     export type JoinFact:struct = { nid: int, k: Sym }
@@ -17126,8 +17154,10 @@ ${
 
     // The planner's running state.
     type PS:struct = { st: AS, plan: SuspendPlan }
-    // A client body being planned: its file, and what it is (for messages).
-    type PCx:struct = { g: Globals, t: Tables, s: Summary, file: string, inFn: boolean }
+    // A body being planned: its file, and what it is (for messages). s468 (U1c):
+    // `server` — a SERVER-side body (a server-placed function, or one server-placed
+    // by §12.2 Trigger 5), whose waits are in place (the S467 §13 gate).
+    type PCx:struct = { g: Globals, t: Tables, s: Summary, file: string, inFn: boolean, server: boolean }
     // `found`: the expression holds a suspension point (lowered or refused).
     type PX:struct = { found: boolean, ps: PS }
     // Why a position cannot suspend ("" — it can).
@@ -17141,7 +17171,7 @@ ${
             const sym: int = fs.info.sym.id
             const pk: PlaceK = placeOf(s.places, sym)
             if ((pk == PlaceK.Client || pk == PlaceK.Ambient) && s.inherited.indexOf(sym) < 0) {
-                const cx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true }
+                const cx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true, server: false }
                 const before: int = ps.plan.at.length
                 ps = planBlock(cx, fs.f.body, ps)
                 if (ps.plan.at.length > before) {
@@ -17151,10 +17181,23 @@ ${
                         ps = pdiag(ps, cx, d, "a `defer` in a function that waits for the server (`" + fs.info.name + "()` suspends on a server call) — its body would run when the function's synchronous part ends, BEFORE the server answers, not at the function's exit (§19.16.2). It arrives with the §19.16.6 async-`defer` slice; until then move the cleanup after the call's handling")
                     }
                 }
+            } else if (pk == PlaceK.Server || s.inherited.indexOf(sym) >= 0) {
+                // s468 (U1c, the S467 §13 gate): a SERVER-side body. Its waits — a
+                // `?{}`, an in-place call of a function that waits on the server —
+                // are suspension points with the SAME position table as the client
+                // (amendment item 2: a position that cannot wait is refused). Its
+                // `defer` is not refused: the server prints native `async`, where a
+                // `try … finally` runs at the function's real exit (§19.16.2).
+                const scx: PCx = { g: g, t: t, s: s, file: fs.info.file, inFn: true, server: true }
+                const sbefore: int = ps.plan.at.length
+                ps = planBlock(scx, fs.f.body, ps)
+                if (ps.plan.at.length > sbefore) {
+                    ps = withPlan(ps, { at: ps.plan.at, temps: ps.plan.temps, joins: ps.plan.joins, waiting: ps.plan.waiting.concat([sym]), rets: ps.plan.rets })
+                }
             }
         }
         for (const a of actionPositions(g)) {
-            const cx2: PCx = { g: g, t: t, s: s, file: a.file, inFn: false }
+            const cx2: PCx = { g: g, t: t, s: s, file: a.file, inFn: false, server: false }
             ps = planValue(cx2, a.v, ps)
         }
         return ps
@@ -17428,7 +17471,7 @@ ${
             .ObjectLit(props: pr) :> planKids(cx, propValueList(pr), pos, ps)
             .Spread(e: x) :> planKids(cx, [x], pos, ps)
             .Index(obj: o, idx: i) :> planKids(cx, [o, i], pos, ps)
-            .Sql(q: q) :> planKids(cx, q.params, pos, ps)
+            .Sql(q: q) :> planKids(cx, distinctSqlParams(q.params), pos, ps)
             .Name(name: n) :> { found: false, ps: ps }
             .At(name: n) :> { found: false, ps: ps }
             .AtItem :> { found: false, ps: ps }
@@ -17541,6 +17584,7 @@ ${
 
     // Is `e` a suspension point (and of which kind)?
     fn suspendKindAt(cx: PCx, e: AExpr) -> SuspendK | not {
+        if (cx.server) return serverSuspendKind(cx, e)
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
             const hf: HandledFact | not = handledFactIn(cx.t, e.nid)
@@ -17564,6 +17608,30 @@ ${
         return not
     }
 
+    // s468 (U1c) — a SERVER-side suspension point: a `?{}` (its handling form, or
+    // the query itself when its `!` function propagates it, §19.8.2), or a call —
+    // plain or handled — of a function that waits when it runs on the server.
+    fn serverSuspendKind(cx: PCx, e: AExpr) -> SuspendK | not {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is given) {
+            if (sqlOfK(h.subject.k) is given) return SuspendK.SQuery
+            const f: Sym | not = callSym(cx.t, h.subject)
+            if (f is given) {
+                if (swaitsOf(cx.s, f.id) is given) return SuspendK.SLocal(f)
+            }
+            return not
+        }
+        if (sqlOfK(e.k) is given) {
+            if (handledFactIn(cx.t, e.nid) is given) return SuspendK.SQuery
+            return not
+        }
+        const c: Sym | not = callSym(cx.t, e)
+        if (c is given) {
+            if (swaitsOf(cx.s, c.id) is given) return SuspendK.SLocal(c)
+        }
+        return not
+    }
+
     // The scrml function a call expression names, else not.
     fn callSym(t: Tables, e: AExpr) -> Sym | not {
         const c: AExpr | not = calleeOf(e.k)
@@ -17582,13 +17650,128 @@ ${
     }
 
     fn handledOutcome(cx: PCx, e: AExpr) -> Sym | not {
-        if (handledOf(e.k) is not) return not
+        if (handledOf(e.k) is not && sqlOfK(e.k) is not) return not
         const hf: HandledFact | not = handledFactIn(cx.t, e.nid)
         if (hf is not) return not
         return hf.outcome
     }
 
-    // The expressions a suspension point evaluates before it suspends: its call's arguments.
+    // =========================================================================
+    // s468 (U1c) — §8.2 PARAMETER DEDUPLICATION, decided on the SYNTAX tree:
+    // "If the same expression appears more than once in a single SQL template,
+    // the compiler SHALL assign it a single positional parameter slot … Two
+    // expressions are the same … when they are syntactically identical …
+    // Complex expressions (function calls, member accesses) are NOT
+    // deduplicated unless they are syntactically identical." A value that WAITS
+    // (a call of a function that waits on the server) is a suspension point, so
+    // deduplicating after lowering (Core `==`, lower.scrml sqlQueryOf) would be
+    // too late — two Suspends, the call made twice. So a query's values are
+    // deduplicated HERE, once: each value stands for the FIRST syntactically
+    // identical one (sqlParamRep), only the distinct ones are planned
+    // (distinctSqlParams) and lowered, and the duplicates read the same Core
+    // value — one slot, evaluated once.
+    // `sqlParamKey` is a canonical spelling of the tree (never source text); ""
+    // for a form that is never deduplicated (a lambda, a nested query, a handled
+    // form, a parse-error placeholder).
+    // =========================================================================
+    export fn sqlParamKey(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> "n:" + n
+            .At(name: n) :> "@:" + n
+            .AtItem :> "@."
+            .Num(raw: r) :> "#:" + r
+            .Str(v: v) :> "s:" + JSON.stringify(v)
+            .Bool(v: b) :> boolKey(b)
+            .NotLit :> "not"
+            .Variant(name: n) :> "v:" + n
+            .Member(obj: o, name: n) :> keyOf2("m(", sqlParamKey(o), n)
+            .Call(callee: c, args: a) :> keyOfList("c(" + sqlParamKey(c) + "|", a)
+            .Unary(op: o, e: x) :> keyOf2("u(" + unKey(o) + "|", sqlParamKey(x), "")
+            .Binary(op: o, l: l, r: r) :> keyOfList("b(" + binKey(o) + "|", [l, r])
+            .Ternary(test: t, yes: y, no: n) :> keyOfList("t(", [t, y, n])
+            .ArrayLit(elems: es) :> keyOfList("[", es)
+            .Index(obj: o, idx: i) :> keyOfList("i(", [o, i])
+            .Spread(e: x) :> keyOf2("...(", sqlParamKey(x), "")
+            .ObjectLit(props: ps) :> ""
+            .Assign(target: t) :> ""
+            .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+            .Recovered :> ""
+        }
+    }
+
+    fn boolKey(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    // `head` + the key of `inner` + `tail` + ")" — "" when the inner one is "".
+    fn keyOf2(head: string, inner: string, tail: string) -> string {
+        if (inner == "") return ""
+        return head + inner + "|" + tail + ")"
+    }
+
+    fn keyOfList(head: string, es: AExpr[]) -> string {
+        let out: string = head
+        for (const x of es) {
+            const kx: string = sqlParamKey(x)
+            if (kx == "") return ""
+            out = out + kx + ","
+        }
+        return out + ")"
+    }
+
+    fn unKey(o: UnOp) -> string {
+        return match o {
+            .Not :> "!"
+            .Neg :> "-"
+            .IsGiven :> "given"
+            .IsNot :> "isnot"
+        }
+    }
+
+    fn binKey(o: BinOp) -> string {
+        return match o {
+            .Add :> "+"
+            .Sub :> "-"
+            .Mul :> "*"
+            .Div :> "/"
+            .Mod :> "%"
+            .Lt :> "<"
+            .Le :> "<="
+            .Gt :> ">"
+            .Ge :> ">="
+            .Eq :> "=="
+            .Ne :> "!="
+            .And :> "&&"
+            .Or :> "||"
+            .Pipe :> "|>"
+        }
+    }
+
+    // The value `p` (one of `ps`) stands for: the first syntactically identical one.
+    export fn sqlParamRep(ps: AExpr[], p: AExpr) -> AExpr {
+        const kp: string = sqlParamKey(p)
+        if (kp == "") return p
+        for (const q of ps) {
+            if (sqlParamKey(q) == kp) return q
+        }
+        return p
+    }
+
+    // The distinct values of a query, in order of first appearance.
+    export fn distinctSqlParams(ps: AExpr[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const p of ps) {
+            if (sqlParamRep(ps, p).nid == p.nid) out = out.concat([p])
+        }
+        return out
+    }
+
+    // The expressions a suspension point evaluates before it suspends: its call's
+    // arguments (s468: a query's DISTINCT values, §8.2).
     fn suspendArgs(e: AExpr) -> AExpr[] {
         const h: AHandled | not = handledOf(e.k)
         let call: AExpr = e
@@ -17615,7 +17798,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
-            .Sql(q: q) :> []
+            .Sql(q: q) :> distinctSqlParams(q.params)
             .Handled(h: x) :> []
         }
     }
@@ -17624,6 +17807,8 @@ ${
         return match k {
             .SRemote(callee: f) :> "a client call of the server function `" + f.hint + "` (§19.9.10) stands"
             .SWaits(callee: f) :> "a call of `" + f.hint + "`, which waits for the server (§13.2: it calls a server function), stands"
+            .SQuery :> "a `" + sqlSigil() + "}` query — a waiting value (§13.8 item 2) — stands"
+            .SLocal(callee: f) :> "a call of `" + f.hint + "`, which waits on the server (§13.8: it runs a `" + sqlSigil() + "}` query, directly or through a call), stands"
         }
     }
 
@@ -17633,6 +17818,8 @@ ${
         const f: Sym | not = match k {
             .SRemote(callee: c) :> c
             .SWaits(callee: c) :> not
+            .SQuery :> not
+            .SLocal(callee: c) :> not
         }
         if (f is not) return ps0
         let ps: PS = ps0

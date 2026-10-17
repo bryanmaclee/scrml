@@ -52,7 +52,13 @@ async function load(src, expose = []) {
   return loadProgram(r.core, "rulings-" + k++, expose);
 }
 // The first Attempt statement of a function's body (its payload).
-const attemptOf = (fn) => fn.body.stmts.find((s) => s.variant === "Attempt").data;
+// s468 (U1c): a query is `Suspend(o, Query(q), [Attempt(FSettled(o)) …])` — its Attempt begins
+// the Suspend's `then` (the S467 §13 gate); a call's Attempt stands in the body itself.
+const attemptOf = (fn) => {
+  const s = fn.body.stmts.find((x) => x.variant === "Attempt" || x.variant === "Suspend");
+  return s.variant === "Attempt" ? s.data : s.data.then.stmts[0].data;
+};
+const queryOf = (fn) => fn.body.stmts.find((x) => x.variant === "Suspend" && x.data.on.variant === "Query").data.on.data.q;
 const text = () => ({ log: $("#log").textContent, out: $("#out").textContent, n: $("#n").textContent });
 
 // ---------------------------------------------------------------------------
@@ -121,7 +127,7 @@ describe("§18.6.1 — the whole-error binder `| _ err :>`", () => {
     expect(mods.check.checkCore(r.core).join("\n")).toContain("C-E2: an Attempt arm binds the whole error but is not the wildcard");
   });
 
-  test("on a `?{}` the binder is a SqlError (codes + Core; the printer refuses queries, U1c)", () => {
+  test("on a `?{}` the binder is a SqlError (codes + Core: the Attempt over the query's settled outcome)", () => {
     const r = clean(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ err :> { return 0 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`);
     const fn = r.core.server.find((f) => f.sym.hint === "f");
     const a = attemptOf(fn);
@@ -374,8 +380,7 @@ describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins;
   const FN = (name = "f") => `    function ${name}() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`;
   const dbOfQuery = (r, fname = "f") => {
     const fn = r.core.server.find((x) => x.sym.hint === fname);
-    const at = attemptOf(fn);
-    const db = r.core.dbs.find((d) => d.sym.id === at.call.data.q.db.id);
+    const db = r.core.dbs.find((d) => d.sym.id === queryOf(fn).db.id);
     return db && db.target;
   };
 
