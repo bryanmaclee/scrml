@@ -778,29 +778,59 @@ export function waitingBindingsOf(
   if (asyncNames.length === 0) return out;
   const reported = new Set<string>();
   const seen = new Set<unknown>();
-  const check = (value: unknown, text: unknown, node: AnyNode, name: string, how: WaitingBinding["how"]): void => {
+  // `shadow`: the names the binding's lexical scope chain binds to something OTHER than the
+  // file-scope async function of that spelling — a parameter of an enclosing function, or a
+  // const / let / lin of an enclosing block whose own value is not waiting (`blockShadows`).
+  // A reference to one of them resolves to that binding, not to the async function.
+  const visibleNames = (shadow: ReadonlySet<string>): readonly string[] =>
+    shadow.size === 0 ? asyncNames : asyncNames.filter((x) => !shadow.has(x));
+  const judgeIn = (value: unknown, text: unknown, shadow: ReadonlySet<string>, names: readonly string[]): boolean => {
+    const isAsyncHere = shadow.size === 0 ? isAsync : (n: string): boolean => !shadow.has(n) && isAsync(n);
+    if (value && typeof value === "object") return mayHoldWaitingFn(value, isAsyncHere, names, combinators);
+    if (typeof text === "string" && text.trim()) {
+      // No parsed initializer: parse it; else fail closed on any mention.
+      let parsed: unknown = null;
+      try { parsed = parseExprToNode(text, "<f4>", 0); } catch { parsed = null; }
+      return parsed ? mayHoldWaitingFn(parsed, isAsyncHere, names, combinators) : textMayHoldWaitingFn(text, names);
+    }
+    return false;
+  };
+  const check = (value: unknown, text: unknown, node: AnyNode, name: string, how: WaitingBinding["how"], shadow: ReadonlySet<string>): void => {
     const span = node.span as { start?: number } | undefined;
     const key = `${name}@${span?.start ?? "?"}`;
     if (reported.has(key)) return;
     // `names` = [] turns every text fallback off: the tree-only verdict.
-    const judge = (names: readonly string[]): boolean => {
-      if (value && typeof value === "object") return mayHoldWaitingFn(value, isAsync, names, combinators);
-      if (typeof text === "string" && text.trim()) {
-        // No parsed initializer: parse it; else fail closed on any mention.
-        let parsed: unknown = null;
-        try { parsed = parseExprToNode(text, "<f4>", 0); } catch { parsed = null; }
-        return parsed ? mayHoldWaitingFn(parsed, isAsync, names, combinators) : textMayHoldWaitingFn(text, names);
-      }
-      return false;
-    };
-    if (!judge(asyncNames)) return;
+    if (!judgeIn(value, text, shadow, visibleNames(shadow))) return;
     reported.add(key);
-    out.push({ name, node, how, textOnly: !judge([]) });
+    out.push({ name, node, how, textOnly: !judgeIn(value, text, shadow, []) });
   };
-  const walk = (n: unknown, nested: boolean): void => {
+  /**
+   * The names a NESTED statement list (a function body, a block) binds for its whole extent
+   * that shadow an async name: each `const` / `let` / `lin` declared directly in it under a
+   * plain identifier whose own value, judged in the OUTER scope, is not waiting. Fail closed —
+   * these shadow nothing, so a reference to the name is still read as the async function: a
+   * declaration whose value may be waiting (that declaration is the one refused), a tilde
+   * declaration (block-nested, it is a write to the outer name), a destructuring, a
+   * `function` declaration (a nested helper is in the async set by name), a loop / catch
+   * header binding, and every file-scope binding.
+   */
+  const blockShadows = (stmts: unknown[], shadow: ReadonlySet<string>): ReadonlySet<string> => {
+    let inner: Set<string> | null = null;
+    for (const c of stmts) {
+      const d = c as AnyNode | null;
+      if (!d || typeof d !== "object") continue;
+      if (d.kind !== "const-decl" && d.kind !== "let-decl" && d.kind !== "lin-decl") continue;
+      if (typeof d.name !== "string" || !d.name || !isAsync(d.name) || shadow.has(d.name)) continue;
+      if (judgeIn(d.initExpr, d.init, shadow, visibleNames(shadow))) continue;
+      (inner ??= new Set(shadow)).add(d.name);
+    }
+    return inner ?? shadow;
+  };
+  const walk = (n: unknown, nested: boolean, shadow: ReadonlySet<string>): void => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
     if (Array.isArray(n)) {
+      const here = nested ? blockShadows(n, shadow) : shadow;
       n.forEach((c, i) => {
         // An export whose initializer the builder split off into the NEXT statement
         // (`export const x = match … { … }` — the export keeps `=` with nothing after it):
@@ -814,31 +844,38 @@ export function waitingBindingsOf(
             out.push({ name: bindingNameOf(e), node: e, how: "declared", textOnly: !refsAsync(n[i + 1], isAsync, []) });
           }
         }
-        walk(c, nested);
+        walk(c, nested, here);
       });
       return;
     }
     const node = n as AnyNode;
     if (typeof node.kind === "string" && DECL_KINDS_F4.has(node.kind)) {
       // A block-nested tilde declaration of an outer name is a WRITE to it.
-      check(node.initExpr, node.init, node, bindingNameOf(node), node.kind === "tilde-decl" && nested ? "written" : "declared");
+      check(node.initExpr, node.init, node, bindingNameOf(node), node.kind === "tilde-decl" && nested ? "written" : "declared", shadow);
     } else if (node.kind === "export-decl" && (node.exportKind === "const" || node.exportKind === "let" || node.exportKind === "var") &&
       !node.reExportSource) {
       const raw = typeof node.raw === "string" ? node.raw : "";
       const eq = raw.indexOf("=");
-      check(node.valueInitExpr, node.valueInitExpr ? null : (eq >= 0 ? raw.slice(eq + 1) : null), node, bindingNameOf(node), "declared");
+      check(node.valueInitExpr, node.valueInitExpr ? null : (eq >= 0 ? raw.slice(eq + 1) : null), node, bindingNameOf(node), "declared", shadow);
     } else if (node.kind === "assign" && WRITE_OPS_F4.has(String(node.op))) {
       const t = node.target as AnyNode | undefined;
       const name = t && t.kind === "ident" && typeof t.name === "string" ? t.name
         : t && t.kind === "member" && typeof t.property === "string" ? `….${t.property}` : "(target)";
-      check(node.value, null, node, name, "written");
+      check(node.value, null, node, name, "written", shadow);
+    }
+    // A function's parameters shadow an outer name of the same spelling in its whole body
+    // (`function eqx(check, b) { const g = check … }` aliases the parameter).
+    let inner = shadow;
+    if (isFnLiteralNode(node)) {
+      const own = paramNamesOf(node.params).filter((x) => !shadow.has(x));
+      if (own.length) inner = new Set([...shadow, ...own]);
     }
     for (const k of Object.keys(node)) {
       if (k === "span" || k === "valueInitExpr") continue;
       const c = node[k];
-      if (c && typeof c === "object") walk(c, true);
+      if (c && typeof c === "object") walk(c, true, inner);
     }
   };
-  walk(Array.isArray(topStmts) ? topStmts : [], false);
+  walk(Array.isArray(topStmts) ? topStmts : [], false, new Set());
   return out;
 }

@@ -178,3 +178,66 @@ describe("S467 r10 — a server-placed SYNC helper reached by a first-class refe
     expect(errors).toEqual([]);
   }, 30_000);
 });
+
+// r10 review finding (false refusal): a parameter or local of the ENCLOSING scope that shares
+// a spelling with a file-scope async function is that parameter / local, not the async
+// function. The binding judge resolves the name through the binding's lexical scope chain
+// (codegen/fn-valued-bindings.ts `waitingBindingsOf`: enclosing functions' parameters, and each
+// enclosing block's const / let / lin whose own value is not waiting).
+describe("S467 r10 — the judge resolves a name through the binding's scope chain", () => {
+  const EQ = `if (!eqx(1, 1) || !check(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"`;
+  const VPI = `import { check } from "./lib.scrml"\n  import { verifyPassword } from "scrml:auth"`;
+  const src = (top, imports) => appSource({ top, body: EQ, imports });
+  const ok = {
+    paramShadow: src(`function eqx(check, b) { const g = check\n    return g == b }`), // pack z4/fpParamShadow
+    localShadow: src(`function eqx(a, b) { const check = 7\n    const g = check\n    return g == b }`), // reviewer ps3
+    localLambdaShadow: src(`function eqx(a, b) { const check = (x, y) => x == y\n    const g = check\n    return g(a, b) }`), // z4/fpLocalShadow
+    blockLocalSameBlock: src(`function eqx(a, b) { if (a) { const check = 7\n    const g = check\n    return g == b }\n    return false }`),
+    outerLocalInnerBlock: src(`function eqx(a, b) { const check = 7\n    if (a) { const g = check\n    return g == b }\n    return false }`),
+    paramCapturedByLambda: src(`function eqx(check, b) { const g = () => check\n    return g() == b }`),
+  };
+  for (const [name, s] of Object.entries(ok)) {
+    test(`compiles: ${name}`, () => {
+      const { errors } = compileFiles(name, { "app.scrml": s, "lib.scrml": DEFAULT_LIB });
+      expect(errors).toEqual([]);
+    }, 30_000);
+  }
+  // What the scope chain must NOT hide — each still refused, naming the binding that holds it.
+  const still = {
+    localAssignedAsync: [src(`function eqx(a, b) { const check2 = check\n    const g = check2\n    return g == b }`), "`check2` holds"],
+    paramShadowReassignedReal: [src(`function eqx(check, b) { check = verifyPassword\n    const g = check\n    return g == b }`, VPI), "`check` is assigned"],
+    paramReassignedAsync: [src(`function eqx(c2, b) { c2 = check\n    const g = c2\n    return g == b }`), "`c2` is assigned"],
+    blockShadowBindingOutside: [src(`function eqx(a, b) { if (a) { const check = 7 }\n    const g = check\n    return g == b }`), "`g` holds"],
+    blockShadowLambdaOutside: [src(`function eqx(a, b) { if (a) { const check = 7\n    }\n    const g = () => check(a, b)\n    return g == b }`), "`g` holds"],
+    nestedFnCaptures: [src(`function eqx(a, b) { function inner() { return check(a, b) }\n    const g = inner\n    return g == b }`), "`inner` is an async function"],
+    lambdaCapturesAsync: [src(`function eqx(a, b) { const g = () => check(a, b)\n    return g == b }`), "`g` holds"],
+    localShadowWrittenWaiting: [src(`function eqx(a, b) { let check = 1\n    check = (x, y) => verifyPassword(x, y)\n    return check == b }`, VPI), "`check` is assigned"],
+    localShadowWaitingInit: [src(`function eqx(a, b) { const check = () => verifyPassword(a, b)\n    const g = check\n    return g == b }`, VPI), "`g` holds"],
+    siblingParamDoesNotLeak: [src(`function other(check) { return check }\n  function eqx(a, b) { const g = check\n    return g == b }`), "`g` holds"],
+    realFnPassedToShadowParam: [src(`function eqx(a, b) { return other(check, b) }\n  function other(check, b) { const g = check\n    return g == b }`), "`check` is an async function"],
+  };
+  for (const [name, [s, msg]] of Object.entries(still)) {
+    test(`still refused: ${name}`, () => {
+      const { errors, messages, read } = compileFiles(name, { "app.scrml": s, "lib.scrml": DEFAULT_LIB });
+      expect(errors).toContain(ESC);
+      expect(messages.some((m) => m.startsWith(ESC) && m.includes(msg))).toBe(true);
+      expect(read("app.server.js")).toBeNull();
+    }, 30_000);
+  }
+  test("unit: a shadowing parameter / local hides the name; an outer-block binding does not", () => {
+    const asyncNames = ["check"];
+    const isAsync = (n) => asyncNames.includes(n);
+    const e = (s) => parseExprToNode(s, "t", 0);
+    const fn = (params, body) => ({ kind: "function-decl", name: "eqx", params: params.map((name) => ({ name })), body });
+    const stmts = [
+      fn(["check"], [{ kind: "const-decl", name: "g1", initExpr: e("check"), span: { start: 1 } }]),
+      fn([], [{ kind: "const-decl", name: "check", initExpr: e("7"), span: { start: 2 } }, { kind: "const-decl", name: "g2", initExpr: e("check"), span: { start: 3 } }]),
+      fn([], [{ kind: "if-stmt", consequent: [{ kind: "const-decl", name: "check", initExpr: e("7"), span: { start: 4 } }] },
+        { kind: "const-decl", name: "g3", initExpr: e("check"), span: { start: 5 } }]),
+      fn([], [{ kind: "const-decl", name: "check", initExpr: e("check"), span: { start: 6 } }, { kind: "const-decl", name: "g4", initExpr: e("check"), span: { start: 7 } }]),
+      { kind: "const-decl", name: "g5", initExpr: e("check"), span: { start: 8 } },
+    ];
+    const out = waitingBindingsOf(stmts, isAsync, asyncNames, ASYNC_COMBINATOR_METHODS);
+    expect(out.map((w) => w.name)).toEqual(["g3", "check", "g4", "g5"]);
+  });
+});

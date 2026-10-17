@@ -18,6 +18,7 @@
 // S467 fix round 10 (dpa-023 F4, §13.9.6): + families y1–y3 (the S467 review of r9, which found
 // four y3 shapes and y1/voIife, y2/voIife, y2/voAnnotIife, y1/topLetIfWrite, y2/topLetIfLit
 // answering WELCOME on r9). Measured on s467-await-r10: 551 shapes, 0 accept a wrong password.
+// + families z1–z4 (the S467 review of r10; 640 shapes): 0 accept a wrong password.
 export const KNOWN_FAIL = {
 };
 
