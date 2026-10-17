@@ -129,7 +129,7 @@ describe("rewriteEqualityOps — scrml == per §45.4", () => {
   });
 
   test("§11 both operands provably primitive → === / !==", () => {
-    expect(rewriteEqualityOps("a.length == 2 && 1 != 2")).toBe("(a.length === 2) && (1 !== 2)");
+    expect(rewriteEqualityOps("a.length == 2 && 1 != 2")).toBe("a.length === 2 && 1 !== 2");
   });
 
   test("§12 empty/null input", () => {

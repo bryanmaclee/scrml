@@ -126,12 +126,70 @@ describe("S468 — library-module verbatim path (§45.1)", () => {
     expect(errors.map((e) => e.code)).toEqual([]);
     const js = readFileSync(join(outDir, "models.js"), "utf8");
     expect(js).toContain("export const SAME = _scrml_structural_eq({ a: 1 }, { a: 1 })");
-    expect(js).toContain("export const PRIM = (1 === 1)");
+    expect(js).toContain("export const PRIM = 1 === 1");
     expect(js).toContain("function _scrml_structural_eq(");
     const mod = await import(`file://${join(outDir, "models.js")}?v=${Date.now()}`);
     expect(mod.SAME).toBe(true);
     expect(mod.DIFF).toBe(false);
     expect(mod.PRIM).toBe(true);
+  });
+
+  // Fix round 1 (F2): the primitive lowering used to wrap `(l === r)`; at the
+  // start of a line that `(` made the previous line's result a callee under ASI.
+  test("a statement starting with a primitive `==` after a call line still loads (ASI)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "s468-eq-asi-"));
+    dirs.push(dir);
+    const outDir = join(dir, "dist");
+    mkdirSync(outDir, { recursive: true });
+    const file = join(dir, "models.scrml");
+    writeFileSync(file, [
+      "${",
+      '  export const LABEL = "x"',
+      "  export const TAG = makeTag()",
+      '  typeof LABEL == "string" && globalThis.__s468AsiLog.push("side-effect-ran")',
+      '  function makeTag() { return "t" }',
+      "}",
+      "",
+    ].join("\n"));
+    const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
+    const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+    expect(errors.map((e) => e.code)).toEqual([]);
+    const js = readFileSync(join(outDir, "models.js"), "utf8");
+    expect(js).not.toMatch(/\(typeof LABEL ===/);
+    globalThis.__s468AsiLog = [];
+    try {
+      const mod = await import(`file://${join(outDir, "models.js")}?v=${Date.now()}`);
+      expect(mod.TAG).toBe("t");
+      expect(globalThis.__s468AsiLog).toEqual(["side-effect-ran"]);
+    } finally {
+      delete globalThis.__s468AsiLog;
+    }
+  });
+});
+
+describe("S468 fix round 1 — inline-handler shapes the reviewer found", () => {
+  // F1: an operator inside a comment between the operands split the expression
+  // there (`!_scrml_structural_eq(a /* is it, ? */ != b)`, the wrong polarity).
+  test("a comment holding `!=` between the operands of `!=` (executed)", async () => {
+    const art = build(`\${
+    <a> : number = 1
+    <b> : number = 1
+    <out> : string = ""
+}
+<p id="w">\${@out}</p>
+<button id="b" onclick=\${@out = (@a /* is it != ? */ != @b) ? "ne" : "eq"}>b</button>
+<button id="c" onclick={
+    const same = @a // left == right?
+        == @b
+    @out = same ? "same" : "differ"
+}>c</button>
+`);
+    await run(art, async ({ text, click }) => {
+      await click("#b");
+      expect(text("#w")).toBe("eq");
+      await click("#c");
+      expect(text("#w")).toBe("same");
+    });
   });
 });
 

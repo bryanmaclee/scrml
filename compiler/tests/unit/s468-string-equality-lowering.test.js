@@ -64,13 +64,20 @@ describe("lowerEqualityOps — non-primitive operands lower to the structural he
 
 describe("lowerEqualityOps — provably primitive operands keep `===` (§45.4 primitives row)", () => {
   test("member `.length` vs number literal", () => {
-    expect(lowerEqualityOps(`x.length == 3`)).toBe(`(x.length === 3)`);
+    expect(lowerEqualityOps(`x.length == 3`)).toBe(`x.length === 3`);
   });
   test("two literals", () => {
-    expect(lowerEqualityOps(`1 != 2`)).toBe(`(1 !== 2)`);
+    expect(lowerEqualityOps(`1 != 2`)).toBe(`1 !== 2`);
   });
-  test("arithmetic vs literal", () => {
-    expect(lowerEqualityOps(`(a + b) == 0`)).toBe(`((a + b) === 0)`);
+  test("arithmetic vs literal (the operand keeps its own parens)", () => {
+    expect(lowerEqualityOps(`(a + b) == 0`)).toBe(`(a + b) === 0`);
+  });
+  test("a node-for-node swap: the surrounding precedence is unchanged", () => {
+    expect(lowerEqualityOps(`x + (1 == 2)`)).toBe(`x + (1 === 2)`);
+    expect(lowerEqualityOps(`!(x.length == 1)`)).toBe(`!(x.length === 1)`);
+    expect(lowerEqualityOps(`1 == 2 == false`)).toBe(`1 === 2 === false`);
+    expect(lowerEqualityOps(`x.length == 1 ? "a" : "b"`)).toBe(`x.length === 1 ? "a" : "b"`);
+    expect(lowerEqualityOps(`x.length == 1 && y.size != 0`)).toBe(`x.length === 1 && y.size !== 0`);
   });
   test("isStaticallyPrimitiveEstree is conservative", () => {
     expect(isStaticallyPrimitiveEstree({ type: "Identifier", name: "x" })).toBe(false);
@@ -118,5 +125,56 @@ describe("client string pipeline (rewriteExpr) — Pass 18 is structural", () =>
     expect(out).not.toContain("_scrml_structural_eq");
     expect(out).toContain("null");
     expect(out).toContain("undefined");
+  });
+});
+
+// S468 fix round 1 (F1) — the operator is found as a TOKEN, never as text: a
+// comment between the operands may itself contain `==` / `!=`.
+describe("lowerEqualityOps — an operator inside a comment between the operands is not the operator", () => {
+  test("block comment holding `!=` before the real `!=`", () => {
+    expect(lowerEqualityOps(`a /* is it != ? */ != b`)).toBe(`!_scrml_structural_eq(a, b)`);
+  });
+  test("block comment holding `,` and `?` (the reviewer's shape)", () => {
+    expect(lowerEqualityOps(`_g("a") /* is it, ? */ != _g("b")`)).toBe(`!_scrml_structural_eq(_g("a"), _g("b"))`);
+  });
+  test("block comment holding `==` before a `!=` keeps the negation", () => {
+    expect(lowerEqualityOps(`a /* == */ != b`)).toBe(`!_scrml_structural_eq(a, b)`);
+  });
+  test("block comment holding `!=` before an `==` is not negated", () => {
+    expect(lowerEqualityOps(`a /* != */ == b`)).toBe(`_scrml_structural_eq(a, b)`);
+  });
+  test("line comment holding `==` — the comment does not swallow `, b)`", () => {
+    const out = lowerEqualityOps(`const same = a // left == right?\n    == b\nout = same`);
+    expect(out).toBe(`const same = _scrml_structural_eq(a, b)\nout = same`);
+    // And the result is valid JS that computes the structural answer.
+    const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+    const run = new Function("_scrml_structural_eq", "a", "b", "let out; " + out + "; return out;");
+    expect(run(eq, { x: 1 }, { x: 1 })).toBe(true);
+  });
+  test("comments inside the operands' own parens stay with the operand", () => {
+    expect(lowerEqualityOps(`(/* c */ a) == (b /* d */)`)).toBe(`_scrml_structural_eq((/* c */ a), (b /* d */))`);
+  });
+  test("operator with no surrounding space", () => {
+    expect(lowerEqualityOps(`a ==/*x*/b`)).toBe(`_scrml_structural_eq(a, b)`);
+    expect(lowerEqualityOps(`x.length==1`)).toBe(`x.length === 1`);
+  });
+});
+
+// S468 fix round 1 (F2) — no NEW leading `(`: a wrapped `(l === r)` at the start
+// of a line let ASI join it to the previous line as a call of its result.
+describe("lowerEqualityOps — the primitive swap adds no parens (ASI hazard)", () => {
+  test("a statement starting with a primitive `==` after a call line (executed)", () => {
+    const src = `export const TAG = makeTag()\ntypeof LABEL == "string" && log.push("ran")`;
+    const out = lowerEqualityOps(src);
+    expect(out).toBe(`export const TAG = makeTag()\ntypeof LABEL === "string" && log.push("ran")`);
+    const body = out.replace("export const TAG", "const TAG") + "; return [TAG, log];";
+    const [tag, log] = new Function("makeTag", "LABEL", "log", body)(() => "t", "x", []);
+    expect(tag).toBe("t");
+    expect(log).toEqual(["ran"]);
+  });
+  test("no lowering starts with a new `(`", () => {
+    for (const src of [`a == b`, `a != b`, `1 == 2`, `x.length != 0`, `typeof q == "s"`]) {
+      expect(lowerEqualityOps(src).startsWith("(")).toBe(false);
+    }
   });
 });

@@ -29,7 +29,12 @@
 // ---------------------------------------------------------------------------
 
 // @ts-ignore — acorn ships its own types
-import { parse as acornParse, parseExpressionAt as acornParseExpressionAt } from "acorn";
+import {
+  parse as acornParse,
+  parseExpressionAt as acornParseExpressionAt,
+  tokenizer as acornTokenizer,
+  tokTypes,
+} from "acorn";
 
 type AnyNode = { type: string; start: number; end: number; [k: string]: any };
 
@@ -156,7 +161,7 @@ export function equalityLegacyFallbackCount(): number { return _legacyFallbacks;
 
 /**
  * Lower every scrml `==` / `!=` in `expr` per §45.4. Both operands statically
- * primitive -> `(l === r)` / `(l !== r)`; otherwise `_scrml_structural_eq(l, r)`
+ * primitive -> `l === r` / `l !== r`; otherwise `_scrml_structural_eq(l, r)`
  * / `!_scrml_structural_eq(l, r)`. Text outside the operator nodes is copied
  * byte-for-byte. Text that does not parse: `onUnparsed: "legacy"` (default, the
  * string pipeline's pre-S468 behaviour) -> the `===` regex; `"keep"` -> unchanged
@@ -191,19 +196,54 @@ export function lowerEqualityOps(expr: string, opts: { onUnparsed?: "legacy" | "
     return out + src.slice(cursor, to);
   };
   const renderEq = (n: AnyNode): string => {
-    // The operator token sits in the gap between the left and right operand
-    // nodes; the gap holds only whitespace, grouping parens, and the operator.
-    // Splitting at the operator keeps each side's own grouping parens with it.
-    const gap = src.slice(n.left.end, n.right.start);
-    const rel = gap.indexOf(n.operator);
-    const opAt = n.left.end + (rel < 0 ? 0 : rel);
-    const left = renderSpan(n.start, opAt).trim();
-    const right = renderSpan(opAt + 2, n.end).trim();
+    const { leftEnd, rightStart } = splitAtOperator(src, n);
+    const left = renderSpan(n.start, leftEnd);
+    const right = renderSpan(rightStart, n.end);
     const neg = n.operator === "!=";
     if (isStaticallyPrimitiveEstree(n.left) && isStaticallyPrimitiveEstree(n.right)) {
-      return `(${left} ${neg ? "!==" : "==="} ${right})`;
+      // A node-for-node operator swap: `===` / `!==` have exactly the
+      // precedence and associativity of `==` / `!=`, so the text around the
+      // node parses the same. No wrapping parens — a NEW leading `(` would
+      // let ASI join this text to the previous line (`f()⏎(a === b)` is a
+      // call of f()'s result).
+      return `${left} ${neg ? "!==" : "==="} ${right}`;
     }
+    // A call (or `!` + call) binds tighter than `==` in every position `==`
+    // could occupy, and starts with an identifier / `!` — neither continues
+    // the previous line under ASI.
     return `${neg ? "!" : ""}_scrml_structural_eq(${left}, ${right})`;
   };
-  return renderSpan(0, src.length);
+  try {
+    return renderSpan(0, src.length);
+  } catch {
+    // splitAtOperator found no operator token where the tree put one — an
+    // internal inconsistency. Same disposition as unparsed text.
+    _legacyFallbacks++;
+    return opts.onUnparsed === "keep" ? expr : lowerEqualityLegacy(expr);
+  }
+}
+
+/**
+ * Locate the operator TOKEN of an `==` / `!=` node and return where the left
+ * operand's text ends and the right operand's text begins (absolute offsets).
+ * The gap between the operand nodes holds only grouping parens, whitespace,
+ * COMMENTS, and the operator — and a comment may itself contain `==` / `!=`
+ * (`a /* is it != ? *\/ != b`), so the gap is TOKENIZED (acorn skips comments)
+ * rather than searched as text. The left text ends at the last token before
+ * the operator (a closing paren of the left operand, else the operand itself);
+ * the right text starts at the first token after it. Comments in the gap are
+ * dropped (a `//` comment kept at the end of the left text would swallow the
+ * `, right)` that follows it).
+ */
+function splitAtOperator(src: string, n: AnyNode): { leftEnd: number; rightStart: number } {
+  const gapStart: number = n.left.end;
+  const gap = src.slice(gapStart, n.right.start);
+  const toks: AnyNode[] = [];
+  for (const t of acornTokenizer(gap, ACORN_OPTS) as Iterable<AnyNode>) toks.push(t);
+  const opIdx = toks.findIndex((t) => t.type === tokTypes.equality && t.value === n.operator);
+  if (opIdx < 0) throw new Error(`string-equality-lowering: no \`${n.operator}\` token between the operands`);
+  return {
+    leftEnd: opIdx > 0 ? gapStart + toks[opIdx - 1].end : gapStart,
+    rightStart: opIdx + 1 < toks.length ? gapStart + toks[opIdx + 1].start : n.right.start,
+  };
 }
