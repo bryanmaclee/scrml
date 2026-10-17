@@ -799,3 +799,20 @@
   gaining E-ASYNC-FN-ESCAPES-AS-VALUE beside their sync-callback code (auth-async-stdlib-sync-callback-neg,
   server-fn-in-sync-callback-pos); 165 artifact diffs + 108 text-only = absolute/relative root paths only
   (normalised: 0 real); syntax delta 0; bare server-fn call sites 36 = 36.
+- MERGE COMMIT cd796e1b6 pushed (hook: 34890 pass / 60 skip / 0 fail). GATES on it: compiler/tests/*.test.js
+  2239 / 0; types:check OK (180, unchanged); bootstrap slices (lint-no-default-arm 0; m1 99, m2 612, m1
+  lowered 99, m3 60, m4 1343, codec 166, v2 lexer 337 — all 0 fail, run per directory as CI does);
+  commands+lsp 763 / 3 skip / 1 fail = dev-watcher-snapshot-identity (ctime) — fails identically on the
+  origin/main archive (pre-existing, environmental); facts / state / spec-index / gen-md-shim /
+  bootstrap-conformance / corpus-compile-floor --check PASS.
+- OPEN for the PA: (1) SPEC §13.9.6 reads "a waiting lambda is legal ONLY as the direct argument of an
+  awaited collection method"; impl#1 also leaves a scheduler argument legal inside a binding init
+  (`const t = setTimeout(() => save(), 0)` — §13.2's exemption, per the PA reading under §13.9.6).
+  (2) "async-colored" vs a SYNC helper placed on the server only by caller-context propagation (emitted as an
+  async in-process peer): impl#1 does not count it (the §12.2 #284 first-class reference stays legal —
+  conformance server-db/first-class-fn-ref-server-helper-rt); the SPEC definition does not say. (3) Nested
+  bindings now carry E-ASYNC-FN-ESCAPES-AS-VALUE beside their pre-existing sync-callback code (two conformance
+  negatives gained it). (4) The F4 rewrite's target forms hit two pre-existing defects: a `function` used only
+  in a `.some` callback is not server-placed (g-fn-reached-only-through-lambda-not-on-server-s466) and an
+  `export function` lib importing an enum/component emits an unloadable import
+  (g-server-js-imports-module-without-server-file-s467).
