@@ -485,3 +485,6 @@ reassigns, one batch) could be made to compile by REPLICATING a closed-initializ
 batch instead of reading it from the request — needs batch-boundary knowledge in RI; not done (fail
 closed; the error's Fix names the declared-after rewrite). (3) An object PARAMETER the CALLER mutates while
 the request is in flight is outside this function's view (no escape check for params).
+
+## Landing merge (S467, origin/main 3ade9bb48 incl. #1433)
+- `carriedValueAdmission` NOT moved onto `binding-provenance.ts`: provenance is a position-free file-wide union, while the carried-value check needs statement-index-ordered write discovery relative to `firstServer` inside one body — not a trivially safe swap; candidate follow-up only.
