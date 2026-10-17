@@ -191,6 +191,27 @@ describe("S468 fix round 1 — inline-handler shapes the reviewer found", () => 
       expect(text("#w")).toBe("same");
     });
   });
+
+  // F4: the helper compared host objects by their own enumerable keys, so two
+  // distinct same-tag DOM elements were "equal" — a backdrop click handler that
+  // tests `e.target == backdrop` fired for clicks on the dialog inside it.
+  test("two distinct DOM elements are not equal; the same element is (executed)", async () => {
+    const art = build(`\${
+    <out> : string = "init"
+}
+<p id="out">\${@out}</p>
+<div id="backdrop" onclick=\${(e) => { @out = (e.target == document.getElementById("backdrop")) ? "close" : "stay" }}>
+    <div id="dialog">dialog body</div>
+</div>
+`);
+    expect(art.clientJs).toContain("_scrml_structural_eq(");
+    await run(art, async ({ text, click }) => {
+      await click("#dialog");
+      expect(text("#out")).toBe("stay");
+      await click("#backdrop");
+      expect(text("#out")).toBe("close");
+    });
+  });
 });
 
 describe("S468 — `==` is structural in every lowering position (§45.1)", () => {
