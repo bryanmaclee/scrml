@@ -3240,7 +3240,9 @@ function generateServerJsImpl(
       continue;
     }
 
-    if (!route.generatedRouteName) {
+    // s468-trigger5-helper-route (§13.4) — only server code calls it: no route
+    // handler. It stays in `serverFns` so its in-process peer callable is emitted.
+    if (!route.generatedRouteName && route.serverCallersOnly !== true) {
       errors.push(new CGError(
         "E-CG-002",
         `E-CG-002: Server-boundary function \`${fnNode.name ?? "<anonymous>"}\` has no ` +
@@ -4311,6 +4313,7 @@ function generateServerJsImpl(
 
   // Baseline CSRF protection
   const hasStateMutatingRoutes = serverFns.some(({ route }) => {
+    if (route.serverCallersOnly === true) return false; // no route (§13.4)
     const m: string = route.explicitMethod ?? "POST";
     return m !== "GET" && m !== "HEAD";
   });
@@ -5120,6 +5123,7 @@ function generateServerJsImpl(
   }
 
   for (const { fnNode, route } of serverFns) {
+    if (route.serverCallersOnly === true) continue; // §13.4 — no route (see above)
     setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name ?? "anon";
     const routeName: string = route.generatedRouteName;
