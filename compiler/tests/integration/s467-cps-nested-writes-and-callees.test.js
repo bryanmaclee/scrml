@@ -163,18 +163,33 @@ describe("S467 — a server-derived value written in a nested statement or a cal
 });
 
 describe("S467 — the same shapes without the browser compile, and hold under forged requests (executed)", () => {
-  test("a nested local write under a server check, no browser need: one batch; forged requests write nothing", async () => {
+  // S467 fix round 5 — §19.9.9.8 admission allow-list: a pre-first local the server
+  // half changes is no longer read from the request at all (the server would start
+  // from whatever the browser sent). Declared AFTER the first server statement, the
+  // same logic is computed on the server and holds.
+  test("a pre-first `let` the server half reassigns is E-RI-002 (never initialised from the request)", async () => {
     const b = await build(program(F(`let blk = false\n @ok = vp(pass, ${SEL})\n if (!@ok) { @msg = "wrong"; blk = true }\n if (!blk) { ${INS} }`)));
-    expect(b.errors).toEqual([]);
-    // `blk` is the author's pre-first `let` (carried client data, reassigned on the server)
-    expect(b.serverJs).toMatch(/let blk = _scrml_body\["blk"\];/);
-    await forgeThenRight(b, { blk: false });
+    expectRefusedE_RI_002(b);
+    expect(b.errors.find((e) => e.code === "E-RI-002").message).toContain("reads `blk` from the request");
   }, T);
 
-  test("an array mutated under a server check, no browser need: forged requests write nothing", async () => {
-    const b = await build(program(F(`const flags = []\n @ok = vp(pass, ${SEL})\n if (!@ok) { @msg = "wrong"; flags.push(1) }\n if (flags.length == 0) { ${INS} }`)));
+  test("the same local declared after the first server statement: one batch; forged requests write nothing", async () => {
+    const b = await build(program(F(`@ok = vp(pass, ${SEL})\n let blk = false\n if (!@ok) { @msg = "wrong"; blk = true }\n if (!blk) { ${INS} }`)));
     expect(b.errors).toEqual([]);
-    await forgeThenRight(b, { flags: [] });
+    expect(b.serverJs).not.toMatch(/_scrml_body\["blk"\]/);
+    await forgeThenRight(b);
+  }, T);
+
+  test("a pre-first array the server half mutates is E-RI-002", async () => {
+    const b = await build(program(F(`const flags = []\n @ok = vp(pass, ${SEL})\n if (!@ok) { @msg = "wrong"; flags.push(1) }\n if (flags.length == 0) { ${INS} }`)));
+    expectRefusedE_RI_002(b);
+  }, T);
+
+  test("the same array declared after the first server statement: forged requests write nothing", async () => {
+    const b = await build(program(F(`@ok = vp(pass, ${SEL})\n const flags = []\n if (!@ok) { @msg = "wrong"; flags.push(1) }\n if (flags.length == 0) { ${INS} }`)));
+    expect(b.errors).toEqual([]);
+    expect(b.serverJs).not.toMatch(/_scrml_body\["flags"\]/);
+    await forgeThenRight(b);
   }, T);
 
   test("a guard that calls a pure helper (`@msg = note(\"w\"); return`): forged requests write nothing", async () => {
