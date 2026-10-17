@@ -6,7 +6,7 @@ origin/main 9d7a6cc2a.
 
 - [x] A §13.8 one rule
 - [x] B §13.9 pending cells
-- [ ] C §34 rows owed (HELD until PR #1427 lands — list below)
+- [x] C §34 rows owed — DONE on branch `s467-dpa-023-s34-rows` after #1427 landed (list below)
 - [x] D Phase 1c U1 design amendment (scrml-support 8c33416)
 - [x] E Phase 1d record corrections (user-voice scrml-support 4ccb423; dpa-queue edited here)
 - [x] F SPEC-INDEX / facts / state
@@ -38,7 +38,16 @@ origin/main 9d7a6cc2a.
 - handOffs/dpa-queue.md: dpa-023 row now leads `RATIFIED S467` with F1–F7 + the three details + the record
   corrections; the S322 "1,350 event-handler hosts" bullet is marked superseded.
 
-## HELD — §34 rows owed (until PR #1427 / `s466-server-param-defaults` lands)
+## DONE — §34 rows (branch `s467-dpa-023-s34-rows`, after PR #1427 landed)
+
+All five items below are written into the §34 rows (each with an S467 provenance pointer;
+`bun scripts/s34-census.ts --check-new --base origin/main` PASS, 7 rows). Notes: item 3 says "impl#1: being
+implemented" because `s467-await-r10` (the F4 refusal) was not on main when written — change it to "impl#1:
+enforced by the F4 refusal (S467)" with an emitter path when that branch lands. Item 4 is written against F7 only;
+the general declaration rule is still on `s467-error-002-value-position` (a flagged PA reading in the row).
+The E-ERROR-002 row is duplicated verbatim in §19's own table (~line 21389); only the §34 row was amended.
+
+The list as it was held:
 
 1. E-VALUE-SERVER-CALL row — add the `(not to T)` exemption (§13.9.1) and the second fix ("or declare the cell
    `(not to T)`"); derived cells stay refused.
