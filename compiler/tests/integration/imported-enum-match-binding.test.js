@@ -449,7 +449,7 @@ const PE_USE = `import { Wire } from "./core.scrml"
     import { parseVariant, ParseError } from 'scrml:data'
     type LR:enum = { Foo, Bar(n: int) }
     function go(raw)! -> ParseError {
-        const v = parseVariant(raw, LR)
+        const v = parseVariant(raw, LR)?
         return v
     }
     export function viaMatch(raw) {
@@ -600,23 +600,22 @@ describe("review F3 + the unit-`Ok` enum — which `::Ok` arms mean the failable
   let mods, errors;
   beforeAll(() => {
     ({ mods, errors } = build("rf3", {
-      "bundle.scrml": ENTRY(`import { viaParam } from "./use.scrml"`),
+      "bundle.scrml": ENTRY(`import { show } from "./use.scrml"`),
       "use.scrml": `\${
     type DivErr:enum = { DivByZero, Neg(n: int) }
     type Status:enum = { Ok, Failed, Pending }
-    function safeDiv(a, b)! DivErr {
+    export function safeDiv(a, b)! DivErr {
         if (b == 0) fail DivErr.DivByZero
         if (b < 0) fail DivErr.Neg(b)
         return a / b
     }
-    function show(r: DivErr) {
+    export function show(r: DivErr) {
         return match r {
             ::Ok(v) :> "ok:" + v
             ::DivByZero :> "zero"
             ::Neg(n) :> "neg:" + n
         }
     }
-    export function viaParam(b) { return show(safeDiv(10, b)) }
     export fn status(s: Status) -> string {
         return match s { .Ok :> "ok"  .Failed :> "failed"  .Pending :> "pending" }
     }
@@ -626,9 +625,13 @@ describe("review F3 + the unit-`Ok` enum — which `::Ok` arms mean the failable
   });
   test("compiles clean", () => { expect(errors).toEqual([]); });
   test("a subject typed by an error enum WITHOUT `Ok` keeps the pre-F11 failable lowering (not undefined)", () => {
-    expect(mods.use.viaParam(2)).toBe("ok:5");
-    expect(mods.use.viaParam(0)).toBe("zero");
-    expect(mods.use.viaParam(-2)).toBe("neg:-2");
+    // S467: scrml source may no longer pass an unhandled `!` result as an argument
+    // (§19.4.3, E-ERROR-002), so the raw result reaches `show` from the host side —
+    // the same value the old `show(safeDiv(10, b))` passed.
+    const viaParam = (b) => mods.use.show(mods.use.safeDiv(10, b));
+    expect(viaParam(2)).toBe("ok:5");
+    expect(viaParam(0)).toBe("zero");
+    expect(viaParam(-2)).toBe("neg:-2");
   });
   test("a unit enum that DECLARES `Ok` is an enum match (main returned \"ok\" for every value)", () => {
     expect(mods.use.status("Ok")).toBe("ok");

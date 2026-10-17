@@ -240,7 +240,9 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
             return "loaded"
         }
 
-        on mount { @msg = load() }
+        // S467: the failable result is handled (§19.4.3 — E-ERROR-002 in a value position).
+        function refresh() { @msg = load() !{ _ :> "" } }
+        on mount { refresh() }
     }
     <p>\${@msg}</p>
 </program>
@@ -285,7 +287,9 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
             return "ok"
         }
 
-        on mount { @buckets = bucketize(@items) }
+        // S467: the failable result is handled (§19.4.3 — E-ERROR-002 in a value position).
+        function refresh() { @buckets = bucketize(@items) !{ _ :> "" } }
+        on mount { refresh() }
     }
     <ul>
         \${ for (let it of sortBy(@items, "order")) {
@@ -335,7 +339,9 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
             return "ok"
         }
 
-        on mount { @msg = load() }
+        // S467: the failable result is handled (§19.4.3 — E-ERROR-002 in a value position).
+        function refresh() { @msg = load() !{ _ :> "" } }
+        on mount { refresh() }
     }
     <p>\${@msg}</p>
 </program>
@@ -396,7 +402,9 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
             return "ok"
         }
 
-        on mount { @buckets = bucketize(@items) }
+        // S467: the failable result is handled (§19.4.3 — E-ERROR-002 in a value position).
+        function refresh() { @buckets = bucketize(@items) !{ _ :> "" } }
+        on mount { refresh() }
     }
     <ul>
         \${ for (let it of sortBy(@items, "order")) {
