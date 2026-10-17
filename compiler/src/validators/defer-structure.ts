@@ -36,6 +36,14 @@ type Node = Record<string, unknown> & { kind?: string };
 // ---------------------------------------------------------------------------
 
 const PROBE_FN = "__scrml_defer_probe__";
+/** The text the probe source puts before a body (`parseStatementTextDetailed`). */
+const PROBE_PREFIX = "${\nfunction " + PROBE_FN + "() {\n";
+/**
+ * S468 — the offset at which a block body's first character sits in the probe
+ * source. A statement node read from a `{ … }` text carries probe offsets: its
+ * offset in the TEXT is `start - PROBE_BODY_OFFSET + 1` (the `{` is text offset 0).
+ */
+export const PROBE_BODY_OFFSET = PROBE_PREFIX.length;
 
 export type ParsedBody = { ok: true; stmts: unknown[] } | { ok: false };
 
@@ -105,7 +113,7 @@ export function parseStatementTextDetailed(
     if (!isWholeBraceBlock(body)) return refuse(null, unparsed, body.trim());
     body = body.slice(1, -1);
   }
-  const source = "${\nfunction " + PROBE_FN + "() {\n" + body + "\n}\n}";
+  const source = PROBE_PREFIX + body + "\n}\n}";
   try {
     const bs = splitBlocks(filePath + "#defer-probe", source) as { errors?: Array<{ code?: string; message?: string }> };
     if (Array.isArray(bs.errors) && bs.errors.length > 0) {
@@ -186,6 +194,24 @@ function unreadableContentIn(stmts: unknown, filePath: string, checkTrailing: bo
     seen.add(n as object);
     if (Array.isArray(n)) { for (const c of n) scan(c); return; }
     const nn = n as Node;
+    // S468 fix round 1 — a nested `!{}` handler ARM whose body is a `{ … }` block
+    // (`x !{ .A :> { @n = 1⏎ false } }` inside the body being read). Its
+    // `handlerExpr` is the builder's EXPRESSION reading of the block's inner text
+    // (`_parseHandlerExpr`), which no emitter uses for a braced arm and which loses
+    // every statement after the first; judging it refused every body holding a
+    // block-armed handler. The block is read as what it is — a statement list —
+    // by this same parser, as every emitter reads it (`armBlockStatementsDetailed`).
+    if (typeof nn.handler === "string" && Object.prototype.hasOwnProperty.call(nn, "handlerExpr") && !nn.kind) {
+      const h = (nn.handler as string).trim();
+      if (h.startsWith("{") && h.endsWith("}")) {
+        if (h.slice(1, -1).trim()) {
+          const inner = parseStatementTextDetailed(h, filePath, { lostTrailing: checkTrailing });
+          if (!inner.ok) { bad = inner.refusal.text || h; return; }
+        }
+        for (const k of Object.keys(nn)) if (k !== "span" && k !== "handlerExpr") scan(nn[k]);
+        return;
+      }
+    }
     if (nn.kind === "escape-hatch" && nn.nativeKind === "ParseError") { bad = String(nn.raw ?? ""); return; }
     if (checkTrailing && exprParser().hasLostTrailingContent(nn)) {
       const r = nn as Record<string, unknown>;

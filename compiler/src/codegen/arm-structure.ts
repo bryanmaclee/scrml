@@ -118,6 +118,52 @@ export function refuseServerArm(body: string, refusal: { code: string | null; me
 }
 
 /**
+ * S468 fix round 1 — FAIL CLOSED on the CLIENT for a `!{}` arm whose handler
+ * result is USED (§19.4.3 value position) and whose `{ … }` block the arm reader
+ * (`armBlockStatementsDetailed`) refuses.
+ *
+ * SPEC §19.4.3: "In a value position, every arm SHALL do one of two things" —
+ * yield a value ("a block whose last expression is that value (§18.5)") or leave;
+ * an arm that does neither "SHALL be a compile error". When the block cannot be
+ * read, the compiler cannot establish either, and the client text lowering it
+ * used to fall back to (`rewriteBlockBody` + `emitArmAssign`) emits the block's
+ * statements as side effects only: the guarded value stays the error envelope —
+ * truthy — and `const ok = check(p) !{ .Denied :> { @note = "d"⏎ !yes } }` let a
+ * wrong password in. The server already refuses the same text (`refuseServerArm`);
+ * this is the client's refusal, so the two boundaries agree.
+ *
+ * Returns true when the arm was refused (a compile error was recorded): the
+ * caller emits an inert placeholder in place of the arm.
+ */
+export function refuseUnreadableValueArm(arm: { pattern?: string; handler?: string; failExpr?: unknown; span?: unknown }): boolean {
+  if (!arm || arm.failExpr) return false;
+  const t = (arm.handler ?? "").trim();
+  if (!(t.startsWith("{") && t.endsWith("}")) || !t.slice(1, -1).trim()) return false;
+  const r = armBlockStatementsDetailed(t);
+  if (!r || r.ok) return false;
+  const pattern = (arm.pattern ?? "_").trim() || "_";
+  const where = `in the \`${pattern}\` arm of a \`!{ }\` handler whose result is used (a value position, §19.4.3)`;
+  const sp = arm.span as { file?: unknown; start?: unknown } | undefined;
+  const span = sp && typeof sp.file === "string" && sp.file && typeof sp.start === "number" ? sp : currentLoweringSpan();
+  let err: CGError;
+  if (r.refusal.code) {
+    const msg = r.refusal.message.startsWith(r.refusal.code) ? r.refusal.message : `${r.refusal.code}: ${r.refusal.message}`;
+    err = new CGError(r.refusal.code, `${msg} (${where}: \`${excerpt(t)}\`)`, span as any);
+  } else {
+    err = new CGError(
+      "E-STMT-UNEXPECTED-TOKEN",
+      `E-STMT-UNEXPECTED-TOKEN: unexpected token — no statement begins at \`${excerpt(r.refusal.text || t)}\` ` +
+        `${where}: \`${excerpt(t)}\`. The compiler cannot read this arm's block, so it cannot tell what value ` +
+        `the arm yields — and in a value position every arm must yield a value or leave. Separate the arm's ` +
+        `statements with \`;\`, or move its work into a function and call that.`,
+      span as any,
+    );
+  }
+  recordRefusedLowering(err, arm as object);
+  return true;
+}
+
+/**
  * The statements of a server `{ … }` arm body, parsed (see file header). Returns
  * null when there is nothing to structure: not server mode, not a statement
  * block, or an empty block. A body the parser refuses is a compile error and

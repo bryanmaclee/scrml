@@ -19564,6 +19564,37 @@ function reemitHandlerStringToken(tok) {
 }
 
 /**
+ * S468 — join a `!{}` arm handler's token texts into the arm's `handler` text
+ * (one "\n" where the source line changes, else one space — BUG-ASI-ERROR-ARM)
+ * and record where each token came from: one `[textOffset, sourceStart,
+ * sourceLine]` entry per token, in text order.
+ *
+ * The joined text does not keep the source layout (blank lines collapse, runs of
+ * spaces become one), so a statement codegen re-reads from it
+ * (`armBlockStatementsDetailed`) cannot find its own source position from the
+ * text alone. The map lets it anchor each re-read statement at its OWN line —
+ * `log()`'s `file:line` (§20.6), a diagnostic — rather than at the arm's first.
+ */
+function joinArmHandlerParts(parts, partLines, partStarts) {
+  let text = "";
+  const srcMap = [];
+  for (let pi = 0; pi < parts.length; pi++) {
+    if (pi > 0) text += partLines[pi] > partLines[pi - 1] ? "\n" : " ";
+    if (typeof partStarts[pi] === "number") srcMap.push([text.length, partStarts[pi], partLines[pi]]);
+    text += parts[pi];
+  }
+  return { text, srcMap };
+}
+
+/** Attach a handler source map to an arm (non-enumerable: position data, not structure). */
+function setArmHandlerSrcMap(arm, srcMap) {
+  if (arm && typeof arm === "object" && Array.isArray(srcMap) && srcMap.length > 0) {
+    Object.defineProperty(arm, "handlerSrcMap", { value: srcMap, enumerable: false, configurable: true, writable: true });
+  }
+  return arm;
+}
+
+/**
  * S452 — is the token at `i` the start of a PIPE-LESS `!{}` handler arm?
  *
  * `!{}` handler arms use the §18.2 `match`-arm grammar (ruling:
@@ -20005,6 +20036,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
@@ -20028,18 +20060,15 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
 
       // Join with newline when consecutive tokens are on different source lines.
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
 
       const _handlerTrimmed = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed,
@@ -20049,7 +20078,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         ...(legacyPipe ? { legacyPipe } : {}),
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
       // Canonical arm syntax (§19.4.3): ::TypeName(binding) -> handler
       // No leading pipe. Binding may be bare ident or paren-wrapped `(ident)`.
@@ -20097,6 +20126,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = [];
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth2 = 0; // S452 r3 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
@@ -20120,15 +20150,13 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      // Join with newline when consecutive tokens are on different source lines.
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
       const _handlerTrimmed3 = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed3,
@@ -20136,7 +20164,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         armArrow: armArrow2,
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else if (
       i + 1 < tokens.length &&
       (tok.kind === "IDENT" || tok.kind === "KEYWORD") &&
@@ -20161,6 +20189,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
@@ -20183,16 +20212,13 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
       // Join with newline when consecutive tokens are on different source lines.
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
       const _handlerTrimmed2 = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed2,
@@ -20200,7 +20226,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         armArrow: armArrow3,
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else {
       // S452 r3 — never skip silently: a comment between arms is fine; any
       // other token here starts no arm and would be dropped -> E-PARSE-001.

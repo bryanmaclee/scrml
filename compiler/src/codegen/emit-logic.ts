@@ -5,10 +5,10 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, asyncNameFactsOf, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
+import { serverArmBlockStatements, serverArmExprNode, refuseServerArm, refuseUnreadableValueArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
-import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
+import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
@@ -943,11 +943,12 @@ function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitL
   if (!tailKind) return null;
 
   // The body was parsed from the arm's text, so its spans are relative to that
-  // text under a probe file name. Anchor them at the arm (its file and start) so
-  // a position-reading lowering — `log()`'s `file:line` (§20.6), a diagnostic —
-  // names the author's file and the arm's line, not the probe.
+  // text under a probe file name. Anchor them in the author's file — each
+  // statement at its own line (the arm's handler source map) — so a
+  // position-reading lowering — `log()`'s `file:line` (§20.6), a diagnostic —
+  // names the author's file and line, not the probe.
   const armSpan = (arm as { span?: { file?: string } }).span;
-  if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(stmts, armSpan);
+  if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(stmts, armSpan, (arm as { handlerSrcMap?: Array<[number, number, number]> }).handlerSrcMap ?? null);
 
   // The arm is its own block scope: its declarations see the outer names but go
   // into their own set (as in `_emitStructuredArmToVar`). Its statements are side
@@ -976,23 +977,64 @@ function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitL
   return lines;
 }
 
-/** Re-anchor every `span` in a freshly parsed subtree at `at` (its file, start and line). */
-function _anchorSpansAt(root: unknown, at: { file?: string; start?: number; end?: number; line?: number; col?: number }): void {
+/**
+ * Re-anchor every `span` in a subtree freshly parsed from an arm's handler text
+ * (`armBlockStatementsDetailed`) in the author's file.
+ *
+ * S468 fix round 1 — each STATEMENT is anchored at its OWN source position: its
+ * span holds a probe offset (`PROBE_BODY_OFFSET`), which is a handler-text offset,
+ * which the arm's `handlerSrcMap` (ast-builder `joinArmHandlerParts`) maps to the
+ * token's source offset and line. (Anchoring every statement at the arm's start
+ * made two `log()`s on lines 20 and 22 both print `app.scrml:20`.) An EXPRESSION
+ * node's span is relative to its own expression text, not to the probe, so it
+ * takes its enclosing statement's position — `log()` resolves its line from that
+ * offset (§20.6). A nested arm's `handlerSrcMap` (probe offsets too) is mapped the
+ * same way, so a nested handler's statements anchor in the author's file as well.
+ * Without a map (an arm built elsewhere) every span takes the arm's position.
+ */
+function _anchorSpansAt(
+  root: unknown,
+  at: { file?: string; start?: number; end?: number; line?: number; col?: number },
+  srcMap?: ReadonlyArray<readonly [number, number, number]> | null,
+): void {
+  const armPos = { start: at.start ?? 0, line: at.line ?? 1, col: at.col };
+  // A probe offset → the source offset and line it was read from (null: unmapped).
+  const toSource = (probeStart: unknown): { start: number; line: number; col?: number } | null => {
+    if (!srcMap || srcMap.length === 0 || typeof probeStart !== "number") return null;
+    const t = probeStart - PROBE_BODY_OFFSET + 1;
+    if (t < 0) return null;
+    let e: readonly [number, number, number] | null = null;
+    for (const m of srcMap) { if (m[0] <= t) e = m; else break; }
+    if (!e) return null;
+    return { start: e[1] + (t - e[0]), line: e[2] };
+  };
   const seen = new Set<object>();
-  const walk = (n: any): void => {
+  const walk = (n: any, enc: { start: number; line: number; col?: number }, inExpr: boolean): void => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
-    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    if (Array.isArray(n)) { for (const c of n) walk(c, enc, inExpr); return; }
+    let here = enc;
+    const sp = n.span;
+    if (sp && typeof sp === "object") {
+      if (!inExpr) here = toSource(sp.start) ?? armPos;
+      const len = !inExpr && typeof sp.end === "number" && typeof sp.start === "number" && sp.end >= sp.start ? sp.end - sp.start : 0;
+      n.span = { ...sp, file: at.file, start: here.start, end: here.start + len, line: here.line, col: here === armPos ? at.col : sp.col };
+    }
+    const nested = Object.getOwnPropertyDescriptor(n, "handlerSrcMap");
+    if (nested && Array.isArray(nested.value)) {
+      const mapped = nested.value.map((m: [number, number, number]) => {
+        const s = toSource(m[1]);
+        return s ? [m[0], s.start, s.line] : [m[0], armPos.start, armPos.line];
+      });
+      Object.defineProperty(n, "handlerSrcMap", { value: mapped, enumerable: false, configurable: true, writable: true });
+    }
     for (const k of Object.keys(n)) {
+      if (k === "span") continue;
       const v = n[k];
-      if (k === "span" && v && typeof v === "object") {
-        n[k] = { ...v, file: at.file, start: at.start, end: at.end ?? at.start, line: at.line, col: at.col };
-        continue;
-      }
-      if (v && typeof v === "object") walk(v);
+      if (v && typeof v === "object") walk(v, here, inExpr || k === "exprNode" || /Expr$/.test(k));
     }
   };
-  walk(root);
+  walk(root, armPos, false);
 }
 
 /**
@@ -5098,13 +5140,29 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         return [`    ${resultVar} = ${bare};`];
       };
 
+      // §19.4.3 — is the handler's result USED (a value position)? The guarded
+      // value is bound (`const` / `let` / an assignment, incl. the synthetic
+      // binding of an expression-position handler), returned, yielded, or written
+      // to a cell. (A handled call alone on its line is a statement position.)
+      const _gExpr = guardedNode && guardedNode.kind === "bare-expr" ? guardedNode.exprNode : null;
+      const guardValueUsed = !!(bindingName || returnsResult || yieldsResult || reactiveCellName || cellWriteNode ||
+        opts.exprPositionGuard || (_gExpr && _gExpr.kind === "assign"));
+
       if (arms.length > 0) {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
           // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
           // that expression: lowered from its parsed statements, tail into resultVar.
-          const blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
+          let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
+          // S468 fix round 1 — FAIL CLOSED: in a value position a braced arm the
+          // reader cannot read is a compile error on the client too (the server's
+          // reader already refuses it, `serverArmBlockStatements`). Never the text
+          // fallback below, which drops the arm's value: the guarded value stayed
+          // the (truthy) error envelope and a wrong password logged in.
+          if (!blockValueLines && guardValueUsed && opts.boundary !== "server" && refuseUnreadableValueArm(arm)) {
+            blockValueLines = [`    ${resultVar} = null; /* E-STMT-UNEXPECTED-TOKEN: unreadable value-position arm */`];
+          }
           const armCode = blockValueLines ? "" : emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
           const armLines = (isExprBody: boolean): string[] => blockValueLines ?? emitArmAssign(armCode, isExprBody);
           // A non-block, non-re-fail arm body is a single EXPRESSION (emitArmBody
