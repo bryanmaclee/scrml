@@ -4722,6 +4722,33 @@ function walkTemplateInterpolations(
   lit: { raw: string; span: ExprSpan } & object,
   callback: (ident: IdentExpr) => void,
 ): void {
+  for (const node of templateInterpolationNodesCached(lit)) {
+    if ((node as EscapeHatchExpr).kind === "escape-hatch"
+        && (node as EscapeHatchExpr).nativeKind === "TemplateInterpFallback") {
+      regexExtractIdents((node as EscapeHatchExpr).raw, lit.span, callback);
+      continue;
+    }
+    forEachIdentInExprNode(node, callback);
+  }
+}
+
+/**
+ * The parsed `${…}` interpolations of a template literal (a `lit` with
+ * `litType: "template"`, or a `TemplateLiteral` escape hatch), in source order.
+ * An interpolation the expression parser could not parse is OMITTED here (the
+ * identifier walker above has its own fallback for those; a structural consumer
+ * gets only what the parser structured — it never re-scans text).
+ *
+ * S467 (§19.4.3) — read by the unhandled-failable-call check, which must see a
+ * `!` call inside an interpolation (a back-tick string holding `${risky()}`) as a value position.
+ */
+export function templateInterpolationNodes(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
+  return templateInterpolationNodesCached(lit).filter(
+    (n) => !((n as EscapeHatchExpr).kind === "escape-hatch" && (n as EscapeHatchExpr).nativeKind === "TemplateInterpFallback"),
+  );
+}
+
+function templateInterpolationNodesCached(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
   let cached = TEMPLATE_INTERP_CACHE.get(lit as unknown as LitExpr);
   if (!cached) {
     cached = [];
@@ -4755,15 +4782,7 @@ function walkTemplateInterpolations(
     }
     TEMPLATE_INTERP_CACHE.set(lit as unknown as LitExpr, cached);
   }
-
-  for (const node of cached) {
-    if ((node as EscapeHatchExpr).kind === "escape-hatch"
-        && (node as EscapeHatchExpr).nativeKind === "TemplateInterpFallback") {
-      regexExtractIdents((node as EscapeHatchExpr).raw, lit.span, callback);
-      continue;
-    }
-    forEachIdentInExprNode(node, callback);
-  }
+  return cached;
 }
 
 // ---------------------------------------------------------------------------
