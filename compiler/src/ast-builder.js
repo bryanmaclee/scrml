@@ -15114,9 +15114,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let curPattern = null; // DestructurePattern | null
     let curPatternIsLin = false;
     let curPatternTypeAnnotation = null;
+    // s466 — where the current param's default starts in the source (the first
+    // token after its top-level `=`). The default is kept as re-spelled TEXT, so
+    // this is the only source position a diagnostic about it can point at.
+    let defStartTok = null;
+    // s466 fix round 4 — the source line of the last token appended to `defBuf`.
+    let defLastLine = null;
 
     function pushParam(nameRaw, defRaw) {
       const def = defRaw == null ? null : defRaw.trim();
+      const defSpan = def && def.length > 0 && defStartTok && defStartTok.span ? spanOf(defStartTok, defStartTok) : null;
+      defStartTok = null;
       // A5-FUP — destructured param path: `curPattern` holds the structured
       // DestructurePattern; `cur` may still contain residual type annotation
       // tokens (after a `:`). Emit a structured entry without re-parsing the
@@ -15126,6 +15134,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (curPatternTypeAnnotation) entry.typeAnnotation = curPatternTypeAnnotation;
         if (curPatternIsLin) entry.isLin = true;
         if (def && def.length > 0) entry.defaultValue = def;
+        if (defSpan) Object.defineProperty(entry, "defaultSpan", { value: defSpan, enumerable: false, configurable: true, writable: true });
         params.push(entry);
         return;
       }
@@ -15147,6 +15156,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       if (isLin) entry.isLin = true;
       if (def && def.length > 0) entry.defaultValue = def;
+      if (defSpan) Object.defineProperty(entry, "defaultSpan", { value: defSpan, enumerable: false, configurable: true, writable: true });
       params.push(entry);
     }
     // Helper: append `text` to a buffer, inserting a leading space when needed
@@ -15163,16 +15173,27 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           buf[buf.length - 1] !== ' ') {
         next += ' ';
       }
-      if (tok.kind === 'STRING') {
+      const piece = tok.kind === 'STRING'
         // S458 — one cooking path for every annotation collector (typeTokenText):
         // `.text` is the RAW inner text (escapes NOT interpreted), so
         // JSON.stringify(text) re-escaped the backslash — `"a\"b"` became
         // `"a\\\"b"` (a different string) in a parameter's refinement and in a
         // parameter default value.
-        next += typeTokenText(tok);
-      } else {
-        next += tok.text;
+        ? typeTokenText(tok)
+        : tok.text;
+      // s466 fix round 1 — two word-like tokens never fuse: `k = 1 2` was
+      // re-spelled `12` (a different, VALID value) instead of the two tokens the
+      // author wrote, so the default's "not one expression" check never saw it.
+      // s466 fix round 4 — a default keeps its LINE BREAKS: a newline separates
+      // `match` arms (`.Red => 1⏎.Green => 2`), and joining the lines re-spelled the
+      // default as `1. Green => 2` (a different, unparseable text).
+      const tokLine = tok.span && typeof tok.span.line === "number" ? tok.span.line : null;
+      if (bufName === 'def' && next.length > 0 && tokLine !== null && defLastLine !== null && tokLine > defLastLine) {
+        next = next.replace(/ $/, "") + "\n";
       }
+      if (bufName === 'def' && tokLine !== null) defLastLine = tokLine;
+      if (next.length > 0 && /[\w$]$/.test(next) && /^[\w$]/.test(piece)) next += ' ';
+      next += piece;
       if (bufName === 'cur') cur = next;
       else defBuf = next;
     }
@@ -15250,6 +15271,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
         inDefault = true;
         consume();
+        defStartTok = peek();
+        defLastLine = null;
       } else {
         if (inDefault) appendTok('def', tok);
         else appendTok('cur', tok);

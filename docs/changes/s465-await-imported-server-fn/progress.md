@@ -769,3 +769,33 @@
   once per binding from codegen/index.ts with the binding name and the `function name(…) { return … }` fix.
   Round 9's escape judge (`escapingAsyncValuesOf` / `fileScopeAsyncEscapesOf`) removed; the pseudo-fn
   colouring KEPT with a comment (dead for shipped output; six emitters still read it on a failing compile).
+- COMMIT fd8a1be4f (hook passed: 34888 tests). Fixtures flipped to E-ASYNC-FN-ESCAPES-AS-VALUE, each
+  kept with a `function`-declared migrated twin that runs: s465-await-r6 (12 HIGH-1 shapes → F4_REFUSED;
+  7 migrated; client H1 split refuse/migrated; shadow probe migrated), r7 (MED-D asyncArrowStrArrow; MED-C
+  cl2/cl3/w(2) → refused + migrated, executed), r8 (all 9 → REFUSED; 7 migrated; ss1 test on the
+  `function` form), r9 (p3 paren arrow → refused; MED-1 probes rewritten value-only), s440 (arrow-bound
+  helper: + the F4 code beside the sync-callback code), peer-call dispatch (+2 binding refusals). New
+  compiler/tests/integration/s467-await-r10.test.js (35). Pack + y1/y2/y3 (551; README / count / known-fail
+  note). Not migrated: r6 inFileInSomeCallback — `function w` used only inside a `.some` callback is not
+  placed on the server (g-fn-reached-only-through-lambda-not-on-server-s466, 500 fail-closed).
+- GAPS filed: g-file-scope-let-written-in-block-stale-on-server-s467 (MED-2 data form; the async form is
+  now refused), g-server-js-imports-module-without-server-file-s467 (the F4 rewrite target `export
+  function` + an enum/component import → unloadable bundle; pre-existing on base). Annotated:
+  g-top-level-async-closure-called-later-accept-all (closed by refusal), g-imported-async-server-fn-not-
+  awaited-s465.
+- MERGE origin/main 22da975a8 (#1427 server param defaults, #1430 the dpa-023 SPEC incl. §13.9.6):
+  emit-server onserver:* handler head (kept main's `_wsSig` signature + r8's `_wsHeadIdx` async upgrade);
+  FACTS regenerated; known-gaps: count hunk regenerated, main's two new s467 entries + this branch's
+  resolved g-lib-export-const-lambda heading; gap-id set == union (2109). SPEC: one carried-gaps sentence
+  (§13.2 ⚑ list) made accurate — g-top-level-async-closure… is refused under §13.9.6, not coloured.
+- PACK (merged tree, classify.js): 551 shapes, 0 FAIL — PASS 220 / PASS-REFUSED 315 / PASS-500 12 /
+  PASS-DENY 3 / UNJUDGED 1. vs r9 tip (same 551): FAIL→REFUSED 9 (y1/voIife, y1/topLetIfWrite, y2/voIife,
+  y2/voAnnotIife, y2/topLetIfLit, y3/vo2Iife, vo2IifeLit, vo2Bind, vo2Annot); PASS→REFUSED 87 and
+  PASS-500→REFUSED 7 — every one binds a waiting function (list: ~/.cache/scrml-agent-tmp/s467-await-r10/
+  flips.txt); PASS-DENY→REFUSED 2 (E-PARAM-DEFAULT-AWAIT, from #1427).
+- CORPUS (corpus-emit-differential; base = origin/main f79a624df archive = 22da975a8 for compiler/corpus;
+  head = merged tree; examples, samples, conformance/cases, stdlib, giti + flogence copies; 2951 sources):
+  0 newly failing / 0 newly passing; 2 diagnostic-code changes, both already-failing conformance negatives
+  gaining E-ASYNC-FN-ESCAPES-AS-VALUE beside their sync-callback code (auth-async-stdlib-sync-callback-neg,
+  server-fn-in-sync-callback-pos); 165 artifact diffs + 108 text-only = absolute/relative root paths only
+  (normalised: 0 real); syntax delta 0; bare server-fn call sites 36 = 36.

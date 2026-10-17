@@ -13,7 +13,7 @@
  * back into emit-tool.
  */
 
-import { emitFnShortcutBody } from "./emit-logic.js";
+import { emitFnShortcutBody, emitParamDefault } from "./emit-logic.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
@@ -970,14 +970,8 @@ export function collectNonAwaitableAsyncCalls(
       if (uses) { for (const c of uses.calls) record(c.name, at(n.span), c.local ? c.root : null); }
       else for (const c of extractCalleeNames(n.raw)) recordRawCallee(c, at(n.span));
     }
-    // s440 — a NESTED function's own parameter defaults. `paramSignature` splices a
-    // default as RAW TEXT (evaluated eagerly, outside any async body — `await` is
-    // illegal there even in an async fn), so a nested `function g(y = inner(1))`
-    // was reached by neither emit-expr nor this walk. Same treatment as the
-    // enclosing fn's own defaults (Case 3 below).
-    if (k === "function-decl" && Array.isArray(n.params)) {
-      scanParamDefaults(n.params as unknown[], here);
-    }
+    // (A NESTED function's own parameter defaults are checked where it is emitted —
+    // emit-logic.ts `emitParamDefault`, s466 fix round 1.)
     // Phase-2 colorless-async — a CLEAN-FAMILY collection-method call with an
     // async first-arg callback is NOT a non-awaitable leak: emit-expr lowers it to
     // `await _scrml_<method>Async(coll, asyncCb)` and RE-EMITS the callback async,
@@ -1080,28 +1074,12 @@ export function collectNonAwaitableAsyncCalls(
     if (localSyncShadowOf(an)) return; // s441 (FP2) — a SYNC nested fn is in scope
     if (isAsyncName(an.name)) record(an.name, anchorDiagnosticSpan(an.span, anchor));
   };
-  const scanParamDefaults = (ps: unknown[], site: unknown): void => {
-    for (const p of ps) {
-      if (!p || typeof p !== "object") continue;
-      const pd = p as { defaultValue?: unknown; defaultExpr?: unknown; span?: unknown };
-      const at = anchorDiagnosticSpan(pd.span, site);
-      if (typeof pd.defaultValue === "string" && pd.defaultValue.length > 0) {
-        const uses = rawAsyncUsesOf(p);
-        if (uses) { for (const c of uses.calls) record(c.name, at, c.local ? c.root : null); }
-        else for (const c of extractCalleeNames(pd.defaultValue)) recordRawCallee(c, at);
-      } else if (pd.defaultValue && typeof pd.defaultValue === "object") {
-        walk(pd.defaultValue, true, at);
-      }
-      if (pd.defaultExpr && typeof pd.defaultExpr === "object") walk(pd.defaultExpr, true, at);
-    }
-  };
   walk(fnBody, false, fnSpan);
-  // Case 3 — the enclosing fn's OWN parameter defaults. `paramSignature` splices
-  // `p.defaultValue` as RAW TEXT, so it lives in neither `fnBody` nor a structural
-  // node — scan the text for async callees (mirrors the raw escape-hatch branch).
-  // A structured default (a destructure-pattern's `defaultExpr` ExprNode) is walked
-  // structurally as an un-awaitable region.
-  if (Array.isArray(params)) scanParamDefaults(params, fnSpan);
+  // (The enclosing fn's OWN parameter defaults are not scanned here: every
+  // function's defaults are lowered and refused in one place — emit-logic.ts
+  // `emitParamDefault`, s466 fix round 1. Scanning them here too reported one
+  // default twice, under a callback message.)
+  void params;
   return out;
 }
 
@@ -1127,7 +1105,7 @@ export function emitLibraryFnMember(
   fnNode: ASTNode,
   // S466 r7 — `ownAsync` overrides the signature decision (the ss1 block passes the
   // file set's by-body part; the set itself still decides every call site's await).
-  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean; ownAsync?: boolean },
+  opts: { isExported: boolean; asyncFnNames: Set<string>; nonAsyncReemit?: boolean; ownAsync?: boolean; serverPlaced?: boolean },
 ): string {
   const name = (fnNode.name ?? "anon") as string;
   const ownAsync = opts.ownAsync ?? opts.asyncFnNames.has(name);
@@ -1137,7 +1115,6 @@ export function emitLibraryFnMember(
   // async closure (so the nested await is legal + the closure is colored async).
   const serverBody = ownAsync || opts.nonAsyncReemit === true;
   const params = (fnNode.params ?? []) as unknown[];
-  const paramList = params.map((p, i) => paramSignature(p as never, i)).join(", ");
   const star = fnNode.isGenerator ? "*" : "";
   const declaredNames = new Set<string>(
     params
@@ -1147,6 +1124,13 @@ export function emitLibraryFnMember(
   const bodyOpts = serverBody
     ? { boundary: "server", serverFnNames: opts.asyncFnNames, declaredNames, insideFunctionBody: true }
     : { boundary: "client", declaredNames, insideFunctionBody: true };
+  // §7.3.2 (s466 fix round 1) — defaults lowered (and refused) by the one helper,
+  // with the body's options; the file's async fn set decides what needs an await.
+  const _span = fnNode.span as { file?: unknown } | undefined;
+  const _defaultSite = { fnName: name, fnSpan: fnNode.span, asyncNames: opts.asyncFnNames, serverPlaced: opts.serverPlaced === true, params };
+  const paramList = params
+    .map((p, i) => paramSignature(p as never, i, emitParamDefault(p, typeof _span?.file === "string" ? _span.file : "", { ...bodyOpts, declaredNames: new Set(declaredNames) } as never, _defaultSite)))
+    .join(", ");
   const bodyCodes = emitFnShortcutBody(
     (fnNode.body ?? []) as never[],
     bodyOpts as never,

@@ -8094,6 +8094,18 @@ ${ function makeSpan(start, end, line = 1, col = start) { ... } }
 
 Default parameters compile directly to JavaScript default parameter syntax.
 
+**Normative statements (s466):**
+
+- A default value SHALL be one expression. A default the compiler can parse only by dropping trailing text (`k = "a" foo`, `k = 1 2`) SHALL be a compile error, E-PARSE-001, naming the parameter and the left-over text; the compiler SHALL NOT compile the parsed prefix.
+- A default is evaluated before the function body, in a position where the compiler cannot insert `await` (§13.1, §13.2). A default whose evaluation needs one — a `?{}` query, written in the default or reached through a function it calls, a server-function call, a Promise-returning stdlib call, or a call to a function the compiler emits `async` — SHALL be a compile error, E-PARAM-DEFAULT-AWAIT, reported once per parameter at the default. The fix is to compute the value in the function body. (A LAMBDA's parameter default keeps its callback codes, E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK.)
+- A server function's caller supplies its arguments over HTTP. An argument omitted at the call site is a missing key in the request body, and the parameter takes its default; an argument passed as `not` is present and SHALL stay `not` (it is not "omitted"). The default of a wholly-server function is evaluated on the server, per request, after the earlier parameters are bound. The default of a CPS-split function (§19.9.9) is evaluated once, in its client part — the function the caller calls — and the value is sent to the server.
+- Because the caller can always supply the argument itself, the default of a function whose value reaches server code — any server-placed function: a wholly-server function, a CPS-split function (whose default is evaluated in the browser and sent to its server part), an SSE generator, a channel `onserver:*` handler, an exported server function — SHALL NOT read an identity — the `session.*` object (§20.5), the ambient `@currentUser` (§20.5, §52), or, in a CPS-split function's browser-evaluated default, the `@session` projection — whether the default reads it directly or through a local function value it references (a `const` bound to a function, a client `function` / `fn`, either one imported from a `.scrml` module; inside such a helper an `@session` read counts in every server-placed function) — compile error E-PARAM-DEFAULT-SERVER-IDENTITY. A default that CALLS a binding whose function value the compiler cannot follow (a `let`, a `const` initialised from a call, a re-export, a function-valued cell) is the same compile error (fail closed). The value is read in a server statement of the body (`const uid = session.userId`). In a wholly-server function's default an `@session` read is E-SESSION-AMBIENT-SERVER and a client-cell read E-REACTIVE-003 (§6.6.9), as in the body; in a client function's default a free `session` is E-SCOPE-012, as in its body.
+- In a SERVER-PLACED function (below), a default reads only the parameters BEFORE it. A default there that reads its own parameter or a later one (which is not bound yet when the default runs) SHALL be a compile error, E-PARAM-DEFAULT-FORWARD-REF. A client-only function's default is not checked here (it behaves as the JavaScript default it compiles to); whether the rule is language-wide is an open owner ruling.
+- For a SERVER-PLACED function — a wholly-server function, a CPS-split function, an SSE generator, a channel `onserver:*` handler, a nested function in server code, an exported function of a library that server code in the compilation reaches (every exported function, when no file in the compilation imports the library) — every check above is made on the whole default, so its default SHALL contain only expressions the compiler fully structures: identifiers, literals (a template's `${…}` slots included), array / object / map literals, operators other than assignment and update (`=`, compound assignment, `++`, `--`, `delete` — a server default contains no assignment, update or delete form of its own; a function it calls may still have effects, e.g. `k = LOG.push(m)`), member / index access, calls, `new`, casts, expression-bodied functions, and a single-subject `match` whose arms are expressions. Anything else (an assignment or update, a block-bodied function, text the compiler keeps unparsed, markup, a multi-subject or `given`-led match, a block-bodied match arm) in a server-placed function's default SHALL be a compile error, E-PARAM-DEFAULT-UNSUPPORTED; the value is computed in the body instead. A client-only function's default is unaffected: its default values remain arbitrary expressions (above).
+  > **PA reading (S466, owner veto):** the closed set is scoped to server-placed functions, where the identity, client-state, await and transport checks are load-bearing; it does not narrow "Default values are arbitrary expressions" for client-only functions. Whether a language-wide narrowing is wanted is the owner's call. Provenance: dispatch:s466-server-param-defaults fix rounds 3–5.
+- `session` is the §20.5 builtin only where the NAME is free. A parameter, local or lambda parameter named `session` binds an ordinary value; it SHALL NOT escalate its function to the server (§12.2) or count as an identity read (s466 fix round 2).
+  > **Provenance:** dispatch:s466-server-param-defaults (fix round 1, S239 review of `f21624d72`) · spec:§6.6.9 ("`@session` is server-only identity and SHALL NEVER be marshalled from the client") · pa-ruled:§6.6.9-server-identity-in-a-parameter-default (the PA's fix-round brief, item 3) · ruling:user-voice-scrml.md S467 "Ratify all four" (the four codes E-PARAM-DEFAULT-AWAIT, E-PARAM-DEFAULT-SERVER-IDENTITY, E-PARAM-DEFAULT-UNSUPPORTED, E-PARAM-DEFAULT-FORWARD-REF are ratified). **Direction of change: newly-rejecting** — measured over examples/, samples/, conformance cases, giti and flogence: see docs/changes/s466-server-param-defaults/progress.md.
+
 #### 7.3.3 A block binds each name once
 
 **Added S430 (round 5 of the `defer` arc).** Inside a function body, a `let`, `const`, `lin` or
@@ -10321,7 +10333,7 @@ The compiler SHALL:
 >
 > **Direction of change (pa-base §8): semantics-changed.** No program's acceptance changes. A server request whose direct boolean test would have read an un-awaited standard-library Promise — and so passed for every input — now fails with HTTP 500. A correctly awaited test is unchanged in result; it costs one function call.
 
-⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); `g-engine-arm-rewired-handler-skips-async-coloring` (a NON-delegable event handler — `oninput`, `onfocus`, … — inside an engine arm OR a `<match>` element arm gets no §13.2 coloring at all, so the S450 sole-root-statement rule does not reach it: a nested server-call write there still runs fire-and-forget and the next statement reads the stale value); a `match` statement nested inside an `if` / loop / closure / another `match` of a handler is not analysed and fails closed (`E-ASYNC-HANDLER-UNANALYZABLE` / `E-CODEGEN-INVALID-LOGIC`) rather than being awaited; `g-handler-level-rejection-bypasses-scrml-logging` (a write the S450 rule now awaits, whose server call rejects, escapes the async listener as an unhandled rejection instead of reaching scrml's error surface); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
+⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods — since S467 impl#1 REFUSES each of these as E-ASYNC-FN-ESCAPES-AS-VALUE under §13.9.6 instead of colouring the binding, so no binding holds an async-colored function; the gap closes when that lands); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); `g-engine-arm-rewired-handler-skips-async-coloring` (a NON-delegable event handler — `oninput`, `onfocus`, … — inside an engine arm OR a `<match>` element arm gets no §13.2 coloring at all, so the S450 sole-root-statement rule does not reach it: a nested server-call write there still runs fire-and-forget and the next statement reads the stale value); a `match` statement nested inside an `if` / loop / closure / another `match` of a handler is not analysed and fails closed (`E-ASYNC-HANDLER-UNANALYZABLE` / `E-CODEGEN-INVALID-LOGIC`) rather than being awaited; `g-handler-level-rejection-bypasses-scrml-logging` (a write the S450 rule now awaits, whose server call rejects, escapes the async listener as an unhandled rejection instead of reaching scrml's error surface); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
 
 ### 13.3 Worked Example
 
@@ -10719,7 +10731,11 @@ what would wait — the server function called; for a client function (item 2), 
 standard-library call it reaches; for a `?{}` (item 3), the query; for a standard-library call (item 4), the
 function — and the fix: *"a value position cannot wait for the server; load the value with a
 `<request>` (§6.7.7) into a cell and read the cell here"* — and, where the cell is server-authoritative, a
-`<x server>` declaration (§52).
+`<x server>` declaration (§52). *(S467 — the message also offers the second fix: "or declare the cell `(not to T)`
+(§13.9)". It is offered only for a cell initializer, the one value position §13.9 opens. Provenance: ruling:user-voice-scrml.md
+S467 "(a) Opt-in marker (Recommended)" (dpa-023 F1) · dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md`
+§Q2 "Codes retired, subsumed or kept" · supersedes: nothing struck. The `<request>` fix stands, and this adds a second
+fix · Nominal with §13.9.)*
 
 ```scrml
 <program db="sqlite:./app.db">
@@ -10804,6 +10820,381 @@ function — and the fix: *"a value position cannot wait for the server; load th
 §19.6 (`<errorBoundary>` — render-time CLIENT `!` calls and host throws only) ·
 §12.2 (server placement) · §13.2 (where server calls are awaited) · §52.4.3 / §52.6.5 (`<x server>` placeholder and
 load) · §34 (E-VALUE-SERVER-CALL).
+
+### 13.8 Where a Waiting Value May Stand — the One Rule
+
+> **Status: a restatement (S467, dpa-023 Phase 1b).** This section adds no new semantics of its own. It states in
+> one place the rule that §13.2, §13.7, §7.3.2 and the sync-callback codes already state position by position, and
+> it names those codes as instances of the rule. **Code names are kept, not renamed.** Item (ii) below is §13.9's,
+> which is Nominal / spec-ahead. Each instance code keeps the status its own section gives it: E-VALUE-SERVER-CALL
+> (§13.7) is Nominal (impl#1 does not implement it), and E-PARAM-DEFAULT-AWAIT (§7.3.2) lands with
+> `s466-server-param-defaults` (PR #1427).
+>
+> **Provenance:** ruling:user-voice-scrml.md S466 "lets move the dpa up" (the dpa-023 build arc starts now) ·
+> ruling:user-voice-scrml.md S467 "(a) Opt-in marker (Recommended)" (dpa-023 F1, which gives item (ii)) ·
+> dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md` §Q5 row 1b (*"a waiting value … may stand
+> only (i) at a suspension point of an action position, where it is awaited, or (ii) … as a `(not to T)` cell's
+> value. Everywhere else it is `E-`."*) and §Q6 *"Not forks — the PA's call … Keeping the existing code names rather
+> than minting one umbrella code"* · **supersedes:** nothing written. **Direction of change (pa-base §8): inert**
+> for this section. Item (ii) is newly-accepting; its direction is stated in §13.9.
+
+**A waiting value.** A *waiting value* is an expression whose value is available only after the program waits:
+
+1. **a call to an async-colored function** (§13.2): a server-placed function (§12.2), a Promise-returning
+   standard-library function, or a function that calls one, directly or transitively;
+2. **a `?{}` query** (§8), written in the position or reached through a function it calls;
+3. **a call to a Promise-returning standard-library function** (`fetch`, the `scrml:http` functions,
+   `scrml:auth` `verifyPassword` / `hashPassword`, and every other standard-library function the compiler emits
+   `async`). This is already included in item 1. It is listed separately because most of the accept-every-password
+   defects that §13.2's codes exist for were calls of this kind.
+
+These are the same three forms as §13.7's items 1–4, and the same set §13.2's *async-colored* defines. This
+definition does not widen either.
+
+**The rule.** A waiting value SHALL stand only in one of two places:
+
+- **(i) At a suspension point of an action position, where the compiler awaits it.** The action positions are
+  the ones §13.7 lists under "What is not affected": an event-handler value, a function body (client or server), a
+  lifecycle element body (`<request>`, `<effect>`, `<onMount>`), an engine `effect=` / `<onTransition>`, and a
+  body-top statement list. A suspension point is a place where the compiler can end a statement, wait, and resume
+  with what follows (§13.2 inserts the `await` there). The S450 sole-root handler write (§13.2) MAY run
+  fire-and-forget instead, because no statement of that handler follows it.
+- **(ii) As the initializer of a cell DECLARED `(not to T)`** (§13.9). The cell holds the in-flight load. Every read
+  before a discrimination is E-TYPE-001.
+
+**Everywhere else a waiting value SHALL be a compile error.** The error is the code already named for the
+position:
+
+| Where the waiting value stands | Why it cannot wait | Code (home) |
+|---|---|---|
+| A value position: a cell initializer without the `(not to T)` marker, a derived formula, a markup `${ … }` interpolation, an attribute value (§6.15) | It produces a value now, at construction, on every recompute or on every render. There is no statement boundary at which to wait. | **E-VALUE-SERVER-CALL** (§13.7) |
+| The body of a synchronous callback in server code: `.sort(cmp)`, `.findLast(f)`, a nested lambda, or a lambda's parameter default | The consumer calls the callback synchronously and uses its return. `await` is illegal there. | **E-SERVER-FN-IN-SYNC-CALLBACK** (a server-function call) / **E-ASYNC-STDLIB-IN-SYNC-CALLBACK** (a standard-library call) (§13.2) |
+| A function declaration's own parameter default | The default is evaluated before the body runs, where no `await` can be inserted. | **E-PARAM-DEFAULT-AWAIT** (§7.3.2) |
+| Behind a function value: an async-colored function aliased, stored, returned, passed to a function that is not an awaited collection method, or (§13.9.6) held by any binding | Each later call of that value produces a waiting value at a call site the compiler cannot see, so nothing awaits it. | **E-ASYNC-FN-ESCAPES-AS-VALUE** (§13.2) |
+
+Two related codes are not instances of the rule, but are part of the same boundary:
+- **E-ASYNC-CALL-PROMISE-METHOD** (§13.2). Once a waiting value has been awaited under (i), it is a `T` and no
+  longer a Promise, so `.then` / `.catch` / `.finally` read off it is an error.
+- **E-ASYNC-HANDLER-UNANALYZABLE** (§13.2). It is a fail-closed backstop for when the compiler cannot tell which
+  position a waiting value stands in.
+
+§13.2's S462 server Promise trap is a run-time backstop for a waiting value that impl#1 failed to await under (i).
+It is not a position rule.
+
+**Failability is a separate question.** A waiting value that is a client call to a server function is also a
+failable call (§19.9.10). Standing in an allowed place does not handle its failure: an unhandled one is still
+E-ERROR-002 under (i), and under (ii) §13.9.5 requires the failure to be handled at the declaration.
+
+```scrml
+<program db="sqlite:./app.db">
+${
+  import { verifyPassword } from "scrml:auth"
+  function teamCount(team: string)! -> LoadError {
+    return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
+  }
+  function anyMatch(pw: string, hashes: string[]) {
+    for (const h of hashes) { if (verifyPassword(pw, h)) return true }   // (i) a function body: awaited
+    return false
+  }
+  function slowest(hashes: string[], pw: string) {
+    return hashes.sort((a, b) => verifyPassword(pw, a) ? 1 : -1)   // E-ASYNC-STDLIB-IN-SYNC-CALLBACK
+  }
+  function lookup(team: string = teamCount("core")) { return team }   // E-PARAM-DEFAULT-AWAIT
+}
+<team> = "core"
+<n> = 0
+<shown> = false
+<members>: int = teamCount(@team) !{ _ :> 0 }          // E-VALUE-SERVER-CALL: no marker, a value position
+<loaded>: (not to int) = teamCount(@team) !{ _ :> not } // (ii): a declared pending cell (§13.9)
+<p>${teamCount(@team)}</p>                              // E-VALUE-SERVER-CALL: an interpolation (§13.9.3)
+<button onclick={ @n = teamCount(@team) !{ _ :> @n }; @shown = true }>Count</button>   // (i) a handler
+</program>
+```
+
+**Cross-references:** §13.2 (async-colored; where calls are awaited) · §13.7 (E-VALUE-SERVER-CALL) · §13.9 (the
+pending cell) · §7.3.2 (E-PARAM-DEFAULT-AWAIT) · §6.15 (value positions) · §19.9.10 (a client call to a server
+function is failable) · §34 (rows for each code).
+
+### 13.9 Pending Cells — the Async Boundary as a `(not to T)` Lifecycle
+
+> **Status: Nominal / spec-ahead (S467).** NORMATIVE. **impl#1 does not implement it** and is not changed for it.
+> impl#1 is frozen for language semantics (S447), and S467 dpa-023 F5 = (a) grants no rebuild exception. impl#1 stays
+> retrofit-only on the await mandate, and that retrofit is held by the security await probe pack (#1428). The
+> divergence is carried (§34.0). The exception is §13.9.6 (the F4 refusal), which impl#1 enforces (ruling:user-voice-scrml.md S467 "yes on the impl#1
+> enforce F4"). On impl#1 a `(not to T)` cell with a waiting initializer compiles, and its
+> pre-arrival read throws at mount (record correction W7, the DD's Context table). **The bootstrap builds this
+> section**, after its U1c (the server artifact) and U2 (`<request>`) units and lifecycle typing in `analyze`. The
+> build order is the DD's Phase 3.
+>
+> **Provenance:** ruling:user-voice-scrml.md S337 "The Q4 ruling — dpa-023" — *"b"* (the direction is ratified as
+> `not → pending → T`; the conditions: *"the marker is SUGAR (no new runtime representation) · the "does not color
+> the function" pitch is DROPPED as measured-false · the rule must be **`E-` not `I-`**"*) · ruling:user-voice-scrml.md
+> S466 "lets move the dpa up" · ruling:user-voice-scrml.md S467 dpa-023 F1–F7 (each quoted at its subsection) ·
+> dd:`scrml-support/docs/deep-dives/dpa-023-build-arc-scoping-2026-10-14.md` §Q2, §Q6 · prior DD:
+> `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` · **supersedes:** §13.7's
+> *"the async-derived alternative belongs to dpa-023 if ever"* (quoted in §13.7's provenance from S451 R1). That
+> alternative is now this section, and only in cells.
+
+**What this section adds.** §13.7 refuses a waiting value (§13.8) in every value position, and its only fix is a
+hand-built `<request>` that loads the value into a cell. This section lets a cell say the same thing in its
+declaration. The declared type `(not to T)` is the marker: it says the cell starts as `not` and becomes `T` when the
+load arrives. The compiler then accepts the waiting initializer and checks every read.
+
+#### 13.9.1 The marker is the lifecycle type — opt-in
+
+A Shape-1 cell declaration (§6.2) whose declared type is the presence lifecycle `(not to T)` (§14.12, §66.11.6)
+MAY take a waiting value (§13.8) as its initializer. Such a cell is a **pending cell**. No other cell may take one:
+a cell declared with any other type, or with no type, keeps **E-VALUE-SERVER-CALL** (§13.7) for a waiting
+initializer. The compiler SHALL NOT infer `(not to T)` from what the initializer calls.
+
+The §66 dialect spells the same declaration in an opener: `<users:(not to User[])=(loadUsers() !{ _ :> not })/>`
+(S449 item 4: a bare lifecycle type MAY stand in an opener).
+
+> **Provenance:** ruling:user-voice-scrml.md S467 "(a) Opt-in marker (Recommended)" — dpa-023 F1: *"`<users>: (not
+> to User[]) = loadUsers() !{…}` is legal in a value position; reads before discrimination are E-TYPE-001; a cell
+> with no marker whose initializer waits keeps E-VALUE-SERVER-CALL. Rejected: (b) inferred (a callee three hops away
+> silently re-types the cell)."* · ruling:user-voice-scrml.md S467 F2 *"(a) The lifecycle type"* — *"the marker is the
+> lifecycle type `<x>: (not to T) = f() !{…}` — no new keyword"* · dd:dpa-023-build-arc-scoping §Q2 "What the
+> marker is", §Q6 F1/F2 · **supersedes:** §13.7's rule for this one position. A `(not to T)`-declared cell
+> initializer is no longer E-VALUE-SERVER-CALL. §13.7's E-VALUE-SERVER-CALL message SHALL add the second fix:
+> *"or declare the cell `(not to T)` (§13.9)"*. **Direction of change: newly-accepting**, narrow. Measured: `(not to
+> T)` is declared in 0 corpus files, and up to 9 cell-initializer sites in 17 files could adopt it (DD §Q4).
+>
+> **A derived cell cannot be a pending cell.** "A Shape-1 cell declaration" excludes a derived cell: `const <x>: (not
+> to T) = f(@id)` with a waiting `f` keeps E-VALUE-SERVER-CALL. Provenance: ruling:user-voice-scrml.md S467 "three
+> §13.9 pending-cell details" — *"No — keep it refused"* (*"A DERIVED cell cannot be a pending cell — `const <x>: (not
+> to T) = f(@id)` stays E-VALUE-SERVER-CALL."*).
+
+```scrml
+<program db="sqlite:./app.db">
+${ function teamCount(team: string)! -> LoadError {
+     return ?{`SELECT count(*) AS n FROM members WHERE team = ${team}`}.get().n
+   } }
+<team> = "core"
+<members>: (not to int) = teamCount(@team) !{ _ :> not }   // legal: a pending cell, deps [@team]
+<total>: int = teamCount(@team) !{ _ :> 0 }                // E-VALUE-SERVER-CALL: no marker (F1)
+</program>
+```
+
+#### 13.9.2 What it means — a plain cell plus a `<request>`; nothing new at run time
+
+A pending cell declaration SHALL mean exactly a plain cell initialized to `not`, plus a `<request>` (§6.7.7) whose
+body is the declared initializer assigned to the cell:
+
+```scrml
+// written
+<users>: (not to User[]) = loadUsers() !{ _ :> not }
+
+// means exactly
+<users>: (not to User[]) = not
+<request id="‹compiler-internal›">${ @users = loadUsers() !{ _ :> not } }</>
+```
+
+- **deps** are inferred from the initializer's `@` reads, as `<request>` infers them (§6.7.7). A change to one
+  re-runs the load. An initializer that reads no cell loads once, on mount.
+- **Everything else is the `<request>`'s.** Mount, supersede (EC-2: the newest load wins), teardown (EC-3), §6.7.7.1
+  READ / WRITE classification and abort-reads / discard-writes, and §6.7.7.3's rule that a provably-writing request
+  does not run on mount all apply to a pending cell by construction, because the desugar is literal. (DD Open
+  Question 3 asks for this confirmation; this sentence gives it.)
+- **No new runtime representation.** At run time the cell holds `not` until the load settles, which is the existing
+  representation of `(not to T)`. The difference between pending and `T` is **static only**.
+- **The compiler SHALL NOT reset the cell by re-running the initializer outside the request.** A reset of a pending
+  cell (§6.8) is the request's re-run. (impl#1's reset path re-invokes an initializer thunk un-awaited:
+  `_scrml_cs_init_set(x, () => fetch())`, 16 sites in 11 corpus files, DD §Q4. That is the S322 falsifier class,
+  and the desugar makes it unreachable.)
+
+> **Provenance:** ruling:user-voice-scrml.md S337 "The Q4 ruling — dpa-023" — *"the marker is SUGAR (no new runtime
+> representation)"* · dd:dpa-023-build-arc-scoping §Q2 "What it desugars to" · **supersedes:** nothing written.
+>
+> **The hidden request's controls are not reachable.** The desugared request's `id` is compiler-internal. A pending
+> cell exposes no `.refetch()`, `.loading` or `.stale` (and, per §13.9.5, no `.error`). An author who needs them writes
+> the `<request>` by hand (§13.7's fix). Provenance: ruling:user-voice-scrml.md S467 "three §13.9 pending-cell
+> details" — *"No — write a <request>"* (*"The pending cell's hidden request controls (`.refetch()` / `.loading` /
+> `.stale`) are NOT reachable; an author who needs them writes an explicit `<request>`."*).
+
+#### 13.9.3 Reads before discrimination are E-TYPE-001; render positions keep E-VALUE-SERVER-CALL
+
+A read of a pending cell SHALL be preceded, on every path, by a presence discrimination of that cell: a `given`, an
+`if=` / `if (@x is not) return` early return, an `is given` test, or a `match`. This is the §14.12.3 (S160) rule:
+*discrimination IS transition* wherever the pre-type is `not`. Any other read SHALL be **E-TYPE-001**. That includes
+a whole-cell read (`${@users}`, `f(@users)`), not only a member access. The declaration never transitions the cell
+by itself, because its initializer writes nothing until the load settles. The message SHALL say that the value may
+still be in flight and name the declaration's load.
+
+The rule is the S337 condition that the rule be `E-`, not `I-`. It reuses E-TYPE-001 and mints no new code. A
+suspension point ends every reactive cell's narrowing (§42.3.5), so inside a handler a read after an awaited call
+discriminates again.
+
+**Render positions do not get pending (F3).** A waiting value written directly in a markup interpolation or an
+attribute value stays **E-VALUE-SERVER-CALL** (§13.7). Waiting data enters markup only through a pending cell or a
+`<request>`. There is no boundary element that holds an anonymous pending state, and no Suspense-style re-suspend.
+
+> **Provenance:** ruling:user-voice-scrml.md S467 F1 (quoted in §13.9.1) — *"reads before discrimination are
+> E-TYPE-001"* · ruling:user-voice-scrml.md S467 "(a) Cells only" — dpa-023 F3: *"I need more clarity on this one. is
+> the only real difference validating @users is not in the loading tag, or am I missing something else here?"* /
+> *"I see, a it is."* — *"R1 stands: a server call in an interpolation or attribute stays E-VALUE-SERVER-CALL; async
+> data enters markup through a `(not to T)` cell (F1) or `<request>`. … Rejected: (b) Suspense-style boundary."* ·
+> dd:dpa-023-build-arc-scoping §Q2 (worked code 3 and 4), §Q6 F3 · **supersedes:** nothing written. E-TYPE-001's
+> §14.12 trigger gains the pending case. **Direction of change: newly-rejecting** only for reads of a cell that this
+> section first made legal to declare. The DD measured 0 such reads in the corpus (§Q4), because `(not to T)` is
+> unused.
+
+```scrml
+// lib/users.scrml
+${
+  export function isTaken(name: string)! -> LoadError {
+    return ?{`SELECT 1 FROM users WHERE name = ${name}`}.get() is given
+  }
+}
+// app.scrml
+${ import { isTaken } from "./lib/users.scrml" }
+<name> = ""
+<taken>: (not to bool) = isTaken(@name) !{ _ :> not }      // deps [@name]
+<p if=(@taken is given && !@taken)>available</p>           // discriminated: legal
+<p else>checking…</p>
+<p>${@taken ? "taken" : "free"}</p>                        // E-TYPE-001: read before discrimination
+<p if=${isTaken(@name)}>taken</p>                          // E-VALUE-SERVER-CALL: render position (F3)
+```
+
+#### 13.9.4 Stale while reloading
+
+When a dependency changes after the first load has settled, the cell SHALL keep its last `T` while the new load is
+in flight, as `<request>.data` does (§6.7.7, "On re-execution, `<#id>.data` is NOT cleared"). It SHALL NOT revert
+to `not`. This follows from the desugar: the request writes the cell only when a load settles. It is a run-time
+behaviour only. Statically, §13.9.3 already requires every read to discriminate.
+
+**A waiting write from an action position.** An action-position write of a waiting value into a pending cell
+(`@members = teamCount(@team) !{ _ :> not }` in a handler or a function body) is awaited at its suspension point
+(§13.8 (i)) and lands when the value arrives. Until then the cell SHALL keep its current value. It SHALL NOT revert
+to `not` when the write starts, as a reload keeps its last value above. The write does not transition the cell by
+itself (§14.12.3): reads still discriminate (§13.9.3), and a suspension point ends narrowing (§42.3.5).
+
+> **Provenance:** ruling:user-voice-scrml.md S467 dpa-023 F6 — *"F6 + F7 "Both recommended""* — *"**F6 (a):** a
+> pending cell keeps its stale value while reloading (as `<request>.data`)"* · ruling:user-voice-scrml.md S467 "three
+> §13.9 pending-cell details" — *"No — keep current value"* (*"An action-position write of a waiting value into a
+> pending cell is awaited and lands when the value arrives; the cell keeps its current value meanwhile (consistent
+> with F6) — it does not revert to `not`."*) · dd:dpa-023-build-arc-scoping §Q6 F6 · **supersedes:** nothing written.
+> **Direction of change: inert** (it follows from §13.9.2 and §13.8 (i)).
+
+```scrml
+<team> = "core"
+<members>: (not to int) = teamCount(@team) !{ _ :> not }
+<select bind:value=@team><option>core</option><option>infra</option></select>
+<p if=@members>Members: ${@members}</p>   // switching team keeps the old count until the new one arrives
+<p else>Loading…</p>
+```
+
+#### 13.9.5 Failure is handled at the declaration
+
+When a pending cell's initializer is failable (a client call to a server function always is, §19.9.10; a `?{}` is
+too, §19.8.3), its failure SHALL be handled in the declaration, with `= f() !{ … }` (§19.4.3, value position). An
+unhandled failable initializer SHALL be **E-ERROR-002**. The desugared request does NOT handle the call on the
+author's behalf, and a pending cell has no implicit `@x.error` surface. Each arm SHALL yield a value of the
+declared type or leave (E-ERROR-012). `not` is a value of `(not to T)`: it returns the cell to its pre-state.
+
+> **Provenance:** ruling:user-voice-scrml.md S467 dpa-023 F7 — *"F6 + F7 "Both recommended""* — *"**F7 (a):** a
+> pending load's failure is handled at the declaration (`= f() !{…}`), consistent with E-ERROR-002 / R11"* ·
+> dd:dpa-023-build-arc-scoping §Q6 F7 (*"(b) is the §52 exception, and generalising it reopens "a failure nobody
+> handled""*) · **supersedes:** for this one desugared request, §6.7.7's *"The call that is the right-hand side of the
+> body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002"*. A pending cell's request is
+> compiler-written, its `.error` is unreachable (§13.9.2), so the author handles the failure. **Direction of change:
+> newly-rejecting** for an unhandled pending initializer, which §13.9.1 first made legal. 0 corpus sites.
+>
+> *PA reading, flagged:* how E-ERROR-002 applies to declarations in general is being settled by
+> `s467-error-002-value-position` (the S466 `s466-error-002-decl` re-dispatch). This subsection depends only on the
+> F7 ruling. If that branch words the declaration rule differently, this sentence is reconciled to it.
+
+```scrml
+<members>: (not to int) = teamCount(@team) !{ _ :> not }          // legal: a failed load goes back to `not`
+<members2>: (not to int) = teamCount(@team)                       // E-ERROR-002: the failure is not handled
+```
+
+#### 13.9.6 A waiting function is bound only by a `function` declaration
+
+An async-colored function (§13.2) SHALL be bound only by a `function` declaration, including `export function`
+and a `function` declared inside another function's body. **No binding SHALL hold an async-colored function.** A
+`const` / `let` / `export const` whose initializer is a lambda (or function expression) whose body waits, or whose
+value is an async-colored function produced any other way (a ternary or `||` of function values, an alias of an
+imported async function, a factory or curried call that returns one, an object method), SHALL be
+**E-ASYNC-FN-ESCAPES-AS-VALUE**. A waiting lambda is legal only written directly as the argument of an awaited
+collection method (§13.2: `.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`,
+`.flatMap`). A synchronous lambda is not affected.
+
+The compiler therefore never has to follow "is this function async" through a binding, an alias, a ternary or a
+call that returns a function. A function either waits and has a name from a `function` declaration, or it is a
+lambda the awaited combinator consumes in place. The mechanical rewrite is `const f = (a) => g(a)` →
+`function f(a) { return g(a) }`.
+
+> **Provenance:** ruling:user-voice-scrml.md S467 "b it is" — dpa-023 F4: *"how far does this decision limit
+> functons?"* / *"b it is"* — *"`const f = (…) => waitingCall()` / `export const f = …` / waiting functions produced
+> by ternary, factory or currying → E-ASYNC-FN-ESCAPES-AS-VALUE (narrowed to "no binding holds an async function").
+> Synchronous lambdas unaffected; a waiting lambda stays legal only as the direct argument of an awaited collection
+> method. … Rejected: (a) async-as-part-of-the-function-type propagation."* · dd:dpa-023-build-arc-scoping §Q1 rows
+> 9, 10, 14, 15; §Q6 F4 · **supersedes:** §13.2's opening of the async-colored bullet, *"An async-colored function
+> SHALL NOT be used as a value. It MAY be called directly …"*. That sentence did not say whether *defining* a waiting
+> function by a `const` lambda is a use as a value, and impl#1's r6–r9 rounds treated it as a pseudo-declaration.
+> This subsection answers that it is refused. **Direction of change: newly-rejecting.**
+>
+> **Measured migration** (S467, `~/.cache/scrml-s467-f4-measure/`; method: every file compiled with the compiler's own
+> async analysis, and each binding classified by whether it holds an async-colored function): **0 newly refused
+> sites** across examples/ (71), samples/ (881), conformance/cases/ (1832), stdlib/ (54), benchmarks/ (7),
+> docs/articles/ (197, including 192 Markdown code blocks), giti (82) and flogence (31). The only sources that flip
+> are compiler test fixtures written to test this shape (about 56, in `compiler/tests/security-await-pack/shapes` and
+> the s465 await r6/r7 tests). The adopter repo RediLedger is not on the measuring machine and is **unmeasured**.
+>
+> **impl#1 status (security gap this closes; not normative text):** main today ACCEPTS a ternary-armed waiting
+> binding unawaited. `const chk = flag ? (n) => isOk(n) : (n) => false`, followed by `if (chk(2))`, tests a Promise,
+> which is always truthy. **impl#1 ENFORCES this subsection** once this text lands, as a refusal under the security
+> exception. Unlike the rest of §13.9, it is not a carried divergence (ruling:user-voice-scrml.md S467 "yes on the impl#1 enforce F4"). The bootstrap's Core already refuses a function-valued program-level binding (DD probe b10).
+>
+> *PA reading (not a ruling):* this subsection governs BINDINGS only. It does not change §13.2's rules for a
+> function passed as an argument — the awaited-collection-method allowance, the global fire-and-forget scheduler
+> exemption (`setTimeout`, … — not a use as a value), `typeof f`, and the sync-callback codes
+> (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) all stand exactly as §13.2 states them.
+
+```scrml
+${
+  import { verifyPassword } from "scrml:auth"
+
+  // refused — each binding holds a waiting function
+  const check = (p, h) => verifyPassword(p, h)                          // E-ASYNC-FN-ESCAPES-AS-VALUE
+  export const check2 = strict ? (p, h) => verifyPassword(p, h) : (p, h) => true   // E-ASYNC-FN-ESCAPES-AS-VALUE
+  const mk = (p) => (h) => verifyPassword(p, h)                         // E-ASYNC-FN-ESCAPES-AS-VALUE
+  const vp = verifyPassword                                             // E-ASYNC-FN-ESCAPES-AS-VALUE (alias)
+
+  // legal
+  export function check3(p: string, h: string) { return verifyPassword(p, h) }
+  function anyOk(p: string, hashes: string[]) {
+    return hashes.some((h) => verifyPassword(p, h))   // a waiting lambda as the direct argument of `.some`
+  }
+  const double = (n) => n * 2                         // a synchronous lambda: unaffected
+}
+```
+
+#### 13.9.7 Normative statements
+
+- A Shape-1 cell declared `(not to T)` MAY take a waiting value (§13.8) as its initializer. A cell not so declared
+  SHALL NOT (E-VALUE-SERVER-CALL, §13.7). The compiler SHALL NOT infer `(not to T)`.
+- A pending cell declaration SHALL mean a cell initialized to `not` plus a `<request>` whose body assigns the
+  initializer to the cell, with deps inferred from the initializer's reads. It SHALL add no runtime representation.
+- A read of a pending cell not preceded on every path by a presence discrimination of it SHALL be E-TYPE-001.
+- A waiting value in a markup interpolation or attribute value SHALL remain E-VALUE-SERVER-CALL. No boundary element
+  holds a pending render.
+- On a dependency change after the first settle, a pending cell SHALL keep its last value until the new load
+  settles. An action-position write of a waiting value into a pending cell SHALL be awaited, and the cell SHALL keep
+  its current value until the write lands.
+- A derived cell SHALL NOT be a pending cell (E-VALUE-SERVER-CALL). A pending cell's desugared request SHALL expose no
+  `.refetch()`, `.loading`, `.stale` or `.error`.
+- A failable pending initializer SHALL be handled in the declaration (`!{}`). Unhandled, it SHALL be E-ERROR-002.
+  The desugared request SHALL NOT handle it, and no implicit `.error` surface exists.
+- An async-colored function SHALL be bound only by a `function` declaration. A binding that holds one SHALL be
+  E-ASYNC-FN-ESCAPES-AS-VALUE. A waiting lambda SHALL be legal only as the direct argument of an awaited collection
+  method.
+
+**Cross-references:** §13.2 (async-colored; E-ASYNC-FN-ESCAPES-AS-VALUE) · §13.7 (E-VALUE-SERVER-CALL) · §13.8 (the
+one rule) · §6.7.7 (`<request>`, the desugar target) · §14.12 / §66.11.6 (the `(A to B)` lifecycle; §14.12.3
+discrimination-as-transition) · §42.3.5 (narrowing ends at a suspension point) · §19.4.3 / §19.9.10 (handling a
+failable call; E-ERROR-002) · §34 (rows owed: `docs/changes/s467-dpa-023-spec/progress.md`).
 
 ---
 
@@ -13956,6 +14347,13 @@ Lifecycle annotation `(A to B)` is permitted at every typed location EXCEPT engi
 Each position's semantics — when the compiler considers the transition fired — inherits from the per-access transition-state tracker in `compiler/src/type-system.ts` (Landing 1). For struct fields, transition fires on `instance.field = value` where `value` is type B-shaped. For Shape 1 reactive cells, transition fires on `@cell = value` where the cell's initial value is A-shaped and the written value is B-shaped. Function-parameter and schema-field transition semantics follow the same per-access tracker shape. Function-return position uses the hybrid transition-marker mechanism — discrimination IS transition for presence-progression `(not to T)` returns, explicit `transition()` for variant-progression `(.VariantA to .VariantB)` returns — per §14.12.6.
 
 **Shape 1 presence-progression — assignment OR discrimination (S160).** A Shape 1 reactive cell carrying an implicit OR explicit **`(not to T)`** annotation (pre-type `not`) transitions to `post` on EITHER a `T`-shaped assignment (`@cell = value`, the base mechanism above) OR a presence-discrimination on the cell (`given c :> …`, `if (@cell is not) return`, `match @cell { … }` — the §14.12.6.1 presence-progression mechanism, reused at the Shape-1 cell locus). This unifies the Shape-1 cell and the function-return cases for presence-progression: discrimination IS transition wherever the pre-type is `not`. **Implicit `(not to T)` (Shape 4, §6.2):** a no-RHS typed cell whose type has no canonical empty (a bare `:struct` / `:enum` / opaque type) initializes to `not` and acquires this `(not to T)` annotation *implicitly* — the developer wrote no annotation, so the E-TYPE-001 message fired on a pre-transition read of such a cell SHALL name that the lifecycle was synthesized from the no-RHS declaration.
+
+**Pending cells — a waiting initializer or write (S467, Nominal; §13.9).** A Shape 1 cell declared `(not to T)` MAY
+take a waiting value (§13.8) as its initializer (a *pending cell*, §13.9). An assignment whose right-hand side waits
+does not transition the cell: an action-position write of a waiting value into a pending cell is awaited and lands
+when the value arrives, and the cell keeps its current value meanwhile — it does not revert to `not` (§13.9.4). Reads
+before a discrimination are E-TYPE-001 (§13.9.3). Provenance: ruling:user-voice-scrml.md S467 "three §13.9
+pending-cell details" — *"No — keep current value"* · S467 dpa-023 F1 / F6.
 
 #### 14.12.4 Engine-cell carve-out
 
@@ -26191,8 +26589,12 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts` as `CGError(…, "warning")`. S260 §34-vs-impl audit: severity corrected Info→Warning — the impl explicitly emits a warning, so no case could ever pin it as "info".) | Warning |
 | E-SQL-004 | §8.1.1 | `?{}` block has no database scope — no `<program db=>`, no `<program>` whose database a single direct-child `<db src=>` supplies (S451 "a for the channel Q"), and no `<db src=>` — in any ancestor, and the file is not a module-with-db-context (§44.7.1). The nearest scope of any kind resolves the `?{}` (S451 "your recs on both"). Emitted by `compiler/src/codegen/emit-server.ts` `generateServerJs` (per site, for an unscoped `?{}` in a file declaring two or more databases; and once per file when the file declares no scope for a handle it uses) and `compiler/src/codegen/emit-tool.ts` `generateToolJs` (a `kind="tool"` program). impl#1 divergence: in a file with ONE database an unscoped `?{}` runs on it instead of firing this code — `g-impl1-unscoped-sql-single-db-accepted-s451`. *(Provenance: spec:§8.1.1 currency correction, S452 — supersedes the stale cite `emit-server.ts:7000` / `emit-tool.ts:746` and the parenthetical "impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`", a gap #1264 resolved; direction of change: inert.)* | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
-| E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default. scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
-| E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
+| E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a lambda's parameter default (a function declaration's own parameter default is E-PARAM-DEFAULT-AWAIT, s466). scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
+| E-PARAM-DEFAULT-AWAIT | §7.3.2 | **(s466; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four".)** A function declaration's own parameter default needs an `await`: it runs a `?{}` query (directly or through a function it calls), calls a server function, a Promise-returning stdlib export, or a function the compiler emits `async`. A default is evaluated before the body, where the compiler cannot insert `await`, so the parameter would hold an unfinished Promise. Reported once per parameter (however many emitted copies of the function lower it), at the default; not reported when the only async callee is a function already refused for reading client state (E-REACTIVE-003 and siblings — one root cause). Resolution: compute the value in the function body (default the parameter to `not` and use the computed value when the argument is `not`). Emitted by `compiler/src/codegen/emit-logic.ts` `emitParamDefault` — the one lowering of every function's defaults. Provenance: dispatch:s466-server-param-defaults fix round 1. | Error |
+| E-PARAM-DEFAULT-UNSUPPORTED | §7.3.2 | **(s466 fix rounds 3–5; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four"; scope: server-placed functions only — PA reading, owner veto.)** The default of a SERVER-PLACED function (wholly-server, CPS-split, SSE, `onserver:*`, nested in server code, an exported library function server code in the compilation reaches — or any exported function of a library no file in the compilation imports; fix round 5: being emitted into the server bundle is not placement) contains an assignment or update (`k = (m = "z")`, `k = m++`, `k = (m += "z")`, `delete` — the route handler binds parameters with `const`, so the server module failed to LOAD and every route in it was down; fix round 4) or a construct outside the closed set of expression kinds every default check understands (`DEFAULT_EXPR_KINDS`, `compiler/src/at-refs.ts`): a block-bodied function, an escape-hatch (text the compiler keeps unparsed), markup, a multi-subject or `given`-led match, a block-bodied or unparseable match arm. FAIL-CLOSED: such a default could hide an identity read, a client-state read or an un-awaitable call from the checks (S239 round 3: a `match` default's raw arms were never read — `uid = match m { "a" => session.userId … }` compiled clean). A single-subject `match` with expression arms IS supported (its arms are parsed and checked). A regular-expression literal is a leaf and is accepted. Does NOT fire for a client-only function's default (lowered as written). Resolution: compute the value in the body. Emitted by `compiler/src/codegen/emit-logic.ts` `emitParamDefault`. Provenance: dispatch:s466-server-param-defaults fix rounds 3–5. | Error |
+| E-PARAM-DEFAULT-FORWARD-REF | §7.3.2 | **(s466 fix round 3; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four"; scope: server-placed functions only since fix round 5 — the language-wide question is an open owner ruling.)** A parameter default of a server-placed function (as for E-PARAM-DEFAULT-UNSUPPORTED) reads its own parameter or one declared after it. §7.3.2: a default "may reference earlier parameters in the same parameter list"; a later one is not bound when the default runs (a ReferenceError at call time), and the name silently shadowed an outer binding for the default checks (`uid = session.userId, session = "x"`). A lambda or match-arm parameter of that name is its own binding and does not count. Emitted at `compiler/src/type-system.ts` (function-decl visitor). Provenance: dispatch:s466-server-param-defaults fix round 3. | Error |
+| E-PARAM-DEFAULT-SERVER-IDENTITY | §7.3.2, §6.6.9 | **(s466; code ratified — ruling:user-voice-scrml.md S467 "Ratify all four".)** The parameter default of a server-placed function (wholly-server, CPS-split, SSE, channel `onserver:*`, exported) reads an identity — the FREE `session.<field>` / `session[…]` (§20.5), the ambient `@currentUser` (no file-scope `<currentUser>` cell), or, in a CPS-split function's browser-evaluated default, `@session` (fix round 2: the CPS default had shipped `uid = session.userId` in the browser and the server batch INSERTed it) — directly or through a local function value the default references (fix round 5: `const getU = () => @session.userId` + `uid = getU()`; a `const`-bound lambda, a client function, an alias, a `.scrml` import; inside a helper `@session` always counts). A CALL of a binding whose function value cannot be followed (a `let`, a `const` from a call, a re-export, a function-valued cell) is refused with this code (fail closed). A parameter or lambda parameter named `session` is not the builtin. A default applies only when the caller omits the argument, and every server function is reachable over HTTP, so the caller can send the parameter itself and the "identity" would be whatever the request body says (measured s466: `server fn who2(m, uid = session.userId)` bound `uid` from a client body key). Resolution: read it in the body — `const uid = session.userId` — and remove the parameter. Emitted at `compiler/src/route-inference.ts` (`reportServerDefaultIdentityReads`), before code generation. Provenance: pa-ruled:§6.6.9-server-identity-in-a-parameter-default · spec:§6.6.9 · dispatch:s466-server-param-defaults fix round 1. | Error |
+| E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a lambda's parameter default (a function declaration's own parameter default is E-PARAM-DEFAULT-AWAIT, s466) (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
 | E-ASYNC-CALL-PROMISE-METHOD | §13.2 | `.then`, `.catch` or `.finally` is read off a call the compiler awaits for you (a server function, a Promise-returning stdlib function, a helper that calls one). The await yields the RESOLVED value, so `(await f()).then(…)` throws a TypeError at run time for any non-thenable result. Became reachable in inline event handlers and `on mount` blocks once they gained §13.2 auto-await (s441), where it silently broke code that previously chained on the Promise. Resolution: remove `.then(…)` and use the value directly — `const r = f(…)` then work with `r`; handle a failure with `!{}` (§19). (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`checkPromiseMethod`) via `jsAsyncUsesErrors` in `compiler/src/codegen/emit-library-shared.ts`, for handler and `on mount` bodies. A `.then` on an awaited call inside an ordinary function body is not yet diagnosed — carried under g-auto-await-family-not-closed.) | Error |
 | E-ASYNC-HANDLER-UNANALYZABLE | §13.2 | An event handler's body references an async-colored function but the compiler could not analyse the handler's code (its emitted text does not parse), so it cannot insert the `await` §13.2 requires. **FAIL-CLOSED**: the build fails rather than ship an unawaited call (a Promise is always truthy). Resolution: move the body into a named function and reference it (`onclick=handle()`); report it — it indicates a compiler defect. (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`unanalyzableHandlerUses`) via `emit-event-wiring.ts` / the active-client-emission handler path.) | Error |
 | E-ASYNC-FN-ESCAPES-AS-VALUE | §13.2 | An **async-colored function** — one the compiler emits `async`: a server function, a Promise-returning stdlib function (`scrml:auth` `verifyPassword`, …), or a helper that transitively calls one (including a helper declared inside another function) — is used as a **value**: aliased (`const g = m`), stored in an array or object (`[m]`, `{ f: m }`, `{ m }`), passed to a function that is not an awaited collection method (a user-written higher-order function `drive(m)`, `Array.from(xs, m)`, `new Promise(m)`, `el.addEventListener("x", m)`), returned, or read as an object (`m.call(…)`). Whoever calls it through that value receives an unawaited Promise, which is **always truthy** — `drive(m)` with `drive(f) { return f(pw) }` accepts EVERY password (the accept-all the sync-callback codes exist to prevent, one level of indirection away). The compiler inserts `await` only at call sites it can see (§13.2) and does not implicitly await every call of a function-typed value. **FAIL-CLOSED** hard error. Checked in every body: function bodies (client, server, library, tool — nested helpers included), raw block-body callbacks and template interpolations, inline event handlers and `on mount` blocks. NOT a value use: a direct call; the first argument of `.some`/`.every`/`.find`/`.findIndex`/`.filter`/`.map`/`.forEach`/`.reduce`/`.flatMap` (lowered to an awaited combinator); an argument of a fire-and-forget scheduler (`setTimeout` & co. discard the return); `typeof m`. Resolution: call the function directly (`m(…)`) where its value is needed, or pass it to an awaited collection method. (Catalog addition s441 — ruling:user-voice-scrml.md S440 F4; closes `g-async-helper-escaping-as-a-value-accept-all`; emitted from `compiler/src/codegen/local-async-fns.ts` + `compiler/src/codegen/js-async-analysis.ts`.) | Error |
@@ -26261,7 +26663,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
 | E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
 | E-SESSION-RESERVED-KEY | §20.5.1 | A LITERAL `session.set("csrfToken", …)` — `csrfToken` is a compiler-owned session key (the §40.2 server-authoritative CSRF synchronizer token). Writing it would let a caller pin the token to a known value and defeat the double-submit check (mass-assignment). Fix: remove the write; the compiler mints + persists the token (`userId`/`role` and preference keys remain writable). A DYNAMIC-key write with a runtime `csrfToken` key is refused at runtime (a no-op) by the emitted setter guard. **(LIVE, S266 i29e B5 — codegen emit-expr.ts:emitCall, drained by emit-server.ts:generateServerJs; runtime guard in emit-server.ts `_scrml_session_begin`.)** | Error |
-| E-SESSION-AMBIENT-SERVER | §6.6.9, §20.5 | An `@session` read (bare `@session` or `@session.<field>`) in a SERVER context: the whole body of a wholly-server function (an SSE `server function*`, a `handle()` middleware, a function nested inside one), the server-batch statements of a CPS-split function (§19.9.9 — its client statements run in the browser, where `@session` is the §20.5 projection, and are not a server context), an `<endpoint>` arm body (§61), or the load query of a `<cell server>` declaration (§52.6.5) — in any expression position (`?{}` and template-literal interpolations, conditions, match arms, a member assignment `@session.userId = …`, an update or (logical) assignment). `@session` is the CLIENT session projection (§20.5); every server lowering of an `@name` read takes its value from the request body, so a server `@session` read was caller-controlled identity (MEASURED S449: an authenticated POST carrying `{"session":{"userId":"victim"}}` wrote a row as `victim`). Fires once per read. The message names the fix — the server's own session object, `session.<field>` (§20.5) — and states that `@session` is not read on the server. Does NOT fire when the file declares its own FILE-SCOPE `<session>` reactive cell (then `@session` is that ordinary client cell, and E-REACTIVE-003 / the §19.9.9 marshal govern it); a component-local `<session>` does not exempt a top-level server read. The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/route-inference.ts` (`detectServerAmbientSessionReads`; `detectServerAmbientSessionReadsInText` for raw text — the `<endpoint>` arm body, template literals — via the comment-, string- and template-aware segmenter), before code generation. The provenance of the CPS / file-scope / expression-position refinements: S449 review of `54e3cb542` (F1, F2, F3). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 1 (interim; what `@session` means server-side stays open) · spec:§6.6.9 ("`@session` is server-only identity and SHALL NEVER be marshalled from the client") · gap `g-session-ambient-unlowered-trust-boundary-inversion`. | Error |
+| E-SESSION-AMBIENT-SERVER | §6.6.9, §20.5 | An `@session` read (bare `@session` or `@session.<field>`) in a SERVER context: the whole body — and the parameter defaults (s466, §7.3.2) — of a wholly-server function (an SSE `server function*`, a `handle()` middleware, a function nested inside one), the server-batch statements of a CPS-split function (§19.9.9 — its client statements run in the browser, where `@session` is the §20.5 projection, and are not a server context), an `<endpoint>` arm body (§61), or the load query of a `<cell server>` declaration (§52.6.5) — in any expression position (`?{}` and template-literal interpolations, conditions, match arms, a member assignment `@session.userId = …`, an update or (logical) assignment). `@session` is the CLIENT session projection (§20.5); every server lowering of an `@name` read takes its value from the request body, so a server `@session` read was caller-controlled identity (MEASURED S449: an authenticated POST carrying `{"session":{"userId":"victim"}}` wrote a row as `victim`). Fires once per read. The message names the fix — the server's own session object, `session.<field>` (§20.5) — and states that `@session` is not read on the server. Does NOT fire when the file declares its own FILE-SCOPE `<session>` reactive cell (then `@session` is that ordinary client cell, and E-REACTIVE-003 / the §19.9.9 marshal govern it); a component-local `<session>` does not exempt a top-level server read. The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/route-inference.ts` (`detectServerAmbientSessionReads`; `detectServerAmbientSessionReadsInText` for raw text — the `<endpoint>` arm body, template literals — via the comment-, string- and template-aware segmenter), before code generation. The provenance of the CPS / file-scope / expression-position refinements: S449 review of `54e3cb542` (F1, F2, F3). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 1 (interim; what `@session` means server-side stays open) · spec:§6.6.9 ("`@session` is server-only identity and SHALL NEVER be marshalled from the client") · gap `g-session-ambient-unlowered-trust-boundary-inversion`. | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |
@@ -26489,7 +26891,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-MARKUP-003~~ | §24.1 | **Retired 2026-07-16 (S263).** Unknown-attribute-on-known-HTML-element is owned by **E-HTML-001** (§24.2, aspirational — VP-1 deliberately passes plain-HTML attributes through). The dead impl squatter (`validateMarkupAttributes`, `type-system.ts`) that carried this code would false-fire on scrml's own `if`/`else`/`each` directives (176 corpus files). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-MU-001 | §35 | Must-use: return value of `!` function not captured | Error |
 | E-PA-002 | §11.3 | Protect analyzer: invalid `protect=` syntax | Error |
-| E-PARSE-001 | §4, §7.2.2 | Parse error: unexpected token in block structure. Includes a line at the arm level of a `match { … }` body that forms no arm (§7.2.2 "Arm heads") — e.g. the line after `.A :> return` (dpa-068 D8; impl#1, S462; that limb emitted at `compiler/src/ast-builder.js` `reportOrphanArmLines` and `markLeaveArms`.) | Error |
+| E-PARSE-001 | §4, §7.2.2, §7.3.2 | Parse error: unexpected token in block structure. Includes a function parameter default that is not one expression (`k = "a" foo`, `k = 1 2` — the message names the parameter and the left-over text; s466, emitted by `compiler/src/codegen/emit-logic.ts` `emitParamDefault`). Includes a line at the arm level of a `match { … }` body that forms no arm (§7.2.2 "Arm heads") — e.g. the line after `.A :> return` (dpa-068 D8; impl#1, S462; that limb emitted at `compiler/src/ast-builder.js` `reportOrphanArmLines` and `markLeaveArms`.) | Error |
 | E-PARSE-002 | §4 | Parse error: unterminated block | Error |
 | E-SCRIPT-001 | §4.17 | `<script>` element in scrml source. scrml does not admit `<script>` at all (§4.17 companion considerations) — scrml logic lives in logic-context `${...}` (§7) and genuine foreign JS has the `_{...}` foreign-code block (§23). The symmetric twin of `<style>` → `E-STYLE-001` (§9): both are element-level rejections at the block-splitter level, both recover by scanning past the matching close tag (case-insensitive) or to EOF so the rejected body does not cascade. Tag-name match is EXACT, not a prefix — `<noscript>` is unaffected. **Source-side only:** the emitter's own `<script src="scrml-runtime.<hash>.js">` / `<script src="<page>.client.js">` tags are produced downstream of the block splitter and are never subject to this check. (Added S277 — closes the gap where a `<script>` element compiled clean and its body reached the emitted document verbatim; the pre-S277 §4.17 claim that `<script>` was a `W-LINT-018` Ghost-Pattern surface was false. Emitted at `compiler/src/block-splitter.js`.) S462: rejected at EVERY position markup is parsed or built, raw content included (§4.17 S462 amendment) — emitted also by the AST builder's structural check, component expansion and the codegen backstop. | Error |
 | ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |

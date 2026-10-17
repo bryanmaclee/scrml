@@ -343,8 +343,12 @@ describe("§11 (bucket c): `.sort` with an async comparator fails closed", () =>
 // even in an async fn — DD colorless-async-boundaries position-2 fail-close anchor).
 // `paramSignature` splices `p.defaultValue` as raw text, so the body walk never
 // reaches it; pre-fix it compiled clean and leaked a bare Promise (`x.ok === undefined`).
+// s466 fix round 1 — a function's OWN parameter default that needs an await is
+// refused in one place (emit-logic.ts emitParamDefault) under one code,
+// E-PARAM-DEFAULT-AWAIT, whatever the callee (stdlib / peer / server / `?{}`).
+const hasParamDefaultAwaitErr = (errors) => errors.some((e) => e.code === "E-PARAM-DEFAULT-AWAIT");
 describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
-  test("client `function f(x = safeCallAsync(...))` fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+  test("client `function f(x = safeCallAsync(...))` fires E-PARAM-DEFAULT-AWAIT", () => {
     const p = fix("f1-param-stdlib.scrml", `<program>
 \${
   import { safeCallAsync } from "scrml:host"
@@ -356,7 +360,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
 </program>
 `);
     const { js, errors } = compile([p], { wantFile: "f1-param-stdlib", field: "clientJs" });
-    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    expect(hasParamDefaultAwaitErr(errors)).toBe(true);
     // The client fn is NOT emitted as an awaited/async-resolved param default — the
     // leak shape (`= safeCallAsync(...)` with a bare `.ok`) is diagnosed, not silently
     // shipped. `x.ok` on a Promise would be `undefined` (the leak this closes).
@@ -376,7 +380,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
 </program>
 `);
     const { errors } = compile([p], { wantFile: "f1-param-peer", field: "clientJs" });
-    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    expect(hasParamDefaultAwaitErr(errors)).toBe(true);
   });
 
   test("library `export function h(x = callHost(obj))` (async peer) fails closed", () => {
@@ -387,7 +391,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
 }
 `);
     const { errors } = compile([p], { mode: "library", wantFile: "f1-param-lib", field: "libraryJs" });
-    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    expect(hasParamDefaultAwaitErr(errors)).toBe(true);
   });
 
   test("a PLAIN param default (no async) does NOT fire — no over-diagnosis", () => {
@@ -398,6 +402,7 @@ describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
 `);
     const { js, errors } = compile([p], { mode: "library", wantFile: "f1-param-plain", field: "libraryJs" });
     expect(hasAsyncSyncCbErr(errors)).toBe(false);
+    expect(hasParamDefaultAwaitErr(errors)).toBe(false);
     expect(js).not.toMatch(/\bawait\b/);
   });
 });
