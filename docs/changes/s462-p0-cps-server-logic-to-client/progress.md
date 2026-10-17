@@ -407,3 +407,81 @@ authorisation for the hook, then commit + push.
   host-global-scan, facts, state, gen-md-shim, conflict-marker, spec-index, bootstrap-conformance, severity,
   s34-census all --check PASS.
 - Load flakes seen in hooks (pass alone): conf-TENANT-SOURCE-FILTER r2/r4 (5 s timeout under load 7–9).
+
+## Fix round 5 (S467, worktree agent-a0059ea973817a2ac, branch s467-cps-r5 from origin/s467-cps-r4 a183cf1cc)
+
+Why: the S467 review of a183cf1cc re-ran seven shapes that all wrote a row with the WRONG password
+(arrow_closure, fnexpr_closure, forof_destr, closure_obj, alias_mut, alias_arr, alias_destr; 0 rows on
+origin/main). Reproduced here (r-start45.tsv: 6/6/6/5/5/4/5 forged rows). Causes confirmed: the taint
+pass only followed `function-decl` callees (a `const set = () => …` closure is an escape-hatch value),
+had no alias tracking, and did not see a `for…of` head as a write.
+
+The approach changed (brief): the ADMISSION of a request value is now an allow-list, not "not tainted".
+
+- `carriedValueAdmission(name, body, firstServer, {isParam, paramTypes, isServerIdx})` in
+  route-inference.ts, run on every carried local (`carriedLocals`) and on every parameter a server
+  statement reads. Admitted only when:
+  (1) a local's writes are all before the first server statement;
+  (2) after the first server statement no statement can write it by any route — `localsWrittenBy`
+      (direct / member / element / ++ / destructuring / for-of head, now added there; with mutations
+      for non-primitives: mutating-method receivers + arguments to any call that may keep them);
+      no call or mention of a body-defined function value that may write it (`const f = () => …`,
+      `function () {}`, nested `function`, transitively); a function value that may write it is
+      only ever called directly before the first server statement (a value handed anywhere may run
+      while the request is in flight); an INLINE closure before the first server statement that writes
+      it is refused unless it is a callback of a synchronous array method (`xs.forEach(…)`);
+  (3) unless provably primitive (literal / arithmetic / comparison / template / primitive-typed
+      param or local / primitive-result call), an alias set to a fixpoint over every binding flow
+      (decl, assign, member store, for-of element, mutating-method edge, unparsed text) — the whole set
+      must satisfy (2); never stored in a cell; never passed (before the first server statement) to a
+      call that may keep it.
+  Parameters: (2) is enforced against BROWSER statements followed by server work reading it.
+- A refusal is E-RI-002 (new placement-refusal kind `carried`), located at the offending statement:
+  "its server half reads `x` from the request — but this statement …".
+- The existing taint machinery (rules a–d) is kept as an additional check.
+- Behaviour change: round 4's accepting shapes that reassigned a pre-first local ON THE SERVER (`let blk
+  = false` before the query, `blk = true` in a server-tier `if`) are now refused — the server would
+  start from whatever the request says. The same logic with the declaration after the first server
+  statement compiles, is never read from the request, and holds under forging (tests updated).
+- Fix-up after the corpus differential: a parameter stored into a cell by a SERVER statement after
+  its last server read (`server function runJob(id) { updateJobStatus(id, …); @selectedJob = id }`,
+  samples/gauntlet-r13+r14 elixir-pipeline) was refused by the cell rule. A cell store counts only
+  when a BROWSER statement does it and a later server statement reads the value (a server-tier cell
+  write reaches the browser as a serialized copy; after the last read nothing is requested).
+- Merged origin/main 02464a9b5 (emit-server param binding moved by #1427 → `serverBodyParamLine(…, kw)`
+  keeps round 4's carried-param `let`; FACTS / SPEC-INDEX / gap counts regenerated).
+- Filed g-nested-match-in-string-arm-block-unlowered-s467 (reviewer's side bug; NOT CPS-specific —
+  reproduces in a plain browser function; reproducer ~/.cache/scrml-agent-tmp/s467-cps-r5/w/nm.mjs).
+
+Probes (harness with dynamic forging of every `_scrml_body` name; probes.mjs…probes5.mjs + probes6.mjs
+(13 new: param_write, param_closure, closure_alias, closure_ret_obj, nested_alias, forof_alias, forin_head,
+push_alias, inline_timer, ok_sync_foreach, ok_carried_prim, ok_carried_read), 84 rows, merged tree):
+FORGED-WRITE only fp_param_guard + fp_alert_noread_between (by design). The seven review shapes →
+E-RI-002 (`reads \`x\` from the request — but …`). Right password writes on every legal flow
+(fp_login_alert_ok, fp_login_local, fp_closure_client, match_str, ok_*; fp_console_after rightRows=0 as at
+start). No leak, no alert-in-server, no pw-in-client. Moved rows vs round-4 tip: arrow_closure,
+fnexpr_closure, forof_destr, closure_obj, alias_mut, alias_arr, alias_destr, param_closure, closure_alias,
+closure_ret_obj, nested_alias, forof_alias, push_alias FORGED → E-RI-002; nested_fn_closure,
+callee_mut_obj, file_callee_mut_obj, elseif_guard, while_write, launder_helper_ret, destr_assign,
+pw_local_if, pw_local_return, pw_array_push, pw_obj_field, role_local, param_write, match_arm keep E-RI-002
+with the admission message; arr_closure adds E-RI-002 to E-VALUE-FUNCTION-STORED.
+
+Tests: compiler/tests/integration/s467-cps-carried-admission.test.js (19 executed: 14 refused shapes
+incl. the seven; 5 legal flows forged with every request name); s467-cps-nested-writes-and-callees
+updated (2 shapes flip to E-RI-002 + 2 declared-after-first variants that compile and hold).
+
+#1428 pack (classify.js, base origin/main 02464a9b5 vs head): identical — PASS=249 PASS-REFUSED=136
+PASS-500=20 PASS-DENY=8 UNJUDGED=1 FAIL=10 (same 10), 0 shapes moved.
+
+Corpus differential (2,897/2,899 files; examples, samples, conformance/cases, ../giti, ../flogence; head
+vs origin/main 02464a9b5): newly refused 0; newly compiling 1 (server-fn-writes-reactive-cell-pos); code-set
+changes 4; emit changes 4 — all = the round-1 record. (The 2 elixir-pipeline code-set changes the first run
+showed are gone after the cell fix-up.)
+
+Open: (1) SPEC §19.9.9.8 has no text for the admission rule (rule 2 "no round trip" is the basis; rule 4
+does not say when a pre-first local may be carried) — a "Direction of change: newly-rejecting" note +
+admission wording is a PA/owner call. (2) The refused round-4 shape (a pre-first `let` the server half
+reassigns, one batch) could be made to compile by REPLICATING a closed-initializer declaration into the
+batch instead of reading it from the request — needs batch-boundary knowledge in RI; not done (fail
+closed; the error's Fix names the declared-after rewrite). (3) An object PARAMETER the CALLER mutates while
+the request is in flight is outside this function's view (no escape check for params).

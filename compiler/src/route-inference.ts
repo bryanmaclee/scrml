@@ -4587,7 +4587,7 @@ export function carriedValueAdmission(
 
   // ---- the alias set (3): every binding the value's reference may flow into
   const A = new Set<string>([name]);
-  let cellAlias: { cell: string; index: number } | null = null;
+  const cellAliases: Array<{ cell: string; index: number }> = [];
   if (!prim) {
     type Flow = { targets: string[]; value: unknown; store: boolean; index: number };
     const flows: Flow[] = [];
@@ -4700,13 +4700,13 @@ export function carriedValueAdmission(
         const intoA = f.store && f.targets.some((t) => A.has(t));
         if (fromA) {
           for (const t of f.targets) {
-            if (t.startsWith("@")) { if (cellAlias === null) cellAlias = { cell: t, index: f.index }; }
+            if (t.startsWith("@")) cellAliases.push({ cell: t, index: f.index });
             else if (!A.has(t)) { A.add(t); changed = true; }
           }
         }
         if (intoA) {
           for (const r of rr) {
-            if (r.startsWith("@")) { if (cellAlias === null) cellAlias = { cell: r, index: f.index }; }
+            if (r.startsWith("@")) cellAliases.push({ cell: r, index: f.index });
             else if (!A.has(r)) { A.add(r); changed = true; }
           }
         }
@@ -4715,21 +4715,23 @@ export function carriedValueAdmission(
   }
   const which = (hit: string): string =>
     hit === name ? `\`${name}\`` : `\`${hit}\`, which may hold the same object as \`${name}\``;
-  if (cellAlias !== null) {
-    const ca = cellAlias as { cell: string; index: number };
-    return {
-      index: ca.index,
-      why: `\`${name}\` may hold an object, and this statement stores it in (or fills it from) the cell \`${ca.cell}\` — ` +
-        `other code can change a cell while the request is in flight`,
-    };
-  }
-
   // a later server statement that reads the value (parameters: what makes a browser write matter)
   const laterServerRead = (i: number): boolean => {
     for (let j = i + 1; j < body.length; j++) if (isServerIdx(j) && statementReadsAnyLocal(body[j], A)) return true;
     return false;
   };
   const counts = (i: number): boolean => !isParam || (!isServerIdx(i) && laterServerRead(i));
+
+  // ---- (3) stored in a cell by a BROWSER statement that a later server read follows
+  // (a server-tier statement's cell write reaches the browser as a serialized copy)
+  for (const ca of cellAliases) {
+    if (isServerIdx(ca.index) || !laterServerRead(ca.index)) continue;
+    return {
+      index: ca.index,
+      why: `\`${name}\` may hold an object, and this statement stores it in (or fills it from) the cell \`${ca.cell}\` — ` +
+        `other code can change a cell while the request is in flight`,
+    };
+  }
 
   // ---- (2) direct writes / mutations / for-of heads / destructuring after the first server statement
   for (let i = Math.max(0, firstServer); i < body.length; i++) {
