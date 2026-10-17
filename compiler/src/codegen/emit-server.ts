@@ -56,8 +56,9 @@ import { jsTextReadsFreeName } from "../free-name.ts";
 import { isDestructurePattern, iterDestructuredNames, FN_NON_DET_CALLS, FN_NONDET_STDLIB } from "../type-system.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet, dispatchTableNamesWithPeers, dispatchTablePeerMembers } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap, buildServerCalleeImportMap, injectHandleRequestAwaits } from "./scheduling.ts";
-import { asyncFnNamesOfFile, asyncByBodyOf } from "./file-async-fns.ts";
+import { asyncFnNamesOfFile, asyncByBodyOf, moduleLevelDeclaredNames } from "./file-async-fns.ts";
 import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
+import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 import type { CalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningImportedCallee, isPromiseReturningStdlibImportedCallee } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1368,8 +1369,19 @@ function emitModuleValueExportLines(
         if (init.startsWith("<")) continue;
         // A `?{}`-initialized const is a server-only SQL read, not a pure value.
         if (init.includes("?{")) continue;
-        const initNode = parseExprToNode(init, filePath, 0);
-        const lowered = emitExprField(initNode, init, { mode: "server" });
+        // S466 r8 (HIGH-2) — the builder's parsed init when it has one (Rule 7); an
+        // async function-valued export (in the file's set by its body) is emitted
+        // `async`, its calls awaited, exactly like the D-5 copy of a non-exported one.
+        const initNode = ((stmt as any).valueInitExpr as any) ?? parseExprToNode(init, filePath, 0);
+        const _veAsync = asyncByBodyOf(asyncFnNames).has(name);
+        const lowered = _veAsync
+          ? emitExprField(asyncFnValueDecl({ initExpr: initNode }).initExpr, init, {
+              mode: "server",
+              asyncCalleeMap: _veCalleeMap,
+              asyncExportRegistry: exportRegistry ?? null,
+              serverFnNames: asyncFnNames,
+            } as any)
+          : emitExprField(initNode, init, { mode: "server" });
         const _kw = kind === "var" ? "var" : (kind === "let" ? "let" : "const");
         if (outValues) {
           outValues.push({ name, text: `export ${_kw} ${name} = ${lowered};`, order: (stmt.span?.start ?? 0), initNode });
@@ -1910,7 +1922,8 @@ function planModuleBindingClosure(
       const code = emitLogicNode(_isAsyncBinding ? asyncFnValueDecl(decl) : decl, {
         boundary: "server" as const,
         insideFunctionBody: true,
-        declaredNames: new Set<string>(byName.keys()),
+        // S466 r8 (HIGH-1) — module bindings are not locals (moduleLevelDeclaredNames).
+        declaredNames: moduleLevelDeclaredNames(byName.keys(), asyncBindings),
         ...(_isAsyncBinding ? { asyncCalleeMap, asyncExportRegistry } : {}),
       } as any);
       if (!code) continue;
@@ -2224,6 +2237,31 @@ function _generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   }
 
   let emitted = lines.join("\n");
+
+  // S466 r8 (g-lib-export-const-lambda-missing-import-s465) — the module's imports the
+  // emitted values reference. A value export can call an import (`export const check =
+  // (p, h) => verifyPassword(p, h)`); the module used to be written with NO import lines
+  // (ReferenceError at the first call). Usage-pruned exactly like the route path's local
+  // imports: a specifier is kept only when its local name is referenced.
+  {
+    const _used = codeTokens(emitted);
+    const _importLines: string[] = [];
+    const _imports: any[] = fileAST?.ast?.imports ?? fileAST?.imports ?? [];
+    for (const stmt of _imports) {
+      if (!((stmt.kind === "import-decl" || stmt.kind === "use-decl") && stmt.source && stmt.names?.length > 0)) continue;
+      if (stmt.isDefault) continue;
+      const specs: Array<{ imported: string; local: string }> = (Array.isArray(stmt.specifiers) && stmt.specifiers.length > 0)
+        ? stmt.specifiers.map((s: any) => ({ imported: String(s.imported ?? s.local), local: String(s.local ?? s.imported) }))
+        : stmt.names.map((n: string) => ({ imported: n, local: n }));
+      const kept = specs.filter((s) => _used.has(s.local));
+      if (kept.length === 0) continue;
+      let jsSource: string = stmt.source;
+      if (jsSource.endsWith(".scrml")) jsSource = distRelativeServerSpecifier(jsSource, filePath, (fileAST as any)?._outputBaseDir);
+      const names = kept.map((s) => (s.imported === s.local ? s.imported : `${s.imported} as ${s.local}`)).join(", ");
+      _importLines.push(`import { ${names} } from ${JSON.stringify(jsSource)};`);
+    }
+    if (_importLines.length > 0) emitted = injectAfterHeader(emitted, "\n" + _importLines.join("\n"));
+  }
 
   // Helper inlining — the SAME scans the route-handler path runs, for the
   // helpers a value export can actually introduce (structural-eq / wire / log).
@@ -7342,6 +7380,7 @@ function generateServerJsImpl(
       const _wsDefaults = serverParamDefaults(params, filePath, _wsFnOpts, fnNode, _atReadingServerFns, _placementOnlyServerFns);
       const _wsSig = wsParamNames.map((n, i) => serverParamSignature(n, _wsDefaults[i] ?? null));
       lines.push(`// §38.6.1 onserver:* handler "${name}" — invoked from _scrml_ws_handlers (no HTTP route)`);
+      const _wsHeadIdx = lines.length;
       lines.push(`function ${name}(${_wsSig.join(", ")}) {`);
       if (_wsOwnerChannel) {
         for (const l of emitBroadcastInjection(_wsOwnerChannel, "  ")) lines.push(l);
@@ -7365,6 +7404,14 @@ function generateServerJsImpl(
       // change-id progress log.
       if (_wsBodyLines.some(l => l.includes("_scrml_body"))) {
         lines.push(`  const _scrml_body = {};`);
+      }
+      // S466 r8 — a handler whose body awaits at its own level (a call to an async
+      // imported helper, a peer, an async stdlib export — classified like any server
+      // body) is emitted `async`; the WS callbacks await it (emit-channel.ts §19.10.6).
+      // Decided on the emitted body's syntax; was a sync function holding `await`
+      // (E-CODEGEN-INVALID-LOGIC "could not lower this construct").
+      if (bodyTextHasOwnAwait(_wsBodyLines.join("\n")) === true) {
+        lines[_wsHeadIdx] = `async ${lines[_wsHeadIdx]}`;
       }
       for (const l of _wsBodyLines) lines.push(l);
       lines.push(`}`);

@@ -9,6 +9,12 @@
  *       codegen/index.ts, is read by every server emitter and by every importer.
  *
  * Executed: server function `f(name, pass)` against bun:sqlite, wrong / right password.
+ *
+ * S467 round 10 — dpa-023 F4 (§13.9.6, ruling:user-voice-scrml.md S467 "b it is"): a waiting
+ * function is bound ONLY by a `function` declaration. MED-C's client bindings (`const persist =
+ * (v) => save(v)`, `const reload = () => { @out = loadCount() }`, `const w = (n) => isOk(n)`) and
+ * MED-D's asyncArrowStrArrow bind one with `const`: each is now E-ASYNC-FN-ESCAPES-AS-VALUE. The
+ * MED-C programs written with `function` run, awaited (executed below).
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync, readFileSync } from "fs";
@@ -87,7 +93,10 @@ const MED_D = {
   syncArrowStrArrow: [{ top: `const w = (a, s = "=>") => {\n    return a.trim() + s\n  }`, body: S }, "WELCOME:bob=>"],
   syncInFnStrParen: [{ body: `const w = function (a, s = ")") {\n      return a.trim() + s\n    }\n    ${S}` }, "WELCOME:bob)"],
   syncInFnArrowDefault: [{ body: `const w = (a, k = (x) => x) => {\n      return k(a.trim())\n    }\n    ${S}` }, "WELCOME:bob"],
-  asyncArrowStrArrow: [{ top: `const w2 = (a, b, s = "=>") => {\n    return check(a, b)\n  }\n  const w = (a) => a`, body: `if (!w2(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME:" + w(name)` }, "WELCOME:bob"],
+};
+// S467 r10 — a `const` holding a waiting function (§13.9.6): refused.
+const MED_D_REFUSED = {
+  asyncArrowStrArrow: { top: `const w2 = (a, b, s = "=>") => {\n    return check(a, b)\n  }\n  const w = (a) => a`, body: `if (!w2(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME:" + w(name)` },
 };
 
 const dirs = [];
@@ -219,6 +228,15 @@ describe("S465 r7 MED-D — function values with `)` / `=>` in a default read fr
   }
 });
 
+describe("S465 r7 MED-D under S467 r10 (§13.9.6) — a `const` holding a waiting function is refused", () => {
+  for (const [name, spec] of Object.entries(MED_D_REFUSED)) {
+    test(`${name}: E-ASYNC-FN-ESCAPES-AS-VALUE`, async () => {
+      const u = await compileShape(name, spec);
+      expect(u.errors.map((e) => e.split(":")[0])).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    }, T);
+  }
+});
+
 describe("S465 r7 HIGH-A — the per-emitter fixpoints are gone (structural)", () => {
   test("only file-async-fns.ts / emit-library-shared.ts call computeAsyncFnNames among the SERVER emitters", () => {
     const src = (f) => readFileSync(join(import.meta.dir, "../../src/codegen", f), "utf8");
@@ -269,51 +287,35 @@ async function runClient(src, answers) {
   }
 }
 
-describe("S465 r7 MED-C — an async function-valued binding is coloured on the client (executed)", () => {
-  test("cl2: `const persist = (v) => save(v)` from a handler runs, awaited before the next statement", async () => {
-    const r = await runClient(`<program db="./app.db">
+const CL2 = (decl) => `<program db="./app.db">
 \${
   function save(v) {
     ?{\`INSERT INTO users (name) VALUES (\${v})\`}.run()
     return 1
   }
-  const persist = (v) => save(v)
+  ${decl}
 }
 <out> = ""
 <button id="go" onclick={ persist("x"); @out = "after" }>r</button>
 <p id="out">\${@out}</p>
 </program>
-`, { save: 1 });
-    expect(r.codes).toEqual([]);
-    expect(r.calls).toEqual(["save"]);
-    expect(r.out).toBe("after");
-    expect(r.clientJs).toMatch(/await persist\("x"\)/);
-  }, T);
-
-  test("cl3: a block-bodied binding doing `@n = loadCount()` runs", async () => {
-    const r = await runClient(`<program db="./app.db">
+`;
+const CL3 = (decl) => `<program db="./app.db">
 \${
   function loadCount() {
     return ?{\`SELECT count(*) AS n FROM users\`}.get().n
   }
-  const reload = () => {
-    @out = loadCount()
-  }
+  ${decl}
 }
 <out> = 0
 <button id="go" onclick={ reload() }>r</button>
 <p id="out">\${@out}</p>
 </program>
-`, { loadCount: 7 });
-    expect(r.codes).toEqual([]);
-    expect(r.out).toBe("7");
-  }, T);
-
-  test("a binding's result used as a value is awaited: `w(2) ? \"Y\" : \"N\"` is \"N\" when the server says false", async () => {
-    const r = await runClient(`<program db="./app.db">
+`;
+const W2 = (decl) => `<program db="./app.db">
 \${
   server function isOk(n) { return n == 1 }
-  const w = (n) => isOk(n)
+  ${decl}
   <out> = ""
   function h() {
     @out = w(2) ? "Y" : "N"
@@ -322,11 +324,43 @@ describe("S465 r7 MED-C — an async function-valued binding is coloured on the 
 <button id="go" onclick=h()>go</button>
 <p id="out">\${@out}</p>
 </program>
-`, { isOk: false });
+`;
+
+describe("S465 r7 MED-C under S467 r10 (§13.9.6) — a client `const` holding a waiting function is refused", () => {
+  test("cl2: `const persist = (v) => save(v)`", async () => {
+    expect((await runClient(CL2("const persist = (v) => save(v)"), { save: 1 })).codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  }, T);
+  test("cl3: `const reload = () => { @out = loadCount() }`", async () => {
+    expect((await runClient(CL3("const reload = () => {\n    @out = loadCount()\n  }"), { loadCount: 7 })).codes)
+      .toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  }, T);
+  test("`const w = (n) => isOk(n)`", async () => {
+    expect((await runClient(W2("const w = (n) => isOk(n)"), { isOk: false })).codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  }, T);
+});
+
+describe("S465 r7 MED-C — the `function`-declared client helpers run, awaited (executed)", () => {
+  test("cl2: `function persist(v) { return save(v) }` from a handler runs, awaited before the next statement", async () => {
+    const r = await runClient(CL2("function persist(v) { return save(v) }"), { save: 1 });
+    expect(r.codes).toEqual([]);
+    expect(r.calls).toEqual(["save"]);
+    expect(r.out).toBe("after");
+  }, T);
+
+  test("cl3: `function reload() { @out = loadCount() }` runs", async () => {
+    const r = await runClient(CL3("function reload() {\n    @out = loadCount()\n  }"), { loadCount: 7 });
+    expect(r.codes).toEqual([]);
+    expect(r.out).toBe("7");
+  }, T);
+
+  test("a helper's result used as a value is awaited: `w(2) ? \"Y\" : \"N\"` is \"N\" when the server says false", async () => {
+    const r = await runClient(W2("function w(n) { return isOk(n) }"), { isOk: false });
     expect(r.codes).toEqual([]);
     expect(r.out).toBe("N");
   }, T);
+});
 
+describe("S465 r7 MED-C — a binding aliased as a VALUE on the client", () => {
   test("a binding aliased as a VALUE on the client is still refused", async () => {
     const r = await runClient(`<program db="./app.db">
 \${

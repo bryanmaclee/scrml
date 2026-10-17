@@ -438,12 +438,14 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
   test("(#284 dispatch → S440 F4) an async server fn in a dispatch object is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
     const { errors } = compileToFiles(DISPATCH_SRC, "disp-sql", SEED);
     const escapes = errors.filter((e) => e.code === "E-ASYNC-FN-ESCAPES-AS-VALUE");
-    // dispatchSql + dispatchTemplate each store it.
-    expect(escapes.length).toBe(2);
-    for (const e of escapes) {
-      expect(e.message).toContain("`nextOrder`");
-      expect(e.message).toContain("stored in an object");
-    }
+    // dispatchSql + dispatchTemplate each store it…
+    const stored = escapes.filter((e) => e.message.includes("stored in an object"));
+    expect(stored.length).toBe(2);
+    for (const e of stored) expect(e.message).toContain("`nextOrder`");
+    // …and (S467 r10, §13.9.6) each binding `t` that holds it is refused too.
+    const bound = escapes.filter((e) => !e.message.includes("stored in an object"));
+    expect(bound.length).toBe(2);
+    for (const e of bound) expect(e.message).toContain("`t` holds a value that is, or may be, an async function");
   });
 
   // ── #284 dispatch-table PLACEMENT (S305): a PLAIN helper (not a `server
