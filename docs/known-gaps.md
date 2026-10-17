@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 649 | 6 |
+| MED | 650 | 6 |
 | LOW | 431 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -374,6 +374,12 @@ Executed S467 on origin/main `9d7a6cc2a` and on the s466-server-param-defaults m
 
 Executed S467 on origin/main `9d7a6cc2a` and on the s466-server-param-defaults merged tip (identical): the program compiles clean; `app.server.js` has `add(m);` in `_scrml_handler_outer_N` and no `function add`; calling the `outer` route throws `ReferenceError: add is not defined`. Expected: either an in-process server callable for the CPS function's server half, or a compile error (a CPS function writes client state — `@last` — which a server caller cannot do).
 
+### g-nested-pattern-default-string-literal-dropped-s467 — a string literal inside a default NESTED in a destructuring parameter pattern loses its quotes: client `fn inner({ a = 1, b = { q: [a, "s"] } } = {})` emits `b = { q : [ a , s ] }` (passes `node --check`; `s` is an undeclared identifier at run time — silent wrong behaviour), and the server shape `b = m + "!"` emits `m + !` (refused as E-CODEGEN-INVALID-LOGIC, fails closed) — `NEW S467; MED; open (pre-existing on origin/main)`
+
+<!-- @gap id=g-nested-pattern-default-string-literal-dropped-s467 sev=MED status=open locus=searched:compiler/src/codegen/emit-destructure-pattern.ts(emitDestructurePatternText — pattern default text emitted as stored when no lowerer is passed)+compiler/src/codegen/utils.ts(paramSignature lowerPatternDefault)+the parameter-list parser that stores the nested default as token-joined text—not-traced prov=review:s466-server-param-defaults(r5,cases ds5/ds6) -->
+
+Executed S467 on origin/main `f79a624df` and on pre-#1427 main `179f9b346` (identical): case `ds6` (client `fn inner({ a = 1, b = { q: [a, "s"] } } = {}, [c = a * 2] = [], k = a + 1)`) emits `function _scrml_inner_3({ a = 1, b = { q : [ a , s ] } } = {}, …)` in `app.client.js` — the token-joined text of the nested default with the string token's quotes gone; calling `inner()` reads an undeclared `s`. The server variant (`ds5` with `b = m + "!"` inside a nested function of a server function) emits `m + !` and is refused by the artifact syntax check. The parameter's OWN default is lowered from its parsed tree (s466); a default nested inside a pattern goes through the stored pattern text (client: no lowerer; server: main's S465 r4 lowerer). Fix direction: keep each nested default's source span / parsed tree on the pattern node and lower it with the same expression emitter, client and server.
+
 ### g-lib-export-const-lambda-missing-import-s465 — a lib's `export const check = (p, h) => verifyPassword(p, h)` emits a server module without the `verifyPassword` import: `ReferenceError` at call time (500) — `NEW S465 r6; MED; open (pre-existing on BASE)`
 
 <!-- @gap id=g-lib-export-const-lambda-missing-import-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(emitModuleValueExportLines const branch + the server import prune)—not-traced prov=review:s465-await-r6 -->
@@ -385,6 +391,8 @@ Executed in s465 fix round 6 (branch and main alike): the importer's `if (!check
 <!-- @gap id=g-lib-exported-fn-destructured-param-codegen-s465 sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(route handler body-param unpacking reads param.name as a string)—not-traced prov=review:s465-await-r6 -->
 
 Executed in s465 fix round 6 (branch and main alike; probe `pre.mjs` preLibDestr). The handler unpacks `_scrml_body` by parameter NAME; a destructuring pattern has none. Fix direction: unpack positionally into a temp and destructure it with emit-destructure-pattern.
+
+**S467 (s466 fix round 6) — the same root in an APP-FILE server function.** Executed on origin/main `f79a624df`: `server fn f({ a = 1, b = "x" } = {}, [c = 2] = [], z = "zz")` (case `ds1`) and `server fn f({ a, b })` (cases `dsv1`–`dsv4`) are refused with E-CODEGEN-INVALID-LOGIC — the route handler emits `const [object Object] = _scrml_body[…]`. Fails closed (no program runs with it), but a destructured parameter of ANY route-backed server function cannot compile. Same fix direction.
 
 ### g-typed-arrow-param-in-server-fn-value-s465 — a function value with an annotated parameter in server code (`const label = (r: R) => { … }`) emits the annotation into JS — E-CODEGEN-INVALID-LOGIC "Unexpected token" (compiler defect, fails closed) — `NEW S465 r6; LOW; open (pre-existing on BASE)`
 
