@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 651 | 6 |
-| LOW | 432 | 0 |
+| HIGH | 264 | 4 |
+| MED | 653 | 6 |
+| LOW | 435 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -69,6 +69,42 @@ Executed (S467 fix round 2): `const ok = match (p == "" || check(p)) { .Denied :
 <!-- @gap id=g-onmount-guarded-failable-call-refused-s467 sev=MED status=open locus=compiler/src/codegen(the `_onMountEffect` body is lowered from its raw text; a guarded call there is not read as a guarded statement) prov=empirical:S467-reproduced-on-origin-main-179f9b346;dispatch:s467-error-002-value-position -->
 
 Reproduced on `origin/main` `179f9b346`: `${ on mount { @msg = load() !{ _ :> "" } } }` with `server function load()! -> AuthErr` → E-SERVER-FN-IN-SYNC-CALLBACK ("called inside a synchronous callback" — there is no callback); `${ on mount { const ok = check("wrong") !{ .Denied :> false }; … } }` with a client `check()!` → E-CODEGEN-INVALID-LOGIC. Both are the correct handled form, so an author must move the call into a named function called from `on mount` (the S467 `bug-18` fixture migration did exactly that). Fails closed (no wrong output); an ergonomic and conformance defect.
+
+### g-failable-alias-through-operator-or-returned-fn-s467 — a failable function reached through a ternary / `||` alias or a returned function slips E-ERROR-002: `const g = p ? check : id; const ok = g(p)`, `const g = check || id`, `getF()(p)` compile and a wrong password logs in — `NEW S467 (filed; S239 r2 of #1431 N1); MED; open`
+
+<!-- @gap id=g-failable-alias-through-operator-or-returned-fn-s467 sev=MED status=open locus=compiler/src/type-system.ts(checkFailableCallsInValuePositions alias tracking — follows bare-name aliases only)+compiler/src/failable-value-calls.ts prov=review:S467-e002-r2-N1;empirical:S467-reproduced-branch-and-base -->
+
+#1431's per-scope alias tracking follows `const g = check` (and alias-of-alias) but not an alias whose value is a ternary / logical expression over a failable function, nor a function that returns one. Executed on 486345909 and origin/main 179f9b346: each compiles and a wrong password gives "LOGGED IN". Probes: ~/.cache/scrml-review-s467-e002/f.mjs (XPS). Fix direction: fail closed — a callee whose binding's value MAY be a failable function (any leaf of a ternary / logical / call-returning-function) is failable. Related declared limits in SPEC §19.4.3 "Carried impl#1 gaps": a failable function passed as a value, a binding reassigned in an inner block.
+
+### g-block-bodied-bang-arm-drops-value-s467 — a block-bodied `!{}` arm in value position drops its value: `const ok = check(p) !{ .Denied :> { @msg = "d"⏎ false } }` leaves `ok` holding the error object → a wrong password logs in — `NEW S467 (filed; S239 r2 of #1431 N2; pre-existing); HIGH; open`
+
+<!-- @gap id=g-block-bodied-bang-arm-drops-value-s467 sev=HIGH status=open locus=compiler/src/codegen(the `!{}` guard emission for a value-position handler with a block-bodied arm — emits the arm's last expression as a bare statement, then `var ok = _scrml__scrml_result_N`) prov=review:S467-e002-r2-N2;spec:§19.4.3("the block's last expression is the arm's value") -->
+
+SPEC §19.4.3 says a block-bodied arm's last expression is the arm's value. impl#1 emits `false;` inside the arm and then assigns the guard's raw result, so the error object survives into `ok`. The E-ERROR-002 checker correctly counts the call as handled — the defect is in codegen. Executed on #1431's branch and on main: "LOGGED IN" with a wrong password. Probe: ~/.cache/scrml-review-s467-e002/f.mjs "FP guard block arm" (XPS). Close to but distinct from `g-impl1-value-position-arm-fallthrough-s451` (that entry says the last statement IS assigned).
+
+### g-param-default-identity-via-param-or-mutation-s467 — identity reaching a CPS-split default through a function PARAMETER or a MUTATING call is not refused: `setIt(@session)` writing a cell, `Object.assign(o, {u: @session.userId})`, `arr.push(…)`, `m.set(…)` then `uid = <that>` — the server binds `uid` from the request — `NEW S467 (filed; PA call, not fixed); LOW; open`
+
+<!-- @gap id=g-param-default-identity-via-param-or-mutation-s467 sev=LOW status=open locus=compiler/src/binding-provenance.ts(records where a NAME gets its value; parameter call-site arguments and mutating-call writes are not sources)+compiler/src/free-name.ts prov=review:S467-param-r6-N1;ruling:PA-S467(file-not-fix) -->
+
+#1433's binding-provenance closes every by-NAME route (p2/p4/p6/p8/p11/q4). Left open by PA decision: a CPS-split default is evaluated in the browser and sent, so ANY client-sent value is forgeable however it was computed — an explicit argument `add("a", @session.userId)` is equally spoofable and no default check sees it. The real protection is the server reading identity from the session; the default check is a safety net for the common confused pattern, not a whole-program taint analysis. Probes t3/t4/t7/t8/t16: ~/.cache/scrml-review-s467-param-r5/cases/ (XPS).
+
+### g-cps-server-half-trusts-client-held-cell-s467 — a CPS server half reads a CELL's value back from the request: `const was = @allowed` before the first server statement, or `if (!@ok && !@allowed) return` — if an earlier call's server result set `@allowed`, the browser can forge it — `NEW S467 (filed; pre-existing, narrowed by #1435); MED; open`
+
+<!-- @gap id=g-cps-server-half-trusts-client-held-cell-s467 sev=MED status=open locus=compiler/src/route-inference.ts(carriedValueAdmission — cells are synced client state, not admission-checked locals)+§19.9.9.8 prov=review:S467-cps-r5-INFO;empirical:S467(base 9/9 forged rows, #1435 branch 3/4) -->
+
+The long-standing cell-sync model: a cell is client state and its value travels with the request. When the cell's value came from a server result in an earlier call, the server trusting it later breaks the spirit of §19.9.9.8 ("a server value never travels to the client and back"). #1435 narrows it (forged rows 9→3, 9→4 on probes cell_prev_call / cell_direct in ~/.cache/scrml-review-s467-cps-r4/h/, XPS) but does not close it. Needs a SPEC decision: is a cell written from a server result a server value for §19.9.9.8 purposes?
+
+### g-cps-carried-primitive-message-says-object-s467 — E-RI-002 for a carried PRIMITIVE local written by a closure says "`blk` may hold an object" — fails closed, wrong wording — `NEW S467 (filed); LOW; open`
+
+<!-- @gap id=g-cps-carried-primitive-message-says-object-s467 sev=LOW status=open locus=compiler/src/route-inference.ts(carriedValueAdmission refusal message) prov=review:S467-cps-r5 -->
+
+`let blk = false`, written only with `true` inside a closure, is refused (correctly) with a message about object aliasing. The message should name the actual reason (written after the first server statement through a closure).
+
+### g-dev-watcher-snapshot-ctime-fails-on-xps-s467 — `compiler/tests/commands` `dev-watcher-snapshot-identity` ("ctime moves") fails 5/5 on origin/main on the XPS clone — `NEW S467 (filed; environment); LOW; open`
+
+<!-- @gap id=g-dev-watcher-snapshot-ctime-fails-on-xps-s467 sev=LOW status=open locus=compiler/tests/commands(dev-watcher-snapshot-identity — filesystem ctime resolution assumption) prov=empirical:S467(4 agents, origin/main, XPS) -->
+
+Reported by four S467 agents independently; fails identically on clean main on this machine, so it is the filesystem (ctime granularity), not a change. CI passes it.
 
 ### g-hook-flakes-under-load-s467 — pre-commit hook flakes on a loaded machine: `defer-spec-calls` times out at 55 s; `import-host` "decorators and JSX" fails in-suite but passes alone — `NEW S467 (filed; test-only); LOW; open`
 
