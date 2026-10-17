@@ -43,3 +43,16 @@ match via env.onFailableMatchSubject; emit-expr bridge forwards) all read it. A 
 - gap 2: newly-accepting (`match (a || check(p))` etc. — backed by §19.4.3 item 1; the refusal was a declared impl gap) +
   semantics-changed (expression-position `match check(p)` and `match g(p)` now discriminate the error: previously miscompiled).
 - security-await-pack classify: before == after (PASS 249, PASS-REFUSED 136, PASS-500 20, PASS-DENY 8, UNJUDGED 1, FAIL 10); 0 changed.
+
+## 2026-10-17 — measured + landed on branch
+- Commit 5b7ca8f84 (source + tests): pre-commit gate PASS — 37136 pass / 125 skip / 13 todo / 0 fail (1588 files).
+- Corpus (`scripts/corpus-emit-differential.ts`, roots examples,samples,conformance,stdlib,benchmarks; 2847 sources), base =
+  `git archive origin/main` (5c43c3b8e; revision "<unknown>" to the tool, hence its INCOMPARABLE provenance finding) vs head:
+  compile-failure delta 0 newly failing / 0 newly passing; diagnostic changes 0 code / 0 text; artifact set delta 0;
+  167 content diffs, ALL only `const _scrml_project_root = "<checkout path>"` (verified by normalizing that line: 167/167);
+  syntax delta 0; bare server-fn sites 29/29. => 0 real sites newly refused; no emitted-code change in the corpus.
+  giti / flogence not present on this machine — not measured.
+- Added C3 tests (server-function match through `||` discriminates; multi-scrutinee head keeps the direct-call rule).
+- known-gaps: both markers flipped to status=resolved with traced locus; parent gap's "still open" note annotated;
+  state.ts / facts.ts --write then --check: PASS.
+- First push of 5b7ca8f84 FAILED (pre-push hook; output masked by a pipe) — re-pushed with the log captured (see below).

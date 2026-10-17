@@ -231,3 +231,42 @@ describe("C2 — the widened subject keeps the other rules", () => {
     expect(codesOf("const ok = match (check(p) && true) { .Denied :> false  _ :> true }")).toContain("E-ERROR-002");
   });
 });
+
+describe("C3 — blast radius: other lowerings of the widened subject", () => {
+  test("a server function's match on `(p == \"\" || check(p))` discriminates the error", () => {
+    const src = `type AuthErr:enum = { Denied }
+<msg> = "init"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    server function login(p) {
+        const ok = match (p == "" || check(p)) { .Denied :> false  _ :> true }
+        return ok ? "LOGGED IN" : "rejected"
+    }
+    function go() { @msg = login("wrong") !{ _ :> "err" } }
+}
+<button onclick=go()>go</button>
+<p>\${@msg}</p>
+`;
+    const uniq = `srv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const dir = resolve(tmpdir(), `scrml-s468-${uniq}`);
+    mkdirSync(dir, { recursive: true });
+    const input = resolve(dir, "app.scrml");
+    writeFileSync(input, src);
+    try {
+      const result = compileScrml({ inputFiles: [input], write: true, outputDir: resolve(dir, "out"), log: () => {} });
+      const errs = (result.errors ?? []).filter((e) => e.severity !== "warning" && !/^[WI]-/.test(e.code ?? ""));
+      expect(errs.map((e) => e.code)).toEqual([]);
+      const server = readFileSync(resolve(dir, "out", "app.server.js"), "utf8");
+      expect(server).toMatch(/const (_scrml_tag_\d+) = \((_scrml_match_\d+) != null && typeof \2 === "object" && \2\.__scrml_error === true\) \? \2\.variant : "Ok";/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a §18.19 multi-scrutinee head keeps the direct-call rule", () => {
+    expect(codesOf("const ok = match (p == \"\" || check(p), 1) { (.Denied, _) :> false  _ :> true }")).toContain("E-ERROR-002");
+  });
+});
