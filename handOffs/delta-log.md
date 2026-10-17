@@ -4369,3 +4369,14 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3979] blocked · given-bool-head, narrowing-after-write, promoted-onclient-handler → auto-questions.md · @adv:g-given-bool-expr-fail-runs-unconditionally-s460,g-narrowing-survives-writes-incl-callee-s460
 [3980] file · six S461 review findings → known-gaps "S461 filings"
 [3981] behaviour · S462 narrowing branch: on a write, render-gate effects (if=/else-if=/else controllers, <each> reconciles, per-row if= swaps) now run BEFORE the written cell's subscribers and other effects — a `when … changes` / <effect> body that reads the DOM sees the post-gate DOM (rows already reconciled, gated subtrees already (un)mounted), whatever the registration order; effects born during the gate pass run once · → SPEC §6.7.4 Timing + §42.3.5 premise; compiler/src/runtime-template.js _scrml_write_fx; branch worktree-agent-a380fd37091953531 · @to:compiler/src/runtime-template.js,compiler/SPEC.md @as:landed-on-branch
+[3982] state · S466 (ASUS) died unwrapped; S467 (XPS) adopted its carry-overs; board S466 → DEAD
+[3983] land · #1426 S466 gap list + review-marker backfill
+[3984] land · #1429 s461 test unregisters happy-dom (local pre-commit order failure) · @adv:g-hook-flakes-under-load-s467
+[3985] land · #1427 server param defaults (auto-merged at round 5, before its re-review cleared) · @adv:g-server-function-param-default-calling-fn-returns-null-s464
+[3986] ruling · S467 dpa-023 F1 (a) F3 (a) F2/F5/F6/F7 (a) F4 (b); impl#1 enforces F4; three §13.9 details · @adv:dpa-023
+[3987] land · #1430 SPEC §13.8 one rule + §13.9 pending cells · @adv:dpa-023
+[3988] land · #1431 E-ERROR-002 for an unhandled failable call used as a value (security) · @adv:g-unhandled-failable-call-in-value-position-s467
+[3989] land · #1432 SPEC §34 rows for §13.8/§13.9 · @adv:dpa-023
+[3990] land · #1433 param-default identity follows every reference; reach set follows const bindings · @adv:g-server-function-param-default-calling-fn-returns-null-s464
+[3991] review · #1434 await r10 (F4 enforcement) — no wrong-password accept; #1435 CPS r5 (allow-list) — CLEAN; both mid-merge with main at wrap · @adv:g-imported-async-server-fn-not-awaited-s465
+[3992] file · six S467 review gaps (block-bodied !{} arm drops value HIGH; failable alias via operator MED; client-held cell trusted MED; identity via param/mutation LOW; …)
