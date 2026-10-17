@@ -75,6 +75,9 @@
 import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
+import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
+import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
+import { parseStatementText, textBodiesOf } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
@@ -123,6 +126,8 @@ import { checkValueFunctionStored, setValueFnModuleIndex } from "./value-functio
 import { judgeTypeOf, unjudgeableIn, wrapRefine, wrapRefineUpdate, wrapRefineMerge, paramGuardStatement, isRefineCall, structJudgeDef, type JudgeType } from "./refinement-obligations.ts";
 import * as acorn from "acorn";
 import { refusedElementMessage } from "./element-refusal.ts";
+import { analyzedParamDefault, paramDefaultSpan } from "./at-refs.ts";
+import { identityReadInDefault } from "./free-name.ts";
 
 // ---------------------------------------------------------------------------
 // Engine state-child grammar metadata (S81 Phase A10 follow-on; ss2 item 3)
@@ -10969,6 +10974,18 @@ function annotateNodes(
   // an unhandled call and E-ERROR-005 (a render-time renderability check) does
   // not. The depth also turns on scope resolution of the callee.
   let handlerCheckDepth = 0;
+  // S467 (§19.4.3) — context of the value-position failable-call check
+  // (`checkFailableCallsInValuePositions`). `failableFnStack` holds one entry per
+  // function body being walked (its `canFail`): a function body is not render-time,
+  // so an enclosing `<errorBoundary>` never handles a call in it. `requestBodyDepth`
+  // counts the `<request>` bodies being walked outside any function: the right-hand
+  // side of a request body's `@var = expr` is handled by the request (§19.4.3 item 5).
+  const failableFnStack: boolean[] = [];
+  let requestBodyDepth = 0;
+  // S467 r2 — `const g = check`: per scope, the bindings that alias a failable
+  // function (name → that function). Read by `resolveFailableCallee`.
+  const failableAliasesByScope = new WeakMap<object, Map<string, string>>();
+  const valuePositionChecked = new WeakSet<object>();
   function withHandlerCheckContext(fn: () => void): void {
     const savedDepth = errorBoundaryDepth;
     const savedFallbacks = errorBoundaryFallbackStack.splice(0);
@@ -11024,6 +11041,10 @@ function annotateNodes(
         }
       }
     }
+
+    // S467 (§19.4.3) — an unhandled `!` call whose result is USED is E-ERROR-002,
+    // not only one that is a whole statement. One check for every logic statement.
+    checkFailableCallsInValuePositions(n);
 
     switch (n.kind) {
       // ------------------------------------------------------------------
@@ -11372,6 +11393,10 @@ function annotateNodes(
           const _hasFallback = Array.isArray(_ebAttrs) && _ebAttrs.some((a) => a && (a as ASTNodeLike).name === "fallback");
           errorBoundaryFallbackStack.push(_hasFallback === true);
         }
+        // S467 (§19.4.3 item 5) — a `<request>` body's `@var = expr` loads `expr`;
+        // the request handles its failure (`<#id>.error`).
+        const _isRequestBody = n.kind === "markup" && _ebTag === "request";
+        if (_isRequestBody) requestBodyDepth++;
         const children = n.children as ASTNodeLike[] | undefined;
         if (Array.isArray(children)) {
           for (const child of children) {
@@ -11403,6 +11428,7 @@ function annotateNodes(
           errorBoundaryDepth--;
           errorBoundaryFallbackStack.pop();
         }
+        if (_isRequestBody) requestBodyDepth--;
         resolvedType = { kind: "html-element", tag: (n.name as string) ?? "unknown", attrs: {} };
         break;
       }
@@ -11729,6 +11755,32 @@ function annotateNodes(
         if (boundary === "server") {
           scopeChain.bind("session", { kind: "variable", resolvedType: tAsIs() });
         }
+        // §7.3.2 E-PARAM-DEFAULT-FORWARD-REF (a default reading its own or a later
+        // parameter) is decided where the default is lowered — codegen
+        // `emitParamDefault`, server-placed functions only (s466 fix round 5).
+        // s466 fix round 2 — the same §20.5 rule over the function's PARAMETER
+        // DEFAULTS (evaluated where the function runs): a free `session` in the
+        // default of a function that is not server-escalated is E-SCOPE-012, as
+        // in its body. Scope-aware (free-name.ts): a parameter or a lambda
+        // parameter named `session` is not the builtin.
+        if (boundary !== "server" && Array.isArray(n.params) && !scopeChain.lookup("session")) {
+          for (const _p of (n.params as unknown[])) {
+            const _a = analyzedParamDefault(_p, filePath);
+            const _d = _a && "tree" in _a ? _a.tree : null;
+            if (!_d) continue;
+            const _hit = identityReadInDefault(_d, n.params, { currentUserAmbient: false, sessionProjection: false });
+            if (_hit === null || !_hit.startsWith("session")) continue;
+            errors.push(new TSError(
+              "E-SCOPE-012",
+              `E-SCOPE-012: \`session\` is available only inside a web-app server ROUTE-HANDLER ` +
+              `function body. The default of parameter \`${typeof (_p as ASTNodeLike).name === "string" ? (_p as ASTNodeLike).name : "(destructured)"}\` ` +
+              `of \`${(n.name as string) ?? "anon"}\` reads it, and that function runs in the browser. ` +
+              `For client-side session display use the \`@session\` projection; to use the server's identity, ` +
+              `read \`session\` in a server function's body.`,
+              ((paramDefaultSpan(_p) ?? n.span) as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            ));
+          }
+        }
 
         // Walk the body.
         const fnBody = n.body as ASTNodeLike[] | undefined;
@@ -11762,6 +11814,10 @@ function annotateNodes(
           }
         }
         enclosingFnReturnTypeStack.push(_enclosingFnReturnType);
+        // S467 — a function body: its own `canFail`, and no `<request>` body around it.
+        failableFnStack.push(_enclosingFnCanFail);
+        const _savedRequestBodyDepth = requestBodyDepth;
+        requestBodyDepth = 0;
         if (Array.isArray(fnBody)) {
           for (const stmt of fnBody) {
             if (stmt && typeof stmt === "object") {
@@ -11770,6 +11826,8 @@ function annotateNodes(
             visitLogicNode(stmt, boundary);
           }
         }
+        requestBodyDepth = _savedRequestBodyDepth;
+        failableFnStack.pop();
         enclosingFnReturnTypeStack.pop();
         // S458 slice 2 — desugar this function's refinement obligations (param
         // guards, refined-return stamps) into its AST, after the body walk so no
@@ -15990,6 +16048,222 @@ function annotateNodes(
         }
       }
     }
+  }
+
+  /**
+   * S467 r2 — the failable function a callee NAME resolves to through the live
+   * scope chain: the name itself when it is a failable function no local binding
+   * shadows; the aliased function when a binding's initializer is (or resolves to)
+   * a failable function (`const g = check; g(p)` — fails closed); otherwise null.
+   */
+  function resolveFailableCallee(name: string): string | null {
+    let scope: Scope | null = scopeChain.current;
+    while (scope !== null) {
+      const aliases = failableAliasesByScope.get(scope);
+      if (aliases && aliases.has(name)) return aliases.get(name) ?? null;
+      if (scope.hasOwn(name)) {
+        const entry = scope.bindings.get(name);
+        if (scope !== scopeChain.global && !!entry && entry.kind !== "function") return null;
+        break;
+      }
+      scope = scope.parent;
+    }
+    return fnCanFail.has(name) ? name : null;
+  }
+
+  /** The text / structure readers the value-position walk needs (`failable-value-calls.ts`). */
+  const failableEnv: FailableEnv = {
+    resolveOuter: resolveFailableCallee,
+    parseStatements: (text) => {
+      const r = parseStatementText(text, filePath);
+      return r.ok ? r.stmts : null;
+    },
+    parseExpr: (text) => {
+      try { return parseExprToNode(text, filePath, 0) ?? null; } catch { return null; }
+    },
+    parseGuardArms: (raw) => {
+      try { return (parseGuardArmsFromRaw(raw, filePath) as unknown[] | null) ?? null; } catch { return null; }
+    },
+    matchArmBodyText: (raw) => {
+      const bodies = textBodiesOf({ rawArms: [raw] });
+      return bodies.length > 0 ? bodies[0].text : null;
+    },
+  };
+
+  /**
+   * S467 — §19.4.3: "Failing to handle the result of a `!` function call in any of
+   * these ways SHALL be a compile error: E-ERROR-002"; §19.4.4: "An unhandled `!`
+   * function call SHALL be a compile error (E-ERROR-002)." Neither sentence is
+   * limited to a call that is a whole statement, but until S467 impl#1 checked only
+   * that one (`checkUnhandledFailableBareCall`): `const ok = check(p); if (ok) …`
+   * compiled, and the error value — a truthy object — read as success.
+   *
+   * ONE structural rule (`failable-value-calls.ts`): a failable call is handled
+   * only when its VALUE REACHES a handling form unchanged (through parentheses, as
+   * an operand `||` / `??` return as-is or the right operand of `&&`, as a ternary
+   * arm). The handling forms that wrap a statement's ROOT:
+   *   - a whole-statement call (`bare-expr`) — the statement check owns it;
+   *   - `f()?` (`propagate-expr`) — §19.5;
+   *   - `… !{ }` — the guarded statement is visited with `__inGuardedContext`;
+   *   - a `match` statement's head (`headerExpr` / `scrutineeExprs`) and the operand
+   *     of a `?` ending a `match` arm (`propagateOperandExpr`);
+   *   - the right-hand side of a `<request>` body's `@var = expr` (§19.4.3 item 5).
+   * Every expression container of the statement is read, including the bodies of
+   * the functions written inside it and the bodies it carries as text (an `on
+   * mount` body, a `!{}` arm body, a C-style `for` initializer, a parameter
+   * default) — its child statements are checked when they are visited.
+   *
+   * §19.6.6: "Within an `<errorBoundary>`, a RENDER-time call to a `!` function
+   * without explicit match/propagation SHALL NOT trigger E-ERROR-002." Only a
+   * render-time call is contained: never one in a function body (declared, or
+   * written as a value inside the statement), an `on mount` effect, or a handler.
+   *
+   * The callee classes are exactly the statement check's, with the same answers: a
+   * declared-`!` function (and a built-in failable, `parseVariant`) → E-ERROR-002;
+   * a CPS-split server function not declared `!` → W-CPS-NEEDS-FAILABLE when the
+   * enclosing function is not `!` (its deprecation cycle, §19.9.5); inside a
+   * deferred statement → E-DEFER-UNHANDLED-FAILABLE (§19.16.3 rule 3). A server
+   * function that is neither declared `!` nor split is not failable on impl#1 at
+   * all (`g-impl1-client-server-call-not-failable-s451`) — unchanged here.
+   */
+  function checkFailableCallsInValuePositions(n: ASTNodeLike): void {
+    const kind = n.kind as string;
+    const rec = n as Record<string, unknown>;
+    if (kind === "markup") { checkFailableCallsInAttrValues(n); return; }
+    if (!VALUE_POSITION_STMT_KINDS.has(kind)) return;
+    if (kind === "match-expr" && "subject" in rec) return; // an expression, not a statement
+    if (valuePositionChecked.has(n)) return;
+    valuePositionChecked.add(n);
+    const inFnBody = failableFnStack.length > 0;
+    const renderTimeInBoundary = !inFnBody && errorBoundaryDepth > 0 && handlerCheckDepth === 0
+      && rec._onMountEffect !== true && kind !== "function-decl";
+    const enclosingFnCanFail = inFnBody
+      ? failableFnStack[failableFnStack.length - 1]
+      : rec.__enclosingFnCanFail === true;
+    const inDefer = rec.__inDeferBody === true;
+    const handling: RootHandling =
+      rec.__inGuardedContext === true ? "operand"
+      : kind === "bare-expr" ? "statement-call"
+      : requestBodyDepth > 0 && kind === "state-decl" ? "operand"
+      : "none";
+    // The statement's span: an expression node's line/col are not reliable across
+    // the parsers that build it (a re-parsed interpolation starts at 1:1).
+    const span = n.span as Span;
+    forEachCallInStatement(rec, handling, failableEnv, (c) => {
+      if (renderTimeInBoundary && !c.inFunction) return;
+      reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
+    });
+    // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
+    if ((kind === "const-decl" || kind === "let-decl" || kind === "tilde-decl" || kind === "lin-decl")
+        && typeof rec.name === "string") {
+      const init = rec.initExpr as { kind?: string; name?: string } | undefined;
+      if (init && init.kind === "ident" && typeof init.name === "string") {
+        const target = resolveFailableCallee(init.name);
+        if (target !== null) {
+          let m = failableAliasesByScope.get(scopeChain.current);
+          if (!m) { m = new Map(); failableAliasesByScope.set(scopeChain.current, m); }
+          m.set(rec.name, target);
+        }
+      }
+    }
+  }
+
+  /**
+   * S467 r2 — a markup element's non-handler attribute values are expressions too
+   * (`if=check(p)`, `title=${f(check(p))}`). Event-handler values are checked by the
+   * handler rule. Evaluated while rendering, so inside an `<errorBoundary>` (outside
+   * a function body) a call there is contained (§19.6.6) — but not one inside a
+   * function written in the value.
+   */
+  function checkFailableCallsInAttrValues(n: ASTNodeLike): void {
+    if (valuePositionChecked.has(n)) return;
+    valuePositionChecked.add(n);
+    const attrs = (n as Record<string, unknown>).attrs;
+    if (!Array.isArray(attrs)) return;
+    const renderTimeInBoundary = failableFnStack.length === 0 && errorBoundaryDepth > 0 && handlerCheckDepth === 0;
+    const enclosingFnCanFail = failableFnStack.length > 0 ? failableFnStack[failableFnStack.length - 1] : false;
+    for (const attr of attrs as ASTNodeLike[]) {
+      if (!attr || typeof attr !== "object" || typeof attr.name !== "string") continue;
+      const value = attr.value as Record<string, unknown> | undefined;
+      if (!value || typeof value !== "object") continue;
+      if (isEventHandlerAttrName(attr.name as string)) {
+        // The handler rule checks the handler's own call; the ARGUMENTS of a bare
+        // `onclick=f(risky())` are values it does not read (the braced forms are
+        // parsed as statements and checked there).
+        if (value.kind === "call-ref" && Array.isArray(value.argExprNodes)) {
+          const hSpan = (attr.span ?? value.span ?? n.span) as Span;
+          withHandlerCheckContext(() => {
+            for (const a of value.argExprNodes as ExprNode[]) {
+              forEachCallInValuePosition(a, "none", failableEnv, (c) =>
+                reportUnhandledFailableValueCall(c, hSpan, c.inFunction ? c.inFailableFn : false, false));
+            }
+          });
+        }
+        continue;
+      }
+      const span = (attr.span ?? value.span ?? n.span) as Span;
+      const onCall = (c: FailableCallCandidate): void => {
+        if (renderTimeInBoundary && !c.inFunction) return;
+        reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, false);
+      };
+      if (value.kind === "call-ref" && typeof value.name === "string") {
+        const target = resolveFailableCallee(value.name);
+        if (target !== null) {
+          onCall({ call: null, calleeName: target, via: target === value.name ? null : value.name, inFunction: false, inFailableFn: false });
+        }
+        for (const a of (value.argExprNodes as ExprNode[] | undefined) ?? []) {
+          forEachCallInValuePosition(a, "none", failableEnv, onCall);
+        }
+      } else if (value.kind === "expr" && value.exprNode) {
+        forEachCallInValuePosition(value.exprNode as ExprNode, "none", failableEnv, onCall);
+      }
+    }
+  }
+
+  function reportUnhandledFailableValueCall(
+    c: FailableCallCandidate, span: Span, enclosingFnCanFail: boolean, inDefer: boolean,
+  ): void {
+    const calleeName = c.calleeName;
+    const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (inDefer) {
+      errors.push(new TSError(
+        "E-DEFER-UNHANDLED-FAILABLE",
+        `E-DEFER-UNHANDLED-FAILABLE: the deferred call to failable function ${shown} ` +
+        `is not handled. A deferred statement runs while its block is already exiting, so its ` +
+        `error cannot propagate: '?' is not allowed in a deferred statement and the enclosing ` +
+        `function's '!' does not cover it (§19.16.3). Handle it in place: ` +
+        `'${calleeName}(...) !{ | _ :> ... }' (or one arm per variant), or 'match' on the result.`,
+        span,
+      ));
+      return;
+    }
+    if (fnCpsImplicitFailable.has(calleeName)) {
+      if (enclosingFnCanFail || handlerCheckDepth > 0) return;
+      errors.push(new TSError(
+        "W-CPS-NEEDS-FAILABLE",
+        `W-CPS-NEEDS-FAILABLE: function \`${calleeName}\` is split across the client/server ` +
+        `boundary (CPS) and may fail due to network or SQL errors. The current call ` +
+        `site does not handle the failure case.\n` +
+        `  Resolution options:\n` +
+        `    1. Wrap the call site in \`<errorBoundary>\` (markup context).\n` +
+        `    2. Mark the calling function \`!\` to propagate the error.\n` +
+        `    3. Match on the result: \`match ${calleeName}(...) { ::Ok(v) -> ... ::NetworkError(e) -> ... }\`.\n` +
+        `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
+        span,
+        "warning",
+      ));
+      return;
+    }
+    errors.push(new TSError(
+      "E-ERROR-002",
+      handlerCheckDepth > 0
+        ? `E-ERROR-002: Result of failable function ${shown} is not handled in this event handler. ` +
+          `Catch it with '!{}' (e.g. '${calleeName}(…) !{ | .Variant :> … }'), match the result, or call it from a ` +
+          `function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+        : `E-ERROR-002: Result of failable function ${shown} is not handled. ` +
+          `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
+      span,
+    ));
   }
 
   /**
@@ -28093,6 +28367,22 @@ function processFile(
     importedFnSignatures,
     importedFnDecls,
   );
+
+  // S467 r2 (F6) — one E-ERROR-002 per site: a call can be reached by both the
+  // whole-statement check and the value-position check (or by the function-body
+  // walker and the statement visit). Identical diagnostics (same code, place and
+  // text) are reported once.
+  {
+    const seenE002 = new Set<string>();
+    for (let i = 0; i < errors.length; i++) {
+      const e = errors[i];
+      if (!e || e.code !== "E-ERROR-002") continue;
+      const sp = e.span as Partial<Span> | undefined;
+      const k = `${sp?.file ?? ""}|${sp?.start ?? ""}|${sp?.end ?? ""}|${sp?.line ?? ""}|${sp?.col ?? ""}|${e.message}`;
+      if (seenE002.has(k)) { errors.splice(i, 1); i--; continue; }
+      seenE002.add(k);
+    }
+  }
 
   // §14.12.4 — Engine-cell carve-out for lifecycle annotation
   // (E-TYPE-LIFECYCLE-ON-ENGINE-CELL). Fires when a state-decl carries a

@@ -186,7 +186,8 @@ describe("negative controls unchanged (backstop still guards real coercion)", ()
   export function f(pw, h, x = verifyPassword(pw, h)) { return x }
 }
 `);
-    expect(codes).toContain(CODE);
+    // s466 fix round 1 — a function's own default is refused under one code.
+    expect(codes).toContain("E-PARAM-DEFAULT-AWAIT");
   });
 
   test("Case 2 — an async thunk to a USER HOF (not in the discard set) still fires", () => {
