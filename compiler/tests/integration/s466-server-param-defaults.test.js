@@ -1224,3 +1224,89 @@ ${imp}${decls}
     expect(one(CPS("  const t = `a-${1 + 2}`", "t"), "r6-ok-tpl")).toEqual([]);
   });
 });
+
+describe("s466 fix round 6 — F1: server reach follows const / alias / let bindings and channel handlers", () => {
+  const LIB = "${\n  export fn fmt(x, k = (y) => { return y + \"!\" }) { return k(x) }\n}\n";
+  const UNSUP = "E-PARAM-DEFAULT-UNSUPPORTED";
+  const app = (decls, server, markup = "<button onclick=${@out = h(\"a\")}>go</button>") => `<program db="./x.db">
+\${
+  import { fmt } from "./lib.scrml"
+${decls}
+${server}
+}
+<out> = ""
+${markup}
+<p>\${@out}</p>
+</program>
+`;
+  const errs = (files, tag) => codesOf(compileFiles(files, "app.scrml", tag).errors);
+  test("R1: `const w = (m) => fmt(m)` + `server fn h(m) { return w(m) }` reaches fmt", () => {
+    expect(errs({ "app.scrml": app("  const w = (m) => fmt(m)", "  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-R1")).toContain(UNSUP);
+  });
+  test("an alias and a `let` reach it too", () => {
+    expect(errs({ "app.scrml": app("  const w = fmt", "  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-alias")).toContain(UNSUP);
+    expect(errs({ "app.scrml": app("  let w = (m) => fmt(m)","  server fn h(m) { return w(m) }"), "lib.scrml": LIB }, "r6-let")).toContain(UNSUP);
+  });
+  test("R6: inside the library — `const w = (m) => fmt(m)` + `export server fn s(m) { return w(m) }`", () => {
+    const lib = "${\n  export fn fmt(x, k = (y) => { return y + \"!\" }) { return k(x) }\n  const w = (m) => fmt(m)\n  export server fn s(m) { return w(m) }\n}\n";
+    const a = `<program db="./x.db">
+\${
+  import { fmt, s } from "./lib.scrml"
+}
+<out> = ""
+<button onclick=\${@out = fmt("a")}>go</button>
+<button onclick=\${@out = s("a")}>go2</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib.scrml": lib }, "r6-R6")).toContain(UNSUP);
+  });
+  test("R7: a lib default reading `@session` reached through `const w` is refused at compile time (main: ReferenceError at run time)", () => {
+    const lib = "${\n  export function tag(x, k = () => { return @session.userId }) { return x + \":\" + k() }\n}\n";
+    const a = `<program db="./x.db">
+\${
+  import { tag } from "./lib.scrml"
+  const w = (m) => tag(m)
+  server fn h(m) { return w(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib.scrml": lib }, "r6-R7").length).toBeGreaterThan(0);
+  });
+  test("a channel `onserver:` handler is server-run code — direct and through `const w`", () => {
+    const ch = (decls, handler) => `<program db="./x.db">
+\${
+  import { fmt } from "./lib.scrml"
+${decls}
+}
+<channel name="chat" onserver:message=${handler}>
+\${
+  <n> = 0
+}
+</channel>
+<p>\${@n}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": ch("", "fmt(msg)"), "lib.scrml": LIB }, "r6-ch-direct")).toContain(UNSUP);
+    expect(errs({ "app.scrml": ch("  const w = (m) => fmt(m)", "w(msg)"), "lib.scrml": LIB }, "r6-ch-const")).toContain(UNSUP);
+  });
+  test("`export *` re-export reaches the source module's function", () => {
+    const a = `<program db="./x.db">
+\${
+  import { fmt } from "./lib2.scrml"
+  server fn h(m) { return fmt(m) }
+}
+<out> = ""
+<button onclick=\${@out = h("a")}>go</button>
+<p>\${@out}</p>
+</program>
+`;
+    expect(errs({ "app.scrml": a, "lib2.scrml": "${\n  export * from \"./lib.scrml\"\n}\n", "lib.scrml": LIB }, "r6-star")).toContain(UNSUP);
+  });
+  test("client-only reach stays client (L3 shape): `const w` used only by client code compiles", () => {
+    expect(errs({ "app.scrml": app("  const w = (m) => fmt(m)", "", "<button onclick=${@out = w(\"a\")}>go</button>"), "lib.scrml": LIB }, "r6-client")).toEqual([]);
+  });
+});
