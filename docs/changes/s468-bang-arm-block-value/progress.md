@@ -28,3 +28,5 @@
 - security-await-pack classify: before FAIL=10, after FAIL=10, identical FAIL set (0 new).
 - Out of scope, found: an expression-position handler's arm text is token-joined (newlines lost), so a
   newline-separated block arm inside an expression is refused E-CODEGEN-INVALID-LOGIC (fails closed); base same.
+
+- 2026-10-17 FIX ROUND 1 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a5e6dd9019709b315 on existing branch s468-bang-arm-block-value, HEAD 684420b36 asserted. bun install (puppeteer postinstall exit 1, unrelated), pretest OK. Briefs appended to BRIEF.md.
