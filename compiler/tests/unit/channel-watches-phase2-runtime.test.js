@@ -28,6 +28,7 @@ import { execFileSync } from "child_process";
 import { tmpdir } from "os";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
+import { SERVER_STRUCTURAL_EQ_HELPER } from "../../src/codegen/emit-server.ts";
 import {
   buildWatchesTriggerDDL,
   emitChannelClientJs,
@@ -319,8 +320,9 @@ describe("§38.13.3 (iii) client __change dispatch", () => {
 
   test("arm bodies lower @-cells to reactive get/set with === / !==", () => {
     expect(js).toContain('_scrml_reactive_set("orders", [..._scrml_reactive_get("orders"), row])');
-    expect(js).toContain('_scrml_reactive_get("orders").map(r => r.id === row.id ? row : r)');
-    expect(js).toContain('_scrml_reactive_get("orders").filter(r => r.id !== key)');
+    // §45.4 (S468): `==` / `!=` on non-provably-primitive operands is structural.
+    expect(js).toContain('_scrml_reactive_get("orders").map(r => _scrml_structural_eq(r.id, row.id) ? row : r)');
+    expect(js).toContain('_scrml_reactive_get("orders").filter(r => !_scrml_structural_eq(r.id, key))');
   });
 });
 
@@ -417,6 +419,9 @@ describe("§38.13.7 (v) mock-SQL notification → re-SELECT → publish", () => 
           const store = ${JSON.stringify(initial)};
           const _scrml_reactive_get = (k) => store[k];
           const _scrml_reactive_set = (k, v) => { store[k] = v; };
+          // The §45 helper the arm bodies call (the page runtime defines it).
+          const _scrml_g = globalThis;
+          ${SERVER_STRUCTURAL_EQ_HELPER}
           // The <onchange> arm bodies end in \`return;\` — contain them in an inner
           // IIFE so the dispatch returns to us and we can read the patched store.
           (function () { ${branch} })();

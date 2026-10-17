@@ -7,6 +7,7 @@ import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
+import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
@@ -1941,6 +1942,13 @@ export function generateLibraryJs(
           blockText = blockText.split("\n").map(line =>
             line.trimStart().startsWith("//") ? line : rewriteIsOperator(rewriteNotKeyword(line))
           ).join("\n");
+          // §45.1 / §45.4 (S468) — this verbatim path re-printed scrml `==` / `!=`
+          // as JS LOOSE `==` (`export const SAME = { a: 1 } == { a: 1 }` was
+          // always false). Lower each operator from the parsed module text, the
+          // same rule as the structured emitter; the helper definition is
+          // appended on use by withRuntimeHelpers. Text acorn cannot parse is
+          // left as it was.
+          blockText = lowerEqualityOps(blockText, { onUnparsed: "keep" });
           if (blockText) {
             lines.push(blockText);
             lines.push("");

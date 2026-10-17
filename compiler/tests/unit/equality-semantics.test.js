@@ -5,14 +5,14 @@
  *   §1  E-EQ-004 — `===` in scrml logic source produces compile error
  *   §2  E-EQ-004 — `!==` in scrml logic source produces compile error
  *   §3  E-EQ-004 recovery — AST gets `==`/`!=` (not `===`/`!==`) after error
- *   §4  rewriteEqualityOps: `==` → `===` in JS output
- *   §5  rewriteEqualityOps: `!=` → `!==` in JS output
+ *   §4  rewriteEqualityOps: `==` → `_scrml_structural_eq` (S468, §45.4)
+ *   §5  rewriteEqualityOps: `!=` → `!_scrml_structural_eq`
  *   §6  rewriteEqualityOps: preserves `==` inside string literals
  *   §7  rewriteEqualityOps: handles mixed `==` and `!=` in one expression
  *   §8  rewriteEqualityOps: no-op when no equality operators present
  *   §9  rewriteEqualityOps: handles template literals with `==`
- *   §10 rewriteEqualityOps: `== null` becomes `=== null`
- *   §11 rewriteEqualityOps: chained comparisons `a == b && c != d`
+ *   §10 rewriteEqualityOps: `x == null` is structural (x not provably primitive)
+ *   §11 rewriteEqualityOps: provably-primitive operands keep `===` / `!==`
  *   §12 rewriteEqualityOps: empty/null input
  *   §13 rewriteEqualityOps: preserves `===` that later passes may produce (not applicable here)
  *   §14 E-EQ-002 — `== not` emits compile error
@@ -32,8 +32,8 @@
  *   §28 _scrml_structural_eq: null/undefined handling
  *   §29 _scrml_structural_eq: different types return false
  *   §30 _scrml_structural_eq: reference identity short-circuit
- *   §31 Full pipeline: `x == y` in logic compiles to `x === y` in JS output
- *   §32 Full pipeline: `x != y` in logic compiles to `x !== y` in JS output
+ *   §31 Full pipeline: `x == y` in logic compiles to `_scrml_structural_eq(x, y)` (S468)
+ *   §32 Full pipeline: `x != y` in logic compiles to `!_scrml_structural_eq(x, y)` (S468)
  *   §33 Runtime template contains _scrml_structural_eq
  */
 
@@ -92,46 +92,44 @@ describe("E-EQ-004 — === and !== are not valid scrml operators", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §4-§13: rewriteEqualityOps — == → === and != → !== in JS output
+// §4-§13: rewriteEqualityOps — §45.4 lowering in JS output (S468: structural
+// unless BOTH operands are provably primitive; was a blanket `==` -> `===`)
 // ---------------------------------------------------------------------------
 
-describe("rewriteEqualityOps — scrml == to JS ===", () => {
-  test("§4 `==` → `===`", () => {
-    expect(rewriteEqualityOps("a == b")).toBe("a === b");
+describe("rewriteEqualityOps — scrml == per §45.4", () => {
+  test("§4 `==` on identifiers → structural helper", () => {
+    expect(rewriteEqualityOps("a == b")).toBe("_scrml_structural_eq(a, b)");
   });
 
-  test("§5 `!=` → `!==`", () => {
-    expect(rewriteEqualityOps("a != b")).toBe("a !== b");
+  test("§5 `!=` → negated structural helper", () => {
+    expect(rewriteEqualityOps("a != b")).toBe("!_scrml_structural_eq(a, b)");
   });
 
   test("§6 preserves == inside string literals", () => {
     const input = 'x == "a == b"';
     const output = rewriteEqualityOps(input);
-    expect(output).toContain('=== "a == b"');
+    expect(output).toBe('_scrml_structural_eq(x, "a == b")');
   });
 
   test("§7 mixed == and != in one expression", () => {
-    expect(rewriteEqualityOps("a == b && c != d")).toBe("a === b && c !== d");
+    expect(rewriteEqualityOps("a == b && c != d")).toBe("_scrml_structural_eq(a, b) && !_scrml_structural_eq(c, d)");
   });
 
   test("§8 no-op when no equality operators", () => {
     expect(rewriteEqualityOps("a + b * c")).toBe("a + b * c");
   });
 
-  test("§9 template literal with ==", () => {
+  test("§9 template literal with == — the interpolation is lowered too", () => {
     const input = "a == `hello ${b == c}`";
-    const output = rewriteEqualityOps(input);
-    // The outer == should be rewritten, inner may or may not depending on implementation
-    expect(output).toContain("===");
+    expect(rewriteEqualityOps(input)).toBe("_scrml_structural_eq(a, `hello ${_scrml_structural_eq(b, c)}`)");
   });
 
-  test("§10 == null becomes === null", () => {
-    expect(rewriteEqualityOps("x == null")).toBe("x === null");
+  test("§10 == null on an identifier is structural (x is not provably primitive)", () => {
+    expect(rewriteEqualityOps("x == null")).toBe("_scrml_structural_eq(x, null)");
   });
 
-  test("§11 chained: a == b && c != d", () => {
-    const output = rewriteEqualityOps("a == b && c != d");
-    expect(output).toBe("a === b && c !== d");
+  test("§11 both operands provably primitive → === / !==", () => {
+    expect(rewriteEqualityOps("a.length == 2 && 1 != 2")).toBe("(a.length === 2) && (1 !== 2)");
   });
 
   test("§12 empty/null input", () => {
@@ -146,19 +144,16 @@ describe("rewriteEqualityOps — scrml == to JS ===", () => {
   });
 
   test("§18 == in if-condition parenthesized", () => {
-    expect(rewriteEqualityOps("(x == 42)")).toBe("(x === 42)");
+    expect(rewriteEqualityOps("(x == 42)")).toBe("(_scrml_structural_eq(x, 42))");
   });
 
   test("§19 nested parenthesized expressions", () => {
-    expect(rewriteEqualityOps("((a == b) && (c != d))")).toBe("((a === b) && (c !== d))");
+    expect(rewriteEqualityOps("((a == b) && (c != d))")).toBe("((_scrml_structural_eq(a, b)) && (!_scrml_structural_eq(c, d)))");
   });
 
-  test("§20 == at start of expression (edge case)", () => {
-    // `== b` at start of expression has no preceding char for the regex to match.
-    // This is syntactically invalid in practice; the rewriter leaves it unchanged.
-    // The key invariant: `x == b` still rewrites correctly.
-    expect(rewriteEqualityOps("x == b")).toBe("x === b");
-    expect(rewriteEqualityOps("(x) == b")).toBe("(x) === b");
+  test("§20 a parenthesized operand keeps its parens", () => {
+    expect(rewriteEqualityOps("x == b")).toBe("_scrml_structural_eq(x, b)");
+    expect(rewriteEqualityOps("(x) == b")).toBe("_scrml_structural_eq((x), b)");
   });
 });
 
@@ -397,14 +392,14 @@ describe("_scrml_structural_eq — cycle guard (cycles-prereq S168)", () => {
 // ---------------------------------------------------------------------------
 
 describe("Full codegen pipeline — equality in JS output", () => {
-  test("§31 rewriteExpr: x == y becomes x === y", () => {
+  test("§31 rewriteExpr: x == y becomes _scrml_structural_eq(x, y)", () => {
     const result = rewriteExpr("x == y");
-    expect(result).toBe("x === y");
+    expect(result).toBe("_scrml_structural_eq(x, y)");
   });
 
-  test("§32 rewriteExpr: x != y becomes x !== y", () => {
+  test("§32 rewriteExpr: x != y becomes !_scrml_structural_eq(x, y)", () => {
     const result = rewriteExpr("x != y");
-    expect(result).toBe("x !== y");
+    expect(result).toBe("!_scrml_structural_eq(x, y)");
   });
 
   test("§33 runtime template contains _scrml_structural_eq", () => {

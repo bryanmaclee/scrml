@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 653 | 6 |
+| MED | 652 | 6 |
 | LOW | 435 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -26030,6 +26030,8 @@ Masked today: the shape fails E-CODEGEN-INVALID-LOGIC (`{ lift "a"; } else { "b"
 
 ### g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464 — `==` with an object-literal operand or inside an attribute handler compiles to JS `===` (reference equality) even for typed structs: `@a == {x:1}`, `p1 == {x:1}`, `d1 == d2` — `NEW S464; MED; open (pre-existing)`
 
-<!-- @gap id=g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464 sev=MED status=open locus=searched:emit-expr.ts,emit-event-wiring.ts(== lowering — _scrml_structural_eq only in the typed function-body form) prov=review:s465-value-fn-land-r4-S239 -->
+<!-- @gap id=g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464 sev=MED status=resolved locus=compiler/src/codegen/rewrite.ts(client Pass 18 rewriteEqualityOps: blanket == -> ===)+compiler/src/codegen/emit-each.ts(rewriteIterValueExpr: no equality pass, JS loose ==)+compiler/src/codegen/emit-library.ts(library verbatim block: JS loose ==) prov=review:s465-value-fn-land-r4-S239;dispatch:s468-structural-eq-everywhere -->
 
 SPEC §45: single `==`, structural. Structural equality is applied only in the typed function-body form; elsewhere `==` silently becomes reference equality → always false for distinct-but-equal structs. Silent wrong value; reviewer probe `~/.cache/scrml-review-vf-r4/t/c10`.
+
+**RESOLVED S468** (branch `s468-structural-eq-everywhere`). Traced: the structured emitter (`emit-expr.ts` `emitBinary`) was already right in every position — typed and untyped fn bodies, markup `${}`, derived consts, `if=`. The wrong value came from the three RAW-TEXT lowerings: (1) the client string pipeline's last pass, `rewriteEqualityOps` (`rewrite.ts`), regex-replaced every `==` with `===` — inherited by every string-fallback site (inline handlers whose body is an assignment / postfix / lambda, `<each>` row handlers, variant-guard arms, match-arm block bodies, engine rule text, `<onTransition if=>`, escape hatches); (2) the `<each>` per-item text path (`emit-each.ts` `rewriteIterValueExpr` — row `class=${it == @sel ? …}`, `if=` gates, `in=`) ran no equality pass and shipped JS LOOSE `==`; (3) the library-module verbatim block (`emit-library.ts`) re-printed `==` as loose `==` (`export const SAME = { a: 1 } == { a: 1 }` was `false`). Fix: NEW `codegen/string-equality-lowering.ts` `lowerEqualityOps` parses the text with acorn and rewrites each `==` / `!=` node in place with `emitBinary`'s rule (both operands provably primitive → `===`; else `_scrml_structural_eq`); used by all three. Corpus differential (examples, samples, conformance/cases, stdlib; 2840 sources): 30 sources / 50 artifacts change, every changed line an `==` → structural lowering (plus runtime-hash / `_scrml/_global.js` companions); 0 compile-outcome change, 0 effective syntax delta. Unparsed text: 0 artifact-producing sites in the corpus (3 compile-failing fixtures). Residual (not reached in the corpus): the SERVER string passes still have no equality pass, so a server raw-text fallback would print loose `==`; a statement fragment acorn cannot parse (an unresolved `break label`) keeps the legacy `===`.
