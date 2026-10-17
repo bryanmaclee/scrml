@@ -93,7 +93,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
 import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, resetExprGuardErrors, drainExprGuardErrors, setCurrentFileRequestIds, setServerAsyncClassifier, refuseUnloweredBoundaryChecks } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -3488,6 +3488,9 @@ export function runCG(input: CgInput): CgOutput {
     // 2 at a real-but-wrong line, where previously all 3 said 1:1. The remaining 2 are
     // a WRONG OFFSET upstream, which no amount of line/col resolution can repair.
     // Filed; not fixed here. Do not restore the stronger claim.
+    // S468 (§19.6.6) — every render-time `!` call an `<errorBoundary>` handles was
+    // lowered inside the boundary's catch, or is refused (emit-expr.ts).
+    for (const f of files) refuseUnloweredBoundaryChecks(f);
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
     for (const e of drainExprGuardErrors()) errors.push(e);
     for (const e of drainRefusedLowerings()) errors.push(e);

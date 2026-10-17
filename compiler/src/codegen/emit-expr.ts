@@ -51,6 +51,62 @@ import { CGError } from "./errors.ts";
 import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { splitTemplateLiteral, lexicalCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { PH_EB_CHECK } from "../placeholder-nonce.ts";
+
+// ---------------------------------------------------------------------------
+// S468 (§19.6.6) — the `<errorBoundary>` catch sites.
+//
+// The type system wraps every render-time `!` call a boundary handles in the
+// boundary-check placeholder. It lowers to `_scrml_error_boundary_check(call)`,
+// which RAISES a returned error — so it may only be emitted where a boundary's
+// catch encloses the emitted code: an interpolation's render function
+// (emit-event-wiring.ts) and the run that wraps a boundary block's statements
+// (emit-reactive-wiring.ts). Each enters `withBoundaryCatchSite` while it
+// emits. Anywhere else (an `<each>` row, a match arm, an attribute value …) no
+// catch would see the raise, so the call is refused with E-ERROR-002 rather
+// than shipped uncaught.
+// ---------------------------------------------------------------------------
+let _boundaryCatchSiteDepth = 0;
+
+/** Emit inside an `<errorBoundary>` catch site (see above). */
+export function withBoundaryCatchSite<T>(fn: () => T): T {
+  _boundaryCatchSiteDepth++;
+  try {
+    return fn();
+  } finally {
+    _boundaryCatchSiteDepth--;
+  }
+}
+
+/**
+ * The completeness half of the rule above. The type system lists the calls it wrapped on the
+ * file AST (`_boundaryCheckCalls`); every one must have reached `emitCall` (lowered or refused).
+ * One that never did was rendered by an emitter that lowers from source TEXT (an `<each>` row
+ * body, …), which never sees the wrap — so its error would ship unchecked. Refuse it.
+ */
+export function refuseUnloweredBoundaryChecks(fileAST: unknown): void {
+  const calls = (fileAST as { _boundaryCheckCalls?: unknown } | null)?._boundaryCheckCalls;
+  if (!Array.isArray(calls)) return;
+  for (const c of calls as Array<Record<string, unknown>>) {
+    if (!c || c._boundaryCheckLowered === true) continue;
+    const arg = Array.isArray(c.args) ? (c.args[0] as { callee?: { kind?: string; name?: unknown } } | undefined) : undefined;
+    const name = arg?.callee?.kind === "ident" && typeof arg.callee.name === "string" ? arg.callee.name : "the function";
+    recordRefusedLowering(new CGError(
+      "E-ERROR-002",
+      `E-ERROR-002: Result of failable function '${name}' is not handled. The call is made while rendering ` +
+      `inside an '<errorBoundary>', but impl#1 renders this position (an '<each>' row, a component or match ` +
+      `arm body, …) from its source text, outside the boundary's catch, so the boundary cannot catch its ` +
+      `error. Handle it in place with '${name}(…) !{ | .Variant :> … }' or 'match'.`,
+      (c.span as object | undefined) ?? {},
+    ), c);
+  }
+}
+
+/** The calls `fn` lowered to the boundary check while inside a catch site (see withBoundaryCatchSite). */
+let _boundaryChecksEmitted = 0;
+export function boundaryChecksEmittedCount(): number {
+  return _boundaryChecksEmitted;
+}
 import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
@@ -3516,6 +3572,26 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // S468 (§19.6.6) — a render-time `!` call an `<errorBoundary>` handles (see the catch-site note
+  // at the top of this file).
+  if (node.callee.kind === "ident" && (node.callee as IdentExpr).name === PH_EB_CHECK() && node.args.length === 1) {
+    const inner = emitExpr(node.args[0] as ExprNode, ctx);
+    (node as unknown as Record<string, unknown>)._boundaryCheckLowered = true;
+    if (_boundaryCatchSiteDepth > 0 && ctx.mode !== "server") {
+      _boundaryChecksEmitted++;
+      return `_scrml_error_boundary_check(${inner})`;
+    }
+    const callee = (node.args[0] as { callee?: { kind?: string; name?: unknown } });
+    const name = callee?.callee?.kind === "ident" && typeof callee.callee.name === "string" ? callee.callee.name : "the function";
+    recordRefusedLowering(new CGError(
+      "E-ERROR-002",
+      `E-ERROR-002: Result of failable function '${name}' is not handled. The call is made while rendering ` +
+      `inside an '<errorBoundary>', but impl#1 renders this position outside the boundary's catch, so the ` +
+      `boundary cannot catch its error. Handle it in place with '${name}(…) !{ | .Variant :> … }' or 'match'.`,
+      (node as { span?: object }).span ?? {},
+    ), node as object);
+    return "null /* E-ERROR-002 */";
+  }
   // §19.4.3 / §19.8.3 (S454) — an expression-position `!{ … }` handler
   // (`<operand> .__scrml_guard__("!{ … }")`, expression-parser
   // extractHandledOperands). Lowered by the statement emitter's guard machinery.

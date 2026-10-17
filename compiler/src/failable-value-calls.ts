@@ -66,6 +66,12 @@ export interface FailableCallCandidate {
   inFunction: boolean;
   /** `inFunction` and that innermost function is declared `!`. */
   inFailableFn: boolean;
+  /**
+   * S468 — the call was found in text the AST carries and this walk PARSED (a `!{}` arm body, a
+   * raw inline-`match` arm, a template literal's `${…}`, a C-style `for` initializer, a bare
+   * `{ … }` block): `call` is not a node codegen will see, since codegen lowers that text itself.
+   */
+  fromText: boolean;
 }
 
 export type RootHandling =
@@ -90,9 +96,11 @@ class LocalScope {
   child(): LocalScope { return new LocalScope(this); }
 }
 
-interface FnCtx { inFunction: boolean; inFailableFn: boolean; }
+interface FnCtx { inFunction: boolean; inFailableFn: boolean; fromText?: boolean; }
 const TOP: FnCtx = { inFunction: false, inFailableFn: false };
 const PLAIN_FN: FnCtx = { inFunction: true, inFailableFn: false };
+/** The same context, for nodes this walk parsed out of text (see FailableCallCandidate.fromText). */
+function textCtx(fn: FnCtx): FnCtx { return fn.fromText ? fn : { ...fn, fromText: true }; }
 
 function resolveName(name: string, scope: LocalScope | null, env: FailableEnv): string | null {
   for (let s = scope; s !== null; s = s.parent) {
@@ -184,7 +192,7 @@ class Walker {
     const target = resolveName(written, scope, this.env);
     if (target === null) return;
     this.cb({ call, calleeName: target, via: target === written ? null : written,
-      inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn });
+      inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fromText: fn.fromText === true });
   }
 
   // ---- expressions --------------------------------------------------------
@@ -201,7 +209,7 @@ class Walker {
         if (armsRaw !== null && node.callee.kind === "member") {
           this.operand(node.callee.object, scope, fn);
           const arms = this.env.parseGuardArms(armsRaw);
-          if (arms) this.guardArms({ arms }, scope, fn);
+          if (arms) this.guardArms({ arms }, scope, textCtx(fn));
           return;
         }
         if (node.callee && node.callee.kind === "ident") this.report(node, node.callee.name, scope, fn);
@@ -225,14 +233,14 @@ class Walker {
           if (typeof raw !== "string") continue;
           const body = this.env.matchArmBodyText(raw.trim());
           const stmts = body === null ? null : this.env.parseStatements(body);
-          if (stmts) this.statements(stmts, scope, fn);
+          if (stmts) this.statements(stmts, scope, textCtx(fn));
         }
         return;
       }
       case "lambda": this.lambda(node, scope, fn); return;
       case "lit": {
         if (node.litType === "template" && node.hasInterpolation !== false && typeof node.raw === "string") {
-          for (const e of templateInterpolationNodes(node)) this.expr(e, scope, fn);
+          for (const e of templateInterpolationNodes(node)) this.expr(e, scope, textCtx(fn));
         }
         return;
       }
@@ -327,7 +335,7 @@ class Walker {
       if (!p || typeof p !== "object") continue;
       const d = (p as { defaultValue?: unknown }).defaultValue;
       if (isExprNodeValue(d)) this.expr(d, scope, fn);
-      else if (typeof d === "string" && d.trim() !== "") this.expr(this.env.parseExpr(d), scope, fn);
+      else if (typeof d === "string" && d.trim() !== "") this.expr(this.env.parseExpr(d), scope, textCtx(fn));
       const pat = (p as { pattern?: unknown }).pattern;
       if (pat && typeof pat === "object") this.patternDefaults(pat, scope, fn);
     }
@@ -356,7 +364,7 @@ class Walker {
     const nk = node.nativeKind;
     const raw = node.raw;
     if (nk === "TemplateLiteral" && typeof raw === "string" && raw.startsWith("`")) {
-      for (const e of templateInterpolationNodes(node as unknown as ExprNode & { raw: string; span: never })) this.expr(e, scope, fn);
+      for (const e of templateInterpolationNodes(node as unknown as ExprNode & { raw: string; span: never })) this.expr(e, scope, textCtx(fn));
       return;
     }
     // A function written as a value and carried with its body TEXT (`function () { … }`, a
@@ -477,7 +485,7 @@ class Walker {
           if (!s || typeof s !== "object") continue;
           const d = s as Record<string, unknown>;
           if (DECL_KINDS.has(d.kind as string)) for (const n of declaredNames(d)) loop.names.set(n, null);
-          this.statement(d, loop, fn, "none");
+          this.statement(d, loop, textCtx(fn), "none");
         }
       }
     } else if (isExprNodeValue(init)) this.expr(init, loop, fn);
@@ -497,7 +505,7 @@ class Walker {
         this.expr(a.handlerExpr, armScope, fn);
       } else if (typeof a.handler === "string" && a.handler.trim() !== "") {
         const stmts = this.env.parseStatements(a.handler);
-        if (stmts) this.statements(stmts, armScope, fn);
+        if (stmts) this.statements(stmts, armScope, textCtx(fn));
       }
     }
   }
@@ -532,7 +540,7 @@ class Walker {
       // An `on mount` body is an effect, not render-time. The statements inside are checked
       // nowhere else, so a whole-statement call among them is reported here — unless the text
       // is itself the operand of a `!{}`.
-      if (stmts) this.statements(stmts, scope, st._onMountEffect === true ? PLAIN_FN : fn, handling === "operand" ? "operand" : "none");
+      if (stmts) this.statements(stmts, scope, textCtx(st._onMountEffect === true ? PLAIN_FN : fn), handling === "operand" ? "operand" : "none");
     }
   }
 }

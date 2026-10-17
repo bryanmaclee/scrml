@@ -423,10 +423,17 @@ describe("G — the `<errorBoundary>` carve-out covers render-time positions onl
     expect(r.codes).toContain("E-ERROR-002");
   });
 
-  test("render-time positions stay contained: an interpolation, an attribute, a render-time declaration", () => {
+  test("render-time positions stay contained: an interpolation, a render-time declaration", () => {
     expect(compileSource(BOUNDARY(`<p>\${check("x") ? 1 : 2}</p>`)).codes).toEqual([]);
-    expect(compileSource(BOUNDARY(`<p title=\${check("x") ? "a" : "b"}>t</p>`)).codes).toEqual([]);
     expect(compileSource(BOUNDARY(`\${ const ok = check("x") }\n<p>\${ok ? 1 : 2}</p>`)).codes).toEqual([]);
+  });
+
+  // S468 — the boundary now TESTS the result of each call it handles, inside its catch
+  // (`error-boundary-returned-error-s468.test.js`). A markup attribute value is rendered outside
+  // any boundary catch on impl#1, so a call there is refused instead of shipping the error object
+  // as the attribute's value (it compiled before S468, and `title` read the truthy error as "a").
+  test("a render-time call in an attribute value is refused (no boundary catch there on impl#1)", () => {
+    expect(compileSource(BOUNDARY(`<p title=\${check("x") ? "a" : "b"}>t</p>`)).codes).toContain("E-ERROR-002");
   });
 });
 

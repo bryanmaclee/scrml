@@ -3,6 +3,8 @@ import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
+import { withBoundaryCatchSite, boundaryChecksEmittedCount } from "./emit-expr.ts";
+import { wrapBoundaryRenderLogic, exprContainsBoundaryCheck, type BoundaryCatchInfo } from "./emit-boundary-logic.ts";
 import { pushLiftNonKeyed, popLiftNonKeyed, pushLiftLive, popLiftLive, liftArmDeclaredNames, checkLoopBinderWrites } from "./emit-lift.js";
 import { pushIfChainCollector, popIfChainCollector, ifChainArmOpen, ifChainArmClose, type IfChainCollector } from "./emit-control-flow.ts";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
@@ -1310,7 +1312,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
 
   for (const stmt of topLevel) {
     const pid = stmt._placeholderId ?? null;
-    if (currentGroup && currentGroup.pid === pid) {
+    // S468 (§19.6.6) — a statement inside an `<errorBoundary>` runs inside that
+    // boundary's catch, so a group never spans two boundary chains (the chain
+    // array is shared by every statement of one `${}` block — emit-html.ts).
+    if (currentGroup && currentGroup.pid === pid && (currentGroup.stmts[0]?._errorBoundaryChain ?? null) === (stmt._errorBoundaryChain ?? null)) {
       currentGroup.stmts.push(stmt);
     } else {
       currentGroup = { pid, stmts: [stmt] };
@@ -1406,7 +1411,20 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const _asyncBindingEmit = (ctx as unknown as {
       _clientAsyncBindingEmit?: { names: Set<string>; opts: Record<string, unknown> };
     })._clientAsyncBindingEmit;
-    const emitTopStmt = (st: any, o: any): string => {
+    // S468 (§19.6.6) — a group whose statements sit inside an `<errorBoundary>`
+    // and whose code runs at module init (a plain group, or an eagerly bound lift
+    // group) is emitted as a boundary CATCH SITE: its render-time `!` calls lower
+    // to `_scrml_error_boundary_check(…)`, and the emitted code is wrapped in the
+    // boundary's run below (emit-boundary-logic.ts). A nested (per-row / per-arm)
+    // group and a mount-deferred lift group are not: a `!` call there is refused.
+    const groupBoundaryChain: BoundaryCatchInfo[] | null =
+      !group.nested && !(pid && liftHostBindings.has(pid) && stmts.some((st: any) => stmtContainsLift(st)))
+        ? ((stmts[0] as any)?._errorBoundaryChain ?? null)
+        : null;
+    const groupChecksBefore = boundaryChecksEmittedCount();
+    const emitTopStmt = (st: any, o: any): string =>
+      groupBoundaryChain ? withBoundaryCatchSite(() => emitTopStmtPlain(st, o)) : emitTopStmtPlain(st, o);
+    const emitTopStmtPlain = (st: any, o: any): string => {
       if (_asyncBindingEmit && st && (st.kind === "const-decl" || st.kind === "let-decl") &&
           typeof st.name === "string" && _asyncBindingEmit.names.has(st.name)) {
         // The group's declared-name set holds every top-level binding; an async one named
@@ -1449,6 +1467,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // pre-fix bug. (Marker set on the wrapper by emit-html.ts; propagated to
       // this inner child stmt by collect.ts, mirroring `_constantFolded`.)
       if ((stmt as any)._valueControlFlowRendered === true) {
+        continue;
+      }
+      // S468 (§19.6.6) — a `${…}` interpolation inside an `<errorBoundary>` that holds a
+      // boundary-handled `!` call is evaluated by its render function, under the slot's
+      // catch (emit-event-wiring.ts). Its module-init re-evaluation (the Anomaly-B
+      // side-effect copy below) would run the call a second time OUTSIDE that catch.
+      if (pid && (stmt as any)._boundaryRendered === true && stmt.kind === "bare-expr" &&
+          exprContainsBoundaryCheck((stmt as any).exprNode)) {
         continue;
       }
       if (isServerOnlyNode(stmt)) {
@@ -1756,6 +1782,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       continue;
     }
 
+    const groupLinesBefore = lines.length;
     if (pid && groupHasLift) {
       // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template —
       // where the lift target comes from. A host in the SSR body is in the
@@ -1787,6 +1814,23 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
     } else {
       lines.push(combinedCode);
+    }
+    // S468 (§19.6.6) — run this boundary block's module-init code inside the
+    // catch of every enclosing boundary (only when it lowered a boundary check —
+    // any other group's emission is unchanged).
+    if (groupBoundaryChain && boundaryChecksEmittedCount() !== groupChecksBefore) {
+      const emitted = lines.splice(groupLinesBefore).join("\n");
+      const wrapped = wrapBoundaryRenderLogic(emitted, groupBoundaryChain);
+      if (wrapped === null) {
+        errors.push(new CGError(
+          "E-ERROR-002",
+          "E-ERROR-002: a failable call made while rendering inside an '<errorBoundary>' could not be placed " +
+          "inside the boundary's catch, so the boundary cannot handle it. Handle it in place with '!{}' or 'match'.",
+          (stmts[0] as any)?.span ?? { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 },
+        ));
+      } else {
+        lines.push(wrapped);
+      }
     }
   }
   setEachLiftRegistry(prevEachLiftRegistry);

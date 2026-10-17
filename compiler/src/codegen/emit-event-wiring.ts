@@ -3,7 +3,7 @@ import { rewriteReactiveRefs, rewriteExprArrowBody } from "./rewrite.js";
 import { wrapUrlGuard } from "./url-attr-guard.ts";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";
-import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix, withBoundaryCatchSite } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import {
   maybeLowerCancelTimerCallRef,
@@ -2442,7 +2442,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // a later reactive change re-evaluates the catch + dispatch.
       // ---------------------------------------------------------------------
       if (binding.boundaryId) {
-        const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+        // S468 (§19.6.6) — the render function below IS this boundary's catch: a
+        // render-time `!` call in the expression lowers to
+        // `_scrml_error_boundary_check(call)`, whose raise lands in the catch.
+        const rewrittenExpr = withBoundaryCatchSite(() =>
+          emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys }));
         let ebExpr = rewrittenExpr;
         if (encodingCtx && encodingCtx.enabled) {
           for (const ref of varRefs) {
@@ -2469,10 +2473,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         blk.push(`        try {`);
         blk.push(`          _scrml_eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
         blk.push(`        } catch (_eb_err) {`);
-        blk.push(`          _scrml_error_boundary_log(${bId}, _eb_err);`);
+        // S468 (§19.6.6) — a `!` call that failed raised its error at the call
+        // (`_scrml_error_boundary_check`): take the TYPED dispatch below (renders,
+        // else fallback). Anything else is a host throw — the §19.6.8 backstop.
+        blk.push(`          _scrml_eb_result = _scrml_error_boundary_failure(_eb_err);`);
+        blk.push(`          if (!_scrml_eb_result) {`);
+        blk.push(`            _scrml_error_boundary_log(${bId}, _eb_err);`);
         if (hasFallback) {
-          blk.push(`          _scrml_el.innerHTML = (${fallbackExpr});`);
-          blk.push(`          return;`);
+          blk.push(`            _scrml_el.innerHTML = (${fallbackExpr});`);
+          blk.push(`            return;`);
         } else if (isAsync) {
           // S454 (bryan: "a yes, b yes, root fix"; folds in
           // g-errorboundary-async-render-rejection-unobserved-s453) — an ASYNC
@@ -2483,10 +2492,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // rejection of this render is logged by the `.catch` arm at its call
           // sites below — each error is logged exactly once. The sync path
           // keeps its re-throw, byte-identical.
-          blk.push(`          return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
+          blk.push(`            return; // §19.6.8 B3 — async render: no enclosing catch can observe a re-throw; logged above`);
         } else {
-          blk.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
+          blk.push(`            throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
         }
+        blk.push(`          }`);
         blk.push(`        }`);
         // Typed !-error dispatch (§19.6.3).
         blk.push(`        if (_scrml_eb_result && typeof _scrml_eb_result === "object" && _scrml_eb_result.__scrml_error) {`);
