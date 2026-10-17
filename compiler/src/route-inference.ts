@@ -4770,6 +4770,20 @@ export function carriedValueAdmission(
       }
     }
   }
+  // ---- (2) an INLINE function value before the first server statement that can
+  // write it (`setTimeout(() => { blk = true })`, `when … { blk = true }`) may run
+  // while the request is in flight. Only a callback handed to an array method that
+  // calls it synchronously (`xs.forEach((x) => { n = n + x })`) is known to run then.
+  for (let i = 0; i < Math.min(firstServer, body.length); i++) {
+    const v = inlineClosureWriting(body[i], A, !prim);
+    if (v !== null) {
+      return {
+        index: i,
+        why: `this statement creates a function that can change ${which(v)} and may run after the function's ` +
+          `server work has begun`,
+      };
+    }
+  }
   // ---- (3) an object it may hold, handed to a call that may keep it
   if (!prim && !isParam) {
     for (let i = 0; i < Math.min(firstServer, body.length); i++) {
@@ -4785,6 +4799,50 @@ export function carriedValueAdmission(
     }
   }
   return null;
+}
+
+/** S467 (fix round 5) — array methods that call their callback synchronously, before returning. */
+const SYNC_CALLBACK_METHODS = new Set([
+  "forEach", "map", "filter", "reduce", "reduceRight", "some", "every", "find", "findIndex", "findLast",
+  "findLastIndex", "flatMap", "sort", "toSorted",
+]);
+
+/**
+ * S467 (fix round 5) — an inline function value (arrow / function expression /
+ * `when` / cleanup body) in `stmt` that writes one of `names`, other than a
+ * callback handed directly to a synchronous array method, or the initializer of a
+ * named declaration (`const f = () => …` — a named function value, judged by its
+ * uses). Returns the written name, or null.
+ */
+function inlineClosureWriting(stmt: unknown, names: ReadonlySet<string>, mutations: boolean): string | null {
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const isFnValue = (o: any): boolean =>
+    !!o && (o.kind === "lambda" || o.kind === "when-effect" || o.kind === "when-message" || o.kind === "cleanup-registration" ||
+      (o.kind === "escape-hatch" && (o.nativeKind === "ArrowFunctionExpression" || o.nativeKind === "FunctionExpression")));
+  const walk = (n: unknown, allowed: boolean): void => {
+    if (hit !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, false); return; }
+    const o = n as any;
+    if (isFnValue(o) && !allowed) {
+      const w = [...localsWrittenBy(o, mutations)].find((x) => names.has(x));
+      if (w !== undefined) { hit = w; return; }
+    }
+    if ((o.kind === "const-decl" || o.kind === "let-decl" || o.kind === "tilde-decl") && typeof o.name === "string" && isFnValue(o.initExpr)) {
+      for (const k of Object.keys(o)) if (k !== "span" && k !== "initExpr" && k !== "init") walk(o[k], false);
+      return;
+    }
+    if (o.kind === "call" && o.callee && o.callee.kind === "member" && typeof o.callee.property === "string" &&
+      SYNC_CALLBACK_METHODS.has(o.callee.property)) {
+      walk(o.callee, false);
+      for (const a of o.args ?? []) walk(a, true);
+      return;
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k], false);
+  };
+  walk(stmt, false);
+  return hit;
 }
 
 /**

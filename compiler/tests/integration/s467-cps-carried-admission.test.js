@@ -139,6 +139,7 @@ const REFUSED = {
   nested_alias: ["st", `const st = { blk: false }\n const box = { inner: st }\n @ok = vp(pass, ${SEL})\n if (!@ok) { alert("w"); box.inner.blk = true }\n if (!st.blk) { ${INS} }`],
   forof_element_alias: ["st", `const st = { blk: false }\n const all = [st]\n @ok = vp(pass, ${SEL})\n if (!@ok) { alert("w"); for (const q of all) { q.blk = true } }\n if (!st.blk) { ${INS} }`],
   pushed_alias: ["st", `const st = { blk: false }\n const all = []\n all.push(st)\n @ok = vp(pass, ${SEL})\n if (!@ok) { alert("w"); all[0].blk = true }\n if (!st.blk) { ${INS} }`],
+  inline_closure_runs_later: ["blk", `let blk = false\n setTimeout(() => { if (!@ok) { blk = true } }, 0)\n @ok = vp(pass, ${SEL})\n if (!blk) { ${INS} }`],
   param_closure: ["body", `const clr = () => { body = "" }\n @ok = vp(pass, ${SEL})\n if (!@ok) { alert("w"); clr() }\n if (body != "") { ${INS} }`],
 };
 
@@ -168,6 +169,12 @@ describe("S467 r5 — legal flows compile and hold under requests forging every 
     const b = await build(program(F(`let n = 0\n const bump = () => { n = n + 1 }\n bump()\n @ok = vp(pass, ${SEL})\n if (!@ok) { @msg = "wrong"; return }\n ${INS}\n @msg = "posted " + n`)));
     expect(b.errors).toEqual([]);
     await forgeEverythingThenRight(b);
+  }, T);
+
+  test("a synchronous array-method callback before the first server statement", async () => {
+    const b = await build(program(F(`let n = 0\n const xs = [1, 2]\n xs.forEach((x) => { n = n + x })\n @ok = vp(pass, ${SEL})\n if (!@ok) { @msg = "wrong"; return }\n ?{\`INSERT INTO posts (author, body) VALUES (\${name}, \${n})\`}.run()`)));
+    expect(b.errors).toEqual([]);
+    await forgeEverythingThenRight(b, { n: 3 });
   }, T);
 
   test("a pre-first browser value the server reads and nothing changes afterwards is carried", async () => {
