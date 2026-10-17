@@ -1,6 +1,33 @@
 # config.map.md
 # project: scrml
-# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# updated: 2026-10-17T19:18:33Z  commit: 5c43c3b8e
+# ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
+# commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
+# E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the
+# emitted client names is shipped (93b60f7af), §67 `<md>` phase 2 — a static `<md>` is lowered at build time by the ONE
+# `scrml:md` reader (`md-lower.ts` + `md-reader.js`, 739b602a5 …), `?{}` result tails apply to the value — `.get().name` no
+# longer serves the whole row (#1407, P0 hash leak); S465 — lift `<pre>`/`<code>` bodies are raw text (#1409); S464 — quoted
+# handlers + static executable URLs/srcdoc refused, E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE (#1416), statement-position
+# markup refused E-MARKUP-STATEMENT-NOT-RENDERED + emitted-JS parse floor on EVERY compile + safe `promote --match` (#1417), a
+# plain `fn` is never a route or async (#1419), no value holds a function E-VALUE-FUNCTION-STORED + `scrml:time`
+# `Debouncer`/`Throttler` struct API (#1418, #1422), imported/async server helpers awaited — ONE per-file async set
+# (`codegen/file-async-fns.ts`) + server text guard (#1424, P0), enum-cell type from a qualified initializer + `ParseError`
+# import-only (#1423), `scrml fix` refuses a file that does not compile (#1425), server-placed functions keep their parameter
+# defaults + E-PARAM-DEFAULT-* (#1427, #1433), the 424-shape security await probe pack (#1428); S467 — SPEC §13.8 one rule
+# for waiting values + §13.9 pending cells (Nominal on impl#1; #1430, #1432), an unhandled failable call used as a value is
+# E-ERROR-002 (#1431), CPS-split functions keep server logic and server values on the server (#1435, P0). Incremental
+# refresh in the main checkout on branch `wrap/s468` = `origin/main` `5c43c3b8e` + an uncommitted docs-only hand-off rotation
+# (source tree = `5c43c3b8e`; no file deleted or renamed under `compiler/src` — incremental is sound for every map).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 94 commits behind HEAD (watermark 41af4153a, HEAD
+# 5c43c3b8e)` = `git log --oneline 41af4153a..5c43c3b8e` (94).
+# ⛑ FIGURES AT `5c43c3b8e` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **340,511 lines / 303 files**
+# (+16,281 lines; +17 files: 16 `.ts`/`.js` modules + `md-reader.d.ts` — see structure.map.md S468; `git ls-tree` = 304) ·
+# test files **1,765** by `git ls-tree -r --name-only 5c43c3b8e compiler/tests | grep -c '\.test\.'` (+47; FACTS rule 1,750) ·
+# `compiler/SPEC.md` **49,366** lines (+662; NEW §13.8, §13.9, §17.6.10.1, §19.9.9.8, §41.21) · conformance **1795**
+# `case.scrml` (+37) · `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (unchanged) · **16 new
+# diagnostic code literals** in `compiler/src`, every one with a §34 row (see error.map.md S468) · known-gaps heading/marker
+# drift **73** (was 72) · `state.ts --check` @generated sections PASS. Conformance suite / full test suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `41af4153a`), CARRIED. ━━━━━━━
 # ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
 # S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
 # whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
@@ -955,6 +982,14 @@
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 
 **Re-verified at `e80b692e` (S313)** by re-enumerating every `process.env.*` / `Bun.env.*` reference across `compiler/src`, `lsp`, `scripts` and `e2e`. **The compiler-side set is UNCHANGED across five sessions** — every landing in this window was compiler source, spec, CI or docs; none introduced or removed a configuration key. The CI-secret table at the bottom is the only part of this map that moved.
+
+## S468 — CONFIG DELTA (`41af4153a..5c43c3b8e`)
+
+- No new env var, `scrml.toml` key, or CLI flag (`process.env.*` / `Bun.env.*` added-line scan: none).
+- `scrml fix`: a file that does not compile is REFUSED (no rule runs, nothing written, errors listed); **exit status 3** when any
+  file was refused, in every mode (`commands/fix.js`). API option `allowNonCompiling` on `fixS66` (`commands/fix-s66.js` ~:1278)
+  disables the refusal — used only by `scripts/bootstrap-conformance.ts` twins.
+- `scrml promote --match` refuses rewrites that would change what renders (`commands/promote.js`).
 
 ## S465 — CONFIG DELTA (`8ce6d61b5..41af4153a`)
 

@@ -1,6 +1,33 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# updated: 2026-10-17T19:18:33Z  commit: 5c43c3b8e
+# ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
+# commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
+# E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the
+# emitted client names is shipped (93b60f7af), §67 `<md>` phase 2 — a static `<md>` is lowered at build time by the ONE
+# `scrml:md` reader (`md-lower.ts` + `md-reader.js`, 739b602a5 …), `?{}` result tails apply to the value — `.get().name` no
+# longer serves the whole row (#1407, P0 hash leak); S465 — lift `<pre>`/`<code>` bodies are raw text (#1409); S464 — quoted
+# handlers + static executable URLs/srcdoc refused, E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE (#1416), statement-position
+# markup refused E-MARKUP-STATEMENT-NOT-RENDERED + emitted-JS parse floor on EVERY compile + safe `promote --match` (#1417), a
+# plain `fn` is never a route or async (#1419), no value holds a function E-VALUE-FUNCTION-STORED + `scrml:time`
+# `Debouncer`/`Throttler` struct API (#1418, #1422), imported/async server helpers awaited — ONE per-file async set
+# (`codegen/file-async-fns.ts`) + server text guard (#1424, P0), enum-cell type from a qualified initializer + `ParseError`
+# import-only (#1423), `scrml fix` refuses a file that does not compile (#1425), server-placed functions keep their parameter
+# defaults + E-PARAM-DEFAULT-* (#1427, #1433), the 424-shape security await probe pack (#1428); S467 — SPEC §13.8 one rule
+# for waiting values + §13.9 pending cells (Nominal on impl#1; #1430, #1432), an unhandled failable call used as a value is
+# E-ERROR-002 (#1431), CPS-split functions keep server logic and server values on the server (#1435, P0). Incremental
+# refresh in the main checkout on branch `wrap/s468` = `origin/main` `5c43c3b8e` + an uncommitted docs-only hand-off rotation
+# (source tree = `5c43c3b8e`; no file deleted or renamed under `compiler/src` — incremental is sound for every map).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 94 commits behind HEAD (watermark 41af4153a, HEAD
+# 5c43c3b8e)` = `git log --oneline 41af4153a..5c43c3b8e` (94).
+# ⛑ FIGURES AT `5c43c3b8e` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **340,511 lines / 303 files**
+# (+16,281 lines; +17 files: 16 `.ts`/`.js` modules + `md-reader.d.ts` — see structure.map.md S468; `git ls-tree` = 304) ·
+# test files **1,765** by `git ls-tree -r --name-only 5c43c3b8e compiler/tests | grep -c '\.test\.'` (+47; FACTS rule 1,750) ·
+# `compiler/SPEC.md` **49,366** lines (+662; NEW §13.8, §13.9, §17.6.10.1, §19.9.9.8, §41.21) · conformance **1795**
+# `case.scrml` (+37) · `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (unchanged) · **16 new
+# diagnostic code literals** in `compiler/src`, every one with a §34 row (see error.map.md S468) · known-gaps heading/marker
+# drift **73** (was 72) · `state.ts --check` @generated sections PASS. Conformance suite / full test suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `41af4153a`), CARRIED. ━━━━━━━
 # ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
 # S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
 # whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
@@ -1087,6 +1114,28 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S468 — DIAGNOSTIC DELTA (`41af4153a..5c43c3b8e`)
+
+16 code literals new in `compiler/src` (set-diff of quoted `E-/W-/I-…` literals at both commits; none removed). Every one has a
+§34 row in `compiler/SPEC.md` at `5c43c3b8e`.
+| code | meaning | emit locus |
+|---|---|---|
+| `E-ATTR-QUOTED-HANDLER` | §5.2 — quoted event-handler attribute with no `${…}` | `attr-injection-sink.ts` `ATTR_QUOTED_HANDLER_CODE` :348; codegen backstop `refuseQuotedHandlerWrite` (`codegen/refused-lowering-errors.ts` :191) |
+| `E-ATTR-STATIC-EXECUTABLE` | §5.2 — static `srcdoc` / unadmitted static URL scheme on navigate/load attrs | `attr-injection-sink.ts` :369 (`classifyStaticExecutableAttr` :460); backstop `refuseStaticAttrWrite` :162 |
+| `E-MARKUP-STATEMENT-NOT-RENDERED` | §17.6.10.1 — statement-position markup that would not render | `markup-statement-refusal.ts` (message :47); `ast-builder.js` `refuseSwallowedStatementMarkup` :5938; `codegen/emit-engine.ts`, `emit-logic.ts`, `index.ts` |
+| `E-MD-INTERP-UNCLOSED` / `-INDENT-MIXED` / `-IN-PHRASING` / `-URL-SCHEME` / `-OF-BODY` / `-OF-NOMINAL` / `-IN-LOGIC-NOMINAL` | §67 `<md>` | `md-lower.ts` (`refuseUnreadMdElements` :95, `checkMdInPhrasing` :158, `lowerMdBlock`); list in `ast-builder.js` ~:20480 |
+| `E-PARAM-DEFAULT-UNSUPPORTED` / `-AWAIT` / `-FORWARD-REF` | §7.3.2 — server-placed fn param default outside the closed set / awaits / forward ref | `codegen/emit-logic.ts` `emitParamDefault` :1409 (codes ~:1445/:1509/:1478) |
+| `E-PARAM-DEFAULT-SERVER-IDENTITY` | §7.3.2 — a CPS/server default reaches a server identity read (any binding) | `route-inference.ts` `reportServerDefaultIdentityReads` :8651 (~:8691/:8714) via `free-name.ts` `identityReadInDefaultDeep` |
+| `E-VALUE-FUNCTION-STORED` | §14.3 / §15.11.5.1 / §59.3 — a value (object/array/map/cell) stores a function | `value-function-stored.ts` (~:882, ~:1610) |
+| `E-TIMER-STRUCT-MISUSE` | §41.21 — calling a `Debouncer`/`Throttler` or a method on it | `value-function-stored.ts` ~:930 |
+
+Codes that pre-existed but gained senses: **`E-ERROR-002`** — an unhandled failable call USED as a value (initializer, write,
+argument, operand, return, member, interpolation) (`failable-value-calls.ts`, fired from `type-system.ts`); **`E-CODEGEN-INVALID-LOGIC`**
+— any server text containing a call that would be lowered from TEXT (`codegen/server-text-guard.ts` `refuseServerTextCall` :50,
+`REFUSED_SERVER_TEXT` :33) and server arm refusals (`codegen/arm-structure.ts` `refuseServerArm` :100); **`E-STMT-UNEXPECTED-TOKEN`**
+— an unclaimed `else` (3bfeec600); **`E-TYPE-063`** — a bare-variant write the inferred enum cell does not declare (#1423);
+`E-ASYNC-CALL-PROMISE-METHOD` (pre-existing) now fires for `.then` on an awaited server call.
 
 ## S465 — DIAGNOSTIC DELTA (`8ce6d61b5..41af4153a`)
 

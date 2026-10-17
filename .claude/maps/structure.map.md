@@ -1,6 +1,33 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# updated: 2026-10-17T19:18:33Z  commit: 5c43c3b8e
+# ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
+# commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
+# E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the
+# emitted client names is shipped (93b60f7af), §67 `<md>` phase 2 — a static `<md>` is lowered at build time by the ONE
+# `scrml:md` reader (`md-lower.ts` + `md-reader.js`, 739b602a5 …), `?{}` result tails apply to the value — `.get().name` no
+# longer serves the whole row (#1407, P0 hash leak); S465 — lift `<pre>`/`<code>` bodies are raw text (#1409); S464 — quoted
+# handlers + static executable URLs/srcdoc refused, E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE (#1416), statement-position
+# markup refused E-MARKUP-STATEMENT-NOT-RENDERED + emitted-JS parse floor on EVERY compile + safe `promote --match` (#1417), a
+# plain `fn` is never a route or async (#1419), no value holds a function E-VALUE-FUNCTION-STORED + `scrml:time`
+# `Debouncer`/`Throttler` struct API (#1418, #1422), imported/async server helpers awaited — ONE per-file async set
+# (`codegen/file-async-fns.ts`) + server text guard (#1424, P0), enum-cell type from a qualified initializer + `ParseError`
+# import-only (#1423), `scrml fix` refuses a file that does not compile (#1425), server-placed functions keep their parameter
+# defaults + E-PARAM-DEFAULT-* (#1427, #1433), the 424-shape security await probe pack (#1428); S467 — SPEC §13.8 one rule
+# for waiting values + §13.9 pending cells (Nominal on impl#1; #1430, #1432), an unhandled failable call used as a value is
+# E-ERROR-002 (#1431), CPS-split functions keep server logic and server values on the server (#1435, P0). Incremental
+# refresh in the main checkout on branch `wrap/s468` = `origin/main` `5c43c3b8e` + an uncommitted docs-only hand-off rotation
+# (source tree = `5c43c3b8e`; no file deleted or renamed under `compiler/src` — incremental is sound for every map).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 94 commits behind HEAD (watermark 41af4153a, HEAD
+# 5c43c3b8e)` = `git log --oneline 41af4153a..5c43c3b8e` (94).
+# ⛑ FIGURES AT `5c43c3b8e` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **340,511 lines / 303 files**
+# (+16,281 lines; +17 files: 16 `.ts`/`.js` modules + `md-reader.d.ts` — see structure.map.md S468; `git ls-tree` = 304) ·
+# test files **1,765** by `git ls-tree -r --name-only 5c43c3b8e compiler/tests | grep -c '\.test\.'` (+47; FACTS rule 1,750) ·
+# `compiler/SPEC.md` **49,366** lines (+662; NEW §13.8, §13.9, §17.6.10.1, §19.9.9.8, §41.21) · conformance **1795**
+# `case.scrml` (+37) · `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (unchanged) · **16 new
+# diagnostic code literals** in `compiler/src`, every one with a §34 row (see error.map.md S468) · known-gaps heading/marker
+# drift **73** (was 72) · `state.ts --check` @generated sections PASS. Conformance suite / full test suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `41af4153a`), CARRIED. ━━━━━━━
 # ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
 # S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
 # whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
@@ -1011,6 +1038,43 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S468 — STRUCTURE DELTA (`41af4153a..5c43c3b8e`; 94 commits, 24 first-parent)
+
+New `compiler/src` modules (one-line purpose from each file's header; locate by SYMBOL — lines verified at `5c43c3b8e`).
+No file deleted or renamed under `compiler/src`, `compiler/runtime` or `stdlib`.
+| file | purpose | key symbols |
+|---|---|---|
+| `at-refs.ts` | THE reader of `@`-refs in a function's code + the plain-pure-`fn` predicate (route inference + server codegen) | `isPlainPureFn` :19, `forEachAtRef` :65, `parsedParamDefault` :115, `analyzedParamDefault` :375, `fnReachesAtName` :422 |
+| `binding-provenance.ts` | where a name's value can come from (every binding source, incl. re-exports / `export *`) | `Binding` :38, `bindingsOfFile` :103, `bindingsOfName` :255 |
+| `brace-pair.ts` | is a text exactly ONE `{ … }` pair; lexical call detection in text | `isWholeBraceBlock` :15, `closingBraceIndex` :25, `lexicalCallInText` :210, `firstCallInText` :276 |
+| `failable-value-calls.ts` | §19.4.3 E-ERROR-002 — an unhandled `!` call whose value is USED | `forEachCallInValuePosition` :544, `forEachCallInStatement` :559 |
+| `free-name.ts` | is a name read FREE (unbound) — `session` escalation, §7.3.2 identity reads in defaults | `exprReadsFreeSession` :108, `identityReadInDefault` :137, `identityReadInDefaultDeep` :243 |
+| `markup-statement-refusal.ts` | §17.6.10.1 E-MARKUP-STATEMENT-NOT-RENDERED message + whole-tree check | `markupNotRenderedMessage` :52, `refuseUnrenderedStatementMarkup` :182 |
+| `md-lower.ts` | §67 phase 2 — a STATIC `<md>` body lowered to elements at build time | `lowerMdBlock` :241, `refuseUnreadMdElements` :95, `checkMdInPhrasing` :158, `assignMdHeadingIds` :700 |
+| `md-reader.js` (+`.d.ts`) | re-exports the GENERATED `runtime/stdlib/md.js` reader (no TS md reader exists) | `parseSlots`, `dedent`, `headingSlugs`, `MdBlock`, `MdInline` |
+| `value-function-stored.ts` | §14.3 / §15.11.5.1 / §59.3 E-VALUE-FUNCTION-STORED + §41.21 E-TIMER-STRUCT-MISUSE | `checkValueFunctionStored` :285, `setValueFnModuleIndex` :183 |
+| `codegen/arm-structure.ts` | SERVER arm bodies emitted from the parsed tree, never re-lowered from text | `refuseServerArm` :100, `serverArmBlockStatements` :126, `serverArmExprNode` :150 |
+| `codegen/cps-cell-writes.ts` | §19.9.9 CPS batch cell writes; only final cell values travel to the client | `planBatchCellReturn` :283, `splitBatchesWithReturnCells` :352, `CPS_WRITTEN_VAR` :367 |
+| `codegen/file-async-fns.ts` | THE per-file answer to "which names does the server emit/call async" (§13.2) | `computeFileAsyncFnNames` :72, `asyncFnNamesOfFile` :123, `asyncFnValuedBindingsOfFile` :134 |
+| `codegen/fn-valued-bindings.ts` | a top-level `const f = (…) => …` is a function for async colouring | `fnValuedBindingsOf` :65, `asyncValueUsesIn` :113, `asyncFnValueDecl` :157 |
+| `codegen/module-scope-refs.ts` | scope-aware "which top-level names does emitted JS reference" (acorn) | `moduleScopeReferences` :46 |
+| `codegen/server-reached-exports.ts` | which exported library fns server code actually reaches (§7.3.2 scope) | `computeServerReachedExports` :125 |
+| `codegen/server-text-guard.ts` | no server code containing a call is lowered from TEXT (fail closed) | `REFUSED_SERVER_TEXT` :33, `refuseServerTextCall` :50 |
+
+Changed-module loci a dev agent needs (grep by symbol): `route-inference.ts` (10,332 lines) `computePureFnSidePlacement` :1515,
+`buildCpsStatementServerProbe` :6000, `reportServerDefaultIdentityReads` :8651; `ast-builder.js` `scanMarkupElementEnd` :5568,
+`refuseSwallowedStatementMarkup` :5938, `collectMarkupTextRun` :6025, `consumeSqlChainedCalls` :9879, `sqlBlockRefHasTail` :9996;
+`codegen/emit-logic.ts` `emitParamDefault` :1409; `codegen/emit-server.ts` `serverParamDefaults` :429; `codegen/async-combinators.ts`
+`isGlobalSchedulerCallee` :251; `codegen/index.ts` `asyncImportedLocalsOf` :966; `codegen/refused-lowering-errors.ts`
+`refuseStaticAttrWrite` :162, `refuseQuotedHandlerWrite` :191; `attr-injection-sink.ts` `isExecutableEventHandlerAttrName` :80,
+`classifyStaticExecutableAttr` :460; `runtime-template.js` `STDLIB_CLIENT_CHUNK_MEMBERS` :176, `_scrml_deep_set_copy` :2693;
+`commands/fix-verify-shared.js` `compileErrorsInPlace` :215; `api.js` emitted-JS parse floor for every compile (comment `§2.2.1
+(S464 Q24 fix round 3)` ~:4071).
+
+Runtime / stdlib: `stdlib/time/index.scrml` + `compiler/runtime/stdlib/time.js` — `debounce`/`throttle` return
+`Debouncer`/`Throttler` structs; free functions `run` / `cancel` / `flush`. New sample `samples/md-article-browser-language.scrml`.
+New test harness dirs: `compiler/tests/integration/security-await-pack/`, `compiler/tests/integration/fixtures/s465-server-shapes/`.
 
 ## S465 — STRUCTURE DELTA (`8ce6d61b5..41af4153a`)
 
