@@ -46,3 +46,5 @@
   `compiler/tests/integration/s468-structural-eq-everywhere.test.js` (5; happy-dom with the TREE-SHAKEN emitted runtime;
   all 4 browser tests FAIL on base 5c43c3b8e, verified). 11 pinned `===` expectations in 10 existing test files updated to
   the §45.4 form (each pinned reference/loose equality on a non-provably-primitive operand).
+
+- 2026-10-17T16:45:55 FIX ROUND 1 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-af1f3d3dba749a434 on s468-structural-eq-everywhere @ 149e62ad5 (S239 review: fix F1, F2, F4; file F3/F5 as gaps).
