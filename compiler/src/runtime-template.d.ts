@@ -20,6 +20,15 @@ export declare function _inlineSiblingShimImports(
 /** The full client reactive runtime source text. */
 export declare const SCRML_RUNTIME: string;
 
+/**
+ * S462 P0 fix round 1 — the members a PARTIAL client stdlib chunk carries (only
+ * the shim's [browser-safe] members), keyed by module name.
+ */
+export declare const STDLIB_CLIENT_CHUNK_MEMBERS: Readonly<Record<string, readonly string[]>>;
+
+/** Build one stdlib registry chunk; `onlyMembers` limits it to those exports (a partial chunk). */
+export declare function _loadStdlibChunk(name: string, onlyMembers?: readonly string[] | null): string;
+
 /** §59 value-native map/set runtime, sliced from SCRML_RUNTIME for server inlining. */
 export declare const SERVER_VALUE_NATIVE_MAP_HELPER: string;
 

@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 650 | 6 |
-| LOW | 431 | 0 |
+| MED | 651 | 6 |
+| LOW | 432 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -227,6 +227,12 @@ PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/app.scrml`: `<a> =
 <!-- @gap id=g-incomplete-binary-return-reaches-codegen-s466 sev=LOW status=open locus=searched:compiler/src/expression-parser.ts,compiler/src/ast-builder.js(return operand with a dangling binary operator)—not-traced prov=pa:s466-gap-list -->
 
 PA-reproduced (S466), reproducer `~/.cache/scrml-s466-pa/swap/inv.scrml`: `${ function bad() { return @n + } }` → E-CODEGEN-INVALID-LOGIC (the compiler-defect code) with no line. A source syntax error should be a parse error at the operator's position. The no-line half is [[g-parse-floor-errors-carry-no-source-location-s464]]; this entry is the missing parse refusal only.
+
+### g-nested-match-in-string-arm-block-unlowered-s467 — a `match` nested inside the block body of a string-literal `match` arm (`match (k) { "bob" :> { match (@ok) { true :> { … } else :> { … } } } else :> { … } }`) is never lowered: in a browser function it fails as E-CODEGEN-INVALID-LOGIC ("compiler defect", the inner `match … :>` text reaches the emitted JS verbatim); in the server half of a CPS-split function it is E-STMT-UNEXPECTED-TOKEN at the inner arm's `:>` — `NEW S467; MED; open (pre-existing on BASE; fails closed)`
+
+<!-- @gap id=g-nested-match-in-string-arm-block-unlowered-s467 sev=MED status=open locus=compiler/src/ast-builder.js(string-literal match arm — arm body kept only as `bare-expr` `expr` text, exprNode = the literal alone)+compiler/src/codegen(text lowering of that arm body — rewriteBlockBody-style, no statement parse) prov=review:s467-cps-r4-match_nested+repro:s467-cps-r5 -->
+
+Found by the S467 review of the CPS round-4 branch (probe `match_nested`), then reproduced by the round-5 agent WITHOUT any server work: `function post(name: string, pass: string, body: string) { @ok = pass == "x"; const k: string = name; match (k) { "bob" :> { match (@ok) { true :> { @msg = "ok" } else :> { @msg = "no" } } } else :> { @msg = "x" } } }` → E-CODEGEN-INVALID-LOGIC, emitted `…( _scrml_reactive_get("ok") ) { true :> { _scrml_reactive_se…`. Same shape with a server statement after it (CPS split) → the same; with the nested match AFTER the first server statement (server half) → E-STMT-UNEXPECTED-TOKEN `no statement begins at \`:> { @msg = "ok" }\``. A single (non-nested) string-arm match compiles in every position, and an `if` inside a string arm compiles. Reproducer: `~/.cache/scrml-agent-tmp/s467-cps-r5/w/nm.mjs`. Same root as the S467 round-4 finding that a string-literal arm's body lives only in `expr` text (the batch planner missed its cell writes; fixed there by scanning the text): the arm body is never read by the statement parser, so anything that needs the parser (a nested `match`) breaks. Direction: parse a string-literal arm's block body into statements like every other arm kind. Not a CPS defect; fails closed everywhere.
 
 ### g-vendor-import-component-035-when-file-exists-s466 — a `vendor:` import is refused with E-COMPONENT-035 even when the imported file exists — `NEW S466; LOW; open (RELAYED)`
 
@@ -802,6 +808,14 @@ Found during s462-p0 (S1 re-exports), confirmed by its S239 review. The importer
 <!-- @gap id=g-trigger3-no-follow-local-reexport-s462 sev=MED status=open locus=compiler/src/route-inference.ts(buildPerFileEscalationServerOnlyBindings — keyed on the import's own specifier) prov=review:s462-p0-unawaited-async-stdlib(S239 F3) -->
 
 `buildPerFileEscalationServerOnlyBindings` maps a local binding to its import's specifier and escalates only when that specifier is a server-only `scrml:` module, so `import { vp } from "./lib.scrml"` never escalates. The client bundle reads `_scrml_modules["lib.client.js"].vp`, which is `undefined` (lib.client.js registers nothing), so the call throws a TypeError on click. No secret ships (the client module is empty), but a server-only capability silently became a client crash. Fix direction: resolve the binding through local re-exports to its terminal module (the registry now carries `stdlibOrigin` for exactly this) and escalate on the terminal stdlib module.
+
+**Re-checked S462 P0 fix round 1 (`s462-p0-cps-server-logic-to-client`): still OPEN.** That round's placement rule (a statement reading a server-originated value, or calling a server-placed function, runs in the server half of a CPS split) re-tiers statements only INSIDE a split function. The F3 shape is a function with no server work at all — `function chk(p) { @ok = vp(p, h) }` with `vp` re-exported by `./lib.scrml` — so it is never split, emits `await vp(…)` against an empty `_scrml_modules["lib.client.js"]`, and throws on click (measured; no secret ships). Inside a split function the same call now lands server-side only when its statement also reads a server value. The fix direction above stands.
+
+### g-cps-cell-concat-sql-member-codegen-invalid-s462 — `@out = "kept " + ?{…}.get().n` (a `?{}` with a member read, inside a larger expression, as a cell write in a split function) fails with E-CODEGEN-INVALID-LOGIC — `NEW S462; LOW; open (pre-existing on BASE; fails closed)`
+
+<!-- @gap id=g-cps-cell-concat-sql-member-codegen-invalid-s462 sev=LOW status=open locus=compiler/src/codegen(sql-ref inside a compound state-decl initializer) prov=review:s462-p0-cps-server-logic-to-client(S239 fix round 1) -->
+
+`` function f() { @out = "kept " + ?{`SELECT count(*) AS n FROM users`}.get().n } `` → `E-CODEGEN-INVALID-LOGIC: the compiler could not lower this construct to valid output` (CLI compile). Identical on base a9aa81eff, so not introduced by the S462 CPS work, and it fails CLOSED (no artifact ships). Related but separate: the SQL chain truncation (`?{…}.get().name` lowers to the whole row) is being fixed on its own branch; this entry is the codegen refusal for the concatenation shape only. Workaround: `const c = ?{…}.get()` then `@out = "kept " + c.n`. Fix direction: lower a `?{}` placeholder nested inside a compound initializer the way a bare `?{}` initializer is lowered (an awaited driver call), then apply the member chain.
 
 ### g-export-star-misses-stdlib-chain-name-s462 — `export *` from a local module does not forward a name that module re-exports from a stdlib chain, so importing it through the star is a false E-IMPORT-004 (§21.4: `export *` exports every name m exports, "including names m itself re-exports") — `NEW S462; LOW; open`
 

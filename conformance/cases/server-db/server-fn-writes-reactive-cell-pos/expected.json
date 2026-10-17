@@ -1,16 +1,13 @@
 {
   "id": "server-db-server-fn-writes-reactive-cell-pos",
-  "description": "`loadAndSet()` runs a `?{}` query — so it escalates to the server per §12 — and then assigns to the reactive cell `@count`. Per §12.2 a server function cannot write client-reactive state, so E-RI-002 fires (§34: Error).",
+  "description": "`loadAndSet()` runs a `?{}` query and then assigns `@count = rows.length`. A function that performs a reactive assignment is CPS-split (§6.6.9): the query AND the statement that consumes its result run in the server half, and the server half hands back only the cell's final value (§19.9.9.7) — the count, never the rows. E-RI-002 does not fire. (S462: the case id keeps its historical `-pos` suffix; it pinned E-RI-002 until S462.)",
   "language-version": "1.0",
-  "spec": "§12.2",
-  "rationale": "§12.2 — reactive state is CLIENT-side. A function that touches a server resource auto-escalates to the server (§12), and a server function has no client-reactive referent to write: the assignment would compile to a store update on a process that holds no store. Rejecting it is what keeps the inferred split honest — the alternative is a write that silently does nothing on the tier it actually runs on. §51.0.E (`server=@source`) and §38.4 (a channel cell) are the sanctioned ways to move server-owned values to the client.",
+  "spec": "§6.6.9",
+  "rationale": "§6.6.9 — \"A function that also performs a reactive assignment (`@cell = …`) is CPS-split (§19.9.9) — a CLIENT function with an embedded server round-trip.\" §19.9.9.7 — within one server batch a cell read sees the batch's own earlier write, and the client applies the write when the batch returns. Until S462 impl#1 refused this shape with E-RI-002 for an IMPLEMENTATION reason, not a SPEC one: its CPS tier classifier did not see the `?{}` attached to the `const` declaration, found no server statement, and so found no split (recorded at S451, docs/changes/s451-boot-u1a/progress.md: \"is impl#1's CPS-eligibility answer; under §19.9.5 the same shape is a split\"). Provenance: S462 P0 (docs/changes/s462-p0-cps-server-logic-to-client/) — direction of change: newly-accepting; supersedes this case's pre-S462 expectation `codes: [\"E-RI-002\"]`.",
   "expect": {
-    "codes": [
+    "codes": [],
+    "notCodes": [
       "E-RI-002"
-    ],
-    "notCodes": [],
-    "severity": {
-      "E-RI-002": "error"
-    }
+    ]
   }
 }

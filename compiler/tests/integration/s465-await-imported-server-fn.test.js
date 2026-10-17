@@ -19,9 +19,8 @@
  * `as` aliases and §21.4 re-export chains) ride on the callee map
  * (`buildCalleeImportMap(...).asyncImportedLocals`), and the ONE classifier every
  * await site already asks — `isPromiseReturningImportedCallee` (the #1399 S462
- * mechanism) — answers true for them. A CPS wrapper's client continuation (which
- * never ran through the client fn-body await injector) now gets the same
- * injector over the same candidate set.
+ * mechanism) — answers true for them. Under §19.9.9.8 a CPS-split function's
+ * check runs in the server batch, where the same classifier awaits it.
  *
  * SPEC §13.2: "An async-colored function is one the compiler emits async: a
  * server function, a Promise-returning standard-library function, or any
@@ -35,8 +34,6 @@ import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { hashPassword } from "../../runtime/stdlib/auth.js";
-import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
 const EXECUTED_DB_TIMEOUT_MS = 30_000;
 
@@ -178,71 +175,67 @@ describe("S465 — an async function imported from another .scrml module is awai
   });
 });
 
-// A CPS-split function: its server statement runs on the server, its later
-// statements in the browser continuation `async function _scrml_cps_<fn>`. That
-// continuation never ran through the client fn-body await injector, so
-// `if (!check(…))` on the imported async helper tested a pending Promise.
+// A CPS-split function (it writes cells). On origin/main the statements after
+// the server statement ran in the browser continuation, where `check(…)` was a
+// bare fetch-stub call. Under §19.9.9.8 (s462-p0-cps) a statement that reads a
+// server-originated value is server-tier, so the check runs IN the server batch
+// — and there it must be awaited like any other server call site.
 const CPS_APP = `<program db="./app.db">
 \${ import { check } from "./lib.scrml" }
-<out> = ""
 <seen> = ""
+<busy> = false
 function login(pass: string) {
-  @out = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.get()
-  if (!check(pass, @out.pw)) { @seen = "REJECTED" } else { @seen = "WELCOME " + @out.name }
+  @busy = true
+  const row = ?{\`SELECT name, pw FROM users WHERE name = 'bob'\`}.get()
+  if (!check(pass, row.pw)) { @seen = "REJECTED" } else { @seen = "WELCOME " + row.name }
+  @busy = false
 }
 <button id="go" onclick={ login("wrong-password") }>login</button>
 <p id="seen">\${@seen}</p>
 </program>
 `;
 
-// Executed in happy-dom exactly as the page loads it: the runtime, then
-// `lib.client.js` (which registers the imported module), then `app.client.js`,
-// each as its own classic script. The server routes are answered by a stub
-// fetch keyed by the source fn name (`login` returns the row, `check` answers
-// the password test), so the test isolates the browser continuation.
-async function runCps(checkAnswer) {
-  const d = mkdtempSync(join(tmpdir(), "s465-cps-"));
-  try {
-    writeFileSync(join(d, "lib.scrml"), LIB);
-    const file = join(d, "app.scrml");
-    writeFileSync(file, CPS_APP);
-    const result = compileScrml({ inputFiles: [file], write: false, outputDir: join(d, "dist"), log: () => {} });
-    expect((result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
-    const app = result.outputs.get(file);
-    const lib = result.outputs.get(join(d, "lib.scrml"));
-    expect(app?.clientJs).toBeTruthy();
-    expect(lib?.clientJs).toBeTruthy();
-    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
-    GlobalRegistrator.register();
-    const g = globalThis;
-    const RealResponse = g.Response;
-    g.fetch = async (input) => {
-      const url = typeof input === "string" ? input : input.url;
-      const m = /__ri_route_([A-Za-z]+)_\d+/.exec(String(url));
-      const body = m && m[1] === "login" ? { name: "bob", pw: "h" } : m && m[1] === "check" ? checkAnswer : null;
-      return new RealResponse(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
-    };
-    const bodyHtml = (/<body[^>]*>([\s\S]*)<\/body>/i.exec(app.html) ?? [null, app.html])[1];
-    g.document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
-    // One function scope (as the conformance adapter does) so the runtime's
-    // top-level bindings never leak into the global lexical scope of later test
-    // files in the same process; each client bundle is already its own IIFE.
-    (0, eval)("(function () {\n" + SCRML_RUNTIME + "\n" + lib.clientJs + "\n" + app.clientJs + "\n})();");
-    g.document.dispatchEvent(new g.Event("DOMContentLoaded", { bubbles: true }));
-    g.document.querySelector("#go").click();
-    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
-    return g.document.querySelector("#seen").textContent.trim();
-  } finally {
-    rmSync(d, { recursive: true, force: true });
-    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
-  }
+let cpsDir, cpsMod, cpsRoute;
+
+beforeAll(async () => {
+  cpsDir = mkdtempSync(join(tmpdir(), "s465-cps-"));
+  const outDir = join(cpsDir, "dist");
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join(cpsDir, "lib.scrml"), LIB);
+  const file = join(cpsDir, "app.scrml");
+  writeFileSync(file, CPS_APP);
+  const db = new Database(join(cpsDir, "app.db"), { create: true });
+  db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pw TEXT)");
+  db.run("INSERT INTO users (name, pw) VALUES ('bob', ?)", [await hashPassword("right-password")]);
+  db.close();
+  const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
+  expect((result.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
+  cpsMod = await import(`file://${join(outDir, "app.server.js")}?v=${Date.now()}-${Math.random()}`);
+  cpsRoute = cpsMod.routes.find((r) => /__ri_route_login_\d+/.test(r.path));
+}, EXECUTED_DB_TIMEOUT_MS);
+
+afterAll(() => {
+  if (cpsDir) rmSync(cpsDir, { recursive: true, force: true });
+});
+
+async function cpsCall(pass) {
+  expect(cpsRoute).toBeDefined();
+  const res = await cpsMod.fetch(new Request(`http://localhost${cpsRoute.path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: "scrml_csrf=tok", "X-CSRF-Token": "tok" },
+    body: JSON.stringify({ pass }),
+  }));
+  expect(res.status).toBe(200);
+  const text = await res.text();
+  expect(text).not.toContain("$argon2");
+  return JSON.parse(text);
 }
 
-describe("S465 — a CPS-split function's browser continuation awaits an imported async helper", () => {
-  test("the helper answers false → REJECTED", async () => {
-    expect(await runCps(false)).toBe("REJECTED");
+describe("S465 — a CPS-split function: the imported async helper runs in the server batch, awaited", () => {
+  test("a WRONG password is rejected", async () => {
+    expect((await cpsCall("wrong-password")).__scrml_cells.seen).toBe("REJECTED");
   }, EXECUTED_DB_TIMEOUT_MS);
-  test("the helper answers true → WELCOME", async () => {
-    expect(await runCps(true)).toBe("WELCOME bob");
+  test("the right password is accepted", async () => {
+    expect((await cpsCall("right-password")).__scrml_cells.seen).toBe("WELCOME bob");
   }, EXECUTED_DB_TIMEOUT_MS);
 });

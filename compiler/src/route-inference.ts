@@ -89,6 +89,7 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { fileBoundNamesOf } from "./codegen/emit-library-shared.ts";
 import { fileScopeDeclaresSessionCell, fileScopeDeclaresCell, fileNodesOf } from "./codegen/server-session-guard.ts";
 import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
@@ -96,6 +97,7 @@ import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDee
 import { bindingsOfFile, bindingsOfName, type Binding } from "./binding-provenance.ts";
 import { toPosix } from "./path-canonical.js";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
+import { planBatchCellReturn, splitBatchesWithReturnCells, statementCanEndFunction } from "./codegen/cps-cell-writes.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -214,6 +216,17 @@ export class CPSSplit {
    * "none").
    */
   monotonicity?: MonotonicityVerdict;
+
+  /**
+   * S465 (§19.9.9.8 rule 4) — locals declared before the function's first server
+   * statement that its server work reads: client data, sent with every batch
+   * request after the function's parameters (`CPSResult.carriedLocals`).
+   * Consumed by emit-functions.ts (stub args) and emit-server.ts (handler binds).
+   */
+  carriedLocals: string[] = [];
+
+  /** S465 — `CPSResult.carriedFunctionIndices` (declared in the batch handler too). */
+  carriedFunctionIndices: number[] = [];
 
   /**
    * Construct a CPS split plan.
@@ -440,6 +453,28 @@ interface CPSResult {
    * the deferred body would run before the function's final exit).
    */
   deferServerIndices?: number[];
+  /**
+   * S462 P0 fix round 1 — statements the placement rule had to move to the
+   * server (they read / sit between server-originated values) but which need the
+   * browser. Each is an E-RI-002 at the call site in runRI.
+   */
+  placementRefusals?: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local" | "guard" | "carried"; fix?: string }>;
+  /**
+   * S465 (§19.9.9.8 rule 4) — locals declared by statements BEFORE the function's
+   * first server statement that a server statement reads. Those statements stay
+   * in the browser (the spinner / optimistic-update shape); their values are
+   * CLIENT data, sent with the batch request exactly like the function's own
+   * parameters (they follow the parameters in the stub's argument list and are
+   * bound from `_scrml_body` in the batch handler). Source order.
+   */
+  carriedLocals?: string[];
+  /**
+   * S465 — body indices of nested `function` declarations BEFORE the first server
+   * statement that server work calls. They stay in the browser AND are emitted at
+   * the top of every batch handler (a declaration has no effect; only functions
+   * that touch no cell and need nothing browser-only qualify).
+   */
+  carriedFunctionIndices?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2365,12 +2400,45 @@ export function walkBodyForTriggers(
  * Per §12.7: "RI walks the parsed function body for assignment expressions where the
  * left-hand side is an AT_IDENT token in assignment position."
  */
+/** S462 P0 — does an ExprNode tree assign / `++` / `--` a `@cell`? */
+function exprTreeWritesCell(root: unknown): boolean {
+  const seen = new WeakSet<object>();
+  // `@session` / `@currentUser` are ambient identity, not cells (§6.6.9).
+  const isCell = (t: any): boolean =>
+    !!t && t.kind === "ident" && typeof t.name === "string" && t.name.length > 1 && t.name.startsWith("@") &&
+    t.name !== "@session" && t.name !== "@currentUser";
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "assign" && isCell(o.target)) return true;
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && isCell(o.argument)) return true;
+    for (const k of Object.keys(o)) if (k !== "span" && walk(o[k])) return true;
+    return false;
+  };
+  return walk(root);
+}
+
 function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
   function visitNode(node: LogicStatement): LogicStatement | null {
     if (!node || typeof node !== "object") return null;
 
     // state-decl is the canonical AT_IDENT assignment form.
     if (node.kind === "state-decl") {
+      return node;
+    }
+
+    // S462 P0 — the in-place cell mutation statements are cell writes too
+    // (`@o.a = 2`, `@list.push(x)`, an explicit set). Before S462 they were not
+    // seen here, so a server function writing a cell ONLY this way was neither
+    // split nor refused: the write was lowered into the server module, which
+    // has no reactive store.
+    if (
+      node.kind === "reactive-nested-assign" ||
+      node.kind === "reactive-array-mutation" ||
+      node.kind === "reactive-explicit-set"
+    ) {
       return node;
     }
 
@@ -2381,12 +2449,33 @@ function findReactiveAssignment(body: LogicStatement[]): LogicStatement | null {
       if (/\B@[A-Za-z_$][A-Za-z0-9_$]*\s*=[^=]/.test(expr)) {
         return node;
       }
+      // S462 P0 — compound assignment (`@n += 1`, `@s ??= x`) and `++` / `--`
+      // on a cell are writes as well; the plain-`=` pattern above missed them.
+      // The ambient identity singletons `@session` / `@currentUser` are not
+      // cells (§6.6.9) — their server-side use has its own code
+      // (E-SESSION-AMBIENT-SERVER), so they are not counted here.
+      const CELL = "@(?!(?:session|currentUser)\\b)[A-Za-z_$][A-Za-z0-9_$]*";
+      if (
+        new RegExp(`\\B${CELL}\\s*(?:\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\||[-+*/%&|^])=`).test(expr) ||
+        new RegExp(`\\B${CELL}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${CELL}`).test(expr)
+      ) {
+        return node;
+      }
       return null;
     }
 
     // Do not recurse into nested function bodies.
     if (node.kind === "function-decl") {
       return null;
+    }
+
+    // S462 P0 — a cell write carried in an ExprNode-valued field: a match arm's
+    // `"admin" :> @role = "ADMIN"` (`match-arm-inline.resultExpr`), an assignment
+    // inside a declaration's initializer or a statement head. The array walk
+    // below never reaches these single-object fields.
+    for (const key of ["resultExpr", "valueExpr", "initExpr", "condExpr", "iterExpr", "headerExpr"]) {
+      const v = (node as any)[key];
+      if (v && typeof v === "object" && exprTreeWritesCell(v)) return node;
     }
 
     // S455 (§19.8.3) — a `!{}` on a `?{}` wraps the WHOLE statement
@@ -3267,8 +3356,30 @@ export function analyzeCPSEligibility(
   importedServerNamespaces: Set<string> = new Set(),
   /** S455 — the function's plain parameter names (what a handled `?{}`'s arm may read on the server). */
   fnParamNames: ReadonlySet<string> = new Set(),
+  /**
+   * S462 P0 — `buildCpsStatementServerProbe`: the escalation walker applied to
+   * one statement. A statement it flags is server-tier whatever the narrower
+   * `isServerTriggerStatement` says. Defaults to "never" for external callers.
+   */
+  stmtServerProbe: (stmt: unknown) => boolean = () => false,
+  /**
+   * S462 P0 fix round 1 — the names the file declares or imports
+   * (`fileKnownNamesOf`). With it, a statement the placement rule would move into
+   * a server batch must name only known names (the allow-list half of
+   * `clientOnlyReason`). Null (external callers) keeps the deny-list only.
+   */
+  fileKnownNames: ReadonlySet<string> | null = null,
+  /**
+   * S467 (fix round 5) — the function's raw parameter list (names + type
+   * annotations), for the carried-value admission allow-list (a parameter whose
+   * type is primitive cannot be changed through an alias).
+   */
+  fnParamsRaw: readonly unknown[] = [],
 ): CPSResult | null {
   if (!body || body.length === 0) return null;
+  const movableKnown: ReadonlySet<string> | null = fileKnownNames === null
+    ? null
+    : new Set<string>([...fileKnownNames, ...functionOwnNames(body, fnParamNames)]);
 
   const serverIndices: number[] = [];
   const reactiveIndices: number[] = [];
@@ -3290,6 +3401,10 @@ export function analyzeCPSEligibility(
     const node = (_handledInner ?? stmt) as LogicStatement;
 
     const isReactive = isReactiveStatement(node);
+    // S462 P0 — server-tier when EITHER reader says so (see
+    // `buildCpsStatementServerProbe`): the escalation walker is the one that
+    // decided the function is server-placed, so it must also decide which of
+    // its statements stay there.
     const isServer = isServerTriggerStatement(
       node,
       protectedFields,
@@ -3299,7 +3414,7 @@ export function analyzeCPSEligibility(
       resolvedServerFnIds,
       importedServerFnNames,
       importedServerNamespaces,
-    );
+    ) || stmtServerProbe(node);
 
     // Special case: state-decl with server function call OR server-only
     // resource in init — CPS-eligible.
@@ -3307,7 +3422,8 @@ export function analyzeCPSEligibility(
       isReactive &&
       node.kind === "state-decl" &&
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
-        hasServerOnlyResourceInInit(node, importedServerNamespaces));
+        hasServerOnlyResourceInInit(node, importedServerNamespaces) ||
+        stmtServerProbe(node));
 
     if (_handledInner && (isServer || isReactiveServer) && !guardArmsAreValues(stmt, fnParamNames)) {
       mixedIndices.push(i);
@@ -3320,8 +3436,12 @@ export function analyzeCPSEligibility(
     } else if (isReactiveServer) {
       reactiveServerIndices.push(i);
     } else if (isReactive && isServer) {
-      // bare-expr with both @var= and server resource — truly unsplittable
-      mixedIndices.push(i);
+      // S462 P0 — a cell write and server work in one statement (`@n += vp(…)`).
+      // A server batch now carries its cell writes back to the client
+      // (§19.9.9.7, the cell envelope — codegen/cps-cell-writes.ts), so the
+      // statement runs on the server like any other server-tier statement.
+      // (Before S462 this was "truly unsplittable" and refused the function.)
+      serverIndices.push(i);
     } else if (isReactive) {
       reactiveIndices.push(i);
     } else if (isServer) {
@@ -3334,7 +3454,657 @@ export function analyzeCPSEligibility(
   // 1. There are NO mixed (unsplittable) statements
   // 2. There is at least one reactive statement (pure reactive or reactive-server)
   // 3. There is at least one server-side element (server statement or reactive-server)
-  const hasReactive = reactiveIndices.length > 0 || reactiveServerIndices.length > 0;
+  // S462 P0 — DATA MINIMISATION BY PLACEMENT. A statement that reads a local
+  // declared by a server-tier statement consumes server data: `const row =
+  // ?{…}.get(); if (row is not) { fail … }; @msg = row.name`. Left on the client it
+  // reads a name the client never had (ReferenceError — before S462 the shape was
+  // refused only because the `const` was mis-tiered client too), and the only way to
+  // make it work client-side is to ship `row` — the raw query result — to the
+  // browser. It runs on the server instead, and the batch sends back only the cell
+  // values it computes (§19.9.9.7). Fixpoint: a statement pulled onto the server
+  // may declare locals of its own.
+  //
+  // S462 P0 fix round 1 — the placement rule, fail-closed. A SERVER-ORIGINATED
+  // value is a cell a server statement wrote, a local a server statement
+  // declared, or anything derived from them. Three pulls, to a fixpoint:
+  //
+  //   (a) A statement that READS a server-originated value (produced by an
+  //       EARLIER server statement) is server-tier — `const hash = @out.pw`,
+  //       `if (!check(pass, @out.pw))`, `@msg = row.name`. Left on the client it
+  //       either reads a name the client never had, or forces the raw value
+  //       (the row, the hash) across the wire so the client can run the logic.
+  //   (b) A statement that CALLS a server-placed function is server-tier at the
+  //       call site (`if (!check(…))`): the callee is awaited in-process, and its
+  //       arguments never take a trip through the browser.
+  //   (c) NO SERVER VALUE MAY ROUND-TRIP THROUGH THE CLIENT. When a later server
+  //       statement consumes a value an earlier server statement produced, every
+  //       client statement between them joins the server batch (a cell write's
+  //       value comes back in the cell envelope, §19.9.9.7), so both run in ONE
+  //       request — before this, `@busy = true` between them split the function
+  //       into two requests and the second one TRUSTED the value the client sent
+  //       back (forging `{"row":{"role":"admin"}}` ran a DELETE). Likewise a
+  //       client local a server statement reads moves to the server with it.
+  //
+  // A statement that must stay on the client (a browser global, a `lift`,
+  // markup) yet would have to move is REFUSED (E-RI-002 via `placementRefusals`),
+  // never relocated and never fed a client-carried server value. Statements
+  // BEFORE the first server statement are never pulled by (a) / (c), so the
+  // spinner (`@busy = true` ahead of the query) still renders before the request.
+  const placementRefusals: Array<{ index: number; value: string; why: string; kind?: "server-value" | "client-local" | "guard" | "carried"; fix?: string }> = [];
+  // S465 — §19.9.9.8 rule 4: "Statements before the function's first server
+  // statement are never moved". The first server statement is fixed by the
+  // tiering above; no pull below can create an earlier one (every pull reads a
+  // value an EARLIER server statement produced, or sits after one), so this bound
+  // holds through the fixpoint. A pre-first statement's local that server work
+  // reads is CLIENT data: it is carried into the request (`carriedLocals`), never
+  // pulled.
+  const _initialServer = [...serverIndices, ...reactiveServerIndices, ...mixedIndices];
+  const firstServer = _initialServer.length > 0 ? Math.min(..._initialServer) : body.length;
+  const refusedIdx = new Set<number>();
+  const serverFnNames = new Set<string>();
+  for (const [name, entries] of functionIndex) {
+    if (entries.some((e) => resolvedServerFnIds.has(e.fnNodeId))) serverFnNames.add(name);
+  }
+  const isServerIdx = (i: number) => serverIndices.includes(i) || reactiveServerIndices.includes(i);
+  // S467 (fix round 4) — CALLEE FOLLOWING. A statement does what the functions it
+  // calls do: `if (!@ok) { deny(); return }` with a file-level `function deny() {
+  // alert(…) }` needs the browser exactly as `alert(…)` inline would, and `blk =
+  // isBad()` with `function isBad() { return !@ok }` reads `@ok`. The callees of a
+  // statement are the user functions it names (called, or passed as a value),
+  // transitively — functions declared in this body (which also see its locals) and
+  // file-level ones (`functionIndex`; every same-named entry, over-approximated).
+  // Server-placed functions are not followed: a call to one is a request (rule (b)).
+  const bodyFns = new Map<string, any>();
+  {
+    const seenB = new WeakSet<object>();
+    const w = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seenB.has(n as object)) return;
+      seenB.add(n as object);
+      if (Array.isArray(n)) { for (const c of n) w(c); return; }
+      const o = n as any;
+      if (o.kind === "function-decl" && typeof o.name === "string" && o.name && !bodyFns.has(o.name)) bodyFns.set(o.name, o);
+      for (const k of Object.keys(o)) if (k !== "span") w(o[k]);
+    };
+    w(body);
+  }
+  const fnNamesMentioned = (n: unknown): string[] => {
+    const out: string[] = [];
+    const seenM = new WeakSet<object>();
+    const isFn = (nm: string) => bodyFns.has(nm) || functionIndex.has(nm);
+    const w = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seenM.has(x as object)) return;
+      seenM.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) w(c); return; }
+      const o = x as any;
+      if (o.kind === "ident" && typeof o.name === "string") { if (isFn(o.name)) out.push(o.name); return; }
+      for (const k of Object.keys(o)) {
+        if (k === "span") continue;
+        const v = o[k];
+        if (typeof v === "string") {
+          if (k === "name" || k === "kind" || k === "op" || k === "property") continue;
+          const t = o.kind === "sql" ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ") : v;
+          for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])/g)) if (isFn(m[1])) out.push(m[1]);
+        } else w(v);
+      }
+    };
+    w(n);
+    return out;
+  };
+  // A function placed on the server ONLY because its callers are server-placed
+  // (§12 caller-context propagation) has no server work of its own: it runs where
+  // its caller's statement runs, so it is followed like a client helper. Without
+  // this, `function deny() { alert(…) }` called only from a guard on a server
+  // value was promoted by that very call, the guard read it as "calls a server
+  // function", and `alert` ran in the server process (S467 fp_helper_guard).
+  const placedByCallerOnly = (fnNodeId: string): boolean => {
+    const rec = analysisMap.get(fnNodeId);
+    const trig = rec?.directTriggers ?? [];
+    return trig.length > 0 && trig.every((t: any) =>
+      t.kind === "server-only-resource" && t.resourceType === "caller-context-propagation");
+  };
+  // name → callee nodes (a body-declared function shadows file-level ones)
+  const calleeMemo = new WeakMap<object, Array<{ name: string; node: any; nested: boolean }>>();
+  const calleesOf = (stmt: unknown): Array<{ name: string; node: any; nested: boolean }> => {
+    if (!stmt || typeof stmt !== "object") return [];
+    const hit = calleeMemo.get(stmt as object);
+    if (hit) return hit;
+    const out: Array<{ name: string; node: any; nested: boolean }> = [];
+    const done = new Set<string>();
+    const queue = fnNamesMentioned(stmt);
+    while (queue.length > 0) {
+      const nm = queue.shift()!;
+      if (done.has(nm)) continue;
+      done.add(nm);
+      const nested = bodyFns.get(nm);
+      const nodes: Array<{ node: any; nested: boolean }> = nested
+        ? [{ node: nested, nested: true }]
+        : (functionIndex.get(nm) ?? [])
+            .filter((e) => !resolvedServerFnIds.has(e.fnNodeId) || placedByCallerOnly(e.fnNodeId))
+            .map((e) => ({ node: e.fnNode as any, nested: false }));
+      for (const c of nodes) {
+        // the statement that declares a nested function is not a call of it
+        if (c.node === stmt) continue;
+        out.push({ name: nm, node: c.node, nested: c.nested });
+        for (const m of fnNamesMentioned(c.node.body ?? c.node)) if (!done.has(m)) queue.push(m);
+      }
+    }
+    calleeMemo.set(stmt as object, out);
+    return out;
+  };
+  /** `statementReadsAnyCell`, also through the statement's callees. */
+  const readsCellX = (stmt: unknown, cells: Set<string>): string | null => {
+    const c = statementReadsAnyCell(stmt, cells);
+    if (c !== null || cells.size === 0) return c;
+    for (const f of calleesOf(stmt)) {
+      const r = statementReadsAnyCell(f.node.body ?? f.node, cells);
+      if (r !== null) return r;
+    }
+    return null;
+  };
+  /** `statementReadsAnyLocal`, also through body-declared callees (they close over the locals). */
+  const readsLocalX = (stmt: unknown, names: Set<string>): boolean => {
+    if (statementReadsAnyLocal(stmt, names)) return true;
+    if (names.size === 0) return false;
+    for (const f of calleesOf(stmt)) if (f.nested && statementReadsAnyLocal(f.node.body ?? f.node, names)) return true;
+    return false;
+  };
+  /** The cells a statement writes, also through its callees. */
+  const cellsWrittenX = (stmt: unknown): Set<string> => {
+    const out = cellsWrittenBy(stmt);
+    for (const f of calleesOf(stmt)) for (const c of cellsWrittenBy(f.node.body ?? f.node)) out.add(c);
+    return out;
+  };
+  /**
+   * The locals a statement writes (`localsWrittenBy`), also through body-declared
+   * callees. `mutations` false = direct writes only (a server statement's own
+   * assignments; what the browser holds is never fed from a server-side mutation).
+   */
+  const localsWrittenX = (stmt: unknown, mutations = true): Set<string> => {
+    const out = localsWrittenBy(stmt, mutations);
+    for (const f of calleesOf(stmt)) {
+      if (!f.nested) continue;
+      for (const n of localsWrittenBy(f.node.body ?? f.node, mutations)) out.add(n);
+    }
+    return out;
+  };
+  /** `clientOnlyDeniedReason`, also through the statement's callees. */
+  const deniedX = (stmt: unknown): string | null => {
+    const d = clientOnlyDeniedReason(stmt);
+    if (d !== null) return d;
+    for (const f of calleesOf(stmt)) {
+      const r = clientOnlyDeniedReason(f.node.body ?? f.node);
+      if (r !== null) return `it calls \`${f.name}\`, and ${r.replace(/^it /, "that ")}`;
+    }
+    return null;
+  };
+  /**
+   * `clientOnlyReason` (deny-list + allow-list), also through the statement's
+   * callees: a statement whose callee needs the browser cannot run in a server batch.
+   */
+  const clientOnlyX = (stmt: unknown): string | null => {
+    const d = clientOnlyReason(stmt, movableKnown);
+    if (d !== null) return d;
+    for (const f of calleesOf(stmt)) {
+      const fb = f.node.body ?? f.node;
+      const deny = clientOnlyDeniedReason(fb);
+      if (deny !== null) return `it calls \`${f.name}\`, and ${deny.replace(/^it /, "that ")}`;
+      if (fileKnownNames === null) continue;
+      const known = f.nested
+        ? movableKnown!
+        : new Set<string>([...fileKnownNames, ...functionOwnNames(fb, plainParamNames(f.node))]);
+      const unknownName = serverUnknownName(fb, known);
+      if (unknownName !== null) {
+        return `it calls \`${f.name}\`, which uses \`${unknownName}\` — not a name the file declares or imports, ` +
+          `or a global known to behave the same on the server (moving the call would change what it does)`;
+      }
+    }
+    return null;
+  };
+  const pull = (i: number): void => {
+    const ri = reactiveIndices.indexOf(i);
+    if (ri >= 0) reactiveIndices.splice(ri, 1);
+    const node = (handledSqlGuardInner(body[i]) ?? body[i]) as LogicStatement;
+    if ((node as any).kind === "defer-stmt") {
+      serverIndices.push(i);
+      deferServerIndices.push(i);
+    } else if (node.kind === "state-decl") {
+      reactiveServerIndices.push(i);
+    } else {
+      serverIndices.push(i);
+    }
+  };
+  // `refuseIfClientOnly` — false when the statement may simply STAY in the browser
+  // if it needs it: it reads a server-written CELL (the client holds that cell's
+  // value anyway, and nothing carries it back to a later request — rule (c)
+  // refuses that), or it calls a server function (an ordinary client → server
+  // call through the fetch stub). True when staying is impossible: it reads a
+  // server LOCAL the browser never has, or it sits between a producer and a
+  // consumer of a server value (rule (c)).
+  const tryPull = (i: number, value: string, because: string, refuseIfClientOnly = true): boolean => {
+    if (isServerIdx(i) || mixedIndices.includes(i) || refusedIdx.has(i)) return false;
+    const why = clientOnlyX(body[i]);
+    if (why !== null) {
+      if (!refuseIfClientOnly) return false;
+      refusedIdx.add(i);
+      placementRefusals.push({ index: i, value, why: `${because}, but ${why}` });
+      return false;
+    }
+    pull(i);
+    return true;
+  };
+  // S466 — §19.9.9.8 rule 3, ruling "(a) Guards stay server": a statement that reads
+  // a server-originated value and can END the function (`return`, `fail`, `?`, a
+  // `break` / `continue` leaving it — statementCanEndFunction) decides whether the
+  // function's later server work runs. In the browser that decision is the
+  // client's: the later work sits in its own batch route, which anyone can call
+  // without passing the check (S465: `@ok = vp(pass, ?{SELECT pw …}.get().pw);
+  // if (!@ok) { alert("wrong"); return }; ?{INSERT …}.run()` left the INSERT route
+  // open). Such a statement is server-tier, and every statement between it and the
+  // later server work joins the same batch, so the check and the work it guards run
+  // in ONE request. A guard (or a statement in between) that needs the browser is
+  // refused (E-RI-002, kind "guard"). A statement after the function's last server
+  // work guards nothing on the server and stays where it is.
+  //
+  // "Server-originated" here includes a value DERIVED in the browser from one
+  // (`@x = localStorage.getItem(@row.role)`; `if (@x != "admin") return`): the guard
+  // then moves to the server and reads `@x` from the request, which rule (d) below
+  // refuses at the browser statement that derived it.
+  const GUARD_FIX = "move the browser work after the server work, or split the function " +
+    "(a server function that does the check and the work, called from a browser function that does the rest)";
+  const guardIdx = new Set<number>();
+  const guardValueAt = new Map<number, string>();
+  const laterServer = (i: number): boolean => {
+    for (let j = i + 1; j < body.length; j++) if (isServerIdx(j)) return true;
+    return false;
+  };
+  const pullGuard = (i: number, value: string, because: string): boolean => {
+    const _before = placementRefusals.length;
+    const pulled = tryPull(i, value, because);
+    for (let r = _before; r < placementRefusals.length; r++) {
+      placementRefusals[r].kind = "guard";
+      placementRefusals[r].fix = GUARD_FIX;
+    }
+    return pulled;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    // What each server statement produces, keyed by the EARLIEST producer.
+    const producedLocal = new Map<string, number>();
+    const producedCell = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of localsWrittenX(body[p], false)) if (!producedLocal.has(n)) producedLocal.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!producedCell.has(c)) producedCell.set(c, p);
+    }
+    const before = (m: Map<string, number>, i: number): Set<string> => {
+      const s = new Set<string>();
+      for (const [n, p] of m) if (p < i) s.add(n);
+      return s;
+    };
+    // The server-originated names visible at each index: produced by an earlier
+    // server statement, or derived from one by an earlier browser statement.
+    const derivedCellsAt: Array<Set<string>> = [];
+    const derivedLocalsAt: Array<Set<string>> = [];
+    {
+      const dc = new Set<string>();
+      const dl = new Set<string>();
+      for (let i = 0; i < body.length; i++) {
+        derivedCellsAt.push(new Set(dc));
+        derivedLocalsAt.push(new Set(dl));
+        const st = body[i];
+        if (!st || typeof st !== "object") continue;
+        const derives = isServerIdx(i) ||
+          readsCellX(st, dc) !== null || [...dl].some((n) => readsLocalX(st, new Set([n])));
+        if (!derives) continue;
+        for (const c of cellsWrittenX(st)) dc.add(c);
+        for (const n of localsWrittenX(st, !isServerIdx(i))) dl.add(n);
+      }
+    }
+    const serverValueRead = (stmt: unknown, i: number): string | null => {
+      const c = readsCellX(stmt, derivedCellsAt[i]);
+      if (c !== null) return `@${c}`;
+      for (const n of derivedLocalsAt[i]) if (readsLocalX(stmt, new Set([n]))) return n;
+      return null;
+    };
+    for (let i = 0; i < body.length; i++) {
+      const stmt = body[i];
+      if (!stmt || typeof stmt !== "object") continue;
+      const locs = before(producedLocal, i);
+      const cells = before(producedCell, i);
+      // A guard: it reads a server value and can end the function before later server work.
+      const guardValue = i > firstServer && statementCanEndFunction(stmt) && laterServer(i) ? serverValueRead(stmt, i) : null;
+      if (guardValue !== null) { guardIdx.add(i); guardValueAt.set(i, guardValue); }
+      if (!isServerIdx(i) && guardValue !== null) {
+        changed = pullGuard(
+          i, guardValue,
+          `it reads \`${guardValue}\`, which the server half computed, and it can end the function before ` +
+          `the function's later server work runs — whether that work runs has to be decided on the server`,
+        ) || changed;
+        continue;
+      }
+      if (!isServerIdx(i)) {
+        // (a) reads a server-originated value / (b) calls a server function.
+        const cell = readsCellX(stmt, cells);
+        const local = cell === null ? [...locs].find((n) => readsLocalX(stmt, new Set([n]))) ?? null : null;
+        const callee = cell === null && local === null ? statementCallsAny(stmt, serverFnNames) : null;
+        // A `return` that only reads server-written CELLS stays client: the client
+        // already holds those cells' values (the batch hands them back), and the
+        // function's own return value is produced on the client side of the split.
+        const isReturn = (handledSqlGuardInner(stmt) ?? stmt as any).kind === "return-stmt";
+        if (
+          cell !== null && isReturn &&
+          ![...locs].some((n) => readsLocalX(stmt, new Set([n]))) &&
+          statementCallsAny(stmt, serverFnNames) === null
+        ) continue;
+        if (cell !== null) changed = tryPull(i, `@${cell}`, `it reads \`@${cell}\`, which the server half computed`, false) || changed;
+        else if (local !== null) changed = tryPull(i, local, `it reads \`${local}\`, which the server half computed`) || changed;
+        else if (callee !== null) changed = tryPull(i, `${callee}(…)`, `it calls \`${callee}\`, which runs on the server`, false) || changed;
+        continue;
+      }
+      // (c) A server statement consuming a value an earlier server statement produced:
+      // every client statement in between joins the server batch.
+      let from = -1;
+      let value = "";
+      const cell = readsCellX(stmt, cells);
+      if (cell !== null) { from = producedCell.get(cell)!; value = `@${cell}`; }
+      else {
+        for (const n of locs) {
+          if (readsLocalX(stmt, new Set([n]))) { from = producedLocal.get(n)!; value = n; break; }
+        }
+      }
+      if (from >= 0) {
+        for (let k = from + 1; k < i; k++) {
+          changed = tryPull(k, value, `it sits between the server work that produces \`${value}\` and the server work that uses it (the value would have to cross the browser to reach the second request)`) || changed;
+        }
+      }
+      // S466 — the guard rule: every statement between a guard and this later server
+      // statement joins the batch, so the guard and the work it guards share ONE request.
+      let lastGuard = -1;
+      for (const g of guardIdx) if (g < i && g > lastGuard && isServerIdx(g)) lastGuard = g;
+      if (lastGuard >= 0) {
+        for (let k = lastGuard + 1; k < i; k++) {
+          changed = pullGuard(
+            k, guardValueAt.get(lastGuard) ?? "a server value",
+            `it sits between a check that reads a server value and can end the function, and server work that ` +
+            `check guards — they must run in one request, or the guarded work could be requested without the check`,
+          ) || changed;
+        }
+      }
+      // A client-declared local the server statement reads moves to the server with
+      // it — unless the declaring statement precedes the first server statement
+      // (rule 4): it then stays in the browser and the local is carried into the
+      // request as client data (see `carriedLocals` below).
+      for (let k = firstServer; k < i; k++) {
+        if (isServerIdx(k)) continue;
+        const declared = topLevelDeclaredLocals(body[k]);
+        const used = declared.find((n) => readsLocalX(stmt, new Set([n])));
+        if (used === undefined) continue;
+        const _before = placementRefusals.length;
+        changed = tryPull(
+          k, used,
+          `the server half reads the local \`${used}\` it declares, and this statement runs after the function's server work has begun, so \`${used}\` cannot travel with that request`,
+        ) || changed;
+        for (let r = _before; r < placementRefusals.length; r++) {
+          placementRefusals[r].kind = "client-local";
+          placementRefusals[r].fix = `compute \`${used}\` before the function's first server statement (it is then sent with the request), or pass it in as a parameter`;
+        }
+      }
+    }
+  }
+  // S465 — §19.9.9.8 rule 4: what a pre-first-server statement declares and server
+  // work needs travels WITH the batch, the statement itself staying in the browser:
+  //   - a value local → `carriedLocals`, sent in the request like a parameter;
+  //   - a nested `function` → `carriedFunctionIndices`: its declaration is ALSO
+  //     emitted at the top of the batch handler (a declaration has no effect, so
+  //     running it on both sides changes nothing the page shows). Only a function
+  //     that could run on either side qualifies — it touches no cell and needs
+  //     nothing browser-only — and the pre-first locals it closes over are carried
+  //     with it. To a fixpoint.
+  // Refused (E-RI-002) instead of moving the statement: a local the server half
+  // (or a carried function) REASSIGNS — the browser keeps its own copy, which would
+  // silently diverge — and a nested function that touches a cell or the browser.
+  const carriedLocals: string[] = [];
+  const carriedFunctionIndices: number[] = [];
+  {
+    const preDecl = new Map<string, number>();
+    for (let k = 0; k < firstServer && k < body.length; k++) {
+      if (isServerIdx(k) || refusedIdx.has(k)) continue;
+      for (const n of topLevelDeclaredLocals(body[k])) if (!preDecl.has(n)) preDecl.set(n, k);
+    }
+    const serverReads = (n: string): boolean => {
+      for (let i = firstServer; i < body.length; i++) {
+        if (isServerIdx(i) && statementReadsAnyLocal(body[i], new Set([n]))) return true;
+      }
+      return false;
+    };
+    const serverAssigns = (n: string): boolean => {
+      for (let i = firstServer; i < body.length; i++) {
+        if (isServerIdx(i) && statementAssignsLocal(body[i], n)) return true;
+      }
+      return false;
+    };
+    const queue: string[] = [...preDecl.keys()].filter(serverReads);
+    const done = new Set<string>();
+    const carriedFnNames: string[] = [];
+    const valueNames: string[] = [];
+    while (queue.length > 0) {
+      const n = queue.shift()!;
+      if (done.has(n)) continue;
+      done.add(n);
+      const k = preDecl.get(n)!;
+      if (refusedIdx.has(k)) continue;
+      const kStmt = (handledSqlGuardInner(body[k]) ?? body[k]) as any;
+      if (kStmt && kStmt.kind === "function-decl") {
+        const why = clientOnlyReason(body[k], movableKnown) ?? (statementMentionsAnyCell(body[k]) ? "it reads or writes a cell" : null);
+        if (why !== null) {
+          refusedIdx.add(k);
+          placementRefusals.push({
+            index: k, value: n, kind: "client-local",
+            why: `the server half calls the function \`${n}\` this statement declares, and it cannot run there — ${why}`,
+            fix: `declare \`${n}\` at file level without browser-only work, or compute its result before the first server statement`,
+          });
+          continue;
+        }
+        carriedFnNames.push(n);
+        carriedFunctionIndices.push(k);
+        for (const m of preDecl.keys()) {
+          if (m === n) continue;
+          if (statementAssignsLocal(body[k], m)) {
+            refusedIdx.add(preDecl.get(m)!);
+            placementRefusals.push({
+              index: preDecl.get(m)!, value: m, kind: "client-local",
+              why: `the function \`${n}\`, which the server half calls, reassigns the local \`${m}\` this statement declares, so the browser's copy and the server's would diverge`,
+              fix: `make \`${n}\` return the new value instead of reassigning \`${m}\``,
+            });
+            continue;
+          }
+          if (statementReadsAnyLocal(body[k], new Set([m]))) queue.push(m);
+        }
+        continue;
+      }
+      if (serverAssigns(n)) {
+        refusedIdx.add(k);
+        placementRefusals.push({
+          index: k, value: n, kind: "client-local",
+          why: `the server half reassigns the local \`${n}\` this statement declares, so the browser's copy and the server's would diverge`,
+          fix: `give the server's value its own name (\`const ${n}2 = …\`) instead of reassigning \`${n}\``,
+        });
+        continue;
+      }
+      valueNames.push(n);
+    }
+    for (const n of valueNames.sort((a, b) => preDecl.get(a)! - preDecl.get(b)!)) {
+      if (!refusedIdx.has(preDecl.get(n)!)) carriedLocals.push(n);
+    }
+    carriedFunctionIndices.sort((a, b) => a - b);
+  }
+
+  // S467 (fix round 5) — §19.9.9.8 ADMISSION ALLOW-LIST. A later batch receives a
+  // local (or a parameter) from the request ONLY when it is provably browser-only
+  // data nothing after the first server statement can have changed
+  // (`carriedValueAdmission`). "Not tainted" is never the reason a value is read
+  // from `_scrml_body`: anything not admitted is refused (E-RI-002) — a value the
+  // browser may have changed after server results exist is never trusted back.
+  {
+    const paramTypes = new Map<string, string | null>();
+    for (const p of fnParamsRaw) {
+      const raw = typeof p === "string" ? p : (p && typeof (p as any).name === "string" ? `${(p as any).name}${(p as any).typeAnnotation ? ": " + (p as any).typeAnnotation : ""}` : "");
+      const t = raw.trim();
+      if (!t) continue;
+      if (t.startsWith("{") || t.startsWith("[")) {
+        // a destructured parameter: every name it binds, type unknown (not primitive)
+        const close = t.startsWith("{") ? t.lastIndexOf("}") : t.lastIndexOf("]");
+        const pat = close > 0 ? t.slice(1, close) : t;
+        for (const m of pat.matchAll(/([A-Za-z_$][\w$]*)\s*(?=[,}\]=]|$)/g)) paramTypes.set(m[1], null);
+        continue;
+      }
+      const m = /^(?:lin\s+)?\.{0,3}([A-Za-z_$][\w$]*)\s*(?::\s*([^=]+?))?\s*(?:=.*)?$/s.exec(t);
+      if (m) paramTypes.set(m[1], m[2] ? m[2].trim() : null);
+    }
+    for (const n of fnParamNames) if (!paramTypes.has(n)) paramTypes.set(n, null);
+    const readByServer = (n: string): boolean => {
+      for (let i = 0; i < body.length; i++) if (isServerIdx(i) && statementReadsAnyLocal(body[i], new Set([n]))) return true;
+      return false;
+    };
+    const candidates: Array<{ name: string; isParam: boolean }> = [
+      ...carriedLocals.map((name) => ({ name, isParam: false })),
+      ...[...paramTypes.keys()].filter((n) => !carriedLocals.includes(n) && readByServer(n)).map((name) => ({ name, isParam: true })),
+    ];
+    for (const c of candidates) {
+      const v = carriedValueAdmission(c.name, body, firstServer, { isParam: c.isParam, paramTypes, isServerIdx });
+      if (v === null) continue;
+      const ci = carriedLocals.indexOf(c.name);
+      if (ci >= 0) carriedLocals.splice(ci, 1);
+      if (refusedIdx.has(v.index)) continue;
+      refusedIdx.add(v.index);
+      placementRefusals.push({
+        index: v.index, value: c.name, kind: "carried", why: v.why,
+        fix: c.isParam
+          ? `do not change the parameter \`${c.name}\` once the server work has begun — give the new value its own name`
+          : `compute \`${c.name}\` before the function's first server statement and do not change it afterwards, ` +
+            `or declare it after the first server statement (it is then computed on the server and never read ` +
+            `from the request)`,
+      });
+    }
+  }
+
+  // S466 — §19.9.9.8 rule 3 (ruling "(a) Guards stay server"): a statement already
+  // server-tier by its own triggers (an `if` / loop / `match` whose body holds server
+  // work, a guard pulled above) that reads a server-originated value decides on the
+  // server whether that work runs. If it also needs the browser (`if (@ok) {
+  // alert("…"); ?{INSERT …}.run() }`), the browser part cannot run there: refused.
+  {
+    const srvCellBefore = new Map<string, number>();
+    const srvLocalBefore = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of localsWrittenX(body[p], false)) if (!srvLocalBefore.has(n)) srvLocalBefore.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!srvCellBefore.has(c)) srvCellBefore.set(c, p);
+    }
+    for (let i = 0; i < body.length; i++) {
+      if (!isServerIdx(i) || refusedIdx.has(i)) continue;
+      const stmt = (handledSqlGuardInner(body[i]) ?? body[i]) as any;
+      if (!stmt || typeof stmt !== "object") continue;
+      const control = statementCanEndFunction(stmt) || CONTROL_STMT_KINDS.has(stmt.kind);
+      if (!control) continue;
+      const cells = new Set<string>();
+      const locals = new Set<string>();
+      for (const [c, p] of srvCellBefore) if (p < i) cells.add(c);
+      for (const [n, p] of srvLocalBefore) if (p < i) locals.add(n);
+      const c = readsCellX(stmt, cells);
+      const read = c !== null ? `@${c}` : ([...locals].find((n) => readsLocalX(stmt, new Set([n]))) ?? null);
+      if (read === null) continue;
+      const why = deniedX(body[i]);
+      if (why === null) continue;
+      refusedIdx.add(i);
+      placementRefusals.push({
+        index: i, value: read, kind: "guard", fix: GUARD_FIX,
+        why: `it reads \`${read}\`, which the server half computed, and decides whether server work runs, so it runs on the server — but ${why}`,
+      });
+    }
+  }
+
+  // (d) DERIVED THROUGH THE BROWSER. A statement that stays in the browser (it
+  // needs the client) yet reads a server-originated value makes everything it
+  // writes or declares server-originated too: `@x = localStorage.getItem(@row.role)`
+  // derives `@x` from `@row`. A LATER server statement that reads such a value
+  // would trust what the client sends back for it — the round trip rule (c)
+  // forbids — so the browser statement is REFUSED (E-RI-002). Transitive through
+  // further browser statements. Fail-closed: a later server rewrite of the value
+  // does not clear it.
+  {
+    const srvCell = new Map<string, number>();
+    const srvLocal = new Map<string, number>();
+    for (let p = 0; p < body.length; p++) {
+      if (!isServerIdx(p)) continue;
+      for (const n of localsWrittenX(body[p], false)) if (!srvLocal.has(n)) srvLocal.set(n, p);
+      for (const c of cellsWrittenX(body[p])) if (!srvCell.has(c)) srvCell.set(c, p);
+    }
+    // name (`@cell` or local) → the browser statement that derived it, and the server value it came from.
+    const tainted = new Map<string, { at: number; from: string; blame: number }>();
+    const readOf = (stmt: unknown, i: number): string | null => {
+      const cells = new Set<string>();
+      const locals = new Set<string>();
+      for (const [c, p] of srvCell) if (p < i) cells.add(c);
+      for (const [n, p] of srvLocal) if (p < i) locals.add(n);
+      for (const [n, t] of tainted) {
+        if (t.at >= i) continue;
+        if (n.startsWith("@")) cells.add(n.slice(1)); else locals.add(n);
+      }
+      const c = readsCellX(stmt, cells);
+      if (c !== null) return `@${c}`;
+      for (const n of locals) if (readsLocalX(stmt, new Set([n]))) return n;
+      return null;
+    };
+    const origin = (name: string): string => tainted.get(name)?.from ?? name;
+    for (let i = 0; i < body.length; i++) {
+      const stmt = body[i];
+      if (!stmt || typeof stmt !== "object" || refusedIdx.has(i)) continue;
+      if (!isServerIdx(i)) {
+        const read = readOf(stmt, i);
+        if (read === null) continue;
+        const t = { at: i, from: origin(read), blame: tainted.get(read)?.blame ?? i };
+        for (const c of cellsWrittenX(stmt)) tainted.set(`@${c}`, t);
+        for (const n of localsWrittenX(stmt)) tainted.set(n, t);
+        continue;
+      }
+      let read: string | null = null;
+      for (const [n, tt] of tainted) {
+        if (tt.at >= i) continue;
+        const hit = n.startsWith("@")
+          ? readsCellX(stmt, new Set([n.slice(1)])) !== null
+          : readsLocalX(stmt, new Set([n]));
+        if (hit) { read = n; break; }
+      }
+      if (read === null) continue;
+      const t = tainted.get(read)!;
+      if (refusedIdx.has(t.blame)) continue;
+      refusedIdx.add(t.blame);
+      const why = clientOnlyX(body[t.blame]) ?? "it has to run in the browser";
+      placementRefusals.push({
+        index: t.blame,
+        value: t.from,
+        why:
+          `it reads \`${t.from}\`, which the server half computed, and later server work reads \`${read}\`, ` +
+          `which is derived from it here (the value would have to cross the browser to reach the second request), but ${why}`,
+      });
+    }
+  }
+
+  // Source order is load-bearing below (`returnVarName` is the FIRST reactive-server cell).
+  serverIndices.sort((a, b) => a - b);
+  reactiveServerIndices.sort((a, b) => a - b);
+
+  // S462 P0 — a cell write NESTED in a server-tier statement (`if (vp(…)) { @ok =
+  // true }`) is a reactive write too: the server batch carries it back in the cell
+  // envelope (§19.9.9.7). Before S462 such a function had no top-level reactive
+  // statement, fell out here, and was refused (E-RI-002) — or, when another
+  // top-level write existed, the nested write lowered to `_scrml_reactive_set`
+  // inside the server module, which has no such function.
+  const hasNestedServerWrite = serverIndices.some(
+    (i) => findReactiveAssignment([body[i] as LogicStatement]) !== null,
+  );
+  const hasReactive = reactiveIndices.length > 0 || reactiveServerIndices.length > 0 || hasNestedServerWrite;
   const hasServer = serverIndices.length > 0 || reactiveServerIndices.length > 0;
 
   if (!hasReactive || !hasServer) return null;
@@ -3369,7 +4139,1136 @@ export function analyzeCPSEligibility(
     pureServerIndices: [...serverIndices].sort((a, b) => a - b),
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
     deferServerIndices,
+    placementRefusals,
+    carriedLocals,
+    carriedFunctionIndices,
   };
+}
+
+/**
+ * S465 — does `stmt` mention any `@cell` (read or write), at any depth, in the AST
+ * or in raw expression text? Over-approximates.
+ */
+function statementMentionsAnyCell(stmt: unknown): boolean {
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") { if (/(?<![\w$])@[A-Za-z_$]/.test(v)) return true; }
+      else if (walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(stmt);
+}
+
+/**
+ * S465 — does `stmt` ASSIGN the plain local `name` anywhere (`name = …`,
+ * `name += …`, `name++`, `name.f = …`, `name[k] = …`)? Over-approximates (raw
+ * expression text is scanned too): a write that may happen counts.
+ */
+function statementAssignsLocal(stmt: unknown, name: string): boolean {
+  const seen = new WeakSet<object>();
+  const rootIs = (t: any): boolean => {
+    let cur = t;
+    while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+    return !!cur && cur.kind === "ident" && cur.name === name;
+  };
+  const textRe = new RegExp(`(?<![\\w$.@])${escapeRegex(name)}(?:\\s*(?:\\.[\\w$]+|\\[[^\\]]*\\]))*\\s*(?:\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\||[-+*/%&|^])?=(?!=)|(?<![\\w$.@])${escapeRegex(name)}\\s*(?:\\+\\+|--)|(?:\\+\\+|--)\\s*${escapeRegex(name)}(?![\\w$])`);
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "assign" && rootIs(o.target)) return true;
+    // A bare `name = …` statement parses as a declaration flagged `_bareAssign`.
+    if (o._bareAssign === true && o.name === name) return true;
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && rootIs(o.argument)) return true;
+    if (o.kind === "update" && rootIs(o.argument)) return true;
+    if (o.kind === "bare-expr" && typeof o.expr === "string" && textRe.test(o.expr)) return true;
+    for (const k of Object.keys(o)) if (k !== "span" && walk(o[k])) return true;
+    return false;
+  };
+  return walk(stmt);
+}
+
+/**
+ * S467 — methods that never change their receiver (or their arguments). A call
+ * `x.m(…)` with any OTHER method may mutate `x` (`flags.push(1)`, `m.set(k, v)`,
+ * a user object's own method), so `localsWrittenBy` counts `x` as written.
+ */
+const NON_MUTATING_METHODS = new Set([
+  "toString", "toLocaleString", "valueOf", "toFixed", "toPrecision", "toUpperCase", "toLowerCase",
+  "toLocaleUpperCase", "toLocaleLowerCase", "trim", "trimStart", "trimEnd", "padStart", "padEnd",
+  "charAt", "charCodeAt", "codePointAt", "at", "slice", "substring", "substr", "split", "concat",
+  "includes", "indexOf", "lastIndexOf", "startsWith", "endsWith", "repeat", "replace", "replaceAll",
+  "match", "matchAll", "search", "normalize", "localeCompare", "join", "map", "filter", "find",
+  "findIndex", "findLast", "findLastIndex", "some", "every", "reduce", "reduceRight", "flat", "flatMap",
+  "keys", "values", "entries", "has", "get", "toSorted", "toReversed", "toSpliced", "with",
+  "getTime", "toISOString", "toDateString", "toTimeString", "toJSON", "test", "exec",
+]);
+/** S467 — globals whose calls do not mutate their arguments (a call to anything else may). */
+const NON_MUTATING_CALLEE_ROOTS = new Set([
+  "Math", "JSON", "String", "Number", "Boolean", "Array", "Date", "RegExp", "Map", "Set", "Symbol",
+  "BigInt", "Intl", "Error", "TypeError", "RangeError", "parseInt", "parseFloat", "isNaN", "isFinite",
+  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI", "structuredClone",
+  "console", "alert", "confirm", "prompt",
+]);
+/** S467 — `Object.<m>(target, …)` calls that mutate their first argument. */
+const MUTATING_OBJECT_STATICS = new Set(["assign", "defineProperty", "defineProperties", "setPrototypeOf", "freeze", "seal", "preventExtensions"]);
+
+/**
+ * S467 (§19.9.9.8, fix round 4) — the plain (non-cell) names a statement WRITES or
+ * declares, at ANY depth: declarations (nested blocks included — over-approximated,
+ * a nested shadow counts), `x = …` / `x += …` / `x.f = …` / `x[k] = …`, `x++` /
+ * `--x`, destructuring assignment targets, and — when `mutations` — the receiver
+ * of a possibly-mutating method call (`x.push(1)`) and every name passed to a call
+ * that may mutate its arguments (a user function, `Object.assign(x, …)`). Raw
+ * expression text with no parsed tree is scanned too. Over-approximates: a write
+ * that MAY happen counts (fail closed — a value written by a statement that reads a
+ * server-originated value is server-originated, §19.9.9.8 rule 1).
+ *
+ * `topLevelDeclaredLocals` (declarations at the statement's top level only) missed
+ * `if (!@ok) { alert("wrong"); blk = true }`: `blk` was never marked server-derived,
+ * so a later batch read it from the request (`_scrml_body["blk"]`) and trusted it.
+ */
+function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const add = (n: unknown) => { if (typeof n === "string" && n && !n.startsWith("@") && !RAW_NON_NAMES.has(n)) out.add(n); };
+  const rootOf = (t: any): string | null => {
+    let cur = t;
+    while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+    return cur && cur.kind === "ident" && typeof cur.name === "string" ? cur.name : null;
+  };
+  const addIdsIn = (n: unknown): void => {
+    // every identifier inside a pattern / argument subtree (raw text included)
+    const s2 = new WeakSet<object>();
+    const w = (x: unknown): void => {
+      if (!x || typeof x !== "object" || s2.has(x as object)) return;
+      s2.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) w(c); return; }
+      const o = x as any;
+      if (o.kind === "ident") { add(o.name); return; }
+      if (o.kind === "escape-hatch" && typeof o.raw === "string") { addIdsInText(o.raw); return; }
+      for (const k of Object.keys(o)) if (k !== "span" && k !== "property") w(o[k]);
+    };
+    w(n);
+  };
+  const addIdsInText = (raw: string): void => {
+    const t = blankLiteralTextInSource(raw) ?? raw;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*:(?!:))/g)) add(m[1]);
+  };
+  const scanText = (raw: string): void => {
+    const t = blankLiteralTextInSource(raw) ?? raw;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*(?:\.\s*[\w$]+|\[[^\]]*\]))*\s*(?:\*\*|<<|>>>?|\?\?|&&|\|\||[-+*/%&|^])?=(?![=>])/g)) add(m[1]);
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)\s*(?:\+\+|--)/g)) add(m[1]);
+    for (const m of t.matchAll(/(?:\+\+|--)\s*([A-Za-z_$][\w$]*)/g)) add(m[1]);
+    for (const m of t.matchAll(/([[{][^=;]*[\]}])\s*=(?![=>])/g)) addIdsInText(m[1]);
+    for (const m of t.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
+    if (!mutations) return;
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*\.\s*[\w$]+)*\s*\.\s*([\w$]+)\s*\(/g)) {
+      if (!NON_MUTATING_METHODS.has(m[2]) && !NON_MUTATING_CALLEE_ROOTS.has(m[1])) add(m[1]);
+    }
+    // a call to anything but a known non-mutating global may mutate what it is passed
+    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)\s*\(/g)) {
+      if (!NON_MUTATING_CALLEE_ROOTS.has(m[1]) && !RAW_NON_NAMES.has(m[1])) { addIdsInText(t); break; }
+    }
+  };
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "function-decl") add(o.name);
+    if (o.kind === "let-decl" || o.kind === "const-decl" || o.kind === "tilde-decl" || o.kind === "lin-decl") {
+      for (const d of topLevelDeclaredLocals(o)) add(d);
+    }
+    if (o.kind === "assign") {
+      const r = rootOf(o.target);
+      if (r !== null) add(r); else addIdsIn(o.target);
+    }
+    if ((o.kind === "unary" && (o.op === "++" || o.op === "--")) || o.kind === "update") {
+      const r = rootOf(o.argument);
+      if (r !== null) add(r); else addIdsIn(o.argument);
+    }
+    if (o._bareAssign === true) add(o.name);
+    // S467 (fix round 5) — a `for … of` head target is written once per element:
+    // `for ([blk] of [[true]]) {}` sets `blk`, `for (x of xs)` sets `x`.
+    if (o.kind === "for-stmt" && o.variable) {
+      if (typeof o.variable === "string") add(o.variable);
+      else for (const n of patternBoundNames(o.variable)) add(n);
+    }
+    if (mutations && o.kind === "call" && o.callee && typeof o.callee === "object") {
+      const c = o.callee;
+      const args = Array.isArray(o.args) ? o.args : [];
+      if (c.kind === "member" || c.kind === "index") {
+        const r = rootOf(c.object);
+        const method = typeof c.property === "string" ? c.property : (c.property && c.property.name) ?? null;
+        if (r === "Object" && method !== null && MUTATING_OBJECT_STATICS.has(method)) {
+          if (args.length > 0) addIdsIn(args[0]);
+        } else if (r !== null && NON_MUTATING_CALLEE_ROOTS.has(r)) {
+          // a known global's method (`console.log(x)`, `Math.max(a, b)`): nothing mutated
+        } else if (method === null || !NON_MUTATING_METHODS.has(method)) {
+          if (r !== null) add(r); else addIdsIn(c.object);
+          addIdsIn(args);
+        }
+      } else if (c.kind === "ident") {
+        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) addIdsIn(args);
+      } else {
+        addIdsIn(args);
+      }
+    }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        if (o.kind === "sql") continue;
+        if (!(k in RAW_EXPR_KEYS) && k !== "header" && k !== "result") continue;
+        const tree = RAW_EXPR_KEYS[k];
+        if (tree && o[tree] && typeof o[tree] === "object") continue;
+        if (k === "raw" && o.kind !== "escape-hatch") continue;
+        scanText(v);
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return out;
+}
+
+/** S467 (fix round 5) — every name a destructuring pattern binds (nested patterns included). */
+function patternBoundNames(p: unknown): string[] {
+  const out: string[] = [];
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (typeof o.name === "string" && o.name && !o.name.startsWith("@")) out.push(o.name);
+    if (typeof o.alias === "string" && o.alias) out.push(o.alias);
+    if (typeof o.local === "string" && o.local) out.push(o.local);
+    for (const k of Object.keys(o)) if (k !== "span" && k !== "defaultExpr" && k !== "default") walk(o[k]);
+  };
+  walk(p);
+  return out;
+}
+
+/** S467 (fix round 5) — a type annotation naming only primitive types (`string`, `number | not`, `string(url)`). */
+function isPrimitiveTypeText(t: unknown): boolean {
+  if (typeof t !== "string" || t.trim() === "") return false;
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of t) {
+    if (ch === "(" || ch === "<" || ch === "[") depth++;
+    else if (ch === ")" || ch === ">" || ch === "]") depth--;
+    if (ch === "|" && depth === 0) { parts.push(cur); cur = ""; } else cur += ch;
+  }
+  parts.push(cur);
+  return parts.every((p) => /^(?:string|number|boolean|bool|int|integer|float|bigint|not|null)\s*(?:\(.*\))?$/s.test(p.trim()));
+}
+
+/** S467 (fix round 5) — global callees whose result is always a primitive. */
+const PRIMITIVE_RESULT_CALLEES = new Set([
+  "String", "Number", "Boolean", "parseInt", "parseFloat", "isNaN", "isFinite",
+  "encodeURIComponent", "decodeURIComponent", "encodeURI", "decodeURI",
+]);
+/** S467 (fix round 5) — methods whose result is always a primitive (user objects hold no functions, §14). */
+const PRIMITIVE_RESULT_METHODS = new Set([
+  "toString", "toLocaleString", "toFixed", "toPrecision", "toUpperCase", "toLowerCase",
+  "toLocaleUpperCase", "toLocaleLowerCase", "trim", "trimStart", "trimEnd", "padStart", "padEnd",
+  "charAt", "charCodeAt", "codePointAt", "repeat", "replace", "replaceAll", "normalize", "localeCompare",
+  "join", "includes", "indexOf", "lastIndexOf", "startsWith", "endsWith", "search", "test", "some",
+  "every", "findIndex", "findLastIndex", "getTime", "toISOString", "toDateString", "toTimeString",
+]);
+
+/** S467 (fix round 5) — is this call's result always a primitive? */
+function isPrimitiveResultCall(e: any): boolean {
+  if (!e || e.kind !== "call" || !e.callee) return false;
+  const c = e.callee;
+  if (c.kind === "ident") return PRIMITIVE_RESULT_CALLEES.has(c.name);
+  if (c.kind === "member") {
+    const obj = c.object;
+    if (obj && obj.kind === "ident" && obj.name === "Math") return true;
+    if (obj && obj.kind === "ident" && obj.name === "JSON" && c.property === "stringify") return true;
+    if (obj && obj.kind === "ident" && obj.name === "Date" && c.property === "now") return true;
+    return typeof c.property === "string" && PRIMITIVE_RESULT_METHODS.has(c.property);
+  }
+  return false;
+}
+
+/** Identifier-like words in expression text (string / template literal content blanked). */
+function namesInExprText(text: string): Set<string> {
+  const out = new Set<string>();
+  const t = blankLiteralTextInSource(text) ?? text;
+  for (const m of t.matchAll(/(?<![\w$.#])(@?[A-Za-z_$][\w$]*)(?![\w$])/g)) {
+    if (!RAW_NON_NAMES.has(m[1])) out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * S467 (fix round 5) — every name (locals, functions, `@cells`) an AST subtree
+ * mentions: identifier nodes and expression text (SQL: only its `${…}`
+ * interpolations). Over-approximates.
+ */
+function namesMentionedIn(n: unknown): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const TEXT_KEYS = new Set(["expr", "init", "iterable", "condition", "raw", "bodyRaw", "header", "result"]);
+  const walk = (x: unknown): void => {
+    if (!x || typeof x !== "object" || seen.has(x as object)) return;
+    seen.add(x as object);
+    if (Array.isArray(x)) { for (const c of x) walk(c); return; }
+    const o = x as any;
+    if (o.kind === "ident" && typeof o.name === "string") { out.add(o.name); return; }
+    if (o.kind === "lit" && !o.hasInterpolation) return;
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        const isSql = o.kind === "sql" || o.kind === "sql-ref";
+        if (isSql && (k === "query" || k === "body" || k === "raw")) {
+          for (const m of v.matchAll(/\$\{([^}]*)\}/g)) for (const nm of namesInExprText(m[1])) out.add(nm);
+        } else if (TEXT_KEYS.has(k) || (o.kind === "lit" && k === "raw")) {
+          if (o.kind === "lit") { for (const m of v.matchAll(/\$\{([^}]*)\}/g)) for (const nm of namesInExprText(m[1])) out.add(nm); }
+          else for (const nm of namesInExprText(v)) out.add(nm);
+        }
+      } else walk(v);
+    }
+  };
+  walk(n);
+  return out;
+}
+
+/**
+ * S467 (fix round 5) — §19.9.9.8: "a server value never travels to the client and
+ * back as later-batch input". The ADMISSION ALLOW-LIST for a value a CPS server
+ * batch reads from the request (`_scrml_body["x"]`): a local declared before the
+ * function's first server statement (`carriedLocals`), or a parameter.
+ *
+ * Rounds 1–4 asked "is this value tainted by a server value?" and each review found
+ * a write the taint pass could not see (a nested write, a mutation, a callee, a
+ * closure, an alias, a `for…of` head). The question is now the converse, and it
+ * fails closed: the value is admitted only when it is PROVABLY browser-only data
+ * that nothing after the first server statement can have changed —
+ *
+ *   (1) a local is declared, and every write to it occurs, before the first server
+ *       statement (a parameter is the function's input);
+ *   (2) no statement after the first server statement can write it by any route —
+ *       a direct write, a write to a member / element, a `for…of` head, a
+ *       destructuring target, a call to a function value defined in the body that
+ *       can write it (or to anything that might be one), an alias of it, passing it
+ *       (or an object holding it) to a call that may change it;
+ *   (3) no object / array it may hold is reachable from anything the above could
+ *       change: when the value is not provably a primitive, every binding (local or
+ *       cell) its reference may flow into joins it (an alias set, to a fixpoint),
+ *       and the set must satisfy (2) as a whole; it must never be stored in a cell
+ *       (other code can change a cell while the request is in flight) or handed to
+ *       a call that may keep it.
+ *
+ * For a PARAMETER, (2) is enforced against BROWSER statements followed by server
+ * work that reads it (a server-side write is the server's own copy).
+ *
+ * Returns null when admitted, else the offending statement index and why.
+ */
+export function carriedValueAdmission(
+  name: string,
+  body: readonly unknown[],
+  firstServer: number,
+  opts: {
+    isParam: boolean;
+    paramTypes: ReadonlyMap<string, string | null>;
+    isServerIdx: (i: number) => boolean;
+  },
+): { index: number; why: string } | null {
+  const { isParam, paramTypes, isServerIdx } = opts;
+  // ---- the body's function values (nested `function`s, `const f = () => …` / `function () {}`)
+  const fnValues = new Map<string, unknown>();
+  {
+    const seen = new WeakSet<object>();
+    const walk = (n: unknown): void => {
+      if (!n || typeof n !== "object" || seen.has(n as object)) return;
+      seen.add(n as object);
+      if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+      const o = n as any;
+      if (o.kind === "function-decl" && typeof o.name === "string" && o.name) fnValues.set(o.name, o.body ?? o);
+      if ((o.kind === "const-decl" || o.kind === "let-decl" || o.kind === "tilde-decl") && typeof o.name === "string" && o.initExpr) {
+        const ie = o.initExpr;
+        if (ie.kind === "lambda" || (ie.kind === "escape-hatch" &&
+          (ie.nativeKind === "ArrowFunctionExpression" || ie.nativeKind === "FunctionExpression"))) fnValues.set(o.name, ie);
+      }
+      for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+    };
+    walk(body);
+  }
+
+  // ---- is the value provably a primitive?
+  const primMemo = new Map<string, boolean>();
+  const primExpr = (e: any, seen: Set<string>): boolean => {
+    if (!e || typeof e !== "object") return false;
+    switch (e.kind) {
+      case "lit": return true;
+      case "unary": return e.op !== "await";
+      case "binary":
+        return (e.op === "&&" || e.op === "||" || e.op === "??") ? primExpr(e.left, seen) && primExpr(e.right, seen) : true;
+      case "ternary": return primExpr(e.consequent, seen) && primExpr(e.alternate, seen);
+      case "cast": return isPrimitiveTypeText(e.targetType);
+      case "ident": return primName(e.name, seen);
+      case "call": return isPrimitiveResultCall(e);
+      default: return false;
+    }
+  };
+  const primName = (nm: string, seen: Set<string>): boolean => {
+    if (typeof nm !== "string" || nm.startsWith("@") || seen.has(nm)) return false;
+    if (paramTypes.has(nm)) return isPrimitiveTypeText(paramTypes.get(nm));
+    if (primMemo.has(nm)) return primMemo.get(nm)!;
+    const next = new Set(seen); next.add(nm);
+    let ok = true;
+    let anyWrite = false;
+    const seenW = new WeakSet<object>();
+    const rootIs = (t: any): boolean => {
+      let cur = t;
+      while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+      return !!cur && cur.kind === "ident" && cur.name === nm;
+    };
+    const walk = (n: unknown): void => {
+      if (!ok || !n || typeof n !== "object" || seenW.has(n as object)) return;
+      seenW.add(n as object);
+      if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+      const o = n as any;
+      if (o.kind === "let-decl" || o.kind === "const-decl" || o.kind === "tilde-decl" || o.kind === "lin-decl") {
+        if (o.name === nm) {
+          anyWrite = true;
+          if (!isPrimitiveTypeText(o.typeAnnotation)) {
+            if (o.ifExpr || o.forExpr || o.matchExpr) ok = false;
+            else if (o.initExpr) { if (!primExpr(o.initExpr, next)) ok = false; }
+            else if (typeof o.init === "string" && o.init.trim() !== "") ok = false;
+          }
+        } else if (o.name && typeof o.name === "object" && patternBoundNames(o.name).includes(nm)) ok = false;
+      }
+      if (o.kind === "function-decl" && o.name === nm) ok = false;
+      if (o.kind === "assign" && o.target) {
+        if (o.target.kind === "ident" && o.target.name === nm) {
+          anyWrite = true;
+          const plainish = o.op === "=" || o.op === "&&=" || o.op === "||=" || o.op === "??=";
+          if (plainish && !primExpr(o.value, next)) ok = false;
+        } else if (rootIs(o.target)) ok = false;
+        else if (o.target.kind !== "member" && o.target.kind !== "index" && namesMentionedIn(o.target).has(nm)) ok = false;
+      }
+      if (((o.kind === "unary" && (o.op === "++" || o.op === "--")) || o.kind === "update") && o.argument &&
+        o.argument.kind !== "ident" && rootIs(o.argument)) ok = false;
+      if (o.kind === "for-stmt" && o.variable &&
+        (o.variable === nm || (typeof o.variable === "object" && patternBoundNames(o.variable).includes(nm)))) ok = false;
+      for (const k of Object.keys(o)) {
+        if (k === "span") continue;
+        const v = o[k];
+        if (typeof v === "string") {
+          if (!(k in RAW_EXPR_KEYS)) continue;
+          const tree = RAW_EXPR_KEYS[k];
+          if (tree && o[tree] && typeof o[tree] === "object") continue;
+          if (k === "raw" && o.kind !== "escape-hatch") continue;
+          if (localsWrittenBy({ kind: "escape-hatch", raw: v }, false).has(nm)) ok = false;
+        } else walk(v);
+      }
+    };
+    primMemo.set(nm, false); // cycle guard
+    walk(body);
+    const r = ok && anyWrite;
+    primMemo.set(nm, r);
+    return r;
+  };
+  const prim = primName(name, new Set());
+
+  // ---- the alias set (3): every binding the value's reference may flow into
+  const A = new Set<string>([name]);
+  const cellAliases: Array<{ cell: string; index: number }> = [];
+  if (!prim) {
+    type Flow = { targets: string[]; value: unknown; store: boolean; index: number };
+    const flows: Flow[] = [];
+    const rootOf = (t: any): string | null => {
+      let cur = t;
+      while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
+      return cur && cur.kind === "ident" && typeof cur.name === "string" ? cur.name : null;
+    };
+    for (let i = 0; i < body.length; i++) {
+      const seen = new WeakSet<object>();
+      const walk = (n: unknown): void => {
+        if (!n || typeof n !== "object" || seen.has(n as object)) return;
+        seen.add(n as object);
+        if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+        const o = n as any;
+        if (o.kind === "let-decl" || o.kind === "const-decl" || o.kind === "tilde-decl" || o.kind === "lin-decl") {
+          const targets = typeof o.name === "string" ? [o.name] : patternBoundNames(o.name);
+          flows.push({ targets, value: o.initExpr ?? o.ifExpr ?? o.matchExpr ?? o.forExpr ?? o.init ?? null, store: false, index: i });
+        }
+        if (o.kind === "state-decl" && typeof o.name === "string") {
+          flows.push({ targets: ["@" + o.name], value: o.initExpr ?? o.init ?? null, store: false, index: i });
+        }
+        if ((o.kind === "reactive-nested-assign" || o.kind === "reactive-array-mutation" || o.kind === "reactive-explicit-set") && typeof o.target === "string") {
+          flows.push({ targets: ["@" + o.target], value: [...namesMentionedIn(o)].join(" "), store: true, index: i });
+        }
+        if (o.kind === "assign" && o.target) {
+          const r = rootOf(o.target);
+          if (r !== null) flows.push({ targets: [r], value: o.value, store: o.target.kind !== "ident", index: i });
+          else flows.push({ targets: [...namesMentionedIn(o.target)], value: o.value, store: true, index: i });
+        }
+        if (o.kind === "for-stmt" && o.variable) {
+          const targets = typeof o.variable === "string" ? [o.variable] : patternBoundNames(o.variable);
+          flows.push({ targets, value: o.iterExpr ?? o.iterable ?? null, store: false, index: i });
+        }
+        if (o.kind === "call" && o.callee && o.callee.kind === "member") {
+          const r = rootOf(o.callee.object);
+          const m = typeof o.callee.property === "string" ? o.callee.property : null;
+          if (r !== null && !NON_MUTATING_CALLEE_ROOTS.has(r) && (m === null || !NON_MUTATING_METHODS.has(m))) {
+            flows.push({ targets: [r], value: { kind: "array", elements: o.args ?? [] }, store: true, index: i });
+          }
+        }
+        for (const k of Object.keys(o)) {
+          if (k === "span") continue;
+          const v = o[k];
+          if (typeof v === "string") {
+            if (!(k in RAW_EXPR_KEYS)) continue;
+            const tree = RAW_EXPR_KEYS[k];
+            if (tree && o[tree] && typeof o[tree] === "object") continue;
+            if (k === "raw" && o.kind !== "escape-hatch") continue;
+            // unparsed text: whatever it writes may receive anything it mentions
+            const targets = [...localsWrittenBy({ kind: "escape-hatch", raw: v }, true)];
+            for (const mm of v.matchAll(/(?<![\w$@])@([A-Za-z_$][\w$]*)\s*(?:\.[\w$]+|\[[^\]]*\])*\s*(?:[-+*/%&|^]|\?\?|&&|\|\|)?=(?![=>])/g)) targets.push("@" + mm[1]);
+            if (targets.length > 0) flows.push({ targets, value: v, store: true, index: i });
+          } else walk(v);
+        }
+      };
+      walk(body[i]);
+    }
+    const refRoots = (e: unknown): Set<string> => {
+      const out = new Set<string>();
+      const go = (x: any): void => {
+        if (x === null || x === undefined) return;
+        if (typeof x === "string") { for (const n of namesInExprText(x)) out.add(n); return; }
+        if (typeof x !== "object") return;
+        if (Array.isArray(x)) { for (const c of x) go(c); return; }
+        switch (x.kind) {
+          case "ident": out.add(x.name); return;
+          case "lit": return;
+          case "sql": case "sql-ref": return;
+          case "unary": if (x.op === "await") go(x.argument); return;
+          case "binary": if (x.op === "&&" || x.op === "||" || x.op === "??") { go(x.left); go(x.right); } return;
+          case "ternary": go(x.consequent); go(x.alternate); return;
+          case "assign": go(x.value); return;
+          case "member": case "index": go(x.object); return;
+          case "spread": go(x.argument); return;
+          case "cast": go(x.expression); return;
+          case "array": for (const el of x.elements ?? []) go(el); return;
+          case "object":
+            for (const p of x.props ?? []) {
+              if (!p) continue;
+              if (p.kind === "shorthand") out.add(p.name);
+              else if (p.kind === "spread") go(p.argument);
+              else go(p.value);
+            }
+            return;
+          case "call": case "new": {
+            if (isPrimitiveResultCall(x)) return;
+            for (const a of x.args ?? []) go(a);
+            const c = x.callee;
+            if (c && (c.kind === "member" || c.kind === "index")) go(c.object);
+            else if (c && c.kind === "ident") {
+              out.add(c.name);
+              const fv = fnValues.get(c.name);
+              if (fv) for (const n of namesMentionedIn(fv)) out.add(n);
+            } else if (c) for (const n of namesMentionedIn(c)) out.add(n);
+            return;
+          }
+          default: for (const n of namesMentionedIn(x)) out.add(n);
+        }
+      };
+      go(e);
+      return out;
+    };
+    const flowRoots = flows.map((f) => refRoots(f.value));
+    for (let changed = true; changed;) {
+      changed = false;
+      flows.forEach((f, fi) => {
+        const rr = flowRoots[fi];
+        const fromA = [...rr].some((r) => A.has(r));
+        const intoA = f.store && f.targets.some((t) => A.has(t));
+        if (fromA) {
+          for (const t of f.targets) {
+            if (t.startsWith("@")) cellAliases.push({ cell: t, index: f.index });
+            else if (!A.has(t)) { A.add(t); changed = true; }
+          }
+        }
+        if (intoA) {
+          for (const r of rr) {
+            if (r.startsWith("@")) cellAliases.push({ cell: r, index: f.index });
+            else if (!A.has(r)) { A.add(r); changed = true; }
+          }
+        }
+      });
+    }
+  }
+  const which = (hit: string): string =>
+    hit === name ? `\`${name}\`` : `\`${hit}\`, which may hold the same object as \`${name}\``;
+  // a later server statement that reads the value (parameters: what makes a browser write matter)
+  const laterServerRead = (i: number): boolean => {
+    for (let j = i + 1; j < body.length; j++) if (isServerIdx(j) && statementReadsAnyLocal(body[j], A)) return true;
+    return false;
+  };
+  const counts = (i: number): boolean => !isParam || (!isServerIdx(i) && laterServerRead(i));
+
+  // ---- (3) stored in a cell by a BROWSER statement that a later server read follows
+  // (a server-tier statement's cell write reaches the browser as a serialized copy)
+  for (const ca of cellAliases) {
+    if (isServerIdx(ca.index) || !laterServerRead(ca.index)) continue;
+    return {
+      index: ca.index,
+      why: `\`${name}\` may hold an object, and this statement stores it in (or fills it from) the cell \`${ca.cell}\` — ` +
+        `other code can change a cell while the request is in flight`,
+    };
+  }
+
+  // ---- (2) direct writes / mutations / for-of heads / destructuring after the first server statement
+  for (let i = Math.max(0, firstServer); i < body.length; i++) {
+    const w = localsWrittenBy(body[i], !prim);
+    const hit = [...w].find((n) => A.has(n));
+    if (hit !== undefined && counts(i)) {
+      return {
+        index: i,
+        why: `this statement runs after the function's server work has begun and can change ${which(hit)}`,
+      };
+    }
+  }
+  // ---- (2) function values that can write it: never called after the first server
+  // statement, never handed anywhere they could run later
+  const mayWrite = new Set<string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [f, node] of fnValues) {
+      if (mayWrite.has(f)) continue;
+      const w = localsWrittenBy(node, !prim);
+      if ([...w].some((n) => A.has(n)) || [...mayWrite].some((g) => statementReadsAnyLocal(node, new Set([g])))) {
+        mayWrite.add(f); changed = true;
+      }
+    }
+  }
+  if (mayWrite.size > 0) {
+    for (let i = 0; i < body.length; i++) {
+      const f = [...mayWrite].find((g) => statementReadsAnyLocal(body[i], new Set([g])));
+      if (f === undefined) continue;
+      if (i >= firstServer) {
+        if (!counts(i)) continue;
+        return {
+          index: i,
+          why: `this statement runs after the function's server work has begun and calls (or passes) \`${f}\`, ` +
+            `a function defined in the body that can change \`${name}\``,
+        };
+      }
+      // before the first server statement: only direct calls (`f()`) are allowed —
+      // a function value handed elsewhere may run while the request is in flight
+      if (fnValueEscapes(body[i], f)) {
+        return {
+          index: i,
+          why: `this statement hands \`${f}\` — a function defined in the body that can change \`${name}\` — ` +
+            `to code that may run it after the function's server work has begun`,
+        };
+      }
+    }
+  }
+  // ---- (2) an INLINE function value before the first server statement that can
+  // write it (`setTimeout(() => { blk = true })`, `when … { blk = true }`) may run
+  // while the request is in flight. Only a callback handed to an array method that
+  // calls it synchronously (`xs.forEach((x) => { n = n + x })`) is known to run then.
+  for (let i = 0; i < Math.min(firstServer, body.length); i++) {
+    const v = inlineClosureWriting(body[i], A, !prim);
+    if (v !== null) {
+      return {
+        index: i,
+        why: `this statement creates a function that can change ${which(v)} and may run after the function's ` +
+          `server work has begun`,
+      };
+    }
+  }
+  // ---- (3) an object it may hold, handed to a call that may keep it
+  if (!prim && !isParam) {
+    for (let i = 0; i < Math.min(firstServer, body.length); i++) {
+      const passed = namesPassedToRetainingCalls(body[i], fnValues);
+      const hit = [...passed].find((n) => A.has(n));
+      if (hit !== undefined) {
+        return {
+          index: i,
+          why: `this statement passes ${which(hit)} to a function that may keep it and change it after the function's ` +
+            `server work has begun`,
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/** S467 (fix round 5) — array methods that call their callback synchronously, before returning. */
+const SYNC_CALLBACK_METHODS = new Set([
+  "forEach", "map", "filter", "reduce", "reduceRight", "some", "every", "find", "findIndex", "findLast",
+  "findLastIndex", "flatMap", "sort", "toSorted",
+]);
+
+/**
+ * S467 (fix round 5) — an inline function value (arrow / function expression /
+ * `when` / cleanup body) in `stmt` that writes one of `names`, other than a
+ * callback handed directly to a synchronous array method, or the initializer of a
+ * named declaration (`const f = () => …` — a named function value, judged by its
+ * uses). Returns the written name, or null.
+ */
+function inlineClosureWriting(stmt: unknown, names: ReadonlySet<string>, mutations: boolean): string | null {
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const isFnValue = (o: any): boolean =>
+    !!o && (o.kind === "lambda" || o.kind === "when-effect" || o.kind === "when-message" || o.kind === "cleanup-registration" ||
+      (o.kind === "escape-hatch" && (o.nativeKind === "ArrowFunctionExpression" || o.nativeKind === "FunctionExpression")));
+  const walk = (n: unknown, allowed: boolean): void => {
+    if (hit !== null || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, false); return; }
+    const o = n as any;
+    if (isFnValue(o) && !allowed) {
+      const w = [...localsWrittenBy(o, mutations)].find((x) => names.has(x));
+      if (w !== undefined) { hit = w; return; }
+    }
+    if ((o.kind === "const-decl" || o.kind === "let-decl" || o.kind === "tilde-decl") && typeof o.name === "string" && isFnValue(o.initExpr)) {
+      for (const k of Object.keys(o)) if (k !== "span" && k !== "initExpr" && k !== "init") walk(o[k], false);
+      return;
+    }
+    if (o.kind === "call" && o.callee && o.callee.kind === "member" && typeof o.callee.property === "string" &&
+      SYNC_CALLBACK_METHODS.has(o.callee.property)) {
+      walk(o.callee, false);
+      for (const a of o.args ?? []) walk(a, true);
+      return;
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k], false);
+  };
+  walk(stmt, false);
+  return hit;
+}
+
+/**
+ * S467 (fix round 5) — does `stmt` mention the function value `f` anywhere other than
+ * as the callee of a direct call (`f(…)`)? (The declaration of `f` is not a mention.)
+ */
+function fnValueEscapes(stmt: unknown, f: string): boolean {
+  const seen = new WeakSet<object>();
+  const re = new RegExp(`(?<![\\w$.@])${escapeRegex(f)}(?![\\w$])(?!\\s*\\()`);
+  const walk = (n: unknown, asCallee: boolean): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some((c) => walk(c, false));
+    const o = n as any;
+    if (o.kind === "ident") return o.name === f && !asCallee;
+    if (o.kind === "lit" && !o.hasInterpolation) return false;
+    if (o.kind === "call" || o.kind === "new") {
+      if (walk(o.callee, o.kind === "call" && !!o.callee && o.callee.kind === "ident")) return true;
+      return walk(o.args, false);
+    }
+    for (const k of Object.keys(o)) {
+      if (k === "span" || k === "name" || k === "kind") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        if (!(k in RAW_EXPR_KEYS)) continue;
+        const tree = RAW_EXPR_KEYS[k];
+        if (tree && o[tree] && typeof o[tree] === "object") continue;
+        if (k === "raw" && o.kind !== "escape-hatch") continue;
+        if (re.test(blankLiteralTextInSource(v) ?? v)) return true;
+      } else if (walk(v, false)) return true;
+    }
+    return false;
+  };
+  return walk(stmt, false);
+}
+
+/**
+ * S467 (fix round 5) — the names `stmt` passes (as arguments, or inside an argument)
+ * to a call that may KEEP them: any call except a known non-mutating global
+ * (`JSON.stringify(x)`, `console.log(x)`) or a non-mutating method. (A mutating
+ * method's receiver/argument flow is an alias edge, handled by the alias set.)
+ */
+function namesPassedToRetainingCalls(stmt: unknown, fnValues: ReadonlyMap<string, unknown>): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if ((o.kind === "call" || o.kind === "new") && o.callee) {
+      const c = o.callee;
+      let retains = true;
+      if (c.kind === "ident" && (NON_MUTATING_CALLEE_ROOTS.has(c.name) || PRIMITIVE_RESULT_CALLEES.has(c.name))) retains = false;
+      if (c.kind === "member") {
+        let root = c.object;
+        while (root && (root.kind === "member" || root.kind === "index") && root.object) root = root.object;
+        if (root && root.kind === "ident" && NON_MUTATING_CALLEE_ROOTS.has(root.name)) retains = false;
+        else retains = false; // a method: non-mutating ones keep nothing; mutating ones are alias edges
+      }
+      if (c.kind === "ident" && fnValues.has(c.name)) retains = true;
+      if (retains) for (const a of o.args ?? []) for (const nm of namesMentionedIn(a)) out.add(nm);
+    }
+    if (o.kind === "escape-hatch" && typeof o.raw === "string") {
+      const t = blankLiteralTextInSource(o.raw) ?? o.raw;
+      if (/(?<![\w$.@#])(?!(?:if|for|while|switch|return|function|catch)\b)[A-Za-z_$][\w$]*\s*\(/.test(t)) for (const nm of namesInExprText(t)) out.add(nm);
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(stmt);
+  return out;
+}
+
+/**
+ * S462 P0 — the plain (non-cell) names a TOP-LEVEL body statement declares:
+ * `let` / `const` / `~` / `lin` declarations (destructured names included) and a
+ * nested `function` declaration's name. Block-nested declarations are scoped to
+ * their block and never reach a sibling statement, so they are not collected.
+ */
+function topLevelDeclaredLocals(stmt: unknown): string[] {
+  const s = (handledSqlGuardInner(stmt) ?? stmt) as any;
+  if (!s || typeof s !== "object") return [];
+  if (s.kind === "function-decl") return typeof s.name === "string" ? [s.name] : [];
+  if (s.kind !== "let-decl" && s.kind !== "const-decl" && s.kind !== "tilde-decl" && s.kind !== "lin-decl") return [];
+  if (typeof s.name === "string" && s.name.length > 0) return [s.name];
+  const out: string[] = [];
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (typeof o.name === "string" && o.name && !o.name.startsWith("@")) out.push(o.name);
+    for (const k of Object.keys(o)) if (k !== "span" && k !== "initExpr" && k !== "init" && k !== "sqlNode") walk(o[k]);
+  };
+  walk(s.pattern ?? s.names ?? s.destructure ?? null);
+  return out;
+}
+
+/**
+ * S462 P0 fix round 1 — the cells a statement WRITES, at any depth (`@x = …`
+ * declarations / assignments / `++`, a field or array mutation of `@x`). Nested
+ * function bodies included: over-approximate (a write that may happen counts).
+ */
+function cellsWrittenBy(stmt: unknown): Set<string> {
+  const out = new Set<string>();
+  const seen = new WeakSet<object>();
+  const isCell = (t: any): boolean =>
+    !!t && t.kind === "ident" && typeof t.name === "string" && t.name.length > 1 && t.name.startsWith("@") &&
+    t.name !== "@session" && t.name !== "@currentUser";
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "state-decl" && typeof o.name === "string") out.add(o.name);
+    if ((o.kind === "reactive-nested-assign" || o.kind === "reactive-array-mutation" || o.kind === "reactive-explicit-set") && typeof o.target === "string") out.add(o.target);
+    if (o.kind === "assign" && isCell(o.target)) out.add(o.target.name.slice(1));
+    if (o.kind === "unary" && (o.op === "++" || o.op === "--") && isCell(o.argument)) out.add(o.argument.name.slice(1));
+    if (o.kind === "bare-expr" && typeof o.expr === "string") {
+      for (const m of o.expr.matchAll(/(?<![\w$@])@([A-Za-z_$][\w$]*)\s*(?:\*\*|<<|>>>?|\?\?|&&|\|\||[-+*/%&|^])?=(?!=)/g)) out.add(m[1]);
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(stmt);
+  return out;
+}
+
+/**
+ * S462 P0 fix round 1 — does `stmt` READ any of `cells` (bare names, no `@`)? An
+ * `@x` identifier anywhere except as the plain target of `@x = …`, or `@x` in raw
+ * text (SQL query text, unparsed expression text). Over-approximates.
+ */
+function statementReadsAnyCell(stmt: unknown, cells: Set<string>): string | null {
+  if (cells.size === 0) return null;
+  const re = new RegExp(`@(${[...cells].map(escapeRegex).join("|")})(?![\\w$])`);
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown, plainTarget: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, null); return; }
+    const o = n as any;
+    if (o.kind === "ident" && typeof o.name === "string" && o.name.startsWith("@") && o !== plainTarget) {
+      if (cells.has(o.name.slice(1))) { hit = o.name.slice(1); return; }
+    }
+    const target = o.kind === "assign" && o.op === "=" ? o.target : null;
+    for (const k of Object.keys(o)) {
+      if (k === "span" || k === "kind" || k === "name") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        // A raw `@x = …` assignment text is a write, not a read — strip plain writes first.
+        const text = v.replace(/(?<![\w$@])@[A-Za-z_$][\w$]*\s*=(?!=)/g, "");
+        const m = re.exec(text);
+        if (m) { hit = m[1]; return; }
+      } else walk(v, target);
+    }
+  };
+  walk(stmt, null);
+  return hit;
+}
+
+/** S466 — statements whose body runs conditionally or repeatedly: a server value they read decides what runs. */
+const CONTROL_STMT_KINDS = new Set([
+  "if-stmt", "for-stmt", "while-stmt", "do-while-stmt", "match-stmt", "switch-stmt", "try-stmt",
+]);
+
+/** Host globals that exist only in a browser. A statement that touches one cannot run on the server. */
+const CLIENT_ONLY_ROOTS = new Set([
+  "document", "window", "localStorage", "sessionStorage", "navigator", "location", "history",
+  "alert", "confirm", "prompt", "requestAnimationFrame", "cancelAnimationFrame",
+]);
+
+/**
+ * S462 P0 fix round 1 — can this statement run in a server batch instead of the
+ * browser? Pure computation and cell writes can (their cell values come back in
+ * the batch's cell envelope). A statement that needs the client cannot: a browser
+ * global, a `lift`, markup. Returns the reason it cannot, or null.
+ */
+function clientOnlyReason(stmt: unknown, known: ReadonlySet<string> | null = null): string | null {
+  const denied = clientOnlyDeniedReason(stmt);
+  if (denied !== null || known === null) return denied;
+  const unknown = serverUnknownName(stmt, known);
+  return unknown === null
+    ? null
+    : `it uses \`${unknown}\`, which is not one of the function's own names, a name the file declares or imports, ` +
+      `or a global known to behave the same on the server (moving it would change what it does)`;
+}
+
+/**
+ * S462 P0 fix round 1 — the ALLOW-LIST half of `clientOnlyReason` (fail-closed).
+ * A statement the placement rule moves into a server batch may only name: cells,
+ * the function's own parameters and locals, names the file declares or imports,
+ * and the globals below (computation that behaves identically on either side). Any
+ * other free name — `setTimeout`, `fetch`, `console`, a host global this list does
+ * not know — could mean something different, or nothing, on the server, so the
+ * statement is not moved; it is refused instead (E-RI-002), never relocated.
+ */
+const SERVER_MOVABLE_GLOBALS = new Set([
+  "Math", "JSON", "String", "Number", "Boolean", "Array", "Object", "Date", "RegExp", "Map", "Set",
+  "WeakMap", "WeakSet", "Symbol", "BigInt", "Intl", "Error", "TypeError", "RangeError",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "encodeURIComponent", "decodeURIComponent",
+  "encodeURI", "decodeURI", "structuredClone", "Infinity", "NaN", "undefined",
+]);
+/** Words that lex as identifiers in raw expression text but are not names. */
+const RAW_NON_NAMES = new Set([
+  "true", "false", "null", "undefined", "this", "new", "typeof", "instanceof", "in", "of", "void",
+  "delete", "await", "async", "function", "return", "if", "else", "const", "let", "var", "for",
+  "while", "do", "break", "continue", "switch", "case", "default", "throw", "try", "catch",
+  "finally", "yield", "class", "extends", "super", "is", "not", "some", "and", "or", "match",
+  "fail", "lift", "with", "as",
+]);
+/** String fields that carry expression text, keyed to the tree field that supersedes them. */
+const RAW_EXPR_KEYS: Record<string, string | null> = {
+  expr: "exprNode", init: "initExpr", iterable: "iterExpr", condition: "condExpr",
+  raw: null, bodyRaw: null,
+};
+
+function rawTextUnknownName(raw: string, known: ReadonlySet<string>): string | null {
+  const text = blankLiteralTextInSource(raw) ?? raw;
+  const local = new Set<string>();
+  const addIds = (s: string) => { for (const m of s.matchAll(/[A-Za-z_$][\w$]*/g)) local.add(m[0]); };
+  for (const m of text.matchAll(/\(([^()]*)\)\s*=>/g)) addIds(m[1]);
+  for (const m of text.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) local.add(m[1]);
+  for (const m of text.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) local.add(m[1]);
+  for (const m of text.matchAll(/\b(?:const|let|var)\s*([[{][^=]*)=/g)) addIds(m[1]);
+  for (const m of text.matchAll(/\bfunction\s*([A-Za-z_$][\w$]*)?\s*\(([^()]*)\)/g)) { if (m[1]) local.add(m[1]); addIds(m[2]); }
+  for (const m of text.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][\w$]*)/g)) local.add(m[1]);
+  // A name read: not after `.` / `@` / `#`, and not an object-literal key (`k :`).
+  for (const m of text.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*:(?!:))/g)) {
+    const n = m[1];
+    if (RAW_NON_NAMES.has(n) || local.has(n) || known.has(n) || SERVER_MOVABLE_GLOBALS.has(n)) continue;
+    return n;
+  }
+  return null;
+}
+
+function serverUnknownName(stmt: unknown, known: ReadonlySet<string>): string | null {
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "ident" && typeof o.name === "string") {
+      const nm = o.name;
+      if (!nm.startsWith("@") && !known.has(nm) && !SERVER_MOVABLE_GLOBALS.has(nm) && !RAW_NON_NAMES.has(nm)) hit = nm;
+      return;
+    }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        if (!(k in RAW_EXPR_KEYS)) continue;
+        const tree = RAW_EXPR_KEYS[k];
+        if (tree !== null && o[tree] && typeof o[tree] === "object") continue;
+        if (k === "raw" && o.kind !== "escape-hatch") continue;
+        const u = rawTextUnknownName(v, known);
+        if (u !== null) { hit = u; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return hit;
+}
+
+/**
+ * S462 P0 fix round 1 — every name a function may legitimately read besides cells
+ * and globals: its parameters and every name it declares at any depth (locals,
+ * destructured names, loop variables, nested functions and their parameters,
+ * lambda parameters, match bindings). Over-collected on purpose — an extra name
+ * only lets a statement move, and the deny-list half still applies.
+ */
+function functionOwnNames(body: unknown, params: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>(params);
+  const addIds = (s: string) => { for (const m of s.matchAll(/[A-Za-z_$][\w$]*/g)) out.add(m[0]); };
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind !== "ident") {
+      for (const k of ["name", "bindName", "variable", "binding", "indexVariable", "errorName", "catchParam"]) {
+        const v = o[k];
+        if (typeof v === "string" && !v.startsWith("@")) addIds(v);
+      }
+      if (Array.isArray(o.params)) {
+        for (const p of o.params) {
+          if (typeof p === "string") addIds(p.split(":")[0]);
+          else if (p && typeof p.name === "string") addIds(p.name);
+        }
+      }
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  walk(body);
+  return out;
+}
+
+/**
+ * S462 P0 fix round 1 — the names a FILE declares or imports (`fileBoundNamesOf`)
+ * plus every declaration's name at any depth (types, enums, machines, …).
+ */
+export function fileKnownNamesOf(fileAST: unknown): Set<string> {
+  const out = fileBoundNamesOf(fileAST);
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (typeof o.kind === "string" && (o.kind.endsWith("-decl") || o.kind === "import") && typeof o.name === "string") {
+      const m = o.name.match(/^[A-Za-z_$][\w$]*/);
+      if (m) out.add(m[0]);
+    }
+    for (const k of ["names", "specifiers", "imports"]) {
+      const v = o[k];
+      if (Array.isArray(v)) for (const s of v) {
+        if (typeof s === "string") out.add(s);
+        else if (s && typeof s === "object") for (const f of ["local", "alias", "name"]) if (typeof s[f] === "string") out.add(s[f]);
+      }
+    }
+    for (const k of Object.keys(o)) if (k !== "span") walk(o[k]);
+  };
+  const f = fileAST as { nodes?: unknown; ast?: { nodes?: unknown } };
+  walk(f.nodes ?? f.ast?.nodes ?? []);
+  return out;
+}
+
+function clientOnlyDeniedReason(stmt: unknown): string | null {
+  const seen = new WeakSet<object>();
+  let why: string | null = null;
+  const walk = (n: unknown): void => {
+    if (why || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "lift-expr") { why = "it lifts markup"; return; }
+    if (o.kind === "markup" || o.kind === "html-element") { why = "it builds markup"; return; }
+    if (o.kind === "ident" && typeof o.name === "string" && CLIENT_ONLY_ROOTS.has(o.name)) { why = `it uses the browser global \`${o.name}\``; return; }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string" && (k === "expr" || k === "init" || k === "condition" || k === "iterable" || k === "raw")) {
+        const m = /(?<![\w$.@])(document|window|localStorage|sessionStorage|navigator|location|history|alert|confirm|prompt|requestAnimationFrame|cancelAnimationFrame)(?![\w$])/.exec(v);
+        if (m) { why = `it uses the browser global \`${m[1]}\``; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return why;
+}
+
+/**
+ * S462 P0 fix round 1 — does `stmt` call (anywhere, incl. an `if` / `while` /
+ * `match` head) a function in `serverFnNames`? Such a call is server work: the
+ * call site runs on the server and the callee is awaited in-process.
+ */
+function statementCallsAny(stmt: unknown, names: Set<string>): string | null {
+  if (names.size === 0) return null;
+  const re = new RegExp(`(?<![\\w$.@])(${[...names].map(escapeRegex).join("|")})\\s*\\(`);
+  const seen = new WeakSet<object>();
+  let hit: string | null = null;
+  const walk = (n: unknown): void => {
+    if (hit || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const o = n as any;
+    if (o.kind === "function-decl" || o.kind === "lambda") return; // a closure is called later, not here
+    if (o.kind === "call" && o.callee && o.callee.kind === "ident" && names.has(o.callee.name)) { hit = o.callee.name; return; }
+    for (const k of Object.keys(o)) {
+      if (k === "span") continue;
+      const v = o[k];
+      if (typeof v === "string" && (k === "expr" || k === "init" || k === "condition" || k === "iterable" || k === "header" || k === "result")) {
+        const m = re.exec(v);
+        if (m) { hit = m[1]; return; }
+      } else walk(v);
+    }
+  };
+  walk(stmt);
+  return hit;
+}
+
+/** S462 P0 — does `stmt` read any of `names` (identifier nodes, or raw expression text)? Over-approximates. */
+function statementReadsAnyLocal(stmt: unknown, names: Set<string>): boolean {
+  if (names.size === 0) return false;
+  const re = new RegExp(`(?<![\\w$.@])(?:${[...names].map(escapeRegex).join("|")})(?![\\w$])`);
+  // Keys that hold a declared name, a discriminant or an operator — not a read.
+  const NOT_READ = new Set(["kind", "name", "op", "litType", "variable", "span", "id", "shape", "constBinder", "structuralForm", "method"]);
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): boolean => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return false;
+    seen.add(n as object);
+    if (Array.isArray(n)) return n.some(walk);
+    const o = n as any;
+    if (o.kind === "lit") return false;
+    if (o.kind === "ident" && typeof o.name === "string") return names.has(o.name);
+    for (const k of Object.keys(o)) {
+      if (NOT_READ.has(k)) continue;
+      const v = o[k];
+      if (typeof v === "string") {
+        // SQL text: only its `${…}` interpolations are expressions — a column named
+        // like a local (`SELECT name …`) is not a read of it.
+        const text = o.kind === "sql" && (k === "query" || k === "body")
+          ? [...v.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]).join(" ")
+          : v;
+        if (re.test(text)) return true;
+      }
+      else if (walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(stmt);
 }
 
 /**
@@ -3776,7 +5675,11 @@ function isServerTriggerStatement(
     }
   }
 
-  if (node.kind === "let-decl" || node.kind === "const-decl") {
+  // S462 P0 — `lin` and `~` declarations are declarations too: `lin ticket =
+  // mintTicket(…)` calls a server function exactly as `const ticket = …` does.
+  // Before S462 only let/const were read here, so the `lin` landed on the client
+  // and the server statement that consumed `ticket` read a name it never had.
+  if (node.kind === "let-decl" || node.kind === "const-decl" || (node as any).kind === "lin-decl" || (node as any).kind === "tilde-decl") {
     // Phase 4d: ExprNode-first, string fallback
     const init = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : ((node as any).init ?? "");
 
@@ -4068,6 +5971,66 @@ function collectServerOnlyBindingModules(
 
   for (const mod of scanForServerOnlyBindingRefs(body, live).values()) found.add(mod);
   return found;
+}
+
+/**
+ * S462 P0 — the CPS split's per-STATEMENT server probe: does this one statement
+ * touch a server-only resource?
+ *
+ * WHY THIS EXISTS. The CPS tier classifier (`isServerTriggerStatement`) is a
+ * SECOND, narrower reader of the same question the escalation walker answers
+ * for the whole function, and the two drifted apart. It keyed server-only
+ * imports on the IMPORTED name (so `verifyPassword as vp` never matched `vp`)
+ * and never looked inside a control-flow HEAD (`if (!vp(...))`, `for (r of
+ * ?{…}.all())`). Measured on a9aa81eff: the function escalated (its body
+ * reaches `scrml:auth` and `?{}`), the split put the `if` on the CLIENT, the
+ * server returned the raw row — password hash included — and the browser ran
+ * `!vp(...)` on an un-awaited Promise: "WELCOME" for a wrong password.
+ *
+ * THE FIX IS ONE READER, NOT A WIDER SECOND ONE. A statement is server-tier when
+ * the escalation walker (`walkBodyForTriggers`, §12.2 Triggers 1/2) or the
+ * Trigger-3 binding scan (`scanForServerOnlyBindingRefs`, by LOCAL name, at any
+ * depth, by reference) would escalate a function made of that statement alone.
+ * Whatever escalates the function therefore also places the statement — by
+ * construction, not by keeping two lists in step.
+ *
+ * Shadowing mirrors `collectServerOnlyBindingModules`: a parameter or body-level
+ * local named after an import is not the import.
+ */
+export function buildCpsStatementServerProbe(
+  fnNode: FunctionDeclNode,
+  bindings: Map<string, string> | undefined,
+  protectedFields: Set<string>,
+  stateBlockIdByField: Map<string, string>,
+  filePath: string,
+  importedServerNamespaces: Set<string>,
+  printBuiltinsShadowed: Set<string>,
+): (stmt: unknown) => boolean {
+  const live = new Map<string, string>();
+  if (bindings && bindings.size > 0) {
+    const body: LogicStatement[] = Array.isArray(fnNode.body) ? fnNode.body : [];
+    const shadowed = new Set<string>();
+    for (const p of (fnNode.params ?? []) as unknown[]) {
+      if (typeof p === "string") shadowed.add(p);
+      else if (p && typeof p === "object" && typeof (p as any).name === "string") shadowed.add((p as any).name);
+    }
+    for (const n of collectLocalNames(body)) shadowed.add(n);
+    for (const [local, mod] of bindings) if (!shadowed.has(local)) live.set(local, mod);
+  }
+  return (stmt: unknown): boolean => {
+    if (!stmt || typeof stmt !== "object") return false;
+    const { triggers } = walkBodyForTriggers(
+      [stmt as LogicStatement],
+      protectedFields,
+      stateBlockIdByField,
+      filePath,
+      true, // E-ROUTE-001 is the function walk's to report, not this probe's
+      importedServerNamespaces,
+      printBuiltinsShadowed,
+    );
+    if (triggers.some((t) => t.kind === "server-only-resource" || t.kind === "protected-field-access")) return true;
+    return live.size > 0 && scanForServerOnlyBindingRefs(stmt, live).size > 0;
+  };
 }
 
 /**
@@ -5048,6 +7011,13 @@ export function runRI(input: RIInput): RIOutput {
   // server-only module). Consumed in the per-function scan below to build the
   // `server-only-import` direct trigger.
   const perFileEscalationServerOnlyBindings = buildPerFileEscalationServerOnlyBindings(files);
+  // S462 — each file's print()/println() shadow set (§20.7.5), filled by Step 3 and
+  // read again by the CPS per-statement server probe (Step 6).
+  const perFilePrintShadowed = new Map<string, Set<string>>();
+  // S462 P0 fix round 1 — each file's declared/imported names: the allow-list for a
+  // statement the CPS placement rule moves into a server batch (`clientOnlyReason`).
+  const perFileKnownNames = new Map<string, Set<string>>();
+  for (const fileAST of files) perFileKnownNames.set(fileAST.filePath, fileKnownNamesOf(fileAST));
 
   // ------------------------------------------------------------------
   // Step 2d: Bug-5 follow-on to C18 (§38.4) — per-file channel-cell
@@ -5119,6 +7089,7 @@ export function runRI(input: RIInput): RIOutput {
     // §20.7.5 — per-file print/println shadow set (a top-level `function print`
     // wins over the builtin, so its calls must NOT server-escalate).
     const filePrintShadowed = new Set(filePrintBuiltinsShadowed(fileAST));
+    perFilePrintShadowed.set(filePath, filePrintShadowed); // S462 — the CPS statement probe reuses it
 
     for (const fnNode of fnNodes) {
       const fnNodeId = makeFunctionNodeId(filePath, fnNode);
@@ -5364,11 +7335,10 @@ export function runRI(input: RIInput): RIOutput {
         `\`${firstModule}\` and its implementation into the browser bundle, along with whatever ` +
         `secret is passed to it, so the compiler refuses instead. Fix: move the call into a ` +
         `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
-        `to a plain reactive cell that the markup reads. Do NOT just delete \`const\`: a plain ` +
+        `to a plain reactive cell that the markup reads. Deleting \`const\` does not help: a plain ` +
         `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
-        `client-side position, is NOT yet diagnosed, and compiles clean while shipping the ` +
-        `implementation to the browser — the shortest edit that silences this error is the one ` +
-        `that restores the leak. See §6.6.19, §12.2.`,
+        `client-side position and is refused too (E-STDLIB-CLIENT-CHUNK-MISSING — there is no ` +
+        `client build of that member). See §6.6.19, §12.2.`,
         (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span),
       );
       eDerived.severity = "error";
@@ -6917,7 +8887,76 @@ export function runRI(input: RIInput): RIOutput {
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
             plainParamNames(record.fnNode),
+            buildCpsStatementServerProbe(
+              record.fnNode,
+              perFileEscalationServerOnlyBindings.get(record.filePath),
+              allProtectedFields,
+              stateBlockIdByField,
+              record.filePath,
+              perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
+              perFilePrintShadowed.get(record.filePath) ?? new Set<string>(),
+            ),
+            perFileKnownNames.get(record.filePath) ?? new Set<string>(),
+            Array.isArray(record.fnNode.params) ? record.fnNode.params : [],
           );
+
+          // S462 P0 fix round 1 — a statement the placement rule had to move to the
+          // server half but which needs the browser. Refused, never relocated and
+          // never fed a server value carried through the client.
+          for (const _r of cpsResult?.placementRefusals ?? []) {
+            const _fnName = record.fnNode.name ?? "<anonymous>";
+            const _node = body[_r.index] as any;
+            if (_r.kind === "guard") {
+              // S466 — §19.9.9.8 rule 3 (ruling S464 "(a) Guards stay server").
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+                `statement has to run in its server half — ${_r.why}. A check that decides whether server work ` +
+                `runs stays on the server (§19.9.9.8 rule 3): in the browser it could be skipped, and the work ` +
+                `requested on its own. Fix: ${_r.fix}.`,
+                (_node && _node.span) ?? record.fnNode.span,
+              ));
+              continue;
+            }
+            if (_r.kind === "carried") {
+              // S467 (fix round 5) — the admission allow-list refused a request value.
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and its ` +
+                `server half reads \`${_r.value}\` from the request — but ${_r.why}. Once the function's ` +
+                `server work has begun, what the browser holds may depend on server results, and a later ` +
+                `request is never trusted to carry such a value back (§19.9.9.8): the server only accepts ` +
+                `a value from the request when nothing after the first server statement can have changed ` +
+                `it. Fix: ${_r.fix ?? "do not change the value once the server work has begun"}.`,
+                (_node && _node.span) ?? record.fnNode.span,
+              ));
+              continue;
+            }
+            if (_r.kind === "client-local") {
+              // S465 — the value is BROWSER data that cannot reach the request; it is
+              // not a server value crossing to the client, so it is not described as one.
+              errors.push(new RIError(
+                "E-RI-002",
+                `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and its ` +
+                `server half needs \`${_r.value}\` from this statement — ${_r.why}. A browser value reaches ` +
+                `the server only as part of the request (like a parameter), and statements before the ` +
+                `function's first server statement stay in the browser (§19.9.9.8 rule 4), so the compiler ` +
+                `refuses instead of moving this statement. Fix: ${_r.fix ?? "pass the value in as a parameter"}.`,
+                (_node && _node.span) ?? record.fnNode.span,
+              ));
+              continue;
+            }
+            errors.push(new RIError(
+              "E-RI-002",
+              `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+              `statement has to run in its server half — ${_r.why}. Running it in the browser would mean ` +
+              `sending \`${_r.value}\` to the browser and trusting whatever comes back in a later request, ` +
+              `so the compiler refuses instead. Fix: keep the server work and the logic that uses ` +
+              `\`${_r.value}\` together, and do the browser-only work in a separate function that runs ` +
+              `after this one returns (or before it starts).`,
+              (_node && _node.span) ?? record.fnNode.span,
+            ));
+          }
 
           if (cpsResult && cpsResult.eligible) {
             // §19.16.5 (S430 P3) — E-DEFER-SERVER-IN-SPLIT, both limbs. The
@@ -6981,6 +9020,8 @@ export function runRI(input: RIInput): RIOutput {
               cpsResult.clientStmtIndices,
               cpsResult.returnVarName,
             );
+            cpsSplit.carriedLocals = [...(cpsResult.carriedLocals ?? [])];
+            cpsSplit.carriedFunctionIndices = [...(cpsResult.carriedFunctionIndices ?? [])];
 
             // Ext 1 M1.3: run the multi-batch planner over the body-DG. The
             // planner topologically schedules the statement-grain DG (M1.2),
@@ -7012,6 +9053,35 @@ export function runRI(input: RIInput): RIOutput {
               // client-wrapper emit can sequence client statements between
               // the per-batch awaits.
               cpsSplit.topoOrder = _plan.topoOrder;
+            }
+
+            // S462 P0 (§19.9.9.7) — a cell write the server half of the split
+            // cannot carry back to the client is REFUSED here, never relocated to
+            // the client (where the server-only work it depends on would follow
+            // it) and never lowered into a server module that has no reactive
+            // store. A server batch hands back each cell's final value; a write
+            // into a cell's value in place, inside a closure, or a `return` from
+            // inside the batch has no such value to hand back.
+            if (cpsSplit) {
+              const _fnName = record.fnNode.name ?? "<anonymous>";
+              const _reported = new Set<unknown>();
+              for (const _b of splitBatchesWithReturnCells(body, cpsSplit)) {
+                const _cellPlan = planBatchCellReturn(body, _b.indices, _b.returnCell);
+                for (const _u of _cellPlan.unsupported) {
+                  if (_reported.has(_u.span)) continue;
+                  _reported.add(_u.span);
+                  const _cellText = _u.cell ? ` (\`@${_u.cell}\`)` : "";
+                  errors.push(new RIError(
+                    "E-RI-002",
+                    `E-RI-002: \`${_fnName}\` is split across the client/server boundary (§19.9.9), and this ` +
+                    `statement runs in its server half because it is part of the server work. It ${_u.what}${_cellText}. ` +
+                    `The server half hands a cell back to the client only as the cell's final value (§19.9.9.7), ` +
+                    `so it cannot carry this write — and moving the statement to the client would move the ` +
+                    `server-only work with it. Fix: ${_u.fix}.`,
+                    (_u.span as Span) ?? record.fnNode.span,
+                  ));
+                }
+              }
             }
           } else {
             // Bug-5 follow-on to C18 (§38.4, S83 Wave 4A): channel-scoped
