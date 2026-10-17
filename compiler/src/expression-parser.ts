@@ -3373,6 +3373,10 @@ export function esTreeToExprNode(
         const id = (node as { id?: { name?: unknown } | null }).id;
         if (id && typeof id.name === "string") hatch.fnName = id.name;
       }
+      // S467 r9 — acorn's own `async` flag, so the async coloring reads a written
+      // `async function (…) { … }` off the node (codegen/fn-valued-bindings.ts), never
+      // off `raw`. Changes no output.
+      if ((node as { async?: unknown }).async === true) (hatch as { isAsync?: boolean }).isAsync = true;
       return hatch;
     }
 
