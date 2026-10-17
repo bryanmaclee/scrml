@@ -3005,9 +3005,9 @@ function substitutePropsInLogicStmt(
       if (typeof header === "string") for (const b of bindingNamesOfForHeader(header)) innerShadowed.add(b);
       const cStyle = (n as ForStmtNode).cStyleParts;
       const newCStyle = cStyle ? {
-        initExpr: substitutePropsInExprNode(cStyle.initExpr, propExprMap, innerShadowed),
-        condExpr: substitutePropsInExprNode(cStyle.condExpr, propExprMap, innerShadowed),
-        updateExpr: substitutePropsInExprNode(cStyle.updateExpr, propExprMap, innerShadowed),
+        initExpr: cStyle.initExpr && substitutePropsInExprNode(cStyle.initExpr, propExprMap, innerShadowed),
+        condExpr: cStyle.condExpr && substitutePropsInExprNode(cStyle.condExpr, propExprMap, innerShadowed),
+        updateExpr: cStyle.updateExpr && substitutePropsInExprNode(cStyle.updateExpr, propExprMap, innerShadowed),
       } : undefined;
       const result: any = {
         ...n,

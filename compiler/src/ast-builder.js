@@ -684,6 +684,22 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
  * and other module-level helpers that need ExprNode but lack access to the
  * closure-scoped safeParseExprToNode inside parseLogicBody.
  */
+/**
+ * s468 (ruling S464 cfor-comma "b") — a C-style `for` header records its
+ * `cStyleParts` when every clause it WRITES was read. An empty clause
+ * (`for (; c; u)`, `for (;;)`) is absent from the grammar and has no part.
+ * Before s468 any empty clause dropped the whole record, so the other clauses
+ * reached codegen as raw text: the comma operator in the condition
+ * (`for (; i < j, j > 0; i++)`) compiled at exit 0 and no later stage saw the
+ * clauses as expressions.
+ */
+function cStyleClausesRead(match, parts) {
+  const written = (i) => typeof match[i] === "string" && match[i].trim().length > 0;
+  return (!written(1) || !!parts.initExpr) &&
+    (!written(2) || !!parts.condExpr) &&
+    (!written(3) || !!parts.updateExpr);
+}
+
 export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
   if (!expr || typeof expr !== "string" || !expr.trim()) return undefined;
   if (shouldSkipExprParse(expr)) {
@@ -12512,7 +12528,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts && _cStyleParts.initExpr && _cStyleParts.condExpr && _cStyleParts.updateExpr ? { cStyleParts: _cStyleParts } : {}),
+        ...(_cStyleParts && cStyleClausesRead(_cStyleMatch, _cStyleParts) ? { cStyleParts: _cStyleParts } : {}),
         span: spanOf(startTok, peek()),
       };
     }
@@ -17736,7 +17752,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts2 && _cStyleParts2.initExpr && _cStyleParts2.condExpr && _cStyleParts2.updateExpr ? { cStyleParts: _cStyleParts2 } : {}),
+        ...(_cStyleParts2 && cStyleClausesRead(_cStyleMatch2, _cStyleParts2) ? { cStyleParts: _cStyleParts2 } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
