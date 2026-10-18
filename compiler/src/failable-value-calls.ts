@@ -30,6 +30,12 @@
  * declarations shadow outer names, and a binding whose initializer is (or resolves to) a failable
  * function is an ALIAS — calling it is calling that function (fails closed).
  *
+ * S469 follow-up — text the front-end does NOT parse (a body it refuses, an escape hatch that
+ * carries only `raw`: a tagged template, a sequence, …) is never skipped. It is never trusted
+ * either: its names are read with the compiler's logic tokenizer ONLY TO REFUSE — every failable
+ * function it names is an unhandled call (`mentionedNames` / `Walker.unreadText`). Nothing is
+ * accepted on the strength of a text read.
+ *
  * Whether an OUTER name is a failable function (and whether a binding outside the walk shadows
  * it) is the caller's decision: it owns the scope chain and the failable-function table
  * (`env.resolveOuter`). This module only reports the calls that resolve to one, with the context
@@ -600,12 +606,11 @@ class Walker {
       this.templateInterpolations(tagged.quasi, node as unknown as ExprNode, scope, fn);
       return;
     }
-    // S469 follow-up (§19.4.3) — every other hatch carries only its source text: an ESTree node
-    // the expression tree does not model (`check\`${p}\`` — a TaggedTemplateExpression, whose
-    // tag is CALLED; a SequenceExpression; a ClassExpression; …) or text that did not parse.
-    // Before, it was not read at all, so `const ok = check\`${p}\`` compiled and a wrong
-    // password logged in. Its text is read to refuse (fails closed): every failable function it
-    // names is an unhandled call.
+    // Every other hatch carries only its source text: an ESTree node the expression tree does
+    // not model (a tagged template whose tag is not a name, a SequenceExpression, a
+    // ClassExpression, …) or an interpolation the parser could not read. Before, it was not
+    // read at all. Its text is read to refuse (fails closed): every failable function it names
+    // is an unhandled call.
     this.unreadText(raw, scope, fn);
   }
 
