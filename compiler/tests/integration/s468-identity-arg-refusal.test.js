@@ -256,6 +256,96 @@ describe("s468 — the CPS default routes the original gap left open (E-PARAM-DE
   });
 });
 
+// s468 fix round 1 (S239 review of 79b34a878) — H1: a `function` declaration's parameter
+// DEFAULT is source text; it is read from the parsed default tree.
+describe("s468 fix round 1 — H1: a client function's parameter default", () => {
+  const h1 = {
+    "plain (`function go(q = @session.userId)`)": `function go(q = @session.userId) { add("hi", q) }`,
+    "typed (`q: string = @session.userId`)": `function go(q: string = @session.userId) { add("hi", q) }`,
+    "`@currentUser.id`": `function go(q = @currentUser.id) { add("hi", q) }`,
+    "through a file-level alias (`const s = @session`)": `const s = @session\n  function go(q = s.userId) { add("hi", q) }`,
+    "forwarded to another function": `function go(q = @session.userId) { relay(q) }\n  function relay(v) { add("hi", v) }`,
+    "destructured (`go({ u } = { u: @session.userId })`)": `function go({ u } = { u: @session.userId }) { add("hi", u) }`,
+  };
+  for (const [label, body] of Object.entries(h1)) {
+    test(label, () => expectRefused(compile(APP(body, `<button onclick=go()>g</button>`))));
+  }
+});
+
+// H4: a rest parameter (`function go(...args)`, parsed as `"... args"`) and `arguments`.
+describe("s468 fix round 1 — H4: rest parameters and `arguments`", () => {
+  test("`function go(...args) { add(\"hi\", args[0]) }` + `go(@session.userId)`", () => {
+    expectRefused(compile(APP(`function go(...args) { add("hi", args[0]) }`, `<button onclick=go(@session.userId)>g</button>`)));
+  });
+  test("`function go() { add(\"hi\", arguments[0]) }` + `go(@session.userId)`", () => {
+    expectRefused(compile(APP(`function go() { add("hi", arguments[0]) }`, `<button onclick=go(@session.userId)>g</button>`)));
+  });
+  test("a rest parameter over non-identity data is not refused", () => {
+    const r = compile(APP(`function go(...args) { add("hi", args[0]) }`, `<button onclick=go(@draft)>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+});
+
+// H2: a CPS-split function's call result is a server result only for what its server
+// batches produce; a `return` in its browser half follows the identity.
+describe("s468 fix round 1 — H2: a CPS-split helper's browser-half return", () => {
+  test("`return @session.userId` after the server batch", () => {
+    expectRefused(compile(APP(`function who() {\n    ?{\`SELECT 1\`}.run()\n    @last = "x"\n    return @session.userId\n  }\n  function go() { add("hi", who()) }`, `<button onclick=go()>g</button>`)));
+  });
+  test("a CPS helper whose server batch reads `session.userId` but returns browser data is not refused", () => {
+    const r = compile(APP(`function stamp() {\n    ?{\`INSERT INTO posts (author, body) VALUES (\${session.userId}, 'x')\`}.run()\n    @last = "x"\n    return @draft\n  }\n  function go() { add("hi", stamp()) }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).not.toContain("E-ARG-SERVER-IDENTITY");
+  });
+});
+
+// F1: an identity read used only to SELECT (a filter/find/some/every/sort callback, a
+// ternary or `if` condition) does not make the selected value an identity.
+describe("s468 fix round 1 — F1: predicates do not taint", () => {
+  const f1 = {
+    "a derived cell filtered by owner, used in `<each>`": `<rows> = [{ id: "1", owner: "o" }]\n  const <mine> = @rows.filter((r) => r.owner == @session.userId)`,
+  };
+  test("`<each in=@mine as r>` over `@rows.filter((r) => r.owner == @session.userId)`", () => {
+    const r = compile(APP(f1["a derived cell filtered by owner, used in `<each>`"], `<each in=@mine as r><button onclick=add("hi", r.id)>del</button></each>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+  test("`.find((r) => r.owner == @currentUser.id)`", () => {
+    const r = compile(APP(`<rows> = [{ id: "1", owner: "o" }]\n  function go() {\n    const m = @rows.find((r) => r.owner == @currentUser.id)\n    add("hi", m.id)\n  }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+  test("a ternary CONDITION (`@session.isAuth ? @draft : \"\"`)", () => {
+    const r = compile(APP(`function go() { add("hi", @session.isAuth ? @draft : "") }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+  test("but a ternary BRANCH holding the identity is refused", () => {
+    expectRefused(compile(APP(`function go() { add("hi", @draft ? @session.userId : "") }`, `<button onclick=go()>g</button>`)));
+  });
+  test("but `.map` (a value-producing callback) carries it", () => {
+    expectRefused(compile(APP(`<rows> = [{ id: "1" }]\n  function go() { add("hi", @rows.map((r) => @session.userId)) }`, `<button onclick=go()>g</button>`)));
+  });
+});
+
+// F2: a call of a user function writes an argument only if the callee mutates that
+// parameter; parameter flow stays positional.
+describe("s468 fix round 1 — F2: user calls write only the parameters they mutate", () => {
+  test("`label(@last, @currentUser.name)` with a pure `label` does not taint `@last`", () => {
+    const r = compile(APP(`function label(a, b) { return a + " by " + b }\n  function go() {\n    const t = label(@last, @currentUser.name)\n    @draft = t\n    add("hi", @last)\n  }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+  test("`relay(a, b) { add(\"hi\", a) }` + `relay(@last, @session.userId)` — positional", () => {
+    const r = compile(APP(`function relay(a, b) { add("hi", a) }\n  function go() { relay(@last, @session.userId) }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+  test("`relay(a, b) { add(\"hi\", b) }` + `relay(@last, @session.userId)` — refused", () => {
+    expectRefused(compile(APP(`function relay(a, b) { add("hi", b) }\n  function go() { relay(@last, @session.userId) }`, `<button onclick=go()>g</button>`)));
+  });
+  test("a callee that DOES mutate its parameter (`fill(o, v) { o.u = v }`) still taints", () => {
+    expectRefused(compile(APP(`function fill(o, v) { o.u = v }\n  function go() {\n    const o = {}\n    fill(o, @session.userId)\n    add("hi", o)\n  }`, `<button onclick=go()>g</button>`)));
+  });
+  test("a callee that passes the parameter to a mutating callee (transitive) still taints", () => {
+    expectRefused(compile(APP(`function fill(o, v) { o.u = v }\n  function outer(o, v) { fill(o, v) }\n  function go() {\n    const o = {}\n    outer(o, @session.userId)\n    add("hi", o)\n  }`, `<button onclick=go()>g</button>`)));
+  });
+});
+
 describe("s468 — NOT refused", () => {
   test("the fix: the server function reads the session itself — writes the REAL id whatever the request says", async () => {
     if (typeof globalThis.document !== "undefined") return; // native Request only (Cookie header)

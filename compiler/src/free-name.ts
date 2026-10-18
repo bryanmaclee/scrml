@@ -142,14 +142,64 @@ export function identityReadInDefault(
   return identityReadIn({ params, body: [defaultExpr] }, opts);
 }
 
+/**
+ * s468 fix round 1 — which subtrees of an owner do NOT give their value to it.
+ *
+ *   - `prune(node)`: a subtree the caller rules out (the E-ARG-SERVER-IDENTITY
+ *     check: a server statement of a CPS-split function scanned as a helper — its
+ *     reads are the server's own, and its values come back as a server result);
+ *   - `ignorePredicates`: a PREDICATE — the callback of a collection method whose
+ *     callback result only selects or orders (`filter`, `find`, `findIndex`,
+ *     `findLast`, `findLastIndex`, `some`, `every`, `sort`, `toSorted`), the
+ *     condition of a ternary, the condition of an `if`. An identity read there
+ *     decides WHICH value flows, it is not part of the value:
+ *     `@rows.filter((r) => r.owner == @session.userId)` holds rows, not the id.
+ *
+ * Pre-order walk: a node is pruned when it is a root or its parent is pruned.
+ */
+export interface IdentityPruneOpts {
+  prune?: (node: unknown) => boolean;
+  ignorePredicates?: boolean;
+}
+const PREDICATE_CALLBACK_METHODS = new Set([
+  "filter", "find", "findIndex", "findLast", "findLastIndex", "some", "every", "sort", "toSorted",
+]);
+function makePruner(opts: IdentityPruneOpts): ((n: unknown, link: { parent: unknown }) => boolean) | null {
+  if (!opts.prune && !opts.ignorePredicates) return null;
+  const pruned = new WeakSet<object>();
+  const roots = new WeakSet<object>();
+  return (n, link) => {
+    const node = n as Record<string, unknown>;
+    if (roots.has(node) || (link.parent && pruned.has(link.parent as object)) || (opts.prune && opts.prune(node))) {
+      pruned.add(node);
+      return true;
+    }
+    if (opts.ignorePredicates) {
+      if (node.kind === "call" && node.callee && typeof node.callee === "object") {
+        const c = node.callee as Record<string, unknown>;
+        const m = c.kind === "member" && typeof c.property === "string" ? c.property : null;
+        const a0 = Array.isArray(node.args) ? node.args[0] : null;
+        if (m && PREDICATE_CALLBACK_METHODS.has(m) && a0 && typeof a0 === "object") roots.add(a0 as object);
+      } else if (node.kind === "ternary" && node.condition && typeof node.condition === "object") {
+        roots.add(node.condition as object);
+      } else if (node.kind === "if-stmt" && node.condExpr && typeof node.condExpr === "object") {
+        roots.add(node.condExpr as object);
+      }
+    }
+    return false;
+  };
+}
+
 /** The identity read in `owner` (a function's params + body, or a default wrapped as one). */
 function identityReadIn(
   owner: { params?: unknown; body?: unknown },
-  opts: { currentUserAmbient: boolean; sessionProjection: boolean },
+  opts: { currentUserAmbient: boolean; sessionProjection: boolean } & IdentityPruneOpts,
 ): string | null {
   let hit: string | null = null;
+  const pruner = makePruner(opts);
   walkScoped(owner, (n, isBound, link) => {
     if (hit !== null) return;
+    if (pruner && pruner(n, link)) return;
     const r = n as Record<string, unknown>;
     if (r.kind === "ident" && r.name === "session" && !isBound("session")) {
       const parent = link.parent as Record<string, unknown> | null;
@@ -281,13 +331,15 @@ export function identityReadInDefaultDeep(
     resolveName: (name: string, at?: unknown) => IdentityNameResolution;
     /** s468 — the node the ROOT expression's free names resolve at (location-aware resolvers). */
     rootAt?: unknown;
-  },
+  } & IdentityPruneOpts,
 ): IdentityRead | null {
   const visited = new Set<string>();
   const scan = (owner: { params?: unknown; body?: unknown; _identityAt?: unknown }, via: string | null): IdentityRead | null => {
     const direct = identityReadIn(owner, {
       currentUserAmbient: opts.currentUserAmbient,
       sessionProjection: via === null ? opts.sessionProjection : opts.helperSessionProjection,
+      prune: opts.prune,
+      ignorePredicates: opts.ignorePredicates,
     });
     if (direct !== null) return { read: direct, via, unresolved: false };
     let hit: IdentityRead | null = null;
@@ -307,8 +359,10 @@ export function identityReadInDefaultDeep(
         if (sub !== null) { hit = sub; return; }
       }
     };
-    walkScoped(owner, (n, isBound) => {
+    const pruner = makePruner(opts);
+    walkScoped(owner, (n, isBound, link) => {
       if (hit !== null) return;
+      if (pruner && pruner(n, link)) return;
       const r = n as Record<string, unknown>;
       if (r.kind === "ident" && typeof r.name === "string") {
         if (!r.name.startsWith("@") && isBound(r.name)) return;

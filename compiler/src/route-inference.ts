@@ -4238,7 +4238,12 @@ const MUTATING_OBJECT_STATICS = new Set(["assign", "defineProperty", "defineProp
  * `if (!@ok) { alert("wrong"); blk = true }`: `blk` was never marked server-derived,
  * so a later batch read it from the request (`_scrml_body["blk"]`) and trusted it.
  */
-function localsWrittenBy(stmt: unknown, mutations = true, cells = false): Set<string> {
+function localsWrittenBy(
+  stmt: unknown,
+  mutations = true,
+  cells = false,
+  callArgWritten: ((call: unknown, index: number) => boolean | null) | null = null,
+): Set<string> {
   const out = new Set<string>();
   const seen = new WeakSet<object>();
   // s468 — `cells`: report the cells (`@x`) the same routes write too — the identity
@@ -4325,7 +4330,14 @@ function localsWrittenBy(stmt: unknown, mutations = true, cells = false): Set<st
           addIdsIn(args);
         }
       } else if (c.kind === "ident") {
-        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) addIdsIn(args);
+        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) {
+          // s468 fix round 1 (F2) — with a per-argument answer, a call of a function
+          // of this compilation writes an argument only when the callee mutates
+          // that parameter; `null` (an unknown callee) keeps "may write".
+          args.forEach((a: unknown, i: number) => {
+            if (!callArgWritten || callArgWritten(o, i) !== false) addIdsIn(a);
+          });
+        }
       } else {
         addIdsIn(args);
       }
@@ -4369,7 +4381,7 @@ function identityArgAnchor(flow: IdentityFlow, node: unknown, fallback: unknown)
 function identityParamLabel(p: unknown): string | null {
   const raw = typeof p === "string" ? p : (p && typeof p === "object" ? (p as any).name : null);
   if (typeof raw !== "string") return null;
-  const m = raw.trim().replace(/^\.\.\./, "").match(/^[A-Za-z_$][\w$]*/);
+  const m = raw.trim().replace(/^\.\.\.\s*/, "").match(/^[A-Za-z_$][\w$]*/);
   return m && m[0] !== "__destructured__" ? m[0] : null;
 }
 
@@ -8706,8 +8718,8 @@ export function runRI(input: RIInput): RIOutput {
         imports: (f as any).ast?.imports ?? (f as any).imports ?? [],
       })),
       resolveImport: input.resolveImport ?? null,
-      writesOf: (node) => {
-        const out = localsWrittenBy(node, true, true);
+      writesOf: (node, callArgWritten) => {
+        const out = localsWrittenBy(node, true, true, callArgWritten ?? null);
         for (const c of cellsWrittenBy(node)) out.add("@" + c);
         return out;
       },
@@ -9624,16 +9636,32 @@ export function runRI(input: RIInput): RIOutput {
       return !!r && r.boundary === "server" && r.isChannelWsHandler !== true;
     };
     // A value source computed on the server is left out (see the header): a node in
-    // a server context, and a CALL of a server function — its result is a server
-    // result, and it does not write the browser values it is passed (its arguments
-    // are serialized), so it is not a mutating writer of them either.
+    // a server context, and a CALL of a WHOLLY-server function — its result is a
+    // server result, and it does not write the browser values it is passed (its
+    // arguments are serialized), so it is not a mutating writer of them either.
+    // s468 fix round 1 (H2): a call of a CPS-SPLIT function is NOT a server result
+    // as a whole — its `return` may run in the browser half
+    // (`function who() { ?{…}.run(); @last = "x"; return @session.userId }`). It
+    // is followed like any helper, with its SERVER statements pruned (`pruneServer`
+    // below): what the server batches compute comes back as a server result.
+    const whollyServer = (fn: object): boolean => {
+      const r = routeOfFn.get(fn);
+      return !!r && r.boundary !== "client" && !r.cpsSplit;
+    };
     const serverComputed = (node: unknown): boolean => {
       if (inServerContext(node)) return true;
       const n = node as any;
       if (n && n.kind === "call" && n.callee && n.callee.kind === "ident" && typeof n.callee.name === "string") {
-        return flow.calleeFnsAt(n.callee.name, n).some((f) => serverCallee(f));
+        const fns = flow.calleeFnsAt(n.callee.name, n);
+        return fns.length > 0 && fns.every((f) => whollyServer(f));
       }
       return false;
+    };
+    // Subtrees of a scanned owner that are server statements (a CPS-split helper's
+    // server batches) give no browser value.
+    const pruneServer = (node: unknown): boolean => {
+      const n = node as any;
+      return !!n && typeof n === "object" && (serverRoots.has(n) || (typeof n.kind === "string" && SERVER_CONTEXT_KINDS.has(n.kind)));
     };
     const reported = new Set<string>();
     for (const [fn, sites] of flow.allCallSites()) {
@@ -9651,6 +9679,8 @@ export function runRI(input: RIInput): RIOutput {
           helperSessionProjection: !sessionCellOwns,
           resolveName,
           rootAt: node,
+          prune: pruneServer,
+          ignorePredicates: true,
         });
         // What reaches the callee: each argument; for a function passed by
         // reference (`xs.forEach(add)`), what the receiver and the other arguments
@@ -9682,6 +9712,8 @@ export function runRI(input: RIInput): RIOutput {
                 helperSessionProjection: !sessionCellOwns,
                 resolveName,
                 rootAt: tnode._identityRawParamOf,
+                prune: pruneServer,
+                ignorePredicates: true,
               })
             : check(tnode);
           if (hit === null) continue;

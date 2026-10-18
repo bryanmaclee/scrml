@@ -36,6 +36,7 @@ import type { IdentityNameResolution } from "./free-name.ts";
 import { parseExprToNode, parseScrmlTextToEstree } from "./expression-parser.ts";
 import { resolveProgramReferences } from "./codegen/js-async-analysis.ts";
 import { toPosix } from "./path-canonical.js";
+import { analyzedParamDefault, parsedParamDefault } from "./at-refs.ts";
 
 type AnyNode = Record<string, any>;
 
@@ -48,8 +49,13 @@ export interface IdentityFlowFile {
 export interface IdentityFlowInput {
   files: IdentityFlowFile[];
   resolveImport: ((source: string, importerPath: string) => string | null) | null;
-  /** The plain names AND cells (`@x`) a node may write (assignment, update, mutating call). */
-  writesOf: (node: unknown) => Set<string>;
+  /**
+   * The plain names AND cells (`@x`) a node may write (assignment, update, mutating
+   * call). `callArgWritten(call, i)` — supplied by this module — answers whether a
+   * call of a function of this compilation writes its argument `i` (false: the callee
+   * never mutates that parameter; null: unknown callee, keep "may write").
+   */
+  writesOf: (node: unknown, callArgWritten?: (call: unknown, index: number) => boolean | null) => Set<string>;
 }
 
 /** One call of a function the compilation declares. */
@@ -79,7 +85,7 @@ const DECL_KINDS = new Set(["let-decl", "const-decl", "lin-decl"]);
 function paramIdent(p: unknown): string | null {
   const raw = typeof p === "string" ? p : (p && typeof p === "object" ? (p as AnyNode).name : undefined);
   if (typeof raw !== "string") return null;
-  const m = raw.trim().replace(/^\.\.\./, "").match(/^[A-Za-z_$][\w$]*/);
+  const m = raw.trim().replace(/^\.\.\.\s*/, "").match(/^[A-Za-z_$][\w$]*/);
   return m ? m[0] : null;
 }
 
@@ -89,6 +95,8 @@ function paramBoundNames(p: unknown): string[] {
     const o = p as AnyNode;
     if (Array.isArray(o.boundNames) && o.boundNames.length > 0) return o.boundNames.filter((x: unknown) => typeof x === "string");
     if (o.pattern && typeof o.pattern === "object") return declaredNamesOf({ name: o.pattern });
+    // a `function` declaration's destructured parameter keeps its pattern as `name`
+    if (o.name && typeof o.name === "object") return declaredNamesOf({ name: o.name });
   }
   const one = paramIdent(p);
   return one && one !== "__destructured__" ? [one] : [];
@@ -219,7 +227,7 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
       const isWriter = WRITER_KINDS.has(n.kind) || n._bareAssign === true || rawTextOf(n) !== null;
       if (!isWriter) continue;
       let names: Set<string>;
-      try { names = input.writesOf(n); } catch { continue; }
+      try { names = input.writesOf(n, callArgWritten); } catch { continue; }
       for (const nm of names) {
         const list = m.get(nm) ?? [];
         list.push(n);
@@ -521,6 +529,76 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
     return !!p && typeof p.name === "string" && p.value === n && p.kind === undefined;
   };
 
+  // ---- per-parameter mutation summary (s468 fix round 1, F2) --------------------
+  //
+  // A call `f(a, b)` of a function of this compilation writes argument `i` only when
+  // `f` MUTATES its parameter `i` — a member write (`p.k = v`), a mutating method
+  // (`p.push(v)`), `Object.assign(p, …)`, or passing it to a call that mutates it
+  // (followed transitively, positionally). Rebinding the parameter (`p = v`) changes
+  // only the callee's local. `label(@last, @currentUser.name)` with
+  // `function label(a, b) { return a + " by " + b }` writes neither argument.
+  // One reader of "may write": the injected `writesOf` (route-inference's
+  // `localsWrittenBy`), run over the callee's own writers. A cycle (recursion) is
+  // assumed to mutate (fail closed).
+
+  const mutationMemo = new Map<string, boolean>();
+  const paramMutated = (fn: AnyNode, index: number): boolean => {
+    const ps = paramsOf(fn);
+    let pi = index;
+    if (pi >= ps.length) {
+      const last = ps.length - 1;
+      if (last >= 0 && isRestParam(ps[last])) pi = last; else return false;
+    }
+    const key = `${idOf(fn)}:${pi}`;
+    const hit = mutationMemo.get(key);
+    if (hit !== undefined) return hit;
+    mutationMemo.set(key, true); // in progress: a cycle reads as "mutates"
+    const names = paramBoundNames(ps[pi]);
+    let result = false;
+    const seen = new WeakSet<object>();
+    const walk = (x: unknown): void => {
+      if (result || !x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const y of x) walk(y); return; }
+      const n = x as AnyNode;
+      const isWriter = WRITER_KINDS.has(n.kind) || n._bareAssign === true || rawTextOf(n) !== null;
+      if (isWriter) {
+        let written: Set<string> | null = null;
+        try { written = input.writesOf(n, callArgWritten); } catch { written = null; }
+        for (const nm of names) {
+          if (written !== null && !written.has(nm)) continue;
+          // rebinding the parameter itself is not a mutation of what the caller passed
+          if (n.kind === "assign" && n.target && n.target.kind === "ident" && n.target.name === nm) continue;
+          if ((n.kind === "tilde-decl" || n._bareAssign === true) && n.name === nm) continue;
+          const sc = scopeOf(nm, n);
+          if (sc.kind === "param" && sc.owner === fn && sc.index === pi) { result = true; return; }
+        }
+      }
+      for (const k of Object.keys(n)) if (k !== "span") walk(n[k]);
+    };
+    walk(bodyOf(fn));
+    mutationMemo.set(key, result);
+    return result;
+  };
+
+  /** Does this call write its argument `index`? null: not a call of a function of this compilation. */
+  function callArgWritten(call: unknown, index: number): boolean | null {
+    const c = call as AnyNode;
+    if (!c || c.kind !== "call" || !c.callee || c.callee.kind !== "ident" || typeof c.callee.name !== "string") return null;
+    const fns = calleeFnsAt(c.callee.name, c);
+    if (fns.length === 0) return null;
+    const args: AnyNode[] = Array.isArray(c.args) ? c.args : [];
+    const spreadAt = args.findIndex((a) => a && a.kind === "spread");
+    for (const fn of fns) {
+      if (spreadAt >= 0 && index >= spreadAt) {
+        // a spread passes an unknown number of values from here on
+        const n = Math.max(paramsOf(fn).length, index + 1);
+        for (let i = spreadAt; i < n; i++) if (paramMutated(fn, i)) return true;
+      } else if (paramMutated(fn, index)) return true;
+    }
+    return false;
+  }
+
   // ---- parameter sources -------------------------------------------------------
 
   /** Sources of a lambda's parameters from where the lambda is passed. */
@@ -622,8 +700,18 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
   const paramSources = (owner: AnyNode, index: number): { owners: LocatedOwner[]; unresolved: string | null } => {
     const out: LocatedOwner[] = [];
     const p = paramsOf(owner)[index] as AnyNode | undefined;
-    const def = p && typeof p === "object" ? (p.defaultValue ?? p.defaultExpr ?? null) : null;
-    if (def && typeof def === "object") out.push({ params: paramsOf(owner), body: [def], _identityAt: owner });
+    // The default: a lambda parameter holds it parsed (`defaultValue` ExprNode); a
+    // `function` declaration's parameter holds SOURCE TEXT — read it from the one
+    // parsed tree the §7.3.2 default checks use (at-refs.ts; s468 fix round 1, H1:
+    // `function go(q = @session.userId) { add("hi", q) }` + `go()` forged). Its free
+    // names resolve where the function is declared (not among its body's locals).
+    let def: unknown = p && typeof p === "object" ? (p.defaultValue ?? p.defaultExpr ?? null) : null;
+    if (typeof def === "string") {
+      const fp = fileOf(owner) ?? "";
+      const a = analyzedParamDefault(p, fp);
+      def = a && "tree" in a ? a.tree : parsedParamDefault(p, fp);
+    }
+    if (def && typeof def === "object") out.push({ params: paramsOf(owner), body: [def], _identityAt: parentOf(owner) ?? owner });
     if (owner.kind === "function-decl") {
       const r = callArgOwners(owner, index);
       return { owners: [...out, ...r.owners], unresolved: r.unresolved };
@@ -655,6 +743,26 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
     const keep = (o: unknown): boolean => !opts.skip || !opts.skip(o && typeof o === "object" && (o as AnyNode)._identityAt ? (o as AnyNode)._identityAt : o);
     const finish = (r: { owners: LocatedOwner[]; serverCell?: string | null; unresolved?: string | null; key: string }): IdentityNameResolution =>
       ({ ...r, owners: r.owners.filter(keep) });
+    // `arguments` inside a `function`: every argument of every call of it (s468 fix
+    // round 1, H4 — an unbound name would otherwise read as "no binding": fail open).
+    if (sc.kind === "file" && name === "arguments" && loc) {
+      let fn: AnyNode | null = null;
+      for (let n: AnyNode | null = loc; n; n = parentOf(n)) if (n.kind === "function-decl") { fn = n; break; }
+      if (fn) {
+        const owners: LocatedOwner[] = [];
+        let unresolved: string | null = null;
+        for (const site of callSitesOf(fn)) {
+          if (site.byRef) {
+            if (isAttributeValueUse(site.node)) continue;
+            unresolved = unresolved ?? `\`${fn.name ?? "the function"}\` is passed as a value, so what \`arguments\` holds is not followed`;
+            continue;
+          }
+          if (site.args === null) owners.push(located(site.node));
+          else for (const a of site.args) if (a && typeof a === "object") owners.push(located(a));
+        }
+        return finish({ owners, unresolved, key: `arguments:${idOf(fn)}` });
+      }
+    }
     if (sc.kind === "param") {
       const r = paramSources(sc.owner, sc.index);
       return finish({ owners: r.owners, unresolved: r.unresolved, key: `param:${idOf(sc.owner)}:${sc.index}` });
