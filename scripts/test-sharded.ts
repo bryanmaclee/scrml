@@ -28,9 +28,10 @@
 //      seconds-per-byte (pure file size when the cache is empty).
 //   3. Runs `bun test <files>` per shard concurrently from the repo root (so bunfig.toml's preload — the S448
 //      per-process temp root — applies to every shard; each shard therefore gets its OWN temp root).
-//   4. Collects output. Live: one line per `(fail)` and one line per finished shard. At the end: each failing
-//      shard's output (with the failure context bun printed), a per-shard pass/fail/skip table and the overall
-//      totals, which equal what the single-process run reports for the same file set.
+//   4. Collects output. Live: one line per `(fail)` and one line per finished shard. At the end: for each failing
+//      shard, the file sections that contain a failure (error + stack + `(fail)` line) with the shard's full
+//      output kept on disk (path printed; runs older than a day are pruned), then a per-shard pass/fail/skip
+//      table and the overall totals, which equal what the single-process run reports for the same file set.
 //   5. Records each file's measured duration (bun's junit reporter, per-file `time`) into the timing cache.
 //
 // TIMING CACHE. `${XDG_CACHE_HOME:-~/.cache}/scrml/test-timings.json` (override: $SCRML_TEST_TIMINGS). It lives
@@ -45,7 +46,7 @@
 
 import { spawn } from "bun";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "fs";
-import { availableParallelism, cpus, homedir, tmpdir } from "os";
+import { availableParallelism, cpus, homedir } from "os";
 import { dirname, join, relative, resolve, sep } from "path";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -277,6 +278,39 @@ function parseCounts(lines: string[]): Counts | null {
   return sawSummary && lines.some((l) => /^\s*\d+ pass$/.test(l)) ? c : null;
 }
 
+// bun prints, per file that produced output, a `<path>:` header followed by that file's console output and its
+// failures. The failure report is every file section that contains a `(fail)` line (its last REPORT_TAIL lines —
+// the error and stack sit just above the `(fail)` line), plus bun's closing summary. A shard that died without a
+// `(fail)` line (a crash, an error outside any test) gets its last REPORT_TAIL lines instead.
+const REPORT_TAIL = 150;
+const FILE_HEADER = /^\S.*(\.test|_test|\.spec|_spec)\.(js|jsx|ts|tsx|mjs|cjs|mts|cts):$/;
+const SUMMARY_LINE = /^\s*\d+ (pass|fail|skip|todo|expect\(\) calls?)$|^Ran \d+ tests? across|^Bailed out after/;
+
+function failureReport(output: string[]): string[] {
+  const sections: string[][] = [];
+  let cur: string[] = [];
+  for (const line of output) {
+    if (/^bun test v\d/.test(line)) continue;
+    if (FILE_HEADER.test(line)) {
+      sections.push(cur);
+      cur = [];
+    }
+    cur.push(line);
+  }
+  sections.push(cur);
+  const out: string[] = [];
+  const failing = sections.filter((s) => s.some((l) => l.startsWith("(fail) ")));
+  const clip = (lines: string[]) =>
+    lines.length > REPORT_TAIL ? [`  … ${lines.length - REPORT_TAIL} earlier line(s) in the full log …`, ...lines.slice(-REPORT_TAIL)] : lines;
+  if (failing.length === 0) return clip(output.filter((l) => !/^bun test v\d/.test(l)));
+  for (const s of failing) {
+    const body = s.filter((l) => !SUMMARY_LINE.test(l));
+    out.push(...(FILE_HEADER.test(body[0] ?? "") ? [body[0], ...clip(body.slice(1))] : clip(body)));
+  }
+  out.push("", ...output.filter((l) => SUMMARY_LINE.test(l)));
+  return out;
+}
+
 async function pump(
   stream: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
@@ -312,7 +346,19 @@ async function main(): Promise<void> {
     return;
   }
 
-  const workDir = mkdtempSync(join(tmpdir(), "scrml-test-sharded-"));
+  // Per-run scratch (junit reports; the full output of a failing shard). Under the user cache dir, not
+  // $TMPDIR — a failing run keeps its logs for reading, and /tmp must not accumulate them (S448). Runs older
+  // than a day are pruned here.
+  const runsDir = join(dirname(timingsPath()), "test-sharded-runs");
+  mkdirSync(runsDir, { recursive: true });
+  for (const name of readdirSync(runsDir)) {
+    try {
+      if (Date.now() - statSync(join(runsDir, name)).mtimeMs > 24 * 60 * 60 * 1000) rmSync(join(runsDir, name), { recursive: true, force: true });
+    } catch {
+      /* raced with another run's prune */
+    }
+  }
+  const workDir = mkdtempSync(join(runsDir, `${process.pid}-`));
   const started = Date.now();
   console.log(
     `test-sharded: ${files.length} files in ${shards.length} shard(s)` +
@@ -382,16 +428,16 @@ async function main(): Promise<void> {
       return { shard, exitCode, output, counts, failLines, killed, seconds };
     }),
   );
-  rmSync(workDir, { recursive: true, force: true });
-
   // ----- report -----
   const failed = results.filter((r) => !r.killed && r.exitCode !== 0);
   for (const r of failed) {
-    console.log(`\n===== shard ${r.shard.index} output (exit ${r.exitCode}) =====`);
-    // bun prints only failures, file headers of failing files and the summary in non-TTY mode, so the
-    // shard's output IS the failure report. Drop the version banner.
-    for (const line of r.output) if (!/^bun test v\d/.test(line)) console.log(line);
+    // Keep the shard's full output on disk; print only the part that explains the failure.
+    const log = join(workDir, `shard-${r.shard.index}.log`);
+    writeFileSync(log, r.output.join("\n") + "\n");
+    console.log(`\n===== shard ${r.shard.index} (exit ${r.exitCode}) — failure report; full output: ${log} =====`);
+    for (const line of failureReport(r.output)) console.log(line);
   }
+  if (failed.length === 0) rmSync(workDir, { recursive: true, force: true });
 
   // Integrity: every shard that ran to completion must report exactly the files it was given. A shortfall
   // means a file was silently not run — that would make the totals lie.
