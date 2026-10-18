@@ -16195,7 +16195,8 @@ function annotateNodes(
     // the parsers that build it (a re-parsed interpolation starts at 1:1).
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
-      if (renderTimeInBoundary && !c.inFunction) { boundaryHandlesCall(c, span); return; }
+      // S469 — a failable function read as a VALUE is not a call any boundary can test.
+      if (renderTimeInBoundary && !c.inFunction && c.refKind !== "fn-value") { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
@@ -16345,6 +16346,21 @@ function annotateNodes(
   ): void {
     const calleeName = c.calleeName;
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "fn-value") {
+      // S469 (§19.4.3) — `lift check` (or any operand reading `check` as a value) hands the
+      // failable function to a binding whose calls impl#1 does not follow, so a call through it
+      // would go unhandled. Refused (fails closed), whatever the callee class.
+      const via = c.via ? `'${c.via}' (an alias of failable function '${calleeName}')` : `failable function '${calleeName}'`;
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: ${via} is lifted as a VALUE. impl#1 does not follow a failable function through ` +
+        `the binding a value-form 'if' / 'for' produces, so a call through it would not be handled. ` +
+        `Lift the handled RESULT instead ('lift ${calleeName}(…) !{ | .Variant :> … }'), or call ` +
+        `'${calleeName}' directly where its result is handled.`,
+        span,
+      ));
+      return;
+    }
     if (inDefer) {
       errors.push(new TSError(
         "E-DEFER-UNHANDLED-FAILABLE",
