@@ -14,9 +14,29 @@ if [ "$BRANCH" = "main" ]; then
 fi
 
 echo "Running tests (unit + integration + conformance, excluding browser)..."
-if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
-  echo "✗ Tests failed. Fix before committing." >&2
-  exit 1
+# S468 (s468-hook-sharding): the SAME file set, split across parallel `bun test` processes by
+# scripts/test-sharded.ts (balanced by measured per-file time; --bail stops every shard on the first
+# failure; totals equal the single-process run). ~11-14 min -> ~2-3 min on the 32-core box.
+# Every shard is BOUNDED: past its timeout or its RSS ceiling it is killed and the commit FAILS,
+# naming the shard and its files — the hook cannot hang or eat the machine. Only the shard's own
+# process group is ever signalled.
+#   SCRML_HOOK_SHARDS=1   the original single-process command, exactly as before
+#   SCRML_HOOK_SHARDS=N   N shards (default min(cores/2, 8, (MemAvailable - reserve) / ceiling))
+#   SCRML_HOOK_SHARD_TIMEOUT_S (1200) · SCRML_HOOK_SHARD_MEM_MB (3072) · SCRML_HOOK_MEM_RESERVE_MB (2048)
+# Machine-wide: every shard of every concurrent hook holds a flock'd slot (~/.cache/scrml/hook-slots/,
+# min(cores/2, MemTotal*0.8/ceiling) slots, SCRML_HOOK_SLOTS); none free -> the shard waits, bounded
+# by SCRML_HOOK_SLOT_WAIT_S (1800), then FAILS. Ten agents committing at once cannot oversubscribe the box.
+# A branch cut before the runner existed has no scripts/test-sharded.ts and runs single-process.
+if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
+  if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
+    echo "✗ Tests failed. Fix before committing." >&2
+    exit 1
+  fi
+else
+  if ! bun scripts/test-sharded.ts --bail compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js 2>&1; then
+    echo "✗ Tests failed. Fix before committing. (SCRML_HOOK_SHARDS=1 reruns single-process.)" >&2
+    exit 1
+  fi
 fi
 
 # S462 md phase 1 — compiler/runtime/stdlib/md.js is GENERATED from stdlib/md/index.scrml
