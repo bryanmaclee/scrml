@@ -1,0 +1,22 @@
+// §66 twin of server-db/sql-delete-reflects-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type Count:struct = { n: int }
+    let <remaining:int=0/>
+    function removeTask(id: int) {
+        ?{`DELETE FROM tasks WHERE id = ${id}`}.run() !{ _ :> { return } }
+    }
+    function countTasks() -> int {
+        const c: Count = ?{`SELECT COUNT(*) AS n FROM tasks`}.get() !{ _ :> { return -1 } }
+        return c.n
+    }
+    function onDelete() {
+        removeTask(2) !{ .Transport(t) :> return }
+    }
+    function onCount() {
+        @remaining = countTasks() !{ .Transport(t) :> return }
+    }
+    <main>
+        <button id="del" onclick=onDelete()>Delete task 2</button>
+        <button id="count" onclick=onCount()>Count</button>
+    </main>
+</program>

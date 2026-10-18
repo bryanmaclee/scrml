@@ -68,10 +68,11 @@ describe("§66.19.1 counter — a missing grant is a Core-level fact", () => {
       const diags = mods.check.checkCore(bad);
       expect(diags.length).toBe(1);
       expect(diags[0]).toStartWith("C2: a write names sym");
-      // …and the printer has no field to target: it emits a visibly dangling
-      // reference instead of a `set` on the field.
-      const js = mods.print.printProgram(bad, "bad.client.js", "scrml-runtime.js").js;
-      expect(js).toContain(`danglingWriteCapability$${f.sym.id}`);
+      // …and the printer prints NOTHING (s468 U1c fix round 1, F3: a printer prints
+      // only a Core checkCore accepts — it used to emit a visibly dangling reference)
+      const out = mods.print.printProgram(bad, "bad.client.js", "scrml-runtime.js");
+      expect(out.js).toBe("");
+      expect(out.refused.join("\n")).toContain("C2: a write names sym");
     }
   });
 

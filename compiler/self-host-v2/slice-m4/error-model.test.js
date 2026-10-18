@@ -355,9 +355,14 @@ describe("§19.8 — `SqlError` and the R11 rule (codes + Core; the printer refu
   test("the lowered implicit propagation: an Attempt over the query, one re-fail arm per SqlError variant", () => {
     const r = run(PDB(`    function f()! SqlError {\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`));
     expect(r.diags).toEqual([]);
-    const at = r.core.server[0].body.stmts[0];
+    // s468 (U1c): the query is a Suspend's `on`; the Attempt inspects its settled outcome
+    const sus = r.core.server[0].body.stmts[0];
+    expect(v(sus)).toBe("Suspend");
+    expect(v(sus.data.on)).toBe("Query");
+    const at = sus.data.then.stmts[0];
     expect(v(at)).toBe("Attempt");
-    expect(v(at.data.call)).toBe("FSql");
+    expect(v(at.data.call)).toBe("FSettled");
+    expect(at.data.call.data.outcome.id).toBe(sus.data.bind.id);
     expect(at.data.arms.map((a) => v(a.body.stmts[0]))).toEqual(["Fail", "Fail", "Fail"]);
     expect(r.core.sqlError.hint).toBe("SqlError");
     expect(mods.check.checkCore(r.core)).toEqual([]);
