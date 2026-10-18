@@ -33,6 +33,25 @@ const L = (decl, imp = `import { check, AuthErr } from "./lib.scrml"`) => `<msg>
 <p id="out">\${@msg}</p>
 `;
 const M = " { .Denied :> false  _ :> true }";
+const STAR = `\${
+    export * from "./lib.scrml"
+}
+`;
+const STAR2 = `\${
+    export * from "./mid.scrml"
+}
+`;
+const RM = (p) => `match check("${p}") { .Denied :> "rejected"  _ :> "LOGGED IN" }`;
+const EACH_CALL = `<msg> = "init"
+<xs> = [1]
+\${
+    import { check, AuthErr } from "./lib.scrml"
+    function say(m) { @msg = m }
+}
+<each in=@xs as x><button id="wrong" onclick=say(${RM("wrong")})>go</button></each>
+<each in=@xs as x><button id="right" onclick=say(${RM("secret")})>go</button></each>
+<p id="out">\${@msg}</p>
+`;
 const X = { "lib.scrml": LIB };
 export default [
   ["imported decl", L("const ok = check(p)"), X],
@@ -45,4 +64,13 @@ export default [
   ["imported match enum not imported", L("const ok = match check(p)" + M, `import { check } from "./lib.scrml"`), X],
   ["imported guard", L("const ok = check(p) !{ .Denied :> false }"), X],
   ["imported guard enum not imported", L("const ok = check(p) !{ _ :> false }", `import { check } from "./lib.scrml"`), X],
+  // S469 fix round 2 (review H3): `export *` re-exports lost failability (api.js chased named
+  // re-exports only) — `const ok = check(p)` through `export *` LOGGED IN.
+  ["export * decl", L("const ok = check(p)", `import { check, AuthErr } from "./mid.scrml"`), { ...X, "mid.scrml": STAR }],
+  ["export * match", L("const ok = match check(p)" + M, `import { check, AuthErr } from "./mid.scrml"`), { ...X, "mid.scrml": STAR }],
+  ["export * double", L("const ok = check(p)", `import { check, AuthErr } from "./top.scrml"`), { ...X, "mid.scrml": STAR, "top.scrml": STAR2 }],
+  ["export * renamed", L("const ok = auth(p)", `import { check as auth, AuthErr } from "./mid.scrml"`), { ...X, "mid.scrml": STAR }],
+  ["export * guard", L("const ok = check(p) !{ .Denied :> false }", `import { check, AuthErr } from "./mid.scrml"`), { ...X, "mid.scrml": STAR }],
+  // S469 fix round 2 (review H2): an imported `check` matched in a call-form handler argument in a row.
+  ["imported call-form arg in each", EACH_CALL, X],
 ];

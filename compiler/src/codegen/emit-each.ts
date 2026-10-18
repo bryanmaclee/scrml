@@ -2897,8 +2897,26 @@ function serializeCallArgs(callRef: any, iterVarName: string): string {
  */
 function serializeCallArgsLowered(callRef: any, iterVarName: string): string {
   const args: any[] = Array.isArray(callRef?.args) ? callRef.args : [];
+  // S469 fix round 2 (H2) — an argument holding a `match` TS stamped as a match on a FAILABLE
+  // result (`onclick=say(match check(p) { … })` in a row) is lowered from a clone of its own
+  // node: the text lowering re-reads it without the stamp and compared the error object as a
+  // plain value (a wrong password logged in). Other arguments keep the text lowering.
+  const nodes: any[] | null = Array.isArray(callRef?.argExprNodes) && callRef.argExprNodes.length === args.length
+    ? callRef.argExprNodes : null;
   return args
-    .map((a) => lowerEachExpr(String(a ?? ""), iterVarName))
+    .map((a, i) => {
+      const n = nodes ? nodes[i] : null;
+      if (n && typeof n === "object" && hasFailableMatchStamp(n)) {
+        const clone = structuredClone(n);
+        rewriteEachScopeInExprNode(clone, iterVarName);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { emitExprField } = require("./emit-expr.ts") as {
+          emitExprField: (n: any, fb: string, c: Record<string, unknown>) => string;
+        };
+        return emitExprField(clone, String(a ?? ""), { mode: "client" });
+      }
+      return lowerEachExpr(String(a ?? ""), iterVarName);
+    })
     .join(", ");
 }
 

@@ -13,7 +13,7 @@ error object as a plain value (or reads a plain enum value as `.Ok`), the wrong 
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 226 shapes. Data only; each family declares its `SIDE`. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 260 shapes (S469 fix round 2: n11 grew to 56 — the call-form argument and nested containers; n12 to 16 — `export *`). Data only; each family declares its `SIDE`. |
 | `pack.js` | compile → client: happy-dom, click `#wrong` / `#right`, read `#out`; server: POST the `login` route → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that log in on a wrong password today, each naming its gap), `UNJUDGED`, `BY_DESIGN_LOGS_IN` |
 | `failable-probe-pack.test.js` | the gate: one test per shape |
@@ -31,7 +31,7 @@ the right one: fail closed, a correctness defect or a probe whose callee is plai
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 226 shapes; a list entry names no shape.
+- the corpus stops holding exactly 260 shapes; a list entry names no shape.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -69,4 +69,4 @@ TMPDIR=$HOME/.cache/<scratch> bun test compiler/tests/integration/security-faila
 TMPDIR=$HOME/.cache/<scratch> bun compiler/tests/integration/security-failable-pack/classify.js [--json] [filter]
 ```
 
-~15 s for 226 shapes on a loaded dev machine, so it rides the pre-commit `integration` set.
+~15 s for 260 shapes on a loaded dev machine, so it rides the pre-commit `integration` set.

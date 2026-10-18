@@ -126,6 +126,29 @@ describe("an unhandled call of an imported `!` function is E-ERROR-002", () => {
     expect(codesOf("const ok = check(p)", `import { check, AuthErr } from "./mid.scrml"`, { "mid.scrml": mid })).toContain("E-ERROR-002");
   });
 
+  // S469 fix round 2 (H3) — `export *` re-exports were not followed.
+  const STAR = `\${\n    export * from "./lib.scrml"\n}\n`;
+  const STAR2 = `\${\n    export * from "./mid.scrml"\n}\n`;
+  test("through `export *`", () => {
+    expect(codesOf("const ok = check(p)", `import { check, AuthErr } from "./mid.scrml"`, { "mid.scrml": STAR })).toContain("E-ERROR-002");
+  });
+  test("through a double `export *`", () => {
+    expect(codesOf("const ok = check(p)", `import { check, AuthErr } from "./top.scrml"`, { "mid.scrml": STAR, "top.scrml": STAR2 })).toContain("E-ERROR-002");
+  });
+  test("renamed import through `export *`", () => {
+    expect(codesOf("const ok = auth(p)", `import { check as auth, AuthErr } from "./mid.scrml"`, { "mid.scrml": STAR })).toContain("E-ERROR-002");
+  });
+  test("`match check(p)` through `export *` rejects a wrong password (or is refused)", async () => {
+    const files = { "lib.scrml": LIB, "mid.scrml": STAR, "app.scrml": APP("const ok = match check(p) { .Denied :> false  _ :> true }", `import { check, AuthErr } from "./mid.scrml"`) };
+    const r = compileProject(files);
+    if (r.codes.length > 0) { expect(r.codes).toContain("E-ERROR-002"); return; }
+    const page = await boot(files);
+    await page.click("#wrong");
+    expect(page.text("#out")).toBe("rejected");
+    await page.click("#right");
+    expect(page.text("#out")).toBe("LOGGED IN");
+  });
+
   test("the message names the imported function", () => {
     const r = compileProject({ "lib.scrml": LIB, "app.scrml": APP("const ok = check(p)") });
     expect(r.messages.join("\n")).toMatch(/'check'/);

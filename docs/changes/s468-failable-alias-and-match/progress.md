@@ -266,3 +266,16 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
 - OPEN after this round: g-failable-function-used-as-value-unchecked-s468 (HIGH, 21 pack shapes, RULING OWED — options in
   "RULING REQUEST" above); g-errorboundary-runtime-does-not-catch-returned-error-value-s467 (render-time call in a boundary,
   incl. through an import — separate gap/PR).
+
+## 2026-10-18 — FIX ROUND 2 start (re-review of 5092a14fa: LAND-WITH-FOLLOWUPS; F4 ruled S469 "Split + audit")
+- Same worktree/branch (s469-failable-r1 at 5092a14fa). Items: F4 (SPEC expressive rule + impl#1 refusal, new code),
+  H1 (cycle reproducer, closed by the F4 refusal), H2, H3, M1 (file only), gap markers, L1 note.
+- H3 (`export *` lost failability) — locus api.js `resolveFnThroughReExport`: chased NAMED re-exports only. HELD. Fix: read
+  the binding with the module resolver's one reader `resolveExportedBinding` (named / renamed / `export *` by ES rules /
+  cycles). Unit tests +4 (bite: 4 fail on HEAD's api.js). The `match` through `export *` is REFUSED (fail closed): the error
+  enum does not arrive through `export *` on the TYPE side, so the import's error type is unreadable in the importer.
+- H2 (call-form handler argument in a row) — locus emit-each.ts `serializeCallArgsLowered` (text lowering of
+  `callRef.args`). HELD. Fix: an argument whose node carries the failable-match stamp is lowered from a clone of
+  `argExprNodes[i]` (rewriteEachScopeInExprNode + emitExprField). Pack n11 += call-form arg + 3 nested containers
+  (56 shapes); bite on HEAD's emit-each: 4 FAIL (each, each in each, if in each, each in component). n12 += 5 `export *`
+  shapes + imported call-form in a row (16). Pack 226 -> 260 shapes; 0 new FAIL.

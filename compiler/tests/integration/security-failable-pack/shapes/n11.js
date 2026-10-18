@@ -20,6 +20,7 @@ const PAGE = (wrong, right, wrap) => `type AuthErr:enum = { Denied }
         if (p != "secret") fail AuthErr::Denied
         return true
     }
+    function say(m) { @msg = m }
 }
 ${wrap(`<button id="wrong" ${wrong}>go</button>`, "W")}
 ${wrap(`<button id="right" ${right}>go</button>`, "R")}
@@ -34,12 +35,18 @@ const FORMS = [
   ["arrow block", (p) => `onclick=\${() => { @msg = ${M(p)} }}`],
   ["arrow expr", (p) => `onclick=\${() => @msg = ${M(p)}}`],
   ["const in braced", (p) => `onclick={\n    const r = ${M(p)}\n    @msg = r\n}`],
+  // S469 fix round 2 (review H2): a call-form handler whose ARGUMENT is the match.
+  ["call-form arg", (p) => `onclick=say(${M(p)})`],
 ];
 const WRAPS = [
   ["top", (b) => b],
   ["each", (b) => `<each in=@xs as x>${b}</each>`],
   ["component", (b, k) => `\${ const Wc${k} = <div>${b}</div> }\n<Wc${k}/>`],
   ["if", (b) => `<div if=\${@msg != "zzz"}>${b}</div>`],
+  // S469 fix round 2 (review H2): nested containers.
+  ["each in each", (b) => `<each in=@xs as x><each in=@xs as y>${b}</each></each>`],
+  ["if in each", (b) => `<each in=@xs as x><div if=\${@msg != "zzz"}>${b}</div></each>`],
+  ["each in component", (b, k) => `\${ const We${k} = <div><each in=@xs as x>${b}</each></div> }\n<We${k}/>`],
 ];
 
 const shapes = [];
