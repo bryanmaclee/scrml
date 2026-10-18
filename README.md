@@ -209,7 +209,7 @@ You wrote a schema, three database functions, some state, three handlers and a s
 
 ## Where the language is going
 
-> **Specified, not yet in the shipping compiler.** Everything on the *specified* side below is normative in [`compiler/SPEC.md` §66](compiler/SPEC.md) or in a recorded design ruling, and **none of it compiles today.** It is being built in the bootstrap compiler, [`compiler/self-host-v2/`](compiler/self-host-v2/), which is written in scrml and is still early. The *today* side of each pair is a gated file that compiles now. When the bootstrap is done, the *today* forms go through a deprecation window: they keep compiling, with a warning that names the new form (SPEC §66.21).
+> **Specified, not yet in the shipping compiler.** Everything on the *specified* side below is normative in [`compiler/SPEC.md` §66](compiler/SPEC.md) or in a recorded design ruling, and **none of it compiles on the shipping compiler.** It is being built in the bootstrap compiler, [`compiler/self-host-v2/`](compiler/self-host-v2/), which is written in scrml and is still early; part of it already compiles there ([try it](#write-it-today-the-bootstrap-compiler)). The *today* side of each pair is a gated file that compiles now. When the bootstrap is done, the *today* forms go through a deprecation window: they keep compiling, with a warning that names the new form (SPEC §66.21).
 
 The upgrade in one sentence: a declaration becomes a thing in the tree with typed attributes, a `renders` and instances, and **data is locked unless its type grants the write.**
 
@@ -338,6 +338,19 @@ const <total> = @count + "1"
 ```
 
 Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two numbers or two strings"*, *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*, and *"a `T | not` operand must be narrowed before `+`, arithmetic, comparison, or use in a template."* A `T | not` value is not a `T` until it has been narrowed, for every type. Both `+` lines above become errors wherever the types are provable. `if=@count` on a number goes the same way: a condition takes a boolean or a presence test.
+
+### Write it today: the bootstrap compiler
+
+The bootstrap compiler speaks the **ruled** language above, not the shipping compiler's. It compiles §66 declarations (`let` / locked / derived), tapes with explicit grants, `single` engines, components with `renders`, and the operator and condition rules. It refuses an ungranted tape write with `E-WRITE-NOT-GRANTED`. A form it does not build yet is refused with `E-BOOTSTRAP-UNSUPPORTED`; it is never silently accepted. Not in yet: `match` on a plain value, comma arm lists, loops, and most method calls. Run it from a clone:
+
+```bash
+bun run boot:compile app.scrml              # → dist/app/ : index.html, program.client.js, scrml-runtime.js
+bun run boot:compile app.scrml -o out/      # choose the output directory
+bun run boot:dev app.scrml                  # compile, serve on http://127.0.0.1:3000/, recompile + reload on save
+bun scripts/scrml-boot.ts --help            # the same commands, called directly (scrml-boot)
+```
+
+Diagnostics print as `error [CODE]: message` with `--> file:line:col`, and the exit status is 1 on any error. `--format line` prints `file:line:col: error [CODE]: message`, one line each, for an editor's quickfix list. The page loads ES modules, so open it over http (`boot:dev`), not as a `file://`. The first run builds the bootstrap with the shipping compiler (~10 s), and later runs load it from a cache in `~/.cache/scrml/boot-bundle/` (~0.2 s). The cache rebuilds whenever `compiler/self-host-v2/` or `compiler/src/` changes. The first acceptance programs are in [`compiler/self-host-v2/slice-m4/src/acceptance/`](compiler/self-host-v2/slice-m4/src/acceptance/).
 
 ---
 
