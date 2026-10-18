@@ -62,3 +62,21 @@ message string avoids `match <subj> {` — impl#1 rewrites that shape even insid
    bootstrap — today it fails loudly (E-PARSE-UNCLOSED cascade, no artifact). Comment corrected; a
    PIN test in arms-union-s469.test.js breaks when markup arm bodies land, forcing the boundary rule
    to learn markup depth.
+
+## Review r2 (LAND-W-F/U) — addressed
+
+1. **HIGH — the same escape through CODE-position types** (pre-existing on main): `parseType`
+   wrapped `T[…] | not` in TMaybe for return types, parameters, local annotations and struct fields.
+   Fix: ONE shared check, `seqUnionCheck` (parse.scrml), used by both `parseOpenerType` and the
+   code-position `maybeType`; `not | T` (either order) now parses in code positions too.
+   **Deviation from the brief, deliberate:** the check refuses a GRANTED tape in a union, not every
+   tape. A blanket refusal broke 5 existing slice-m2 tests (`int[] | not` params / locals / a struct
+   field; `<each in=>` over `S | not`) — and §17.7.2 explicitly admits `S | not`. An ungranted
+   `S | not` has nothing to escape; the one open path for it (`let` → `replace`) is closed in
+   analyze: the E-GRANT-LET-ON-SEQUENCE check now sees through `| not` (`seqElem(unMaybe(ty))`).
+   Without `let` it is locked (whole write and `.shift()` → E-WRITE-NOT-GRANTED). Tests: repro A
+   (return type), repro B (struct field), parameter, local, `not | T[…]`, ungranted controls.
+   Residual (not in this PR): a struct field written `let xs: int[]` is not E-GRANT-LET-ON-SEQUENCE
+   (the check exists only for cells) — pre-existing, also for plain `T[]`.
+2. **LOW — E-DERIVED-WRITE advice on a tape-typed derived cell** no longer says "declare it `let`";
+   it names E-GRANT-LET-ON-SEQUENCE and `T[replace]`. Non-sequence derived cells keep the advice.

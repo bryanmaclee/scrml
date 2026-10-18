@@ -277,7 +277,7 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     const refused = (src) => {
       const r = run(src);
       expect(r.core == null).toBe(true);
-      const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("a sequence in a union type"));
+      const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"));
       expect(d).toBeDefined();
       return r;
     };
@@ -299,13 +299,60 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       const lib = `export <box xs:int[append] | not=[]/>\nrenders <p>x</p>\n`;
       const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml"\n    <main><box/></main>\n</program>\n` }]);
       expect(r.core == null).toBe(true);
-      expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("a sequence in a union type"))).toBe(true);
+      expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"))).toBe(true);
     });
     test("a tape alone is unaffected: the granted append compiles, an ungranted shift is E-WRITE-NOT-GRANTED", () => {
       const ok = `<program>\n${E}\n    <audit:Entry[free, append]=[]/>\n    function add() { @audit.push({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
       expect(codes(ok)).toEqual([]);
       expect(codes(ok.replace("function add()", "function bad() { @audit.shift(); }\n    function add()"))).toEqual(["E-WRITE-NOT-GRANTED"]);
     });
+    // review r2 (HIGH, pre-existing on main): the CODE-position type parser wrapped a
+    // tape in `| not` too. One shared check (parse.scrml seqUnionCheck) now refuses it
+    // in every type position: return type, struct field, parameter, local annotation.
+    const inProg = (body) => `<program>\n${E}\n${body}\n    <main><p>x</p></main>\n</program>\n`;
+    const refusedCode = (src, text) => {
+      const r = run(src);
+      expect(r.core == null).toBe(true);
+      const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"));
+      expect(d).toBeDefined();
+      if (text) expect(d.message).toContain("`" + text + "`");
+    };
+    test("repro A — a return type `-> Entry[free, append] | not` seeding a cell", () => {
+      refusedCode(inProg(`    function mk() -> Entry[free, append] | not { return [] }\n    let <audit=(mk())/>\n    function bad() { @audit.shift(); @audit = []; }`), "Entry[free, append] | not");
+    });
+    test("repro B — a struct field `xs: Entry[free, append] | not`", () => {
+      refusedCode(inProg(`    type Box:struct = { xs: Entry[free, append] | not }\n    let <b:Box=({ xs: [] })/>\n    function bad() { @b.xs = []; @b.xs = not; }`), "Entry[free, append] | not");
+    });
+    test("a parameter, a local annotation, and `not | T[…]` in a return type", () => {
+      refusedCode(inProg(`    function p(xs: Entry[free, append] | not) -> int { return 1 }`));
+      refusedCode(inProg(`    function q() -> int {\n        let ys: Entry[append] | not = []\n        return 1\n    }`));
+      refusedCode(inProg(`    function r() -> not | Entry[append] { return [] }`), "not | Entry[append]");
+    });
+    test("an UNGRANTED `S | not` (§17.7.2 admits it) parses in every position, and is never writable through `let`", () => {
+      expect(codes(inProg(`    function g(z: int[] | not) -> int[] | not { return z }\n    function f() -> int {\n        let ys: int[] | not = not\n        return 1\n    }`))).toEqual([]);
+      // `let` on it is `let` on a sequence — seen through `| not`
+      expect(codes(inProg(`    let <xs:int[] | not=not/>`))).toContain("E-GRANT-LET-ON-SEQUENCE");
+      expect(codes(inProg(`    function mk() -> int[] | not { return not }\n    let <xs=(mk())/>`))).toContain("E-GRANT-LET-ON-SEQUENCE");
+      // without `let` it is locked: a whole write and a removal are refused
+      const c = codes(inProg(`    <xs:int[] | not=not/>\n    function w() { @xs = [1]; }\n    function r() { @xs.shift(); }`));
+      expect(c.filter((x) => x === "E-WRITE-NOT-GRANTED").length).toBe(2);
+    });
+    test("a non-tape `T | not` in code positions is unaffected, either order", () => {
+      expect(codes(inProg(`    function ok(n: int | not) -> not | string { return not }`))).toEqual([]);
+      expect(codes(inProg(`    type Box:struct = { s: string | not }\n    let <b:Box=({ s: not })/>\n    function w() { @b.s = "x"; }`))).toEqual([]);
+    });
+    test("a derived tape's E-DERIVED-WRITE never advises `let` (E-GRANT-LET-ON-SEQUENCE)", () => {
+      const src = inProg(`    <src:Entry[free, append]=[]/>\n    <d:Entry[free, append]=(@src)/>\n    function w() { @d = []; }`);
+      const d = diag(src, "E-DERIVED-WRITE");
+      expect(d).toBeDefined();
+      expect(d.message).not.toContain("declare it `let`");
+      expect(d.message).toContain("E-GRANT-LET-ON-SEQUENCE");
+      expect(d.message).toContain("`T[replace]`");
+      // a non-sequence derived cell keeps the `let`-seeding advice
+      const n = diag(inProg(`    let <a:int=1/>\n    <b:int=(@a + 1)/>\n    function w() { @b = 0; }`), "E-DERIVED-WRITE");
+      expect(n.message).toContain("declare it `let`");
+    });
+
     test("the locked-tape message never advises `let` (E-GRANT-LET-ON-SEQUENCE): it names `replace` in the grants", () => {
       const src = `<program>\n${E}\n    <ent:Entry[]=[]/>\n    function w() { @ent = []; }\n    <main><p>x</p></main>\n</program>\n`;
       const d = diag(src, "E-WRITE-NOT-GRANTED");

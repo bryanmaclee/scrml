@@ -2988,7 +2988,8 @@ ${
             origin = ot.origin
             if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
-        if (isLet && seqElem(ty) is given) {
+        // s469 review r2: through `| not` too — `let <xs:int[] | not=…/>` is `let` on a sequence
+        if (isLet && seqElem(unMaybe(ty)) is given) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
         }
         const rg: RGraph = graphOf(te, g, ty, body, st)
@@ -5719,6 +5720,8 @@ ${
 
     fn derivedMessage(p: WPlace, f: FieldInfo) -> string {
         const deps: string = f.reads.join(", ")
+        // s469 review r2: `let` on a sequence is E-GRANT-LET-ON-SEQUENCE — a tape is never seeded by `let`
+        if (seqElem(f.ty) is given) return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. A sequence is not made writable by `let` (`let` on a sequence is E-GRANT-LET-ON-SEQUENCE): its grants live on the type (`T[replace]`, §66.12.2, §66.12.3)."
         return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. If you want a value that STARTS from that expression and is then written independently, declare it `let` — it becomes SEEDED: computed once, and it no longer follows " + deps + " (§66.9)."
     }
 
