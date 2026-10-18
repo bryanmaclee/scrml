@@ -105,6 +105,7 @@ function escapeRawHasEffect(raw) {
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
+import { OBJECT_SHORTHAND_CELL, destructureCellMessage } from "./object-shorthand-cell.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -14658,6 +14659,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       return buf.join(' ').trim();
     }
 
+    /** S469 — a cell read (`@x`) where the pattern needs a NAME: refuse it (it used
+     *  to be dropped silently — `const {  } = o;`). Consumes it and any default.
+     *  Returns true when it consumed one. */
+    function refuseCellTarget(closeText, fieldName) {
+      const t = peek();
+      if (t.kind !== 'AT_IDENT') return false;
+      consume();
+      errors.push(new TABError(OBJECT_SHORTHAND_CELL, destructureCellMessage(t.text, isArray, fieldName), spanOf(t, t)));
+      if (peek().text === '=' && peek(1)?.text !== '=') { consume(); collectDefaultText(closeText); }
+      return true;
+    }
+
     if (isArray) {
       const elements = [];
       let rest;
@@ -14702,6 +14715,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             if (def) defExpr = safeParseExprToNode(def, 0);
           }
           elements.push({ kind: 'nested', pattern, ...(def ? { default: def } : {}), ...(defExpr ? { defaultExpr: defExpr } : {}) });
+        } else if (refuseCellTarget(']')) {
+          // a cell read is not a binding name (S469) — refused above
         } else if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
           const nameTok = consume();
           let def, defExpr;
@@ -14754,7 +14769,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           break; // rest must be last
         }
-        if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
+        if (refuseCellTarget('}')) {
+          // a cell read is not a binding name (S469) — refused above
+        } else if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
           const fieldTok = consume();
           const fieldName = fieldTok.text;
           let def, defExpr;
@@ -14777,6 +14794,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
                 if (def) defExpr = safeParseExprToNode(def, 0);
               }
               properties.push({ kind: 'name', fieldName, bindName, ...(def ? { default: def } : {}), ...(defExpr ? { defaultExpr: defExpr } : {}) });
+            } else if (refuseCellTarget("}", fieldName)) {
+              // `{ a: @x }` — a cell read is not a binding name (S469) — refused above
             } else {
               // Malformed `:` — bind to fieldName.
               properties.push({ kind: 'name', fieldName, bindName: fieldName });
