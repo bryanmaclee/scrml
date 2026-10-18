@@ -26,40 +26,44 @@
  *     bodies are their own scope and are not entered.
  */
 
-import { parseExprToNode } from "./expression-parser.ts";
 
 /**
- * S468 r1 — THE reading of a block arm body that is an OBJECT LITERAL
- * (`.A :> { g: check }`, `1 :> { x: 1, y: 2 }`, `else :> {}`). The statement parser
- * reads `{ g: check }` as a block whose one statement is the text `g : check` (an
- * exprNode holding only the first key), so the arm's VALUE is recovered here: the
- * brace text re-read as an expression, and the arm is an object literal when (and only
- * when) that expression is an `object` node. Every reader of an arm's value uses this —
- * the AST builder (which stores the object node on the arm body, so every analysis that
- * walks the tree sees the object: §13.2 / §13.9.6 E-ASYNC-FN-ESCAPES-AS-VALUE,
- * E-VALUE-FUNCTION-STORED), the type checker (`objectLiteralArmBodyNode`) and codegen
- * (`emitObjectLiteralArm`). Before S468 r1 codegen read the value one way
- * and the analyses another, and `const o = match n { 1 :> { g: check } … }` stored an
- * async function in an object unrefused (a wrong password accepted).
+ * THE reading of a block arm body that is an OBJECT LITERAL (`.A :> { g: check }`,
+ * `1 :> { x: 1, y: 2 }`, `else :> {}`). The decision is the PARSER's, made from the
+ * arm's tokens (ast-builder.js `armBraceBodyObjectShape` / `parseArmBraceBody`): an
+ * object arm's body is ONE `bare-expr` marked `objectLiteralArm`, whose exprNode is the
+ * object. This function only reads that mark — it never rebuilds or re-parses text (S469
+ * r2: the r1 version rebuilt `{ <expr> }` from the statement text, which had lost a `;`,
+ * so the BLOCK `1 :> { ok; }` read as the object `{ ok: ok }` — truthy — and a wrong
+ * password got in). Used by the type checker (`objectLiteralArmBodyNode`, the
+ * W-MATCH-ARM-SHORTHAND-OBJECT lint) and codegen (`emitObjectLiteralArm`), so every
+ * stage agrees with the parser (§13.2 / §13.9.6: an async function stored in the object
+ * is E-ASYNC-FN-ESCAPES-AS-VALUE).
  *
- * Returns `{ text, node }` — the object source and its tree — or null for a genuine block.
+ * Returns `{ text, node, singleShorthand }` or null for a genuine block.
  */
-export function objectLiteralArmValue(body: unknown): { text: string; node: any } | null {
+export function objectLiteralArmValue(body: unknown): { text: string; node: any; singleShorthand: string | null } | null {
   if (!Array.isArray(body)) return null;
   if (body.length === 0) {
-    // `else :> {}` — an empty OBJECT, not a void block.
-    return { text: "{}", node: { kind: "object", props: [] } };
+    // `else :> {}` — an empty OBJECT, not a void block (structural: no statement at all).
+    return { text: "{}", node: { kind: "object", props: [] }, singleShorthand: null };
   }
   if (body.length !== 1) return null;
-  const only = body[0] as { kind?: string; expr?: unknown; exprNode?: any; span?: { start?: number }; objectLiteralArm?: boolean } | undefined;
-  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
-  const text = `{ ${only.expr} }`;
-  // Already read by the AST builder (the node it stored IS this reading).
-  if (only.objectLiteralArm && only.exprNode && only.exprNode.kind === "object") return { text, node: only.exprNode };
-  let node: any = null;
-  try { node = parseExprToNode(text, "<match-arm-block>", only.span?.start ?? 0); } catch { node = null; }
-  return node && node.kind === "object" ? { text, node } : null;
+  const only = body[0] as { kind?: string; expr?: unknown; exprNode?: any; objectLiteralArm?: boolean; singleShorthand?: string } | undefined;
+  if (!only || only.kind !== "bare-expr" || only.objectLiteralArm !== true) return null;
+  if (!only.exprNode || only.exprNode.kind !== "object" || typeof only.expr !== "string") return null;
+  return { text: only.expr, node: only.exprNode, singleShorthand: typeof only.singleShorthand === "string" ? only.singleShorthand : null };
 }
+
+/**
+ * §18.5 (#1450 F6) — the ONE place that decides what a brace arm body that is the
+ * single shorthand property `{ name }` (no `;`) is. Today (S468 ruling item 5, under
+ * re-confirmation): the object `{ name: name }`, with the info lint
+ * W-MATCH-ARM-SHORTHAND-OBJECT. To make it a compile ERROR instead, set this to
+ * "error": the type checker's lint site (type-system.ts `singleShorthandArmDiagnostic`)
+ * then reports the same site at severity "error", so the program does not build.
+ */
+export const SINGLE_SHORTHAND_ARM_BODY: "object" | "error" = "object";
 
 const FN_KINDS = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-loop", "while-loop"]);

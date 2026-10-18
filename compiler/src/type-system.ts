@@ -72,7 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
-import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
+import { armStatements, objectLiteralArmValue, SINGLE_SHORTHAND_ARM_BODY } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
@@ -20788,6 +20788,21 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
 }
 
 /**
+ * The diagnostic for a match arm whose brace body is the single shorthand property
+ * `{ name }` (§18.5, #1450 F6). Its severity follows the ONE policy switch,
+ * arm-body-statements.ts `SINGLE_SHORTHAND_ARM_BODY` ("object" → info lint; "error" →
+ * a compile error at the same site).
+ */
+function singleShorthandArmDiagnostic(name: string, armSpan: Span): TSError {
+  return new TSError(
+    "W-MATCH-ARM-SHORTHAND-OBJECT",
+    matchArmShorthandObjectMessage(name),
+    armSpan,
+    SINGLE_SHORTHAND_ARM_BODY === "error" ? "error" : "info",
+  );
+}
+
+/**
  * Build the W-MATCH-ARM-SHORTHAND-OBJECT (§18.5 / §34) message for a match arm
  * whose brace body is the one-property shorthand object `{ name }`.
  */
@@ -21260,17 +21275,12 @@ function checkMatchDiagnostics(
     for (const arm of armBody) {
       if (!arm || typeof arm !== "object") continue;
       if ((arm as ASTNodeLike).kind !== "match-arm-block") continue;
-      const v = objectLiteralArmValue((arm as { body?: unknown }).body);
-      const props = v?.node?.props;
-      if (!Array.isArray(props) || props.length !== 1 || props[0]?.kind !== "shorthand") continue;
-      const name = String(props[0].name);
+      // `singleShorthand` is the PARSER's (from the arm's tokens: exactly one entry, a
+      // lone identifier, no `;`) — `{ ok; }` is a block and never reaches here.
+      const name = objectLiteralArmValue((arm as { body?: unknown }).body)?.singleShorthand;
+      if (!name) continue;
       const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
-      errors.push(new TSError(
-        "W-MATCH-ARM-SHORTHAND-OBJECT",
-        matchArmShorthandObjectMessage(name),
-        armSpan,
-        "info",
-      ));
+      errors.push(singleShorthandArmDiagnostic(name, armSpan));
     }
   }
 

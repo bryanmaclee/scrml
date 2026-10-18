@@ -570,3 +570,87 @@ export fn arg(n: int) {
     expect(m.obj(4)).toBe(7);
   });
 });
+
+// S469 r2 (#1450 re-review of 435d55cd4) — object-vs-block is decided by the PARSER from
+// the arm's TOKENS. A `;` at the body's top level makes it a statement list (a block): the
+// r1 reader rebuilt `{ <expr> }` from statement text that had lost the `;`, so `1 :> { ok; }`
+// read as the object `{ ok: ok }` (truthy — a wrong password accepted; security-await-pack
+// family `la3`). Nothing after the parser re-reads arm text.
+describe("(E) object-vs-block from the arm's tokens", () => {
+  const armBody = (src) => {
+    const arms = matchArms(inFn(src))[0];
+    return arms.find((a) => a.kind === "match-arm-block").body;
+  };
+  test("`{ ok; }` / `{⏎ ok;⏎ }` are BLOCKS (one statement, no object mark)", () => {
+    for (const src of [
+      `    const v = match n {\n      1 :> { ok; }\n      else :> false\n    }`,
+      `    const v = match k {\n      .A :> {\n        ok;\n      }\n      else :> false\n    }`,
+      `    const v = match k {\n      ::A :> { ok; }\n      else :> false\n    }`,
+    ]) {
+      const body = armBody(src);
+      expect(body.length).toBe(1);
+      expect(body[0].objectLiteralArm).toBeUndefined();
+      expect(body[0].exprNode?.kind).not.toBe("object");
+    }
+  });
+  test("keyed, spread, computed and shorthand bodies are OBJECTS; only `{ name }` is singleShorthand", () => {
+    const cases = [
+      [`{ x: 1, y: 2 }`, null], [`{ x: 1, }`, null], [`{ ...o }`, null], [`{ [key]: 1 }`, null],
+      [`{ "a b": 1 }`, null], [`{ a, b }`, null], [`{ foo }`, "foo"],
+    ];
+    for (const [b, single] of cases) {
+      const body = armBody(`    const v = match n {\n      1 :> ${b}\n      else :> false\n    }`);
+      expect(body.length).toBe(1);
+      expect(body[0].objectLiteralArm).toBe(true);
+      expect(body[0].exprNode.kind).toBe("object");
+      expect(body[0].singleShorthand ?? null).toBe(single);
+    }
+  });
+  test("`{ undefined }` is a block whose result is `undefined` (a keyword is not a shorthand name)", () => {
+    const body = armBody(`    const v = match n {\n      1 :> { undefined }\n      else :> false\n    }`);
+    expect(body[0].objectLiteralArm).toBeUndefined();
+  });
+  test("executed: `{ ok; }` yields ok's VALUE in decl, let, return and multi-scrutinee positions", async () => {
+    const r = compileLibAll("semi-block", `type K:enum = { A, B }
+export fn lit(ok: boolean) {
+  const n = 1
+  const v = match n {
+    1 :> { ok; }
+    else :> true
+  }
+  return v
+}
+export fn colonV(ok: boolean) {
+  const k: K = .A
+  return match k {
+    ::A :> { ok; }
+    else :> true
+  }
+}
+export fn letAlt(ok: boolean) {
+  const n = 2
+  let v = match n {
+    1 | 2 :> {
+      ok;
+    }
+    else :> true
+  }
+  return v
+}
+export fn ms(ok: boolean) {
+  const a = 1
+  const b = 2
+  return match (a, b) {
+    (2, 2) :> true
+    _ :> { ok; }
+  }
+}`);
+    expect(r.errorCodes).toEqual([]);
+    expect(r.lints).toEqual([]);
+    const m = await loadLib(r.libPath);
+    for (const f of ["lit", "colonV", "letAlt", "ms"]) {
+      expect(m[f](false)).toBe(false);
+      expect(m[f](true)).toBe(true);
+    }
+  });
+});

@@ -103,7 +103,6 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
-import { objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -4124,24 +4123,6 @@ function unclassifiableArmHead(peek) {
   return why ? { arrowK: k, why } : null;
 }
 
-/**
- * S468 r1 — a block arm whose body is an OBJECT LITERAL (`.A :> { g: check }`,
- * `1 :> { x: 1 }`) is a value, not statements; `parseRecursiveBody` reads it as one
- * `bare-expr` whose exprNode is only the first key. Store the object tree the ONE
- * reader (`objectLiteralArmValue`, arm-body-statements.ts — also codegen's and the type
- * checker's) recovers, so every analysis that walks the tree sees what the arm holds
- * (§13.2 / §13.9.6: an async function stored in it is E-ASYNC-FN-ESCAPES-AS-VALUE).
- * The raw `expr` text is kept (codegen rebuilds the value from it).
- */
-function markObjectLiteralArmBody(body) {
-  if (!Array.isArray(body) || body.length !== 1) return body;
-  const v = objectLiteralArmValue(body);
-  if (v) {
-    body[0].exprNode = v.node;
-    body[0].objectLiteralArm = true;
-  }
-  return body;
-}
 
 /**
  * S468 (§18.2 / §18.16) — the head of a match arm that the single-alternate
@@ -9616,6 +9597,86 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   let _matchArmBodyDepth = 0;
 
   /**
+   * S469 r2 (#1450) — is the match-arm brace body that starts at `tokens[i]` (the `{`
+   * already consumed) an OBJECT LITERAL? Decided from the TOKENS, at parse time — never
+   * from text rebuilt later (the r1 reader rebuilt `{ <expr> }` from the statement's
+   * `expr`, which had lost a `;`, so the block `1 :> { ok; }` read as the object
+   * `{ ok: ok }` and a wrong password got in).
+   *
+   * Object iff the body, up to its matching `}`, is a non-empty comma-separated list in
+   * which every entry is `key: value` (key an identifier / keyword / string / number, or
+   * a `[computed]` key), `...spread`, or a lone identifier (shorthand) — and NO `;` at
+   * the body's top level (a `;` makes it a statement list: a block). Returns
+   * `{ singleShorthand }` (the name when the body is exactly one shorthand entry — §18.5
+   * `{ foo }`, see `SINGLE_SHORTHAND_ARM_BODY`) or null for a block.
+   */
+  function armBraceBodyObjectShape() {
+    const entries = [[]];
+    let depth = 0;
+    for (let k = i; k < tokens.length; k++) {
+      const t = tokens[k];
+      if (t.kind === "EOF") return null;
+      if (t.kind === "COMMENT") continue;
+      const isP = t.kind === "PUNCT";
+      if (isP && (t.text === "}" || t.text === ")" || t.text === "]")) {
+        if (depth === 0) {
+          if (t.text !== "}") return null;
+          break;
+        }
+        depth--;
+        if (depth === 0) entries[entries.length - 1].push(t);
+        continue;
+      }
+      if (depth === 0) {
+        if (isP && t.text === ";") return null; // a statement list — a block
+        if (isP && t.text === ",") { entries.push([]); continue; }
+        entries[entries.length - 1].push(t);
+      }
+      if (isP && (t.text === "{" || t.text === "(" || t.text === "[")) depth++;
+    }
+    if (entries.length && entries[entries.length - 1].length === 0 && entries.length > 1) entries.pop(); // trailing `,`
+    if (entries.length === 0 || entries.some((e) => e.length === 0)) return null; // `{}` keeps its own (structural) rule
+    const isColon = (t) => t && t.kind === "PUNCT" && t.text === ":";
+    for (const e of entries) {
+      const a = e[0];
+      if ((a.kind === "OPERATOR" || a.kind === "PUNCT") && a.text === "...") continue;
+      if (a.kind === "IDENT" && e.length === 1) continue; // shorthand
+      if ((a.kind === "IDENT" || a.kind === "KEYWORD" || a.kind === "STRING" || a.kind === "NUMBER") && isColon(e[1])) continue;
+      if (a.kind === "PUNCT" && a.text === "[" && e[1] && e[1].kind === "PUNCT" && e[1].text === "]" && isColon(e[2])) continue;
+      return null;
+    }
+    const single = entries.length === 1 && entries[0].length === 1 && entries[0][0].kind === "IDENT";
+    return { singleShorthand: single ? entries[0][0].text : null };
+  }
+
+  /**
+   * S469 r2 (#1450) — the body of a match block arm (`<head> :> {` already consumed):
+   * an OBJECT LITERAL arm (`armBraceBodyObjectShape`) is collected by the parser's own
+   * brace-body collector and parsed as ONE expression — its value, stored as the body's
+   * single `bare-expr` with `objectLiteralArm: true` (the one reading every later stage
+   * uses, arm-body-statements.ts `objectLiteralArmValue`); anything else is a block of
+   * statements (`parseRecursiveBody`). An object-shaped body that does not parse as an
+   * object (`{ a: 1⏎ b: 2 }`) is a block, as before.
+   */
+  function parseArmBraceBody() {
+    const shape = armBraceBodyObjectShape();
+    if (shape) {
+      const saved = i;
+      const firstTok = peek();
+      const { body } = collectBracedBody(); // consumes through the matching `}`
+      const text = `{ ${body} }`;
+      const node = safeParseExprToNode(text, firstTok.span?.start ?? 0);
+      if (node && node.kind === "object") {
+        const stmt = { id: ++counter.next, kind: "bare-expr", expr: text, exprNode: node, objectLiteralArm: true, span: spanOf(firstTok, peek()) };
+        if (shape.singleShorthand) stmt.singleShorthand = shape.singleShorthand;
+        return [stmt];
+      }
+      i = saved;
+    }
+    return parseRecursiveBody();
+  }
+
+  /**
    * Parse a braced body `{ ... }` into a structured LogicNode[] tree.
    * Caller should have already consumed the opening `{`.
    * Consumes up to and including the closing `}`.
@@ -13937,7 +13998,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const variantNameTok = consume(); // IDENT (PascalCase variant name)
         for (let _a = 0; _a < _arrow1.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = markObjectLiteralArmBody(parseRecursiveBody()); // parse until matching '}'
+        const blockBody = parseArmBraceBody(); // parse until matching '}'
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -14061,7 +14122,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `parseBindingList` (in emit-control-flow.ts) can resolve named
         // bindings (`field: local` → `const local = subject.data.field`).
         const bindingText = allBindingTokens.map(t => t.text).join(' ').replace(/\s+/g, ' ').trim();
-        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -14088,7 +14149,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'else'
         for (let _a = 0; _a < _arrow2.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -14110,7 +14171,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'not'
         for (let _a = 0; _a < _arrow3.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -14181,7 +14242,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         for (let _h = 0; _h < _arrowK4; _h++) consume(); // arm head
         for (let _a = 0; _a < _arrow4.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
+        const blockBody = parseArmBraceBody();
         const armNode = {
           id: ++counter.next,
           kind: 'match-arm-block',

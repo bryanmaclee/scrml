@@ -11,7 +11,7 @@ server does not await it, `if (!check(pass, hash))` tests a Promise and the wron
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8; `x1` the S239 review of r8; `r9` written by fix round 9; `y1`–`y3` the S467 review of r9; `z1`–`z4` the S467 review of r10; `la1`–`la2` the S468 literal-arm families — the S468 review of #1446 plus the shapes the fix swept, and the S239 review of the fix). 796 shapes. Data only. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8; `x1` the S239 review of r8; `r9` written by fix round 9; `y1`–`y3` the S467 review of r9; `z1`–`z4` the S467 review of r10; `la1`–`la3` the S468 literal-arm families — the S468 review of #1446 plus the shapes the fix swept, the S239 review of the fix, and `la3` its re-review). 823 shapes. Data only. |
 | `pack.js` | compile → load `app.server.js` → POST the `f` route with the wrong and the right password → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that accept a wrong password on main, each naming its gap) and `UNJUDGED` (shapes this instrument cannot judge) |
 | `await-probe-pack.test.js` | the gate: one test per shape |
@@ -30,7 +30,7 @@ defects that happen to refuse (`E-CODEGEN-INVALID-LOGIC`, …); the detail colum
 - a shape not in `KNOWN_FAIL` answers a wrong password WELCOME;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 796 shapes; a list entry names no shape;
+- the corpus stops holding exactly 823 shapes; a list entry names no shape;
 - the pinned hash stops verifying under `scrml:auth`'s `verifyPassword`.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
@@ -50,6 +50,11 @@ on the fix every `la1` shape is `PASS` or `PASS-REFUSED`. Family `la2` is the S2
 arms whose body was dropped, comments inside arm heads, and heads the compiler cannot classify (now
 E-PARSE-001). On fix round 1: 0 `la2` shapes FAIL (one `PASS-DENY`, `cpsMsWild`, whose CPS response this
 instrument cannot read as WELCOME/REJECTED — the wrong password returns REJECTED).
+Family `la3` (27 shapes) is the S469 re-review of fix round 1: a one-statement BLOCK arm `{ ok; }`
+read as the shorthand OBJECT `{ ok: ok }` (truthy), so `if (!allowed)` never fired — 21 FAIL on
+435d55cd4, 3 FAIL on main (`return` position, the text-carried arm). On fix round 2 (object-vs-block
+decided from the arm's tokens; a top-level `;` = a block): 26 PASS, 1 PASS-REFUSED (`semiWild`, a
+wildcard-only declaration match, refused on main too — gap `g-expr-position-wildcard-only-match-malformed-s469`).
 
 ## Running
 
