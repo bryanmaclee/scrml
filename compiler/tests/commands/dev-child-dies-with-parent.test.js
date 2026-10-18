@@ -137,9 +137,24 @@ describe("§2 stopping `scrml dev` mid-respawn leaves no app child behind", () =
 
       // Trigger a respawn, and stop the parent the moment the respawned child exists
       // — i.e. while it is still starting, before the parent has adopted it.
-      writeFileSync(entry, src("v2"));
-      const respawning = await waitFor(() => pidsWithArg(`${needle}1.json`).length > 0, 15_000, 5);
-      expect(respawning, `the edit never produced a respawned child.\n${out}`).toBe(true);
+      //
+      // RE-EDIT UNTIL THE RESPAWN APPEARS (S468, s468-ci-speedup — the CI intermittent
+      // "the edit never produced a respawned child", 4 of 60 `tracking` runs). `scrml dev`
+      // prints "Serving …" BEFORE it takes its per-file stat snapshot and registers its
+      // directory watch (dev.js: the log, then `watchFile` for each gathered source). The
+      // test is a separate process reading that line off a pipe, so on a loaded runner
+      // its single edit could land before the snapshot: the snapshot then already holds
+      // the edited file, no later event fires, and no respawn ever comes. What this test
+      // is about is the SIGTERM-mid-respawn reaping, not watcher start-up latency — so it
+      // keeps editing (each edit a fresh mtime/ctime) until a respawned child exists.
+      let edits = 0;
+      const editStart = Date.now();
+      const respawning = await waitFor(() => {
+        if (pidsWithArg(`${needle}1.json`).length > 0) return true;
+        if (edits === 0 || edits * 750 < Date.now() - editStart) writeFileSync(entry, src(`v${2 + edits++}`));
+        return false;
+      }, 15_000, 5);
+      expect(respawning, `${edits} edit(s) never produced a respawned child.\n${out}`).toBe(true);
       dev.kill("SIGTERM");
       await dev.exited;
 
