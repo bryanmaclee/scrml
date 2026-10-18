@@ -96,7 +96,7 @@ export function markLocallyBoundSession(fnNode: unknown): void {
   if (!fnNode || typeof fnNode !== "object") return;
   walkScoped(fnNode as { params?: unknown; body?: unknown }, (n, isBound) => {
     if (!isBound("session")) return;
-    if ((n.kind === "ident" && n.name === "session") || rawFragmentsOf(n as Record<string, unknown>).length > 0) setMark(n);
+    if (((n.kind === "ident" || n.kind === "shorthand") && n.name === "session") || rawFragmentsOf(n as Record<string, unknown>).length > 0) setMark(n);
   });
 }
 
@@ -116,7 +116,8 @@ export function exprReadsFreeSession(exprNode: unknown, exprString: string | nul
     seen.add(n as object);
     if (Array.isArray(n)) { for (const c of n) visit(c); return; }
     const r = n as Record<string, unknown>;
-    if (r.kind === "ident" && r.name === "session") { if (!isMarked(r)) hit = true; return; }
+    // an object shorthand `{ session }` reads it as `{ session: session }` does (S469)
+    if ((r.kind === "ident" || r.kind === "shorthand") && r.name === "session") { if (!isMarked(r)) hit = true; return; }
     if (!isMarked(r)) {
       for (const frag of rawFragmentsOf(r)) if (rawReadsFreeName(frag, "session")) { hit = true; return; }
     }

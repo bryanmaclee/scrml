@@ -1868,8 +1868,15 @@ function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
       const val = emitExpr(prop.value, ctx);
       return `${key}: ${val}`;
     }
-    case "shorthand":
-      return prop.name;
+    case "shorthand": {
+      // `{ x }` is `{ x: x }` — the value is an identifier READ and lowers through
+      // emitIdent like any other (S469 re-review of #1451: the bare-name return
+      // skipped emitIdent, so a server `{ session }` slipped past E-SESSION-VALUE and
+      // emitted a bare `session` → ReferenceError at request time; the longhand was
+      // refused). A name emitIdent leaves unchanged keeps the shorthand.
+      const val = emitIdent({ kind: "ident", name: prop.name, span: prop.span } as IdentExpr, ctx);
+      return val === prop.name ? prop.name : `${emitObjectKey(prop.name)}: ${val}`;
+    }
     case "spread":
       return `...${emitExpr(prop.argument, ctx)}`;
   }

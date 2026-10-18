@@ -229,3 +229,30 @@ NOT done:
   benchmarks, giti, flogence = 3001 sources → E-ARG-SERVER-IDENTITY 0, E-PARAM-DEFAULT-SERVER-IDENTITY 0. One
   CRASH (samples/gauntlet-s19-phase4/nested-comments.scrml, stack overflow) is pre-existing — the same in every
   S468 scan including base.
+
+## FIX ROUND 3 (S469, PA: fold the `{ session }` placement issue into this PR — same root)
+
+What a function whose only `session` use is `{ session }` did BEFORE (executed on 3342f958c, which equals main for
+these readers):
+- client-only function (`const ctx = { session }; return ctx.session.userId`, or `{ session }.session.userId`):
+  NOT server-placed → compile error E-SCOPE-012 ("`session` … not reachable from a client-side function"). The
+  longhand `{ session: session }` is server-placed → E-SESSION-VALUE. Fails closed; nothing shipped.
+- a function server-placed for another reason (`?{}`) with `return { session }`: compiled CLEAN (emit-expr.ts
+  `emitProp` returned the bare shorthand name without `emitIdent`, so E-SESSION-VALUE never saw it), and the route
+  threw `ReferenceError: session is not defined` at request time (executed with a real session cookie and a
+  forged body `{session:{userId:"VICTIM"}}`): a 500, no session data in the response, the forged body unread.
+  The longhand is E-SESSION-VALUE.
+**Neither form EXPOSED or FORGED anything** — a compile error, or a request-time crash.
+Fix (the class): free-name.ts `exprReadsFreeSession` + `markLocallyBoundSession` read a shorthand as the
+longhand (placement); emit-expr.ts `emitProp` lowers a shorthand's value through `emitIdent` (any rename / refusal
+emitIdent applies to `x` now applies to `{ x }`; an unchanged name keeps the shorthand). No `{ currentUser }`
+case exists — the ambient is `@currentUser`, which a shorthand cannot spell. Now every shape is server-placed and
+E-SESSION-VALUE, identical to the longhand, with no artifacts written (§20.5: `session` is not a first-class value,
+so there is no compiling `{ session }` and no route to emit). §34 E-SESSION-VALUE row names the object forms.
+Tests: compiler/tests/unit/s469-session-shorthand.test.js (RI boundary == server for shorthand and longhand,
+E-SESSION-VALUE, not E-SCOPE-012, no artifacts; a parameter named `session` stays client and compiles; `{ a, b }`
+still emits as a shorthand).
+Corpus: corpus-emit-differential, both sides archives of the same tree (base = 3342f958c, head = + the two source
+files): 2857 sources, 0 newly failing / 0 newly passing, 0 diagnostic-code changes, 8533 / 8533 artifacts identical
+after normalizing paths / path-derived hash ids; the 1 "text-only" diagnostic change is a path-derived dispatcher
+id in a message. **No real source changes placement or output.**
