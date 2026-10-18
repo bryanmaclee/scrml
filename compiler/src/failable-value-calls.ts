@@ -39,10 +39,20 @@
  * function its callee evaluates to MAY be a failable function (`failableFnValueOf`) — a name bound
  * to one, a ternary / `||` / `??` / `&&` that may choose one, a call of a function that may RETURN
  * one (`getF()(p)`, `const g = getF(); g(p)`). One fail-closed judgement covers every alias shape
- * instead of one syntactic chain per review round. The same judgement decides what a `match`
- * subject carries (`failableResultCallees`): the failable calls whose result reaches the subject
- * unchanged — so the check that ACCEPTS a `match` as handling a call and the lowering that
- * DISCRIMINATES that call's error read one answer.
+ * instead of one syntactic chain per review round.
+ *
+ * A `match` is different (S468 fix round 1): it HANDLES a failable call only when its lowering can
+ * discriminate the error, and impl#1's lowering discriminates by treating every non-error value as
+ * `.Ok`. That is correct only when the subject's value is PROVABLY a failable result — so the
+ * subject must be a call whose callee is PROVABLY a failable function (`provableSubjectCallees`:
+ * every value the callee may be is a failable function — a `!` function by name, a `const` bound
+ * to one, a call of a function every `return` of which is one, a ternary both of whose arms are).
+ * A subject whose value MAY be a failable result but may also be a plain value — an operator
+ * (`match (a || check(p))`, `match (c ? AuthErr::Denied : check(p))`) or a callee that may be a
+ * plain function (`const g = c ? plainDeny : check; match g(p)`) — has no correct lowering (a plain
+ * `AuthErr::Denied` would be read as `.Ok`, or the error object compared as a plain value), so it
+ * is NOT handled: E-ERROR-002, fail closed. The check that ACCEPTS a `match` as handling a call
+ * and the stamp that makes the lowering DISCRIMINATE read this one answer.
  */
 
 import type { ExprNode, CallExpr, LambdaExpr } from "./types/ast.ts";
@@ -60,7 +70,14 @@ export interface FailableEnv {
    */
   resolveOuterReturns(name: string): string | null;
   /**
-   * An expression-position `match` whose subject carries the result of failable calls (the
+   * The failable functions an outer name PROVABLY is — every value it may hold is one of them (a
+   * `!` function by name, a `const` bound to one) — or null when that is not provable.
+   */
+  resolveOuterExact(name: string): string[] | null;
+  /** The failable functions a CALL of an outer name PROVABLY returns (every `return` is one), or null. */
+  resolveOuterReturnsExact(name: string): string[] | null;
+  /**
+   * An expression-position `match` whose subject is a call of a PROVABLY failable function (the
    * failable functions named): the caller stamps it, so its lowering discriminates the error.
    */
   onFailableMatchSubject?(node: ExprNode, callees: string[]): void;
@@ -85,6 +102,11 @@ export interface FailableCallCandidate {
   inFunction: boolean;
   /** `inFunction` and that innermost function is declared `!`. */
   inFailableFn: boolean;
+  /**
+   * The call is a `match` subject whose callee MAY be a failable function but is not PROVABLY one
+   * (S468 fix round 1): the match cannot discriminate its error, so it does not handle the call.
+   */
+  matchSubjectNotProvable?: boolean;
 }
 
 export type RootHandling =
@@ -94,7 +116,7 @@ export type RootHandling =
   | "statement-call"
   /** The root is the operand of a handling form: a call whose value reaches it unchanged is handled. */
   | "operand"
-  /** The root is a `match` subject: handled exactly like an operand (see matchSubject). */
+  /** The root is a `match` subject: only a call of a PROVABLY failable function is handled (see matchSubject). */
   | "match-subject"
   /** The root is one scrutinee of a §18.19 multi-scrutinee head: only a direct call is handled. */
   | "multi-scrutinee";
@@ -109,6 +131,10 @@ class LocalScope {
   readonly names = new Map<string, string | null>();
   /** Per bound name: the failable function a CALL of it may return (`const mk = () => check`). */
   readonly returns = new Map<string, string>();
+  /** Per bound name: the failable functions it PROVABLY is (a local `!` function, a `const` bound to one). */
+  readonly exact = new Map<string, string[]>();
+  /** Per bound name: the failable functions a CALL of it PROVABLY returns. */
+  readonly exactReturns = new Map<string, string[]>();
   constructor(readonly parent: LocalScope | null) {}
   child(): LocalScope { return new LocalScope(this); }
 }
@@ -137,14 +163,89 @@ function resolveReturns(name: string, scope: LocalScope | null, env: FailableEnv
   return env.resolveOuterReturns(name);
 }
 
-/** How a function-value judgement resolves a NAME: what it may be, and what a call of it may return. */
+function resolveExact(name: string, scope: LocalScope | null, env: FailableEnv): string[] | null {
+  for (let s = scope; s !== null; s = s.parent) {
+    if (s.names.has(name)) return s.exact.get(name) ?? null;
+  }
+  return env.resolveOuterExact(name);
+}
+
+function resolveReturnsExact(name: string, scope: LocalScope | null, env: FailableEnv): string[] | null {
+  for (let s = scope; s !== null; s = s.parent) {
+    if (s.names.has(name)) return s.exactReturns.get(name) ?? null;
+  }
+  return env.resolveOuterReturnsExact(name);
+}
+
+/**
+ * How a function-value judgement resolves a NAME: what it may be and what a call of it may return
+ * (fail closed — "may"), and what it PROVABLY is / returns (admit only what is provable — "exact").
+ */
 export interface FnValueLookup {
   is(name: string): string | null;
   returns(name: string): string | null;
+  isExact(name: string): string[] | null;
+  returnsExact(name: string): string[] | null;
 }
 
 function scopeLookup(scope: LocalScope | null, env: FailableEnv): FnValueLookup {
-  return { is: (n) => resolveName(n, scope, env), returns: (n) => resolveReturns(n, scope, env) };
+  return {
+    is: (n) => resolveName(n, scope, env),
+    returns: (n) => resolveReturns(n, scope, env),
+    isExact: (n) => resolveExact(n, scope, env),
+    returnsExact: (n) => resolveReturnsExact(n, scope, env),
+  };
+}
+
+function unionNames(a: string[] | null, b: string[]): string[] {
+  const out = a ? [...a] : [];
+  for (const x of b) if (!out.includes(x)) out.push(x);
+  return out;
+}
+
+/**
+ * The failable functions the VALUE of `node` PROVABLY is — every value it may evaluate to is one of
+ * them — or null when that is not provable (S468 fix round 1; admit only what is provably safe):
+ *   - a name the lookup proves (a `!` function by name, a `const` bound to one);
+ *   - a ternary BOTH of whose arms are provable;
+ *   - a cast of a provable value;
+ *   - a call of a NAME every `return` of which is provable (`getF()` with `function getF() { return check }`).
+ * Everything else — `||` / `??` / `&&` (an operand may be chosen that is not a function), an
+ * assignment, a lambda callee (its parameters are not modelled here), a member read — is not
+ * provable. This judgement only ADMITS: a null answer never makes a call less failable; the
+ * may-judgement (`failableFnValueOf`) still reports it.
+ */
+export function exactFnValueOf(node: ExprNode | null | undefined, lk: FnValueLookup, depth = 0): string[] | null {
+  if (!node || typeof node !== "object" || depth > 64) return null;
+  switch (node.kind) {
+    case "ident": return typeof node.name === "string" ? lk.isExact(node.name) : null;
+    case "ternary": {
+      const a = exactFnValueOf(node.consequent, lk, depth + 1);
+      if (a === null) return null;
+      const b = exactFnValueOf(node.alternate, lk, depth + 1);
+      return b === null ? null : unionNames(a, b);
+    }
+    case "cast": return exactFnValueOf(node.expression, lk, depth + 1);
+    case "call": {
+      if (guardCallArmsRaw(node) !== null || !node.callee) return null;
+      return node.callee.kind === "ident" && typeof node.callee.name === "string" ? lk.returnsExact(node.callee.name) : null;
+    }
+    default: return null;
+  }
+}
+
+/**
+ * S468 fix round 1 — the failable functions a `match` subject is PROVABLY a call of, or null. A
+ * `match` handles a failable call (and its lowering discriminates the error, reading every other
+ * value as `.Ok`) only when this is non-null: the subject IS a call (parentheses are transparent)
+ * and its callee is provably a failable function (`exactFnValueOf`). A subject that may also be a
+ * plain value has no correct lowering — see the module header.
+ */
+export function provableSubjectCallees(node: ExprNode | null | undefined, lk: FnValueLookup): string[] | null {
+  if (!node || typeof node !== "object" || node.kind !== "call" || guardCallArmsRaw(node) !== null || !node.callee) return null;
+  return node.callee.kind === "ident" && typeof node.callee.name === "string"
+    ? lk.isExact(node.callee.name)
+    : exactFnValueOf(node.callee, lk);
 }
 
 /**
@@ -212,29 +313,6 @@ function failableFnReturnOfCallee(callee: ExprNode | null | undefined, lk: FnVal
 export function failableCalleeOf(node: ExprNode | null | undefined, lk: FnValueLookup): string | null {
   if (!node || node.kind !== "call" || guardCallArmsRaw(node) !== null || !node.callee) return null;
   return node.callee.kind === "ident" ? lk.is(node.callee.name) : failableFnValueOf(node.callee, lk);
-}
-
-/**
- * The failable calls whose RESULT reaches `node`'s value unchanged (the rule a handling form reads,
- * see the module header): the call itself; either operand of `||` / `??`; the right of `&&`; either
- * ternary arm. Returns the failable functions called (deduplicated). A `match` on `node` matches
- * these calls' results, so it must discriminate their errors.
- */
-export function failableResultCallees(node: ExprNode | null | undefined, lk: FnValueLookup): string[] {
-  const out: string[] = [];
-  const go = (e: ExprNode | null | undefined, depth: number): void => {
-    if (!e || typeof e !== "object" || depth > 64) return;
-    if (e.kind === "call") {
-      const t = failableCalleeOf(e, lk);
-      if (t !== null && !out.includes(t)) out.push(t);
-      return;
-    }
-    if (e.kind === "binary" && (e.op === "||" || e.op === "??")) { go(e.left, depth + 1); go(e.right, depth + 1); return; }
-    if (e.kind === "binary" && e.op === "&&") { go(e.right, depth + 1); return; }
-    if (e.kind === "ternary") { go(e.consequent, depth + 1); go(e.alternate, depth + 1); }
-  };
-  go(node, 0);
-  return out;
 }
 
 /** Statement kinds whose expressions are read. */
@@ -324,9 +402,22 @@ class Walker {
    * When set, the values `return`ed by the function whose context is `ctx` (not by functions nested
    * in it) are judged here: the failable function any of them may be (`failableFnReturnedBy`).
    */
-  returnSink: { ctx: FnCtx; found: string | null } | null = null;
+  returnSink: { ctx: FnCtx; found: string | null; exact: string[] | null; allExact: boolean } | null = null;
+
+  /**
+   * Set when the walk met a body it could not read (text that does not parse): a `return` in it is
+   * unseen, so nothing about the function's returns is PROVABLE (the exact-returns judgement).
+   */
+  opaque = false;
 
   constructor(readonly env: FailableEnv, readonly cb: Cb) {}
+
+  /** Parse a text-carried statement body; a body that does not parse makes the walk opaque. */
+  parseBody(text: string): unknown[] | null {
+    const stmts = this.env.parseStatements(text);
+    if (stmts === null) this.opaque = true;
+    return stmts;
+  }
 
   report(call: CallExpr | null, written: string, scope: LocalScope | null, fn: FnCtx): void {
     const target = resolveName(written, scope, this.env);
@@ -381,16 +472,19 @@ class Walker {
           if (subjects.length === 1) this.matchSubject(s, scope, fn);
           else this.directCallSubject(s, scope, fn);
         }
+        // The ONE judgement matchSubject accepted it by: only a call of a provably failable
+        // function is stamped (its lowering then discriminates the error).
         if (subjects.length === 1 && this.env.onFailableMatchSubject) {
-          const callees = failableResultCallees(subjects[0], scopeLookup(scope, this.env));
-          if (callees.length > 0) this.env.onFailableMatchSubject(node, callees);
+          const callees = provableSubjectCallees(subjects[0], scopeLookup(scope, this.env));
+          if (callees !== null && callees.length > 0) this.env.onFailableMatchSubject(node, callees);
         }
         // Its arms are kept raw (`pattern :> body`): each body is a value (or a block whose
         // statements are walked).
         for (const raw of node.rawArms ?? []) {
           if (typeof raw !== "string") continue;
           const body = this.env.matchArmBodyText(raw.trim());
-          const stmts = body === null ? null : this.env.parseStatements(body);
+          if (body === null) { this.opaque = true; continue; }
+          const stmts = this.parseBody(body);
           if (stmts) this.statements(stmts, scope, fn);
         }
         return;
@@ -460,14 +554,32 @@ class Walker {
   }
 
   /**
-   * A `match` subject: an operand like any other handling form's (S468). A call whose result
-   * reaches the subject unchanged (`match (a || check(p)) { .Denied :> … }`) is handled, and the
-   * lowering discriminates its error: the caller stamps the match from `failableResultCallees` —
-   * the same reaches-unchanged reading — so a subject accepted here is one whose error the arms
-   * see (`g-match-failable-subject-through-operator-miscompiled-s467`, resolved).
+   * A `match` subject (S468 fix round 1 — fail closed). impl#1's `match` discriminates a failable
+   * result by reading every non-error value as `.Ok`, which is correct only when the subject IS a
+   * call of a PROVABLY failable function (`provableSubjectCallees`). Such a call is handled (its
+   * arguments, and a callee that is not a bare name, are values). A call whose callee MAY be a
+   * failable function but is not provably one (`const g = c ? plainDeny : check; match g(p)`) is
+   * NOT handled — a plain `AuthErr::Denied` would read as `.Ok` — and is reported. Anything else —
+   * an operator (`match (a || check(p))`, `match (c ? AuthErr::Denied : check(p))`) — is a value
+   * position: a failable call inside it is unhandled
+   * (`g-match-failable-subject-through-operator-miscompiled-s467`, refused as on base).
    */
   matchSubject(node: ExprNode | null | undefined, scope: LocalScope | null, fn: FnCtx): void {
-    this.operand(node, scope, fn);
+    if (!node || typeof node !== "object") return;
+    if (node.kind === "call" && guardCallArmsRaw(node) === null && node.callee) {
+      const lk = scopeLookup(scope, this.env);
+      const may = failableCalleeOf(node, lk);
+      if (may !== null && provableSubjectCallees(node, lk) === null) {
+        const callee = node.callee;
+        const via = callee.kind === "ident" ? (callee.name === may ? null : callee.name) : calleeDisplay(callee);
+        this.cb({ call: node, calleeName: may, via, inFunction: fn.inFunction,
+          inFailableFn: fn.inFunction && fn.inFailableFn, matchSubjectNotProvable: true });
+      }
+      if (node.callee.kind !== "ident") this.expr(node.callee, scope, fn);
+      for (const a of node.args ?? []) this.expr(a as ExprNode, scope, fn);
+      return;
+    }
+    this.expr(node, scope, fn);
   }
 
   /**
@@ -546,11 +658,12 @@ class Walker {
     if (typeof node.bodyRaw === "string") {
       const inner = new LocalScope(scope);
       this.params(node.params, inner, PLAIN_FN);
-      const stmts = this.env.parseStatements(node.bodyRaw);
+      const stmts = this.parseBody(node.bodyRaw);
       if (stmts) this.statements(stmts, inner, PLAIN_FN);
       return;
     }
-    // Any other hatch carries no structure to read (it is not re-scanned).
+    // Any other hatch carries no structure to read (it is not re-scanned): nothing in it is provable.
+    this.opaque = true;
   }
 
   // ---- statements ---------------------------------------------------------
@@ -569,7 +682,9 @@ class Walker {
           // A bare `g = v` (a tilde-decl) WRITES an enclosing local `g` when one exists: it does
           // not declare a new one here (recordAlias then records on that binding's scope).
           if (decl.kind === "tilde-decl" && localBinds(n, scope)) continue;
-          block.names.set(n, decl.kind === "function-decl" && decl.canFail === true ? n : null);
+          const failableFn = decl.kind === "function-decl" && decl.canFail === true;
+          block.names.set(n, failableFn ? n : null);
+          if (failableFn) block.exact.set(n, [n]);
         }
       }
     }
@@ -578,7 +693,8 @@ class Walker {
       const st = s as Record<string, unknown> | null;
       if (!st || typeof st !== "object" || st.kind !== "function-decl" || typeof st.name !== "string") continue;
       const ret = failableFnReturnedByDecl(st, block, this.env);
-      if (ret !== null) block.returns.set(st.name, ret);
+      if (ret.may !== null) block.returns.set(st.name, ret.may);
+      if (ret.exact !== null) block.exactReturns.set(st.name, ret.exact);
     }
     for (const s of stmts) if (s && typeof s === "object") this.statement(s as Record<string, unknown>, block, fn, handling);
   }
@@ -596,8 +712,14 @@ class Walker {
       if (Array.isArray(st.body)) this.statements(st.body as unknown[], inner, fnCtx);
       return;
     }
-    if (kind === "return-stmt" && this.returnSink && this.returnSink.ctx === fn && this.returnSink.found === null) {
-      this.returnSink.found = failableFnValueOf(st.exprNode as ExprNode | undefined, scopeLookup(scope, this.env));
+    if (kind === "return-stmt" && this.returnSink && this.returnSink.ctx === fn) {
+      const sink = this.returnSink;
+      const lk = scopeLookup(scope, this.env);
+      const operand = st.exprNode as ExprNode | undefined;
+      if (sink.found === null) sink.found = failableFnValueOf(operand, lk);
+      const ex = exactFnValueOf(operand, lk);
+      if (ex === null) sink.allExact = false;
+      else sink.exact = unionNames(sink.exact, ex);
     }
     if (kind === "guarded-expr") {
       if (st.guardedNode && typeof st.guardedNode === "object") {
@@ -643,7 +765,7 @@ class Walker {
     for (const b of bodies) {
       const scope = new LocalScope(null);
       if (typeof b.binding === "string" && b.binding.trim() !== "") scope.names.set(b.binding.trim(), null);
-      const stmts = typeof b.raw === "string" && b.raw.trim() !== "" ? this.env.parseStatements(b.raw) : null;
+      const stmts = typeof b.raw === "string" && b.raw.trim() !== "" ? this.parseBody(b.raw) : null;
       if (stmts) this.statements(stmts, scope, PLAIN_FN);
       else if (isExprNodeValue(b.expr)) this.root(b.expr, "none", scope, PLAIN_FN);
     }
@@ -668,7 +790,11 @@ class Walker {
     const lk = scopeLookup(scope, this.env);
     const target = failableFnValueOf(init, lk);
     const returns = lambdaOrValueReturns(init.kind === "assign" ? init.value : init, scope, this.env, lk);
-    if (target === null && returns === null) return;
+    // PROVABLE facts only for a binding that is never written again: a `const` / `lin`.
+    const once = st.kind === "const-decl" || st.kind === "lin-decl";
+    const exact = once ? exactFnValueOf(init, lk) : null;
+    const exactReturns = once ? returns.exact : null;
+    if (target === null && returns.may === null && exact === null && exactReturns === null) return;
     // Bind in the innermost scope that already declares it; else this block.
     let owner: LocalScope = scope;
     for (let s: LocalScope | null = scope; s !== null; s = s.parent) {
@@ -676,7 +802,9 @@ class Walker {
     }
     if (target !== null) owner.names.set(name, target);
     else if (!owner.names.has(name)) owner.names.set(name, resolveName(name, scope, this.env));
-    if (returns !== null) owner.returns.set(name, returns);
+    if (returns.may !== null) owner.returns.set(name, returns.may);
+    if (exact !== null && target !== null) owner.exact.set(name, exact);
+    if (exactReturns !== null) owner.exactReturns.set(name, exactReturns);
   }
 
   /** A C-style `for`'s parts: the initializer (a declaration, carried as text), test and update. */
@@ -685,7 +813,7 @@ class Walker {
     if (!parts || typeof parts !== "object") return;
     const init = parts.initExpr;
     if (isParseErrorHatch(init) && typeof (init as { raw?: unknown }).raw === "string") {
-      const stmts = this.env.parseStatements((init as { raw: string }).raw);
+      const stmts = this.parseBody((init as { raw: string }).raw);
       if (stmts) {
         for (const s of stmts) {
           if (!s || typeof s !== "object") continue;
@@ -710,7 +838,7 @@ class Walker {
       if (isExprNodeValue(a.handlerExpr) && !isParseErrorHatch(a.handlerExpr)) {
         this.expr(a.handlerExpr, armScope, fn);
       } else if (typeof a.handler === "string" && a.handler.trim() !== "") {
-        const stmts = this.env.parseStatements(a.handler);
+        const stmts = this.parseBody(a.handler);
         if (stmts) this.statements(stmts, armScope, fn);
       }
     }
@@ -742,7 +870,7 @@ class Walker {
     // any statement text the expression parser could not read) carries a parse-error hatch.
     const textOnly = st._onMountEffect === true ? !st.exprNode || isParseErrorHatch(st.exprNode) : isParseErrorHatch(st.exprNode);
     if (kind === "bare-expr" && typeof st.expr === "string" && textOnly) {
-      const stmts = this.env.parseStatements(st.expr);
+      const stmts = this.parseBody(st.expr);
       // An `on mount` body is an effect, not render-time. The statements inside are checked
       // nowhere else, so a whole-statement call among them is reported here — unless the text
       // is itself the operand of a `!{}`.
@@ -753,8 +881,17 @@ class Walker {
 
 const NO_REPORT: Cb = () => {};
 
-/** Per env: a declaration / function value → the failable function its body returns (or null). */
-const returnsCache = new WeakMap<FailableEnv, WeakMap<object, string | null>>();
+/**
+ * What a function returns, as a function value: `may` — a failable function any `return` may be
+ * (fail closed); `exact` — the failable functions it PROVABLY returns (every `return` operand is
+ * provably one of them, at least one `return` exists, and no part of the body was unreadable), or
+ * null.
+ */
+export interface ReturnFacts { may: string | null; exact: string[] | null; }
+const NO_RETURNS: ReturnFacts = { may: null, exact: null };
+
+/** Per env: a declaration / function value → what its body returns. */
+const returnsCache = new WeakMap<FailableEnv, WeakMap<object, ReturnFacts>>();
 
 const quietEnvs = new WeakMap<FailableEnv, FailableEnv>();
 /** The env a return-judging walk runs with: it reports nothing and stamps nothing (memoized per env). */
@@ -766,91 +903,117 @@ function quietEnv(env: FailableEnv): FailableEnv {
 }
 
 /**
- * The failable function a function body may RETURN: any `return` operand of the function itself
- * (not of a function nested in it) that may be one, or the tail expression of a `fn` body.
+ * What a function body RETURNS (`ReturnFacts`): its own `return` operands (not those of a function
+ * nested in it), or the tail expression of a `fn` body.
  */
 function failableFnReturnedByBody(
   owner: object, params: unknown, body: unknown[], isFnTail: boolean, scope: LocalScope | null, env: FailableEnv,
-): string | null {
+): ReturnFacts {
   let byEnv = returnsCache.get(env);
   if (!byEnv) { byEnv = new WeakMap(); returnsCache.set(env, byEnv); }
-  if (byEnv.has(owner)) return byEnv.get(owner) ?? null;
-  byEnv.set(owner, null); // a self-reference while judging reads "not yet known"
+  const cached = byEnv.get(owner);
+  if (cached) return cached;
+  byEnv.set(owner, NO_RETURNS); // a self-reference while judging reads "not known" (never provable)
   const w = new Walker(quietEnv(env), NO_REPORT);
   const ctx: FnCtx = { inFunction: true, inFailableFn: false };
-  w.returnSink = { ctx, found: null };
+  const sink = { ctx, found: null as string | null, exact: null as string[] | null, allExact: true };
+  w.returnSink = sink;
   const inner = new LocalScope(scope);
   w.params(params, inner, ctx);
   w.statements(body, inner, ctx);
-  let found = w.returnSink.found;
-  if (found === null && isFnTail && body.length > 0) {
+  let found = sink.found;
+  let exact = sink.allExact && !w.opaque ? sink.exact : null;
+  if (sink.found === null && sink.exact === null && isFnTail && body.length > 0) {
     const last = body[body.length - 1] as Record<string, unknown> | null;
-    if (last && last.kind === "bare-expr") found = failableFnValueOf(last.exprNode as ExprNode | undefined, scopeLookup(inner, env));
+    if (last && last.kind === "bare-expr") {
+      const lk = scopeLookup(inner, env);
+      found = failableFnValueOf(last.exprNode as ExprNode | undefined, lk);
+      exact = sink.allExact && !w.opaque ? exactFnValueOf(last.exprNode as ExprNode | undefined, lk) : null;
+    }
   }
-  byEnv.set(owner, found);
-  return found;
+  const facts: ReturnFacts = { may: found, exact: found === null ? null : exact };
+  byEnv.set(owner, facts);
+  return facts;
 }
 
-function failableFnReturnedByDecl(st: Record<string, unknown>, scope: LocalScope | null, env: FailableEnv): string | null {
-  if (!Array.isArray(st.body)) return null;
+function failableFnReturnedByDecl(st: Record<string, unknown>, scope: LocalScope | null, env: FailableEnv): ReturnFacts {
+  if (!Array.isArray(st.body)) return NO_RETURNS;
   return failableFnReturnedByBody(st, st.params, st.body as unknown[], st.fnKind === "fn", scope, env);
 }
 
 /**
- * The failable function a CALL of `value` may return, when `value` is itself a function (or names
- * one): an arrow whose body may yield one, a name whose call may, either side of a choice.
+ * What a CALL of `value` returns (`ReturnFacts`), when `value` is itself a function (or names one):
+ * an arrow whose body may yield one, a name whose call may, either side of a choice. Provable
+ * (`exact`) only through a name, an arrow, a function expression, a ternary both of whose arms are
+ * provable, or a cast.
  */
 function lambdaOrValueReturns(
   value: ExprNode | null | undefined, scope: LocalScope | null, env: FailableEnv, lk: FnValueLookup, depth = 0,
-): string | null {
-  if (!value || typeof value !== "object" || depth > 64) return null;
+): ReturnFacts {
+  if (!value || typeof value !== "object" || depth > 64) return NO_RETURNS;
   switch (value.kind) {
-    case "ident": return lk.returns(value.name);
+    case "ident": {
+      const may = lk.returns(value.name);
+      return { may, exact: may === null ? null : lk.returnsExact(value.name) };
+    }
     case "lambda": {
       if (value.body && value.body.kind === "expr") {
         const inner = new LocalScope(scope);
         for (const n of paramNames(value.params)) inner.names.set(n, null);
-        return failableFnValueOf(value.body.value, scopeLookup(inner, env));
+        const ilk = scopeLookup(inner, env);
+        const may = failableFnValueOf(value.body.value, ilk);
+        return { may, exact: may === null ? null : exactFnValueOf(value.body.value, ilk) };
       }
       if (value.body && value.body.kind === "block") {
         return failableFnReturnedByBody(value, value.params, value.body.stmts as unknown[], false, scope, env);
       }
-      return null;
+      return NO_RETURNS;
     }
     case "escape-hatch": {
       const r = value as unknown as Record<string, unknown>;
-      if (typeof r.bodyRaw !== "string") return null;
+      if (typeof r.bodyRaw !== "string") return NO_RETURNS;
       const stmts = env.parseStatements(r.bodyRaw);
-      return stmts ? failableFnReturnedByBody(value, r.params, stmts, false, scope, env) : null;
+      return stmts ? failableFnReturnedByBody(value, r.params, stmts, false, scope, env) : NO_RETURNS;
     }
-    case "ternary":
-      return lambdaOrValueReturns(value.consequent, scope, env, lk, depth + 1) ?? lambdaOrValueReturns(value.alternate, scope, env, lk, depth + 1);
+    case "ternary": {
+      const a = lambdaOrValueReturns(value.consequent, scope, env, lk, depth + 1);
+      const b = lambdaOrValueReturns(value.alternate, scope, env, lk, depth + 1);
+      return { may: a.may ?? b.may, exact: a.exact !== null && b.exact !== null ? unionNames(a.exact, b.exact) : null };
+    }
     case "binary":
       if (value.op === "||" || value.op === "??") {
-        return lambdaOrValueReturns(value.left, scope, env, lk, depth + 1) ?? lambdaOrValueReturns(value.right, scope, env, lk, depth + 1);
+        const a = lambdaOrValueReturns(value.left, scope, env, lk, depth + 1);
+        return { may: a.may ?? lambdaOrValueReturns(value.right, scope, env, lk, depth + 1).may, exact: null };
       }
-      if (value.op === "&&") return lambdaOrValueReturns(value.right, scope, env, lk, depth + 1);
-      return null;
+      if (value.op === "&&") return { may: lambdaOrValueReturns(value.right, scope, env, lk, depth + 1).may, exact: null };
+      return NO_RETURNS;
     case "cast": return lambdaOrValueReturns(value.expression, scope, env, lk, depth + 1);
-    default: return null;
+    default: return NO_RETURNS;
   }
 }
 
 /**
- * The failable function a file-level function declaration may return (S468) — for the caller's
- * whole-file facts (`env.resolveOuterReturns`), solved by the caller to a fixpoint.
+ * What a function declaration returns (`ReturnFacts`) — for the caller's binding facts
+ * (`env.resolveOuterReturns` / `env.resolveOuterReturnsExact`). The caller roots `env` at the
+ * scope that holds the declaration, so every free name in the body resolves where the function
+ * was declared (S468 fix round 1: by binding, never by name across the file).
  */
-export function failableFnReturnedBy(fnDecl: Record<string, unknown>, env: FailableEnv): string | null {
+export function failableFnReturnedBy(fnDecl: Record<string, unknown>, env: FailableEnv): ReturnFacts {
   return failableFnReturnedByDecl(fnDecl, null, env);
 }
 
 /**
- * What a file-level binding's initializer makes it (S468): the failable function the value may be,
- * and the failable function a call of it may return.
+ * What a binding's initializer makes it (S468): the failable function the value may be (`is`), the
+ * failable function a call of it may return (`returns`), and the PROVABLE versions of both
+ * (`isExact` / `returnsExact`; the caller keeps those only for a binding never written again).
  */
-export function failableBindingFacts(init: ExprNode | null | undefined, env: FailableEnv): { is: string | null; returns: string | null } {
+export function failableBindingFacts(init: ExprNode | null | undefined, env: FailableEnv): {
+  is: string | null; returns: string | null; isExact: string[] | null; returnsExact: string[] | null;
+} {
   const lk = scopeLookup(null, env);
-  return { is: failableFnValueOf(init, lk), returns: lambdaOrValueReturns(init, null, env, lk) };
+  const is = failableFnValueOf(init, lk);
+  const r = lambdaOrValueReturns(init, null, env, lk);
+  return { is, returns: r.may, isExact: is === null ? null : exactFnValueOf(init, lk), returnsExact: r.exact };
 }
 
 /**

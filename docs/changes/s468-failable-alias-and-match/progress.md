@@ -75,3 +75,103 @@ match via env.onFailableMatchSubject; emit-expr bridge forwards) all read it. A 
   failable because its callee MAY be failable; a plain enum value is classified Ok). Base rejected these (but base is
   fail-open the other way: when the callee IS check, base compares the error object as a plain value). No lowering is
   correct for a subject that may or may not be a failable result.
+
+## 2026-10-17 — FIX ROUND 1: governing sentences (quoted)
+- §19.4.3: "A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the following: 1. **Match** the result …"
+  and "Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002**".
+  §19.4.4: "An unhandled `!` function call SHALL be a compile error (E-ERROR-002)."
+  -> A (refusing operator-widened / not-provably-failable match subjects) changes no meaning: such a subject's call is
+  NOT handled by impl#1's match (its lowering cannot discriminate it), so it is the E-ERROR-002 the SHALL requires — the
+  same refusal base made, documented as a carried impl#1 gap in §19.4.3 ("impl#1 handles a `match` subject only when the
+  subject IS the call … so the check refuses that form").
+- B root (refuse a failable function READ AS A VALUE): searched §19.4 (19.4.1–19.4.5), §19.4.3 (incl. "Handler
+  references", "Arrow-valued handlers", "Carried impl#1 gaps"), §14.3 (E-VALUE-FUNCTION-STORED), §13.9.6. NO governing
+  sentence makes the read illegal:
+  · §14.3 :11273 says the opposite for functions in general: "A function still flows PASSED (an argument, a callback, a
+    component prop or attribute — wiring) and CALLED (a handler); it is never stored."
+  · §13.9.6 "An async-colored function (§13.2) SHALL be bound only by a `function` declaration" is ruled for ASYNC
+    functions only (S467 "b it is").
+  · §19.4.3 "Handler references (S441 ruling)" makes a failable function passed as an EVENT-HANDLER reference E-ERROR-002
+    — handler attributes only ("The rule applies to event-handler attributes only: a component's declared prop … is a
+    callback value handed to the component").
+  · §19.4.3's general SHALL governs the CALLS a passed function receives; the carried-gaps paragraph names "a failable
+    function passed as a value (`items.map(risky)`)" as not yet reached. That governs reporting the call, not refusing
+    the read. => STOPPED on the root refusal (ruling request below). Not invented.
+
+## Locus trace (fix round 1)
+- F1/F2/F3 root: `failable-value-calls.ts` `Walker.matchSubject` (head: `this.operand(...)`, the reaches-unchanged rule)
+  + the stamp from `failableResultCallees` (statement: `type-system.ts` `checkMatchDiagnostics` via
+  `failableSubjectCallees`; expression: `env.onFailableMatchSubject`). Codegen `emit-control-flow.ts`
+  `isFailableOkMatch` -> every non-`__scrml_error` value is `"Ok"`. HYPOTHESIS (reviewer: "the stamp marks the whole
+  subject failable, the lowering treats every non-error value as Ok") HELD. F2 refined: the operator form in a handler
+  attribute was ACCEPTED by the widened walk and the handler lowering compared as a plain value (traced to the emitted
+  `if (_scrml_match_6 === "Denied")`). F3 HELD (operator form accepted; the server statement lowering does not await).
+- F5: `type-system.ts` `solvedFnReturnsFailable` keyed every function-decl (nested included, via `allFnDecls`) BY NAME;
+  `resolveFailableReturns` fell back to it whenever the chain hit a function binding. HELD.
+- NEW (n9, the F1 class through a NAME): `failableFnValueOf` is a MAY judgement (first failable leaf wins); the head
+  stamped `match g(p)` from it, so `const g = c ? plainDeny : check` was stamped and `plainDeny`'s `AuthErr::Denied` read
+  as `.Ok`. Same root as F1.
+
+## Fix (rule flipped to "admit only what is provably safe")
+- ONE judgement for a match subject: `provableSubjectCallees` — the subject IS a call (parens transparent) whose callee is
+  PROVABLY a failable function (`exactFnValueOf`: a `!` function by name, judged by its binding; a `const`/`lin` bound
+  to a provable value; a ternary BOTH of whose arms are provable; a cast; a call of a NAME every `return` of which is
+  provable, with no unreadable body text). `Walker.matchSubject`: a provable call is handled; a call whose callee MAY be
+  failable but is not provable is reported (E-ERROR-002 with a match-specific message); anything else (an operator) is a
+  value position — as on base. The same judgement is the only thing that stamps (`checkMatchDiagnostics`,
+  `onFailableMatchSubject`), and a stamp is applied only when the error enum resolves (base rule; head had stamped
+  `__matchSubjectFailable` without variants).
+- Provable facts recorded only for bindings never written again (const/lin) — Walker `LocalScope.exact/exactReturns`, TS
+  `failableExactByScope/failableExactReturnsByScope`. A name a function body declares LATER than the current point is
+  not provable (`declaredAheadByScope`).
+- F5: function declarations are judged BY BINDING. `fnDeclsByScope` (a function body's direct declarations registered
+  when its scope is pushed — hoisted; block-level ones when bound; top-level ones on first use), `declReturnFacts(decl,
+  root)` walks the body with every free name resolved from the scope that holds the declaration (memoized per decl,
+  keyed on the visible bindings + a facts generation; a recursive reference reads "nothing" and is not memoized). The
+  by-name fixpoint is gone. `resolveFnBinding` is the one chain walk behind fnFactsIs / IsExact / Returns / ReturnsExact.
+- multi-scrutinee head: unchanged (base rule) — executed: its lowering reads each value's own variant, so a mixed alias
+  rejects correctly (n9 "multi mixed alias" PASS on base, head and fix).
+
+## Direction of change (fix round 1, relative to BASE 5c43c3b8e)
+- operator-widened subjects: inert vs base (refused on base, refused again).
+- newly-rejecting vs base: a `match` subject whose callee MAY be a plain function (`const g = c ? plain : check; match
+  g(p)`, `let g = check; …; match g(p)`, a returned function that may be plain, the same-name-shadow case where a local
+  plain function shares a failable function's name). Base accepted these and miscompiled one branch.
+- semantics-changed vs base (kept from the first pass, review-confirmed): a provably-failable subject in an expression
+  position (in a block, an arrow, `.map`, an `if`/`while` condition, markup) and through `const g = check` / `getF()`
+  now discriminates the error (base: accepted, LOGGED IN).
+- the alias half (E-ERROR-002 through modelled value flows): newly-rejecting vs base, unchanged from the first pass
+  except F5 (a false refusal removed).
+
+## RULING REQUEST (STOPPED — B root refusal; not implemented)
+Question: may a FAILABLE function be read as a VALUE (outside callee position)?
+Evidence: 21 shapes in `compiler/tests/integration/security-failable-pack/known-fail.js` (`VALUE`) log in on a wrong
+password on base AND this branch: `apply(check)`, `((f) => f(p))(check)`, `[p].map(check)` / `filter` / `some`,
+`id(check)(p)`, `const g = id(check)`, curried `mk()()(p)`, `apply2(getF)(p)`, a function-expression IIFE, a
+destructuring default `const { g = check } = {}`, a parameter default `function t(p, f = check)`, a closure write, a
+write after use in a loop. The check follows a CLOSED set of value flows (`failableFnValueOf`); each round of review
+finds a new one — the S467 await (10 rounds) / CPS (5 rounds) signature. No SPEC sentence governs the read (see
+"governing sentences" above; §14.3 explicitly allows a function to flow PASSED).
+Options:
+  (a) RECOMMENDED — the §13.9.6 analogue for failable functions: "A failable function SHALL be referenced only in
+      callee position, by a `const` alias of it (`const g = check`), or where the SPEC requires one (`<formFor
+      onsubmit=…>`, §41.14.3)." Every other read is E-ERROR-002 (or a new code). Fail closed by construction: a failable
+      function can only reach a call through a modelled alias, so the may-judgement becomes complete instead of
+      shape-chasing; the returned-function / ternary-alias machinery could then be retired. Handler references are
+      already E-ERROR-002 (S441). Component callback props (`<Btn onSave=risky/>`, legal today per S441's last
+      sentence) would need a carve-out or a migration — decide with the ruling.
+  (b) failable-ness as part of the function's TYPE, propagated through parameters / returns / bindings (the S467 F4
+      ruling rejected the analogous "(a) async-as-part-of-the-function-type propagation" for async).
+  (c) leave it: document the carried gap (status quo; 21 known live wrong-password shapes, all contrived, 0 corpus sites).
+Measured corpus (text scan of every `function NAME(…)!` declaration and every non-callee read of NAME, reviewed by hand;
+script `~/.cache/scrml-agent-tmp/s468-failable-alias-and-match/scripts/fnvalue-reads.mjs`): examples/ samples/ stdlib/
+benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .scrml) + flogence (31 .scrml):
+  · examples / samples / stdlib / benchmarks: **0** value reads (stdlib hits were doc comments / an object key).
+  · giti / flogence: **0** (neither declares a `!` function).
+  · conformance/cases: 12 real reads — 6× `<formFor onsubmit=persistSignup/>` (SPEC-REQUIRED failable value, §41.14.3:
+    must be exempt under (a)); 3× event-handler references in `handler-failable-reference-pos` (already E-ERROR-002);
+    3× component callback prop `onSave=risky` (`handler-failable-reference-component-prop-neg` ×2 — legal today,
+    `…-via-component-prop-pos` ×1 — already E-ERROR-002 at the call site). The other 4 hits were false positives
+    (button text `>b<`, an `<each … as risky>` alias).
+  => under (a) with the formFor carve-out: 0 real (non-test-fixture) sites newly refused; 2 conformance -neg fixtures
+     (component callback props) would flip unless props are carved out too.

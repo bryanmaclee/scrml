@@ -168,6 +168,9 @@ describe("A2 — values that cannot be a failable function stay clean", () => {
 // B — the handled forms through such a value compile and reject a wrong password
 // ---------------------------------------------------------------------------
 
+/** A plain (not failable) function that returns the error enum's variant as a VALUE. */
+const PLAIN_DENY = "    function plainDeny(p) { return AuthErr::Denied }";
+
 describe("B — handled through an alias / returned function: executed", () => {
   test("`g(p) !{ … }` through a ternary alias", async () => {
     await expectRejectsWrong("const g = p ? check : id\n        const ok = g(p) !{ .Denied :> false }");
@@ -175,39 +178,20 @@ describe("B — handled through an alias / returned function: executed", () => {
   test("`getF()(p) !{ … }`", async () => {
     await expectRejectsWrong("const ok = getF()(p) !{ .Denied :> false }");
   });
-  test("`match g(p)` through a plain alias (was: compiled and LOGGED IN)", async () => {
+  test("`match g(p)` through `const g = check` (was: compiled and LOGGED IN)", async () => {
     await expectRejectsWrong("const g = check\n        const ok = match g(p) { .Denied :> false  _ :> true }");
   });
-  test("`match g(p)` through a ternary alias", async () => {
-    await expectRejectsWrong("const g = p ? check : id\n        const ok = match g(p) { .Denied :> false  _ :> true }");
+  test("`match g(p)` through a const ternary both of whose arms are failable", async () => {
+    await expectRejectsWrong("const g = p == \"\" ? check : check\n        const ok = match g(p) { .Denied :> false  _ :> true }");
   });
-  test("`match getF()(p)`", async () => {
+  test("`match getF()(p)` (every return of getF is a failable function)", async () => {
     await expectRejectsWrong("const ok = match getF()(p) { .Denied :> false  _ :> true }");
   });
-});
-
-// ---------------------------------------------------------------------------
-// C — gap 2: a `match` subject that carries a failable result through an operator
-// ---------------------------------------------------------------------------
-
-describe("C — a match subject carrying a failable result: compiles and discriminates the error", () => {
-  test("`match (p == \"\" || check(p))` (was: refused; before S467, LOGGED IN)", async () => {
-    await expectRejectsWrong("const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }");
+  test("`match mk()(p)` with `const mk = () => check`", async () => {
+    await expectRejectsWrong("const mk = () => check\n        const ok = match mk()(p) { .Denied :> false  _ :> true }");
   });
-  test("a ternary-arm subject", async () => {
-    await expectRejectsWrong("const ok = match (p == \"\" ? false : check(p)) { .Denied :> false  _ :> true }");
-  });
-  test("the right of `&&`", async () => {
-    await expectRejectsWrong("const ok = match (p != \"\" && check(p)) { .Denied :> false  _ :> true }");
-  });
-  test("`??`", async () => {
-    await expectRejectsWrong("const ok = match (check(p) ?? false) { .Denied :> false  _ :> true }");
-  });
-  test("an `::Ok(v)` arm binds the success value through an operator", async () => {
-    await expectRejectsWrong("const ok = match (p == \"\" || check(p)) { .Ok(v) :> v  .Denied :> false }");
-  });
-  test("a statement-position match", async () => {
-    await expectRejectsWrong("let ok = true\n        match (p == \"\" || check(p)) {\n            .Denied :> { ok = false }\n            _ :> { ok = true }\n        }");
+  test("a statement-position `match g(p)` through `const g = check`", async () => {
+    await expectRejectsWrong("const g = check\n        let ok = false\n        match g(p) {\n            .Denied :> { ok = false }\n            _ :> { ok = true }\n        }");
   });
   test("a direct-call subject in an expression-position match inside a block (was: LOGGED IN)", async () => {
     await expectRejectsWrong("let ok = true\n        if (p != \"\") { ok = match check(p) { .Denied :> false  _ :> true } }");
@@ -217,9 +201,84 @@ describe("C — a match subject carrying a failable result: compiles and discrim
   });
 });
 
-describe("C2 — the widened subject keeps the other rules", () => {
+// ---------------------------------------------------------------------------
+// C — S468 fix round 1: a `match` handles a failable call only when the subject is a call
+// of a PROVABLY failable function. Everything else stays REFUSED (fail closed): the lowering
+// reads every non-error value as `.Ok`, so a subject that may be a plain value has no correct
+// lowering (review F1–F3 of 7ecae57eb: each of these compiled and LOGGED IN on a wrong password).
+// ---------------------------------------------------------------------------
+
+describe("C — an operator-widened match subject is E-ERROR-002 (as on base)", () => {
+  const shapes = [
+    ["`||`", "const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }"],
+    ["a ternary arm", "const ok = match (p == \"\" ? false : check(p)) { .Denied :> false  _ :> true }"],
+    ["the right of `&&`", "const ok = match (p != \"\" && check(p)) { .Denied :> false  _ :> true }"],
+    ["`??`", "const ok = match (check(p) ?? false) { .Denied :> false  _ :> true }"],
+    ["an `::Ok(v)` arm through an operator", "const ok = match (p == \"\" || check(p)) { .Ok(v) :> v  .Denied :> false }"],
+    ["a statement-position match", "let ok = true\n        match (p == \"\" || check(p)) {\n            .Denied :> { ok = false }\n            _ :> { ok = true }\n        }"],
+    // F1 — a PLAIN enum value as the other operand: the stamped lowering read it as `.Ok`.
+    ["F1: a plain enum value as the other ternary arm",
+      "const ok = match (p == \"wrong\" ? AuthErr::Denied : check(p)) { .Denied :> false  _ :> true }"],
+    ["F1: a bare-dot variant as the other ternary arm",
+      "const ok = match (p == \"wrong\" ? .Denied : check(p)) { .Denied :> false  _ :> true }"],
+    ["F1: a plain function's enum value under `||`",
+      "const ok = match (plainDeny(p) || check(p)) { .Denied :> false  _ :> true }"],
+    ["F1: statement position",
+      "let ok = true\n        match (p == \"wrong\" ? AuthErr::Denied : check(p)) { .Denied :> { ok = false }  _ :> { ok = true } }"],
+    ["inside a block", "let ok = false\n        if (p != \"zz\") { ok = match (false || check(p)) { .Denied :> false  _ :> true } }"],
+    ["inside `.map`", "const ok = [p].map((q) => match (false || check(q)) { .Denied :> false  _ :> true })[0]"],
+    ["an `if` condition", "let ok = false\n        if (match (false || check(p)) { .Denied :> false  _ :> true }) { ok = true }"],
+  ];
+  for (const [label, decl] of shapes) {
+    test(label, () => {
+      expect(codesOf(decl, PLAIN_DENY)).toContain("E-ERROR-002");
+    });
+  }
+
+  test("F2: inline `match` through `||` in an event-handler attribute", () => {
+    const src = LOGIN("const ok = false").replace('onclick=login("wrong")',
+      'onclick=${ @msg = match (false || check("wrong")) { .Denied :> "rejected"  _ :> "LOGGED IN" } }');
+    expect(compileSource(src).codes).toContain("E-ERROR-002");
+  });
+
+  test("F2: inline `match` through `||` in a markup interpolation", () => {
+    const src = LOGIN("const ok = false").replace('<p id="out">${@msg}</p>',
+      '<p id="out">${match (false || check("wrong")) { .Denied :> "rejected"  _ :> "LOGGED IN" }}</p>');
+    expect(compileSource(src).codes).toContain("E-ERROR-002");
+  });
+});
+
+describe("C1 — a callee that MAY be a plain function is not provably failable: E-ERROR-002", () => {
+  // The F1 class reached through a NAME (found while reproducing F1): with the alias stamped
+  // failable, `plainDeny`'s `AuthErr::Denied` read as `.Ok` and a wrong password logged in.
+  const shapes = [
+    ["a ternary alias over a plain function", "const g = p == \"wrong\" ? plainDeny : check\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
+    ["a `||` alias", "const g = plainDeny || check\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
+    ["a ternary callee", "const ok = match (p == \"wrong\" ? plainDeny : check)(p) { .Denied :> false  _ :> true }"],
+    ["a returned function that may be plain", "const ok = match getQ(p)(p) { .Denied :> false  _ :> true }"],
+    ["a `let` alias written again", "let g = check\n        if (p == \"wrong\") { g = plainDeny }\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
+    ["statement position", "const g = p == \"wrong\" ? plainDeny : check\n        let ok = false\n        match g(p) { .Denied :> { ok = false }  _ :> { ok = true } }"],
+  ];
+  const pre = PLAIN_DENY + "\n    function getQ(q) { if (q == \"wrong\") { return plainDeny }\n        return check }";
+  for (const [label, decl] of shapes) {
+    test(label, () => {
+      expect(codesOf(decl, pre)).toContain("E-ERROR-002");
+    });
+  }
+
+  test("the message says why the match does not handle it", () => {
+    const r = compileSource(LOGIN("const g = p == \"wrong\" ? plainDeny : check\n        const ok = match g(p) { .Denied :> false  _ :> true }", PLAIN_DENY));
+    expect(r.messages.join("\n")).toMatch(/subject of a 'match', but the function called there may also be one that is not failable/);
+  });
+
+  test("a §18.19 multi-scrutinee head keeps its rule (its lowering reads each value's own variant)", async () => {
+    await expectRejectsWrong("const g = p == \"wrong\" ? plainDeny : check\n        const ok = match (g(p), 1) { (.Denied, _) :> false  _ :> true }", PLAIN_DENY);
+  });
+});
+
+describe("C2 — the direct subject keeps the other rules", () => {
   test("exhaustiveness: no `_` and no `.Ok` arm is E-TYPE-020", () => {
-    expect(codesOf("const ok = match (p == \"\" || check(p)) { .Denied :> false }")).toContain("E-TYPE-020");
+    expect(codesOf("const ok = match check(p) { .Denied :> false }")).toContain("E-TYPE-020");
   });
   test("a member access in between is still a value position", () => {
     expect(codesOf("const ok = match (check(p).ok) { .Denied :> false  _ :> true }")).toContain("E-ERROR-002");
@@ -230,11 +289,40 @@ describe("C2 — the widened subject keeps the other rules", () => {
   test("the left of `&&` is only tested: still a value position", () => {
     expect(codesOf("const ok = match (check(p) && true) { .Denied :> false  _ :> true }")).toContain("E-ERROR-002");
   });
+  test("a §18.19 multi-scrutinee head keeps the direct-call rule", () => {
+    expect(codesOf("const ok = match (p == \"\" || check(p), 1) { (.Denied, _) :> false  _ :> true }")).toContain("E-ERROR-002");
+  });
+  test("a built-in failable bound by import (`parseVariant`, §41.13) is a provable direct subject", () => {
+    const src = `type Color:enum = { Red, Green }
+<msg> = "init"
+\${
+    import { parseVariant } from "scrml:data"
+    function pick(p) {
+        @msg = match parseVariant(p, Color) { .Ok(c) :> "ok"  _ :> "bad" }
+    }
+}
+<button onclick=pick("Red")>go</button>
+<p>\${@msg}</p>
+`;
+    expect(compileSource(src).codes).toEqual([]);
+  });
+  test("a CPS-split server function (failable without `!`) stays a handled direct subject", () => {
+    const src = `<msg> = "init"
+\${
+    server function load(p) { return p == "x" }
+    function go() {
+        @msg = match load("x") { .Ok(v) :> "ok"  _ :> "bad" }
+    }
+}
+<button onclick=go()>go</button>
+<p>\${@msg}</p>
+`;
+    expect(compileSource(src).codes.filter((c) => c === "E-ERROR-002")).toEqual([]);
+  });
 });
 
-describe("C3 — blast radius: other lowerings of the widened subject", () => {
-  test("a server function's match on `(p == \"\" || check(p))` discriminates the error", () => {
-    const src = `type AuthErr:enum = { Denied }
+describe("C3 — server function (F3): an operator-widened subject is refused at statement and expression position", () => {
+  const SRV = (body) => `type AuthErr:enum = { Denied }
 <msg> = "init"
 \${
     server function check(p)! -> AuthErr {
@@ -242,31 +330,45 @@ describe("C3 — blast radius: other lowerings of the widened subject", () => {
         return true
     }
     server function login(p) {
-        const ok = match (p == "" || check(p)) { .Denied :> false  _ :> true }
-        return ok ? "LOGGED IN" : "rejected"
+        ${body}
     }
     function go() { @msg = login("wrong") !{ _ :> "err" } }
 }
 <button onclick=go()>go</button>
 <p>\${@msg}</p>
 `;
-    const uniq = `srv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const dir = resolve(tmpdir(), `scrml-s468-${uniq}`);
-    mkdirSync(dir, { recursive: true });
-    const input = resolve(dir, "app.scrml");
-    writeFileSync(input, src);
-    try {
-      const result = compileScrml({ inputFiles: [input], write: true, outputDir: resolve(dir, "out"), log: () => {} });
-      const errs = (result.errors ?? []).filter((e) => e.severity !== "warning" && !/^[WI]-/.test(e.code ?? ""));
-      expect(errs.map((e) => e.code)).toEqual([]);
-      const server = readFileSync(resolve(dir, "out", "app.server.js"), "utf8");
-      expect(server).toMatch(/const (_scrml_tag_\d+) = \((_scrml_match_\d+) != null && typeof \2 === "object" && \2\.__scrml_error === true\) \? \2\.variant : "Ok";/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+  test("statement position `match (p == \"\" || check(p))` (was: unawaited, 200 LOGGED IN)", () => {
+    const codes = compileSource(SRV("let ok = false\n        match (p == \"\" || check(p)) { .Denied :> { ok = false }  _ :> { ok = true } }\n        return ok ? \"LOGGED IN\" : \"rejected\"")).codes;
+    expect(codes).toContain("E-ERROR-002");
   });
+  test("expression position `match (p == \"\" || check(p))`", () => {
+    const codes = compileSource(SRV("const ok = match (p == \"\" || check(p)) { .Denied :> false  _ :> true }\n        return ok ? \"LOGGED IN\" : \"rejected\"")).codes;
+    expect(codes).toContain("E-ERROR-002");
+  });
+});
 
-  test("a §18.19 multi-scrutinee head keeps the direct-call rule", () => {
-    expect(codesOf("const ok = match (p == \"\" || check(p), 1) { (.Denied, _) :> false  _ :> true }")).toContain("E-ERROR-002");
+// ---------------------------------------------------------------------------
+// D — F5: function facts are judged BY BINDING, never by name across the file
+// ---------------------------------------------------------------------------
+
+describe("D — a function's returns are judged where it is declared (F5)", () => {
+  test("the review's shape: a local plain `getF` is clean while another function's nested `getF` returns check", () => {
+    expect(codesOf(
+      "function getF2() { return plain }\n        const ok = getF2()(p)",
+      "    function other() { function getF2() { return check }\n        return getF2()(\"x\") !{ _ :> false } }")).toEqual([]);
+  });
+  test("a local `getF` returning check is still E-ERROR-002 when called unhandled", () => {
+    expect(codesOf(
+      "function getF2() { return check }\n        const ok = getF2()(p)",
+      "    function other() { function getF2() { return plain }\n        return getF2()(\"x\") }")).toContain("E-ERROR-002");
+  });
+  test("a local `getF` used before its declaration (hoisted) is judged by that declaration", () => {
+    expect(codesOf(
+      "const ok = getF2()(p)\n        function getF2() { return plain }",
+      "    function other() { function getF2() { return check }\n        return getF2()(\"x\") !{ _ :> false } }")).toEqual([]);
+  });
+  test("a local shadow of a failable name declared later is not provable: refused in a match subject", () => {
+    expect(codesOf(
+      "function getF2() { return check }\n        const ok = match getF2()(p) { .Denied :> false  _ :> true }\n        const check = plain")).toContain("E-ERROR-002");
   });
 });
