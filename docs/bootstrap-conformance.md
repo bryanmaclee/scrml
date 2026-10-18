@@ -7,22 +7,22 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1795 of 1795 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1805 of 1805 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 200 | 11.1% |
+| PASS | 210 | 11.6% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 65 | 3.6% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 674 | 37.5% |
-| UNSUPPORTED | 856 | 47.7% |
+| NOT-TWINNED | 674 | 37.3% |
+| UNSUPPORTED | 856 | 47.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 265; of those, 200 hold (75.5%). Runtime half executed on the bootstrap for 75 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 275; of those, 210 hold (76.4%). Runtime half executed on the bootstrap for 85 case(s).
 
-- **Vacuous** passes: 11 of 200 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **189**.
+- **Vacuous** passes: 11 of 210 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **199**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 65; the other 32 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -154,7 +154,7 @@ NOT-TWINNED by reason (674 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 81 | · | · | · | · | 19 | 62 | · | · |
+| server-db | 91 | 10 | · | · | · | 19 | 62 | · | · |
 | server-fn | 25 | · | · | 7 | · | 8 | 10 | · | · |
 | sql | 20 | 1 | · | · | · | 9 | 10 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -340,7 +340,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (200)
+### PASS / CODES-ONLY (210)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -538,6 +538,16 @@ none
 - `reactive/reset-handler-nonzero-initial` — PASS · TWIN
 - `reactive/textarea-rcdata-value-bind` — PASS · TWIN
 - `reactive/toggle-show` — PASS · TWIN
+- `server-db/sql-aggregate-group-rt-twin` — PASS
+- `server-db/sql-all-array-shape-rt-twin` — PASS
+- `server-db/sql-delete-reflects-rt-twin` — PASS
+- `server-db/sql-get-single-row-rt-twin` — PASS
+- `server-db/sql-join-two-tables-rt-twin` — PASS
+- `server-db/sql-multi-table-sequence-rt-twin` — PASS
+- `server-db/sql-order-limit-rt-twin` — PASS
+- `server-db/sql-select-hydrate-rt-twin` — PASS
+- `server-db/sql-update-returning-rt-twin` — PASS
+- `server-db/sql-where-filter-rt-twin` — PASS
 - `sql/bare-identifier-body-e-sql-003-neg` — PASS · TWIN
 - `style/style-001-style-block-pos` — PASS
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS

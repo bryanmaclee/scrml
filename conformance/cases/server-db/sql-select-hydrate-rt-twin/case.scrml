@@ -1,0 +1,13 @@
+// §66 twin of server-db/sql-select-hydrate-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    <users:User[replace]=([])/>
+    function loadUsers() -> User[] {
+        return ?{`SELECT id, name FROM users`}.all() !{ _ :> [] }
+    }
+    <main>
+        <button id="load" onclick={ @users = loadUsers() !{ .Transport(t) :> return } }>Load</button>
+        <ul id="list"><each in=@users key=(@.id) as u><li class="row">${u.name}</li></each></ul>
+        <p id="count">Count: ${@users.length}</p>
+    </main>
+</program>

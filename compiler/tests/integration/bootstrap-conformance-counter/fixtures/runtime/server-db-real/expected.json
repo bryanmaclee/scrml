@@ -1,0 +1,14 @@
+{
+  "id": "fixture-server-db-real",
+  "description": "KNOWN PASS (codes + runtime, s468 U1c): the bootstrap's own server artifact on a REAL in-memory SQLite (sqlEngine: real) — the WHERE with a bound parameter is evaluated by the engine, so only the admins come back (the stub engine would answer every row).",
+  "language-version": "1.0",
+  "spec": "§8.1, §8.2, §8.3",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "sqlEngine": "real",
+    "serverDb": { "people": [{ "id": 1, "name": "a", "role": "admin" }, { "id": 2, "name": "b", "role": "user" }, { "id": 3, "name": "c", "role": "admin" }] },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "rows": [{ "id": 1, "name": "a" }, { "id": 3, "name": "c" }] }
+  }
+}

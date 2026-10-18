@@ -1,0 +1,55 @@
+{
+  "id": "server-db-sql-order-limit-rt-twin",
+  "description": "ORDER BY \u2026 LIMIT evaluated by a real engine (RUNTIME, sqlEngine:\"real\"): b 90, c 60.",
+  "language-version": "1.0",
+  "spec": "\u00a78.3",
+  "source-test": "conformance/cases/server-db/sql-order-limit-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-order-limit-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the \u00a766 twin generator cannot type \u2014 O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. impl#1 passes it too (measured S468 with `bun conformance/run.ts --xfail-signature`): a case both implementations hold.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "scores": [
+        {
+          "id": 1,
+          "player": "a",
+          "points": 30
+        },
+        {
+          "id": 2,
+          "player": "b",
+          "points": 90
+        },
+        {
+          "id": 3,
+          "player": "c",
+          "points": 60
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "top": [
+        {
+          "player": "b",
+          "points": 90
+        },
+        {
+          "player": "c",
+          "points": 60
+        }
+      ]
+    }
+  }
+}
