@@ -136,6 +136,26 @@ function gapCounts() {
   return gapCountsFromTokens(gapMarkersFrom(text));
 }
 
+/**
+ * The body of the `@generated:gap-counts` section, derived from a known-gaps TEXT (not the file).
+ *
+ * EXPORTED (S468, s468-generated-merge-driver) so the merge driver
+ * (`scripts/git-merge-generated.ts`) regenerates this section from the MERGED text it holds in
+ * memory. It cannot read `docs/known-gaps.md` from disk mid-merge: git runs a merge driver on
+ * temp files while the working tree still holds the pre-merge (ours) version — measured, not
+ * assumed (see that script's header). This is the ONE producer; `--write`/`--check` call it too,
+ * so the driver can never emit a table this script would call stale.
+ */
+export function gapCountsSection(knownGapsText: string): string {
+  const g = gapCountsFromTokens(gapMarkersFrom(knownGapsText));
+  return [
+    `| HIGH | ${g.high} | ${g.carried.high} |`,
+    `| MED | ${g.med} | ${g.carried.med} |`,
+    `| LOW | ${g.low} | ${g.carried.low} |`,
+    `| Nominal (spec-ahead-of-impl) | ${g.nominal} | ${g.carried.nominal} |`,
+  ].join("\n");
+}
+
 function gapMarkersFrom(text: string) {
   // S307 — parse the marker as an ATTRIBUTE BAG, not a fixed field order.
   //
@@ -384,15 +404,7 @@ const GEN_SECTIONS: GenSection[] = [
     // equal what PRINT reports. Header + separator + the "Count basis" legend stay STATIC (hand-doc).
     // S430: a THIRD column, Carried — owed by the bootstrap, not by impl#1 (see GAP_STATUS_CARRIED).
     // ⚑ The static header in docs/known-gaps.md §0 must name three columns to match.
-    produce: () => {
-      const g = gapCounts();
-      return [
-        `| HIGH | ${g.high} | ${g.carried.high} |`,
-        `| MED | ${g.med} | ${g.carried.med} |`,
-        `| LOW | ${g.low} | ${g.carried.low} |`,
-        `| Nominal (spec-ahead-of-impl) | ${g.nominal} | ${g.carried.nominal} |`,
-      ].join("\n");
-    },
+    produce: () => gapCountsSection(readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8")),
   },
   {
     name: "recent-sessions",

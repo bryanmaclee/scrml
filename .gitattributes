@@ -40,3 +40,21 @@ hand-off.md text eol=lf
 # repo-wide for these files, not introduced by that script.
 scripts/*.sh text eol=lf
 scripts/git-hooks/* text eol=lf
+
+# ---------------------------------------------------------------------------
+# Files carrying GENERATED content — the scrml-generated merge driver (S468).
+#
+# Every PR regenerates the same @generated sections, so any two open PRs conflicted on them and
+# each merge to main re-conflicted every other PR. The driver (scripts/git-merge-generated.ts)
+# merges only the HAND-WRITTEN text 3-way, regenerates the self-contained @generated:gap-counts
+# table from the merged text, and gives content derived from other files a provisional value that
+# the post-merge / post-rewrite hooks (or `bun scripts/git-merge-generated.ts --regen`) regenerate
+# once the merged tree exists. A conflict in hand-written text still stops the merge.
+#
+# ⚑ Inert until the clone is configured: `./scripts/git-hooks/install.sh` (merge drivers are
+# per-clone config). GitHub's own merge never runs it — update a PR branch locally to use it.
+docs/known-gaps.md            merge=scrml-generated
+master-list.md                merge=scrml-generated
+docs/FACTS.md                 merge=scrml-generated
+compiler/SPEC-INDEX.md        merge=scrml-generated
+docs/bootstrap-conformance.md merge=scrml-generated
