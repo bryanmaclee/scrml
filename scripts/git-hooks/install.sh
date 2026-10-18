@@ -10,6 +10,13 @@ set -e
 
 cd "$(git rev-parse --show-toplevel)"
 
+# ---------------------------------------------------------------------------
+# The scrml-generated merge driver (S468/S469, s468-generated-merge-driver): per-clone config +
+# an info/attributes mirror. Delegated to the idempotent scripts/install-merge-driver.sh, which
+# every `bun run pretest` also runs. Done FIRST because it works from any worktree; the hook copy
+# below (post-merge / post-rewrite = the driver's phase 2) needs the main checkout.
+bash scripts/install-merge-driver.sh
+
 HOOKS_SRC="scripts/git-hooks"
 HOOKS_DST=".git/hooks"
 
