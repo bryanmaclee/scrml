@@ -67,6 +67,9 @@
 //       has a wire descriptor (no FIXED-length sequence); `Local` needs a
 //       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
 //       persisted field and follows its reset Write (§6.14.2 rule 9)
+//   C18 (s468) no Static attribute is executable text: an event-handler name,
+//       a `srcdoc`, or a navigate / load URL whose scheme is not admitted
+//       (§5.2 S464 — url.scrml `classifyStatic`, analyze's own decision)
 //   C-SQL1, C-S1..C-S4 (s451, U1a) — the server boundary: see checkServer.
 //   C-S3 (s454 extended), C-S7, C-S8, C-E2 (extended) — the client half of a
 //       server call (U1b): see checkClientCalls.
@@ -81,6 +84,7 @@ ${
              Pattern, Failable, OkArm, ErrArm,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
+    import { UrlAttr, StaticSink, classifyStatic, staticExecMessage, isEventHandlerName } from "./url.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
     // s451: the SQL sigil for messages, in two pieces (impl#1 rewrites a
@@ -892,8 +896,9 @@ ${
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .Errors(of: x) :> checkSurface(p, encl, x)
-            .El(tag: t, attrs: attrs) :> checkGates(t, attrs)
+            .El(tag: t, attrs: attrs) :> checkGates(t, attrs).concat(checkStaticSinks(t, attrs))
             .Text(text: x) :> []
+            .RawText(text: x) :> []
             .Dyn(e: x) :> []
             .Cond(arms: x) :> []
             .Each(src: x) :> []
@@ -980,6 +985,72 @@ ${
             .Show(test: x) :> false
             .On(event: x) :> false
             .Bind(kind: x) :> false
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C18 (s468) — no printed attribute is executable text scrml never checked
+    // (SPEC §5.2): a STATIC attribute (Attr.Static — the printer writes it into
+    // the page as is) is never
+    //   - an event-handler attribute (rule 1's name test; "Quoted event-handler
+    //     attributes (S464)" — E-ATTR-QUOTED-HANDLER): handler text is wired as
+    //     a listener (Attr.On), never written;
+    //   - a static executable value ("Static executable values (S464)" —
+    //     E-ATTR-STATIC-EXECUTABLE): any `srcdoc`, or a navigate / load URL
+    //     whose scheme is not admitted — url.scrml `classifyStatic`, the SAME
+    //     decision analyze.scrml refuses with.
+    // §5.2: "on every code path that writes an attribute into output (fail
+    // closed)" — analyze refuses first, from source; C18 states it again over
+    // Core, so no lowering path can print one. Core has no parent element at
+    // an El, so an animation of `href` is judged with the `<image>`-parent
+    // admission allowed (url.scrml `parentKnown` false — never stricter than
+    // the refusal).
+    // -------------------------------------------------------------------------
+    fn checkStaticSinks(tag: string, attrs: Attr[]) -> string[] {
+        let ua: UrlAttr[] = []
+        for (const a of attrs) { ua = ua.concat(urlAttrOf(a)) }
+        let out: string[] = []
+        for (const a of attrs) {
+            const s: StaticText | not = staticOf(a)
+            if (s is given) {
+                if (isEventHandlerName(s.name)) {
+                    out = out.concat(["C18: a static `" + s.name + "=\"…\"` on `<" + tag + ">` — handler text is wired as a listener, never written into the page (§5.2, E-ATTR-QUOTED-HANDLER)"])
+                } else if (!(s.name.toLowerCase() == "srcdoc" && s.value == "")) {
+                    // (a presence `srcdoc` is Static with value "" in Core — an
+                    // empty document that runs nothing, legal at the source;
+                    // `srcdoc=""` written out is refused there, by analyze)
+                    const sink: StaticSink | not = classifyStatic(tag, s.name, s.value, ua, "", false)
+                    if (sink is given) out = out.concat(["C18: " + staticExecMessage(sink, s.name, tag) + " (E-ATTR-STATIC-EXECUTABLE)"])
+                }
+            }
+        }
+        return out
+    }
+
+    type StaticText:struct = { name: string, value: string }
+
+    fn staticOf(a: Attr) -> StaticText | not {
+        return match a {
+            .Static(name: n, value: v) :> { name: n, value: v }
+            .Bound(name: x) :> not
+            .Show(test: x) :> not
+            .On(event: x) :> not
+            .Bind(kind: x) :> not
+            .Gate(values: x) :> not
+        }
+    }
+
+    // The element's attributes as url.scrml reads them (a Bound value is
+    // computed; a listener, a bind, a show toggle and a gate are no attribute
+    // the decision reads).
+    fn urlAttrOf(a: Attr) -> UrlAttr[] {
+        return match a {
+            .Static(name: n, value: v) :> [{ name: n, text: v, computed: false }]
+            .Bound(name: n) :> [{ name: n, text: not, computed: true }]
+            .Show(test: x) :> []
+            .On(event: x) :> []
+            .Bind(kind: x) :> []
+            .Gate(values: x) :> []
         }
     }
 
@@ -1328,6 +1399,7 @@ ${
             .Instance(decl: d) :> d
             .El(tag: x) :> not
             .Text(text: x) :> not
+            .RawText(text: x) :> not
             .Dyn(e: x) :> not
             .Cond(arms: x) :> not
             .Each(src: x) :> not
@@ -1458,6 +1530,7 @@ ${
             .Errors(of: x) :> []
             .El(tag: x) :> []
             .Text(text: x) :> []
+            .RawText(text: x) :> []
             .Dyn(e: x) :> []
             .Cond(arms: x) :> []
             .Each(src: x) :> []
@@ -2449,6 +2522,7 @@ ${
             .Instance(decl: d, alias: a) :> sameAlias(a, h, d)
             .El(tag: t) :> not
             .Text(text: t) :> not
+            .RawText(text: t) :> not
             .Dyn(e: e) :> not
             .Cond(arms: a) :> not
             .Each(src: s) :> not

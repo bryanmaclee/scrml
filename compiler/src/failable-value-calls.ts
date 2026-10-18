@@ -493,10 +493,23 @@ class Walker {
       const a = arm as Record<string, unknown>;
       const armScope = new LocalScope(scope);
       if (typeof a.binding === "string" && a.binding.trim() !== "") armScope.names.set(a.binding.trim(), null);
-      if (isExprNodeValue(a.handlerExpr) && !isParseErrorHatch(a.handlerExpr)) {
+      // S468 fix round 2 — a BRACED arm body is a statement list (§7.2.2 "Terms": "a `{ … }`
+      // match or `!{}` arm block"), read by the one statement-list reader every emitter uses
+      // (`env.parseStatements` = defer-structure `parseStatementText`). Its `handlerExpr` is the
+      // builder's EXPRESSION reading of the block's inner text, which stops after the FIRST
+      // statement: walking it let `{ note = "d"⏎ const q = check3(p)⏎ q }` — an unhandled
+      // failable call after the first statement — escape E-ERROR-002, and a wrong password
+      // logged in. `handlerExpr` is read only for an unbraced (single-expression) arm, or as a
+      // last resort when the block text does not parse.
+      const ht = typeof a.handler === "string" ? a.handler.trim() : "";
+      const braced = ht.startsWith("{") && ht.endsWith("}");
+      const blockStmts = braced && ht.slice(1, -1).trim() !== "" ? this.env.parseStatements(ht) : null;
+      if (blockStmts) {
+        this.statements(blockStmts, armScope, fn);
+      } else if (isExprNodeValue(a.handlerExpr) && !isParseErrorHatch(a.handlerExpr)) {
         this.expr(a.handlerExpr, armScope, fn);
-      } else if (typeof a.handler === "string" && a.handler.trim() !== "") {
-        const stmts = this.env.parseStatements(a.handler);
+      } else if (ht !== "") {
+        const stmts = this.env.parseStatements(ht);
         if (stmts) this.statements(stmts, armScope, fn);
       }
     }
