@@ -1,26 +1,42 @@
 # CI — the authoritative async gate (clean env). Never blocks a local push.
 #
 # Gate-layering (flogence gate-layering-methodology-2026-07-06 + scrml S242/S243; TUNED S253 cloud-PA arc):
-#   types (`bun run types:check`; BLOCKING in `gate` below since S454 — NOT always-on local, nothing local
-#   invokes it) · pre-commit fast subset (unit+integration+conformance, ~2min, every commit)
+#   types (`bun run types:check`; BLOCKING in `checks` below since S454 — NOT always-on local, nothing local
+#   invokes it) · pre-commit fast subset (unit+integration+conformance, every commit)
 #   · **CI (HERE) = the authoritative async gate** · R26 + adversarial /code-review (the PA's judgment).
 #   (S365 fix round: this line previously advertised a layer that did not exist — `scripts/types-gate.ts`
 #   was runnable and nothing ran it. That is the script's own thesis, one level up. Corrected AND wired.)
 #
-# THREE jobs:
-#   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
-#                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet
-#                + the types gate (S454) + the bootstrap-conformance report's currency on PRs touching
-#                conformance/cases or compiler/self-host-v2 (S457). This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
-#                green in `tracking` (the v1 self-host dist tests were removed S447 — see KEY FINDING).
-#   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
-#                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
-#                interp) + the bootstrap conformance/severity reports. Visible, never blocks. (The types
-#                gate ran here S365-S454; it is in `gate` now.) (The M6.x within-node parser-parity
-#                step was retired S449 item 6 — native-parser frozen as part of impl#1.)
-#   • windows  — NON-BLOCKING (continue-on-error). unit + conformance on windows-latest — surfaces the
-#                OS-path-separator regressions the Linux gate can't see (#25/#26 `\` vs `/`). Promote into
-#                `gate` (windows-latest matrix) once green. The owed Windows-CI runner (4th+ OS-path report).
+# S468 (s468-ci-speedup) — THE REQUIRED GATE IS NOW PARALLEL, AND IT IS BIGGER.
+#   Until S468 `gate` was ONE serial job (~19.7 min: unit+conformance 7m43, host-global scan 5m09, browser
+#   1m54, …). It is now a set of parallel jobs and a final AGGREGATOR job that is literally named `gate`:
+#
+#   • checks        — types gate, root-level parser/native tests, snippet gate, compile floor, facts, md shim,
+#                     bootstrap-report currency (PR, path-scoped), conflict markers, SPEC-INDEX, delta-log,
+#                     §34.0 row provenance. Every step runs even when an earlier one failed (each reports).
+#   • unit          — `compiler/tests/unit` + `compiler/tests/conformance`, sharded (bun --shard=i/N).
+#   • integration   — `compiler/tests/integration` (incl. security-await-pack) + `lsp` + `commands`,
+#                     sharded. PROMOTED into the required gate at S468 (ran only in non-blocking
+#                     `tracking` before — so the security pack gated nothing).
+#   • browser       — TodoMVC gauntlet build + the browser tier's failure NAME-SET gate (once; it used to
+#                     run in both `gate` and `tracking`).
+#   • slices        — the self-host-v2 bootstrap slices + the e2e-render-map tier.
+#   • host-global   — the S457 host-global alias scan, sharded BY EMISSION MODE (each leg a full corpus pass
+#                     in its own modes — the scan already supports `--modes`, and its KNOWN_THROWS bookkeeping
+#                     is scoped to the modes a run covers).
+#   • gate          — the AGGREGATOR. `needs:` every job above, runs `if: always()`, and FAILS unless every one
+#                     of them concluded `success` (failed / cancelled / skipped all fail it). It also checks that
+#                     the sharded suites are an exact partition of their test files (scripts/ci-shards.ts
+#                     reconcile): a shard that silently ran nothing cannot pass for a green suite.
+#
+#   ⚑ BRANCH PROTECTION IS UNCHANGED: the required status check is still the context `gate` (GitHub Actions
+#   app), which is now the aggregator's check. No protection setting was touched. Do NOT give any other job
+#   the name `gate`, and do NOT drop `if: always()` from it: a job whose `needs` failed is SKIPPED by
+#   default, and a skipped required check reads as satisfied — the aggregator would then wave through
+#   exactly the run it exists to stop.
+#
+#   NON-BLOCKING jobs: `tracking` (bootstrap conformance count + severity-table staleness, never in `gate`)
+#   and `windows` (OS-path-separator surface; runs on main, nightly, and PRs touching path-handling code).
 #
 # KEY FINDING (S253): the local "full gate" (pre-push) partly PASSES ON UN-REPRODUCIBLE LOCAL ARTIFACTS —
 # the self-host tests (`compiler/tests/self-host` AND `integration/self-host-smoke.test.js`) need a
@@ -66,6 +82,11 @@ on:
       - 'handOffs/**'
       - 'docs/**'
   pull_request:
+  # S468 — NIGHTLY full run of `main`. Exists for the `windows` job (which no longer runs on every
+  # PR — see its header), and doubles as a daily re-run of the whole gate on the trunk, which is
+  # how an intermittent that slipped through a PR shows up without waiting for the next merge.
+  schedule:
+    - cron: "41 6 * * *"
   # S326 — MANUAL RE-FIRE. Added because a dropped trigger had no recovery path.
   #
   # GitHub does not re-deliver a webhook it dropped. During the 2026-08-06 Actions
@@ -83,98 +104,252 @@ on:
   # have 'workflow_dispatch' trigger` on any branch cut BEFORE this landed. Rebase the branch
   # onto main first, or dispatch `--ref main`. Consequence worth stating plainly: this lever
   # is prospective, not retroactive — it will not rescue a branch that predates it.
-  # Proven both ways: `--ref docs/s326-continuity` (pre-merge cut) → 422; `--ref main` → run
-  # 31140159467, **all three jobs green including `gate`**, which also confirms the census
-  # fallback below does not break a dispatched run.
   #
   # ⚑ This WEAKENS NO GATE. It adds a way to START a run; it does not add a way to skip
   # one. `gate` must still go green on the head SHA before a merge is allowed, and
-  # `enforce_admins=true` is untouched. The fork-rule row that matters is root-vs-position:
-  # nudging a PR treats the symptom, a manual trigger removes the class.
+  # `enforce_admins=true` is untouched.
   #
   # ONE HONEST CAVEAT — a dispatched run's §34.0 row-provenance check is WEAKER. Step
   # `s34-census --check-new --base` reads `github.event.pull_request.base.sha`, which does
-  # not exist on a manual run, so it falls back to `HEAD~1` (a fallback that already
-  # existed; this is not new behaviour). On a multi-commit branch that compares against the
-  # previous commit rather than the merge base, so rows added in EARLIER commits of the
-  # same branch are not seen as NEW. Every other step is event-independent and identical.
-  # Prefer a real push/PR event when one is available; reach for this when the platform
-  # has eaten the event.
+  # not exist on a manual run, so it falls back to `HEAD~1`. On a multi-commit branch that
+  # compares against the previous commit rather than the merge base, so rows added in EARLIER
+  # commits of the same branch are not seen as NEW. Every other step is event-independent.
   workflow_dispatch: {}
 
+# S468: the event name is part of the group so the nightly `schedule` run of main and a `push`
+# run of main do not cancel each other (both have ref refs/heads/main). Per-PR behaviour is
+# unchanged: a new push to a PR cancels that PR's in-flight run.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  gate:
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # checks — the fast deterministic gates. Each step is `if: !cancelled()` so one red step does not
+  # hide the rest (a failed step otherwise halts the job and every later check reads `skipped`).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      # fetch-depth: 0 — the §34.0 row-provenance gate diffs against the PR base SHA, and a shallow
-      # clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
+      # fetch-depth: 0 — the §34.0 row-provenance gate and the bootstrap-report currency check diff
+      # against the PR base SHA, and a shallow clone has no common ancestry.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in this job
         run: bun install --frozen-lockfile
       # S365 / S454 — the compiler's own TypeScript diagnostics do not change silently. BLOCKING.
-      #
       # `scripts/types-gate.ts --check` diffs `tsc --noEmit --strict` over compiler/src against the
       # NAME->COUNT baseline in compiler/tests/TYPES-BASELINE.json and exits 1 on ANY difference, in
-      # EITHER direction: a NEW name or a GROWN count is a regression; a GONE name or a SHRUNK count
-      # means the baseline is stale — record a fix in the same commit with
-      # `bun scripts/types-gate.ts --write`. It is a ratchet, not a "tsc-clean" demand: the recorded
-      # population drains through ordinary work.
-      #
-      # It ran from S365 as a continue-on-error step in `tracking`, and sat red there unseen for
-      # ~32 merges (30 NEW + 1 GROWN when promoted). Those were fixed, the baseline re-recorded,
-      # and the step moved here without continue-on-error.
+      # EITHER direction (a GONE/SHRUNK entry means the baseline is stale — re-record with `--write`).
+      # It sat red unseen for ~32 merges as a continue-on-error `tracking` step before S454 promoted it.
       # > Provenance: ruling:user-voice-scrml.md S454 "yes, fix the 30 then promote it"
-      #
-      # PLACED FIRST (right after Install deps): it needs neither `pretest` nor a populated dist, so
-      # no earlier step's failure can skip it. `typescript` is a devDependency (installed above);
-      # the script refuses to fall back to a PATH tsc and exits 2 if it is missing.
       - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
         run: bun scripts/types-gate.ts --check
+      # S302: the ROOT-LEVEL test files (parser-conformance-*, native-*) were run by NO workflow at
+      # all, and a 38-failure native-parity regression passed pre-commit AND the required gate.
+      # Deterministic (no dist / browser / network deps), seconds. See
+      # g-parity-canary-outside-every-blocking-gate.
+      - name: Root-level parser/native conformance (S302 — previously ungated)
+        if: ${{ !cancelled() }}
+        run: bun test compiler/tests/*.test.js
+      - name: Snippet gate (every public-cited .scrml still compiles)
+        if: ${{ !cancelled() }}
+        run: bun scripts/snippet-gate.js
+      # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
+      # example/benchmark apps) must build on HEAD. corpus-emit-differential is base-vs-head and treats
+      # compile-failure as DATA, so a program broken since before the baseline is invisible to it — that
+      # is how examples/09 failed to compile from S236 uncaught for months
+      # (g-corpus-differential-gate-blind-to-standing-breakage). Known-broken programs are baselined
+      # (scripts/corpus-compile-floor.baseline.json, each naming its gap); a NEW break — or a stale
+      # baseline entry — fails.
+      - name: Compile-floor gate (every showcase program still builds on HEAD)
+        if: ${{ !cancelled() }}
+        run: bun scripts/corpus-compile-floor.ts --check
+      - name: Facts gate (published figures still match the repo)
+        if: ${{ !cancelled() }}
+        run: bun scripts/facts.ts --check
+      # S462 md phase 1 — the scrml:md runtime shim is impl#1's compile of the scrml reader
+      # (SPEC §67.8, one md reader); it must be byte-current with the source AND the compiler.
+      - name: scrml:md shim gate (compiler/runtime/stdlib/md.js generated from stdlib/md/index.scrml)
+        if: ${{ !cancelled() }}
+        run: bun scripts/gen-md-shim.ts --check
+      # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
+      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3). BLOCKING here, but
+      # PATH-SCOPED: only a pull request whose diff touches `conformance/cases/**` or
+      # `compiler/self-host-v2/**` must leave the report current. What blocks is STALENESS only — the
+      # FAIL count never sets the exit status. Remedy: `bun scripts/bootstrap-conformance.ts --write`.
+      #
+      # PR-ONLY: on a push to `main` there is no PR base, and two individually-current corpus PRs can
+      # merge into a stale combination; failing the trunk check for that would be cry-wolf. `tracking`
+      # reports staleness on every run where THIS step did not run (S468: once, not twice).
+      #
+      # HONEST LIMIT: the report also reads impl#1's front end (`compiler/src/commands/fix-s66.js`) and
+      # `conformance/*.ts`, so a PR touching only those can stale it without tripping this step.
+      # `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
+      - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          if git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+            echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
+          else
+            bun scripts/bootstrap-conformance.ts --check
+          fi
+      # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and the gate was GREEN.
+      - name: Conflict-marker gate (no unresolved merge markers on the trunk)
+        if: ${{ !cancelled() }}
+        run: bun scripts/conflict-marker-gate.ts
+      # S409 — gates every Sections row's range/size AND asserts the scan reached all sections (a
+      # stray line ends the table scan, and a zero over a partial scan is not a pass).
+      - name: SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)
+        if: ${{ !cancelled() }}
+        run: bun run scripts/regen-spec-index.ts --check
+      # A duplicate delta-log sequence number silently drops an entry from the flogence digest.
+      # BASELINED (handOffs/delta-log-dupes.baseline.json) — only a NEW duplicate fails.
+      - name: delta-log sequence gate (a duplicate silently drops an entry from the digest)
+        if: ${{ !cancelled() }}
+        run: bun scripts/delta-lint.ts
+      # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
+      # DIFF-SCOPED: silent on the legacy corpus by construction.
+      - name: §34.0 row-provenance gate (new error-code rows state where they fire)
+        if: ${{ !cancelled() }}
+        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # unit — unit + conformance, sharded across the matrix with bun's own `--shard=i/N`.
+  # `scripts/ci-test-timings.json` only BALANCES the legs (bun assigns files by recorded duration);
+  # a stale or absent entry changes which leg runs a file, never whether it runs. The `gate`
+  # aggregator proves the legs are an exact partition of the suite's test files.
+  # No `pretest` here: nothing under unit/ or conformance/ reads samples/compilation-tests/dist
+  # (the windows job has always run this suite without it).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  unit:
+    name: unit (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in unit/conformance
+        run: bun install --frozen-lockfile
+      - name: unit + conformance — shard ${{ matrix.shard }}/3
+        run: >-
+          bun test compiler/tests/unit compiler/tests/conformance
+          --shard=${{ matrix.shard }}/3
+          --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-unit-${{ matrix.shard }}-of-3.xml"
+      - name: Upload shard report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-unit-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/junit-unit-${{ matrix.shard }}-of-3.xml
+            ${{ runner.temp }}/timings.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # integration — integration (incl. security-await-pack) + lsp + commands, sharded. S468 PROMOTED
+  # these from non-blocking `tracking` into the required gate. They were green there except ONE
+  # intermittent, `§2 stopping scrml dev mid-respawn … SIGTERM` (compiler/tests/commands/
+  # dev-child-dies-with-parent.test.js — 4 of the last 60 runs), FIXED at S468 rather than moved: the
+  # test edited the entry the moment `scrml dev` logged "Serving", which can land before the dev
+  # parent has taken its stat snapshot / registered its directory watch, so that edit was never seen
+  # and the respawn never came. The test now re-edits until the respawn appears.
+  # `pretest` runs here: integration/s464-quoted-handler-refused reads samples/compilation-tests/dist.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  integration:
+    name: integration (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in integration/lsp/commands
+        run: bun install --frozen-lockfile
+      - name: Populate test fixtures (samples/compilation-tests/dist)
+        run: bun run pretest
+      - name: integration + lsp + commands — shard ${{ matrix.shard }}/3
+        run: >-
+          bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
+          --shard=${{ matrix.shard }}/3
+          --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-3.xml"
+      - name: Upload shard report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-integration-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-3.xml
+            ${{ runner.temp }}/timings.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # browser — the TodoMVC gauntlet + the browser tier's failure NAME-SET gate. Runs ONCE (until S468
+  # the tier ran in both `gate` and `tracking`).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps (incl. puppeteer's Chromium)
+        run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: Gate suite (unit + conformance — reproducibly green from source)
-        run: bun test compiler/tests/unit compiler/tests/conformance
-      # S302: the 14 ROOT-LEVEL test files (parser-conformance-*, native-*) were run by
-      # NO workflow at all — 13 of 14 had no runner anywhere, and the 14th
-      # (parser-conformance-within-node) ran only in `tracking`, which is
-      # continue-on-error:true. They are also outside the pre-commit hook's
-      # unit/integration/conformance scope. A 38-failure native-parity regression
-      # therefore passed pre-commit AND this required gate, surfacing solely as a red
-      # `tracking` — the job we routinely (and correctly) read as the documented
-      # browser/serve-tool baseline. A gate that is correctly non-blocking and
-      # habitually red is where a real regression hides.
-      # Deterministic (no dist / browser / network deps) and ~16s. Green at wiring
-      # time: 6394 tests, 0 fail. See g-parity-canary-outside-every-blocking-gate.
-      - name: Root-level parser/native conformance (S302 — previously ungated)
-        run: bun test compiler/tests/*.test.js
-      # S427: the e2e-render-map tier ran in NO job and NO hook — `compiler/tests/*.test.js`
-      # above does not descend into subdirectories, and the pre-commit globs stop at the same
-      # depth. Its detector pins (259 at wiring time, incl. the seed-gating invariant "no cell
-      # scores GREEN while a seed failure is on the record") therefore pinned nothing until
-      # someone ran them by hand. What this step makes BLOCKING is the tier's ASSERTIONS. The
-      # fast-slice green->red delta inside `e2e-render-map.test.js` is WARN-only by design, and
-      # `generate-baseline.js --check` is still not run here (the committed baseline carries
-      # pre-existing drift). Happy-dom only, no browser; ~55s. See
-      # g-e2e-render-map-tier-runs-in-no-ci-job-at-all.
-      - name: e2e-render-map tier assertions (S427 — previously ran in no job)
-        run: bun test compiler/tests/e2e-render-map/
-      # S437 — the native bootstrap (impl#2, compiler/self-host-v2/) lives outside the bunfig test root,
-      # so a plain `bun test` never runs it. The no-default-arm lint enforces dpa-051 §3.4 (total matches
-      # over IR enums; exit 1 on a violation, bite proven); the slice suite is M1's oracle for M2's `lower`
-      # (bench/mutations.js proves every acceptance test goes RED under its matching runtime defect).
-      # M2 (s437-bootstrap-slice-m2): the front end (parse → analyze → lower) — its proof that the
-      # lowered Core equals M1's hand-built oracle, its §66.19 negative lines, and the M1 suite run a
-      # second time on the LOWERED programs (SLICE_CORE=lowered).
-      # S444 — slice-m4 (#1164: the §66.19 programs compiled from source and run) ran in NO job until now.
-      # S446 — slice-codec (arc unit Uc: the §57 wire codec, descriptor + runtime half + cross-impl vs impl#1).
-      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + §57 codec + v2 lexer oracle
+      - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
+        run: |
+          bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
+          node --check benchmarks/todomvc/dist/app.client.js
+      # S313 (bryan RULED promote): the browser tier is assertable by its failure NAME SET, so it is
+      # BLOCKING. `--check` exits 0 while the set is unchanged and 1 the moment a name joins or leaves.
+      # Placement is deliberate: AFTER the gauntlet step, which materialises benchmarks/todomvc/dist, so
+      # the script's two env-exclusions are moot here. NOT in pre-push: local environments vary more
+      # than CI, and a local difference is what made the first recorded baseline wrong.
+      - name: Browser tier failure NAME-SET gate (S313 — a regression here blocks)
+        run: bun scripts/browser-baseline.ts --check
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # slices — the native bootstrap (impl#2, compiler/self-host-v2/) + the e2e-render-map tier.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  slices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps (incl. Chromium — slice-m3's css oracle drives puppeteer)
+        run: bun install --frozen-lockfile
+      # S437 — the native bootstrap lives outside the bunfig test root, so a plain `bun test` never runs
+      # it. The no-default-arm lint enforces dpa-051 §3.4 (total matches over IR enums); the slice
+      # suite is M1's oracle for M2's `lower`. M2: parse → analyze → lower, plus the M1 suite re-run on
+      # the LOWERED programs (SLICE_CORE=lowered). S444 slice-m4 (§66.19 programs compiled from source
+      # and run). S446 slice-codec (§57 wire codec). (S468: `compiler/tests/integration/self-host-v2-lexer`
+      # is no longer run here — the `integration` job runs it as part of the integration suite.)
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 + M2 front end + M3 + M4 §66.19 programs + §57 codec
         run: |
           bun scripts/lint-no-default-arm.js
           bun test ./compiler/self-host-v2/slice-m1/
@@ -183,189 +358,186 @@ jobs:
           bun test ./compiler/self-host-v2/slice-m3/
           bun test ./compiler/self-host-v2/slice-m4/
           bun test ./compiler/self-host-v2/slice-codec/
-          bun test compiler/tests/integration/self-host-v2-lexer
-      - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
-        run: |
-          bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
-          node --check benchmarks/todomvc/dist/app.client.js
-      # S313 (bryan RULED promote): the browser tier is now assertable by its failure NAME SET, so it
-      # belongs in the BLOCKING gate rather than in continue-on-error `tracking`. Before this the tier
-      # was excluded from every blocking gate precisely because an exit code cannot express "the same
-      # failures as before" — it always exits 1. `--check` exits 0 while the set is unchanged and 1 the
-      # moment a name joins or leaves it, which is a condition a gate CAN carry.
-      #
-      # Placement is deliberate: this sits AFTER the gauntlet step, which compiles the TodoMVC
-      # benchmark and therefore materialises benchmarks/todomvc/dist. That makes the script's two
-      # env-exclusions moot IN THIS JOB (the pair passes here) — they still matter in `tracking`, which
-      # never builds it. The check is correct either way; both sides of the comparison are filtered.
-      #
-      # NOT added to pre-push: local environments vary far more than CI, and it was exactly a local
-      # environment difference that made the first recorded baseline wrong.
-      - name: Browser tier failure NAME-SET gate (S313 — a regression here now blocks)
-        run: bun scripts/browser-baseline.ts --check
-      - name: Snippet gate (every public-cited .scrml still compiles)
-        run: bun scripts/snippet-gate.js
-      # ABSOLUTE floor (NOT differential): every shipped showcase PROGRAM (examples/* + multi-file
-      # example/benchmark apps) must build on HEAD. corpus-emit-differential is base-vs-head and by its
-      # HARD REQ 5 treats compile-failure as DATA, so a program broken since before the baseline is
-      # invisible to it — that is how examples/09 failed to compile from S236 uncaught for months
-      # (g-corpus-differential-gate-blind-to-standing-breakage). Known-broken programs are baselined
-      # (scripts/corpus-compile-floor.baseline.json, each naming its gap); a NEW break — or a stale
-      # baseline entry — fails.
-      - name: Compile-floor gate (every showcase program still builds on HEAD)
-        run: bun scripts/corpus-compile-floor.ts --check
-      # S457 2a / S458 — compiler references to host globals go through the `_scrml_g` alias, so no
-      # user binding can capture them. The guarantee is only as good as this gate: the whole corpus
-      # (samples, examples incl. multi-file programs, conformance, stdlib, benchmarks) compiled in
-      # every emission mode (default, esm, embed, build/per-route, testMode), every emitted artifact
-      # scope-analysed — no free host-global reference the author did not write, every `_scrml_g`
-      # reader declares/imports it, no binding at a classic script's top level. ~2 min; too slow for
-      # the pre-commit hook, which carries the executed per-name tests instead.
-      - name: Host-global alias gate (S457 2a — no user binding can capture a compiler reference)
-        run: bun scripts/host-global-scan.ts --check
-      - name: Facts gate (published figures still match the repo)
-        run: bun scripts/facts.ts --check
-      # S462 md phase 1 — the scrml:md runtime shim is impl#1's compile of the scrml reader
-      # (SPEC §67.8, one md reader); it must be byte-current with the source AND the compiler.
-      - name: scrml:md shim gate (compiler/runtime/stdlib/md.js generated from stdlib/md/index.scrml)
-        run: bun scripts/gen-md-shim.ts --check
-      # S457 — docs/bootstrap-conformance.md went STALE for SEVEN consecutive map windows while its
-      # `--check` sat in continue-on-error `tracking` (non-compliance N-S455-3): nothing that grows
-      # the corpus was ever made to regenerate it. BLOCKING here, but PATH-SCOPED: only a pull request
-      # whose diff touches `conformance/cases/**` or `compiler/self-host-v2/**` must leave the report
-      # current. What blocks is STALENESS only — the FAIL count never sets the exit status (that stays
-      # a tracked backlog, not a gate). Remedy: `bun scripts/bootstrap-conformance.ts --write` (~60 s).
-      #
-      # PR-ONLY: on a push to `main` there is no PR base, and two individually-current corpus PRs can
-      # merge into a stale combination; failing the trunk check for that would be cry-wolf. The next
-      # corpus PR is made to heal it, and `tracking` still reports staleness on every run.
-      #
-      # HONEST LIMIT: the report also reads impl#1's front end (the §66 twins come from
-      # `compiler/src/commands/fix-s66.js`) and `conformance/*.ts`, so a PR touching only those can
-      # stale it without tripping this step; the next corpus PR then inherits a mechanical
-      # regenerate. `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
-      - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
-        if: github.event_name == 'pull_request'
-        run: |
-          if git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
-            echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
-          else
-            bun scripts/bootstrap-conformance.ts --check
-          fi
-      # S409 — an unresolved merge conflict reached `main` at e74f5423 (#900) and this job was GREEN.
-      # `compiler/SPEC-INDEX.md` carried three raw markers around 117 duplicated rows; it is a
-      # mandatory full-read at every Profile-A PA boot, so the next session read a doubled navigation
-      # table as truth. Nothing here looked at file well-formedness. Backlog at introduction: ZERO
-      # (swept across all 8,170 tracked files), which is the pa-base §8 condition for adding a gate.
-      - name: Conflict-marker gate (no unresolved merge markers on the trunk)
-        run: bun scripts/conflict-marker-gate.ts
-      # S409 — was "SPEC-INDEX totals gate". It checked ONLY the two numbers in the @generated totals
-      # block, so it passed on the #900 file while 117 rows were duplicated: working correctly,
-      # measuring what it was built to measure, and not an answer to "is this map well-formed".
-      # Now also gates every Sections row's range/size AND asserts the scan reached all 71 sections
-      # (a stray line ends the table scan, and a zero over a partial scan is a smaller measurement,
-      # not a pass — pa-base §8's truncated probe). Rationale for the change + the superseded
-      # decision it overturns are recorded in the script header per Rule 4b.
-      - name: SPEC-INDEX currency gate (totals + every row's range + full-scan coverage)
-        run: bun run scripts/regen-spec-index.ts --check
-      # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
-      # DIFF-SCOPED: silent on the legacy corpus by construction (pa-base §8 — a gate that is instantly
-      # red for reasons no change caused gets bypassed, then deleted).
-      # The delta-log sequence is a shared counter and its own header still claimed a
-      # single-writer rule that stopped being true when the project went to two concurrent
-      # operators. A duplicate is not cosmetic: the flogence bridge checkpoints on the
-      # sequence, so the second entry to merge reads as already-absorbed and DROPS OUT of
-      # the digest. BASELINED (handOffs/delta-log-dupes.baseline.json) so it is not
-      # instantly red on nine pre-existing collisions — only a NEW duplicate fails.
-      - name: delta-log sequence gate (a duplicate silently drops an entry from the digest)
-        run: bun scripts/delta-lint.ts
-      - name: §34.0 row-provenance gate (new error-code rows state where they fire)
-        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+      # S427: the e2e-render-map tier ran in NO job and NO hook (the root glob does not descend and the
+      # pre-commit globs stop at the same depth). What is BLOCKING is the tier's ASSERTIONS; the
+      # fast-slice green->red delta is WARN-only by design. Happy-dom only. See
+      # g-e2e-render-map-tier-runs-in-no-ci-job-at-all.
+      - name: e2e-render-map tier assertions (S427 — previously ran in no job)
+        if: ${{ !cancelled() }}
+        run: bun test compiler/tests/e2e-render-map/
 
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # host-global — S457 2a / S458: compiler references to host globals go through the `_scrml_g`
+  # alias, so no user binding can capture them. The scan compiles the whole corpus (samples, examples
+  # incl. multi-file programs, conformance, stdlib, benchmarks) in every emission mode and scope-
+  # analyses every emitted artifact.
+  #
+  # S468 — WHY IT TOOK 5 MIN AND WHY IT IS SHARDED (not path-filtered). It is CPU-bound: ~2,850 units ×
+  # 6 modes ≈ 7,000 full compiles + a scope walk of ~10,500 artifacts, already spread over 6 worker
+  # processes on a 4-vCPU runner. There is nothing to cache across runs — its inputs are the compiler
+  # and the whole corpus, which is what nearly every PR changes. A "run only when inputs change"
+  # filter would therefore skip almost nothing, and its input list (compiler/src, compiler/runtime,
+  # stdlib, five corpus roots, the script, the lockfile…) is a list that rots into a silent hole the
+  # day someone adds an input. Splitting BY MODE keeps the guarantee whole on every run: each leg is a
+  # complete corpus pass in its modes, and the script's KNOWN_THROWS "no longer throws" accounting
+  # is already scoped to the modes a run covers, so the legs never misreport each other's keys.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  host-global:
+    name: host-global (${{ matrix.modes }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every mode exactly once across the legs. `test` and `library` compile only the sources that
+        # use them, so they ride with a full-corpus mode.
+        modes: ["default,test", "esm,library", "embed", "build"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+        run: bun install --frozen-lockfile
+      - name: Host-global alias gate — modes ${{ matrix.modes }}
+        run: bun scripts/host-global-scan.ts --check --modes ${{ matrix.modes }}
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # gate — THE REQUIRED CHECK. Aggregates every blocking job above. See the header: it must stay
+  # `if: always()`, and it must stay the only job named `gate`.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  gate:
+    if: ${{ always() }}
+    needs: [checks, unit, integration, browser, slices, host-global]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Every blocking job succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null; then
+            echo "gate: every blocking job concluded success"
+          else
+            echo "::error::gate: a blocking job did not succeed (failure, cancellation and skip all count)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        if: ${{ !cancelled() }}
+      - uses: oven-sh/setup-bun@v2
+        if: ${{ !cancelled() }}
+      - name: Download shard reports
+        if: ${{ !cancelled() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-report-*
+          path: ${{ runner.temp }}/reports
+      # The sharded suites must be an exact PARTITION of their test files: every leg reported, no file
+      # in two legs, no test file under the suite's directories run by no leg. Prints the summed
+      # file / test counts per suite (compare: one unsharded unit+conformance run = 1284 files).
+      - name: Sharded suites are an exact partition (scripts/ci-shards.ts reconcile)
+        if: ${{ !cancelled() }}
+        run: >-
+          bun scripts/ci-shards.ts reconcile "$RUNNER_TEMP/reports"
+          unit=compiler/tests/unit,compiler/tests/conformance
+          integration=compiler/tests/integration,compiler/tests/lsp,compiler/tests/commands
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # tracking — NON-BLOCKING. Backlog reports that must stay visible but must never gate (a red gate
+  # over a backlog is the cry-wolf shape). STEP-LEVEL continue-on-error on every step, on purpose: a
+  # failed step HALTS the job even in a continue-on-error job (verified on run 30742472551).
+  # S468: integration + lsp + commands and the browser tier LEFT this job (now in the gate).
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
   tracking:
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the same base diff the blocking currency step makes (de-dup below)
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
-      # (The Types gate step that ran here S365-S454 is now BLOCKING, in `gate` — S454.)
-      #
-      # STEP-LEVEL continue-on-error ON EVERY TRACKING STEP, ON PURPOSE: a failed step HALTS the
-      # job even in a continue-on-error job (verified on run 30742472551, where the within-node
-      # parity step reported `skipped` and had never run at all), so one red signal would
-      # silently suppress every tracking signal below it.
-      #
-      # S449 (s449-bootstrap-conformance-counter) — how many conformance cases the PURE bootstrap
-      # (compiler/self-host-v2/) passes, by bucket and area; ~7 s. TRACKING ONLY, never in `gate`:
-      # the number is a backlog, and a red gate over a backlog is the cry-wolf shape. `--check`
-      # exits 1 only when docs/bootstrap-conformance.md is stale (regenerate with `--write`); the
-      # FAIL count never sets the exit status here. (S457: on a PR touching conformance/cases or
-      # compiler/self-host-v2 the same staleness check is ALSO a blocking `gate` step.) Step-level continue-on-error for the reason
-      # stated above (a failed step halts the job). Needs no pretest.
+      # S449 — how many conformance cases the PURE bootstrap passes; `--check` exits 1 only when
+      # docs/bootstrap-conformance.md is stale. S468 DE-DUP: on a PR that touches conformance/cases or
+      # compiler/self-host-v2 the BLOCKING `checks` step runs this exact check, so it is not run twice;
+      # here it reports staleness on every OTHER run (push, nightly, dispatch, untouched PRs). The
+      # touched-test below is byte-for-byte the blocking step's, so exactly one of the two runs.
       - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
-        run: bun scripts/bootstrap-conformance.ts --check
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ] && ! git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+            echo "this PR touches conformance/cases or compiler/self-host-v2 — the blocking 'checks' job runs this check; not repeated here"
+          else
+            bun scripts/bootstrap-conformance.ts --check
+          fi
       # s451-boot-diag-severity — compiler/self-host-v2/severity.scrml is GENERATED from SPEC §34.
-      # Staleness is TRACKED here, not gated: a docs-only SPEC PR adding a §34 row for a code the
-      # bootstrap names (same severity) makes the file stale without changing any answer. The
-      # SEMANTIC check (compiled severityOf == §34) is in slice-m4/severity.test.js. Regenerate
-      # with `bun scripts/gen-bootstrap-severity.ts`.
+      # Staleness is TRACKED, not gated (a docs-only §34 row can stale it without changing any answer);
+      # the SEMANTIC check is in slice-m4/severity.test.js. Regenerate: `bun scripts/gen-bootstrap-severity.ts`.
       - name: Bootstrap severity table (tracking; report staleness)
         continue-on-error: true
         run: bun scripts/gen-bootstrap-severity.ts --check
-      - name: Populate browser-test fixtures
-        run: bun run pretest
-      - name: integration + lsp + commands (promotion candidates)
-        run: bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
-      # S313 (bryan's Q6) — assert the browser tier's failure NAME SET, not its exit code.
-      #
-      # The tier always exits 1 (a documented ~48-failure baseline), so `bun test compiler/tests/browser`
-      # was PERMANENTLY red — which made it useless in both directions at once: a real regression was
-      # invisible (red either way), and because a failed step HALTS the job, every step after it was
-      # skipped. That second effect was verified, not assumed: on run 30742472551 the within-node
-      # parity step below reports `skipped`, and had therefore never run at all — the S302 class
-      # (13 of 14 root-level test files run by no workflow) recurring one job over.
-      #
-      # The name-set check exits 0 while the failure set is UNCHANGED and 1 the moment a name joins or
-      # leaves it, so this step now carries information and the steps after it execute.
-      - name: Browser tier — failure NAME-SET assertion (not exit code)
-        run: bun scripts/browser-baseline.ts --check
-      # S449 (item 6 = (b)): the "Within-node parser-parity" step that stood here is RETIRED with
-      # the parity test, its allowlist and the dual-pipeline canary. compiler/native-parser is a
-      # frozen component of impl#1 (divergences filed, not fixed), so a native-vs-default drift
-      # record has no consumer. The native functions impl#1 calls in production keep their own
-      # tests, run by the blocking `gate` job's root glob and the unit suite.
 
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # windows — NON-BLOCKING (continue-on-error; NOT a required check). Surfaces OS-path-separator
+  # regressions invisible on Linux: #25 nested-pages prefix, #26 isStdlibFilePath auth-bypass (both
+  # `\` vs `/`), and the S417 e2e-render-map tier that minted every relpath with `\`.
+  #
+  # S468 — WHEN IT RUNS. Every push to main, the nightly schedule, manual dispatch, and a PR whose diff
+  # touches code where an OS path is built, split, compared or resolved:
+  #   compiler/src/**            module resolution, the CLI + commands, file IO, route/page paths (#25, #26)
+  #   compiler/bin/**            the CLI entry
+  #   compiler/runtime/**        the server runtime serves and resolves files
+  #   stdlib/**                  stdlib modules that touch the host file system (stdlib/host/…)
+  #   compiler/tests/helpers/**  shared test infra (tmp roots, path helpers) every test inherits
+  #   compiler/tests/e2e-render-map/**  the tier whose own path minting was the S417 class
+  #   bunfig.toml, package.json, bun.lock, .github/workflows/ci.yml   the job's own toolchain
+  # A test-only PR elsewhere does not trigger it: a test that hardcodes `/` is caught on the next push
+  # to main or the nightly. The decision is made INSIDE the job (so the job always reports), from the
+  # pull_request merge commit's own two parents — fail closed: if the diff cannot be computed, it runs.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
   windows:
-    # NON-BLOCKING (continue-on-error) — surfaces OS-path-separator regressions on every PR without gating
-    # merges on a currently-imperfect Windows state. scrml's compiler has repeated Windows path-sensitivity
-    # bugs (issue #25 nested-pages prefix, #26 isStdlibFilePath auth-bypass — both `\` vs `/`), invisible on
-    # the Linux `gate`. Runs the dist-independent core (unit + conformance — "reproducibly green from source,
-    # no dist/env deps") on windows-latest so a Windows-only classifier/path bug goes RED here, visibly.
-    # Promote into the blocking `gate` (add windows-latest to a matrix) once this is confirmed green.
     runs-on: windows-latest
     continue-on-error: true
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # the PR merge commit + its two parents — enough for the path check below
+      - name: Does this run need the Windows suite?
+        id: need
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "event ${{ github.event_name }} — always runs"; exit 0
+          fi
+          if ! changed=$(git diff --name-only HEAD^1 HEAD 2>/dev/null); then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "could not compute the PR diff — running (fail closed)"; exit 0
+          fi
+          hits=$(printf '%s\n' "$changed" | grep -E '^(compiler/src/|compiler/bin/|compiler/runtime/|stdlib/|compiler/tests/helpers/|compiler/tests/e2e-render-map/|bunfig\.toml$|package\.json$|bun\.lock$|\.github/workflows/ci\.yml$)' || true)
+          if [ -n "$hits" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "path-handling files changed:"; printf '%s\n' "$hits" | head -40
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "no path-handling file changed in this PR — Windows suite not needed (it runs on main + nightly)"
+          fi
       - uses: oven-sh/setup-bun@v2
+        if: ${{ steps.need.outputs.run == 'true' }}
       - name: Install deps
-        # S314 — skip puppeteer's chrome-headless-shell download. This job runs ONLY
-        # unit + conformance (no browser tier), so the browser is never used here; the
-        # download was pure cost AND a flake source. Witnessed on PR #382: `ECONNRESET`
-        # in the postinstall failed `Install deps` before a single test ran, while a
-        # sibling run of IDENTICAL content passed. A job whose whole purpose is to
-        # surface OS-path regressions reading red for a network hiccup destroys the
-        # signal it exists to give. `gate` still downloads it — the browser NAME-SET
-        # assertion needs a real browser.
+        if: ${{ steps.need.outputs.run == 'true' }}
+        # S314 — skip puppeteer's chrome-headless-shell download: no browser runs here, and the download
+        # was a flake source (`ECONNRESET` in the postinstall failed this job on PR #382).
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
       - name: Unit + conformance on Windows (catches `\` vs `/` OS-path bugs — #25/#26 class)
+        if: ${{ steps.need.outputs.run == 'true' }}
         run: bun test compiler/tests/unit compiler/tests/conformance
-      # S427: the e2e-render-map tier is the one that was a SILENT WHOLE-TIER NO-OP on Windows
-      # (S417: every relpath minted with `\`, 0 of 449 baseline keys resolved, the tier reported
-      # green). That separator class is exactly what this job exists to surface.
+      # S427: the e2e-render-map tier was a SILENT WHOLE-TIER NO-OP on Windows (S417: every relpath
+      # minted with `\`, 0 of 449 baseline keys resolved, the tier reported green).
       - name: e2e-render-map tier on Windows (S427 — the S417 separator class)
+        if: ${{ steps.need.outputs.run == 'true' }}
         run: bun test compiler/tests/e2e-render-map/

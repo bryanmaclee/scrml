@@ -23,3 +23,39 @@
   inaccuracy — deferred, out of the tooling-only scope.)
 - Merge queue: owner.type = "User", public; GraphQL `repository.mergeQueue(branch:"main")` = null. GitHub
   merge queues require an ORGANIZATION-owned repo -> NOT available. Not enabled.
+
+## PAUSED (S468 wrap)
+DONE (committed on s468-ci-speedup):
+- db82533ba WIP start (BRIEF.md verbatim + this log).
+- 7c5a25463 dev mid-respawn SIGTERM flake FIXED in compiler/tests/commands/dev-child-dies-with-parent.test.js
+  (root cause + forced-race proof above). Local: 3/3 green; forced pre-snapshot edit: old FAILS with the CI
+  message, new passes.
+- (this commit) WIP .github/workflows/ci.yml rewrite + scripts/ci-shards.ts — NOT YET RUN IN CI:
+  * jobs: checks · unit (i/3) · integration (i/3) [integration+lsp+commands PROMOTED, incl. security-await-pack]
+    · browser (gauntlet + browser NAME-SET gate, once) · slices (self-host-v2 slices + e2e-render-map)
+    · host-global (4 legs by --modes: default,test | esm,library | embed | build) · gate = AGGREGATOR
+    (`if: always()`, needs all blocking jobs, fails on any non-success incl. skipped/cancelled, then
+    `bun scripts/ci-shards.ts reconcile` proves each sharded suite is an exact partition of its test files)
+    · tracking (bootstrap count/severity only; bootstrap check de-duped vs the blocking PR step)
+    · windows (non-required; runs on push main / nightly schedule / dispatch / PRs touching path-handling
+    paths, decided in-job from the PR merge commit's two parents, fail-closed).
+  * concurrency group now includes event_name (nightly vs push on main don't cancel each other).
+  * scripts/ci-shards.ts reconcile verified locally on lsp (2 legs): exact partition -> exit 0; a dropped leg
+    -> exit 1 with each missing file named. Enumeration matches bun: 1284 unit+conformance files (= CI's
+    "Ran 28724 tests across 1284 files").
+MEASURED: baseline gate 1185 s (run 39078887384); 60-run survey above. Merge queue: NOT available
+(user-owned repo; mergeQueue = null) — not enabled. Branch protection read only, unchanged (contexts ["gate"]).
+NEXT:
+1. Open PR "ci(S468): parallel gate + sharded tests + security tests gate merges" from s468-ci-speedup (do NOT merge).
+2. From its run: per-job times, aggregator wall time, reconcile totals (unit expect 1284 files / ~28.7k tests;
+   integration+lsp+commands vs tracking's old count). Download test-report-* artifacts ->
+   `bun scripts/ci-shards.ts merge-timings scripts/ci-test-timings.json <each timings.json>`; commit; rebalance
+   host-global legs / shard counts from measured times.
+3. Bite proof: branch s468-ci-bite-proof off this branch + a failing test in compiler/tests/lsp/ (the pre-commit
+   hook does not run lsp, so no --no-verify needed; the now-required integration job does) -> DRAFT PR ->
+   record `gate` red -> close PR + delete branch.
+4. Watch for: snippet-gate / facts / compile-floor now run without pretest (none reads samples dist per grep);
+   unit shards run without pretest (windows always did). Deferred: dev.js logs "Serving/Watching" before the
+   watch exists (minor, compiler/src, out of scope); windows-only flakes (bind-address 20 s, §4 seeded fuzz 5 s,
+   S27 §51.11 timer audit) — non-required job, untouched.
+No scratch bite-proof branch/PR was created.
