@@ -1,10 +1,10 @@
 {
   "id": "raw-content-component-prop-displays-as-text",
-  "description": "A static string component prop substituted into a raw body (`<pre>${t}</pre>` in the component body) is encoded AFTER substitution: it renders as text and builds no element.",
+  "description": "A `${t}` inside a raw body in a component body (`<pre>${t}</pre>`) is display text, not a prop interpolation (§4.17, S468 \"raw content wins\"): the page shows the literal `${t}`, and the prop's markup-shaped value builds no element.",
   "language-version": "1.0",
   "spec": "§4.17",
-  "provenance": "ruling:user-voice-scrml.md S462 Q21 \"I like a.\"",
-  "rationale": "§4.17 (S462 Q21): a `<pre>` / `<code>` raw-content body is emitted with `<` and `>` entity-encoded — what the author typed is what the page shows and nothing in a raw body builds an element; `&` is not encoded (the author's entities still decode); a balanced, attribute-less nested `<code>` / `<pre>` stays an element.",
+  "provenance": "ruling:user-voice-scrml.md S468 \"go on the merge driver, your recs on the rest\" item 4 (supersedes, for this case, ruling:user-voice-scrml.md S462 Q21 \"I like a.\")",
+  "rationale": "§4.17 as amended S468: \"Inside a `<pre>` / `<code>` body a `${…}` is display text, always — including in a component's `renders` body (§66) and a legacy component body (§15.9): it substitutes no prop, reads no cell, and displays exactly as written (`<pre>${t}</pre>` in a component body shows the five characters `${t}`).\" A component prop reaches a raw body only as element CONTENT (children / slot), never through an interpolation. Before S468 this case asserted the S462 Q21 reading (the prop substituted, then encoded). impl#1 still substitutes — carried: g-impl1-component-raw-body-substitutes-prop-s468. The bootstrap (with s468-bootstrap-failopen-gaps' raw-content mode) shows a `renders <pre>${t} …</pre>` body literally (slice-m4/raw-content.test.js \"in a declaration's renders\"); this legacy-dialect case is not twinned there (component-const).",
   "expect": {
     "codes": [],
     "notCodes": [
@@ -18,8 +18,16 @@
       },
       {
         "selector": "#shown",
-        "text": "<img src=x onerror='window.pwned=5'>"
+        "text": "${t}"
       }
     ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-component-raw-body-substitutes-prop-s468",
+      "fails": {
+        "runtime": "sha256:3ede924423e3624d"
+      }
+    }
   }
 }
