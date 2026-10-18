@@ -14,9 +14,22 @@ if [ "$BRANCH" = "main" ]; then
 fi
 
 echo "Running tests (unit + integration + conformance, excluding browser)..."
-if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
-  echo "✗ Tests failed. Fix before committing." >&2
-  exit 1
+# S468 (s468-hook-sharding): the SAME file set, split across parallel `bun test` processes by
+# scripts/test-sharded.ts (balanced by measured per-file time; --bail stops every shard on the first
+# failure; totals equal the single-process run). ~16 min -> ~4 min on the 32-core box.
+#   SCRML_HOOK_SHARDS=1   the original single-process command, exactly as before
+#   SCRML_HOOK_SHARDS=N   N shards (default min(cores/2, 8))
+# A branch cut before the runner existed has no scripts/test-sharded.ts and runs single-process.
+if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
+  if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
+    echo "✗ Tests failed. Fix before committing." >&2
+    exit 1
+  fi
+else
+  if ! bun scripts/test-sharded.ts --bail compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js 2>&1; then
+    echo "✗ Tests failed. Fix before committing. (SCRML_HOOK_SHARDS=1 reruns single-process.)" >&2
+    exit 1
+  fi
 fi
 
 # S462 md phase 1 — compiler/runtime/stdlib/md.js is GENERATED from stdlib/md/index.scrml

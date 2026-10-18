@@ -14,7 +14,7 @@ Existing `.git/hooks/<name>` files are backed up to `<name>.bak` on first instal
 
 ## Hooks
 
-- **pre-commit** — warns if committing directly to `main` (only the PA should do that), then runs `bun test compiler/tests/{unit,integration,conformance} --bail`. Skips the `browser` subdir (headless-browser flakiness). Fails the commit on any test failure.
+- **pre-commit** — warns if committing directly to `main` (only the PA should do that), then runs `bun test compiler/tests/{unit,integration,conformance} --bail`. Skips the `browser` subdir (headless-browser flakiness). Fails the commit on any test failure. Since S468 the file set runs across parallel `bun test` processes via `scripts/test-sharded.ts` (shard count `SCRML_HOOK_SHARDS`, default min(cores/2, 8); `SCRML_HOOK_SHARDS=1` runs the original single-process command). pre-push's full-suite step uses the same switch.
 
 ## Updating a hook
 
