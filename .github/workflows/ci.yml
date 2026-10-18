@@ -239,21 +239,22 @@ jobs:
   # No `pretest` here: nothing under unit/ or conformance/ reads samples/compilation-tests/dist
   # (the windows job has always run this suite without it).
   #
-  # S469 — FEW LEGS, EACH `--parallel`. A first cut ran 3 unit + 4 integration + 4 host-global legs (17
-  # jobs a run). Every job pays ~30 s of checkout + `bun install` (+ pretest), and the org's Free plan
-  # runs at most 20 jobs at once across EVERY run, so a wide fan-out queues behind sibling PRs (run
-  # 39142073562 waited 19 min for runners). Each leg therefore spreads its files over the runner's
-  # cores with bun's `--parallel` (worker processes; implies `--isolate`), so 2 legs do what 3-4 did,
-  # with fewer jobs and less runner time per run.
+  # S469 — HOW WIDE. Every job pays ~30 s of checkout + `bun install` (+ pretest), and the org's Free
+  # plan runs at most 20 jobs at once across EVERY run, so a wide fan-out queues behind sibling PRs (a
+  # 17-job cut, run 39142073562, waited 19 min for runners). 3 + 3 legs (+ 2 host-global) is the
+  # measured balance. `bun test --parallel` inside a leg was TRIED and REJECTED (run 39146319438): on a
+  # 4-vCPU runner, CPU contention pushed ~4 s integration tests past bun's 5 s per-test timeout
+  # (emit-block-analysis byte-determinism, expr-node corpus invariant). A required gate must not buy
+  # speed with timeouts that fire under load.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   unit:
-    name: unit (${{ matrix.shard }}/2)
+    name: unit (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -261,19 +262,19 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in unit/conformance
         run: bun install --frozen-lockfile
-      - name: unit + conformance — shard ${{ matrix.shard }}/2
+      - name: unit + conformance — shard ${{ matrix.shard }}/3
         run: >-
           bun test compiler/tests/unit compiler/tests/conformance
-          --shard=${{ matrix.shard }}/2 --parallel
+          --shard=${{ matrix.shard }}/3
           --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
-          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-unit-${{ matrix.shard }}-of-2.xml"
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-unit-${{ matrix.shard }}-of-3.xml"
       - name: Upload shard report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: test-report-unit-${{ matrix.shard }}
           path: |
-            ${{ runner.temp }}/junit-unit-${{ matrix.shard }}-of-2.xml
+            ${{ runner.temp }}/junit-unit-${{ matrix.shard }}-of-3.xml
             ${{ runner.temp }}/timings.json
           retention-days: 14
           if-no-files-found: warn
@@ -289,14 +290,14 @@ jobs:
   # `pretest` runs here: integration/s464-quoted-handler-refused reads samples/compilation-tests/dist.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   integration:
-    name: integration (${{ matrix.shard }}/2)
+    name: integration (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        # 2 legs × `--parallel` (S469): ~620 s of serial test time (run 39137191221) vs ~410 s for unit.
-        shard: [1, 2]
+        # 3 legs, balanced by scripts/ci-test-timings.json (~620 s of test time; ~410 s for unit).
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -306,19 +307,19 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: integration + lsp + commands — shard ${{ matrix.shard }}/2
+      - name: integration + lsp + commands — shard ${{ matrix.shard }}/3
         run: >-
           bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
-          --shard=${{ matrix.shard }}/2 --parallel
+          --shard=${{ matrix.shard }}/3
           --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
-          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-2.xml"
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-3.xml"
       - name: Upload shard report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: test-report-integration-${{ matrix.shard }}
           path: |
-            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-2.xml
+            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-3.xml
             ${{ runner.temp }}/timings.json
           retention-days: 14
           if-no-files-found: warn

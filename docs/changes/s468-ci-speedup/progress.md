@@ -107,3 +107,10 @@ No scratch bite-proof branch/PR was created.
   (slices `if: false`) -> run 39140391972 "slices: skipped" -> gate FAIL ("failure, cancellation and skip all
   count"). Coverage note: the CI file count can exceed a local enumeration because pull_request runs test the
   PR MERGED with current main (run 1 included compiler/tests/unit/s468-identity-read-raw-text.test.js from main).
+- Run 3 (39146319438, c8cf901fc, `--parallel` legs): RED, and the bite worked as designed. integration 1/2
+  failed with two 5 s per-test TIMEOUTS under CPU contention (emit-block-analysis "(e) byte-determinism"
+  5000.66 ms, expr-node-corpus-invariant "12-snippets-slots" 6994 ms) and `gate` failed. unit 2 legs under
+  --parallel passed (201/239 s) but were no faster than 3 serial legs (127-163 s). VERDICT: --parallel REJECTED
+  on 4-vCPU runners (a required gate must not buy speed with load-sensitive timeouts). Final shape: unit 3 ·
+  integration 3 (timing-balanced) · host-global 2 (194/157 s measured) · checks · browser · slices = 11
+  blocking jobs + gate + tracking (+ windows when the path filter matches) — 13-14 jobs, down from 17.
