@@ -51,7 +51,8 @@ scripts/git-hooks/* text eol=lf
 # the post-merge / post-rewrite hooks (or `bun scripts/git-merge-generated.ts --regen`) regenerate
 # once the merged tree exists. A conflict in hand-written text still stops the merge.
 #
-# ⚑ Inert until the clone is configured: `./scripts/git-hooks/install.sh` (merge drivers are
+# ⚑ Inert until the clone is configured: `scripts/install-merge-driver.sh`, run by every `bun run pretest`
+# and by `./scripts/git-hooks/install.sh` (merge drivers are
 # per-clone config). GitHub's own merge never runs it — update a PR branch locally to use it.
 docs/known-gaps.md            merge=scrml-generated
 master-list.md                merge=scrml-generated

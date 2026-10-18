@@ -25,8 +25,11 @@
 //   PHASE 1 — this driver, inside the merge (a pure function of %O %A %B):
 //     1. MASK every generated region in all three versions (its body replaced by nothing), so the
 //        3-way merge sees only hand-written text. Generated churn can no longer conflict.
-//     2. `git merge-file` the masked versions. Any conflict left is in HAND-WRITTEN text → the file is
-//        written with markers and the driver exits 1: a human/agent 3-way is still owed for that.
+//     2. `git merge-file` the masked versions. Any conflict left is in HAND-WRITTEN text. ONE shape of it
+//        is resolved: when EVERY conflicted hunk is both sides INSERTING distinct new `@gap` entries at
+//        the same spot (empty base side, disjoint ids), the hunks are UNIONED, ours first
+//        (`unionEntryAdditions`, ruled S469). Anything else → the file is written with markers and the
+//        driver exits 1: a human/agent 3-way is still owed for that.
 //     3. Fill each generated region back in:
 //          SELF-CONTAINED sections (derived only from the file's own text — today `gap-counts`, from
 //          the `@gap` markers of the same file) are REGENERATED EXACTLY from the merged text, by the
@@ -63,11 +66,17 @@
 // pending), never as hand text and never as self-contained — the safe default.
 //
 // ═══ INSTALL (merge drivers are PER-CLONE config; all worktrees of a clone share it) ═══════════
-//   ./scripts/git-hooks/install.sh   — sets `merge.scrml-generated.driver` (see that script), and
-//   mirrors the attribute lines into the clone's info/attributes: a merge reads .gitattributes from
-//   OURS' working tree, so a branch cut before the lines landed would otherwise never use the driver.
-//   .gitattributes maps the five files above to `merge=scrml-generated`. Without the config, git
-//   ignores the attribute and falls back to its normal text merge (conflicts as before — never worse).
+//   scripts/install-merge-driver.sh — IDEMPOTENT; run by every `bun run pretest` and by
+//   scripts/git-hooks/install.sh. Sets `merge.scrml-generated.driver`, and mirrors the attribute lines
+//   into the clone's info/attributes: a merge reads .gitattributes from OURS' working tree, so a branch
+//   cut before the lines landed would otherwise never use the driver. .gitattributes maps the five
+//   files above to `merge=scrml-generated`. Without the config, git ignores the attribute and falls
+//   back to its normal text merge (conflicts as before). With the config but WITHOUT bun or this
+//   script in the checkout, the configured command FAILS CLOSED (plain 3-way under a marker block,
+//   exit 1 — the path stays conflicted). The post-merge / post-rewrite hooks (phase 2) need
+//   scripts/git-hooks/install.sh; without them, run `--regen` by hand — the CI currency gates catch it.
+//   ⚑ DETERMINISM: no phase reads the clock or the network. Phase 1 is a pure function of %O %A %B;
+//   phase 2 runs the repo's own producers over the merged tree (+ `git log` for recent-sessions).
 //   ⚑ GitHub's server-side merge NEVER runs custom drivers: a PR shows `dirty` on GitHub until its
 //   branch is updated locally (`git merge origin/main` with the driver installed) and pushed.
 //
@@ -272,6 +281,7 @@ export type MergeResult = {
   pending: boolean;            // cross-file generated content holds a PROVISIONAL value
   regenerated: string[];       // self-contained sections regenerated exactly
   provisional: string[];       // cross-file sections / rows / whole file given a provisional value
+  unioned: number;             // same-spot entry-addition hunks resolved by the union rule
   selfCheck: { dropped: string[]; duplicated: string[] };
 };
 
@@ -319,11 +329,17 @@ export function mergeGenerated(
   if (ma.names.has("whole") || mb.names.has("whole")) {
     const text = pick3(mo.values.get("whole#0"), ma.values.get("whole#0"), mb.values.get("whole#0"));
     provisional.push("(whole file)");
-    return { text, conflicts: 0, pending: true, regenerated, provisional, selfCheck: gapIdSelfCheck(o, a, b, text) };
+    return { text, conflicts: 0, pending: true, regenerated, provisional, unioned: 0, selfCheck: gapIdSelfCheck(o, a, b, text) };
   }
 
-  // Step 2 — hand text only.
-  const merged = gitMergeFile(mo.text, ma.text, mb.text, markerSize, labels);
+  // Step 2 — hand text only. A conflict left there is retried as a UNION when every conflicted hunk
+  // is two sides each ADDING whole, distinct ledger entries at the same spot (see unionEntryAdditions).
+  let merged = gitMergeFile(mo.text, ma.text, mb.text, markerSize, labels);
+  let unioned = 0;
+  if (merged.conflicts > 0) {
+    const u = unionEntryAdditions(mo.text, ma.text, mb.text, markerSize, labels);
+    if (u) { merged = { text: u.text, conflicts: 0 }; unioned = u.hunks; }
+  }
 
   // Step 3 — fill. Self-contained sections derive from the merged HAND text (every entry of both
   // sides is in it by now); the generated bodies hold no @gap markers, so the masked text counts the same.
@@ -348,7 +364,69 @@ export function mergeGenerated(
   }
   const pending = provisional.length > 0;
   const selfCheck = merged.conflicts === 0 ? gapIdSelfCheck(o, a, b, text) : { dropped: [], duplicated: [] };
-  return { text, conflicts: merged.conflicts, pending, regenerated, provisional, selfCheck };
+  return { text, conflicts: merged.conflicts, pending, regenerated, provisional, unioned, selfCheck };
+}
+
+/**
+ * The UNION rule for same-spot ledger additions (ruled S469: "union gap entries").
+ * Two PRs that each file a NEW gap entry at the same place (the tail of a section — the usual case)
+ * conflict in hand-written text with an EMPTY base side: neither replaced anything, both inserted.
+ * Keeping both is then the only right answer, so the driver takes ours-then-theirs — but ONLY when
+ * EVERY conflicted hunk satisfies all of:
+ *   - the base side of the hunk is empty (whitespace only) — a pure insertion on both sides;
+ *   - each side's insertion carries at least one `@gap id=` marker (it is ledger entries, not prose);
+ *   - the two sides' id sets are disjoint (the same id filed twice is a real conflict, not a union).
+ * Any hunk failing any test → null, and the caller keeps the plain conflict: the rule never
+ * resolves a hunk where one side changed or deleted existing text. Order is deterministic (ours
+ * first). The gap-id self-check still runs on the result.
+ */
+export function unionEntryAdditions(
+  o: string, a: string, b: string, markerSize: number, labels: Labels,
+): { text: string; hunks: number } | null {
+  const dir = scratchDir();
+  let r;
+  try {
+    const po = join(dir, "base"), pa = join(dir, "ours"), pb = join(dir, "theirs");
+    writeFileSync(po, o); writeFileSync(pa, a); writeFileSync(pb, b);
+    r = spawnSync(
+      "git",
+      ["merge-file", "-p", "--diff3", `--marker-size=${markerSize}`, "-L", labels.ours, "-L", labels.base, "-L", labels.theirs, pa, po, pb],
+      { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  if (r.status === null || r.status > 127 || r.error || r.status === 0) return null;
+  const OPEN = "<".repeat(markerSize), BASE = "|".repeat(markerSize), SEP = "=".repeat(markerSize), CLOSE = ">".repeat(markerSize);
+  const isMark = (ln: string, m: string) => ln === m || ln.startsWith(m + " ");
+  const lines = r.stdout.split("\n");
+  const out: string[] = [];
+  let hunks = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (!isMark(lines[i], OPEN)) { out.push(lines[i]); continue; }
+    const ours: string[] = [], base: string[] = [], theirs: string[] = [];
+    let cur = ours, j = i + 1, closed = false;
+    for (; j < lines.length; j++) {
+      const ln = lines[j];
+      if (cur === ours && isMark(ln, BASE)) { cur = base; continue; }
+      if ((cur === base || cur === ours) && ln === SEP) { cur = theirs; continue; }
+      if (cur === theirs && isMark(ln, CLOSE)) { closed = true; break; }
+      if (isMark(ln, OPEN)) return null; // nested / malformed
+      cur.push(ln);
+    }
+    if (!closed || cur !== theirs) return null;
+    if (base.some((l) => l.trim() !== "")) return null;
+    const ia = gapIdCounts(ours.join("\n")), ib = gapIdCounts(theirs.join("\n"));
+    if (ia.size === 0 || ib.size === 0) return null;
+    for (const id of ia.keys()) if (ib.has(id)) return null;
+    // Keep the ledger's blank-line separation between the two insertions.
+    const joint = [...ours];
+    if (joint.length && joint[joint.length - 1].trim() !== "" && theirs.length && theirs[0].trim() !== "") joint.push("");
+    out.push(...joint, ...theirs);
+    hunks++;
+    i = j;
+  }
+  return hunks > 0 ? { text: out.join("\n"), hunks } : null;
 }
 
 // ─── pending record (per worktree: `git rev-parse --git-path` resolves to the worktree's own dir) ─
@@ -424,6 +502,7 @@ function runDriver(argv: string[]): number {
   writeFileSync(pA, r.text);
   if (r.pending) writePending([...readPending(), path.replace(/\\/g, "/")]);
   const bits = [
+    r.unioned ? `unioned ${r.unioned} same-spot gap-entry addition(s) (ours first)` : "",
     r.regenerated.length ? `regenerated ${r.regenerated.join(", ")}` : "",
     r.provisional.length ? `provisional ${r.provisional.join(", ")} (PENDING — after the merge completes: bun scripts/git-merge-generated.ts --regen)` : "",
   ].filter(Boolean).join("; ");

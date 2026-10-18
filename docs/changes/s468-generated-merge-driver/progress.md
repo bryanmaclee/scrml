@@ -63,3 +63,10 @@
   (puppeteer postinstall exit 1 — browser download, not load-bearing), pretest OK. Ruling (2) is answered by the
   S469 brief title ("union gap entries"). Remaining: an idempotent install on the pretest path, a fail-closed
   fallback when bun or the script is unavailable, a UNION of same-spot gap-entry additions, and the bite proofs.
+- 2026-10-17T22:40 IMPLEMENTED (commit 2): `unionEntryAdditions` (diff3 re-merge; every conflicted hunk must be an
+  empty-base insertion on both sides, each side carrying >=1 `@gap id=`, ids disjoint — else the plain conflict
+  stands); NEW scripts/install-merge-driver.sh (idempotent: config + a snapshot of the driver + state.ts in
+  <common-dir>/scrml-generated-driver/ for branches cut before the driver + the info/attributes mirror; opt-out
+  SCRML_SKIP_MERGE_DRIVER_INSTALL=1), run by `pretest` and by install.sh; the configured command now FAILS CLOSED
+  (plain 3-way under a DRIVER UNAVAILABLE marker block, exit 1). Unit file 16 -> 24 tests, all pass. The clone
+  config of THIS checkout is deliberately left unconfigured (my runs use the opt-out) until the PR lands.
