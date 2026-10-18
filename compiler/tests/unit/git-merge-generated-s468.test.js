@@ -25,6 +25,9 @@ import {
   gitMergeFile,
   gapIdSelfCheck,
   gapIdCounts,
+  unionEntryAdditions,
+  regenBlock,
+  stripRegenBlock,
 } from "../../../scripts/git-merge-generated.ts";
 import { gapCountsSection } from "../../../scripts/state.ts";
 
@@ -78,7 +81,7 @@ describe("gap-counts — self-contained section, regenerated from the MERGED tex
     expect(tableOf(r.text)).toBe(gapCountsSection(r.text));
     expect(r.regenerated).toEqual(["gap-counts"]);
     expect(r.pending).toBe(false);
-    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [] });
+    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
   });
 
   test("BITE: two DIFFERENT table changes conflict under plain merge, resolve under the driver", () => {
@@ -149,7 +152,7 @@ describe("UNION of same-spot gap-entry additions (S469)", () => {
     expect(tableOf(r.text)).toBe(gapCountsSection(r.text));
     expect(tableOf(r.text)).toContain("| HIGH | 2 | 0 |");
     expect(tableOf(r.text)).toContain("| LOW | 3 | 0 |");
-    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [] });
+    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
     // the ledger stays well-formed: each union'd entry is its own block, separated by a blank line
     expect(r.text).toMatch(/status=open -->\n\n### g-tail-theirs/);
   });
@@ -170,6 +173,35 @@ describe("UNION of same-spot gap-entry additions (S469)", () => {
     const r = mergeGenerated(o, a3, b3, "docs/known-gaps.md");
     expect(r.conflicts).toBeGreaterThan(0);
     expect(r.unioned).toBe(0);
+  });
+
+  test("BITE (S469 review #2): a `=======` content line in ours' addition is NOT read as the separator", () => {
+    // a setext heading underline inside ours' new entry
+    const a5 = ledger([...BASE_ENTRIES, { id: "g-tail-ours", sev: "HIGH" }]).replace(/(### g-tail-ours[^\n]*\n)/, "$1\nSetext heading\n=======\n");
+    const r = mergeGenerated(o, a5, b, "docs/known-gaps.md");
+    expect(r.conflicts).toBe(0);
+    expect(r.unioned).toBe(1);
+    expect(r.text).not.toMatch(/^\|{7}/m); // no leaked diff3 base marker
+    expect(r.text).toContain("Setext heading\n=======\n");
+    expect(r.text).toContain("g-tail-theirs");
+    expect(r.text.split("\n").filter((l) => l === "=======").length).toBe(1); // only ours' own underline
+    // …and an underline exactly as long as the parser's OWN separator: accepted as SEP only after
+    // the base marker, so it stays content too
+    const long = "=".repeat(31);
+    const a7 = ledger([...BASE_ENTRIES, { id: "g-tail-ours", sev: "HIGH" }]).replace(/(### g-tail-ours[^\n]*\n)/, `$1\nSetext heading\n${long}\n`);
+    const r7 = mergeGenerated(o, a7, b, "docs/known-gaps.md");
+    expect(r7.unioned).toBe(1);
+    expect(r7.text).not.toMatch(/^\|{7}/m);
+    expect(r7.text).toContain(`Setext heading\n${long}\n`);
+    expect(r7.text).toContain("g-tail-theirs");
+  });
+
+  test("BITE (S469 review #5): an IDENTICAL line both sides added is not unioned (it would be filed twice)", () => {
+    const shared = "**Workaround:** none known.";
+    const a6 = ledger([...BASE_ENTRIES, { id: "g-u1", sev: "LOW" }]) + shared + "\n";
+    const b6 = ledger([...BASE_ENTRIES, { id: "g-u2", sev: "LOW" }]) + shared + "\n";
+    expect(unionEntryAdditions(o, a6, b6, 7, LABELS)).toBeNull();
+    expect(mergeGenerated(o, a6, b6, "docs/known-gaps.md").conflicts).toBeGreaterThan(0);
   });
 
   test("BITE: prose added at the same spot (no @gap marker) is not unioned", () => {
@@ -197,7 +229,7 @@ describe("gap-id union self-check", () => {
     const r = mergeGenerated(o, a, b, "docs/known-gaps.md");
     expect(r.conflicts).toBe(0);
     expect(gapIdCounts(r.text).has("g-d")).toBe(false);
-    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [] });
+    expect(r.selfCheck).toEqual({ dropped: [], duplicated: [], ambiguous: [] });
   });
 
   test("a result that DUPLICATES an id, or loses one, is flagged", () => {
@@ -209,21 +241,55 @@ describe("gap-id union self-check", () => {
     // the doc's own format example is not an entry
     expect(gapIdCounts("<!-- @gap id=<stable-id> sev=HIGH status=open -->").size).toBe(0);
   });
+
+  test("BITE (S469 review #6): MULTIPLICITY — one copy of a double-filed id lost is a drop, not a pass", () => {
+    const m = (id) => `<!-- @gap id=${id} sev=LOW status=open -->\n`;
+    const o = m("g-a"), a = m("g-a") + m("g-x") + m("g-x"), b = m("g-a");
+    // a presence-only check passes this (g-x is present); the multiset check does not
+    expect(gapIdSelfCheck(o, a, b, m("g-a") + m("g-x")).dropped).toEqual(["g-x"]);
+    // both sides changed g-a's count differently: no right answer → ambiguous
+    expect(gapIdSelfCheck(m("g-a"), m("g-a") + m("g-a"), "", m("g-a")).ambiguous).toEqual(["g-a"]);
+  });
+
+  test("BITE (S469 review #6): a marker inside a CODE FENCE does not stand in for a dropped entry", () => {
+    const fence = "```\n<!-- @gap id=g-x sev=LOW status=open -->\n```\n";
+    const entry = "<!-- @gap id=g-x sev=LOW status=open -->\n";
+    const o = fence, a = fence + entry, b = fence;
+    expect(gapIdCounts(fence).size).toBe(0);
+    expect(gapIdSelfCheck(o, a, b, fence).dropped).toEqual(["g-x"]);
+  });
 });
 
-describe("cross-file sections — provisional value, pending phase 2, never markers", () => {
+describe("cross-file sections — one-sided change taken; a TWO-sided change STOPS for --regen", () => {
   const facts = (version, tests) =>
     `# facts\n\nprose\n\n<!-- @generated:facts-table START (do not edit — \`bun scripts/facts.ts --write\`) -->\n| fact | value |\n|---|---|\n| compiler version | \`${version}\` |\n| test files | ${tests} |\n<!-- @generated:facts-table END -->\n\nmore prose\n`;
 
-  test("BITE: both sides change the table → plain merge conflicts; the driver takes ours provisionally", () => {
+  test("BITE (S469 review #3): both sides change the table → NO right value here → needsRegen (the driver stops)", () => {
+    // Neither 1,754 nor 1,751 is the merged tree's count; committing either is a merge whose
+    // facts.ts --check fails while both parents pass. The driver must stop, not pick.
     const o = facts("0.8.0", "1,750"), a = facts("0.8.0", "1,754"), b = facts("0.8.0", "1,751");
     expect(gitMergeFile(o, a, b, 7, LABELS).conflicts).toBeGreaterThan(0);
     const r = mergeGenerated(o, a, b, "docs/FACTS.md");
     expect(r.conflicts).toBe(0);
-    expect(r.text).not.toContain(OPEN);
-    expect(r.text).toContain("| test files | 1,754 |");
+    expect(r.needsRegen).toEqual(["facts-table"]);
     expect(r.provisional).toEqual(["facts-table"]);
     expect(r.pending).toBe(true);
+  });
+
+  test("the regen block round-trips: stripRegenBlock removes exactly it, and refuses a file with other markers", () => {
+    const body = facts("0.8.0", "1,754");
+    const blocked = regenBlock(7, ["facts-table"]) + body;
+    expect(blocked.startsWith(OPEN)).toBe(true);
+    expect(stripRegenBlock(blocked)).toBe(body);
+    expect(stripRegenBlock(body)).toBeNull();
+    expect(stripRegenBlock(blocked + `${OPEN} x\na\n${"=".repeat(7)}\nb\n${CLOSE} y\n`)).toBeNull();
+  });
+
+  test("a section only ONE side changed takes that side's value — no stop", () => {
+    const o = facts("0.8.0", "1,750"), a = facts("0.8.0", "1,750").replace("more prose", "more prose, ours"), b = facts("0.8.0", "1,751");
+    const r = mergeGenerated(o, a, b, "docs/FACTS.md");
+    expect(r.needsRegen).toEqual([]);
+    expect(r.text).toContain("| test files | 1,751 |");
   });
 
   test("a side that left the section at base yields to the side that changed it", () => {
@@ -251,49 +317,52 @@ describe("cross-file sections — provisional value, pending phase 2, never mark
     expect(r.text).toContain("| 3 | Three | 23-32 | 10 | third — theirs' summary |");
     expect(r.text).toContain("| 1 | One | 1-12 | 12 | first |");
     expect(r.provisional.sort()).toEqual(["spec-index-rows", "spec-index-totals"]);
+    expect(r.needsRegen.sort()).toEqual(["spec-index-rows", "spec-index-totals"]); // both sides moved them
     expect(r.pending).toBe(true);
   });
 
-  test("a wholly-generated file never conflicts; ours is provisional", () => {
+  test("a wholly-generated file never gets markers from the text merge; a two-sided change needs regen", () => {
     const g = (n) => `# Bootstrap conformance — generated\n\n<!-- @generated by \`bun scripts/bootstrap-conformance.ts --write\`. Do not hand-edit. -->\n\n| PASS | ${n} |\n`;
     expect(gitMergeFile(g(1), g(2), g(3), 7, LABELS).conflicts).toBeGreaterThan(0);
     const r = mergeGenerated(g(1), g(2), g(3), "docs/bootstrap-conformance.md");
     expect(r.conflicts).toBe(0);
     expect(r.text).toBe(g(2));
     expect(r.pending).toBe(true);
+    expect(r.needsRegen).toEqual(["(whole file)"]);
+    expect(mergeGenerated(g(1), g(1), g(3), "docs/bootstrap-conformance.md").needsRegen).toEqual([]);
   });
 });
 
-describe("end to end through `git merge`, with the config string install.sh ships", () => {
+describe("end to end through `git merge`, with the config the installer ships", () => {
   // ⚑ Strip every GIT_* variable: under the pre-commit hook git exports GIT_INDEX_FILE (and may
   // export GIT_DIR), and a `git init`/`commit` in a temp dir that inherited them would act on the
-  // REAL repository's index.
-  // SCRML_SKIP_MERGE_DRIVER_INSTALL is stripped too: a suite run with the opt-out set (so the REAL clone's
-  // config is left alone) must still exercise the installer inside these throwaway repos.
+  // REAL repository's index. SCRML_SKIP_MERGE_DRIVER_INSTALL is stripped too: a suite run with the
+  // opt-out set (so the REAL clone's config is left alone) must still exercise the installer here.
   const cleanEnv = () =>
     Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "SCRML_SKIP_MERGE_DRIVER_INSTALL"));
   const sh = (cwd, cmd, args, env) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...cleanEnv(), ...env } });
+  const ID = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  const SCRIPTS = ["git-merge-generated.ts", "git-merge-generated.sh", "state.ts"];
 
-  function repo(withScripts) {
+  /** A throwaway repo. `scripts`: copy the driver into the checkout (gitignored, so it is in ours' tree). */
+  function repo(scripts, { attrs = true } = {}) {
     const root = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-test-"));
     const g = (...args) => {
-      const r = sh(root, "git", args, { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" });
-      if (r.status !== 0 && args[0] !== "merge") throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      const r = sh(root, "git", args, ID);
+      if (r.status !== 0 && !["merge", "ls-files", "diff"].includes(args[0])) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
       return r;
     };
     g("init", "-q", "-b", "main");
     g("config", "core.hooksPath", "/dev/null");
     g("config", "rerere.enabled", "false");
-    // The driver config, set by the shipped installer itself (the one `bun run pretest` runs).
     const cfg = sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh"), "--quiet"]);
     expect(cfg.status).toBe(0);
-    if (withScripts) {
+    if (scripts) {
       mkdirSync(join(root, "scripts"));
-      copyFileSync(join(REPO, "scripts/git-merge-generated.ts"), join(root, "scripts/git-merge-generated.ts"));
-      copyFileSync(join(REPO, "scripts/state.ts"), join(root, "scripts/state.ts"));
+      for (const f of SCRIPTS) copyFileSync(join(REPO, "scripts", f), join(root, "scripts", f));
     }
     mkdirSync(join(root, "docs"));
-    writeFileSync(join(root, ".gitattributes"), "docs/known-gaps.md merge=scrml-generated\n");
+    writeFileSync(join(root, ".gitattributes"), attrs ? "/docs/known-gaps.md merge=scrml-generated\n" : "");
     writeFileSync(join(root, ".gitignore"), "scripts/\n");
     writeFileSync(join(root, "docs/known-gaps.md"), ledger(BASE_ENTRIES));
     g("add", "-A"); g("commit", "-qm", "base");
@@ -305,13 +374,15 @@ describe("end to end through `git merge`, with the config string install.sh ship
     g("commit", "-qam", "ours");
     return { root, g };
   }
+  const kg = (root) => readFileSync(join(root, "docs/known-gaps.md"), "utf8");
+  const done = (root) => rmSync(root, { recursive: true, force: true });
 
   test("with the driver: the merge commits cleanly, both entries present, table exact", () => {
     const { root, g } = repo(true);
     try {
       const r = g("merge", "--no-edit", "side");
       expect(r.status).toBe(0);
-      const text = readFileSync(join(root, "docs/known-gaps.md"), "utf8");
+      const text = kg(root);
       expect(text).not.toContain(OPEN);
       expect(text).toContain("g-new-ours");
       expect(text).toContain("g-new-theirs");
@@ -319,9 +390,7 @@ describe("end to end through `git merge`, with the config string install.sh ship
       expect(tableOf(text)).toContain("| HIGH | 3 | 0 |");
       expect(tableOf(text)).toContain("| MED | 1 | 0 |");
       expect(existsSync(join(root, ".git/MERGE_HEAD"))).toBe(false);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    } finally { done(root); }
   });
 
   test("UNION end to end: two branches each append an entry at the tail → auto-merged, both kept, counts exact", () => {
@@ -336,35 +405,83 @@ describe("end to end through `git merge`, with the config string install.sh ship
       const r = g("merge", "--no-edit", "tail-a");
       expect(r.status).toBe(0);
       expect(r.stderr).toContain("unioned 1 same-spot gap-entry addition");
-      const text = readFileSync(join(root, "docs/known-gaps.md"), "utf8");
+      const text = kg(root);
       expect(text).not.toContain(OPEN);
       expect([...gapIdCounts(text).keys()].sort()).toEqual([...BASE_ENTRIES.map((e) => e.id), "g-tail-a", "g-tail-b"].sort());
       expect(tableOf(text)).toBe(gapCountsSection(text));
       expect(tableOf(text)).toContain("| HIGH | 3 | 0 |");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    } finally { done(root); }
   });
 
-  test("a checkout WITHOUT the script (a branch cut before the driver) uses the installer's snapshot", () => {
+  test("BITE (S469 review #1): the driver CRASHES at import → markers + BOTH sides on the page, never pure ours", () => {
+    const { root, g } = repo(true);
+    try {
+      const st = join(root, "scripts/state.ts");
+      writeFileSync(st, `throw new Error("boom at import");\n` + readFileSync(st, "utf8"));
+      const r = g("merge", "--no-edit", "side");
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("DRIVER FAILED");
+      const text = kg(root);
+      expect(text).toContain(OPEN);
+      expect(text).toContain("DRIVER FAILED");
+      expect(text).toContain("g-new-ours");
+      expect(text).toContain("g-new-theirs"); // the pre-fix wrapper left pure ours: theirs absent
+      expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
+      expect(existsSync(join(root, "docs/known-gaps.md.scrml-ours"))).toBe(false); // no litter
+    } finally { done(root); }
+  });
+
+  test("BITE (S469 review #1): no bun on PATH → the same fail-closed plain 3-way with markers", () => {
+    const { root, g } = repo(true);
+    try {
+      const gitDir = dirname(spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim());
+      const PATH = [gitDir, "/usr/bin", "/bin"].filter((d) => !existsSync(join(d, "bun"))).join(":");
+      const r = sh(root, "git", ["merge", "--no-edit", "side"], { ...ID, PATH });
+      expect(r.status).not.toBe(0);
+      const text = kg(root);
+      expect(text).toContain("DRIVER UNAVAILABLE");
+      expect(text).toContain("g-new-theirs");
+      expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
+    } finally { done(root); }
+  });
+
+  test("BITE (S469 review #4): a branch WITHOUT the driver scripts gets git's own merge, not any stored copy", () => {
     const { root, g } = repo(false);
     try {
-      // the installer, run once from a checkout that HAS the scripts, snapshots them into the common dir
-      mkdirSync(join(root, "scripts"));
-      copyFileSync(join(REPO, "scripts/git-merge-generated.ts"), join(root, "scripts/git-merge-generated.ts"));
-      copyFileSync(join(REPO, "scripts/state.ts"), join(root, "scripts/state.ts"));
-      expect(sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh"), "--quiet"]).status).toBe(0);
-      rmSync(join(root, "scripts"), { recursive: true, force: true });
-      expect(existsSync(join(root, ".git/scrml-generated-driver/git-merge-generated.ts"))).toBe(true);
+      // a legacy stored copy from the first cut must never run: the installer removes it, and the
+      // configured command never looks for it
+      mkdirSync(join(root, ".git/scrml-generated-driver"));
+      writeFileSync(join(root, ".git/scrml-generated-driver/git-merge-generated.ts"), "process.exit(0)\n");
       const r = g("merge", "--no-edit", "side");
+      expect(r.status).not.toBe(0);
+      const text = kg(root);
+      expect(text).toContain(OPEN); // git's normal markers
+      expect(text).not.toContain("scrml-generated-merge");
+      g("merge", "--abort");
+      expect(sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh"), "--quiet"]).status).toBe(0);
+      expect(existsSync(join(root, ".git/scrml-generated-driver"))).toBe(false);
+    } finally { done(root); }
+  });
+
+  test("a branch with no `merge=scrml-generated` attribute never runs the driver, even with it installed", () => {
+    const { root, g } = repo(true, { attrs: false });
+    try {
+      const r = g("merge", "--no-edit", "side");
+      expect(r.stderr).not.toContain("scrml-generated-merge");
+    } finally { done(root); }
+  });
+
+  test("BITE (S469 review #7): a pending record does not survive `git merge --abort` into the next merge", () => {
+    const { root, g } = repo(true);
+    try {
+      // a record left by a merge that was then aborted: keyed to HEAD, HEAD never moved
+      const head = g("rev-parse", "HEAD").stdout.trim();
+      writeFileSync(join(root, ".git/scrml-generated-pending"), `key ${head}\ndocs/FACTS.md\n`);
+      const r = sh(root, "bun", [join(root, "scripts/git-merge-generated.ts"), "--pending"]);
       expect(r.status).toBe(0);
-      const text = readFileSync(join(root, "docs/known-gaps.md"), "utf8");
-      expect(text).not.toContain(OPEN);
-      expect(tableOf(text)).toBe(gapCountsSection(text));
-      expect(tableOf(text)).toContain("| HIGH | 3 | 0 |");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+      expect(r.stdout.trim()).toBe("");
+      expect(existsSync(join(root, ".git/scrml-generated-pending"))).toBe(false);
+    } finally { done(root); }
   });
 
   test("SCRML_SKIP_MERGE_DRIVER_INSTALL leaves the clone untouched", () => {
@@ -373,12 +490,10 @@ describe("end to end through `git merge`, with the config string install.sh ship
       expect(sh(root, "git", ["init", "-q"]).status).toBe(0);
       expect(sh(root, "bash", [join(REPO, "scripts/install-merge-driver.sh")], { SCRML_SKIP_MERGE_DRIVER_INSTALL: "1" }).status).toBe(0);
       expect(sh(root, "git", ["config", "--get", "merge.scrml-generated.driver"]).status).not.toBe(0);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    } finally { done(root); }
   });
 
-  test("install.sh: sets the driver, mirrors the attributes into info/attributes, idempotently", () => {
+  test("install.sh: sets the driver idempotently, removes legacy state; --uninstall removes everything", () => {
     const root = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "scrml-mgd-install-"));
     try {
       expect(sh(root, "git", ["init", "-q"]).status).toBe(0);
@@ -388,44 +503,23 @@ describe("end to end through `git merge`, with the config string install.sh ship
       }
       copyFileSync(join(REPO, "scripts/install-merge-driver.sh"), join(root, "scripts/install-merge-driver.sh"));
       copyFileSync(join(REPO, ".gitattributes"), join(root, ".gitattributes"));
-      // a user's own line + a block in the PRE-S469 format (BEGIN mark named install.sh) — replaced, not duplicated
+      // a user's own line + a block in the legacy format (both earlier installers wrote one)
       writeFileSync(
         join(root, ".git/info/attributes"),
         "*.bin binary\n# >>> scrml-generated merge driver (managed by scripts/git-hooks/install.sh) >>>\nold.md merge=scrml-generated\n# <<< scrml-generated merge driver <<<\n",
       );
       for (let i = 0; i < 2; i++) expect(sh(root, "bash", ["scripts/git-hooks/install.sh"]).status).toBe(0);
-      const before = readFileSync(join(root, ".git/info/attributes"), "utf8");
+      const drv = sh(root, "git", ["config", "--get", "merge.scrml-generated.driver"]).stdout;
+      expect(drv).toContain("sh scripts/git-merge-generated.sh");
+      expect(drv).not.toContain("exec bun"); // review #1: exec'ing bun skipped every fallback
+      expect(drv).toContain("%O %A %B %P %L %S %X %Y");
+      expect(readFileSync(join(root, ".git/info/attributes"), "utf8")).toBe("*.bin binary\n"); // legacy block gone, user line kept
       const again = sh(root, "bash", ["scripts/install-merge-driver.sh"]);
       expect(again.status).toBe(0);
       expect(again.stdout).toContain("already configured"); // the pretest path is a no-op once installed
-      expect(readFileSync(join(root, ".git/info/attributes"), "utf8")).toBe(before);
-      const drv = sh(root, "git", ["config", "--get", "merge.scrml-generated.driver"]).stdout;
-      expect(drv).toContain("bun scripts/git-merge-generated.ts");
-      expect(drv).toContain("%O %A %B %P %L %S %X %Y");
-      const info = readFileSync(join(root, ".git/info/attributes"), "utf8");
-      expect(info.startsWith("*.bin binary\n")).toBe(true); // a user's own lines survive
-      expect(info.match(/>>> scrml-generated merge driver/g)?.length).toBe(1);
-      const mirrored = info.split("\n").filter((l) => /\smerge=scrml-generated\b/.test(l)).map((l) => l.split(/\s+/)[0]).sort();
-      expect(mirrored).toEqual(["compiler/SPEC-INDEX.md", "docs/FACTS.md", "docs/bootstrap-conformance.md", "docs/known-gaps.md", "master-list.md"]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  test("driver unavailable: the shipped config FAILS CLOSED — a marked conflict, never a silent pick", () => {
-    const { root, g } = repo(false);
-    try {
-      const r = g("merge", "--no-edit", "side");
-      expect(r.status).not.toBe(0);
-      const text = readFileSync(join(root, "docs/known-gaps.md"), "utf8");
-      expect(text).toContain(OPEN);
-      expect(text).toContain("DRIVER UNAVAILABLE");
-      expect(text).toContain("g-new-ours");
-      expect(text).toContain("g-new-theirs");
-      expect(g("ls-files", "-u").stdout).toContain("docs/known-gaps.md");
-      expect(existsSync(join(root, ".git/MERGE_HEAD"))).toBe(true);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+      const un = sh(root, "bash", ["scripts/install-merge-driver.sh", "--uninstall"]);
+      expect(un.status).toBe(0);
+      expect(sh(root, "git", ["config", "--get-regexp", "^merge\\.scrml-generated\\."]).stdout).toBe("");
+    } finally { done(root); }
   });
 });

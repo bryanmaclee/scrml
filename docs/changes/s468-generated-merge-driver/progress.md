@@ -90,3 +90,27 @@
   unit/s457-url-scheme-runtime-guard. This diff touches no compiler code (scripts/, package.json pretest, docs,
   this one test file). s457 passed in the pre-commit gate run of this same tree, so it is environmental or flaky and
   was not caused by this diff. Not investigated further.
+
+## S239 REVIEW ROUND (DO-NOT-LAND at 15c1e5552 — 8 findings)
+
+- 2026-10-18T06:50 Each finding was confirmed against the code before it was fixed. Fixes (commit "review round"):
+  #1 HIGH — the config `exec bun`'d and the try/catch wrapped only mergeGenerated, so a crash left pure ours with
+  no markers. Fix: NEW crash-safe wrapper scripts/git-merge-generated.sh (no exec). The driver writes
+  %A.scrml-done after its result; without that sentinel the wrapper writes git's plain 3-way of the ORIGINAL
+  inputs, with markers, under a DRIVER FAILED / UNAVAILABLE block, and exits 1.
+  #2 — SEP was accepted while cur===ours. Fix: SEP only after the base marker, marker size 31, exact labels.
+  #3 — a cross-file section changed differently on BOTH sides now STOPS the merge (regen block, exit 1).
+  `--regen` during the stopped merge strips the blocks, runs the producers over the merged tree and `git add`s.
+  Chosen over "pretest installs the hooks" because it fails closed even when no hook is installed and still
+  resolves in one command. A one-sided change is still taken. History-derived recent-sessions stays
+  provisional (it cannot be derived before the commit exists).
+  #4 — no stored copy and no info/attributes mirror any more. The branch's own scripts and .gitattributes are the
+  only source. The installer removes the legacy state; added `--uninstall`.
+  #5 — union refuses when a non-blank line appears in both insertions.
+  #6 — the self-check is a multiset 3-way per id (dropped / duplicated / ambiguous), and fenced code is stripped.
+  #7 — the pending record line 1 is `key <ORIG_HEAD-to-be>`. A record is stale when no operation is in progress
+  and HEAD==key (aborted) or key!=ORIG_HEAD; paths are also filtered to ORIG_HEAD..HEAD changes.
+  #8 — .gitattributes paths anchored with a leading `/` (check-attr: sub/master-list.md unspecified).
+  PA ruling applied: the stray half-table near known-gaps L663 is deleted; gap-counts PASS.
+- Unit file 24 -> 33 tests, all pass. MUTATION CHECK: undoing each fix in place makes its bite test fail
+  (#1, #2, #3 x2, #5, #6 fences, #6 multiplicity, #7), and the tree is restored byte-identical afterwards.
