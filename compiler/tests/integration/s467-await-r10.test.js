@@ -241,3 +241,94 @@ describe("S467 r10 — the judge resolves a name through the binding's scope cha
     expect(out.map((w) => w.name)).toEqual(["g3", "check", "g4", "g5"]);
   });
 });
+
+// S468 follow-up F1 (review of #1434; introduced by 933c6e51a): the scope chain must also
+// REMOVE a name. A nested `function` declaration, a loop header or a destructuring that
+// re-binds a shadowed spelling makes the name async-capable again for that scope, so a
+// binding there that captures it holds a waiting function. Before: the shadow only ever
+// grew, and F4 went silent on every shape below (they stayed refused only by the
+// sync-callback backstop). Each now names the binding `g` again, as at 19458af1e.
+describe("S468 F1 — a re-binding by `function` / loop header / destructuring drops the shadow", () => {
+  const VPI = `import { check } from "./lib.scrml"\n  import { verifyPassword } from "scrml:auth"`;
+  const RUN = `if (!run(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"`;
+  const RUN1 = `if (!run(1, pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"`;
+  const blockFn = (lam, kw = "const") => `function run(p, h) { const check = 1\n    if (p) { function check(a, b) { return verifyPassword(a, b) }\n      ${kw} g = ${lam}\n      return g(p, h) }\n    return false }`;
+  const shapes = {
+    reproducer: [blockFn(`(a, b) => check(a, b)`), RUN],
+    paramShadow: [`function run(check, p, h) { if (p) { function check(a, b) { return verifyPassword(a, b) }\n      const g = (a, b) => check(a, b)\n      return g(p, h) }\n    return false }`, RUN1],
+    innerFnBody: [`function run(p, h) { const check = 1\n    function inner(a, b) { function check(x, y) { return verifyPassword(x, y) }\n      const g = (x, y) => check(x, y)\n      return g(a, b) }\n    return inner(p, h) }`, RUN],
+    innerFnBodyParamShadow: [`function run(check, p, h) { function inner(a, b) { function check(x, y) { return verifyPassword(x, y) }\n      const g = (x, y) => check(x, y)\n      return g(a, b) }\n    return inner(p, h) }`, RUN1],
+    blockLambda: [blockFn(`(a, b) => { return check(a, b) }`), RUN],
+    fnExpr: [blockFn(`function (a, b) { return check(a, b) }`), RUN],
+    namedFnExpr: [blockFn(`function nm(a, b) { return check(a, b) }`), RUN],
+    iife: [blockFn(`(() => (a, b) => check(a, b))()`), RUN],
+    letG: [blockFn(`(a, b) => check(a, b)`, "let"), RUN],
+    ternary: [blockFn(`p ? (a, b) => check(a, b) : (a, b) => false`), RUN],
+    sameListAsParam: [`function run(check, p, h) { function check(a, b) { return verifyPassword(a, b) }\n    const g = (a, b) => check(a, b)\n    return g(p, h) }`, RUN1],
+  };
+  for (const [name, [top, body]] of Object.entries(shapes)) {
+    test(`refused, naming \`g\`: ${name}`, () => {
+      const { errors, messages, read } = compileFiles(`f1-${name}`, { "app.scrml": appSource({ top, body, imports: VPI }), "lib.scrml": DEFAULT_LIB });
+      expect(errors).toContain(ESC);
+      expect(messages.some((m) => m.startsWith(ESC) && m.includes("`g` holds"))).toBe(true);
+      expect(read("app.server.js")).toBeNull();
+    }, 30_000);
+  }
+  // The r10 false-refusal fix still holds where nothing re-binds the name.
+  const EQ = `if (!eqx(1, 1) || !check(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"`;
+  const ok = {
+    paramShadowInLoop: `function eqx(check, b) { for (const x of [1]) { const g = check\n      return g == b }\n    return false }`,
+    paramShadowBesideOtherFn: `function eqx(check, b) { function other(x) { return x }\n    const g = check\n    return other(g) == b }`,
+    paramShadowInNestedBlock: `function eqx(check, b) { if (b) { if (check) { const g = check\n        return g == b } }\n    return false }`,
+  };
+  for (const [name, top] of Object.entries(ok)) {
+    test(`compiles: ${name}`, () => {
+      const { errors } = compileFiles(`f1ok-${name}`, { "app.scrml": appSource({ top, body: EQ }), "lib.scrml": DEFAULT_LIB });
+      expect(errors).toEqual([]);
+    }, 30_000);
+  }
+  test("unit: function-decl / loop header / destructuring / waiting local / unknown binder drop the shadow", () => {
+    const asyncNames = ["check", "vp"];
+    const isAsync = (n) => asyncNames.includes(n);
+    const e = (s) => parseExprToNode(s, "t", 0);
+    const g = (start) => ({ kind: "const-decl", name: `g${start}`, initExpr: e("check"), span: { start } });
+    const fn = (params, body) => ({ kind: "function-decl", name: "eqx", params: params.map((name) => ({ name })), body });
+    const stmts = [
+      fn(["check"], [g(1)]), // param shadow: clean
+      fn(["check"], [{ kind: "function-decl", name: "check", params: [], body: [] }, g(2)]), // re-bound by a function decl
+      fn(["check"], [{ kind: "for-stmt", variable: "check", body: [g(3)] }]), // loop header re-binds
+      fn(["check"], [{ kind: "for-stmt", variable: "x", body: [g(4)] }]), // other loop variable: clean
+      fn(["check"], [{ kind: "if-stmt", consequent: [{ kind: "const-decl", name: { kind: "destructure-object", properties: [{ kind: "name", fieldName: "check", bindName: "check" }] }, initExpr: e("o"), span: { start: 5 } }, g(6)] }]),
+      fn(["check"], [{ kind: "if-stmt", consequent: [{ kind: "let-decl", name: "check", initExpr: e("(a) => vp(a)"), span: { start: 7 } }, g(8)] }]), // waiting local re-binds
+      fn(["check"], [{ kind: "match-stmt", body: [g(9)] }]), // an unlisted (binding) kind: no shadow inside
+      fn(["check"], [{ kind: "for-stmt", variable: null, body: [g(10)] }]), // C-style header: no shadow inside
+    ];
+    const out = waitingBindingsOf(stmts, isAsync, asyncNames, ASYNC_COMBINATOR_METHODS);
+    expect(out.map((w) => w.name)).toEqual(["g2", "g3", "g6", "check", "g8", "g9", "g10"]);
+  });
+});
+
+// S468 follow-up F3 (review of #1434) — NOT taken, pinned here so it is not taken by accident.
+// `const ranked = rows.sort((a, b) => verifyPassword(…) ? -1 : 1)` gets a second, misleadingly
+// worded F4 error beside E-ASYNC-STDLIB-IN-SYNC-CALLBACK. Suppressing F4 for a sync-callback
+// consumer's result (`.sort` / `.toSorted` / `.findLast` / `.findLastIndex` / `.reduceRight`)
+// would be NEWLY ACCEPTING: for `.findLast` / `.findLastIndex` / `.reduceRight` over a lambda
+// calling a file-scope helper that calls an imported async function, the sync-callback
+// backstop does not fire and F4 is the only compile-time refusal (measured S468: with the
+// suppression these compiled and failed only at run time, ReferenceError → 500).
+describe("S468 F3 (not taken) — a consumer lambda over a file-scope async helper stays refused", () => {
+  const VPI = `import { check } from "./lib.scrml"\n  import { verifyPassword } from "scrml:auth"`;
+  const PR = `function pr(r) { return check(r.name, r.pw) }`;
+  const body = (init) => `const rows = ?{\`SELECT name, pw FROM users\`}.all()\n    const ranked = ${init}\n    if (ranked.length == 0) { return "REJECTED" }\n    return "WELCOME"`;
+  for (const [name, init] of Object.entries({
+    findLast: `[rows.findLast((r) => pr(r))]`,
+    findLastIndex: `[rows.findLastIndex((r) => pr(r))]`,
+    reduceRight: `[rows.reduceRight((acc, r) => acc || pr(r), false)]`,
+  })) {
+    test(`${name}: refused at compile time`, () => {
+      const { errors, read } = compileFiles(`f3-${name}`, { "app.scrml": appSource({ top: PR, body: body(init), imports: VPI }), "lib.scrml": DEFAULT_LIB });
+      expect(errors).toContain(ESC);
+      expect(read("app.server.js")).toBeNull();
+    }, 30_000);
+  }
+});
