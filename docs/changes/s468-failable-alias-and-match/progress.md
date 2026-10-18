@@ -175,3 +175,31 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
     (button text `>b<`, an `<each … as risky>` alias).
   => under (a) with the formFor carve-out: 0 real (non-test-fixture) sites newly refused; 2 conformance -neg fixtures
      (component callback props) would flip unless props are carved out too.
+
+## 2026-10-17 — S469 resume (fix round 1, agent 2) at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a801c016b9425741f
+- Branch `s469-failable-r1` from origin/s468-failable-alias-and-match 623e69f8b. The dead agent's uncommitted round
+  brought over with `git apply` of scrml-support/handOffs/s468-wip-patches/s468-failable-alias-and-match/uncommitted.diff;
+  every file verified byte-identical (cmp / diff -r) to the old worktree agent-ae657b908d8b68adf.
+
+## 2026-10-17 — THE HANG (found, root-caused, fixed)
+- Symptom: the pre-commit gate ran 49 min / ~24 GB RSS (three attempts, commit2-4.log, all stalled at the same point).
+- Located by running all 1589 gate files one per process (180 s / 3 GB cap): ONE file over the limit —
+  `compiler/tests/integration/bootstrap-conformance-counter/bootstrap-conformance-counter.test.js` (its beforeAll compiles the
+  bootstrap's slice-M2 bundle with impl#1). Bisected: `compiler/self-host-v2/link.scrml` alone hangs; it imports `parse.scrml`,
+  which hangs alone (236 mutually recursive `fn`s — a recursive-descent parser).
+- INPUT SHAPE: a cyclic call graph where function bodies BIND calls of each other (`const v = pJ(k - 1)` in every `pI`).
+  Minimal: N `fn`s each binding a call of every other — old code n=4 0.15 s, n=5 0.24 s, n=6 1.0 s, n=7 16.4 s (factorial).
+- ROOT CAUSE: `type-system.ts` `declReturnFacts` (new in this round, F5 by-binding returns). Every binding initializer that is a
+  call asks what the callee RETURNS (`failableBindingFacts` -> `lk.returns`), which walks the callee's whole body, whose
+  bindings ask again. Re-entry was blocked only along the CURRENT path (`declFactsInProgress`), and a result computed through a
+  cycle was never memoized — not even for the rest of the same query — so one query re-walked every simple path of the call
+  graph. (The memo key `bindings-size:facts-generation` also invalidates on every recorded fact, so cross-query reuse is rare.)
+- FIX (root, not the test): a per-top-level-query cache `declFactsQuery` — each declaration evaluated at most once per query;
+  reading a cycle-dependent entry marks the reader cycle-dependent (so it is still not memoized beyond the query); the query's
+  ROOT is memoized once it completes (nothing is in progress then). Soundness: DFS reachability — a cycle-dependent result lacks
+  only what flows through a declaration still in progress, and that declaration's own evaluation adds it. `exact` stays
+  fail-closed (a cycle read is "nothing" = not provable).
+- After: n=12 0.2 s; link.scrml 1.6 s; the full M2 bundle 9.2 s / 1007 MB (origin/main 8.9 s / 769 MB);
+  bootstrap-conformance-counter.test.js 30 s, passes. Regression tests: failable-alias-and-match-s468 section E (14-fn graph
+  bounded; failable reachable only through a cycle still E-ERROR-002; a cycle never makes a match subject provable). The first
+  E test hangs (killed at 60 s) on the pre-fix type-system.ts.

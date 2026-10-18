@@ -372,3 +372,51 @@ describe("D — a function's returns are judged where it is declared (F5)", () =
       "function getF2() { return check }\n        const ok = match getF2()(p) { .Denied :> false  _ :> true }\n        const check = plain")).toContain("E-ERROR-002");
   });
 });
+
+// ---------------------------------------------------------------------------
+// E — S469: the return-facts walk terminates in polynomial time on a recursive call graph
+// ---------------------------------------------------------------------------
+//
+// The fix-round-1 WIP re-walked every SIMPLE PATH of a cyclic call graph (a declaration's
+// facts computed through a cycle were never reused, even inside one query): N mutually
+// recursive functions, each binding calls of the others, took n=6 1.0 s, n=7 16.4 s, and the
+// bootstrap's `parse.scrml` (236 `fn`s) never finished (the pre-commit gate: 49 min, 24 GB).
+
+/** N mutually recursive `fn`s; each binds a call of every other (the recursive-descent shape). */
+function recursiveCallGraph(n, extra = "") {
+  let s = "type AuthErr:enum = { Denied }\n${\n";
+  s += "    function check(p)! -> AuthErr {\n        if (p != \"secret\") fail AuthErr::Denied\n        return true\n    }\n";
+  for (let i = 0; i < n; i++) {
+    s += `    fn p${i}(k: number) -> number {\n        if (k < 1) return 0\n`;
+    for (let j = 0; j < n; j++) if (j !== i) s += `        const v${j} = p${j}(k - 1)\n`;
+    s += "        return k\n    }\n";
+  }
+  s += extra + "}\n<p>${p0(3)}</p>\n";
+  return s;
+}
+
+/** getA may return check directly or through getB; getB returns getA's result (a cycle). */
+const CYCLE_FNS = [
+  "    function getA(k) { if (k < 1) { return check }\n        return getB(k - 1) }",
+  "    function getB(k) { return getA(k) }",
+].join("\n") + "\n";
+
+describe("E — termination on a cyclic call graph (S469 hang)", () => {
+  test("14 mutually recursive functions compile (bounded time)", () => {
+    const t = Date.now();
+    const r = compileSource(recursiveCallGraph(14), "cyclic");
+    expect(r.codes).toEqual([]);
+    expect(Date.now() - t).toBeLessThan(10000);
+  }, 30000);
+
+  test("a failable function reachable only THROUGH the cycle is still found (fail closed)", () => {
+    const extra = CYCLE_FNS + "    function login(p) { const ok = getB(1)(p)\n        return ok }\n";
+    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-fail").codes).toContain("E-ERROR-002");
+  }, 30000);
+
+  test("a cycle never makes a match subject provable (refused)", () => {
+    const extra = CYCLE_FNS
+      + "    function login(p) { const ok = match getB(1)(p) { .Denied :> false  _ :> true }\n        return ok }\n";
+    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-match").codes).toContain("E-ERROR-002");
+  }, 30000);
+});

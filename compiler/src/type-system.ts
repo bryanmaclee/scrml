@@ -16258,18 +16258,35 @@ function annotateNodes(
    * one function does not decide what an unrelated `getF` returns. Memoized per
    * declaration while the bindings visible from `root` and the recorded binding facts
    * are unchanged; a recursive reference reads "nothing", and a result computed
-   * through one is not memoized.
+   * through one is not memoized across queries.
+   *
+   * S469 (the hang): each declaration is evaluated AT MOST ONCE per top-level query
+   * (`declFactsQuery`). Without it, a result computed through a cycle was recomputed
+   * every time any path reached it, so a recursive-descent module (the bootstrap's
+   * `parse.scrml`, reached from `link.scrml`: dozens of mutually recursive `fn`s that
+   * `return` each other's calls) re-walked every SIMPLE PATH of its return-call graph
+   * — exponential time and memory; the pre-commit gate ran 49 min / 24 GB in
+   * `bootstrap-conformance-counter`. Reusing a cycle-dependent result inside the same
+   * query is sound: a cycle-dependent result lacks only what flows through a
+   * declaration still in progress, and that declaration's own evaluation adds it
+   * (DFS reachability); a reader of such an entry is marked cycle-dependent too, so
+   * it is never memoized beyond the query either.
    */
   const declFactsInProgress = new Set<object>();
   let declFactsCycleHit = false;
   const declFactsMemo = new WeakMap<object, { sig: string; facts: ReturnFacts }>();
+  let declFactsQuery: Map<object, { facts: ReturnFacts; cyclic: boolean }> | null = null;
   function declReturnFacts(decl: ASTNodeLike, root: Scope): ReturnFacts {
     if (declFactsInProgress.has(decl)) { declFactsCycleHit = true; return { may: null, exact: null }; }
+    const inQuery = declFactsQuery?.get(decl);
+    if (inQuery) { if (inQuery.cyclic) declFactsCycleHit = true; return inQuery.facts; }
     let size = 0;
     for (let s: Scope | null = root; s !== null; s = s.parent) size += s.bindings.size;
     const sig = `${size}:${failableFactsGeneration}`;
     const memo = declFactsMemo.get(decl);
     if (memo && memo.sig === sig) return memo.facts;
+    const topLevel = declFactsQuery === null;
+    if (topLevel) declFactsQuery = new Map();
     const outerCycle = declFactsCycleHit;
     declFactsCycleHit = false;
     declFactsInProgress.add(decl);
@@ -16286,8 +16303,12 @@ function annotateNodes(
       facts = failableFnReturnedBy(decl as Record<string, unknown>, rooted);
     } finally {
       declFactsInProgress.delete(decl);
+      if (topLevel) declFactsQuery = null;
     }
-    if (!declFactsCycleHit) declFactsMemo.set(decl, { sig, facts });
+    if (!topLevel) declFactsQuery!.set(decl, { facts, cyclic: declFactsCycleHit });
+    // The query's root is complete once it returns (nothing else is in progress), so its
+    // result is memoized even when a cycle was met on the way.
+    if (topLevel || !declFactsCycleHit) declFactsMemo.set(decl, { sig, facts });
     declFactsCycleHit = outerCycle || declFactsCycleHit;
     return facts;
   }
