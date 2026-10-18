@@ -462,3 +462,6 @@ describe("LSP L2 — rebuildCrossFileGraph", () => {
     expect(ws.exportRegistry.size).toBe(before);
   });
 });
+
+// THROWAWAY (s469-ci-speedup bite proof, branch s469-ci-bite-fail) — must never reach main.
+it("s469 ci bite proof — deliberately fails", () => { expect(1).toBe(2); });
