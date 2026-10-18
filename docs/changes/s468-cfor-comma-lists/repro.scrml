@@ -1,0 +1,17 @@
+// s468-cfor-comma-lists reproducer @ origin/main 5c43c3b8e
+<program>
+    function clientRev(n) {
+        let s = 0
+        for (let i = 0, j = n; i < j; i++, j--) { s = s + j - i }
+        return s
+    }
+    server function serverRev(n) {
+        let s = 0
+        for (let i = 0, j = n; i < j; i++, j--) { s = s + j - i }
+        return s
+    }
+    <out> = 0
+    <button onclick=${ @out = clientRev(5) }>"c"</button>
+    <button onclick=${ serverRev(5) }>"s"</button>
+    <p>${@out}</p>
+</program>

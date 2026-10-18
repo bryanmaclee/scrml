@@ -16,6 +16,12 @@ const args = process.argv.slice(2);
 const json = args.includes("--json");
 const filter = args.find((a) => !a.startsWith("--"));
 
+// `--json` keeps stdout pure JSON: a shape's server code may itself print (s3/consoleThen runs
+// `console.log(check(…))`, which wrote stray `false` / `true` lines ahead of the JSON), so while
+// shapes run, console.log goes to stderr.
+const print = console.log.bind(console);
+if (json) console.log = (...a) => console.error(...a);
+
 const root = mkdtempSync(join(tmpdir(), "scrml-await-pack-"));
 const out = {};
 const counts = Object.fromEntries(CLASSES.map((c) => [c, 0]));
@@ -39,7 +45,7 @@ try {
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
-if (json) console.log(JSON.stringify(out, null, 2));
+if (json) print(JSON.stringify(out, null, 2));
 else {
   console.log("\n" + CLASSES.map((c) => `${c}=${counts[c]}`).join("  ") +
     `  total=${Object.keys(out).length}  ${((performance.now() - t0) / 1000).toFixed(1)}s`);

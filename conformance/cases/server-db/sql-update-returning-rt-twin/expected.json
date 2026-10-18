@@ -1,0 +1,40 @@
+{
+  "id": "server-db-sql-update-returning-rt-twin",
+  "description": "UPDATE \u2026 RETURNING with two bound parameters, evaluated by a real engine (RUNTIME, sqlEngine:\"real\"): qty 5 + 3 = 8.",
+  "language-version": "1.0",
+  "spec": "\u00a78.5",
+  "source-test": "conformance/cases/server-db/sql-update-returning-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-update-returning-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the \u00a766 twin generator cannot type \u2014 O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. impl#1 passes it too (measured S468 with `bun conformance/run.ts --xfail-signature`): a case both implementations hold.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "items": [
+        {
+          "id": 1,
+          "qty": 5
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "updated": [
+        {
+          "id": 1,
+          "qty": 8
+        }
+      ]
+    }
+  }
+}
