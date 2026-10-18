@@ -1552,6 +1552,7 @@ function _compileScrmlImpl(options = {}) {
   const _sqlProgramStatementSeen = new Set();
   // §4.17 (S462) — `${file}|${code}` of every pre-codegen `<script>`/`<style>` refusal.
   const _refusedElementFilesSeen = new Set();
+  const _shorthandCellSeen = new Set(); // S469 — E-OBJECT-SHORTHAND-CELL front-end refusals, `file|@x`
   function collectErrors(stageName, errors, filePath = null) {
     if (errors && errors.length > 0) {
       for (const e of errors) {
@@ -1646,6 +1647,19 @@ function _compileScrmlImpl(options = {}) {
             _refusedElementFilesSeen.add(`${rawFile}|${enriched.code}`);
             _refusedElementFilesSeen.add(`*|${enriched.code}`);
           }
+        }
+        // S469 — E-OBJECT-SHORTHAND-CELL: the front end (GCP1) refuses `{ @x }`; codegen's
+        // emitProp backstop refuses any copy it is asked to lower. One report per site: a
+        // backstop report is dropped when the front end already refused the same `{ @x }` in
+        // the same file (a re-parsed copy cannot share the original's span). A backstop
+        // report with no front-end refusal of that name in its file is kept.
+        if (enriched.code === "E-OBJECT-SHORTHAND-CELL" && typeof e.cellName === "string") {
+          const rawFile = String(enriched.filePath ?? (enriched.span && enriched.span.file) ?? "").replace(/#.*$/, "");
+          // a copy's span may name a synthetic file (`app.scrml#Card`, `<match:7:A>`): such a
+          // name matches the same `{ @x }` refused in any file
+          const known = sourceByFile.has(rawFile);
+          if (stageName === "CG" && _shorthandCellSeen.has(`${known ? rawFile : "*"}|${e.cellName}`)) continue;
+          if (stageName !== "CG") { _shorthandCellSeen.add(`${rawFile}|${e.cellName}`); _shorthandCellSeen.add(`*|${e.cellName}`); }
         }
         if (typeof e.sqlBodyKey === "string") {
           if (stageName === "CG" && _sqlProgramStatementSeen.has(e.sqlBodyKey)) continue;
