@@ -354,3 +354,99 @@ describe("D — a re-read arm statement is anchored at its own line", () => {
     expect(out.serverJs).toContain(`_scrml_log("server", "app.scrml:${lineOf('log("two")')}", "two")`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// E — fix round 2: E-ERROR-002 reads a braced arm as its statement list
+//     (failable-value-calls.ts guardArms walked `handlerExpr`, the builder's
+//     expression reading of the block, which stops after the FIRST statement —
+//     an unhandled failable call after it escaped and a wrong password logged in)
+// ---------------------------------------------------------------------------
+
+/** Server page with three failable server functions; `pre` handles check2/check3 once so they are used. */
+const SERVER3 = (body) => `type AuthErr:enum = { Denied }
+type E2:enum = { Locked, Denied }
+type E3:enum = { Gone }
+<msg> = "init"
+\${
+    server function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    server function check2(p)! -> E2 {
+        if (p != "secret") fail E2::Locked
+        return true
+    }
+    server function check3(p)! -> E3 {
+        if (p != "secret") fail E3::Gone
+        return true
+    }
+    server function login(p) {
+        let note = ""
+        const pre2 = check2("secret") !{ _ :> false }
+        const pre3 = check3("secret") !{ _ :> false }
+${body}
+        if (ok) { return "LOGGED IN" }
+        return "rejected"
+    }
+    function go() { @msg = login("wrong") }
+}
+<button onclick=go()>go</button>
+<p>\${@msg}</p>
+`;
+
+function expectE002(out, callee) {
+  expect(out.codes).toEqual(["E-ERROR-002"]);
+  expect(out.errors[0].message).toContain(`failable function '${callee}' is not handled`);
+}
+
+describe("E — an unhandled failable call after a braced arm's first statement is E-ERROR-002", () => {
+  test("server, single level, newline (srv-single-lead-unhandled)", () => {
+    expectE002(compileSource(SERVER3(`        const ok = check(p) !{ .Denied :> { note = "d"
+            const q = check3(p)
+            q } }`), "e002-srv1"), "check3");
+  });
+
+  test("server, single level, `;` form", () => {
+    expectE002(compileSource(SERVER3(`        const ok = check(p) !{ .Denied :> { note = "d"; const q = check3(p); q } }`), "e002-srv2"), "check3");
+  });
+
+  test("server, nested (e002-nested-pre)", () => {
+    expectE002(compileSource(SERVER3(`        const ok = check(p) !{ .Denied :> { note = "d"
+            const y = check2(p) !{ .Locked :> { const q = check3(p)
+                q }
+                .Denied :> false }
+            y } }`), "e002-srv3"), "check3");
+  });
+
+  test("client, single level, newline and `;`", () => {
+    expectE002(compileSource(LOGIN(`const ok = check(p) !{ .Denied :> { @note = "d"
+            const q = check2(p)
+            q } }`), "e002-cl1"), "check2");
+    expectE002(compileSource(LOGIN(`const ok = check(p) !{ .Denied :> { @note = "d"; const q = check2(p); q } }`), "e002-cl2"), "check2");
+  });
+
+  test("client, nested, newline and `;`", () => {
+    expectE002(compileSource(LOGIN(`const ok = check(p) !{ .Denied :> { @note = "d"
+            const y = check2(p) !{ .Locked :> { const q = check(p)
+                q }
+                .Denied :> false }
+            y } }`), "e002-cl3"), "check");
+    expectE002(compileSource(LOGIN(`const ok = check(p) !{ .Denied :> { @note = "d"; const y = check2(p) !{ .Locked :> { const q = check(p); q } .Denied :> false }; y } }`), "e002-cl4"), "check");
+  });
+
+  test("client, statement position: a bare unhandled call after the first statement", () => {
+    expectE002(compileSource(LOGIN(`let ok = p == "secret"
+        check(p) !{ .Denied :> { @note = "d"
+            check2(p) } }`), "e002-cl5"), "check2");
+  });
+
+  test("a HANDLED call after the first statement still compiles and runs", async () => {
+    await expectRejectsWrong(`const ok = check(p) !{ .Denied :> { @note = "d"
+            const q = check2(p) !{ _ :> false }
+            q } }`);
+    const out = compileSource(SERVER3(`        const ok = check(p) !{ .Denied :> { note = "d"
+            const q = check3(p) !{ _ :> false }
+            q } }`), "e002-srv-ok");
+    expect(out.codes).toEqual([]);
+  });
+});

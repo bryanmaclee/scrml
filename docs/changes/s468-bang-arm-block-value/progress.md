@@ -97,3 +97,35 @@
 - NEW GAP FILED: `g-derived-cell-ignores-bang-handler-s468` (HIGH) — reproduced on `684420b36` and this head:
   `const <okc> = check(@pw) !{ .Denied :> false }` → `@okc` truthy with a wrong password (the derived thunk
   recomputes `check(@pw)` with no handler; the arms only touch `_scrml_cs_derived_declare(...)`'s return). Not fixed.
+
+- 2026-10-17 RESUME after machine shutdown: pushed d14cb636b..66dab45da (pre-push green: 34909 pass, 0 fail).
+
+- 2026-10-17 FIX ROUND 2 (S239 re-review of frozen 66dab45da, verdict DO-NOT-LAND without F1).
+- REPRODUCED F1 (executed, reviewer harness `~/.cache/scrml-agent-tmp/s468-rev-bangarm2/h/` srun.mjs / run.mjs on
+  66dab45da): server `srv-single-lead-unhandled` (+ `;`), `e002-nested-pre` → wrong="LOGGED IN"; client
+  `cl-e002-single`, `cl-e002-nested` (+ `-bare`, `-semi`) → wrong "LOGGED IN". Root: `failable-value-calls.ts`
+  `guardArms` walked `a.handlerExpr` whenever it parsed; for a braced arm that is `_parseHandlerExpr`'s EXPRESSION
+  reading of the block's inner text, which stops after the FIRST statement, and the `parseStatements` fallback ran
+  only when that first statement was not an expression. Same first-statement defect fix round 1 removed from
+  `defer-structure.ts unreadableContentIn`, not removed from the E-ERROR-002 walker. Locus hypothesis HELD.
+- GOVERNING: §19.4.3 "Failing to handle the result of a `!` function call in any of these ways SHALL be a compile
+  error: E-ERROR-002"; §7.2.2 "Terms" — "a `{ … }` match or `!{}` arm block" is a statement list.
+- FIX: `guardArms` reads a braced, non-empty arm through `env.parseStatements` — which in type-system.ts IS
+  defer-structure `parseStatementText`, the same statement-list reader codegen and fix round 1 use (ONE reader, not
+  the reviewer's "skip handlerExpr when braced" patch on its own: the braced path reads the block with that reader;
+  `handlerExpr` is used only for an unbraced arm, or as a last resort when the block text does not parse).
+  Executed after: every reviewer e002 shape (s3/s4/s5, c5) is E-ERROR-002; handled nested shapes (s2 n1-*/n2/n3,
+  return / self / stmtpos variants) compile and give wrong="rejected"/"rejected-ret", right="LOGGED IN".
+- DIRECTION: newly-rejecting (unhandled failable calls the check missed). CORPUS (differential, base 684420b36, head
+  = this tree; examples, samples, conformance/cases, stdlib): 2840 sources, 0 newly failing, 0 newly passing,
+  0 diagnostic changes; 167 artifact diffs, all only `_scrml_project_root` (checked) → 0 real sites.
+- GATES: r1 + s468 suites, e-error-002-handler-forms, e-error-002-value-position-s467, s441-async-escape-f4-f5:
+  357 pass / 0 fail. New describe E (7 cases): 6 fail on 66dab45da. security-await-pack classify FAIL=10, set
+  identical to base. conformance 1724/1795, non-PASS set identical to base.
+- LEDGER: g-block-bodied-bang-arm-drops-value-s467 — fix-round-2 paragraph + locus. WIDENED
+  g-server-match-arm-same-file-peer-call-not-defined-s465: a `!{}` arm block too, and a PLAIN (non-`server`) peer
+  fails the same way (`check2 is not defined`, 500 — fails closed; reproduced on 5c43c3b8e for the flat shape).
+- RECORDED, pre-existing, LOW, fail CLOSED (executed: the RIGHT password is REJECTED, never a wrong one accepted):
+  (a) a `match` block arm whose tail is a handled call drops the value (`match-enum-arm-block-tail`: wrong=rejected,
+  right=rejected); (b) a `fn` whose last statement is a handled call returns nothing (`fn-implicit-tail`: right
+  rejected). Also `if-expr-tail` (if-as-expression tail) right=rejected. Not filed separately by this unit.
