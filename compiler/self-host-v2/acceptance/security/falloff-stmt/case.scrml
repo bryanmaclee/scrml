@@ -1,0 +1,27 @@
+// a login whose finder (`User | not`, statement form) falls off the end on a wrong password: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    type User:struct = { name: string }
+    function find(pw: string) -> User | not {
+        const u: User = { name: "bryan" }
+        if (pw == "hunter2") return u
+    }
+    function attempt(pw: string) -> string {
+        let m: string = "denied"
+        match find(pw) {
+            not :> m = "denied"
+            _ :> m = "welcome"
+        }
+        return m
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

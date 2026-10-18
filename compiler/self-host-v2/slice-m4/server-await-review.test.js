@@ -87,6 +87,16 @@ const REVIEW_EXPECT = {
   "s4/implicitRunStmt": ["PASS"],
   "s4/matchFailable": ["REFUSED", ["E-COND-NOT-BOOLEAN"]],
   "s4/queryMatch": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469 #1471 review HIGH-1: a `-> T | not` function that falls off the end is refused;
+  // with `return not` the `not` arm is taken (`== null`) — wrong → REJECTED
+  "s5/fallOffValue": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/fallOffStmt": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/fallOffString": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/fallOffEnum": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/retValue": ["PASS"],
+  "s5/retStmt": ["PASS"],
+  "s5/retString": ["PASS"],
+  "s5/retEnum": ["PASS"],
 };
 
 async function classify(s) {

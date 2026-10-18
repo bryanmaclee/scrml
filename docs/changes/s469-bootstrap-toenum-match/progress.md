@@ -62,3 +62,36 @@ Branch `s469-bootstrap-toenum-match` from `origin/s469-bootstrap-parse-arms-unio
 - No payload-variant construction (`Shape.Circle(2)`): Core has no value for it; only `fail` builds one.
 - Member access through `S | not` (`@u.name` after a `not` arm) is not in the binder (needs E-TYPE-046).
 - Value-position block arms (`:> { stmts; v }`) — Core's Match arm is one Expr.
+
+## #1471 review fix round (verdict FIX)
+
+- [x] **HIGH-1** — a `-> T | not` function falling off the end gave JS `undefined`; the absence arm
+  tested `=== null`, so `undefined` took the PRESENT arm (a wrong-password WELCOME, client and server).
+  (1) `print.scrml litTest`: the absence pattern prints `== null`, as `is not` (IsNot) does — every
+  absence arm / pattern, value and statement form. (2) `analyze.scrml fallOffPass` REFUSES a function
+  with a declared non-void return type that can reach the end of its body: `-> T` → **E-TYPE-043**
+  (§17.6 / §34, existing code); `-> T | not` → **E-BOOTSTRAP-UNSUPPORTED** (whether falling off means
+  `not` is the PA's question for bryan — NOT lowered to an implicit `return not`; note SPEC §42.7
+  already says a SERVER function's fall-off "SHALL be treated as returning `not`" — the PA should
+  rule that alongside); a body whose tail is an unreturned value expression (§48.11's implicit tail
+  return, which the bootstrap does NOT implement — it printed `acc + 1;` and returned `undefined`) →
+  **E-BOOTSTRAP-UNSUPPORTED** naming §48.11. A path is closed by `return <v>`, `fail`, an `if`/`else`
+  whose branches all are, or an exhaustive statement `match` whose arms all are. Functions with a
+  parse error in them, an unresolved return type, `!` functions and `-> void` are not judged.
+  §42.5 "no scrml program SHALL directly emit `undefined`": with the fall-off refused, every non-void
+  function ends in an explicit `return` (a bare `return` lowers to `null`); a test asserts the
+  security programs' JS never names `undefined`.
+- [x] Fall-off logins: `security/falloff-{value,stmt,string,enum}` (refused) and
+  `security/return-not-*` (runtime: wrong → denied); server family `s5` in
+  `server-await-probes-review.js` (4 REFUSED, 4 PASS on the real server artifact).
+- [x] **L1** dead `not` arm (subject cannot be `not`) → **E-TYPE-044** (existing: §17.6, a presence
+  test on a type without `| not`), binder-known and typer-known subjects.
+- [x] **L3** `asIs` → E-BOOTSTRAP-UNSUPPORTED by name (was E-TYPE-UNKNOWN).
+- Conformance after the fix round: PASS 210 (main) → **217**: +9 new PASS, of which **3 vacuous**
+  (`ctrl-switch-forbidden-match-neg`, `e-type-026-match-in-logic-neg`,
+  `e-type-081-partial-match-render-neg`), and −1 (`defer/fn-prohibition-applies-neg`, now refused
+  for the missing §48.11 tail return). The round-1 count of 222 included 5 PASSes that relied on the
+  missing tail return (the function silently returned `undefined`; `e-type-025-enum-subject-neg`,
+  the reviewer's 4th vacuous one, was among them) — they are now UNSUPPORTED, which is the honest
+  bucket. Of the report's 32: 6 PASS, 26 UNSUPPORTED (no FAIL).
+- **Next wall added:** §48.11 implicit tail return (a return-typed function's tail expression).

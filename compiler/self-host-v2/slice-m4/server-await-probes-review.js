@@ -106,7 +106,32 @@ return {
 };
 })();
 
+// ---- family s5 (s469 #1471 review HIGH-1): a function declared `-> T | not` that FALLS OFF
+// THE END yields JS `undefined`; the absence arm tested `=== null`, so `undefined` took the
+// PRESENT arm — a wrong password WELCOMEd. Now the fall-off is refused (fail closed) and the
+// absence test is `== null`. The `ret*` shapes write `return not` and must PASS.
+const S5 = (() => {
+const A = `    type Acct:struct = { name: string }`;
+const FIND = (tail) => `${A}\n    function find(p: string, h: string) -> Acct | not {\n        const u: Acct = { name: "bob" }\n        if (p == h) return u${tail}\n    }`;
+const SFIND = (tail) => `    function find(p: string, h: string) -> string | not {\n        if (p == h) return "bob"${tail}\n    }`;
+const EFIND = (tail) => `    type Verd:enum = { Yes, No }\n    function find(p: string, h: string) -> Verd | not {\n        if (p == h) return .Yes${tail}\n    }`;
+const VAL = `        return match find(pass, row.pw) {\n            not :> "REJECTED"\n            else :> "WELCOME"\n        }`;
+const STMT = `        let v: string = "REJECTED"\n        match find(pass, row.pw) {\n            not :> v = "REJECTED"\n            _ :> v = "WELCOME"\n        }\n        return v`;
+const ENUM = `        return match find(pass, row.pw) {\n            .Yes :> "WELCOME"\n            .No :> "REJECTED"\n            not :> "REJECTED"\n        }`;
+const RN = "\n        return not";
+return {
+  fallOffValue: { top: FIND(""), body: VAL },
+  fallOffStmt: { top: FIND(""), body: STMT },
+  fallOffString: { top: SFIND(""), body: STMT },
+  fallOffEnum: { top: EFIND(""), body: ENUM },
+  retValue: { top: FIND(RN), body: VAL },
+  retStmt: { top: FIND(RN), body: STMT },
+  retString: { top: SFIND(RN), body: STMT },
+  retEnum: { top: EFIND(RN), body: ENUM },
+};
+})();
+
 export const REVIEW_SHAPES = {};
-for (const [fam, shapes] of Object.entries({ s1: S1, s2: S2, s3: S3, s4: S4 })) {
+for (const [fam, shapes] of Object.entries({ s1: S1, s2: S2, s3: S3, s4: S4, s5: S5 })) {
   for (const [name, s] of Object.entries(shapes)) REVIEW_SHAPES[fam + "/" + name] = s;
 }

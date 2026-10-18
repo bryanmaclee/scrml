@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-security-falloff-stmt",
+  "description": "a `-> T | not` finder that can fall off the end is refused (`User | not`, statement form).",
+  "language-version": "1.0",
+  "spec": "§42.5 · §17.6 · S467 §13 floor",
+  "rationale": "#1471 review HIGH-1: JS gives `undefined` when a function falls off the end; the absence arm tested `=== null`, so a wrong password took the present arm. Falling off is refused (whether it means `not` is a language decision not taken for the bootstrap), and the absence test is `== null`.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

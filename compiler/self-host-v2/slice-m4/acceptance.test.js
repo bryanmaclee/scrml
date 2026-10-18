@@ -53,6 +53,15 @@ const STATUS = {
   "security/login-literal": ["PASS", []],
   "security/login-literal-no-else": ["PASS", ["W-MATCH-002"]],
   "security/login-maybe": ["PASS", []],
+  // #1471 review HIGH-1: a `-> T | not` finder that falls off the end is refused; with `return not` the deny arm runs
+  "security/falloff-value": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/falloff-stmt": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/falloff-string": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/falloff-enum": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/return-not-value": ["PASS", []],
+  "security/return-not-stmt": ["PASS", []],
+  "security/return-not-string": ["PASS", []],
+  "security/return-not-enum": ["PASS", []],
   "toenum/neg-arg-type": ["PASS", ["E-TYPE-031"]],
   "toenum/prototype-keys": ["PASS", []],
 };
@@ -93,7 +102,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
     }
   });
   test("the security cases ran their runtime half (the deny arm was taken, not merely compiled)", () => {
-    for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys"]) {
+    for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys",
+                       "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

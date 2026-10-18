@@ -908,6 +908,8 @@ ${
             if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st, unresolved: false }
             i = i + 1
         }
+        // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
+        if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`"), unresolved: true }
     }
 
@@ -5239,6 +5241,120 @@ ${
         return out
     }
 
+    // s469 (review HIGH-1) — A FUNCTION WITH A DECLARED RETURN TYPE THAT CAN
+    // FALL OFF THE END. JS gives `undefined` there, a value no scrml program may
+    // produce (§42.5) — and an absence test that missed it let a wrong password
+    // in. Refused, fail closed:
+    //   - `-> T` (no `| not`): §17.6 / §34 E-TYPE-043 — "a code path that
+    //     returns `not` … implicitly by falling off the end of the function body";
+    //   - `-> T | not`: whether falling off MEANS `not` is a language decision
+    //     not taken for the bootstrap (§42.7 says so of a server function only),
+    //     so it is refused (E-BOOTSTRAP-UNSUPPORTED — write `return not`), never
+    //     lowered to an implicit `return not`.
+    // A path that leaves by `return <value>` (an `if` whose branches all do; a
+    // statement `match` whose arms all do and which is exhaustive — a
+    // failable `match` is total by E-TYPE-020) does not fall off. A `!`
+    // function has no success-type slot (§19.4.1): not judged here.
+    fn fallOffPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const fs of g.fns) {
+            const r: AType | not = fs.f.ret
+            // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
+            if (r is given && fs.info.ret is given && !fs.info.failable && !declaresVoid(r) && !hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !fallsNever(t, fs.f.body)) {
+                const k: ATypeK = r.k
+                const opt: boolean = match k {
+                    .TMaybe(inner: i) :> true
+                    .TName(name: n) :> false
+                    .TSeq(elem: e) :> false
+                }
+                if (tailValue(fs.f.body)) {
+                    // §48.11: a return-typed function returns its tail expression — the bootstrap does not
+                    // (it would discard the value and yield `undefined`), so the form is refused by name
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it", fs.info.file, fs.f.span)])
+                } else if (opt) {
+                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` is declared to return a `T | not` but can reach the end of its body without a `return` — whether falling off the end means `not` is not settled in the bootstrap (JS would yield `undefined`, which no scrml value is, §42.5); end every path with a `return`, e.g. `return not`", fs.info.file, fs.f.span)])
+                } else {
+                    out = out.concat([newDiag("E-TYPE-043", "`" + fs.info.name + "` has a declared return type but can reach the end of its body without returning a value — falling off the end returns `not`, which its type does not include (§17.6, §34 E-TYPE-043); end every path with a `return`", fs.info.file, fs.f.span)])
+                }
+            }
+        }
+        return out
+    }
+
+    // Does `b` end in a value expression (not a write) — a §48.11 tail return?
+    fn tailValue(b: ABlock) -> boolean {
+        if (b.stmts.length == 0) return false
+        const x: AExpr | not = evalOf(b.stmts[b.stmts.length - 1])
+        if (x is not) return false
+        if (isWriteExpr(x)) return false
+        // a statement `match` whose arms are all blocks (`:> return …`, `:> { … }`) yields no value
+        const h: AHandled | not = handledOf(x.k)
+        if (h is given) {
+            const arms: AArm[] | not = matchArmsOf(h.how)
+            if (arms is given) {
+                let allBlocks = true
+                for (const a of arms) {
+                    const body: AArmBody = a.body
+                    const isB: boolean = match body {
+                        .ArmBlock(b: bb) :> true
+                        .ArmExpr(e: ee) :> false
+                    }
+                    if (!isB) allBlocks = false
+                }
+                if (allBlocks) return false
+            }
+        }
+        return true
+    }
+
+    // Does every path through `b` leave with a value (or fail)?
+    fn fallsNever(t: Tables, b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtLeavesAll(t, s)) return true
+        }
+        return false
+    }
+
+    fn stmtLeavesAll(t: Tables, s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x is given
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb) && elseLeavesAll(t, el)
+            .Eval(e: x) :> matchLeavesAll(t, x)
+            .Given(name: n) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    fn elseLeavesAll(t: Tables, el: ABlock | not) -> boolean {
+        if (el is not) return false
+        return fallsNever(t, el)
+    }
+
+    // A statement `match` every arm of which leaves, and which takes every value.
+    fn matchLeavesAll(t: Tables, e: AExpr) -> boolean {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return false
+        const arms: AArm[] | not = matchArmsOf(h.how)
+        if (arms is not) return false
+        const pm: PlainMatch | not = plainFactOf(failFact(t.fails, e.nid))
+        if (pm is given) {
+            if (!pm.exhaustive) return false
+        }
+        for (const a of arms) {
+            const body: AArmBody = a.body
+            const leaves: boolean = match body {
+                .ArmBlock(b: b) :> fallsNever(t, b)
+                .ArmExpr(e: x) :> false
+            }
+            if (!leaves) return false
+        }
+        return arms.length > 0
+    }
+
     fn fnCallsFunctionDiag(env: Env, e: AExpr, cf: FnInfo, why: string) -> Diag {
         return newDiag("E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`", env.file, e.span)
     }
@@ -7698,7 +7814,12 @@ ${
             }
             return rparm(-6, li.key, armEnv, st)
         }
-        if (isNotPat(p)) return rparm(-5, "", armEnv, st)
+        if (isNotPat(p)) {
+            // s469 (review L1): a `not` arm on a subject that can never be `not` is dead
+            // — the E-TYPE-044 rule (§17.6: a presence test on a type without `| not`)
+            if (sk.code == "" && sk.known && !sk.maybe) st = addDiag(st, env.file, a.span, "E-TYPE-044", "a `not` arm on a subject whose type does not include `| not` (it is " + kindLabel(sk.kind) + ") — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
+            return rparm(-5, "", armEnv, st)
+        }
         const wb: WholePat | not = wholePatOf(p)
         if (wb is given) {
             // E-MATCH-BARE-BINDER is reported (plainMatchBinderDiags): bound, and
@@ -13428,6 +13549,8 @@ ${
         if (m.kind == 2 && k != 0 && k != 1) out = report(out, env, subj.span, "E-TYPE-001", "the arms are number literals, but the subject is `" + typeName(t) + "` (§18.16)")
         if (m.kind == 3 && k != 3) out = report(out, env, subj.span, "E-TYPE-001", "the arms are bool literals, but the subject is `" + typeName(t) + "` (§18.16)")
         if (k == 5) out = report(out, env, subj.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over a tape (`" + typeName(t) + "`) — §18 matches an enum, a `T | not`, or a string, number or bool")
+        // s469 (review L1): the binder took `maybe` from the `not` arm alone — dead on a type without `| not`
+        if (maybeInner(t) is not && m.maybe && k != 5) out = report(out, env, e.span, "E-TYPE-044", "a `not` arm on a subject whose type (`" + typeName(t) + "`) does not include `| not` — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
         if (maybeInner(t) is given && !m.maybe && !m.wild) out = report(out, env, e.span, "E-MATCH-012", "this `match` is over a `T | not` value (`" + typeName(t) + "`) but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
         return out
     }
@@ -18816,7 +18939,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum))
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound))
         const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags))
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)

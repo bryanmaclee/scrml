@@ -275,3 +275,59 @@ describe("security lens — the deny arm is reachable and chosen by its own test
     expect($("#right").textContent).toBe("granted");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1471 review HIGH-1: `undefined` (a `-> T | not` function falling off the end) took the
+// PRESENT arm — the absence arm tested `=== null`. Both halves fixed: the absence test is
+// `== null` (as `is not`), and a function with a declared return type that can fall off the
+// end is refused (E-TYPE-043; `-> T | not`: E-BOOTSTRAP-UNSUPPORTED — not lowered to `not`).
+describe("review HIGH-1 — absence is `null` and `undefined`; no function falls off the end", () => {
+  const js = (src) => mods.print.printProgram(clean(src).core, "t.client.js", "scrml-runtime.js").js;
+  const FIND = (tail) => `    type User:struct = { name: string }\n    function find(pw: string) -> User | not {\n        const u: User = { name: "bryan" }\n        if (pw == "hunter2") return u${tail}\n    }`;
+  const VAL = `    function attempt(pw: string) -> string {\n        return match find(pw) {\n            not :> "denied"\n            else :> "welcome"\n        }\n    }`;
+  const STMT = `    function attempt(pw: string) -> string {\n        let m: string = "denied"\n        match find(pw) {\n            not :> m = "denied"\n            else :> m = "welcome"\n        }\n        return m\n    }`;
+  const P2 = (decls) => prog(decls, `        <p>\${attempt("x")}</p>`);
+  test("the absence arm prints `== null` (value and statement form), never `=== null`", () => {
+    for (const a of [VAL, STMT]) {
+      const out = js(P2(FIND("\n        return not") + "\n" + a));
+      expect(out).toContain("m$ == null");
+      expect(out).not.toContain("=== null");
+    }
+  });
+  test("the reviewer's repro — `-> User | not` falling off the end — is refused, value and statement form", () => {
+    for (const a of [VAL, STMT]) {
+      const r = run(P2(FIND("") + "\n" + a));
+      expect(r.core == null).toBe(true);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags[0].message).toContain("return not");
+    }
+  });
+  test("`-> string` falling off the end is E-TYPE-043 (§17.6); `string | not` and an enum `| not` are refused too", () => {
+    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) return "one"\n    }`, `        <p>\${f(1)}</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function f(a: int) -> string | not {\n        if (a == 1) return "one"\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(`    type R:enum = { A, B }\n    function f(a: int) -> R | not {\n        if (a == 1) return .A\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("every path returning — if / else, an exhaustive statement match whose arms all return — is not refused; a non-exhaustive one is", () => {
+    expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) {\n            return "one"\n        } else {\n            return "other"\n        }\n    }`, `        <p>\${f(1)}</p>`))).toEqual([]);
+    expect(codes(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> return "r"\n            .Green :> return "g"\n            .Blue :> return "b"\n        }\n    }`, `        <p>\${f(@c)}</p>`))).toEqual([]);
+    expect(codes(prog(`    function f(s: string) -> string {\n        match s {\n            "a" :> return "A"\n        }\n    }`, `        <p>\${f("a")}</p>`))).toEqual(["E-TYPE-043", "W-MATCH-002"]);
+  });
+  test("§42.5: a security program's emitted JS never names `undefined`", () => {
+    const out = js(P2(FIND("\n        return not") + "\n" + VAL));
+    expect(out).not.toMatch(/\bundefined\b/);
+  });
+  test("a return-typed function ending in an unreturned expression (the §48.11 tail return the bootstrap lacks) is refused by name", () => {
+    const d = diag(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> "r"\n            else :> "o"\n        }\n    }`, `        <p>\${f(@c)}</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(d?.message).toContain("§48.11");
+  });
+  test("(review L1) a `not` arm on a subject that cannot be `not` is dead — E-TYPE-044 (binder-known and typer-known)", () => {
+    expect(codes(prog(COLOR, `        <p>\${match @c { .Red :> 1, .Green :> 2, .Blue :> 3, not :> 0, }}</p>`))).toEqual(["E-TYPE-044"]);
+    expect(codes(prog(`    let <s:string=""/>`, `        <p>\${match @s { "a" :> 1, not :> 0, else :> 2, }}</p>`))).toEqual(["E-TYPE-044"]);
+    expect(codes(prog(`    function s() -> string { return "a" }`, `        <p>\${match s() { not :> 0, else :> 2, }}</p>`))).toEqual(["E-TYPE-044"]);
+  });
+  test("(review L3) `asIs` is refused by name, not as an unknown type", () => {
+    const d = diag(prog(`    function f(x: asIs) -> int { return 1 }`, `        <p>x</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(d?.message).toContain("asIs");
+    expect(codes(prog(`    function f(x: asIs) -> int { return 1 }`, `        <p>x</p>`))).not.toContain("E-TYPE-UNKNOWN");
+  });
+});
