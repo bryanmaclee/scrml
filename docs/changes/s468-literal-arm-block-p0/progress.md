@@ -182,3 +182,31 @@ but all three multi-scrutinee lowerings still DROPPED the block body (`msWildDen
 - Real (non-test-fixture) sites newly refused: 0.
 
 ## 2026-10-17T22:02:37-06:00 — s469-literal-arm-r1 resume at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a47310f83fb21b193; fast-forwarded to 0322961fe (from old worktree)
+
+## 2026-10-17 — FIX ROUND 1, continued (s469-literal-arm-r1; resumed from 0322961fe after the prior agent died)
+
+Verified F1–F5 by re-running the reviewer's instruments on 0322961fe (do not trust the commit message):
+- la2 (classify.js, 101 shapes): 14 PASS · 86 PASS-REFUSED · 1 PASS-DENY (`cpsMsWild`, REJECTED inside a CPS
+  envelope) · **0 FAIL**. Every shape that was FAIL in the reviewer's atk*-head.txt at 4369d0bb9 (23 of them:
+  objArmDecl, objArmDeclVariant, objDecl*, objReturn*, serverFnObjRet = F1; msWildDeny*, msLitAltWild = F2;
+  cmt*, commentBeforeArrow = F3; mixedDrop, parenDrop, notAltDrop = F4) is now PASS / PASS-REFUSED.
+- sem1/sem2 (reviewer semantic shapes): tmplHead / tmplInterp / tmplInterp2 now E-PARSE-001 (were "matched",
+  F5); multiScrutWild / multiScrutWildDecl / multiScrutWildStmtRet return "wild" (were "none" / null, F2).
+- Pre-commit gate on the start commit 2206094b4: 37762 pass · 0 fail.
+
+New this round:
+- **One reader, codegen side (F1 follow-through).** Codegen still emitted an object-literal block arm from its
+  brace TEXT (`emitArmValue(text)` — on the client that is the token rewriter, a second reader of the arm).
+  New `emitObjectLiteralArm` (emit-control-flow.ts) emits the object TREE the parser stored
+  (`objectLiteralArmValue`) in both modes; the four call sites (IIFE, statement, decl, multi-scrutinee decl)
+  use it; the text accessor `_objectLiteralArmFromStructuredBody` is deleted. Output change: `{ x }` -> `{x}`
+  spacing (one assertion in g-library-fn-match-else-arm-object-literal.test.js relaxed to accept both).
+- **F6 (S468 ruling item 5).** SPEC §18.5 bullet: a brace arm body that reads as an object literal is the
+  arm's value in every position; `{ foo }` = `{ foo: foo }`. New info lint W-MATCH-ARM-SHORTHAND-OBJECT
+  (§34 row; type-system.ts `checkMatchDiagnostics`) on a single-shorthand body, naming `{ foo: foo }` and bare
+  `foo`. Not linted: a `match` nested inside an expression (rawArms text locus, already deferred). Gap
+  g-match-arm-brace-shorthand-object-vs-block-tail-s468 -> resolved. Unit (D) in s468-literal-arm-block-parsed.
+- Filed (found while testing, both LOW, both pre-existing loci): g-expr-position-wildcard-only-match-malformed-s469
+  (a wildcard-only `match` inside an expression emits `else` with no `if` -> E-CODEGEN-INVALID-LOGIC, fails
+  closed); g-dg-002-false-on-read-in-match-arm-block-in-fn-s469 (false E-DG-002 for a cell read only inside a
+  decl-position match arm block in a function; also for `.V` arms).

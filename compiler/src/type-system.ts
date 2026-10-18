@@ -14434,7 +14434,7 @@ function annotateNodes(
           // E-SCOPE-001 — or, when a same-named binding was in scope, nothing,
           // and the value expressions went unchecked). Codegen already lowers
           // this body as the object value (emit-logic
-          // `_objectLiteralArmFromStructuredBody`, from the node's raw `expr`
+          // `emitObjectLiteralArm`, from the node's raw `expr`
           // text); check the SAME object expression here instead.
           const objectBody = objectLiteralArmBodyNode(armBody, filePath);
           if (objectBody) visitNode(objectBody);
@@ -20788,6 +20788,21 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
 }
 
 /**
+ * Build the W-MATCH-ARM-SHORTHAND-OBJECT (§18.5 / §34) message for a match arm
+ * whose brace body is the one-property shorthand object `{ name }`.
+ */
+function matchArmShorthandObjectMessage(name: string): string {
+  return (
+    `W-MATCH-ARM-SHORTHAND-OBJECT: This match arm's body \`{ ${name} }\` is the object ` +
+    `\`{ ${name}: ${name} }\` (object shorthand), not a block whose result is \`${name}\` — a ` +
+    `brace arm body that reads as an object literal is the arm's value, as it is after ` +
+    `\`return\` or as an argument. Make the intent explicit: write \`{ ${name}: ${name} }\` ` +
+    `for the object, or the bare \`${name}\` (\`<pattern> :> ${name}\`) for its value. ` +
+    `See SPEC §18.5.`
+  );
+}
+
+/**
  * §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452) for `!{}` handler arms. A `!{}` arm
  * led by `|` is soft-deprecated (§63.1 Stage 1); one info-level lint per arm.
  *
@@ -21227,6 +21242,32 @@ function checkMatchDiagnostics(
       errors.push(new TSError(
         "W-MATCH-ARROW-LEGACY",
         matchArrowLegacyMessage(`match arm \`${test}\``, glyph),
+        armSpan,
+        "info",
+      ));
+    }
+  }
+
+  // §18.5 / §34 — W-MATCH-ARM-SHORTHAND-OBJECT (S469, ruling S468 "safe ints only,
+  // your recs" item 5). A brace arm body that reads as an object literal is the arm's
+  // VALUE, so `{ foo }` is the shorthand object `{ foo: foo }` — as in a `return` or an
+  // argument — never a block whose tail is `foo`. It is the one brace body whose two
+  // readings both look intended, so the lint names both explicit spellings. Reads the
+  // arm through the ONE object-arm reader (`objectLiteralArmValue`), the reading the
+  // AST builder stored and codegen emits.
+  {
+    const armBody = (node as { body?: ASTNodeLike[] }).body ?? [];
+    for (const arm of armBody) {
+      if (!arm || typeof arm !== "object") continue;
+      if ((arm as ASTNodeLike).kind !== "match-arm-block") continue;
+      const v = objectLiteralArmValue((arm as { body?: unknown }).body);
+      const props = v?.node?.props;
+      if (!Array.isArray(props) || props.length !== 1 || props[0]?.kind !== "shorthand") continue;
+      const name = String(props[0].name);
+      const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
+      errors.push(new TSError(
+        "W-MATCH-ARM-SHORTHAND-OBJECT",
+        matchArmShorthandObjectMessage(name),
         armSpan,
         "info",
       ));

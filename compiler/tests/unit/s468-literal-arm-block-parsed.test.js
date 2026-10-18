@@ -489,3 +489,84 @@ describe("(C) the analyses read a literal arm's body", () => {
     expect(missing).toContain("E-TYPE-020");
   });
 });
+
+// S469 (#1450 F6; ruling S468 "safe ints only, your recs" item 5) — §18.5: a brace arm
+// body `{ foo }` is the shorthand OBJECT `{ foo: foo }` in every position (declaration,
+// `return`, argument), the same reading `return { foo }` and `f({ foo })` give;
+// W-MATCH-ARM-SHORTHAND-OBJECT (info) names the two explicit spellings.
+function compileLibAll(name, source) {
+  const filePath = join(TMP, `${name}.scrml`);
+  writeFileSync(filePath, source.endsWith("\n") ? source : source + "\n");
+  const outDir = join(TMP, `${name}.dist`);
+  const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, mode: "library", write: true, validateEmit: true, log: () => {} });
+  const all = [...(result.errors || []), ...(result.warnings || [])];
+  return {
+    errorCodes: all.filter((e) => e.severity == null || e.severity === "error").map((e) => e.code),
+    lints: all.filter((e) => e.code === "W-MATCH-ARM-SHORTHAND-OBJECT"),
+    libPath: join(outDir, `${name}.js`),
+  };
+}
+
+describe("(D) §18.5: a `{ foo }` arm body is the shorthand object, with a lint", () => {
+  test("decl, return and argument positions; literal, variant and `_` heads — all { foo: foo }", async () => {
+    const r = compileLibAll("shorthand", `type K:enum = { A, B }
+export fn decl(n: int) {
+  const foo = 7
+  const v = match n {
+    1 :> { foo }
+    else :> 0
+  }
+  return v
+}
+export fn ret(k: K) {
+  const foo = 8
+  return match k {
+    .A :> { foo }
+    else :> 0
+  }
+}
+export fn arg(n: int) {
+  const foo = 9
+  return JSON.stringify(match n {
+    1 :> 0
+    _ :> { foo }
+  })
+}`);
+    expect(r.errorCodes).toEqual([]);
+    // decl + return; a `match` nested inside a larger expression is still carried by the
+    // expression parser's raw arms (a separate locus, deferred), which the lint does not read.
+    expect(r.lints.length).toBe(2);
+    for (const l of r.lints) {
+      expect(l.severity).toBe("info");
+      expect(l.message).toContain("`{ foo: foo }`");
+      expect(l.message).toContain("bare `foo`");
+    }
+    const m = await loadLib(r.libPath);
+    expect(m.decl(1)).toEqual({ foo: 7 });
+    expect(m.decl(2)).toBe(0);
+    expect(m.ret("A")).toEqual({ foo: 8 });
+    expect(m.arg(3)).toBe('{"foo":9}');
+  });
+
+  test("the explicit spellings and a multi-property object do not lint", async () => {
+    const r = compileLibAll("shorthand-explicit", `export fn obj(n: int) {
+  const foo = 7
+  const bar = 1
+  const v = match n {
+    1 :> { foo: foo }
+    2 :> foo
+    3 :> { foo, bar }
+    else :> { const t = foo
+      t }
+  }
+  return v
+}`);
+    expect(r.errorCodes).toEqual([]);
+    expect(r.lints).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect(m.obj(1)).toEqual({ foo: 7 });
+    expect(m.obj(2)).toBe(7);
+    expect(m.obj(3)).toEqual({ foo: 7, bar: 1 });
+    expect(m.obj(4)).toBe(7);
+  });
+});

@@ -38,7 +38,7 @@ import { parseExprToNode } from "./expression-parser.ts";
  * the AST builder (which stores the object node on the arm body, so every analysis that
  * walks the tree sees the object: §13.2 / §13.9.6 E-ASYNC-FN-ESCAPES-AS-VALUE,
  * E-VALUE-FUNCTION-STORED), the type checker (`objectLiteralArmBodyNode`) and codegen
- * (`_objectLiteralArmFromStructuredBody`). Before S468 r1 codegen read the value one way
+ * (`emitObjectLiteralArm`). Before S468 r1 codegen read the value one way
  * and the analyses another, and `const o = match n { 1 :> { g: check } … }` stored an
  * async function in an object unrefused (a wrong password accepted).
  *
