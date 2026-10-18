@@ -213,6 +213,7 @@ ${
         return match v {
             .El(tag: tag, attrs: attrs, kids: ks) :> attrNodes(attrs).concat(viewNodes(ks))
             .Text(text: t) :> []
+            .RawText(text: t) :> []
             .Dyn(e: e) :> [Node.NExpr(e)]
             .Cond(arms: arms) :> condArmNodes(arms)
             .Each(src: src, key: key, row: row) :>
@@ -424,6 +425,7 @@ ${
             .Each(bind: bind, handles: handles) :> [bind].concat(handles)
             .El(tag: tag, attrs: attrs, kids: ks) :> []
             .Text(text: t) :> []
+            .RawText(text: t) :> []
             .Dyn(e: e) :> []
             .Cond(arms: arms) :> []
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []

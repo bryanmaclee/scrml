@@ -133,8 +133,43 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     expect(codes(P(two, `        <input bind:value=@n/>\n        <input bind:value=@m/>`))).toEqual([]);
   });
   test("the length comparisons, exactly: `>N` → minlength N+1, `<N` → maxlength N-1, `==N` → both", async () => {
-    await loadProgram(clean(P(F("length(>2) length(<9) length(==4)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths");
+    await loadProgram(clean(P(F("length(>2) length(<9)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths");
     expect(attrsOf($("main input"))).toEqual({ minlength: "3", maxlength: "8" });
+    await loadProgram(clean(P(F("length(==4)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths-eq");
+    expect(attrsOf($("main input"))).toEqual({ minlength: "4", maxlength: "4" });
+  });
+  // s468 (gap g-bootstrap-two-validators-same-html-attr-first-wins): §55.12
+  // "Validators on a single cell COMPOSE" — two validators lowering to one HTML
+  // attribute state their INTERSECTION (the tightest bound), never the first.
+  // The bootstrap kept the first pair: `length(>2) length(<9) length(==4)` gave
+  // `minlength="3" maxlength="8"` (this test's former expectation), looser than
+  // `==4`, so the browser accepted a 3-character value the declaration forbids.
+  describe("s468 — several validators on one attribute: the intersection (§55.12, §55.17.1)", () => {
+    test("`length(>2) length(<9) length(==4)` → minlength 4, maxlength 4 (was 3 / 8)", async () => {
+      await loadProgram(clean(P(F("length(>2) length(<9) length(==4)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths-meet");
+      expect(attrsOf($("main input"))).toEqual({ minlength: "4", maxlength: "4" });
+    });
+    test("order does not matter: `length(==4) length(>2)` and `length(>=2) length(>=6) length(<=10) length(<=7)`", async () => {
+      await loadProgram(clean(P(F("length(==4) length(>2)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths-order");
+      expect(attrsOf($("main input"))).toEqual({ minlength: "4", maxlength: "4" });
+      await loadProgram(clean(P(F("length(>=2) length(>=6) length(<=10) length(<=7)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths-four");
+      expect(attrsOf($("main input"))).toEqual({ minlength: "6", maxlength: "7" });
+    });
+    test("the top-level form (the gap's reproduction): `let <v:string=\"\" length(>2) length(==4)/>`", async () => {
+      await loadProgram(clean(P(`    let <v:string="" length(>2) length(==4)/>`, `        <form><input bind:value=@v/></form>`)), "v-lengths-top");
+      expect(attrsOf($("main input"))).toEqual({ minlength: "4", maxlength: "4" });
+    });
+    test("a hand-written attribute is judged against the COMBINED bound: equal → clean, the looser one → refused", () => {
+      clean(P(F("length(>2) length(>=5)", `<input minlength="5" bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`));
+      const d = run(P(F("length(>2) length(>=5)", `<input minlength="3" bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain("lowers to `minlength=\"5\"`");
+    });
+    test("two DIFFERENT exact patterns cannot share one `pattern` attribute: refused (never one silently kept)", () => {
+      const d = run(P(F("pattern(/^[a-z]+$/) pattern(/^[a-c]+$/)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain("two `pattern(…)` validators");
+    });
   });
   test("a textarea takes `required` and the lengths; a select takes `required` only", async () => {
     await loadProgram(clean(P(F("req length(>=2)", `<textarea bind:value=@v></textarea>`, `<form><*v/></form>`), `        <*f/>`)), "v-textarea");
