@@ -7828,8 +7828,14 @@ export function runRI(input: RIInput): RIOutput {
       // ExprNode sister fields — emitStringFromTree + collectIdentsFromText
       // catches identifiers regardless of whether the AST builder produced
       // a string or an ExprNode for the same logical expression.
+      // `resultExpr` (S468) — a single-expression `match` arm's value
+      // (`match-arm-inline`). A literal / alternation arm (`0 -> handleZero()`)
+      // used to reach here as a `bare-expr` whose `expr` text the string scan
+      // above read; since S468 it is a `match-arm-inline` like `.V :> f()` and
+      // `_ :> f()`, whose value only this field carries (those two false-fired
+      // W-DEAD-FUNCTION before S468 too).
       const EXPR_NODE_FIELDS = [
-        "condExpr", "valueExpr", "exprNode", "testExpr", "headerExpr",
+        "condExpr", "valueExpr", "exprNode", "testExpr", "headerExpr", "resultExpr",
       ] as const;
       for (const field of EXPR_NODE_FIELDS) {
         const v = node[field];

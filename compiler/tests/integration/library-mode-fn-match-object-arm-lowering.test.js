@@ -80,17 +80,30 @@ describe("library-mode fn-body match object-arm lowering (g-library-fn-match-obj
     expect(mod.pick(1)).not.toBeUndefined();
   });
 
-  test("multi-key object arms + a wildcard presence-binding object arm", async () => {
+  test("multi-key object arms + a wildcard object arm referencing the scrutinee", async () => {
     const r = compileLib(
       "multikey",
-      `export fn tag(n: int) { return match n { 1 :> { kind: "one", n: 1 } (x) :> { kind: "other", n: x } } }`,
+      `export fn tag(n: int) { return match n { 1 :> { kind: "one", n: 1 } _ :> { kind: "other", n: n } } }`,
     );
     expect(r.errorCodes).toEqual([]);
     const mod = await loadLib(r.libPath);
     expect(mod.tag(1)).toEqual({ kind: "one", n: 1 });
-    // The presence-binding wildcard binds the scrutinee AND returns an object
-    // referencing it.
+    // The wildcard object arm returns an object referencing the scrutinee.
     expect(mod.tag(7)).toEqual({ kind: "other", n: 7 });
+  });
+
+  test("the removed `(x) :>` presence-guard arm is E-SYNTAX-043 after a literal block arm too (S468)", () => {
+    // This test used `(x) :> { … }` as a scrutinee-binding wildcard until S468. §42.2.3:
+    // "The old form `(x) =>` is removed from the language. Any source file using `(x) =>`
+    // as a presence guard SHALL be a compile error (E-SYNTAX-043)." Written as the first
+    // arm it always was; written after a literal `{ … }` arm it was glued into that arm's
+    // TEXT and slipped through. Since S468 the literal arm's body is parsed, so the next
+    // arm starts its own statement and meets the same check.
+    const r = compileLib(
+      "multikey-presence",
+      `export fn tag(n: int) { return match n { 1 :> { kind: "one", n: 1 } (x) :> { kind: "other", n: x } } }`,
+    );
+    expect(r.errorCodes).toContain("E-SYNTAX-043");
   });
 
   test("the EMPTY object arm (`1 :> {}`) returns an empty object, not undefined (S239 finding 2)", async () => {

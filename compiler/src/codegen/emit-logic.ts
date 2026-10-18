@@ -11,7 +11,7 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -6901,16 +6901,10 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // local list) exactly as the sibling emitter in emit-control-flow.ts does —
       // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
       // so a block arm of `const r = match …` referenced an unbound name.
-
-      arms.push({
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: child.variant ?? null,
-        // F17 — a block arm's payload binding (was `null`: every binding of a
-        // block-bodied arm in a `const x = match …` was dropped).
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : null,
-      });
+      // (F17 — a block arm's payload binding was `null`: every binding of a
+      // block-bodied arm in a `const x = match …` was dropped.) S468 — one reader
+      // for every block-arm head, literal / alternation arms included.
+      arms.push(matchArmBlockToMatchArm(child));
       continue;
     }
     // Structured match-arm-inline nodes (from `. Variant => result` arms)
@@ -7009,7 +7003,17 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // and is PER-ARM (so a name declared in one arm does not leak into a sibling
       // arm, which would turn that sibling's fresh declaration into an assignment
       // to an unbound name).
-      bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
+      //
+      // S468 — an OBJECT-LITERAL arm body (`.A :> { x: 1 }`, `1 :> { x: 1 }`) is a
+      // VALUE, as the statement and IIFE lowerings already read it
+      // (`_objectLiteralArmFromStructuredBody`); emitted as statements it was
+      // `tilde = x : 1;` → E-CODEGEN-INVALID-LOGIC.
+      const _objArm = _objectLiteralArmFromStructuredBody(_body);
+      if (_objArm !== null) {
+        bodyCode.push(`  ${tildeVar} = ${_awaitMatchArmServerCalls(emitArmValue(_objArm, _makeExprCtx(opts)), opts)};`);
+      } else {
+        bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
+      }
       if (arm.kind === "wildcard") {
         lines.push(`else {`);
       } else if (arm.kind === "not") {

@@ -1832,6 +1832,48 @@ export function matchArmBlockBinding(child: any): string | null {
   return payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
 }
 
+/**
+ * The ONE reading of a block-bodied arm node (`match-arm-block`) as a `MatchArm`,
+ * shared by every match lowering (statement, value IIFE, declaration, compile-time
+ * `^{}` evaluation). The node's head (ast-builder.js Forms 1–4):
+ *   - `isWildcard` / `isNotArm`        → the wildcard / absence arm;
+ *   - `literals` (S468, Form 4)        → a §18.16 literal arm or literal
+ *     alternation: `"string"` when every alternate is a string, else `"literal"`;
+ *     the alternates are JS source (`1`, `-1`, `"bob"`, `true`), compared directly;
+ *   - `alternates` (S468, Form 4)      → a variant alternation (`.A | .B :> { … }`);
+ *   - `variant`                        → a single variant (`.V` / `::V`, with its
+ *     payload binding).
+ * The body is always the parsed statements (`structuredBody`).
+ */
+export function matchArmBlockToMatchArm(child: any): MatchArm {
+  const structuredBody = Array.isArray(child?.body) ? child.body : null;
+  if (child?.isWildcard) return { kind: "wildcard", test: child.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+  if (child?.isNotArm) return { kind: "not", test: child.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+  const head = armHeadFromTokens(child);
+  if (head) return { ...head, binding: null, result: "", structuredBody };
+  return { kind: "variant", test: child?.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+}
+
+/**
+ * S468 — the arm head the AST builder recorded from its TOKENS on a Form 4 block
+ * arm or an Inline Form 6 arm (ast-builder.js `readArmHead`): `literals` (each a
+ * literal's JS source, `1` / `-1` / `"bob"` / `true`) or `alternates` (variant
+ * names). Null when the node carries neither. A literal arm is `"string"` when
+ * every alternate is a string literal (its recorded source starts with its own
+ * delimiter — this reads the token text the parser stored, not program source),
+ * else `"literal"`; `armCondition` compares either directly.
+ */
+function armHeadFromTokens(node: any): Pick<MatchArm, "kind" | "test" | "tests"> | null {
+  const literals: string[] | null = Array.isArray(node?.literals) && node.literals.length > 0 ? node.literals : null;
+  if (literals) {
+    const allStrings = literals.every((t: string) => t.startsWith('"') || t.startsWith("'"));
+    return { kind: allStrings ? "string" : "literal", test: literals[0], tests: literals.length > 1 ? literals : null };
+  }
+  const alternates: string[] | null = Array.isArray(node?.alternates) && node.alternates.length > 0 ? node.alternates : null;
+  if (alternates) return { kind: "variant", test: alternates[0], tests: alternates.length > 1 ? alternates : null };
+  return null;
+}
+
 export function parseBindingList(raw: string): PayloadBinding[] {
   if (!raw) return [];
   const result: PayloadBinding[] = [];
@@ -2198,6 +2240,10 @@ function _matchArmInlineToMatchArm(node: any): MatchArm | null {
   if (test === "else") {
     return { kind: "wildcard", test: null, binding: null, result, failExpr };
   }
+  // S468 — a literal / alternation head the AST builder recorded from its tokens
+  // (ast-builder.js Inline Form 6): read the structure, not the `test` text.
+  const tokenHead = armHeadFromTokens(node);
+  if (tokenHead) return { ...tokenHead, binding: null, result, failExpr };
   if (test === "not") {
     return { kind: "not", test: null, binding: null, result, failExpr };
   }
@@ -3755,15 +3801,10 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
     // statements before the arm body. Without this, references like `n` inside
     // the body emit as unbound JS identifiers → ReferenceError at runtime.
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
+    // S468 — literal / alternation / `_` block arms are `match-arm-block` nodes
+    // too (ast-builder.js Form 4); `matchArmBlockToMatchArm` reads every head.
     if (child.kind === "match-arm-block") {
-      const arm: MatchArm = {
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: child.variant ?? null,
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : null,
-      };
-      arms.push(arm);
+      arms.push(matchArmBlockToMatchArm(child));
       continue;
     }
     // Handle structured match-arm-inline nodes (from AST builder inline arm parsing).

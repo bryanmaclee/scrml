@@ -279,22 +279,17 @@ describe("§18.5 arm bodies are sibling SCOPES, not one shared scope", () => {
   });
 
   /**
-   * KNOWN RESIDUAL, pinned deliberately — the ROUTE-DEPENDENT half of this axis.
+   * The ROUTE-DEPENDENT half of this axis — CLOSED by S468 (the two expectations
+   * this pin carried have flipped, as it said they would).
    *
-   * LITERAL/wildcard arms do not produce `arm.structuredBody`; they stay a raw
-   * SOURCE STRING and lower through `rewriteBlockBody`, which is text-preserving
-   * and never makes a decl-vs-assignment decision at all. So a fresh `a = 5` in
-   * an arm emits verbatim as a bare assignment with no binding in scope, exactly
-   * as it did before this fix — the per-arm declared-name set cannot reach a
-   * route that does not consult declared names.
-   *
-   * This is NOT a divergence introduced here: the raw-string routes never made
-   * this decision. It is the pre-existing (a)/(b) input-axis split, and closing
-   * it means giving the raw-string routes a decl-vs-assignment decision they do
-   * not currently have — a separate change on routes that are correct on both
-   * axes this dispatch was scoped to. Surfaced to PA rather than folded in.
-   *
-   * When it IS closed, the two expectations below flip.
+   * LITERAL/wildcard arms used to stay a raw SOURCE STRING and lower through
+   * `rewriteBlockBody`, which is text-preserving and never makes a
+   * decl-vs-assignment decision — so a fresh `a = 5` in such an arm emitted
+   * verbatim as a bare assignment with no binding in scope. Since S468 the AST
+   * builder parses a literal / `_` arm's `{ … }` body into statements
+   * (ast-builder.js Form 4), so the arm takes the same structured route as a
+   * variant arm and gets the same per-arm declared-name set: the fresh `a = 5`
+   * declares the arm's own `a`.
    */
   const SIBLING_LITERAL_SRC = `\${
     function pick(k: int) -> int {
@@ -308,11 +303,11 @@ describe("§18.5 arm bodies are sibling SCOPES, not one shared scope", () => {
 <page><main><p id="v">\${ pick(2) }</p></main></page>
 `;
 
-  test("RESIDUAL: the raw-string arm route still emits an unbound bare assignment (documented, not desired)", () => {
+  test("a literal / `_` block arm is its own scope too: a fresh `a = 5` declares the arm's `a` (S468)", () => {
     const r = compileSource(SIBLING_LITERAL_SRC, "sibling-scope-raw");
     expect(hardErrors(r)).toEqual([]);
     expect(r.clientJs).toBeTruthy();
-    expect(r.clientJs).toMatch(/(?<!const\s)(?<!let\s)\ba\s*=\s*5\s*;/);
-    expect(r.clientJs).not.toMatch(/const\s+a\s*=\s*5\s*;/);
+    expect(r.clientJs).not.toMatch(/(?<!const\s)(?<!let\s)\ba\s*=\s*5\s*;/);
+    expect(r.clientJs).toMatch(/const\s+a\s*=\s*5\s*;/);
   });
 });

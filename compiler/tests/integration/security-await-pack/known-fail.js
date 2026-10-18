@@ -19,6 +19,9 @@
 // four y3 shapes and y1/voIife, y2/voIife, y2/voAnnotIife, y1/topLetIfWrite, y2/topLetIfLit
 // answering WELCOME on r9). Measured on s467-await-r10: 551 shapes, 0 accept a wrong password.
 // + families z1–z4 (the S467 review of r10; 640 shapes): 0 accept a wrong password.
+// S468 + family la1 (literal / alternation match arms; 695 shapes): 29 la1 shapes accept a wrong
+// password on main bbddfd7b9 and none on s468-literal-arm-block-p0 (the parser reads those arms'
+// bodies) — they land together, so no la1 entry is listed here.
 export const KNOWN_FAIL = {
 };
 

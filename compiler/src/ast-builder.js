@@ -4066,6 +4066,77 @@ function armPatternChainReachesArrow(peek, k) {
   return armPatternChainArrowOffset(peek, k) >= 0;
 }
 
+/**
+ * S468 (§18.2 / §18.16) — the head of a match arm that the single-alternate
+ * arm forms (`.V :>`, `.V(…) :>`, `else :>`, `not :>`, and inline `_ :>` /
+ * `"s" :>`) do not own: a literal arm (`1 :>`, `-1 :>`, `"bob" :> {`,
+ * `true :>`), an alternation (`1 | 2 :>`, `.A | .B :>`, `.P(_) | .Q(_) :>`)
+ * or the `_` wildcard alias with a block body (`_ :> {`). `arrowK` is the
+ * peek-offset of the arm arrow (armPatternChainArrowOffset). Reads each
+ * alternate from its TOKEN (scanArmPatternAlternate's grammar) and returns
+ *   { literals, variants, wildcard, pattern }
+ * — `literals` as JS source (`1`, `-1`, `0x1F`, `"bob"`, `'al'`, `true`),
+ * `variants` the variant names, `wildcard` when an alternate is `_` / `else`
+ * (an alternation holding one IS the wildcard arm, §18.2), `pattern` the head
+ * as written (for diagnostics). Returns null for a head this form does not
+ * take: one mixing literal and variant alternates, or a single variant
+ * alternate carrying a payload binding (Form 1b's).
+ */
+function readArmHead(peek, arrowK) {
+  const literals = [];
+  const variants = [];
+  const texts = [];
+  let wildcard = false;
+  let k = 0;
+  while (k < arrowK) {
+    const end = scanArmPatternAlternate(peek, k);
+    if (end < 0 || end > arrowK) return null;
+    const t = peek(k);
+    if ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::")) {
+      const name = peek(k + 1).text;
+      variants.push(name);
+      let txt = t.text + name;
+      if (end > k + 2) {
+        // A payload `( … )`: only positional `_` discards are this form's (an
+        // alternation's binding is E-MATCH-ALT-BINDING, armChainBindingAlternate;
+        // a single variant's binding is Form 1b's).
+        const discards = [];
+        for (let j = k + 3; j < end - 1; j++) {
+          const tk = peek(j);
+          if (tk && tk.kind === "IDENT" && tk.text === "_") discards.push("_");
+          else if (!(tk && tk.kind === "PUNCT" && tk.text === ",")) return null;
+        }
+        txt += "(" + discards.join(", ") + ")";
+      }
+      texts.push(txt);
+    } else if ((t.kind === "IDENT" && t.text === "_") || (t.kind === "KEYWORD" && t.text === "else")) {
+      wildcard = true;
+      texts.push(t.text);
+    } else if (t.kind === "STRING") {
+      const d = t.delim === "'" ? "'" : t.delim === '"' ? '"'
+        : (t.text.includes('"') && !t.text.includes("'") ? "'" : '"');
+      literals.push(d + t.text + d);
+      texts.push(d + t.text + d);
+    } else if (t.kind === "PUNCT" && t.text === "-") {
+      literals.push("-" + peek(k + 1).text);
+      texts.push("-" + peek(k + 1).text);
+    } else {
+      // NUMBER, `true`, `false`
+      literals.push(t.text);
+      texts.push(t.text);
+    }
+    k = end;
+    if (k < arrowK) {
+      const bar = peek(k);
+      if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return null;
+      k++;
+    }
+  }
+  if (texts.length === 0) return null;
+  if (!wildcard && literals.length > 0 && variants.length > 0) return null;
+  return { literals, variants, wildcard, pattern: texts.join(" | ") };
+}
+
 // ---------------------------------------------------------------------------
 // §18.19 Multi-Scrutinee Match — shared parse helpers.
 //
@@ -13738,13 +13809,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //
     // Form 1: `. VariantName :> {` — enum variant arm with block body
     // (`:>` canonical; `=>`/`->` deprecated aliases — §18.2.)
+    // S468 — the `::VariantName` alias prefix (§18.2 `variant-pattern ::= ('.' |
+    // '::') VariantName …`) takes the same form; before, a `::V :> { … }` arm was
+    // kept as text and no lowering read it (the arm never matched).
+    const _isVariantPrefix = (tok.kind === 'PUNCT' && tok.text === '.') || (tok.kind === 'OPERATOR' && tok.text === '::');
     {
-      const _arrow1 = (tok.kind === 'PUNCT' && tok.text === '.' &&
+      const _arrow1 = (_isVariantPrefix &&
         peek(1) && peek(1).kind === 'IDENT' && /^[A-Z]/.test(peek(1).text))
         ? matchArrowGlyphAt(peek, 2) : null;
       if (_arrow1 && peek(2 + _arrow1.len) && peek(2 + _arrow1.len).kind === 'PUNCT' && peek(2 + _arrow1.len).text === '{') {
         const startTok = tok;
-        consume(); // '.'
+        consume(); // '.' / '::'
         const variantNameTok = consume(); // IDENT (PascalCase variant name)
         for (let _a = 0; _a < _arrow1.len; _a++) consume(); // arm arrow
         consume(); // '{'
@@ -13766,7 +13841,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // with block body. Captures comma-separated binding names so the type-
     // system can bind them into the arm body's scope (otherwise references
     // like `n` inside the body fire E-SCOPE-001).
-    if (tok.kind === 'PUNCT' && tok.text === '.' &&
+    if (_isVariantPrefix &&
         peek(1) && peek(1).kind === 'IDENT' && /^[A-Z]/.test(peek(1).text) &&
         peek(2) && peek(2).kind === 'PUNCT' && peek(2).text === '(') {
       // Lookahead to find the matching `)` then check for `=> {`.
@@ -13935,6 +14010,56 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
 
+    // Form 4 (S468 — §18.2, §18.16): EVERY other arm head whose body is a `{ … }`
+    // block — a literal arm (`1 :> {`, `-1 :> {`, `0x1F :> {`, `"bob" :> {`,
+    // `true :> {`), an alternation (`1 | 2 :> {`, `"a" | "b" :> {`, `.A | .B :> {`,
+    // `.P(_) | .Q(_) :> {`) and the `_` wildcard alias (`_ :> {`). These arms used
+    // to fall through to the default statement path and be kept as ONE `bare-expr`
+    // holding the whole arm TEXT, whose exprNode was the leading literal alone — so
+    // no stage after the parser saw the statements in the body. A waiting function
+    // aliased there (`1 :> { const g = check … g(pass, hash) }`) was neither refused
+    // (§13.9.6) nor awaited (§13.2): the server tested a Promise and accepted a wrong
+    // password. The body is now parsed by the same `parseRecursiveBody` every other
+    // block arm uses, so every analysis reads it by construction, and the head is
+    // recorded from its tokens:
+    //   `literals`   the literal alternates as JS source (`1`, `-1`, `"bob"`, `true`)
+    //   `alternates` the variant names of a variant alternation (`["A", "B"]`)
+    //   `variant`    a single variant (`::V(_)`), as Forms 1 / 1b record it
+    //   `isWildcard` an alternation holding `_` / `else` IS the wildcard arm (§18.2)
+    //   `pattern`    the head as written, for diagnostics
+    // Arm level only: anywhere else `_ => { … }` is an arrow function. Not taken (the
+    // head stays on the text path, as before): a head mixing literal and variant
+    // alternates, and an alternation alternate carrying a payload pattern (that is
+    // E-MATCH-ALT-BINDING, raised by collectExpr).
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth) {
+      const _arrowK4 = armPatternChainArrowOffset(peek, 0);
+      const _arrow4 = _arrowK4 >= 0 ? matchArrowGlyphAt(peek, _arrowK4) : null;
+      const _open4 = _arrow4 ? peek(_arrowK4 + _arrow4.len) : null;
+      const _head4 = _open4 && _open4.kind === 'PUNCT' && _open4.text === '{' && armChainBindingAlternate(peek, 0) === null
+        ? readArmHead(peek, _arrowK4) : null;
+      if (_head4) {
+        const startTok = tok;
+        for (let _h = 0; _h < _arrowK4; _h++) consume(); // arm head
+        for (let _a = 0; _a < _arrow4.len; _a++) consume(); // arm arrow
+        consume(); // '{'
+        const blockBody = parseRecursiveBody();
+        const armNode = {
+          id: ++counter.next,
+          kind: 'match-arm-block',
+          variant: !_head4.wildcard && _head4.variants.length === 1 ? _head4.variants[0] : null,
+          payloadBindings: [],
+          isWildcard: _head4.wildcard,
+          armArrow: _arrow4.glyph,
+          pattern: _head4.pattern,
+          body: blockBody,
+          span: spanOf(startTok, peek()),
+        };
+        if (!_head4.wildcard && _head4.literals.length > 0) armNode.literals = _head4.literals;
+        if (!_head4.wildcard && _head4.variants.length > 1) armNode.alternates = _head4.variants;
+        return armNode;
+      }
+    }
+
     // MATCH ARM INLINE: `. VariantName => result`, `else => result`, `not => result`
     // Produce structured `match-arm-inline` nodes instead of falling through to bare-expr.
     // Block arms (with `{` after arrow) are already handled above as match-arm-block.
@@ -14096,6 +14221,48 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           };
         }
+      }
+    }
+
+    // Inline Form 6 (S468 — §18.2, §18.16): every other single-expression arm —
+    // a number / boolean literal arm (`1 :> r`, `-1 :> r`, `true :> r`) and an
+    // alternation (`1 | 2 :> r`, `"a" | "b" :> r`, `.A | .B :> r`,
+    // `.P(_) | .Q(_) :> r`, `_ | .A :> r`). These used to be kept as a `bare-expr`
+    // holding the arm TEXT whose exprNode was the leading literal alone, so the
+    // result expression was never read by a stage after the parser: an async
+    // function passed from it to a higher-order function (`1 :> drive(check, …)`)
+    // was not refused (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE) and the wrong password
+    // was accepted. Now a structured `match-arm-inline` like Inline Forms 1–5, with
+    // the head recorded from its tokens (`literals` / `alternates`, see Form 4) and
+    // `test` the head as written. An alternation holding `_` / `else` is the
+    // wildcard arm (`test: 'else'`, §18.2). Arm level only; the heads Form 4 does
+    // not take (mixed literal + variant alternates, an alternate's payload
+    // binding) stay on the text path.
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth) {
+      const _arrowK6 = armPatternChainArrowOffset(peek, 0);
+      const _arrow6 = _arrowK6 >= 0 ? matchArrowGlyphAt(peek, _arrowK6) : null;
+      const _after6 = _arrow6 ? peek(_arrowK6 + _arrow6.len) : null;
+      const _head6 = _arrow6 && !(_after6 && _after6.kind === 'PUNCT' && _after6.text === '{') &&
+        armChainBindingAlternate(peek, 0) === null
+        ? readArmHead(peek, _arrowK6) : null;
+      if (_head6) {
+        const startTok = tok;
+        for (let _h = 0; _h < _arrowK6; _h++) consume(); // arm head
+        for (let _a = 0; _a < _arrow6.len; _a++) consume(); // arm arrow
+        const { expr: result } = collectExpr(null, { armBody: true });
+        const trimmedResult = result.trim();
+        const armNode = {
+          id: ++counter.next,
+          kind: 'match-arm-inline',
+          test: _head6.wildcard ? 'else' : _head6.pattern,
+          armArrow: _arrow6.glyph,
+          result: trimmedResult,
+          resultExpr: safeParseExprToNode(trimmedResult, spanOf(startTok, peek())?.start ?? 0),
+          span: spanOf(startTok, peek()),
+        };
+        if (!_head6.wildcard && _head6.literals.length > 0) armNode.literals = _head6.literals;
+        if (!_head6.wildcard && _head6.variants.length > 0) armNode.alternates = _head6.variants;
+        return armNode;
       }
     }
 
