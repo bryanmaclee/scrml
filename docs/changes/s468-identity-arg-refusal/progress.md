@@ -184,3 +184,21 @@ NOT done:
   of this check (impl#1)" — (a) alias mutation + component-prop object literal NOT refused, (b) flow-/field-
   insensitive refusals — with the floor-not-the-model sentence pointing at dpa-071.
 - FILED `g-identity-arg-via-alias-mutation-s468` (MED, open) under the s467 entry; gap-counts regenerated (MED +1).
+- 2026-10-18 — RE-MEASURED (fix round 1 + merge; base = archive of origin/main 38e7ab398, head = this branch):
+  - in-process scan (repro/scan.mjs): examples + samples + benchmarks + giti + flogence 1157 sources → 0 changed
+    outside stdlib; conformance/cases 1844 → 0 changed; stdlib 54 (each side its own copy) → 0 newly refused, 15
+    newly passing = base-archive E-IMPORT-008 (environment: the archive lacks what stdlib/compiler imports).
+    E-ARG-SERVER-IDENTITY: 0 files; E-PARAM-DEFAULT-SERVER-IDENTITY: 0 files, both sides. **0 real sites newly refused.**
+  - corpus-emit-differential (2857 sources): 0 newly failing / 14 newly passing (the same stdlib/compiler
+    E-IMPORT-008 archive artifact); after normalizing `_scrml_project_root`, the sqlite path prefix and per-path
+    8-char hash ids, 8533 / 8533 common artifacts identical; syntax delta 0; bare server-fn sites 29 → 29.
+  - security-await-pack classify: base == head (PASS 264 / PASS-REFUSED 355 / PASS-500 17 / PASS-DENY 3 /
+    UNJUDGED 1; 640 shapes; 0 FAIL).
+  - S467 param probes (~/.cache/scrml-review-s467-param-r5/cases, 96): newly refused t1 t2 t3 t4 t7 t8 t16 (the
+    gap's param / mutation / loop routes — true positives); newly ACCEPTED t5 (`function other() { const me =
+    @session.userId }` shadowing an outer `const me = "x"` — base's refusal was a scope false positive; the outer
+    `me` the default reads is the literal).
+- `bun run test` (full compiler/tests/): 40376 pass / 171 skip / 17 todo / 51 fail. The 51 are browser / e2e
+  files outside the pre-commit gate: 48 fail standalone on this branch AND on the origin/main archive (same files, same or larger counts on main) (E-TYPE-031 `email`
+  validator in bug60, transitions, engine dispatch, soft-nav, …) — pre-existing; 3 (s462 handler-helpers, s457
+  url-guard, e2e detector-validation) pass standalone on this branch — full-run cross-file interference. Pre-commit gate: 0 fail.
