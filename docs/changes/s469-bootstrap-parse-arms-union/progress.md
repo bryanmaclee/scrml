@@ -40,6 +40,25 @@ message string avoids `match <subj> {` — impl#1 rewrites that shape even insid
   §18 plain-value match unit, blocker 5); the value `match @g {…}` inside `${}` (two
   E-BOOTSTRAP-UNSUPPORTED: handled-failable in a larger expression; match over a non-failable value).
 
-## Next
+- [x] commit 2, push, PR #1468.
 
-- regenerate docs/bootstrap-conformance.md; pre-commit gate; push; PR.
+## Review r1 (FIX) — addressed
+
+1. **HIGH — a tape inside an opener union escaped its grants.** `Entry[free, append] | not` became
+   TMaybe(TSeq); analyze's grant / `let` checks do not see through `.Maybe`, so `.shift()`, `= []`,
+   `= not` compiled clean. Fix: `parseOpenerType` refuses every union with a sequence member
+   (E-BOOTSTRAP-UNSUPPORTED "a sequence in a union type …"), any order, own type or typed attribute.
+   The type falls back to the tape alone, so the `let` check also fires (fail-closed). Tests: the
+   repro with / without `let`, `not | T[…]`, unspaced, `Guess | not[free]`, a typed attribute, and
+   the plain tape unaffected.
+   Message: a locked SEQUENCE's E-WRITE-NOT-GRANTED said "Declare it `let <…/>`" — advice that
+   leads to E-GRANT-LET-ON-SEQUENCE. A sequence now gets "needs `replace` in the type's grants"
+   (analyze.scrml `wholeFieldWrite`). (The brief cited §66.12.6; there is no such section — the
+   message cites §66.12.2 / §66.12.3.)
+2. **LOW — bare `|` cascade.** A member that failed to parse (`Guess |=`, `Guess | />`) now gets its
+   E-PARSE-TYPE only, no second union refusal.
+3. **LOW — pinned, not built.** `armEnd`'s depth-0 `,` counts token brackets only: a markup arm body
+   (`.Ok(v) :> <b>ok, yes</b>,`) would split at its text's `,`. Markup arm bodies are not in the
+   bootstrap — today it fails loudly (E-PARSE-UNCLOSED cascade, no artifact). Comment corrected; a
+   PIN test in arms-union-s469.test.js breaks when markup arm bodies land, forcing the boundary rule
+   to learn markup depth.

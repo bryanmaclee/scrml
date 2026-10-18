@@ -794,9 +794,12 @@ ${
             const x: PTok = tp.toks[i]
             if (x.cls == TC.End) return i
             if (depth == 0 && i > tp.i) {
-                // s469: a `,` at depth 0 ends the arm (dpa-073 F2) — no
-                // expression holds a top-level `,`; one inside `( [ {` is the
-                // body's own (`f(a, b)`, `[1, 2]`)
+                // s469: a `,` at depth 0 ends the arm (dpa-073 F2). One inside
+                // `( [ {` is the body's own (`f(a, b)`, `[1, 2]`). This counts
+                // TOKEN brackets only: a MARKUP arm body (`.Ok(v) :> <b>ok, yes</b>`)
+                // would be split at its text's `,`. The bootstrap has no markup
+                // arm bodies yet (it fails loudly — pinned in arms-union-s469.test.js);
+                // when they land, this boundary rule must learn markup depth.
                 if (x.cls == TC.Punct && x.text == ",") return i
                 if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
                 if (x.cls == TC.Punct && x.text == "|") return i
@@ -2364,6 +2367,13 @@ ${
         let nots: int = 0
         let inner: AType = first.t
         if (isNotType(first.t)) nots = 1
+        // review r1: a TAPE member (`Entry[free, append] | not`) is refused —
+        // the grant checks do not see through `| not`, so `T[…] | not` would
+        // let every write through. A member that failed to parse (`Guess |=`)
+        // has its own E-PARSE-TYPE; no second report.
+        let seqs: int = 0
+        if (isSeqAType(first.t)) seqs = 1
+        let blank = isBlankAType(first.t)
         let going = true
         while (going) {
             const after: MP = skipSpace(m)
@@ -2371,6 +2381,8 @@ ${
                 const rm: RMType = openerTypeMember(skipSpace(mAdv(after, 1)), "`|`")
                 m = rm.mp
                 members = members + 1
+                if (isSeqAType(rm.t)) seqs = seqs + 1
+                if (isBlankAType(rm.t)) blank = true
                 if (isNotType(rm.t)) {
                     nots = nots + 1
                 } else {
@@ -2380,11 +2392,15 @@ ${
                 going = false
             }
         }
-        if (members == 2 && nots == 1) {
+        const text: string = mp.src.substring(start, m.pos)
+        // (a blank member was reported by openerTypeMember: E-PARSE-TYPE)
+        if (!blank && members > 1 && seqs > 0) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a sequence in a union type (`" + text + "`) is not in the bootstrap — its grants are not checked through the union; declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)", start, m.pos)
+        } else if (!blank && members == 2 && nots == 1) {
             ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TMaybe(inner) }
             m = mBump(m)
-        } else if (members > 1) {
-            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the union type `" + mp.src.substring(start, m.pos) + "` is not in the bootstrap — its type system has `T | not` only (§66.2.4 admits any union here, S451)", start, m.pos)
+        } else if (!blank && members > 1) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the union type `" + text + "` is not in the bootstrap — its type system has `T | not` only (§66.2.4 admits any union here, S451)", start, m.pos)
         }
         // The type's SPAN runs to the end of the type TEXT: a continuation the
         // slice cannot read (`fn()`) stays inside it, so the tag scanner's
@@ -2393,6 +2409,22 @@ ${
         const end: int = typeTextEnd(mp.src, m.pos)
         if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }
         return { t: ty, mp: m }
+    }
+
+    fn isSeqAType(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> false
+            .TSeq(elem: e) :> true
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    fn isBlankAType(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> n == ""
+            .TSeq(elem: e) :> isBlankAType(e)
+            .TMaybe(inner: i) :> false
+        }
     }
 
     fn isNotType(t: AType) -> boolean {
