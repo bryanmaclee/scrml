@@ -31,7 +31,7 @@
  *   G  operand-scan regressions + the S457 `__scrml_` reservation
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { resolve } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
@@ -596,4 +596,13 @@ describe("G — review round: the operand scan does not change legal programs", 
       expect(out.errors.map((e) => e.code)).toEqual([]);
     }
   });
+});
+
+// DOM-global hygiene (S468, s468-hook-sharding): happy-dom's GlobalRegistrator (registered above and
+// re-registered per page) replaces Bun's native Request/Response/Headers/fetch/URL/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives —
+// left registered, a later file's `fetch` to a real local server goes through happy-dom's CORS layer
+// (observed: reserved-double-prefix-s457's `scrml serve` round failed when sharding put it after this file).
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
