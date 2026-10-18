@@ -13,6 +13,12 @@
  *       sync lambda that would have to await fails closed.
  *
  * Executed: server function `f(name, pass)` against bun:sqlite, wrong / right password.
+ *
+ * S467 round 10 — dpa-023 F4 (§13.9.6, ruling:user-voice-scrml.md S467 "b it is"): a waiting
+ * function is bound ONLY by a `function` declaration. The HIGH-1 shapes bind one with `const`
+ * (`const inner = (p, h) => verifyPassword(p, h)`), so each is now E-ASYNC-FN-ESCAPES-AS-VALUE
+ * (F4_REFUSED below); the same programs with `function inner(p, h) { return … }` run
+ * (MIGRATED). The other r6 roots (regex, variants, `for` headers) are unchanged.
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync, readFileSync } from "fs";
@@ -40,7 +46,8 @@ const lib = (body) => `\${
 `;
 
 // name -> { lib?, imports?, top?, body }  (run: wrong → REJECTED, right → WELCOME)
-const RUN = {
+// S467 r10 — each binds a waiting function with `const`: E-ASYNC-FN-ESCAPES-AS-VALUE (§13.9.6).
+const F4_REFUSED = {
   libLambda: { lib: lib(`const inner = (p, h) => verifyPassword(p, h)
   export function check(p, h) { return inner(p, h) }`), body: G },
   libFnExpr: { lib: lib(`const inner = function (p, h) { return verifyPassword(p, h) }
@@ -66,6 +73,31 @@ const RUN = {
     return "WELCOME"` },
   inFileFnCallsLambda: { top: `const w0 = (a, b) => check(a, b)
   function w(a, b) { return w0(a, b) }`, body: W },
+};
+
+// The same programs with every waiting function declared by `function` (the §13.9.6 rewrite).
+const MIGRATED = {
+  libLambda: { lib: lib(`function inner(p, h) { return verifyPassword(p, h) }
+  export function check(p, h) { return inner(p, h) }`), body: G },
+  libBlockLambda: { lib: lib(`function inner(p, h) {
+    return verifyPassword(p, h)
+  }
+  export function check(p, h) { return inner(p, h) }`), body: G },
+  libLambdaChain: { lib: lib(`function a(p, h) { return verifyPassword(p, h) }
+  function b(p, h) { return a(p, h) }
+  export function check(p, h) { return b(p, h) }`), body: G },
+  libNegationInside: { lib: lib(`function bad(p, h) { return !verifyPassword(p, h) }
+  export function check(p, h) { return !bad(p, h) }`), body: G },
+  inFile: { top: `function w(a, b) { return check(a, b) }`, body: W },
+  inFileStdlib: { imports: `import { verifyPassword } from "scrml:auth"`, top: `function w(a, b) { return verifyPassword(a, b) }`, body: W },
+  inFileTernary: { top: `function w(a, b) { return check(a, b) ? 1 : 0 }`, body: `if (w(pass, row.pw) == 0) { return "REJECTED" }
+    return "WELCOME"` },
+  // (inFileInSomeCallback's migration — `function w` called only inside a `.some` callback — is
+  // not placed on the server: g-fn-reached-only-through-lambda-not-on-server-s466, a
+  // ReferenceError 500 that fails closed. Not listed here until that gap closes.)
+};
+
+const RUN = {
   syncLambdaStaysSync: { top: `const dbl = (x) => x * 2`, body: `if (dbl(2) != 4) { return "bad" }
     ${G}` },
   // MED-1 — a regex literal holds no call (refused on dcbbd64d7 as "it calls `/[A-Z]`").
@@ -207,6 +239,26 @@ describe("S465 r6 — server shapes that must run (HIGH-1 bindings, MED-1 regex,
   }
 });
 
+describe("S465 r6 HIGH-1 shapes under S467 r10 (§13.9.6): a `const` holding a waiting function is refused", () => {
+  for (const [name, spec] of Object.entries(F4_REFUSED)) {
+    test(`${name}: E-ASYNC-FN-ESCAPES-AS-VALUE`, async () => {
+      const u = await compileShape(name, spec);
+      expect(u.errors.map((e) => e.split(":")[0])).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+      expect(u.mod).toBeUndefined();
+    }, T);
+  }
+});
+
+describe("S465 r6 HIGH-1 — the migrated (`function`-declared) forms run (executed)", () => {
+  for (const [name, spec] of Object.entries(MIGRATED)) {
+    test(`${name}: wrong → REJECTED, right → WELCOME`, async () => {
+      const u = await compileShape(name, spec);
+      expect(await callF(u, "wrong-password")).toEqual({ status: 200, body: JSON.stringify("REJECTED") });
+      expect(await callF(u, "right-password")).toEqual({ status: 200, body: JSON.stringify("WELCOME") });
+    }, T);
+  }
+});
+
 describe("S465 r6 — server shapes that must be compile errors (HIGH-1 escapes, MED-2, LOW-3)", () => {
   for (const [name, [spec, code]] of Object.entries(REFUSE)) {
     test(`${name}: ${code}`, async () => {
@@ -248,15 +300,15 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
   });
   // HIGH-1, client half — the client does not colour a function-valued binding: a client
   // use of an async-coloured one fails closed (it would test a Promise: always "Y").
-  // S466 r7 (MED-C): the client now COLOURS the binding — the call is awaited (executed
-  // in s465-await-r7.test.js: "N" when the server says false), so it compiles clean.
-  test("client code calling an async-coloured function-valued binding awaits it (r7: coloured, was refused)", () => {
+  // S466 r7 (MED-C): the client COLOURED the binding. S467 r10 (§13.9.6): the binding itself is
+  // refused; the `function`-declared form is awaited.
+  const clientH1 = (decl) => {
     const dir = mkdtempSync(join(tmpdir(), "s465-r6-clienth1-"));
     dirs.push(dir);
     writeFileSync(join(dir, "app.scrml"), `<program db="./app.db">
 \${
   server function isOk(n) { return n == 1 }
-  const w = (n) => isOk(n)
+  ${decl}
   <out> = ""
   function h() {
     @out = w(2) ? "Y" : "N"
@@ -267,11 +319,17 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
 </program>
 `);
     const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, gather: true, log: () => {} });
-    expect((r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code)).toEqual([]);
     let clientJs = "";
     for (const o of r.outputs?.values() ?? []) if (o?.clientJs) clientJs += o.clientJs;
-    expect(clientJs).toMatch(/const w = async \(n\) =>/);
-    expect(clientJs).toMatch(/await w\(2\)/);
+    return { codes: (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code), clientJs };
+  };
+  test("client: a `const` holding a waiting function is E-ASYNC-FN-ESCAPES-AS-VALUE (S467 r10)", () => {
+    expect(clientH1("const w = (n) => isOk(n)").codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  });
+  test("client code calling a `function`-declared async helper awaits it", () => {
+    const r = clientH1("function w(n) { return isOk(n) }");
+    expect(r.codes).toEqual([]);
+    expect(r.clientJs).toMatch(/await _scrml_w_\d+\(2\)/);
   });
   test("a client parameter named like an async binding is not a use of it", () => {
     const dir = mkdtempSync(join(tmpdir(), "s465-r6-clientshadow-"));
@@ -279,7 +337,7 @@ describe("S465 r6 LOW-1 / LOW-3 — client function bodies", () => {
     writeFileSync(join(dir, "app.scrml"), `<program db="./app.db">
 \${
   server function isOk(n) { return n == 1 }
-  const w = (n) => isOk(n)
+  function w(n) { return isOk(n) }
   <out> = ""
   function h() {
     const g = (w) => w + 1

@@ -49,6 +49,25 @@ import { hasTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
  * runtime. False-positives are harmless. The walker descends into every object
  * child including ExprNode fields, so any reset-expr reachable is detected.
  */
+/**
+ * Keys the presence walkers below do NOT descend into.
+ *
+ * `span` / `id` / `_scope` are metadata. `valueInitExpr` is a PARSED COPY of an
+ * `export const|let NAME = …` initializer that the builder attaches for the
+ * async-colouring classifier (codegen/fn-valued-bindings.ts, S467 r9) — no
+ * emitter lowers the client side from it (the client emits the export from
+ * `valueInit` / its raw text). Descending into the copy made a server-only
+ * value export (`export const SAME = {a:1} == {a:1}` in a module whose client
+ * chunk is empty) ship the `equality` chunk to a page that never calls it.
+ * Skipping it cannot under-include: when the export IS emitted to the client,
+ * its lowered text contains `_scrml_structural_eq(` / `_scrml_reset(`, and
+ * emit-client's post-emit reference gates (POST_EMIT_HELPER_CHUNK_GATES) add
+ * the chunk from that ground truth.
+ */
+function isSkippedPresenceKey(key: string): boolean {
+  return key === "span" || key === "id" || key === "_scope" || key === "valueInitExpr";
+}
+
 const RESET_EXPR_SENTINEL = Symbol("RESET_EXPR_PRESENT");
 function detectResetExprPresence(nodes: any[]): boolean {
   if (!Array.isArray(nodes) || nodes.length === 0) return false;
@@ -64,7 +83,7 @@ function detectResetExprPresence(nodes: any[]): boolean {
     for (const key in node) {
       // Skip span / id / pure-metadata fields. `kind` is a string and
       // skipped naturally by the object-check below.
-      if (key === "span" || key === "id" || key === "_scope") continue;
+      if (isSkippedPresenceKey(key)) continue;
       const val = node[key];
       if (Array.isArray(val)) {
         for (let i = 0; i < val.length; i++) {
@@ -107,7 +126,7 @@ function detectEqualityExprPresence(nodes: any[]): boolean {
       throw EQUALITY_EXPR_SENTINEL;
     }
     for (const key in node) {
-      if (key === "span" || key === "id" || key === "_scope") continue;
+      if (isSkippedPresenceKey(key)) continue;
       const val = node[key];
       if (Array.isArray(val)) {
         for (let i = 0; i < val.length; i++) {
@@ -175,7 +194,7 @@ function detectMarkupForStmtChunkPresence(
       throw MARKUP_FOR_STMT_SENTINEL;
     }
     for (const key in node) {
-      if (key === "span" || key === "id" || key === "_scope") continue;
+      if (isSkippedPresenceKey(key)) continue;
       const val = node[key];
       if (Array.isArray(val)) {
         for (let i = 0; i < val.length; i++) {

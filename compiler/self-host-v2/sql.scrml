@@ -195,6 +195,63 @@ ${
         return { end: -1 }
     }
 
+    // ---- a `${…}` that cannot be a bound parameter (s468 U1c fix round 1, F4) ----
+    // §8.1: "`${}` inside a SQL template SHALL be compiled to a positional bound
+    // parameter in the generated database driver call." A `${…}` written INSIDE a
+    // quoted run (`'%${q}%'`, `"${c}"`, `` `${t}` ``) or a comment cannot be one —
+    // the driver reads a placeholder there as text, so the value is silently lost
+    // (`LIKE '%?%'`). The quote / comment state is carried from run to run (a
+    // `${…}` ends a run, not a string); `slot` is the first such `${…}` (its index,
+    // -1: none), `what` names where it stands.
+    export type SlotQuote:struct = { slot: int, what: string }
+
+    export fn slotInLiteral(chunks: string[]) -> SlotQuote {
+        // state: "" code · "'" / "\"" / "`" inside that quote · "--" line comment · "/*" block comment
+        let state: string = ""
+        let ci: int = 0
+        for (const s of chunks) {
+            let i: int = 0
+            while (i < s.length) {
+                const c: string = ch(s, i)
+                if (state == "") {
+                    if (c == "'" || c == "\"" || c == "`") {
+                        state = c
+                    } else if (c == "-" && ch(s, i + 1) == "-") {
+                        state = "--"
+                        i = i + 1
+                    } else if (c == "/" && ch(s, i + 1) == "*") {
+                        state = "/*"
+                        i = i + 1
+                    }
+                } else if (state == "--") {
+                    if (c == "\n") state = ""
+                } else if (state == "/*") {
+                    if (c == "*" && ch(s, i + 1) == "/") {
+                        state = ""
+                        i = i + 1
+                    }
+                } else if (c == state) {
+                    // a doubled quote is an escaped one (`'it''s'`)
+                    if (ch(s, i + 1) == state) {
+                        i = i + 1
+                    } else {
+                        state = ""
+                    }
+                }
+                i = i + 1
+            }
+            if (ci < chunks.length - 1 && state != "") return { slot: ci, what: slotPlace(state) }
+            ci = ci + 1
+        }
+        return { slot: -1, what: "" }
+    }
+
+    fn slotPlace(state: string) -> string {
+        if (state == "'") return "a single-quoted string literal"
+        if (state == "--" || state == "/*") return "an SQL comment"
+        return "a quoted identifier"
+    }
+
     // ---- vocabulary -------------------------------------------------------------
     fn isWriteVerb(w: string) -> boolean {
         return ["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE", "INTO", "FOR", "LOCK"].indexOf(w) >= 0

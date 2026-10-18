@@ -291,9 +291,9 @@ describe("§6 — mixed precedence semantics", () => {
 // ---------------------------------------------------------------------------
 
 describe("§7 — negative control: other operators preserved", () => {
-  test("§7.1 `@a == 1` still lowers `==` to `===`", () => {
+  test("§7.1 `@a == 1` still lowers `==` (§45.4: structural — `@a` is not provably primitive)", () => {
     const result = rewriteExpr("@a == 1");
-    expect(result).toContain("===");
+    expect(result).toBe('_scrml_structural_eq(_scrml_reactive_get("a"), 1)');
   });
 
   test("§7.2 `not @x` still lowers `not` to `!`", () => {

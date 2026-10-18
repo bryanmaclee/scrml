@@ -4380,3 +4380,13 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3990] land · #1433 param-default identity follows every reference; reach set follows const bindings · @adv:g-server-function-param-default-calling-fn-returns-null-s464
 [3991] review · #1434 await r10 (F4 enforcement) — no wrong-password accept; #1435 CPS r5 (allow-list) — CLEAN; both mid-merge with main at wrap · @adv:g-imported-async-server-fn-not-awaited-s465
 [3992] file · six S467 review gaps (block-bodied !{} arm drops value HIGH; failable alias via operator MED; client-held cell trusted MED; identity via param/mutation LOW; …)
+[3993] state · S468 boot on theRog (new machine, replaces the dead ASUS); XPS USB backup restored (memory, agents, repos, XPS-only branches as refs/xps/*)
+[3994] land · #1434 await P0 r8–r10 (impl#1 enforces F4) · @adv:g-imported-async-server-fn-not-awaited-s465
+[3995] land · #1446 #1434 follow-ups — F4 shadow set scope-correct; #1435 prune test bites · @adv:dpa-023
+[3996] land · #1437 S468 hand-off rotation + maps 41af4153a→5c43c3b8e
+[3997] land · #1439 a server-only helper gets no public route (§13.4) · @adv:g-trigger5-server-only-function-helper-still-a-public-route-s464
+[3998] ruling · S468: 1c CPS split callees compose; 2b identity-as-argument refused; 2d server-only identity kind banked dpa-071 · @adv:g-cps-rule1-split-callee-placement-ruling-s468,g-param-default-identity-via-param-or-mutation-s467
+[3999] ruling · S468: merge driver; contradictory validators error; §4.17 raw wins; int = safe integer; E-SQL-SLOT-IN-LITERAL; no slot in raw; {foo} shorthand; hook sharding; CI speedup; TS exceptions E+B
+[4000] review · #1449 bootstrap U1c (server half, awaits by construction; checkCore gates emission) LAND-W-F/U · @adv:dpa-023
+[4001] review · #1450 literal-arm P0 DO-NOT-LAND (obj-literal arm escape) → fix round; #1444 DO-NOT-LAND → fix round; #1451 LAND-W-F/U → fix round · @adv:g-literal-arm-block-body-unparsed-s468
+[4002] state · S468 wrap: 11 PRs in flight, all branches checkpointed + PAUSED; landing queue #1442 #1441 #1443 #1445 #1447 #1440 #1449 #1448

@@ -26,6 +26,8 @@ export const MODULES = [
   "css.scrml",
   "names.scrml",
   "print.scrml",
+  "print-server.scrml",
+  "url.scrml",
   "check.scrml",
   "measure.scrml",
   "slice-m1/counter.core.scrml",
