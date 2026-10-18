@@ -70,3 +70,23 @@
   SCRML_SKIP_MERGE_DRIVER_INSTALL=1), run by `pretest` and by install.sh; the configured command now FAILS CLOSED
   (plain 3-way under a DRIVER UNAVAILABLE marker block, exit 1). Unit file 16 -> 24 tests, all pass. The clone
   config of THIS checkout is deliberately left unconfigured (my runs use the opt-out) until the PR lands.
+  Pre-commit gate on commit 2: 37456 pass / 0 fail.
+- 2026-10-17T23:05 BITE PROOFS (throwaway repos under ~/.cache/scrml-agent-tmp/s469-merge-driver, base = the REAL
+  docs/known-gaps.md, HIGH 264): (1) pr-a and pr-b each append a different HIGH entry at the tail + regenerate
+  counts. Plain git: exit 1, 1 marker block. With the driver: exit 0, "unioned 1 same-spot gap-entry addition(s);
+  regenerated gap-counts", both ids present once, HIGH 266, table == gapCountsSection(merged). (2) pr-b files an
+  entry inside the generated region (the masked merge would lose it): "GAP-ID SELF-CHECK FAILED — gap ids DROPPED:
+  g-proof-lost", exit 1, path unmerged. (3) driver configured, no script and no snapshot: "DRIVER UNAVAILABLE - left
+  conflicted (fail closed)", exit 1, marker block on top.
+- REAL REPLAY (scratch `--shared` clone, its own config): up/s468-cps-unbound-cluster (#1442) into up/main
+  43ad24d9e. main does NOT carry the script, so the installer's SNAPSHOT ran the driver. Plain git: exit 1, conflicts
+  in docs/FACTS.md + docs/known-gaps.md. With the driver: exit 0, 0 markers; known-gaps gap-counts regenerated, FACTS
+  provisional + pending; `--regen` ran facts.ts --write; `facts.ts --check` PASS, `state.ts` gap-counts PASS; gap ids
+  main 2134 / pr 2137 / merged 2138, 0 of the union missing. recent-sessions reads STALE on up/main ITSELF in that
+  clone (pre-existing, not the merge's).
+- 2026-10-17T23:40 PR #1454 opened. `bun run test` (opt-out set): 40150 pass / 171 skip / 56 fail. 5 of them were MINE:
+  the opt-out env var leaked into the tests' installer calls. Fixed: the tests strip it, and they now pass with it
+  set. The other 51 are in compiler/tests/browser (10 files), e2e-render-map/detector-validation and
+  unit/s457-url-scheme-runtime-guard. This diff touches no compiler code (scripts/, package.json pretest, docs,
+  this one test file). s457 passed in the pre-commit gate run of this same tree, so it is environmental or flaky and
+  was not caused by this diff. Not investigated further.

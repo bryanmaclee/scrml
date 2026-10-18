@@ -268,7 +268,10 @@ describe("end to end through `git merge`, with the config string install.sh ship
   // ⚑ Strip every GIT_* variable: under the pre-commit hook git exports GIT_INDEX_FILE (and may
   // export GIT_DIR), and a `git init`/`commit` in a temp dir that inherited them would act on the
   // REAL repository's index.
-  const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_")));
+  // SCRML_SKIP_MERGE_DRIVER_INSTALL is stripped too: a suite run with the opt-out set (so the REAL clone's
+  // config is left alone) must still exercise the installer inside these throwaway repos.
+  const cleanEnv = () =>
+    Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_") && k !== "SCRML_SKIP_MERGE_DRIVER_INSTALL"));
   const sh = (cwd, cmd, args, env) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: { ...cleanEnv(), ...env } });
 
   function repo(withScripts) {
