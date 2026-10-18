@@ -77,6 +77,7 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
+import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
 import { parseStatementText, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
@@ -4018,6 +4019,32 @@ const _ARRAY_INSERTERS: Record<string, number> = { push: 0, unshift: 0, splice: 
 function _replaceNode(o: Record<string, unknown>, next: Record<string, unknown>): void {
   for (const k of Object.keys(o)) if (k !== "span") delete o[k];
   Object.assign(o, next);
+}
+
+/** S468 — is `node` this compilation's boundary-check placeholder call? */
+function isBoundaryCheckCall(node: unknown): boolean {
+  const n = node as { kind?: string; callee?: { kind?: string; name?: unknown } } | null;
+  return !!n && n.kind === "call" && n.callee?.kind === "ident" && n.callee.name === PH_EB_CHECK()
+    && isCompilerPlaceholderName(n.callee.name);
+}
+
+/**
+ * S468 (§19.6.6) — wrap each recorded render-time `!` call in place:
+ * `check(p)` becomes `__scrml_eb_check_<token>__(check(p))`. The original call moves into the
+ * argument (a shallow copy — its children keep their identity, so a call nested in it that is
+ * also recorded is wrapped there too).
+ */
+function applyBoundaryCatchWraps(calls: Set<Record<string, unknown>>): void {
+  for (const call of calls) {
+    if (isBoundaryCheckCall(call)) continue; // never wrap twice
+    const span = call.span;
+    const original = { ...call };
+    _replaceNode(call, {
+      kind: "call",
+      callee: { kind: "ident", name: PH_EB_CHECK(), ...(span ? { span } : {}) },
+      args: [original],
+    });
+  }
 }
 
 /**
@@ -10247,6 +10274,8 @@ function annotateNodes(
   // (warn) instead of E-ERROR-002 (error) for unhandled CPS calls during the
   // deprecation cycle's stage 1 (v0.next).
   const fnCpsImplicitFailable = new Set<string>();
+  // S468 fix round 1 (F1) — functions placed on the server (collectFnErrorTypes).
+  const fnServerPlaced = new Set<string>();
 
   // S84 v0.2.4 #5-followon (Gap B.3) — stack tracking the current enclosing
   // function's return ResolvedType. Pushed on function-decl entry, popped
@@ -10489,6 +10518,14 @@ function annotateNodes(
             // exhaustive-match path unchanged. Adopters who want full
             // exhaustive matching add `!` explicitly with a custom errorType.
           }
+        }
+      }
+      // S468 fix round 1 (F1) — a server-placed function (keyword, route inference, or a
+      // CPS split): its client call returns a Promise. Read by `boundaryHandlesCall`.
+      {
+        const placed = routeMap?.functions?.get(`${filePath}::${(n.span as Span | undefined)?.start}`);
+        if ((n as { isServer?: boolean }).isServer === true || (placed && (placed.boundary === "server" || placed.cpsSplit))) {
+          fnServerPlaced.add(n.name as string);
         }
       }
       // Recurse into body and children for nested functions.
@@ -10966,6 +11003,10 @@ function annotateNodes(
   // entry: a reachable error variant with no `renders` clause is a compile error
   // only when the boundary also lacks a `fallback`.
   const errorBoundaryFallbackStack: boolean[] = [];
+  // S468 (§19.6.6) — the render-time `!` calls an `<errorBoundary>` handles. Each is wrapped in
+  // the boundary-check placeholder after the walk (`applyBoundaryCatchWraps`), so no walker of
+  // this stage sees the wrapper.
+  const boundaryCatchCalls = new Set<Record<string, unknown>>();
 
   // §19.4.3 (S440) — depth of an event-handler value's check walk. A handler
   // runs on an event, AFTER render: an enclosing `<errorBoundary>` does not
@@ -16036,28 +16077,20 @@ function annotateNodes(
     // `fallback=`. A variant with neither is a compile error — at runtime
     // it would re-propagate (§19.6.8 B3) with nothing to render.
     if (bareCallee && inErrorBoundary && fnCanFail.has(bareCallee) && !inGuarded) {
-      const hasFallback = errorBoundaryFallbackStack.length > 0
-        && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
-      if (!hasFallback) {
-        const errTypeName = fnErrorTypes.get(bareCallee);
-        const errType = errTypeName ? resolveFailableErrorType(errTypeName, typeRegistry) : undefined;
-        if (errType && errType.kind === "enum" && Array.isArray(errType.variants)) {
-          for (const v of errType.variants) {
-            // A variant with no `renders` clause and no boundary `fallback`
-            // is unrenderable inside this boundary.
-            if (!v.renders) {
-              const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
-              errors.push(new TSError(
-                "E-ERROR-005",
-                `E-ERROR-005: Error variant '${errorTypeDisplayName(errTypeName ?? "")}::${v.name}' may occur inside ` +
-                `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
-                `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
-                `'fallback' attribute to the boundary.`,
-                n.span as Span,
-              ));
-            }
-          }
-        }
+      checkBoundaryCoverage(bareCallee, n.span as Span | undefined);
+      // S468 (§19.6.6) — a RENDER-time whole-statement call (`${check(p)}`): the boundary handles
+      // it, so its result is tested at the call (see `boundaryHandlesCall`). A function body, an
+      // `on mount` effect and a handler are not render-time and keep today's answer.
+      const renderTime = failableFnStack.length === 0 && handlerCheckDepth === 0
+        && (n as Record<string, unknown>)._onMountEffect !== true;
+      const root = n.exprNode as { kind?: string; callee?: { kind?: string } } | undefined;
+      if (renderTime && fnServerPlaced.has(bareCallee)) {
+        boundaryHandlesCall({ call: null, calleeName: bareCallee, via: null, inFunction: false, inFailableFn: false, fromText: false }, n.span as Span);
+      } else if (renderTime && root && root.kind === "call" && root.callee && root.callee.kind === "ident") {
+        boundaryCatchCalls.add(root as Record<string, unknown>);
+      } else if (renderTime && !root) {
+        // Carried as text only: nothing codegen lowers can test the result — refuse (fails closed).
+        boundaryHandlesCall({ call: null, calleeName: bareCallee, via: null, inFunction: false, inFailableFn: false, fromText: true }, n.span as Span);
       }
     }
   }
@@ -16162,7 +16195,7 @@ function annotateNodes(
     // the parsers that build it (a re-parsed interpolation starts at 1:1).
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
-      if (renderTimeInBoundary && !c.inFunction) return;
+      if (renderTimeInBoundary && !c.inFunction) { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
@@ -16215,13 +16248,13 @@ function annotateNodes(
       }
       const span = (attr.span ?? value.span ?? n.span) as Span;
       const onCall = (c: FailableCallCandidate): void => {
-        if (renderTimeInBoundary && !c.inFunction) return;
+        if (renderTimeInBoundary && !c.inFunction) { boundaryHandlesCall(c, span); return; }
         reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, false);
       };
       if (value.kind === "call-ref" && typeof value.name === "string") {
         const target = resolveFailableCallee(value.name);
         if (target !== null) {
-          onCall({ call: null, calleeName: target, via: target === value.name ? null : value.name, inFunction: false, inFailableFn: false });
+          onCall({ call: null, calleeName: target, via: target === value.name ? null : value.name, inFunction: false, inFailableFn: false, fromText: false });
         }
         for (const a of (value.argExprNodes as ExprNode[] | undefined) ?? []) {
           forEachCallInValuePosition(a, "none", failableEnv, onCall);
@@ -16229,6 +16262,81 @@ function annotateNodes(
       } else if (value.kind === "expr" && value.exprNode) {
         forEachCallInValuePosition(value.exprNode as ExprNode, "none", failableEnv, onCall);
       }
+    }
+  }
+
+  /**
+   * S468 — §19.6.6: "`<errorBoundary>` SHALL catch error variants produced by any `!` function
+   * call made while RENDERING its direct or nested markup content", and such a call "SHALL NOT
+   * trigger E-ERROR-002; the boundary satisfies the handling requirement". A `!` call RETURNS its
+   * error, so the boundary handles the call only if the call's result is tested where it is made:
+   * the call is recorded here and, after the walk, wrapped in the boundary-check placeholder
+   * (`applyBoundaryCatchWraps`), which codegen lowers to `_scrml_error_boundary_check(call)` inside
+   * the boundary's catch — or refuses where no catch encloses it (emit-expr.ts).
+   *
+   * A call this compiler cannot wrap — one carried without a call node (a markup `attr=f(x)`
+   * call-ref), or found in text the AST carries (`fromText`: codegen lowers that text itself, so a
+   * wrap on the walk's own parse is never seen) — is refused with E-ERROR-002 instead of being
+   * accepted unhandled (fails closed). The boundary's E-ERROR-005 coverage check applies to every
+   * call it handles (§19.6.6), not only to a whole-statement call.
+   */
+  function boundaryHandlesCall(c: FailableCallCandidate, span: Span): void {
+    // S468 fix round 1 (F1) — §19.6.6: "A server call SHALL NOT occur at render time: in the
+    // boundary's content, as in any value position, it is E-VALUE-SERVER-CALL (§13.7), and the
+    // boundary SHALL NOT exempt it." Its client call returns a Promise, which no render-time test
+    // can read (the runtime check also refuses one — a call it cannot see as server-placed).
+    if (fnServerPlaced.has(c.calleeName)) {
+      const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
+      errors.push(new TSError(
+        "E-VALUE-SERVER-CALL",
+        `E-VALUE-SERVER-CALL: server function ${shown} is called while rendering inside an '<errorBoundary>'. ` +
+        `A server call cannot occur at render time, and the boundary does not exempt it (§13.7, §19.6.6). ` +
+        `Load the value with a '<request>' and read its failure from '<#id>.error'.`,
+        span,
+      ));
+      return;
+    }
+    if (c.call === null || c.fromText) {
+      const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled. The call is made while ` +
+        `rendering inside an '<errorBoundary>', but at this position (${c.call === null ? "a markup attribute value" : "a handler arm, match arm, template literal or loop initializer"}) ` +
+        `impl#1 cannot route its error to the boundary, so the boundary does not handle it. Handle it in place with ` +
+        `'${c.calleeName}(…) !{ | .Variant :> … }' or 'match', or bind it in a statement of the boundary's content ` +
+        `('\${ const v = ${c.calleeName}(…) }') and use 'v'.`,
+        span,
+      ));
+      return;
+    }
+    boundaryCatchCalls.add(c.call as unknown as Record<string, unknown>);
+    checkBoundaryCoverage(c.calleeName, span);
+  }
+
+  /**
+   * E-ERROR-005 (§19.6.6) — static exhaustiveness for a `!`-call an `<errorBoundary>` handles:
+   * every error variant the call can produce MUST be displayable — the variant carries a `renders`
+   * clause (§19.2) or the innermost boundary declares a `fallback=`.
+   */
+  function checkBoundaryCoverage(calleeName: string, span: Span | undefined): void {
+    const hasFallback = errorBoundaryFallbackStack.length > 0
+      && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
+    if (hasFallback) return;
+    const errTypeName = fnErrorTypes.get(calleeName);
+    const errType = errTypeName ? resolveFailableErrorType(errTypeName, typeRegistry) : undefined;
+    if (!(errType && errType.kind === "enum" && Array.isArray(errType.variants))) return;
+    for (const v of errType.variants) {
+      // A variant with no `renders` clause and no boundary `fallback` is unrenderable inside this boundary.
+      if (v.renders) continue;
+      const loc = `${span?.line ?? "?"}:${span?.col ?? "?"}`;
+      errors.push(new TSError(
+        "E-ERROR-005",
+        `E-ERROR-005: Error variant '${errorTypeDisplayName(errTypeName ?? "")}::${v.name}' may occur inside ` +
+        `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
+        `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
+        `'fallback' attribute to the boundary.`,
+        span as Span,
+      ));
     }
   }
 
@@ -17158,6 +17266,14 @@ function annotateNodes(
   // the handlers the statement walk above never sees: a `!{}` INSIDE an
   // expression, and a `match` whose scrutinee is a `?{}` query.
   _checkExpressionPositionHandlers(topNodes);
+
+  // S468 (§19.6.6) — the render-time calls an `<errorBoundary>` handles test their result at the
+  // call: wrap each in the boundary-check placeholder, in place (its parent keeps the reference).
+  // Last, so no walker of this stage sees the wrapper. Codegen lowers the placeholder inside the
+  // boundary's catch or refuses it; one that reaches an artifact is refused by the §2.2.1 gate.
+  applyBoundaryCatchWraps(boundaryCatchCalls);
+  // Codegen checks every one was lowered (codegen/index.ts `refuseUnloweredBoundaryChecks`).
+  if (boundaryCatchCalls.size > 0) (fileAST as Record<string, unknown>)._boundaryCheckCalls = [...boundaryCatchCalls];
 
   return nodeTypes;
 
@@ -28388,7 +28504,7 @@ function processFile(
     const seenE002 = new Set<string>();
     for (let i = 0; i < errors.length; i++) {
       const e = errors[i];
-      if (!e || e.code !== "E-ERROR-002") continue;
+      if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-VALUE-SERVER-CALL")) continue; // S468 r1: the boundary server-call refusal too
       const sp = e.span as Partial<Span> | undefined;
       const k = `${sp?.file ?? ""}|${sp?.start ?? ""}|${sp?.end ?? ""}|${sp?.line ?? ""}|${sp?.col ?? ""}|${e.message}`;
       if (seenE002.has(k)) { errors.splice(i, 1); i--; continue; }

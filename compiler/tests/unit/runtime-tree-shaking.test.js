@@ -267,7 +267,9 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 43 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 44 chunks", () => {
+    // 44 chunks after S468: 'boundary' (the §19.6.6 render-time `!` call check of an
+    // <errorBoundary>) ADDED, shipped only by a page that names one of its helpers.
     // 43 chunks after S462 P0 fix round 1: 'stdlib-crypto' RESTORED as a PARTIAL
     // chunk — only the members its shim labels [browser-safe] (generateToken,
     // generateUUID, hmac, safeCompare); hash / verifyHash stay server-only.
@@ -371,6 +373,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(43);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(44);
   });
 });
