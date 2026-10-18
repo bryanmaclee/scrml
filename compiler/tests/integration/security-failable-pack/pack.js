@@ -54,12 +54,17 @@ export async function loadFamilies() {
 const settle = async () => { for (let k = 0; k < 8; k++) await new Promise((r) => setTimeout(r, 0)); };
 
 /** Load the compiled page on a fresh document, click `#id`, and read `#out`. */
-async function clickAndRead(outDir, id) {
+async function clickAndRead(outDir, id, extraFiles = []) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   GlobalRegistrator.register();
   try {
     const html = readFileSync(resolve(outDir, "app.html"), "utf8");
-    const js = readFileSync(resolve(outDir, "app.client.js"), "utf8");
+    // S469 — a multi-file shape (an imported module): its client chunks load before the page's.
+    const deps = extraFiles
+      .map((f) => resolve(outDir, f.replace(/\.scrml$/, ".client.js")))
+      .filter((p) => existsSync(p))
+      .map((p) => readFileSync(p, "utf8"));
+    const js = [...deps, readFileSync(resolve(outDir, "app.client.js"), "utf8")].join("\n");
     const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     document.body.innerHTML = (m ? m[1] : html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
     // eslint-disable-next-line no-eval
@@ -133,8 +138,9 @@ export async function runShape(shape, side, dir) {
   }
 
   if (!shape.src.includes('id="wrong"')) return { cls: "UNJUDGED", detail: "no #wrong button" };
-  const wrong = await clickAndRead(out, "wrong");
-  const right = await clickAndRead(out, "right");
+  const extraNames = Object.keys(shape.extra ?? {});
+  const wrong = await clickAndRead(out, "wrong", extraNames);
+  const right = await clickAndRead(out, "right", extraNames);
   const detail = `wrong->${JSON.stringify(wrong.text)}${wrong.threw ? " (threw)" : ""} right->${JSON.stringify(right.text)}${right.threw ? " (threw)" : ""}`;
   if (wrong.text === "LOGGED IN") return { cls: "FAIL", detail };
   return { cls: right.text === "LOGGED IN" ? "PASS" : "PASS-DENY", detail };

@@ -9962,6 +9962,20 @@ function inferEnumFromQualifiedVariantInit(
  * agree: same name, same variants in order, same payload field names in order. Used to
  * decide that an imported `!` function's error enum is readable in the importing file.
  */
+function treeHasFailableMatchStamp(node: unknown, depth = 0): boolean {
+  // S469 — a `match` in this tree is stamped as a match on a failable result (the
+  // codegen-side twin is emit-control-flow.ts `hasFailableMatchStamp`).
+  if (!node || typeof node !== "object" || depth > 200) return false;
+  if (Array.isArray(node)) return node.some((x) => treeHasFailableMatchStamp(x, depth + 1));
+  const r = node as Record<string, unknown>;
+  if (r.__matchSubjectFailable === true) return true;
+  for (const [k, v] of Object.entries(r)) {
+    if (k === "span" || k === "__matchSubjectVariants") continue;
+    if (v && typeof v === "object" && treeHasFailableMatchStamp(v, depth + 1)) return true;
+  }
+  return false;
+}
+
 function sameEnumShape(a: EnumType, b: EnumType): boolean {
   if (a.name !== b.name || a.variants.length !== b.variants.length) return false;
   for (let i = 0; i < a.variants.length; i++) {
@@ -17037,7 +17051,36 @@ function annotateNodes(
         scopeChain.pop();
         const produced = errors.splice(before);
         for (const e of produced) if (e && e.code === "E-ERROR-002") errors.push(e);
-      } else {
+      }
+      // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — the walk
+      // above reads a CHECK-ONLY re-parse of the value, so the `match` stamps it applies land
+      // on a copy; codegen lowers the value's own `exprNode` (emit-html `handlerExprNode`), which
+      // was never stamped: `onclick=${ @msg = match check("wrong") { .Denied :> … _ :> … } }`
+      // compared the error object as a plain value and a wrong password logged in (the same for
+      // a one-statement braced value and an expression arrow). Stamp the tree codegen reads —
+      // the same provable-subject judgement, reports discarded (the copy walk owns them).
+      const ownExpr = value.kind === "expr" ? (value as Record<string, unknown>).exprNode : undefined;
+      if (ownExpr && typeof ownExpr === "object") {
+        scopeChain.push(`handler-stamp:${attr.name as string}`);
+        withHandlerCheckContext(() => forEachCallInValuePosition(ownExpr as ExprNode, "none", failableEnv, () => {}));
+        scopeChain.pop();
+      }
+      // FAIL CLOSED: the copy holds a match on a failable result but the tree codegen will
+      // lower carries no such stamp (no `exprNode` yet — a component body's value, whose node
+      // codegen synthesizes later): that match would compare the error as a plain value.
+      if (Array.isArray(checkStmts) && treeHasFailableMatchStamp(checkStmts)
+          && !(ownExpr && typeof ownExpr === "object" && treeHasFailableMatchStamp(ownExpr))) {
+        withHandlerCheckContext(() => {
+          errors.push(new TSError(
+            "E-ERROR-002",
+            `E-ERROR-002: a 'match' on the result of a failable function in this '${attr.name as string}' ` +
+            `handler is not handled: impl#1 cannot lower it here so that it tells the error from a plain ` +
+            `value. Move the 'match' into a function the handler calls, or catch the call with '!{}'.`,
+            (valueSpan ?? attr.span) as Span,
+          ));
+        });
+      }
+      if (!Array.isArray(checkStmts)) {
         const call = handlerValueAsBareCall(value, valueSpan);
         // Scope: the ruling covers calls to functions DECLARED `!`. A
         // CPS-implicit-failable callee (a server fn not declared `!`) is still

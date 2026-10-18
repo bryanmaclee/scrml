@@ -10,6 +10,8 @@
 //
 // Measured S468 fix round 1 (branch s468-failable-alias-and-match): 24 shapes. For comparison, the
 // same 188 shapes on base 5c43c3b8e: 63 FAIL; on the frozen review head 7ecae57eb: 47 FAIL.
+// S469 (fix round 1, agent 2): 21 of 226 — the HANDLER and SERVER_STMT entries were fixed (deleted;
+// families n11 / n12 added), only the VALUE class (ruling owed) remains.
 
 // A failable function reaches a call through a value flow the "may be a failable function" judgement
 // does not model (passed as an argument, a callback, a curried / identity-wrapped return, a parameter
@@ -17,12 +19,6 @@
 // (a failable function SHALL NOT be read as a value outside callee position) is OWED A RULING: no SPEC
 // sentence makes the read illegal (§14.3 explicitly lets a function flow PASSED), see the gap entry.
 const VALUE = "g-failable-function-used-as-value-unchecked-s468";
-// `match check(p)` (direct) in an event-handler ATTRIBUTE: the stamp that makes the lowering
-// discriminate the error is not consumed there; the error object is compared as a plain value.
-const HANDLER = "g-match-failable-subject-in-handler-attribute-not-discriminated-s468";
-// Statement-position `match check(p)` (direct) in a SERVER function: the subject is not awaited, so a
-// Promise is classified `.Ok`.
-const SERVER_STMT = "g-server-statement-match-failable-subject-unawaited-s468";
 
 export const KNOWN_FAIL = {
   "n1/alias in loop (pre)": VALUE,
@@ -46,9 +42,6 @@ export const KNOWN_FAIL = {
   "n7/closure reassign": VALUE,
   "n7/alias destructure default": VALUE,
   "n7/alias param default lambda": VALUE,
-  "n3/handler direct": HANDLER,
-  "s2/stmt direct": SERVER_STMT,
-  "s2/stmt direct paren": SERVER_STMT,
 };
 
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling

@@ -3445,6 +3445,15 @@ function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: strin
   const _matchMode: "client" | "server" = opts?.boundary === "server" ? "server" : "client";
   const _matchCtx: EmitExprContext = {
     mode: _matchMode,
+    // S469 (g-server-statement-match-failable-subject-unawaited-s468) — the async facts travel
+    // with the header, as on the `if` hop (`_ifExprCtx`): without them a statement `match
+    // check(p) { … }` in a server function emitted `const _scrml_match_N = check(p);` with no
+    // `await`, so the Promise read as `.Ok` and a wrong password logged in (200 LOGGED IN).
+    ...hostAsyncFacts(opts),
+    serverFnNames: opts?.serverFnNames ?? null,
+    serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null,
+    serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null,
+    syncPeerCalls: opts?.syncPeerCalls ?? null,
     // S462 (§19.9.9.7) — a CPS "cells" server batch records each cell write.
     ...(_matchMode === "server" && (opts as any)?.serverCellWrites ? { serverCellWrites: true } : {}),
     ...(engineCtx?.exprCtxExtras ?? {}),
@@ -4094,6 +4103,24 @@ export type SubjectVariantFields = Map<string, string[] | null>;
 /** §19.7.1 — TS stamped this match's subject as a failable-call result union. */
 export function isMatchSubjectFailable(node: any): boolean {
   return node?.__matchSubjectFailable === true;
+}
+
+/**
+ * S469 — does this expression tree hold a `match` TS stamped as a match on a failable result
+ * (`isMatchSubjectFailable`)? Such a tree must be lowered from its own nodes: a lowering that
+ * re-reads the source TEXT never sees the stamp, and compares the error object as a plain
+ * value (g-match-failable-subject-in-handler-attribute-not-discriminated-s468).
+ */
+export function hasFailableMatchStamp(node: unknown, depth = 0): boolean {
+  if (!node || typeof node !== "object" || depth > 200) return false;
+  if (Array.isArray(node)) return node.some((x) => hasFailableMatchStamp(x, depth + 1));
+  const r = node as Record<string, unknown>;
+  if (r.__matchSubjectFailable === true) return true;
+  for (const [k, v] of Object.entries(r)) {
+    if (k === "span" || k === "__matchSubjectVariants") continue;
+    if (v && typeof v === "object" && hasFailableMatchStamp(v, depth + 1)) return true;
+  }
+  return false;
 }
 /**
  * §14.10 — lower a match-arm RESULT that is, as a whole, a bare-dot payload

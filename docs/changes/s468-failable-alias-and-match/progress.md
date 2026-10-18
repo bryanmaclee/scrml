@@ -227,3 +227,32 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
 - Not covered (named in the gap entry): an imported function's RETURNED facts (`import { getF }` + `getF()(p)`, the VALUE
   class); a render-time call inside `<errorBoundary>` (imprepro imp/imp3: accepted by the rule, still LOGGED IN at run time —
   g-errorboundary-runtime-does-not-catch-returned-error-value-s467, open, separate PR).
+
+## 2026-10-17 — commit 181012c20 (imported failable; gate 37374 pass / 0 fail)
+
+## 2026-10-17 — F3 server statement match unawaited + F2 handler-attribute match (the two direct-form HIGH gaps the
+   WIP had filed open — FAIL-CLOSED direction: a wrong-password path left open is not "handled")
+- SERVER_STMT locus: codegen/emit-control-flow.ts emitMatchInline `_matchCtx` lacked the async facts the `if` hop's
+  `_ifExprCtx` carries (serverFnNames, peer aliases/dispatch objs, syncPeerCalls, hostAsyncFacts). HELD (emitted
+  `const _scrml_match_3 = check(p);`). Fix: forward them. Now `await check(p)`; s2 direct shapes PASS. Value-IIFE lowering
+  (emitMatchExpr's ctx, :3163) deliberately NOT changed: an `await` there would sit in a sync IIFE.
+- HANDLER locus: TWO READERS. TS checks a one-statement handler value on a check-only re-parse
+  (`parseHandlerStatementsForCheck`) -> stamps on a copy; codegen lowers value.exprNode (handlerExprNode) or re-reads TEXT
+  (`@cell = …` string path in emit-event-wiring Case C; emit-each `buildEachExprHandlerBody`). Probe (new pack family n11, 7
+  value forms × top/each/component/if): 14 of 28 LOGGED IN on 181012c20 — wider than the one n3 shape.
+- Fix: (1) TS also walks value.exprNode with the provable-subject judgement (stamps only, reports discarded);
+  (2) emit-event-wiring: an assign carrying the stamp takes the structured emitExprField path (`hasFailableMatchStamp`,
+  emit-control-flow.ts); (3) emit-each: such a row value is lowered from a structuredClone of its node with
+  rewriteEachScopeInExprNode (as the statement-list path); (4) FAIL CLOSED in TS: copy stamped but own tree not (component
+  body one-statement value — codegen synthesizes its node later; block-bodied arrow) -> E-ERROR-002.
+- Pack: 188 -> 226 shapes (n11 28, n12 10 imported multi-file; pack.js loads extra files' client chunks). 181012c20: FAIL 38;
+  now FAIL 21 (= the VALUE class only). known-fail.js HANDLER / SERVER_STMT entries deleted; README tables.
+- Direction: semantics-changed (one-statement handler `match` on a failable now discriminates; server statement match now
+  awaits) + newly-rejecting (component-body one-statement handler match on a failable; block-bodied arrow handler match on a
+  failable — the latter was E-CODEGEN-INVALID-LOGIC before, so only the code changes). Corpus: one handler-attribute match in
+  the corpus + adopters (non-failable subject).
+- Corpus emit differential (scripts/corpus-emit-differential.ts; base = `git archive HEAD` 181012c20, head = working tree;
+  roots examples,samples,conformance,stdlib,benchmarks; 2847 sources, 8578 artifacts): compile-failure delta 0/0,
+  diagnostic changes 0 code / 0 text, artifact set delta 0, syntax delta 0, bare server-fn sites 29/29. 167 content diffs,
+  ALL only `const _scrml_project_root = "<checkout path>"` (normalized: 0 real). The tool's "NOT A VALID COMPARISON"
+  verdict is its provenance check (an archived tree has no revision), as in the first pass.
