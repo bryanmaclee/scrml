@@ -287,3 +287,47 @@ New this round:
   artifacts differ — formatting only (product-arm blocks now structured-emitted; one `;;` empty statement
   in returned-multi-match-braced-leave-and-inner-break, the pre-existing `bodyLines.join("; ")` in
   structuredIifeArmInner). giti + flogence (113): 0 error-code differences.
+
+## 2026-10-18 — FIX ROUND 5 (S239 delta re-review of 5c795a428 = DO-NOT-LAND)
+
+**Blocker (INTRODUCED by r4), reproduced:** `const allowed = match (a, b) { (1, 2) :> { chk(pass, row.pw) }
+(_, _) :> false }` (`chk` is `! -> AuthErr`) compiled clean and answered WELCOME. Cause confirmed: r4 put the
+product block on a `match-arm-inline` as `structuredBody`; the E-ERROR-002 walk (failable-value-calls.ts
+`STATEMENT_CHILD_KEYS`, which lists `body` but not `structuredBody`) never visited it.
+
+**Fix of the class:** the product BLOCK arm is now a `match-arm-block` — `{ kind: "match-arm-block",
+productPatterns, body, payloadBindings }` — the shape every analysis already walks for a `.V {` / `_ {` block arm,
+and the field codegen emits (both multi-scrutinee lowerings read `child.body`). No analysis reads
+`structuredBody` off an AST arm any more (`structuredBody` survives only on codegen's internal `MatchArm`
+records). `payloadBindings` come from the product positions' TOKENS (`productPositionBindings`), so the scope
+checker binds `n` in `(.B(n), 2) :> { … n … }`. lint-defer's binder table gains the `match-arm-block`
+`productPatterns` row.
+
+**Walker enumeration — who reads a match arm's body, and does it see a product BLOCK now** (verified by
+execution, la5 `prodBlk*` / unit (F) / probes; "=" means it reads the product block exactly as it reads a
+`_ :> { … }` / `.V :> { … }` block):
+
+| analysis | reads | product block (r5) | evidence |
+|---|---|---|---|
+| E-ERROR-002 (failable-value-calls.ts + type-system §19 walker) | `body` (STATEMENT_CHILD_KEYS) | = yes | la5 prodBlkFailable* x9 refused E-ERROR-002; unit (F) |
+| E-ASYNC-FN-ESCAPES-AS-VALUE / F4 local-async-fns, fn-valued-bindings | statement tree | = yes | la5 prodBlkAlias, prodBlkHof refused |
+| E-VALUE-FUNCTION-STORED (value-function-stored.ts) | statement tree | = yes | la5 prodBlkObjStore refused |
+| server-call await + async colouring (codegen `_awaitMatchArmServerCalls`, emit-library-shared) | emitted body | = yes | la5 prodBlkServerCall REJECTS; client probe: `await _scrml_fetch_srv` in an async fn |
+| route inference / server reach (route-inference.ts) | statement tree | = yes | client probe: server fn reached from a client product block gets its route + fetch |
+| E-REACTIVE-003 / at-refs (server cell read) | statement tree | = yes | la5 prodBlkCellRead refused |
+| scope (type-system `match-arm-block` case, payloadBindings) | `body` | = yes | E-SCOPE-001 on an undeclared name; `n` bound (unit F) |
+| §4 statement checks (E-SWITCH-FORBIDDEN, …) | statement tree | = yes | probe: `switch` in a product block refused |
+| exhaustiveness / arity (checkMultiScrutineeMatch) | `productPatterns` (kind-agnostic) | = yes | unit + conformance suites |
+| W-MATCH-ARROW-LEGACY | every `match-arm-block` | = yes | — |
+| lint-defer binder census | `payloadBindings`, `productPatterns` | = yes (row added) | defer-binder-completeness.test.js |
+| E-DG-002 reader accounting (dependency-graph.ts) | — | = NO, same as every block arm in a function | pre-existing: g-dg-002-false-on-read-in-match-arm-block-in-fn-s469 |
+| same-file peer harvest (emit-server) | — | = NO for a `!{}`-handled failable peer in a helper's arm, product and single-scrutinee alike | pre-existing residual: g-server-match-arm-same-file-peer-call-not-defined-s465 (narrowed) |
+| meta-eval / meta-checker | `matchArmBlockToMatchArm` / `body` | = (not separately exercised) | — |
+
+- LOW nested match as a block tail (yields undefined): NOT product-specific — `1 :> { match m { _ :> { … } } }`
+  is the same on single-scrutinee arms and the whole-product `_` arm. Filed g-match-as-block-tail-yields-undefined-s469
+  (fails closed; la5/prodBlkNested PASS-DENY).
+- LOW same-file failable peer: shapes la5/prodBlkPeerHelper(+Single, +Plain) added to
+  g-server-match-arm-same-file-peer-call-not-defined-s465, status resolved -> narrowed.
+- Corpus (2847 sources incl. benchmarks, base = archive of 5c795a428): 0 newly failing / passing, 0 diagnostic
+  changes, 0 artifact content changes after root-path normalisation.

@@ -4330,6 +4330,43 @@ function matchPositionIsPatternShaped(toks) {
 }
 
 /** §18.19 — reconstruct a per-position arm-pattern's source text from tokens. */
+/**
+ * S469 r5 — the names a §18.19 product position BINDS, read from its tokens: a variant
+ * position `.V(a, b)` / `::V(a)` / `T.V(f: x)` binds `a`, `b` / `a` / `x` (a `_` discard
+ * binds nothing; a literal / wildcard / `is` position binds nothing). The scope the arm's
+ * block body is checked in (type-system `match-arm-block` → `payloadBindings`).
+ */
+function productPositionBindings(toks) {
+  const out = [];
+  let k = 0;
+  if (toks[k] && toks[k].kind === "IDENT" && toks[k + 1] && (toks[k + 1].text === "." || toks[k + 1].text === "::")) k += 1;
+  if (!(toks[k] && (toks[k].text === "." || toks[k].text === "::"))) return out;
+  k++;
+  if (!(toks[k] && toks[k].kind === "IDENT")) return out;
+  k++;
+  if (!(toks[k] && toks[k].kind === "PUNCT" && toks[k].text === "(")) return out;
+  k++;
+  let entry = [];
+  let depth = 0;
+  const flush = () => {
+    const e = entry.filter((t) => t.kind !== "COMMENT");
+    entry = [];
+    if (e.length === 1 && e[0].kind === "IDENT" && e[0].text !== "_") out.push(e[0].text);
+    else if (e.length === 3 && e[1].text === ":" && e[2].kind === "IDENT" && e[2].text !== "_") out.push(e[2].text);
+  };
+  for (; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+    if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) {
+      if (depth === 0) { flush(); break; }
+      depth--;
+    }
+    if (depth === 0 && t.kind === "PUNCT" && t.text === ",") { flush(); continue; }
+    entry.push(t);
+  }
+  return out;
+}
+
 function joinPatternTokens(toks) {
   let out = "";
   let prevWord = false;
@@ -14049,8 +14086,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // S469 r4 — a `{ … }` product-arm body is read by the SAME arm-body reader as
         // every other arm form (`parseArmBraceBody`: object-vs-block from the tokens,
         // E-MATCH-ARM-SHORTHAND-AMBIGUOUS for `{ ok }`). An object body is the arm's
-        // VALUE (`result` / `resultExpr` = the parser's object); a block is its
-        // statements (`structuredBody`), which every multi-scrutinee lowering emits.
+        // VALUE (`result` / `resultExpr` = the parser's object); a block is a
+        // `match-arm-block` (S469 r5) whose `body` every multi-scrutinee lowering emits.
         if (peek().kind === "PUNCT" && peek().text === "{") {
           consume(); // `{`
           const armBodyNodes = parseArmBraceBody();
@@ -14068,14 +14105,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               span: spanOf(startTok, peek()),
             };
           }
+          // S469 r5 — a product BLOCK arm is a `match-arm-block` whose statements are its
+          // `body`: the one shape every analysis already walks (E-ERROR-002, F4 / async,
+          // E-VALUE-FUNCTION-STORED, scope, route / server reach, DG, lints) and the one
+          // codegen emits. (r4 carried them on a `match-arm-inline` as `structuredBody`, a
+          // field the E-ERROR-002 walk never visited — a wrong password accepted.)
           return {
             id: ++counter.next,
-            kind: "match-arm-inline",
+            kind: "match-arm-block",
             test: "__product__",
             productPatterns,
+            isWildcard: false,
+            payloadBindings: prod.positions.flatMap(productPositionBindings),
             armArrow: prod.arrow.glyph,
-            result: "",
-            structuredBody: armBodyNodes,
+            body: armBodyNodes,
             span: spanOf(startTok, peek()),
           };
         }

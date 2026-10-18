@@ -37,3 +37,40 @@ export const SHAPES = {
   // E-CODEGEN-INVALID-LOGIC — a compiler-defect code — not E-ERROR-002)
   rawObjFailable: { top: CHK, body: `const n = 1\n    const o = JSON.parse(JSON.stringify(match n {\n      1 :> { ok: chk(pass, row.pw) }\n      else :> { ok: false }\n    }))\n    if (!o.ok) { return "REJECTED" }\n    return "WELCOME"` },
 };
+
+// S469 r5 — the S239 delta re-review of r4 (5c795a428): a `!` call inside a §18.19 PRODUCT-arm
+// BLOCK got no E-ERROR-002 — r4 carried the block on a `match-arm-inline` as `structuredBody`, a
+// field the E-ERROR-002 walk never visited — so the error object (truthy) let a wrong password in.
+// Now a `match-arm-block` (`body`), the shape every analysis walks: each prodBlkFailable* shape is
+// REFUSED with E-ERROR-002.
+const AUTH = `type AuthErr:enum = { Bad }\n  function chk(p, h)! -> AuthErr { if (!check(p, h)) { fail .Bad }\n    return true }`;
+const KE = `type K:enum = { A, B(n: number) }`;
+const pb = (scrut, head, body, rest = `(_, _) :> false`, kw = "const", top = AUTH) => ({
+  top,
+  body: `${scrut}\n    ${kw} allowed = match (a, b) {\n      ${head} :> ${body}\n      ${rest}\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"`,
+});
+const AB = `const a = 1\n    const b = 2`;
+Object.assign(SHAPES, {
+  prodBlkFailable: pb(AB, "(1, 2)", "{ chk(pass, row.pw) }"),
+  prodBlkFailableLet: pb(AB, "(1, 2)", "{ chk(pass, row.pw) }", `(_, _) :> false`, "let"),
+  prodBlkFailableTail: pb(AB, "(1, 2)", "{ const v = chk(pass, row.pw)\n        v }"),
+  prodBlkFailableAlt: pb(AB, "(1 | 2, 2)", "{ chk(pass, row.pw) }"),
+  prodBlkFailableStr: pb(`const a: string = name\n    const b = 1`, `("bob", 1)`, "{ chk(pass, row.pw) }"),
+  prodBlkFailableVariant: pb(`const a: K = K.B(3)\n    const b = 2`, "(.B(n), 2)", "{ chk(pass, row.pw) }", `(_, _) :> false`, "const", AUTH + "\n  " + KE),
+  prodBlkFailableColonV: pb(`const a: K = .A\n    const b = 2`, "(::A, 2)", "{ chk(pass, row.pw) }", `(_, _) :> false`, "const", AUTH + "\n  " + KE),
+  prodBlkFailableWildLast: pb(AB, "(2, 2) :> false\n      (_, _)", "{ chk(pass, row.pw) }", ``),
+  prodBlkFailableStmt: { top: AUTH, body: `${AB}\n    let allowed = false\n    match (a, b) {\n      (1, 2) :> { allowed = chk(pass, row.pw) }\n      (_, _) :> { allowed = false }\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  // a server call / a cell read inside a SERVER product block: must reject or be refused
+  prodBlkServerCall: { top: `function inner2(p, h) { return check(p, h) }`, body: `${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { const v = inner2(pass, row.pw)\n        v }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  prodBlkCellRead: { top: `<gate> = true`, body: `${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { const g = @gate\n        g && check(pass, row.pw) }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  // §13.9.6 / §13.2: an async function aliased / stored inside a product block
+  prodBlkAlias: { body: `${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { const g = check\n        g(pass, row.pw) }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  prodBlkObjStore: { body: `${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { const o = { g: check }\n        o.g(pass, row.pw) }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  prodBlkHof: { top: `function drive(cb, p, h) { if (cb(p, h)) { return true }\n    return false }\n  function never(a, b) { return false }`, body: `const y = drive(never, "x", "y")\n    ${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { drive(check, pass, row.pw) }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+  // LOW (review, pre-existing): a helper whose product block calls a same-file failable peer
+  prodBlkPeerHelper: { top: AUTH + `\n  function h(p, hh) { const a = 1\n    const b = 2\n    return match (a, b) {\n      (1, 2) :> { const r = chk(p, hh) !{ .Bad :> false }\n        r }\n      (_, _) :> false\n    } }`, body: `if (!h(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"` },
+  prodBlkPeerHelperSingle: { top: AUTH + `\n  function h(p, hh) { const a = 1\n    return match a {\n      1 :> { const r = chk(p, hh) !{ .Bad :> false }\n        r }\n      else :> false\n    } }`, body: `if (!h(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"` },
+  prodBlkPeerHelperPlain: { top: AUTH + `\n  function h(p, hh) { const r = chk(p, hh) !{ .Bad :> false }\n    return r }`, body: `if (!h(pass, row.pw)) { return "REJECTED" }\n    return "WELCOME"` },
+  // LOW (review): a nested product match inside a product block yielded undefined
+  prodBlkNested: { body: `${AB}\n    const allowed = match (a, b) {\n      (1, 2) :> { match (b, a) {\n        (_, _) :> { const v = check(pass, row.pw)\n          v }\n      } }\n      (_, _) :> false\n    }\n    if (!allowed) { return "REJECTED" }\n    return "WELCOME"` },
+});

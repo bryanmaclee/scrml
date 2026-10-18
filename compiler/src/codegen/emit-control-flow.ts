@@ -2927,16 +2927,17 @@ function emitMultiScrutineeMatch(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       const prelude = preludes.join("");
-      // S469 r4 — a `{ … }` product-arm BLOCK body arrives parsed (`structuredBody`,
-      // the parser's `parseArmBraceBody`): emitted as a structured arm, with the
-      // same leave rule as the whole-product wildcard block below.
+      // S469 r4/r5 — a `{ … }` product-arm BLOCK body arrives parsed (a `match-arm-block`
+      // whose `body` is the parser's `parseArmBraceBody` statements): emitted as a
+      // structured arm, with the same leave rule as the whole-product wildcard block below.
       let bodyEmit: string;
-      if (Array.isArray(child.structuredBody)) {
-        const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: "", structuredBody: child.structuredBody });
+      const productBlock: any[] | null = child.kind === "match-arm-block" && Array.isArray(child.body) ? child.body : null;
+      if (productBlock) {
+        const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: "", structuredBody: productBlock });
         if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
           refuseLeavingValueArm(node, leaves, opts);
         }
-        const inner = structuredIifeArmInner(child.structuredBody, opts, matchCtx);
+        const inner = structuredIifeArmInner(productBlock, opts, matchCtx);
         bodyEmit = `{ ${prelude}${inner} }`;
       } else {
         bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
@@ -3724,7 +3725,7 @@ function emitMultiScrutineeMatchStmt(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       lines.push(`${conditionIndex === 0 ? "if" : "else if"} (${condition}) {`);
-      for (const l of [...preludes, ...armBody(resultStr, Array.isArray(child.structuredBody) ? child.structuredBody : null)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      for (const l of [...preludes, ...armBody(resultStr, child.kind === "match-arm-block" && Array.isArray(child.body) ? child.body : null)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
       lines.push(`}`);
       conditionIndex++;
     } else if (isWholeWildcard) {

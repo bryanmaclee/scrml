@@ -731,4 +731,29 @@ export fn bind(ok: boolean) {
     }
     expect(m.bind(true)).toBe(4);
   });
+
+  // S469 r5 — one body, one reader: a product BLOCK arm is a `match-arm-block` whose `body`
+  // every analysis walks (r4's `structuredBody` on a `match-arm-inline` was invisible to the
+  // E-ERROR-002 walk — a wrong password accepted, security-await-pack `la5/prodBlkFailable*`).
+  test("a product block arm is a match-arm-block with its statements as `body` and its bindings", () => {
+    const arms = matchArms(`<program>\n\${\n  type K:enum = { A, B(n: number) }\n  function f(k, b) {\n    const r = match (k, b) {\n      (.B(n), 2) :> { const q = n + 1\n        q }\n      (_, _) :> 0\n    }\n    return r\n  }\n}\n</program>\n`)[0];
+    const prod = arms.find((a) => Array.isArray(a.productPatterns) && a.kind === "match-arm-block");
+    expect(prod).toBeDefined();
+    expect(Array.isArray(prod.body)).toBe(true);
+    expect(prod.body.length).toBe(2);
+    expect(prod.payloadBindings).toEqual(["n"]);
+    expect(prod.structuredBody).toBeUndefined();
+  });
+  test("a `!` call in a product block is E-ERROR-002 (decl, let, statement, `(_, _)` last)", () => {
+    const AUTH = `type AuthErr:enum = { Bad }\nexport fn chk(p: string)! -> AuthErr {\n  if (p == "") { fail .Bad }\n  return true\n}\n`;
+    for (const [name, body] of Object.entries({
+      decl: `  const v = match (a, b) {\n    (1, 2) :> { chk(p) }\n    (_, _) :> false\n  }\n  return v`,
+      letTail: `  let v = match (a, b) {\n    (1, 2) :> { const t = chk(p)\n      t }\n    (_, _) :> false\n  }\n  return v`,
+      stmt: `  let v = false\n  match (a, b) {\n    (1, 2) :> { v = chk(p) }\n    (_, _) :> { v = false }\n  }\n  return v`,
+      wildLast: `  const v = match (a, b) {\n    (2, 2) :> false\n    (_, _) :> { chk(p) }\n  }\n  return v`,
+    })) {
+      const r = compileLibAll(`prod-err002-${name}`, AUTH + `export fn g(a: int, b: int, p: string) {\n${body}\n}`);
+      expect([name, r.errorCodes.includes("E-ERROR-002")]).toEqual([name, true]);
+    }
+  });
 });
