@@ -1,0 +1,49 @@
+// acceptance/b-tapes.scrml — an append-only audit log + a stack, written in today's scrml.
+// The first human-written bootstrap acceptance program (s469-bootstrap-cli), verbatim from
+// scrml-support/docs/workability/today-scrml-distance-2026-10-18.md §3 (b). Every sequence is a
+// tape with explicit grants; `;` ends every statement. Compiled by `scrml-boot compile`
+// (scripts/scrml-boot.ts) in slice-m4/scrml-boot.test.js.
+<program>
+    type Entry:struct = { at: int, actor: string, action: string }   // fields carry no contract → fixed (§66.11.4)
+    type Frame:struct = { name: string }
+
+    <audit:Entry[free, append]=[]/>                // grows at the end only; no replace (§66.12.2 S442, §66.19.5; ⚑ O10 bracket form)
+    <stack:Frame[free, append, pop]=[]/>           // a stack (§66.12.2)
+    let <actor:string="ops"/>
+    let <tick:int=0/>
+
+    function record(action: string) {
+        @tick = @tick + 1;
+        @audit.push({ at: @tick, actor: @actor, action: action });            // end-append: granted
+    }
+    function recordBySpread(action: string) {
+        @tick = @tick + 1;
+        @audit = [...@audit, { at: @tick, actor: @actor, action: action }];   // recognized end-append shape (§66.11.2)
+    }
+    function enter(name: string) {
+        @stack.push({ name: name });
+        record("enter " + name);
+    }
+    function leave() {
+        @stack.pop();
+        record("leave");
+    }
+
+    <main>
+        <input bind:value=@actor/>
+        <button onclick=enter("a")>Enter a</button>
+        <button onclick=leave()>Leave</button>
+        <button onclick=recordBySpread("spread")>Spread</button>
+        <p>depth ${@stack.length}</p>
+        <ul>
+            <each in=@audit as e>
+                <li>${e.at} ${e.actor}: ${e.action}</li>
+            </each>
+        </ul>
+        <ol>
+            <each in=@stack as f>
+                <li>${f.name}</li>
+            </each>
+        </ol>
+    </main>
+</program>

@@ -3045,6 +3045,8 @@ There is no syntax to override a cell's render-spec at a particular render site.
 ### 6.5 Reactive Array Mutation
 
 > ⚑ **Superseded by §66.11 / §66.12 (S435)** — a sequence is immutable unless its TYPE grants edits along axes; reactive notify is permission-driven; granted in-place edits notify like any write (the DQ-2 'not guaranteed in production' posture is withdrawn for granted operations); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+>
+> ⚑ **S469:** the freely mutable `<items> = []` cell below is NOT scrml semantics. A legacy right-hand-side tape cell is `E-DECL-LEGACY-RHS`, with no transitional all-grant, and every in-place method below is a write checked against a tape's grants in every position (§66.12.4, §66.12.6). What follows describes impl#1's carried legacy divergence.
 
 
 
@@ -7175,8 +7177,10 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
 5. **Writable cells only.** The reset is a write and is checked against the cell's write contract like any
    write (§66.11: `reset(@x)` is a `replace`). `reset-on=` is legal on a cell whose contract admits that write:
    a writable (`let`) scalar; a sequence, tuple or struct whose type grants `replace`; a cell with a lifecycle
-   `(A to B)` (the reset follows §6.8.3); an engine / transition-graph cell (rule 6); a legacy-form cell (§6.2),
-   which carries the transitional all-permissions grant (§66.12.4). On a **locked** or **derived** cell
+   `(A to B)` (the reset follows §6.8.3); an engine / transition-graph cell (rule 6); a legacy-form cell (§6.2)
+   holding a scalar or a struct, which is writable through its §66.21 window. (A legacy-form cell holding a tape
+   is `E-DECL-LEGACY-RHS` in the language: there is no transitional all-permissions grant since S469, §66.12.4.
+   impl#1 accepts it as a carried legacy divergence.) On a **locked** or **derived** cell
    (`const <x>`, a §66 locked cell, a `derived=` engine) it is **E-RESET-ON-NOT-WRITABLE**.
 6. **Engine cells — allowed, checked against `rule=` (S447 3b).** On a cell that carries a transition graph
    (`<engine for=T initial=.X>`'s variable, §51.0; a §66.13.2 enum value with `rule=` state-children), the reset
@@ -26745,7 +26749,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
-| E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, placed in an object (`{ session: session }` or the shorthand `{ session }` — the same read, and either one makes the function server-placed, S469), or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
+| E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, placed in an object (`{ session: session }` or the shorthand `{ session }` — the same read, and either one makes the function server-placed, S469), or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — emitted at `compiler/src/codegen/emit-expr.ts:1716` (`emitIdent`; S469: a shorthand `{ session }` reaches it through `emitProp`), drained by emit-server.ts:generateServerJs.)** | Error |
 | E-SESSION-RESERVED-KEY | §20.5.1 | A LITERAL `session.set("csrfToken", …)` — `csrfToken` is a compiler-owned session key (the §40.2 server-authoritative CSRF synchronizer token). Writing it would let a caller pin the token to a known value and defeat the double-submit check (mass-assignment). Fix: remove the write; the compiler mints + persists the token (`userId`/`role` and preference keys remain writable). A DYNAMIC-key write with a runtime `csrfToken` key is refused at runtime (a no-op) by the emitted setter guard. **(LIVE, S266 i29e B5 — codegen emit-expr.ts:emitCall, drained by emit-server.ts:generateServerJs; runtime guard in emit-server.ts `_scrml_session_begin`.)** | Error |
 | E-SESSION-AMBIENT-SERVER | §6.6.9, §20.5 | An `@session` read (bare `@session` or `@session.<field>`) in a SERVER context: the whole body — and the parameter defaults (s466, §7.3.2) — of a wholly-server function (an SSE `server function*`, a `handle()` middleware, a function nested inside one), the server-batch statements of a CPS-split function (§19.9.9 — its client statements run in the browser, where `@session` is the §20.5 projection, and are not a server context), an `<endpoint>` arm body (§61), or the load query of a `<cell server>` declaration (§52.6.5) — in any expression position (`?{}` and template-literal interpolations, conditions, match arms, a member assignment `@session.userId = …`, an update or (logical) assignment). `@session` is the CLIENT session projection (§20.5); every server lowering of an `@name` read takes its value from the request body, so a server `@session` read was caller-controlled identity (MEASURED S449: an authenticated POST carrying `{"session":{"userId":"victim"}}` wrote a row as `victim`). Fires once per read. The message names the fix — the server's own session object, `session.<field>` (§20.5) — and states that `@session` is not read on the server. Does NOT fire when the file declares its own FILE-SCOPE `<session>` reactive cell (then `@session` is that ordinary client cell, and E-REACTIVE-003 / the §19.9.9 marshal govern it); a component-local `<session>` does not exempt a top-level server read. The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/route-inference.ts` (`detectServerAmbientSessionReads`; `detectServerAmbientSessionReadsInText` for raw text — the `<endpoint>` arm body, template literals — via the comment-, string- and template-aware segmenter), before code generation. The provenance of the CPS / file-scope / expression-position refinements: S449 review of `54e3cb542` (F1, F2, F3). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 1 (interim; what `@session` means server-side stays open) · spec:§6.6.9 ("`@session` is server-only identity and SHALL NEVER be marshalled from the client") · gap `g-session-ambient-unlowered-trust-boundary-inversion`. | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
@@ -35569,7 +35573,7 @@ ${
 - An assignment to a `const` variable SHALL be a compile error (E-ASSIGN-004), in statement position and in expression position alike. (§50.8.5)
 - A binding created without `let` SHALL be a `const` binding. The keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does; `let` is the only declaration form that produces a mutable binding. (§50.8.5)
 - A compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) whose target is a `const` binding SHALL be E-ASSIGN-004. Compound assignment is statement-only in scrml (§50.12), so this follows from the statement-form rule above. (§50.8.5)
-- Mutating a property reached through a `const` binding SHALL NOT be E-ASSIGN-004. `const` freezes the binding, not the value. (§50.8.5)
+- Mutating a property reached through a `const` binding SHALL NOT be E-ASSIGN-004. `const` freezes the binding, not the value. (§50.8.5) ⚑ For a tape this sentence is superseded: the tape's grants govern the write, in a `const` or any other binding (§66.12.6, S469; ruled for locals S440, O14).
 - An assignment expression to an undeclared identifier SHALL be a compile error (E-ASSIGN-003). (§50.8.4)
 - Assignment-as-expression to an outer-scope variable from inside a `fn` body SHALL be E-FN-003, identical to statement-form assignment. The expression form does not affect the outer-scope mutation prohibition. (§50.5.2)
 - Assignment to a `lin` variable using the expression form is not a valid consumption. It is a re-assignment and SHALL be E-LIN-004. (§50.6)
@@ -46539,7 +46543,7 @@ contracts**, and the engine is re-expressed as a `single` declaration whose fiel
 | 66.9 | `let`, locked, derived, seeded; `const` retires | §6.6 / §6.6.1 / §6.6.8 / §6.6.16 / §6.6.17 / §6.6.18 (the `const <x>` form) |
 | 66.10 | Value semantics | — (new axiom; impl#1 leaks reference semantics) |
 | 66.11 | Write contracts — the one transition axis | §6.5.1 (DQ-2 notify), §6.5.5; §14.12.1 (lifecycle as a read check only) |
-| 66.12 | Sequences à la carte — arrays and tuples | §6.5 (unconstrained arrays); the S222 no-tuple sentences (§14.11, §18.19, §59.7/§59.8) |
+| 66.12 | Sequences à la carte — arrays and tuples (the tape) | §6.5 (unconstrained arrays — and, S469, no transitional all-grant for a legacy tape cell, §66.12.4); §50.9's `const`-property-write sentence for tapes (§66.12.6); the S222 no-tuple sentences (§14.11, §18.19, §59.7/§59.8) |
 | 66.13 | Field contracts; `single`; engines | §15.13.5, §51.0.A traits 1 + 4, §51.0.K (Move 20). (§51.0.A's S178 amendment is NOT superseded — it is OPEN, O45.) |
 | 66.14 | Encapsulation (E2) | §15.11.1 `bind` props |
 | 66.15 | Components retire into declarations | §15 (component definition), §16 (slot surface, partially) |
@@ -47795,6 +47799,8 @@ One rule across sequences, tuples and structs.
 #### 66.11.5 Out of scope: local `let` rebinding
 
 Rebinding a local `let` variable (`let n = 1; n = 2`) is NOT governed by this axis; it stays under §50 (`E-ASSIGN-*`).
+For a tape-typed local see §66.12.6 rule 4 (S469): the rebinding is still judged by §50, and the tape write it
+performs is classified and checked against the tape's grants.
 
 #### 66.11.6 Lifecycles are write contracts
 
@@ -47809,6 +47815,9 @@ every granted in-place edit notifies subscribers exactly as a whole-value write 
 operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`. (This supersedes §6.5.1's
 "mutation interception is NOT guaranteed in production" posture for granted operations.)
 
+> ⚑ **Record lag:** O14 was RULED S440 in user-voice (*"take it, next Q"*: value contracts govern LOCAL values);
+> this block has not been updated. §66.12.6 (S469) applies it to tapes.
+>
 > ⚑ **OPEN (not ruled) — O14: non-cell values and §50.9.** The permissions are on the TYPE (§66.12.3), which
 > suggests the field rule of §66.11.4 applies to a struct held in a local binding too
 > (`const u: User = …; u.name = "x"` would write a fixed field). Whether it does — which reverses §50.9's
@@ -47829,7 +47838,7 @@ operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`
 > method-native reassignment (`@m = @m.insert(k, v)`). Whether a map/set cell needs a grant, and whether
 > `.insert` / `.remove` / `.add` reassignments are recognized edit shapes or `replace`s, is not ruled.
 
-### 66.12 Sequences à la carte — arrays and tuples
+### 66.12 Sequences à la carte — arrays and tuples (the tape)
 
 > **Provenance:** ruling:user-voice-scrml.md S435 · *"I want to continue on arrays vs tuples. the same thing,
 > vessels for data with constraint options."* (exploratory) · *"I accept your pushbacks. I guess I menat splce.
@@ -47838,7 +47847,8 @@ operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`
 > adding any, correct? (all must go because it is a leaky abstraction."*; S435 (#14) · *"retire, int, reverse
 > L19, bank dpa-053"* (*"positional data lives in tuples"*). Note (§66.12.4): *"transitional only"* is the PA's
 > reconciliation of bryan's *"a temporary "all""* with his *"all must go because it is a leaky abstraction"* —
-> recorded in the queue body, not bryan's words.
+> recorded in the queue body, not bryan's words. **That reconciliation is withdrawn S469** (§66.12.4): there is no
+> transitional all-grant in the language.
 > **supersedes:** §6.5's model of a reactive array as unconstrained and freely mutable; S430's opinion *"arrays
 > are mutable"* (stated as "IMO", overtaken by the S435 rulings); the S222 **no-tuple** sentences at §14.11,
 > §18.19 ("No-tuple invariant"), §59.7 and §59.8 (the language now has tuples — bracketed, per-position-typed
@@ -47949,21 +47959,53 @@ superset grant.)
 > semantics; one axis), not a grammar, so whether these tokens are the final syntax — and the token for bounded
 > length (`1..10`) — is not ruled.
 
-#### 66.12.4 There is no `any` permission
+#### 66.12.4 There is no `any` permission, and no exception
 
 **There is NO `any` / all permission in the language** — an all-grant is a leaky abstraction. A fully-mutable
 sequence is spelled with **every axis granted explicitly**. An `any` / `all` grant token is rejected
 (`E-GRANT-UNKNOWN`, §66.20).
 
-**The one exception is TRANSITIONAL:** a legacy right-hand-side cell (`<todos> = []`, §66.21) compiles with a
-temporary all-permissions grant and carries a **hard deprecation warning with clear deprecation terms**
-(`W-DECL-LEGACY-RHS`, §66.21) until `scrml fix` rewrites it. **`scrml fix` infers each legacy cell's MINIMAL
-grant from its actual writes**, so migration lands on the least permission set the program uses, not a blanket
-one — ruling:S435 (PA proposal text answered "yes", the let/const message): *"Legacy `<x> = v` cells keep the
-all-grant until `scrml fix` gives them `let`. Per your earlier ruling, it should give them only the smallest
-grant they actually use."* A new-form declaration is locked by omission.
+> **Amendment S469 — there is no exception: the transitional all-grant retires from the language.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — NO unconstrained sequence behaviour anywhere in the
+> language" — *"that wasnt just a message to your vocabulary, I want to make sure that un-constrained array
+> behaviour is not allowed at all. go ahead"* (the *"go ahead"* ratifies the PA's four-point implementation text
+> recorded in that entry: (1) the transitional grant is removed from the language; (2) impl#1 keeps legacy cells as
+> a labelled legacy divergence; (3) no position escapes the grant check; (4) whole-value writes are classified and
+> never get around the grants — points (3) and (4) are §66.12.6). Context: the entry before it, S469 *"I do not
+> want JS style arrays in scrml at all"* — the one sequence kind is the **tape** (S440, *"tape it is"*).
+> **supersedes:** S435's *"a temporary "all" with a hard deprecation warning"* (bryan's own earlier words) as
+> LANGUAGE semantics, and the paragraph that implemented it here — *"**The one exception is TRANSITIONAL:** a
+> legacy right-hand-side cell (`<todos> = []`, §66.21) compiles with a temporary all-permissions grant and carries
+> a hard deprecation warning with clear deprecation terms (`W-DECL-LEGACY-RHS`, §66.21) until `scrml fix` rewrites
+> it."* S435's other half, *"all must go because it is a leaky abstraction"*, now wins outright. The PA's
+> reconciliation *"transitional only"* (§66.12 provenance note) is withdrawn with it.
 
-> ⚑ **OPEN (not ruled) — O12: "hard deprecation … clear dep terms" vs §63.** §63.2 forbids a Stage-1
+**There is no exception.** No tape in scrml is unconstrained — not a legacy one, not a transitional one. A
+legacy right-hand-side cell whose value is a tape (`<todos> = []`, `<todos>: Todo[] = load()`, §66.21) is **not**
+a fully-mutable tape: a conforming implementation **refuses** it with **`E-DECL-LEGACY-RHS`** (§66.20, §66.21),
+and the fix-it is the `scrml fix` rewrite. **`scrml fix` infers each legacy cell's MINIMAL grant from its actual
+writes**, so migration lands on the least permission set the program uses, never a blanket one — ruling:S435 (PA
+proposal text answered "yes", the let/const message): *"Per your earlier ruling, it should give them only the
+smallest grant they actually use."* (The same S435 sentence's first half — *"Legacy `<x> = v` cells keep the
+all-grant until `scrml fix` gives them `let`"* — is superseded by S469 for tapes.) A new-form declaration is
+locked by omission.
+
+⚑ **Carried impl#1 divergence, not the language rule:** impl#1 (frozen, legacy) implements neither §66 nor this
+refusal. It accepts a legacy right-hand-side tape cell and lets every mutating method and every reassignment write
+it (§6.5). An implementation MAY accept legacy tape cells only as such a **labelled, implementation-specific
+legacy divergence** — never as scrml semantics, and never by extending it to a new-form declaration. `scrml fix`
+is the way off it: it rewrites each such cell to its minimal grant.
+
+**Scope.** S469 reaches tapes. A legacy right-hand-side cell holding a scalar or a struct keeps its §66.21 Stage-1
+treatment (`W-DECL-LEGACY-RHS`, writable, until `scrml fix` rewrites it); whether "not allowed at all" also
+retires the writable treatment of legacy STRUCT cells is ⚑ O62 (§66.22).
+
+> ⚑ **OPEN (not ruled; MOOT for tapes since S469) — O12: "hard deprecation … clear dep terms" vs §63.** Since
+> S469 there is no deprecation window for a legacy tape cell in the language — it is an error — so O12 no longer
+> concerns tapes. It lives on for impl#1's legacy path and for the non-tape legacy right-hand-side cells that
+> keep `W-DECL-LEGACY-RHS` (§66.21). The prior text follows.
+>
+> **O12: "hard deprecation … clear dep terms" vs §63.** §63.2 forbids a Stage-1
 > deprecation from naming a removal version, and §63.3 removes only at a MAJOR. How "hard" (severity above the
 > usual info-level W — §63.3 permits an optional escalation) and "clear dep terms" are realized within §63, or
 > whether §63 is amended for this case, is not ruled. §66.21 states the treatment §63 already allows. (Evidence,
@@ -47997,6 +48039,118 @@ sequence whose positions carry `:Type` and an optional default, **in the Q3 `:Ty
 > not grammar; whether this is the tuple-type spelling everywhere (function parameter / return, struct field,
 > attribute), and how it relates to the typed-literal form above, is not ruled (§18.19's `fn f() -> (A, B)`
 > remains illegal — parentheses are not tuples).
+
+#### 66.12.6 No position escapes the grants (S469)
+
+> **Amendment S469 — a tape's grants govern it in every position, from every source, under every spelling.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — NO unconstrained sequence behaviour anywhere in the
+> language" — *"that wasnt just a message to your vocabulary, I want to make sure that un-constrained array
+> behaviour is not allowed at all. go ahead"*, ratifying the PA's implementation points (3) *"No position escapes
+> the grant check. That covers locals, parameters, returns, struct fields, tuple positions and values arriving from
+> host JS. A sequence coming in from the host (an `asIs`/JS value) must be given a tape type with explicit grants,
+> or it is immutable. Mutating host methods (`push`, `splice`, `sort`, `reverse`, `fill`, `copyWithin`, index
+> writes, `length =`) are checked against the grants like any other write. An ungranted one is
+> E-WRITE-NOT-GRANTED."* and (4) *"Spread-rebuild and other whole-value writes are classified as edits or a
+> `replace` (§66.11.2, O37 = certify). They never get around the grants."* Locals: ruling:user-voice-scrml.md S440
+> "dpa-052 Q2 (O14) = value contracts govern LOCAL values" — *"take it, next Q"* (*"a local is immutable by
+> omission (`r.push(x)` on an ungranted local is E-WRITE-NOT-GRANTED)"*).
+> **supersedes:** for tapes, the S440 O14 ruling's condition (b) *"host / `asIs` values are OUT of scope (the
+> contract covers scrml struct and tape types only)"*. A sequence arriving from the host is now in scope (rule 2).
+> For structs, (b) is untouched. Also §50.9's *"Mutating a property reached through a `const` binding SHALL NOT be
+> E-ASSIGN-004. `const` freezes the binding, not the value."* as it applies to a tape. The S440 O14 ruling already
+> superseded it, but that ruling's SPEC text has not landed: the ⚑ O14 block at §66.11.7 still reads OPEN.
+
+The rules of §66.12.1–§66.12.4 are not a property of cells. **A tape is immutable unless its TYPE grants the
+write, wherever the tape is held, wherever it came from, and however the write is spelled.**
+
+1. **Every position.** A tape's grants govern every write to it, in each position that can hold one:
+   - a **cell** or a **declaration field** (§66.11, §66.13);
+   - a **struct field** whose type is a tape (§66.11.4: the field's tape type carries its grants);
+   - a **tuple position** whose type is a tape (the position's lifecycle, §66.12.5, governs replacing that
+     position; the tape's own grants govern edits of the tape in it);
+   - a **local binding**: `let`, `const`, or the keywordless binding (§50.8.5) (ruled S440, O14);
+   - a **function parameter**: the callee can do only what its parameter type grants (§66.12.3);
+   - a **return value**: what the caller holds carries the return type's grants. A return type that names no
+     grant returns an immutable tape.
+
+   **Inference never invents a grant.** An un-annotated binding (`let xs = []`, `const ys = load()`) holds a tape
+   whose inferred type carries no grants, so it is immutable. To mutate it, write the grants in its type.
+
+2. **Values from the host.** A sequence that arrives from host JavaScript carries **no grants**. That covers the
+   result of a host function or method (`Object.keys(o)`, `s.split(",")`, `JSON.parse(text)`), a value out of a
+   `_{ }` foreign slice (§23), and an `asIs` value (§14.7). It becomes mutable only by being given a **tape type
+   that names its grants**: a typed binding, a parameter, a cell, or the narrowing of an `asIs` value that §14.7
+   already requires. Until then it is **immutable**, and a mutating operation on it (rule 3) is
+   `E-WRITE-NOT-GRANTED`. An `asIs` value does not become mutable by having no type. The compiler cannot show
+   that an un-narrowed `asIs` value is not a tape, so the rule-3 operations on one are refused *(derived: the
+   conservative reading of point (3); not separately ruled)*. Code INSIDE a `_{ }` slice is host code and is not
+   checked. A tape handed OUT to host code is ⚑ O64 (§66.22).
+
+3. **Mutating host methods are writes.** Every in-place mutation is classified onto the §66.12.2 axes and checked
+   against the target's grants, exactly as a whole-value write is (§66.11.2). An ungranted one is
+   **`E-WRITE-NOT-GRANTED`** (§66.20). One that would break a length bound or a per-position type is
+   `E-WRITE-INVARIANT` (§66.20).
+
+   | In-place operation | Classified as | Granted by |
+   |---|---|---|
+   | `xs.push(…)` | grow at the end | `append` (or `insert`) |
+   | `xs.pop()` | shrink at the end | `pop` (or `remove`) |
+   | `xs.unshift(…)` | grow at the front | `prepend` (or `insert`) |
+   | `xs.shift()` | shrink at the front | `shift` (or `remove`) |
+   | `xs.splice(i, n, …items)` | its removals a shrink-anywhere, its insertions a grow-anywhere (§66.12.2) | `remove` and/or `insert`, as it uses them |
+   | `xs[i] = v`, `xs.sort(…)`, `xs.reverse()`, `xs.fill(…)`, `xs.copyWithin(…)` | position writes | `writable` |
+   | `xs.length = n` | a shrink at the end | `pop` (or `remove`) |
+
+   An index write at or past the end, and a `length =` write that lengthens, would create a position that holds
+   no value. scrml has no `undefined` (§42.1), so such a write breaks the per-position type:
+   `E-WRITE-INVARIANT`. Any other in-place mutation the compiler cannot classify is a `replace` (§66.11.2). (The
+   rows apply the §66.12.2 axes to the host's mutating set. The grant tokens are ruled S442; the bracket form is
+   still ⚑ O10.)
+
+4. **Whole-value writes never bypass the grants.** A whole-value write to a tape, at ANY of the rule-1
+   positions, is classified by the §66.11.2 edit classifier. It is a recognized reassignment shape
+   (`xs = [...xs, e]` is an end-append, `xs = xs.filter(…)` a shrink-anywhere, `xs = xs.map(…)` a position
+   write, `xs = xs.slice(1)` a shrink at the front), a certified helper's result (O37 = (c), §66.12.3), or else a
+   `replace`. It is then checked against the grants. **No spelling reaches a write the grants refuse.**
+   Spread-rebuild, a non-mutating chain written back, a helper's result and a round trip through the host all land
+   on the same check. For a local, rebinding a tape-typed name IS such a write. §66.11.5 still decides whether the
+   name may be rebound (§50, `E-ASSIGN-*`); this rule decides whether the tape write it performs is granted.
+   Whether a local `let` gives a tape `replace` is ⚑ O63 (§66.22).
+
+```scrml
+type Entry:struct = { at: number, actor: string, action: string }
+
+function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {   // ⚑ O10: bracket form
+    log.push(e)                                    // end-append: granted by the parameter type
+    // log.pop()                                   → E-WRITE-NOT-GRANTED (shrink at the end; only `append`)
+    // log.shift()                                 → E-WRITE-NOT-GRANTED (shrink at the front)
+    return log
+}
+
+function names(o: asIs) -> string[] {
+    const keys = Object.keys(o)                    // from the host: no grants, so immutable
+    // keys.sort()                                 → E-WRITE-NOT-GRANTED (position writes; nothing granted)
+    return keys.toSorted()                         // non-mutating: always allowed (§66.12.1)
+}
+
+function one(n: int) -> int[] {
+    let out = []                                   // inferred: no grants, so immutable
+    // out.push(n)                                 → E-WRITE-NOT-GRANTED (write `out: int[free, append]`)
+    return [n]
+}
+```
+
+> ⚑ **OPEN (not ruled) — O63: does a local `let` give a tape `replace`?** Rule 4 makes rebinding a tape-typed
+> local a whole-value write. If `let` on a local conferred `replace`, every `let` local tape could reach every
+> edit through a replace (§66.11.3): a broad grant by keyword. For cells, O3 = (c) already says `let` on a
+> sequence is an error (`E-GRANT-LET-ON-SEQUENCE`: write `replace` in the type's grants). Whether that rule
+> reaches locals is not ruled. Under it, a local tape's grants live only in its type, and `let` only makes the
+> NAME rebindable. Lean (not a ruling): yes, O3's rule reaches locals, so one spelling governs every position.
+
+> ⚑ **OPEN (not ruled) — O64: a tape handed OUT to host code.** A tape passed to a host function, or read inside
+> a `_{ }` foreign slice, can be mutated there, and no grant check reaches it. Value semantics (§66.10) makes the
+> host's copy a snapshot only if the implementation copies at the boundary. Whether the boundary copies (or
+> freezes) a tape whose type does not grant the host's writes, or whether such a call is refused, is not ruled.
 
 ### 66.13 Field contracts, `single`, and engines (Q6 = (a))
 
@@ -48767,7 +48921,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place host-method mutation — `push`, `splice`, `sort`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -48846,6 +49000,13 @@ Both: **Nominal on impl#1** (impl#1 emits the legacy codes); **the bootstrap emi
 `W-COMPONENT-CONST-DEPRECATED`, `W-ENGINE-ELEMENT-DEPRECATED`, `W-POSITIONAL-STRUCT-DEPRECATED`,
 `W-THEME-BODY-DEPRECATED`, and their `E-` twins).
 
+> **Amendment S469 — `E-DECL-LEGACY-RHS` is in force for a tape cell.** It is no longer only reserved: a
+> right-hand-side cell holding a tape is `E-DECL-LEGACY-RHS` now, because there is no transitional all-grant
+> (§66.12.4). For scalar and struct cells it stays the reserved Stage-3 twin of `W-DECL-LEGACY-RHS` (§66.21).
+> **Nominal / spec-ahead — not yet emitted** (impl#1 accepts the legacy tape cell as a carried divergence; the
+> bootstrap does not emit it yet). **Provenance:** ruling:user-voice-scrml.md S469 — *"I want to make sure that
+> un-constrained array behaviour is not allowed at all. go ahead"*.
+
 **Codes that retire with their form** (live through the §63 window; they stop firing at Stage 3 because the
 form they police no longer parses): `E-CELL-RENDER-SPEC-NOT-BINDABLE` and `E-DECL-RHS-INTERP-WRAPPED` (the
 right-hand-side form); `E-COMPONENT-010` / `-011` / `-012` / `-013` / `-014` (the `props={…}` block and `bind`
@@ -48855,13 +49016,14 @@ props); `E-ENGINE-VAR-DUPLICATE` and the §51.0.C auto-naming surface (the `<eng
 
 Every retired form below goes through the §63 stage machine — Stage 1 (SOFT-DEPRECATED): the form **parses
 identically**, a `W-` lint fires at every site naming the canonical form + `scrml fix` + this section, and a
-**reserved `E-`** is named — **except** the render-by-tag rewrite, which was ruled SAME-ARC. No removal version is
+**reserved `E-`** is named — **except** the render-by-tag rewrite, which was ruled SAME-ARC, and a right-hand-side
+cell holding a tape, which is `E-DECL-LEGACY-RHS` with no window (S469, §66.12.4). No removal version is
 named (§63.2); scheduling is a later §62 version event (§63.3), gated on a verified-landed `scrml fix` rule
 (§63.4).
 
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
-| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12); the cell carries the **transitional all-permissions grant** (§66.12.4) | `E-DECL-LEGACY-RHS` | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written **and its initializer reads no cell** → locked `<x:T=v/>`; a written scalar, **or a never-written scalar whose initializer reads a cell** → `let <x:T=v/>` (S447 position, §66.2.5; amended S449 — below); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
+| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12), **for a cell holding a scalar or a struct only**. **A cell holding a tape has NO Stage-1 window (S469, §66.12.4):** there is no transitional all-permissions grant, and the cell is `E-DECL-LEGACY-RHS` at once (impl#1 accepts it as a carried, labelled legacy divergence, §66.12.4) | `E-DECL-LEGACY-RHS` (reserved for scalar / struct cells; **in force now** for a tape cell) | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written **and its initializer reads no cell** → locked `<x:T=v/>`; a written scalar, **or a never-written scalar whose initializer reads a cell** → `let <x:T=v/>` (S447 position, §66.2.5; amended S449 — below); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
 | `const <x> = expr` (top level and in-compound) | `W-CONST-CELL-DEPRECATED` | `E-CONST-CELL-DEPRECATED` | `<x:T=(expr)/>` — the locked declaration; derived exactly when `expr` reads cells (§66.9). (`W-CONST-AT-DEPRECATED` for `const @name` is unchanged.) |
 | Component `const X = <root props={…}>…</>` | `W-COMPONENT-CONST-DEPRECATED` | `E-COMPONENT-CONST-DEPRECATED` | `props={a: T, b?: T, c: T = d}` → typed attributes with inline defaults; the root element → the `renders` clause; `${...}` children → `<slot/>`; `bind` props → `export let <f:T=v/>` CHILD fields (§66.4 rule 6, S447). **Owed (S435):** count the component files the codemod cannot rewrite mechanically (snippet slots, lambda slot-fill — ⚑ O9); those stay soft until a rule or a designer-card waiver covers them (§63.4). |
 | `<engine for=T initial=.X …>` | `W-ENGINE-ELEMENT-DEPRECATED` | `E-ENGINE-ELEMENT-DEPRECATED` | `<engine for=T initial=.X>` → `<t:T=.X single>` with state-children carried verbatim (⚑ O52: how state-children fit the marker, and whether their `:`-shorthand bodies survive). The rule covers only what §66.13 rules; the rest of the §51.0 surface waits on ⚑ O5, so the rule is partial and the form cannot be scheduled (§63.4) until it is complete. |
@@ -48906,9 +49068,9 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
 | O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens, the bounded-length token (`1..10`). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
-| O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
+| O12 (MOOT for tapes, S469) | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). S469: a legacy tape cell is an error with no window, so O12 no longer concerns tapes; it remains for impl#1's legacy path and for scalar / struct legacy cells. |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
-| O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). |
+| O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). **Record lag:** ruled S440 in user-voice (*"take it, next Q"* — value contracts govern LOCAL values); that text has not landed at §66.11.7. §66.12.6 (S469) states it for tapes. |
 | O15 | §66.18 | Whether `<each … as (k, v)>` (§59.8, built on §14.11) survives the Tier-3 retirement. |
 | O16 | §66.12.5 | Whether the tuple-type annotation in the answered one-axis text (`[:number, :number]`) is the spelling in every type position. |
 | O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
@@ -48941,6 +49103,9 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 | O61 (S447) | §66.2.5 | Which bodies besides a program body and a declaration body are ITEM positions for `let <x/>` / `export <x/>` — a `<page>` body (same §40.8 default-logic mode as `<program>`), a `<theme>` body (token declarations only, §66.17). |
+| O62 (S469) | §66.12.4, §66.21 | Whether S469's "not allowed at all" also retires the writable Stage-1 treatment of a legacy right-hand-side STRUCT cell (its fields writable without contracts), or reaches tapes only. |
+| O63 (S469) | §66.12.6 | Whether a local `let` gives a tape `replace`, or O3's rule (`let` on a sequence is an error; write `replace` in the type) reaches locals (lean: it reaches locals). |
+| O64 (S469) | §66.12.6 | A tape handed OUT to host code (a host call, a `_{ }` slice): copy or freeze at the boundary, or refuse the call. |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O58~~ RULED S437 = (b) | §66.11.3 | How sub-field contracts bind a GENUINE replace (a non-spread value, `reset`, a server reload). RULED (b): a genuine replace is AUTHORITATIVE and does not have to satisfy sub-field contracts (`reset` = the declared initial state; a reload = the server's state); the spread shape `@x = { ...@x, f: v }` stays a checked field edit. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O59~~ RULED S437 = PA lean | §66.7.6 | When conditional and `<each>`-row instances get their records, and how construction is ordered. RULED: at mount, fresh on each remount; construction in document order after the cells it reads; use-site initializers are the one sanctioned user code at construction. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |

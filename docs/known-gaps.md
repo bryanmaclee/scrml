@@ -31,10 +31,22 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 661 | 6 |
+| MED | 663 | 6 |
 | LOW | 438 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-type-params-attempt-garbage-cascade-s469 — a generics attempt (`function id<T>(x: T) -> T { return x }`) gets an unrelated-looking cascade in BOTH compilers: impl#1 reports `E-SCOPE-001` on a later binding (`a` undeclared) plus `E-MARKUP-STATEMENT-NOT-RENDERED` on the `<T>`; the bootstrap reports 11 diagnostics; nothing mentions type parameters — `NEW S469; MED; open`
+
+<!-- @gap id=g-type-params-attempt-garbage-cascade-s469 sev=MED status=open locus=compiler/src(impl#1 logic parser — `<T>` after a function name is read as a markup opener)+compiler/self-host-v2(bootstrap parser — `E-PARSE-EXPECTED: expected '(', found '<'` then a type/param cascade) prov=dpa:dpa-074(§5.5 probes p1 + p2; Fork 9 "BOTH compilers get a targeted diagnostic now");empirical:S469(impl#1 re-executed on a74a32eca) -->
+
+Probe (dpa-074 §5.5 p1): `function id<T>(x: T) -> T { return x }` then `const a: int = id(3)` and `<p>${a}</p>`. impl#1 (re-executed S469 on `a74a32eca`): `E-SCOPE-001` "Undeclared identifier `a`" at the `${a}` read, plus `E-MARKUP-STATEMENT-NOT-RENDERED` pointing at the `<T>` (line 3 col 14). The function declaration itself draws `I-FN-PROMOTABLE` and `W-DEAD-FUNCTION`, so the adopter is told to promote a function the compiler did not parse as written. The bootstrap (per §5.5): `E-PARSE-EXPECTED: expected '(', found '<'`, `E-TYPE-UNKNOWN 'T'` ×2, 4× `E-BOOTSTRAP-UNSUPPORTED` (unannotated parameter), 2× `E-BOOTSTRAP-REDECLARE` parameter … — 11 in all. `type Box<T>:struct = { v: T }` (p2) cascades the same way in both. Owed (dpa-074 Fork 9, ruled S469): one targeted diagnostic in each compiler, at the `<` of the binder, saying type parameters are not yet supported — impl#1 under an impl#1-labelled code (dpa-072 Fork 1 row 0 / RP5), the bootstrap as `E-BOOTSTRAP-UNSUPPORTED` "type parameters arrive with …" until it builds pole B (after the function-types slice + dpa-072 RP1). On `type X<T>`, the message should say data types stay monomorphic (dpa-074 Fork 2). The diagnostic suppresses the cascade.
+
+### g-inline-type-predicate-lt-lexed-as-tag-opener-s469 — a `<` inside an inline type predicate (`type len: integer(> 1 && < 50)`) in a `<program>` body is lexed as a TAG OPENER: on bryan's first attempt the result is `E-CTX-003: Unclosed '50'` + `E-CTX-003: Unclosed 'program'` + `W-PROGRAM-001: No <program> root element found` — on a file whose first line is `<program>`; nothing names the predicate — `NEW S469; MED; open`
+
+<!-- @gap id=g-inline-type-predicate-lt-lexed-as-tag-opener-s469 sev=MED status=open locus=compiler/src(impl#1 block splitter / markup tokenizer — `< 50` inside a `type …: T(…)` predicate in the default-logic `<program>` body read as an element opener) prov=friction:scrml-support/docs/workability/friction-log.md(2026-10-18 second pass, item 8);empirical:S469(re-executed on a74a32eca) -->
+
+Reproduced S469 on `a74a32eca` with `bun compiler/bin/scrml.js compile tryit/attempt.scrml --output-dir <tmp>` (`scrml/tryit/attempt.scrml`, line 11 `type len: integer(> 1 && < 50)` at `<program>` body level): exactly `W-PROGRAM-001` + `E-CTX-003 Unclosed '50'` + `E-CTX-003 Unclosed 'program'`, three diagnostics, none at line 11. A minimal file (`<program>`, the same `type` line, `const n: len = 10`, `<p>${n}</p>`, `</program>`) shows the same misread with a different cascade: `W-WHITESPACE-001` "Opener `< 50>`", `E-CTX-001` "'</p>' tries to close '<50>'", `E-UNQUOTED-DISPLAY-TEXT` on `( > 1 &&`, `E-SCOPE-001` on `n`. The same predicate inside an explicit `${ … }` block compiles clean, so the defect is in how the default-logic `<program>` body finds markup openers, not in the predicate grammar. Same family as the generics `<` hazard (dpa-074 RP-A, Fork 5). Fix direction: inside a `type` declaration's predicate parentheses (and any open `(`), a `<` followed by whitespace or a digit is an operator, never an opener; at minimum, a `<`-then-digit opener should be refused at its own site with a message naming the comparison, so the cascade never reaches `<program>`.
 
 ### g-server-fn-pattern-param-peer-drops-bindings-s468 — a server-placed function with a destructuring parameter (`function g({ ok = 1 }) { return ok }`) is emitted wrong on both server paths: the route handler writes `const [object Object] = _scrml_body[{…AST JSON…}]` and the in-process peer writes `async function g(_scrml_arg_0) { return ok; }` — `NEW S468 (filed; pre-existing); MED; open (refused, fails closed — by accident)`
 
