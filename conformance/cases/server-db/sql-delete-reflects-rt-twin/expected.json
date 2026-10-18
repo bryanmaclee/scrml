@@ -1,0 +1,61 @@
+{
+  "id": "server-db-sql-delete-reflects-rt-twin",
+  "description": "A DELETE then a COUNT on a real engine (RUNTIME, sqlEngine:\"real\"): 2 rows remain. The legacy `<remaining> = not` cell (a `{n} | not`, which the §66 opener cannot type yet) is an int cell here; the asserted count is the case's.",
+  "language-version": "1.0",
+  "spec": "§8.5",
+  "source-test": "conformance/cases/server-db/sql-delete-reflects-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-delete-reflects-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the §66 twin generator cannot type — O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. XFAIL on impl#1: it does not parse the §66 opener (`let <x:T=v/>`, `<x:T[replace]=(v)/>`) — the opener half of the carried gap named below (the precedent: control-flow/if-chain-program-first-true-rt); impl#1's own run of the same program is pinned by the legacy case.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "tasks": [
+        {
+          "id": 1,
+          "title": "a"
+        },
+        {
+          "id": 2,
+          "title": "b"
+        },
+        {
+          "id": 3,
+          "title": "c"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#del"
+      },
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#count"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "remaining": 2
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=1",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

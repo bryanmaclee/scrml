@@ -800,3 +800,34 @@ Change `docs/changes/s449-bootstrap-no-write-formulas/` (BRIEF + progress, with 
   (14 new `reactive/no-write-*` cases, executed by the bootstrap in value-positions.test.js).
 - **Owed when they land** (they are value positions): §6.8.1 `default=`, multi-statement `${ }` in markup, Tier-0
   `for … lift`, display-text `${ }`, `<match on=>`.
+
+---
+
+# s468 — U1c: the server half of the server boundary (the S467 §13 gate, print-server, the server runtime)
+
+Change `docs/changes/s468-bootstrap-u1c/` (BRIEF + progress: governing sentences, readings for veto, measurements).
+Design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §3(a), §4, §5 and the
+BINDING §13 amendment (S467) — "the server half awaits by construction".
+
+- **Core** — `Expr.Query(q)` (a `?{}` is a Suspend's `on`; `Failable.FSql` removed: a query is `Suspend(o, Query(q),
+  [Attempt(FSettled(o)) …])` — "Suspend waits, Attempt inspects" on both sides); `ServerFn.waits`.
+- **analyze** — one summary dimension `swaits` (a function waits when it runs on the server: its own `?{}`, closed over
+  calls); the suspension plan covers SERVER bodies (`SQuery`, `SLocal`) with the client's position table; §8.2
+  deduplication on the syntax tree (`sqlParamKey`).
+- **lower** — server waits as Suspends; server-side bodies through the continuation pass (no Return tail).
+- **check** — C-S8s (a server function `waits` ⟺ it holds a Suspend; a call of a waiting function only as a Suspend's
+  `on`), C-SQL2, C-S7 / C-E2 over a Query and a `!` ServerFn callee, C12 (a server body is a continuation owner).
+- **print** — server mode: `await` printed at a Suspend AND NOWHERE ELSE (Join/Jump flattened); the client artifact omits
+  a function only server functions reach. **print-server.scrml** (new) — `manifest`, the shared route tables, frozen SQL
+  text, `createServer(host$)` with injected connections.
+- **Runtime** — `slice-m1/runtime/server-runtime.js` (new): connection, query (bound values; a driver error is a
+  `SqlError` value), route / server (§39.2.3 double-submit CSRF, strict decode → 400, 200 / 204 / the §19.9.1
+  envelope with the §19.9.2 status, a fixed 500; a complete response on every path). `runtime.js call`: the CSRF
+  header + one retry on a planted token.
+- **Gates** — slice-m4 + `server-artifact.test.js` (66), `server-runtime.test.js` (10), `server-await-pack.test.js` (the
+  424-shape impl#1 pack through the bootstrap: 424 refused at compile time, 0 accept a wrong password); the
+  bootstrap-expressible await probes (31: 25 PASS, 6 refused). The counter executes `serverDb` cases against the
+  bootstrap's own server artifact (`scripts/bootstrap-conformance.ts` `serverFetch`).
+- **Not built (refused, fail closed)** — a waiting ambient function's server-side copy; the conditional positions
+  (`&&`/`||` right operand, ternary branch, arm, `defer` body, lambda) for a server wait; `<schema>`; body split (U1d);
+  transactions (U1e).

@@ -131,7 +131,7 @@ describe("S3 — C12 widened: a Suspend / Jump at the tail of a client owner's c
     const at = fnOf(c, "save").body.stmts[0].data.then.stmts[0];
     const rec = fnOf(c, "recount").body.stmts[0];
     at.data.arms[0].body.stmts = [structuredClone(rec)];
-    expect(issues(c, "C12").join("\n")).toContain("outside a client owner's continuation");
+    expect(issues(c, "C12").join("\n")).toContain("outside a continuation owner's tail");
   });
 
   test("bite: a Join not followed by the If that ends its block", () => {
@@ -149,10 +149,22 @@ describe("S3 — C12 widened: a Suspend / Jump at the tail of a client owner's c
     expect(issues(c, "C12").join("\n")).toContain("not the Join of an enclosing If");
   });
 
-  test("bite: a Suspend in a server function", () => {
+  // s468 (U1c): a server function's waits ARE Suspends now (the S467 §13 gate) — but never a
+  // CLIENT call of a server function (C-S1: a ServerCall touches client state), and never
+  // anywhere but a block's tail (C12).
+  test("bite: a CLIENT call (a Suspend on a ServerCall) in a server function", () => {
     const c = core();
     const sf = c.server.find((s) => s.sym.hint === "wordCount");
     sf.body.stmts.push(structuredClone(fnOf(c, "recount").body.stmts[0]));
-    expect(mods.check.checkCore(c).join("\n")).toContain("server function wordCount() suspends");
+    expect(mods.check.checkCore(c).join("\n")).toContain("C-S1: server function wordCount() makes a client call of a server function");
+  });
+
+  test("bite: a server function's Suspend that is not the last statement of its block (C12)", () => {
+    const c = core();
+    const sf = c.server.find((s) => s.sym.hint === "wordCount");
+    const sus = sf.body.stmts.findIndex((x) => x.variant === "Suspend");
+    expect(sus).toBeGreaterThanOrEqual(0);
+    sf.body.stmts.splice(sus + 1, 0, st("Return", { e: st("Lit", { lit: "Absent" }) }));
+    expect(issues(c, "C12").join("\n")).toContain("server function wordCount() is not the last statement");
   });
 });
