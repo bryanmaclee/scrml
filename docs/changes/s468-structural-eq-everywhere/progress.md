@@ -48,3 +48,54 @@
   the §45.4 form (each pinned reference/loose equality on a non-provably-primitive operand).
 
 - 2026-10-17T16:45:55 FIX ROUND 1 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-af1f3d3dba749a434 on s468-structural-eq-everywhere @ 149e62ad5 (S239 review: fix F1, F2, F4; file F3/F5 as gaps).
+- 2026-10-17 FIX ROUND 1 — reproduced on 149e62ad5 (executed, happy-dom, reviewer harness `probes/run.mjs`):
+  F1 `p6.scrml` `#b` -> "ne" (expected "eq"); emitted `!_scrml_structural_eq(_scrml_cs_reactive_get("a") /* is it, ? */ != _scrml_cs_reactive_get("b"))`.
+  F2 `lib/models.scrml` compiled + imported -> `TypeError: makeTag() is not a function` (emitted `export const TAG = makeTag()⏎  (typeof LABEL === "string") && …`).
+  F4 `p2.scrml` click `#dialog` -> "close" (expected "stay"). F3 `p8.scrml` -> "false/false" for equal structs (fn + handler; same `===` emission on base 5c43c3b8e).
+- Locus F1 HELD: `renderEq` `gap.indexOf(n.operator)`. Fix: `splitAtOperator` tokenizes the gap with acorn's `tokenizer` (comments skipped);
+  the operator TOKEN is the split; left text ends at the last token before it, right text starts at the first token after it
+  (comments in the gap are dropped — a kept `//` comment at the end of the left text would swallow `, right)`). Rule 7: the gap
+  is tokenized by the JS tokenizer, not searched as text. A token miss (internal inconsistency) -> the same fallback as unparsed text.
+- Locus F2 HELD: `(${left} === ${right})`. Fix: node-for-node swap `${left} === ${right}` (`===`/`!==` share `==`/`!=`'s
+  precedence + associativity). Other new-text sites: the structural form starts with `_scrml_structural_eq(` or `!` — an
+  identifier / prefix-only `!` never continues the previous line under ASI; the three callers (rewrite.ts Pass 18,
+  emit-each.ts rewriteIterValueExpr, emit-library.ts verbatim block) pass the result through with no wrapping. No other `(` added.
+- Locus F4 HELD: `_scrml_structural_eq` struct branch read any object by own enumerable keys. Governing sentences, §45.2:
+  "Primitives (number, string, boolean): always comparable with `==`. / Structs: comparable if all fields are comparable. Deep
+  structural (recursive field-by-field). / Enums: comparable. … / Maps (§59): comparable." and "**`asIs` values**: `==` generates
+  `===` in JS output with compiler warning W-EQ-001." §45.6: "There is no identity comparison operator in scrml." So the values
+  `==` compares structurally are primitives / structs / enums / maps; a DOM node, an Event, a host-class instance is not one, and
+  §45.2 gives such an (`asIs`) value `===`. Fix: after the built-in value-class branches, an object that is not an array, host
+  Map/Set, or Error and whose prototype is not null / a realm's Object.prototype (realm-safe: proto's proto is null — the
+  runtime's existing plain-record test, cf. `_scrml_deep_set_copy`) returns false (identity already ruled out by `a === b`).
+  Applies to the server inline copy (same text, sliced). Checked: bun:sqlite rows (`all()`/`get()`), JSON.parse, structuredClone
+  results are plain records — server-side struct comparisons keep structural semantics.
+- Direction: F1 semantics-changed (wrong polarity -> correct); F2 inert in meaning (removes a runtime crash; no paren-related
+  precedence change); F4 semantics-changed (non-value host objects: own-key comparison -> identity; scrml values unchanged).
+  Not newly-accepting / newly-rejecting (compile outcomes unchanged — see differential).
+- Tests (executed): unit `s468-string-equality-lowering.test.js` (+9 F1/F2 tests; 4 primitive-form expectations unwrapped),
+  NEW unit `s468-structural-eq-host-identity.test.js` (client + server copies; DOM/Event/host-class identity, struct/enum/map/
+  array/Date/Map/Set/Error/foreign-realm/null-proto unchanged), integration `s468-structural-eq-everywhere.test.js` (+3:
+  library ASI load, p6 comment shapes in happy-dom, p2 backdrop in happy-dom; library PRIM expectation unwrapped),
+  `equality-semantics.test.js` §11 expectation unwrapped. All 18 new/changed assertions FAIL on frozen 149e62ad5 (verified on
+  an archive of it). The 11 originally touched test files + host-identity + giti-036 + s440 + map/HAMT + tree-shaking +
+  server-eq-helper-import + md suites: 0 fail.
+- Pre-commit gate (unit+integration+conformance, --bail): 9ce4f84ba 37265 tests 0 fail; aaae4cb2f 37277 0 fail;
+  da39a0370 37280 0 fail. md.js regenerated (`gen-md-shim --check` current).
+- security-await-pack classify (archive of 149e62ad5 + round-1 source): PASS 249 / PASS-REFUSED 136 / PASS-500 20 /
+  PASS-DENY 8 / UNJUDGED 1 / FAIL 10 — identical per-shape to the frozen head and to base (0 changed, 0 new FAIL).
+- Corpus differential (roots examples,samples,conformance,stdlib,ext; 2953 sources; reviewer base manifest 5c43c3b8e vs
+  round-1 head): 0 compile-outcome changes, 0 diagnostic changes, effective syntax delta 0. Fix-round delta measured directly
+  (frozen-head artifacts vs round-1 artifacts, every file, path/hash-normalised): 260 changed files = 245 hunks of the F4
+  helper block (runtime files + server/library inline copies) + 4 paren-wrap removals (callback-prop-absence-safe-forms
+  `if((null) === null)`, 27-type-derived-table `if (… .length === … .length)`, giti status `${it.name === "_private" ? …}`,
+  gauntlet-r10-vue-datatable `if (typeof av === "number")`) + path noise (ext/giti relative imports name the checkout dir) +
+  3 content-hashed chunk filenames renamed. 0 other changes. So the base->head real hunks are the frozen head's set minus
+  the paren-wrap form, plus the F4 helper text.
+- Gaps: resolved gap's wording corrected (not "structural everywhere" — F3 still open); filed (open, MED):
+  g-eq-primitive-by-member-name-s468 (F3), g-eq-001-misses-number-vs-string-s468, g-each-attr-word-form-and-invalid-logic-s468,
+  g-eq-asis-operands-structural-s468, g-eq-server-raw-text-loose-eq-s468. Each re-executed; all pre-existing on base.
+- Observation, not filed (unchanged by this branch): reviewer p1 `#b3` `e.target == e.currentTarget` on a button click reads
+  "diff-node" on both 149e62ad5 and round 1 — handlers are delegated, so currentTarget is not the button.
+- Push note: each push of an existing ref re-runs the full suite locally (~12-20 min); the first round-1 push was blocked by the
+  FACTS currency gate after the suite (FACTS regenerated in the docs commit). Round-1 code + docs commits pushed together.
