@@ -305,6 +305,13 @@ export interface FunctionRoute {
    * standard server-fn path would otherwise generate.
    */
   isChannelWsHandler?: boolean;
+  /**
+   * s468-trigger5-helper-route (§13.4): true for a server-boundary function that
+   * server functions call and that no client code references. It has no HTTP
+   * route and no client fetch stub (`generatedRouteName` is null); emit-server
+   * emits only its in-process peer callable. See `markServerCallersOnly`.
+   */
+  serverCallersOnly?: boolean;
 }
 
 /** A page route entry derived from file-based routing. */
@@ -1487,6 +1494,31 @@ function makeFunctionNodeId(filePath: string, fnNode: FunctionDeclNode): string 
 }
 
 
+// Identifier-like tokens of a text. Used over AST STRING fields (raw expression
+// text the AST keeps unparsed: `?{}` bodies, test bodies, component raw, `bodyRaw`),
+// where no structured tree exists to walk — Rule 7 justification. Callers use it
+// only where over-collection is the safe direction.
+const IDENT_TOKEN_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+function identTokensOf(text: string, out: Set<string>): void {
+  IDENT_TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = IDENT_TOKEN_RE.exec(text)) !== null) out.add(m[0]);
+}
+
+// Every identifier-like token in a subtree (all string fields, any depth).
+function collectSubtreeIdentTokens(node: unknown, out: Set<string>, seen: Set<unknown>): void {
+  if (node === null || node === undefined) return;
+  if (typeof node === "string") { identTokensOf(node, out); return; }
+  if (typeof node !== "object") return;
+  if (seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) { for (const c of node) collectSubtreeIdentTokens(c, out, seen); return; }
+  for (const key of Object.keys(node as object)) {
+    if (key === "span") continue;
+    collectSubtreeIdentTokens((node as Record<string, unknown>)[key], out, seen);
+  }
+}
+
 /**
  * s464-pure-fn-placement — decide which bundle(s) carry each plain pure `fn`.
  *
@@ -1520,25 +1552,8 @@ function computePureFnSidePlacement(
   serverHelperIds: Set<string>,
   clientSkipIds: Set<string>,
 ): void {
-  const IDENT_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
-  const tokensOf = (text: string, out: Set<string>): void => {
-    IDENT_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = IDENT_RE.exec(text)) !== null) out.add(m[0]);
-  };
-  // Every identifier-like token in a subtree (all string fields, any depth).
-  const collectTokens = (node: unknown, out: Set<string>, seen: Set<unknown>): void => {
-    if (node === null || node === undefined) return;
-    if (typeof node === "string") { tokensOf(node, out); return; }
-    if (typeof node !== "object") return;
-    if (seen.has(node)) return;
-    seen.add(node);
-    if (Array.isArray(node)) { for (const c of node) collectTokens(c, out, seen); return; }
-    for (const key of Object.keys(node as object)) {
-      if (key === "span") continue;
-      collectTokens((node as Record<string, unknown>)[key], out, seen);
-    }
-  };
+  const tokensOf = identTokensOf;
+  const collectTokens = collectSubtreeIdentTokens;
 
   for (const fileAST of files) {
     const filePath = fileAST.filePath;
@@ -1664,6 +1679,136 @@ function computePureFnSidePlacement(
     for (const id of serverReached) {
       serverHelperIds.add(id);
       if (!clientReached.has(id)) clientSkipIds.add(id);
+    }
+  }
+}
+
+/**
+ * s468-trigger5-helper-route — §13.4: "The callee SHALL NOT generate an
+ * additional HTTP route when called from a server-escalated caller", and only
+ * "if … function B is also referenced from client code" does B get a
+ * "fetch-based route handler (used by client call sites of B)".
+ *
+ * Marks the server-boundary functions that need no route: called by a
+ * server-placed function in their own file, and named nowhere a client could
+ * reach them from. For each, `generatedRouteName` becomes null and
+ * `serverCallersOnly` true — emit-server emits only the in-process peer callable
+ * the server callers already use, and emit-functions emits no fetch stub. Before
+ * this pass every server-boundary function was a public `POST /_scrml/…`
+ * endpoint, so a helper promoted by Trigger 5 (or one with a `?{}` of its own)
+ * could be called directly with any arguments, skipping its callers' checks.
+ *
+ * A route is KEPT (the old behaviour) unless every one of these holds:
+ *   - boundary "server", no CPS split (its client half calls its own batches),
+ *     not an SSE generator, not an `onserver:*` handler, not a function declared
+ *     in a `<channel>` body (emit-server does not emit those as peers);
+ *   - no explicit `server` annotation, `route=` or `method=` (an author-declared
+ *     endpoint — §12.6 treats these as endpoint declarations);
+ *   - not exported (another file's client code may call it);
+ *   - every parameter a plain identifier (see the check below);
+ *   - at least one same-file server-boundary caller, direct or through a
+ *     first-class reference (the §13.4 condition — a function nobody calls is
+ *     not this case);
+ *   - its name is not an identifier token anywhere in the file a client can
+ *     reach: markup, top-level logic, client function bodies, a CPS-split
+ *     function's client statements and parameters, cell initializers,
+ *     `<endpoint>` arms, tests (comments excepted). Token-based (see
+ *     `identTokensOf`) so a reference in raw text counts; over-collection only
+ *     keeps a route, which is the old behaviour.
+ */
+function markServerCallersOnly(
+  files: FileAST[],
+  functions: Map<string, FunctionRoute>,
+  analysisMap: Map<string, AnalysisRecord>,
+  callerMaps: Array<Map<string, Set<string>>>,
+  perFileChannelFnMap: Map<string, Map<string, string>>,
+): void {
+  for (const fileAST of files) {
+    const filePath = fileAST.filePath;
+    const nodes: unknown[] =
+      (fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : [])) ?? [];
+    const fileExportedNames = new Set<string>();
+    const fileExps = (fileAST.exports ?? ((fileAST as any).ast ? (fileAST as any).ast.exports : [])) as
+      Array<{ exportedName: string | null }> | undefined;
+    for (const exp of fileExps ?? []) if (exp && exp.exportedName) fileExportedNames.add(exp.exportedName);
+    const channelFns = perFileChannelFnMap.get(filePath);
+
+    const candidates = new Map<string, FunctionRoute>(); // fnNodeId -> route
+    for (const [fnNodeId, record] of analysisMap) {
+      if (record.filePath !== filePath) continue;
+      const route = functions.get(fnNodeId);
+      if (!route || route.boundary !== "server") continue;
+      if (route.cpsSplit || route.isSSE || route.isChannelWsHandler) continue;
+      if (route.explicitRoute || route.explicitMethod) continue;
+      if (route.escalationReasons.some((r) => r.kind === "explicit-annotation")) continue;
+      const fn = record.fnNode as any;
+      const name = fn.name;
+      if (typeof name !== "string" || !name) continue;
+      if (fileExportedNames.has(name) || fn.exported === true || fn.fromExport === true) continue;
+      if (channelFns && channelFns.has(name)) continue;
+      // Every parameter a plain identifier. The peer callable binds plain names
+      // only; a destructuring or rest parameter is not lowered by either server
+      // path, and today only the route handler's invalid output refuses it
+      // (g-server-fn-pattern-param-peer-drops-bindings-s468) — keep that refusal.
+      const params: unknown[] = Array.isArray(fn.params) ? fn.params : [];
+      if (!params.every((p) => {
+        const pn = typeof p === "string" ? p.split(":")[0].trim() : (p as { name?: unknown } | null)?.name;
+        return typeof pn === "string" && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(pn);
+      })) continue;
+      let hasServerCaller = false;
+      for (const callerMap of callerMaps) {
+        for (const callerId of callerMap.get(fnNodeId) ?? []) {
+          if (callerId === fnNodeId) continue;
+          if (analysisMap.get(callerId)?.filePath !== filePath) continue;
+          if (functions.get(callerId)?.boundary === "server") { hasServerCaller = true; break; }
+        }
+        if (hasServerCaller) break;
+      }
+      if (!hasServerCaller) continue;
+      candidates.set(fnNodeId, route);
+    }
+    if (candidates.size === 0) continue;
+
+    // Every token a client could reach: the whole file except the bodies of
+    // functions placed wholly off the client.
+    const clientTokens = new Set<string>();
+    const walkClient = (node: unknown, seen: Set<unknown>): void => {
+      if (node === null || node === undefined) return;
+      if (typeof node === "string") { identTokensOf(node, clientTokens); return; }
+      if (typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) { for (const c of node) walkClient(c, seen); return; }
+      const n = node as Record<string, unknown>;
+      if (n.kind === "comment") return; // a comment cannot reach a route
+      if (n.kind === "function-decl") {
+        const sp = n.span as { start?: unknown } | undefined;
+        const route = sp && typeof sp.start === "number" ? functions.get(`${filePath}::${sp.start}`) : undefined;
+        if (route && route.boundary !== "client" && !route.cpsSplit) return;
+        // A CPS-split function's server statements run only in its server batch;
+        // the client wrapper replaces them with the batch call (emit-functions.ts
+        // CPS wrapper), so their tokens are server-side. Everything else — the
+        // client statements, parameters and their defaults — is client.
+        if (route && route.cpsSplit && Array.isArray(n.body)) {
+          const serverIdx = new Set(route.cpsSplit.serverStmtIndices);
+          (n.body as unknown[]).forEach((stmt, i) => { if (!serverIdx.has(i)) walkClient(stmt, seen); });
+          for (const key of Object.keys(n)) {
+            if (key === "span" || key === "body") continue;
+            walkClient(n[key], seen);
+          }
+          return;
+        }
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span") continue;
+        walkClient(n[key], seen);
+      }
+    };
+    walkClient(nodes, new Set());
+
+    for (const [, route] of candidates) {
+      if (route.functionName && clientTokens.has(route.functionName)) continue;
+      route.generatedRouteName = null;
+      route.serverCallersOnly = true;
     }
   }
 }
@@ -9888,6 +10033,10 @@ export function runRI(input: RIInput): RIOutput {
       }
     }
   }
+
+  // s468-trigger5-helper-route — §13.4: a server function only server code calls
+  // gets no HTTP route and no client fetch stub.
+  markServerCallersOnly(files, functions, analysisMap, [inverseCallerMap, indirectInverseCallerMap], perFileChannelFnMap);
 
   // s464-pure-fn-placement — the bundle(s) each plain pure `fn` lands in.
   const pureFnServerHelperIds = new Set<string>();
