@@ -256,3 +256,13 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
   diagnostic changes 0 code / 0 text, artifact set delta 0, syntax delta 0, bare server-fn sites 29/29. 167 content diffs,
   ALL only `const _scrml_project_root = "<checkout path>"` (normalized: 0 real). The tool's "NOT A VALID COMPARISON"
   verdict is its provenance check (an archived tree has no revision), as in the first pass.
+
+## 2026-10-18 — commits a2512f0be (handler/server match; gate 37412 / 0) + f65210c8d (FACTS + gap-counts regen; gate 37412 / 0)
+- Full local suite `bun run test` (compiler/tests/, 1768 files): 40111 pass / 171 skip / 17 todo / 51 fail. Base 623e69f8b
+  (git archive + pretest, same machine): 39768 pass / 56 fail. The branch's 51 failing tests are a strict SUBSET of base's
+  (comm: 0 new; base's extra 3 are TodoMVC dist-missing artifacts of the archive). 48 are browser tests failing in isolation
+  on base too (browser-transitions, navigate soft/cross-chunk, engine-gated-each, engine-message-dispatch, …); 3 pass alone.
+- Pushed: origin/s469-failable-r1 (new ref) and origin/s468-failable-alias-and-match 623e69f8b..f65210c8d (fast-forward).
+- OPEN after this round: g-failable-function-used-as-value-unchecked-s468 (HIGH, 21 pack shapes, RULING OWED — options in
+  "RULING REQUEST" above); g-errorboundary-runtime-does-not-catch-returned-error-value-s467 (render-time call in a boundary,
+  incl. through an import — separate gap/PR).
