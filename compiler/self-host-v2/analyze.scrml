@@ -5864,6 +5864,9 @@ ${
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
         if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
+        // s469 review: a SEQUENCE is never made writable by `let` (E-GRANT-LET-ON-SEQUENCE,
+        // §66.12.3) — its whole-value write is the `replace` grant in its type
+        if (seqElem(f.ty) is given) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a sequence whose type grants nothing — this whole-value write needs `replace` in the type's grants (`T[replace]`, §66.12.2); its grants live on the type, and `let` on a sequence is E-GRANT-LET-ON-SEQUENCE (§66.12.3)") }
         return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let <" + f.sym.hint + "…/>` (`let` before the `<`, §66.2.5) to make it writable (§66.9, §66.11).") }
     }
 

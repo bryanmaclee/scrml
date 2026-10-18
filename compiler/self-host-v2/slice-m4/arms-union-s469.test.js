@@ -164,6 +164,17 @@ describe("dpa-073 F2 — comma-separated arm lists", () => {
     expect(codes(P(fn("f", `        @out = load("x") !{ , .NotFound(m) :> "nf", .Timeout :> "to" }`)))).toEqual(["E-PARSE-ARM"]);
   });
 
+  // review r1 (LOW, pinned, not built): armEnd's depth-0 `,` counts TOKEN brackets
+  // only, so a markup arm body's text `,` would end the arm. Markup arm bodies are
+  // not in the bootstrap — today this fails LOUDLY (no artifact). When they land,
+  // this pin breaks and the arm-boundary rule must learn markup depth.
+  test("PIN: a markup arm body with a `,` in its text fails loudly today (no artifact)", () => {
+    const src = P(fn("f", `        @out = match load("a") { .Ok(v) :> <b>ok, yes</b>, .NotFound(m) :> "nf", .Timeout :> "to", }`));
+    const r = run(src);
+    expect(r.core == null).toBe(true);
+    expect(r.diags.map((d) => d.code)).toContain("E-PARSE-UNCLOSED");
+  });
+
   test("engine message arms (§51.0.S.2.3) are not in the bootstrap: refused by name, comma or newline list — never read as display text", () => {
     const eng = (arms) =>
       `<program>\n    type Phase:enum = { Idle, Loading }\n    type Msg:enum = { Go, Stop }\n    <phase:Phase=.Idle single accepts=Msg>\n        <Idle rule=.Loading>\n${arms}\n            "Ready"\n        </>\n        <Loading rule=.Idle : "Loading">\n    </>\n    <main><p><*phase/></p></main>\n</program>\n`;
@@ -246,9 +257,64 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     }
   });
 
-  test("`|` with no member after it is E-PARSE-TYPE; `||` is not a union", () => {
-    expect(codes(prog(`    <g:Guess | =.Yes/>`))).toContain("E-PARSE-TYPE");
+  test("`|` with no member after it is E-PARSE-TYPE only — no second union refusal; `||` is not a union", () => {
+    for (const d of [`    <g:Guess | =.Yes/>`, `    <g:Guess |=.Yes/>`, `    <g:Guess | />`]) {
+      const c = codes(prog(d));
+      expect(c).toContain("E-PARSE-TYPE");
+      expect(c).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
+    }
     expect(codes(prog(`    <g:Guess || not=.Yes/>`))).toContain("E-PARSE-TAG");
+  });
+
+  // review r1 (HIGH): the grant checks do not see through `| not`, so a tape inside an
+  // opener union would escape its grants (`.shift()` / `= []` / `= not` compiled clean).
+  // Every union with a sequence member is refused, with or without `let`, either order,
+  // own type or typed attribute.
+  describe("a tape in an opener union is refused (its grants would not be checked)", () => {
+    const E = `    type Entry:struct = { at: int, actor: string, action: string }`;
+    const writes = `    function bad() { @audit.shift(); }\n    function bad2() { @audit = []; }\n    function bad3() { @audit = not; }`;
+    const tape = (decl) => `<program>\n${E}\n${decl}\n${writes}\n    <main><button onclick=bad()>x</button><p>x</p></main>\n</program>\n`;
+    const refused = (src) => {
+      const r = run(src);
+      expect(r.core == null).toBe(true);
+      const d = r.diags.find((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("a sequence in a union type"));
+      expect(d).toBeDefined();
+      return r;
+    };
+    test("the review repro: `let <audit:Entry[free, append] | not=[]/>`", () => {
+      refused(tape(`    let <audit:Entry[free, append] | not=[]/>`));
+    });
+    test("without `let`: `<audit:Entry[free, append] | not=[]/>`", () => {
+      refused(tape(`    <audit:Entry[free, append] | not=[]/>`));
+    });
+    test("`not` first: `<audit:not | Entry[free, append]=[]/>`, and unspaced `Entry[append]|not`", () => {
+      refused(tape(`    <audit:not | Entry[free, append]=[]/>`));
+      refused(tape(`    <audit:Entry[append]|not=[]/>`));
+    });
+    test("`Guess | not[free]` (a `not` tape) is refused too", () => {
+      const c = codes(prog(`    <g:Guess | not[free]=.Yes/>`));
+      expect(c).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    });
+    test("a tape member in a typed attribute (`export <box xs:int[append] | not=[]/>`)", () => {
+      const lib = `export <box xs:int[append] | not=[]/>\nrenders <p>x</p>\n`;
+      const r = frontEnd(mods, [{ path: "lib.scrml", src: lib }, { path: "app.scrml", src: `<program>\n    import { box } from "./lib.scrml"\n    <main><box/></main>\n</program>\n` }]);
+      expect(r.core == null).toBe(true);
+      expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("a sequence in a union type"))).toBe(true);
+    });
+    test("a tape alone is unaffected: the granted append compiles, an ungranted shift is E-WRITE-NOT-GRANTED", () => {
+      const ok = `<program>\n${E}\n    <audit:Entry[free, append]=[]/>\n    function add() { @audit.push({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
+      expect(codes(ok)).toEqual([]);
+      expect(codes(ok.replace("function add()", "function bad() { @audit.shift(); }\n    function add()"))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    });
+    test("the locked-tape message never advises `let` (E-GRANT-LET-ON-SEQUENCE): it names `replace` in the grants", () => {
+      const src = `<program>\n${E}\n    <ent:Entry[]=[]/>\n    function w() { @ent = []; }\n    <main><p>x</p></main>\n</program>\n`;
+      const d = diag(src, "E-WRITE-NOT-GRANTED");
+      expect(d).toBeDefined();
+      expect(d.message).not.toContain("Declare it `let");
+      expect(d.message).toContain("`replace`");
+      // and `let` there is indeed refused, so the old advice pointed at an error
+      expect(codes(src.replace("<ent:", "let <ent:"))).toContain("E-GRANT-LET-ON-SEQUENCE");
+    });
   });
 
   test("`<g:Guess | not=Guess.Yes/>` — the union parses; the qualified value is an opener expression to parenthesize (§66.2.4), and `(Guess.Yes)` is a member access the bootstrap does not have yet", () => {
