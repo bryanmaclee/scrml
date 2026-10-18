@@ -61,6 +61,31 @@ Security follow-up to #1464 (§19.4.3, E-ERROR-002). Base: `origin/s469-value-fo
   **0 diagnostic changes, 0 newly refused.**
 - Gate (pre-commit hook): 37711 pass / 0 fail after the last code commit.
 
+## Fix round 2 (#1470 review: FIX)
+- **F1 (HIGH, my reader).** `parseLiftTag` folds `attr=${…}` + every later attribute into one value
+  (`raw` = `${"wrong"}onclick={…}`, `exprNode` = ident `$`); the lifted-markup reader read only
+  `exprNode`. Now an attribute's `raw` is ALSO read to refuse unless it parses as one whole
+  expression (`readsWhole`: no parse error, no lost trailing content). A span-length check was
+  tried first and dropped: the `!{}` placeholder rewrite changes text lengths, so it over-refused
+  handled forms. Filed the mangling: `g-lift-tag-attr-value-swallows-attrs-s469`.
+- **F2 (HIGH).** `return-stmt.markupNode` read by the lifted-markup reader. Generalized:
+  `STMT_KEY_CLASSES` classifies every object-valued key of a non-declaration statement (corpus
+  probe over 2983 files found exactly `return-stmt.markupNode`, `return-stmt.sqlNode`,
+  `match-arm-inline.leaveStmt`, `for-stmt.variable`, `bare-expr._refusalSpan`; `foreignNode` and
+  `productPatterns` added from the builder scan); an unclassified one is read `opaque`. Test D now
+  enumerates statement-literal keys too.
+- **F3 (HIGH).** `for-stmt.variable` → `patternDefaults` (through the same classification).
+- **F4 (MED regression).** A §18.19 multi-scrutinee head's `headerExpr` (comma-sequence hatch) is
+  skipped when `scrutineeExprs` carries it; the direct / alias / second-scrutinee shapes execute
+  correctly again. The security-failable pack runner itself was not in my scratch; I re-ran the
+  three shapes in the login harness (wrong rejected, right logged in).
+- Filed (not fixed): F5 `g-sql-interpolation-failable-call-unchecked-s469` (MED),
+  F6 `g-mentioned-names-comment-tokens-false-refusal-s469` (LOW). F2+F3 recorded resolved as
+  `g-statement-structure-keys-unread-by-failable-walk-s469`.
+- A braced handler holding `check(x) !{ … }` in LIFTED markup does not lower on #1464's head
+  (E-CODEGEN-INVALID-LOGIC); the r2 right-password test uses a handler calling a handling function.
+- r2 measured: gate 37729 pass / 0 fail; corpus 2858 sources vs #1464 head — 0 diagnostic changes.
+
 ## Not closed (observed, out of scope)
 - `${ for (x of [@pw]) { const v = check(x) !{ | _ :> false }⏎ lift <li>${v ? …}</li> } }` renders
   "rejected" for the RIGHT password too (same on #1464 head) — fails closed, a codegen/reactivity
