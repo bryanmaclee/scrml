@@ -299,6 +299,10 @@ export const DECL_KEY_CLASSES: ReadonlyMap<string, "expr" | "value-form" | "stat
   ["structuralForm", "inert"], ["stateType", "inert"], ["auth", "inert"], ["reactivity", "inert"],
   ["implicitNotLifecycle", "inert"], ["_isReactiveAssign", "inert"], ["_bareAssign", "inert"],
   ["refinementNoRhsBase", "inert"], ["serverAuthorityTable", "inert"], ["boundNames", "inert"],
+  // S469 follow-up — flags written outside a declaration literal: on each statement of an arrow
+  // handler's parameter prelude (`const e = _scrml_event`, ast-builder `parseArrowHandlerStatements`,
+  // through a loop variable), and on the cells `<formFor>` synthesizes (codegen — after this walk).
+  ["_handlerParamPrelude", "inert"], ["_cellKind", "inert"], ["_formForSynth", "inert"],
   ["sqlNode", "opaque"], ["foreignNode", "opaque"], ["renderSpec", "opaque"], ["validators", "opaque"],
 ] as const);
 
@@ -971,7 +975,15 @@ class Walker {
     const isDecl = DECL_KINDS.has(kind);
     const seen = new Set<object>();
     for (const key of Object.keys(st)) {
-      if (STATEMENT_CHILD_KEYS.has(key) || SPECIAL_KEYS.has(key) || key.startsWith("__")) continue;
+      if (STATEMENT_CHILD_KEYS.has(key) || SPECIAL_KEYS.has(key)) continue;
+      if (key.startsWith("__")) {
+        // A pass's annotation (`__inGuardedContext`, `__enclosingFnCanFail`, …): a flag or a
+        // name. S469 follow-up — one that holds a STRUCTURE is not a flag this walk knows: it is
+        // read conservatively (fails closed), never skipped.
+        const v = st[key];
+        if (v !== null && typeof v === "object") this.opaque(v, scope, fn);
+        continue;
+      }
       if (isDecl && this.declKey(st, key, scope, fn, handling)) continue;
       const v = st[key];
       const roots = Array.isArray(v) ? v : [v];
