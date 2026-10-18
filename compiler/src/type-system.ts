@@ -72,7 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
-import { armStatements } from "./arm-body-statements.ts";
+import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
@@ -21675,21 +21675,15 @@ function stampArmResultVariants(matchNode: ASTNodeLike, positionType: ResolvedTy
  * parsed by the AST builder as ONE `bare-expr` whose raw `expr` is the brace
  * interior), return a synthetic `bare-expr` carrying the whole object as its
  * exprNode, so scope/type checks see the object's VALUES and never its keys.
- * Mirrors codegen's `_objectLiteralArmFromStructuredBody` + the
- * `_matchArmResultIsBlockBody` classifier (emit-logic.ts): reconstruct
- * `{ <expr> }` and treat it as a value iff it parses to an `object` node.
- * `null` for every genuine statement block.
+ * The reading is the ONE shared reader (`objectLiteralArmValue`,
+ * arm-body-statements.ts — codegen's and the AST builder's too, S468 r1).
+ * `null` for every genuine statement block (and for an empty body: nothing to check).
  */
-function objectLiteralArmBodyNode(armBody: ASTNodeLike[], filePath: string): ASTNodeLike | null {
+function objectLiteralArmBodyNode(armBody: ASTNodeLike[], _filePath: string): ASTNodeLike | null {
   if (armBody.length !== 1) return null;
-  const only = armBody[0] as { kind?: string; expr?: unknown; span?: Span } | undefined;
-  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
-  const candidate = `{ ${only.expr} }`;
-  let parsed: { kind?: string } | null = null;
-  try { parsed = parseExprToNode(candidate, filePath, only.span?.start ?? 0) as { kind?: string } | null; }
-  catch { parsed = null; }
-  if (!parsed || parsed.kind !== "object") return null;
-  return { ...(only as object), expr: candidate, exprNode: parsed } as unknown as ASTNodeLike;
+  const v = objectLiteralArmValue(armBody);
+  if (!v) return null;
+  return { ...(armBody[0] as object), expr: v.text, exprNode: v.node } as unknown as ASTNodeLike;
 }
 
 /**

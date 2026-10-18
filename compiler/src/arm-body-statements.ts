@@ -26,6 +26,41 @@
  *     bodies are their own scope and are not entered.
  */
 
+import { parseExprToNode } from "./expression-parser.ts";
+
+/**
+ * S468 r1 — THE reading of a block arm body that is an OBJECT LITERAL
+ * (`.A :> { g: check }`, `1 :> { x: 1, y: 2 }`, `else :> {}`). The statement parser
+ * reads `{ g: check }` as a block whose one statement is the text `g : check` (an
+ * exprNode holding only the first key), so the arm's VALUE is recovered here: the
+ * brace text re-read as an expression, and the arm is an object literal when (and only
+ * when) that expression is an `object` node. Every reader of an arm's value uses this —
+ * the AST builder (which stores the object node on the arm body, so every analysis that
+ * walks the tree sees the object: §13.2 / §13.9.6 E-ASYNC-FN-ESCAPES-AS-VALUE,
+ * E-VALUE-FUNCTION-STORED), the type checker (`objectLiteralArmBodyNode`) and codegen
+ * (`_objectLiteralArmFromStructuredBody`). Before S468 r1 codegen read the value one way
+ * and the analyses another, and `const o = match n { 1 :> { g: check } … }` stored an
+ * async function in an object unrefused (a wrong password accepted).
+ *
+ * Returns `{ text, node }` — the object source and its tree — or null for a genuine block.
+ */
+export function objectLiteralArmValue(body: unknown): { text: string; node: any } | null {
+  if (!Array.isArray(body)) return null;
+  if (body.length === 0) {
+    // `else :> {}` — an empty OBJECT, not a void block.
+    return { text: "{}", node: { kind: "object", props: [] } };
+  }
+  if (body.length !== 1) return null;
+  const only = body[0] as { kind?: string; expr?: unknown; exprNode?: any; span?: { start?: number }; objectLiteralArm?: boolean } | undefined;
+  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
+  const text = `{ ${only.expr} }`;
+  // Already read by the AST builder (the node it stored IS this reading).
+  if (only.objectLiteralArm && only.exprNode && only.exprNode.kind === "object") return { text, node: only.exprNode };
+  let node: any = null;
+  try { node = parseExprToNode(text, "<match-arm-block>", only.span?.start ?? 0); } catch { node = null; }
+  return node && node.kind === "object" ? { text, node } : null;
+}
+
 const FN_KINDS = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-loop", "while-loop"]);
 

@@ -103,6 +103,7 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
+import { objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -4064,6 +4065,25 @@ function armChainBindingAlternate(peek, k) {
 
 function armPatternChainReachesArrow(peek, k) {
   return armPatternChainArrowOffset(peek, k) >= 0;
+}
+
+/**
+ * S468 r1 — a block arm whose body is an OBJECT LITERAL (`.A :> { g: check }`,
+ * `1 :> { x: 1 }`) is a value, not statements; `parseRecursiveBody` reads it as one
+ * `bare-expr` whose exprNode is only the first key. Store the object tree the ONE
+ * reader (`objectLiteralArmValue`, arm-body-statements.ts — also codegen's and the type
+ * checker's) recovers, so every analysis that walks the tree sees what the arm holds
+ * (§13.2 / §13.9.6: an async function stored in it is E-ASYNC-FN-ESCAPES-AS-VALUE).
+ * The raw `expr` text is kept (codegen rebuilds the value from it).
+ */
+function markObjectLiteralArmBody(body) {
+  if (!Array.isArray(body) || body.length !== 1) return body;
+  const v = objectLiteralArmValue(body);
+  if (v) {
+    body[0].exprNode = v.node;
+    body[0].objectLiteralArm = true;
+  }
+  return body;
 }
 
 /**
@@ -13823,7 +13843,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const variantNameTok = consume(); // IDENT (PascalCase variant name)
         for (let _a = 0; _a < _arrow1.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody(); // parse until matching '}'
+        const blockBody = markObjectLiteralArmBody(parseRecursiveBody()); // parse until matching '}'
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13947,7 +13967,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `parseBindingList` (in emit-control-flow.ts) can resolve named
         // bindings (`field: local` → `const local = subject.data.field`).
         const bindingText = allBindingTokens.map(t => t.text).join(' ').replace(/\s+/g, ' ').trim();
-        const blockBody = parseRecursiveBody();
+        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13974,7 +13994,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'else'
         for (let _a = 0; _a < _arrow2.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody();
+        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13996,7 +14016,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'not'
         for (let _a = 0; _a < _arrow3.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody();
+        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -14042,7 +14062,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         for (let _h = 0; _h < _arrowK4; _h++) consume(); // arm head
         for (let _a = 0; _a < _arrow4.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody();
+        const blockBody = markObjectLiteralArmBody(parseRecursiveBody());
         const armNode = {
           id: ++counter.next,
           kind: 'match-arm-block',

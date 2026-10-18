@@ -9,7 +9,7 @@ import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
-import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
+import { armBlockStatementsDetailed, objectLiteralArmValue } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
@@ -6619,35 +6619,15 @@ export function _matchArmResultIsBlockBody(result: string): boolean {
  * same field the §18.5 tail derivation already reads.
  */
 export function _objectLiteralArmFromStructuredBody(structuredBody: any): string | null {
-  if (!Array.isArray(structuredBody)) return null;
-  let candidate: string | null = null;
-  if (structuredBody.length === 0) {
-    // `else :> {}` — an empty OBJECT (parity with the inline `1 :> {}` → `return {}`),
-    // not a void block: the classifier below resolves `{}` to an object node.
-    candidate = "{}";
-  } else if (
-    structuredBody.length === 1 &&
-    structuredBody[0] &&
-    structuredBody[0].kind === "bare-expr" &&
-    typeof structuredBody[0].expr === "string"
-  ) {
-    // Reconstruct from the node's retained raw `expr` text ONLY. The node's
-    // `exprNode` is NOT a usable fallback here: for a `{ a: 1, b: {...} }` body the
-    // parser captured only the FIRST key as `exprNode` (an `ident`), so
-    // emitStringFromTree(exprNode) would yield `{ a }` and silently drop the rest.
-    // `expr` is the sole faithful source; when it is absent the arm is left on the
-    // structuredBody path below (it cannot be an object we can reconstruct).
-    candidate = `{ ${structuredBody[0].expr} }`;
-  }
-  if (candidate === null) return null;
-  // Divert ONLY when the classifier resolves the candidate to an object node. This
-  // is the SAME `_matchArmResultIsBlockBody` the inline path (#664) runs, so the two
-  // arm forms stay in lockstep by construction — including the object-SHORTHAND case
-  // `{ x }`, which the parser resolves to an object, exactly as the inline arm
-  // `1 :> { x }` does (both emit `return { x }`). A candidate the classifier calls a
-  // genuine BLOCK returns null and keeps the §18.5 structuredBody tail lowering
-  // (tildeContext / engineCtx / declaredNames a string re-lowering would drop).
-  return _matchArmResultIsBlockBody(candidate) ? null : candidate;
+  // S468 r1 — the ONE reader (arm-body-statements.ts `objectLiteralArmValue`), shared
+  // with the AST builder and the type checker, so every stage agrees on what the arm
+  // holds. Same rule as before: rebuild the brace text from the body's one bare-expr's
+  // raw `expr` (its exprNode used to hold only the first key), `{}` for an empty body,
+  // and divert ONLY when that text reads as an `object` node — the same object-vs-block
+  // reading `_matchArmResultIsBlockBody` gives the inline form (`{ x }` shorthand
+  // included). A genuine BLOCK returns null and keeps the §18.5 structuredBody tail
+  // lowering (tildeContext / engineCtx / declaredNames a string re-lowering would drop).
+  return objectLiteralArmValue(structuredBody)?.text ?? null;
 }
 
 /**
