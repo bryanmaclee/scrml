@@ -16196,7 +16196,7 @@ function annotateNodes(
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
       // S469 — a failable function read as a VALUE is not a call any boundary can test.
-      if (renderTimeInBoundary && !c.inFunction && c.refKind !== "fn-value") { boundaryHandlesCall(c, span); return; }
+      if (renderTimeInBoundary && !c.inFunction && c.refKind !== "fn-value" && c.refKind !== "lift-guard") { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
@@ -16297,12 +16297,12 @@ function annotateNodes(
       ));
       return;
     }
-    if (c.call === null || c.fromText) {
+    if (c.call === null || c.fromText || c.inValueForm) {
       const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
       errors.push(new TSError(
         "E-ERROR-002",
         `E-ERROR-002: Result of failable function ${shown} is not handled. The call is made while ` +
-        `rendering inside an '<errorBoundary>', but at this position (${c.call === null ? "a markup attribute value" : "a handler arm, match arm, template literal or loop initializer"}) ` +
+        `rendering inside an '<errorBoundary>', but at this position (${c.call === null ? "a markup attribute value" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : "a handler arm, match arm, template literal or loop initializer"}) ` +
         `impl#1 cannot route its error to the boundary, so the boundary does not handle it. Handle it in place with ` +
         `'${c.calleeName}(…) !{ | .Variant :> … }' or 'match', or bind it in a statement of the boundary's content ` +
         `('\${ const v = ${c.calleeName}(…) }') and use 'v'.`,
@@ -16357,6 +16357,18 @@ function annotateNodes(
         `the binding a value-form 'if' / 'for' produces, so a call through it would not be handled. ` +
         `Lift the handled RESULT instead ('lift ${calleeName}(…) !{ | .Variant :> … }'), or call ` +
         `'${calleeName}' directly where its result is handled.`,
+        span,
+      ));
+      return;
+    }
+    if (c.refKind === "lift-guard") {
+      // S469 (§19.4.3) — impl#1 applies a `!{}` on a `lift` to the lift's result, never to the
+      // call's: the error object is lifted unchecked. Refused (fails closed), whatever the class.
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled: impl#1 does not apply a ` +
+        `'!{}' written on a 'lift' to the call (the error would be lifted as the value). Handle it ` +
+        `first and lift the result: 'const v = ${calleeName}(…) !{ | .Variant :> … }' then 'lift v'.`,
         span,
       ));
       return;
