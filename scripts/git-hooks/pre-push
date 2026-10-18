@@ -84,11 +84,20 @@ echo "--- Running test suite (unit + integration + conformance) ---"
 # "--- Running full test suite ---" and exited 1, with the diagnostic on lines below it dead
 # code. `|| EXIT_CODE=$?` keeps the assignment from tripping set -e so the hook can say why.
 EXIT_CODE=0
-TEST_OUTPUT=$(bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
+# S468 (s468-hook-sharding): same file set, run across parallel processes by scripts/test-sharded.ts
+# (see pre-commit). SCRML_HOOK_SHARDS=1 keeps the original single-process command.
+if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
+  TEST_OUTPUT=$(bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
+  COUNTS_LINE="$TEST_OUTPUT"
+else
+  TEST_OUTPUT=$(bun scripts/test-sharded.ts compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
+  # The runner prints per-shard counts first; the overall numbers are on its TOTAL line.
+  COUNTS_LINE=$(echo "$TEST_OUTPUT" | grep -E '^(PARTIAL )?TOTAL' || true)
+fi
 
-PASS_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ pass' | head -1)
-FAIL_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ fail' | head -1)
-SKIP_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ skip' | head -1)
+PASS_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ pass' | head -1)
+FAIL_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ fail' | head -1)
+SKIP_COUNT=$(echo "$COUNTS_LINE" | grep -oP '\d+ skip' | head -1)
 echo "Tests: $PASS_COUNT, $FAIL_COUNT, $SKIP_COUNT"
 
 if [ "$EXIT_CODE" -ne 0 ]; then
