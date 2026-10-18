@@ -37,7 +37,9 @@
  */
 
 import type { ExprNode, CallExpr, LambdaExpr } from "./types/ast.ts";
-import { templateInterpolationNodes, guardCallArmsRaw } from "./expression-parser.ts";
+import { templateInterpolationNodesAll, guardCallArmsRaw } from "./expression-parser.ts";
+import { tokenizeLogic } from "./tokenizer.ts";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
 export interface FailableEnv {
   /**
@@ -82,7 +84,21 @@ export interface FailableCallCandidate {
    *     impl#1 lowers that guard against the LIFT's result, not the call's (the error object is
    *     lifted unchecked; executed S469), so the `!{}` does not handle it.
    */
-  refKind?: "call" | "fn-value" | "lift-guard";
+  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable";
+  /**
+   * S469 follow-up — `refKind: "unreadable"`: a `lift` operand this walk could not read — the
+   * operand text (`lift if (c) { lift if … }`, a value form nested two deep) parses neither as
+   * an expression nor as statements, and names no failable function in scope. Nothing proves it
+   * free of an unhandled failable call through a path the text scan cannot see, so it is
+   * refused (fails closed). `calleeName` is "" and `text` is the operand text.
+   */
+  text?: string;
+  /**
+   * S469 follow-up — the call is inside markup a `lift` produces (`lift <li>${check(x)}</li>`).
+   * The main walk does not visit lifted markup, so an `<errorBoundary>` cannot be trusted to
+   * test it there (refused, like `fromText`).
+   */
+  inLiftedMarkup?: boolean;
   /**
    * S469 — the call is inside the body of a value-form `if` / `for` (see FnCtx.inValueForm): an
    * `<errorBoundary>` cannot be trusted to test it there (refused, like `fromText`).
@@ -119,14 +135,87 @@ class LocalScope {
  * as a plain value and its arms never see the failure (executed: a wrong password logged in).
  * Within one, only a statement `!{}` is a handling form (it lowers from the tree alone).
  */
-interface FnCtx { inFunction: boolean; inFailableFn: boolean; fromText?: boolean; inValueForm?: boolean; liftGuard?: boolean; }
+interface FnCtx { inFunction: boolean; inFailableFn: boolean; fromText?: boolean; inValueForm?: boolean; liftGuard?: boolean; inLiftedMarkup?: boolean; }
 const TOP: FnCtx = { inFunction: false, inFailableFn: false };
 const PLAIN_FN: FnCtx = { inFunction: true, inFailableFn: false };
 /** The same context, for nodes this walk parsed out of text (see FailableCallCandidate.fromText). */
 function textCtx(fn: FnCtx): FnCtx { return fn.fromText ? fn : { ...fn, fromText: true }; }
 /** A function body written inside `fn` (a value-form body stays one: see FnCtx). */
 function fnBodyCtx(fn: FnCtx, canFail: boolean): FnCtx {
-  return fn.inValueForm ? { inFunction: true, inFailableFn: canFail, inValueForm: true } : { inFunction: true, inFailableFn: canFail };
+  const out: FnCtx = { inFunction: true, inFailableFn: canFail };
+  if (fn.inValueForm) out.inValueForm = true;
+  if (fn.inLiftedMarkup) out.inLiftedMarkup = true;
+  return out;
+}
+
+/**
+ * S469 follow-up — a tagged template whose tag is a bare name (`check\`a ${p}\``), carried as
+ * an escape hatch: its tag and its template text. Null for any other node (a tag that is a
+ * member, a call, a nested tagged template, … is read only as text — see Walker.unreadText).
+ */
+function taggedTemplateParts(node: ExprNode | null | undefined): { tag: string; quasi: string } | null {
+  if (!node || typeof node !== "object" || node.kind !== "escape-hatch") return null;
+  const h = node as unknown as { nativeKind?: unknown; raw?: unknown };
+  if (h.nativeKind !== "TaggedTemplateExpression" || typeof h.raw !== "string") return null;
+  const m = /^\s*([A-Za-z_$][\w$]*)\s*(`[\s\S]*`)\s*$/.exec(h.raw);
+  return m ? { tag: m[1], quasi: m[2] } : null;
+}
+
+/** The statement carries at least one expression tree that is not a parse-error hatch. */
+function hasStructuredExpression(st: Record<string, unknown>): boolean {
+  for (const key of Object.keys(st)) {
+    if (STATEMENT_CHILD_KEYS.has(key) || key === "span") continue;
+    const v = st[key];
+    for (const x of Array.isArray(v) ? v : [v]) if (isExprNodeValue(x) && !isParseErrorHatch(x)) return true;
+  }
+  return false;
+}
+
+/** Every identifier-shaped run of `t` (the over-approximating fallback of mentionedNames). */
+function identifierRuns(t: string, out: Set<string>): void {
+  for (const m of t.matchAll(/[A-Za-z_$][\w$]*/g)) out.add(m[0]);
+}
+
+/**
+ * S469 follow-up (§19.4.3) — every name a piece of source TEXT could refer to, read with the
+ * compiler's own logic tokenizer. Used ONLY to REFUSE: when text this walk must read does not
+ * parse (or is carried by an escape hatch with no structure), a failable function it names may
+ * be called in it unhandled, and nothing else will check it. Over-approximates on purpose:
+ * keywords are kept (a contextual keyword may be a binding name), and a string token that holds
+ * a `${` is read again (a template literal's interpolations are text inside its token, and an
+ * unterminated quote in markup text swallows the rest of the line). A name read as a property
+ * (`o.check`) is not a reference to the binding `check`. When the tokenizer throws, every
+ * identifier-shaped run of the text is a name.
+ */
+export function mentionedNames(text: string): Set<string> {
+  const out = new Set<string>();
+  const scan = (t: string, depth: number): void => {
+    let toks: Array<{ kind: string; text: string }>;
+    try {
+      toks = tokenizeLogic(t, 0, 1, 1, []) as unknown as Array<{ kind: string; text: string }>;
+    } catch {
+      identifierRuns(t, out);
+      return;
+    }
+    for (let i = 0; i < toks.length; i++) {
+      const k = toks[i];
+      if (k.kind === "IDENT" || k.kind === "KEYWORD") {
+        const prev = i > 0 ? toks[i - 1] : null;
+        if (prev && prev.kind === "PUNCT" && (prev.text === "." || prev.text === "?.")) continue;
+        out.add(k.text);
+      } else if (k.kind === "STRING") {
+        if (!k.text.includes("${")) continue;
+        if (depth < 32) scan(k.text, depth + 1);
+        else identifierRuns(k.text, out);
+      } else if (k.kind !== "NUMBER" && k.kind !== "PUNCT" && k.kind !== "OPERATOR" && k.kind !== "EOF") {
+        // An `@cell`, a block reference, or a token kind this reader has no class for: its text
+        // may hold a name.
+        identifierRuns(k.text, out);
+      }
+    }
+  };
+  scan(text, 0);
+  return out;
 }
 
 function resolveName(name: string, scope: LocalScope | null, env: FailableEnv): string | null {
@@ -259,7 +348,25 @@ class Walker {
     if (target === null) return;
     this.cb({ call, calleeName: target, via: target === written ? null : written,
       inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fromText: fn.fromText === true,
-      ...(fn.inValueForm ? { inValueForm: true } : {}), ...(fn.liftGuard ? { refKind: "lift-guard" as const } : {}) });
+      ...(fn.inValueForm ? { inValueForm: true } : {}), ...(fn.inLiftedMarkup ? { inLiftedMarkup: true } : {}),
+      ...(fn.liftGuard ? { refKind: "lift-guard" as const } : {}) });
+  }
+
+  /**
+   * S469 follow-up (§19.4.3) — text this walk must read but cannot parse (or an escape hatch
+   * that carries no structure: a tagged template, a sequence, a class expression, …). Every
+   * failable function the text names is reported as an unhandled CALL (fails closed: a tagged
+   * template's tag IS called; any other mention may be). True when something was reported.
+   */
+  unreadText(text: unknown, scope: LocalScope | null, fn: FnCtx): boolean {
+    if (typeof text !== "string" || text.trim() === "") return false;
+    let found = false;
+    for (const name of mentionedNames(text)) {
+      if (resolveName(name, scope, this.env) === null) continue;
+      this.report(null, name, scope, textCtx(fn));
+      found = true;
+    }
+    return found;
   }
 
   // ---- expressions --------------------------------------------------------
@@ -277,6 +384,7 @@ class Walker {
           this.operand(node.callee.object, scope, fn);
           const arms = this.env.parseGuardArms(armsRaw);
           if (arms) this.guardArms({ arms }, scope, textCtx(fn));
+          else this.unreadText(armsRaw, scope, fn);
           return;
         }
         if (node.callee && node.callee.kind === "ident") this.report(node, node.callee.name, scope, fn);
@@ -301,13 +409,15 @@ class Walker {
           const body = this.env.matchArmBodyText(raw.trim());
           const stmts = body === null ? null : this.env.parseStatements(body);
           if (stmts) this.statements(stmts, scope, textCtx(fn));
+          else this.unreadText(body ?? raw, scope, fn);
         }
         return;
       }
       case "lambda": this.lambda(node, scope, fn); return;
       case "lit": {
         if (node.litType === "template" && node.hasInterpolation !== false && typeof node.raw === "string") {
-          for (const e of templateInterpolationNodes(node)) this.expr(e, scope, textCtx(fn));
+          // S469 follow-up — every interpolation, an unparsed one as a text hatch (read to refuse).
+          for (const e of templateInterpolationNodesAll(node)) this.expr(e, scope, textCtx(fn));
         }
         return;
       }
@@ -346,6 +456,10 @@ class Walker {
       for (const a of node.args ?? []) this.expr(a as ExprNode, scope, fn);
       return;
     }
+    // A tagged template whose tag is a name (`check\`${p}\` !{ … }`) IS a call of the tag:
+    // handled like one (its interpolations are its arguments — still value positions).
+    const tagged = taggedTemplateParts(node);
+    if (tagged !== null) { this.templateInterpolations(tagged.quasi, node, scope, fn); return; }
     if (node.kind === "binary" && (node.op === "||" || node.op === "??")) {
       this.operand(node.left, scope, fn);
       this.operand(node.right, scope, fn);
@@ -393,7 +507,16 @@ class Walker {
       for (const a of node.args ?? []) this.expr(a as ExprNode, scope, fn);
       return;
     }
+    // A whole-statement `check\`x\`` is the statement check's, like a whole-statement call.
+    const tagged = handling === "statement-call" ? taggedTemplateParts(node) : null;
+    if (tagged !== null) { this.templateInterpolations(tagged.quasi, node, scope, fn); return; }
     this.expr(node, scope, fn);
+  }
+
+  /** The `${ … }` interpolations of template-literal text (`quasi`), each a value position. */
+  templateInterpolations(quasi: string, at: ExprNode, scope: LocalScope | null, fn: FnCtx): void {
+    const lit = { kind: "lit", litType: "template", raw: quasi, span: (at as { span?: unknown }).span } as unknown as ExprNode & { raw: string; span: never };
+    for (const e of templateInterpolationNodesAll(lit)) this.expr(e, scope, textCtx(fn));
   }
 
   /** A parameter list: its names shadow; its defaults are evaluated at call time (in the function). */
@@ -404,7 +527,11 @@ class Walker {
       if (!p || typeof p !== "object") continue;
       const d = (p as { defaultValue?: unknown }).defaultValue;
       if (isExprNodeValue(d)) this.expr(d, scope, fn);
-      else if (typeof d === "string" && d.trim() !== "") this.expr(this.env.parseExpr(d), scope, textCtx(fn));
+      else if (typeof d === "string" && d.trim() !== "") {
+        const parsed = this.env.parseExpr(d);
+        if (parsed && !isParseErrorHatch(parsed)) this.expr(parsed, scope, textCtx(fn));
+        else this.unreadText(d, scope, fn);
+      }
       const pat = (p as { pattern?: unknown }).pattern;
       if (pat && typeof pat === "object") this.patternDefaults(pat, scope, fn);
     }
@@ -434,7 +561,7 @@ class Walker {
     const nk = node.nativeKind;
     const raw = node.raw;
     if (nk === "TemplateLiteral" && typeof raw === "string" && raw.startsWith("`")) {
-      for (const e of templateInterpolationNodes(node as unknown as ExprNode & { raw: string; span: never })) this.expr(e, scope, textCtx(fn));
+      for (const e of templateInterpolationNodesAll(node as unknown as ExprNode & { raw: string; span: never })) this.expr(e, scope, textCtx(fn));
       return;
     }
     // A function written as a value and carried with its body TEXT (`function () { … }`, a
@@ -445,9 +572,31 @@ class Walker {
       this.params(node.params, inner, body);
       const stmts = this.env.parseStatements(node.bodyRaw);
       if (stmts) this.statements(stmts, inner, body);
+      else this.unreadText(node.bodyRaw, inner, body);
       return;
     }
-    // Any other hatch carries no structure to read (it is not re-scanned).
+    // A literal the tree does not model (a regular expression, a BigInt) holds no code.
+    if (nk === "Literal") return;
+    // A statement's text the expression parser could not read: its reader is the statement's
+    // (ownExpressions — the statement usually carries the structured form under another key).
+    if (nk === "ParseError") return;
+    // S469 follow-up (§19.4.3) — `check\`${p}\``: a tagged template CALLS its tag (with the
+    // template's strings and interpolated values). Before, the hatch was not read and
+    // `const ok = check\`${p}\`` compiled: a wrong password logged in. A tag that is a name is
+    // read as the callee of a call in a value position; its interpolations are values.
+    const tagged = taggedTemplateParts(node as unknown as ExprNode);
+    if (tagged !== null) {
+      this.report(null, tagged.tag, scope, textCtx(fn));
+      this.templateInterpolations(tagged.quasi, node as unknown as ExprNode, scope, fn);
+      return;
+    }
+    // S469 follow-up (§19.4.3) — every other hatch carries only its source text: an ESTree node
+    // the expression tree does not model (`check\`${p}\`` — a TaggedTemplateExpression, whose
+    // tag is CALLED; a SequenceExpression; a ClassExpression; …) or text that did not parse.
+    // Before, it was not read at all, so `const ok = check\`${p}\`` compiled and a wrong
+    // password logged in. Its text is read to refuse (fails closed): every failable function it
+    // names is an unhandled call.
+    this.unreadText(raw, scope, fn);
   }
 
   // ---- statements ---------------------------------------------------------
@@ -526,7 +675,11 @@ class Walker {
       if (typeof b.binding === "string" && b.binding.trim() !== "") scope.names.set(b.binding.trim(), null);
       const stmts = typeof b.raw === "string" && b.raw.trim() !== "" ? this.env.parseStatements(b.raw) : null;
       if (stmts) this.statements(stmts, scope, PLAIN_FN);
-      else if (isExprNodeValue(b.expr)) this.root(b.expr, "none", scope, PLAIN_FN);
+      else {
+        if (isExprNodeValue(b.expr)) this.root(b.expr, "none", scope, PLAIN_FN);
+        // The single-expression view may hold only part of a body that did not parse.
+        this.unreadText(b.raw, scope, PLAIN_FN);
+      }
     }
   }
 
@@ -558,7 +711,7 @@ class Walker {
           if (DECL_KINDS.has(d.kind as string)) for (const n of declaredNames(d)) loop.names.set(n, null);
           this.statement(d, loop, textCtx(fn), "none");
         }
-      }
+      } else this.unreadText((init as { raw: string }).raw, loop, fn);
     } else if (isExprNodeValue(init)) this.expr(init, loop, fn);
     if (isExprNodeValue(parts.condExpr)) this.expr(parts.condExpr, loop, fn);
     if (isExprNodeValue(parts.updateExpr)) this.expr(parts.updateExpr, loop, fn);
@@ -587,9 +740,12 @@ class Walker {
         this.statements(blockStmts, armScope, textCtx(fn));
       } else if (isExprNodeValue(a.handlerExpr) && !isParseErrorHatch(a.handlerExpr)) {
         this.expr(a.handlerExpr, armScope, fn);
+        // A braced body that did not parse: `handlerExpr` reads only its first statement.
+        if (braced && ht.slice(1, -1).trim() !== "") this.unreadText(ht, armScope, fn);
       } else if (ht !== "") {
         const stmts = this.env.parseStatements(ht);
         if (stmts) this.statements(stmts, armScope, textCtx(fn));
+        else this.unreadText(ht, armScope, fn);
       }
     }
   }
@@ -626,6 +782,7 @@ class Walker {
         if (typeof v === "string" && v.trim() !== "" && !structured && !other) {
           const parsed = this.env.parseExpr(v);
           if (parsed && !isParseErrorHatch(parsed)) this.root(parsed, handling, scope, textCtx(fn));
+          else this.unreadText(v, scope, fn);
         }
         return true;
       }
@@ -667,12 +824,22 @@ class Walker {
    * S469 — `lift <operand>`: the operand is the value the enclosing form produces (a value-form
    * `if` / `for`, or a rendered `for` body), so it is a VALUE position; and a failable function
    * read as a value there (`lift check`, `lift c ? check : plain`, `lift (x) => check`) escapes
-   * into a binding whose calls this walk cannot follow — refused (`refKind: "fn-value"`). Lifted
-   * markup / SQL are not read here (`g-lift-markup-failable-call-unchecked-s468`).
+   * into a binding whose calls this walk cannot follow — refused (`refKind: "fn-value"`).
+   *
+   * S469 follow-up — lifted MARKUP (`lift <li>${check(x) ? "a" : "b"}</li>`) is read too: the
+   * main walk does not visit it, so before this a failable call in its interpolations or
+   * attribute values was checked nowhere and a wrong password rendered as a login
+   * (`g-lift-markup-failable-call-unchecked-s468`). Any other operand shape is read
+   * conservatively (`opaque`).
    */
   liftOperand(st: Record<string, unknown>, scope: LocalScope | null, fn: FnCtx, handling: RootHandling): void {
-    const e = st.expr as { kind?: unknown; expr?: unknown; exprNode?: unknown } | undefined;
-    if (!e || typeof e !== "object" || e.kind !== "expr") return;
+    const e = st.expr as { kind?: unknown; expr?: unknown; exprNode?: unknown; node?: unknown } | undefined;
+    if (!e || typeof e !== "object") return;
+    if (e.kind === "markup") {
+      this.liftedMarkup(e.node, scope, { ...fn, inLiftedMarkup: true });
+      return;
+    }
+    if (e.kind !== "expr") { this.opaque(e, scope, fn); return; }
     let node: ExprNode | null = isExprNodeValue(e.exprNode) && !isParseErrorHatch(e.exprNode) ? e.exprNode : null;
     let lfn = fn;
     if (node === null && typeof e.expr === "string" && e.expr.trim() !== "") {
@@ -682,8 +849,19 @@ class Walker {
     if (node === null) {
       // An operand that is not an expression (`lift if (c) { … } else { … }` — a nested value
       // form carried as text): read it as statements. A value-form body (see FnCtx).
-      const stmts = typeof e.expr === "string" && e.expr.trim() !== "" ? this.env.parseStatements(e.expr) : null;
-      if (stmts) this.statements(stmts, scope, { ...textCtx(fn), inValueForm: true });
+      const text = typeof e.expr === "string" ? e.expr : "";
+      const stmts = text.trim() !== "" ? this.env.parseStatements(text) : null;
+      if (stmts) { this.statements(stmts, scope, { ...textCtx(fn), inValueForm: true }); return; }
+      // S469 follow-up (§19.4.3) — the operand text parses neither way (`lift if (c) { lift if
+      // (d) { lift check(x) } … }`: a value form nested two deep, whose inner `lift if` the
+      // statement reader refuses). Before, the walk returned here and read nothing; only
+      // codegen's E-CODEGEN-INVALID-LOGIC stood between it and an unhandled call. Fails closed:
+      // every failable function the text names is an unhandled call; text that names none is
+      // refused as unreadable.
+      if (text.trim() !== "" && !this.unreadText(text, scope, { ...fn, inValueForm: true })) {
+        this.cb({ call: null, calleeName: "", via: null, inFunction: fn.inFunction,
+          inFailableFn: fn.inFunction && fn.inFailableFn, fromText: true, refKind: "unreadable", text: text.trim() });
+      }
       return;
     }
     // A whole-statement `lift f()` is NOT a statement call: its value is lifted, so it is read.
@@ -691,6 +869,60 @@ class Walker {
     // "lift-guard". Every failable call in the operand is reported.
     this.root(node, "none", scope, handling === "operand" ? { ...lfn, liftGuard: true } : lfn);
     this.fnValueRefs(node, scope, lfn);
+  }
+
+  /**
+   * S469 follow-up — markup a `lift` produces: its attribute values and `${ … }` interpolations
+   * are values rendered into the DOM (an unhandled failable call there renders its error object
+   * as data), its event-handler values are handler bodies, and its child markup is read the same
+   * way. Nothing in it is a handling form except what is written there (`!{}`, `match`).
+   */
+  liftedMarkup(node: unknown, scope: LocalScope | null, fn: FnCtx): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const n of node) this.liftedMarkup(n, scope, fn); return; }
+    const n = node as Record<string, unknown>;
+    const kind = n.kind;
+    if (kind === "text" || kind === "comment") return;
+    if (kind === "logic" && Array.isArray(n.body)) {
+      // A `${ … }` interpolation: its statements' values are rendered (no statement-call
+      // exemption — a bare `${check(x)}` renders the call's result).
+      this.statements(n.body as unknown[], scope, fn);
+      return;
+    }
+    if (kind !== "markup") {
+      if (typeof kind === "string" && OPAQUE_STATEMENT_KINDS.has(kind)) this.statement(n, new LocalScope(scope), fn, "none");
+      else this.opaque(n, scope, fn);
+      return;
+    }
+    for (const attr of Array.isArray(n.attrs) ? n.attrs as Array<Record<string, unknown>> : []) {
+      if (!attr || typeof attr !== "object") continue;
+      const value = attr.value as Record<string, unknown> | undefined;
+      if (!value || typeof value !== "object") continue;
+      const handler = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
+      // An event handler runs on the event: a function body (not render-time, not `!`).
+      const vfn = handler ? fnBodyCtx(fn, false) : fn;
+      if (value.kind === "call-ref" && typeof value.name === "string") {
+        // `attr=f(x)` / `onclick=f(x)`: a call nothing handles.
+        this.report(null, value.name, scope, vfn);
+        for (const a of Array.isArray(value.argExprNodes) ? value.argExprNodes as ExprNode[] : []) this.expr(a, scope, vfn);
+        continue;
+      }
+      if (value.kind === "variable-ref" && typeof value.name === "string") {
+        // `onclick=check`: a handler REFERENCE — the dispatcher calls it and discards its result.
+        if (handler) this.report(null, value.name, scope, vfn);
+        continue;
+      }
+      if (Array.isArray(value.handlerBlock)) { this.statements(value.handlerBlock as unknown[], scope, vfn); continue; }
+      if (value.kind === "expr" && isExprNodeValue(value.exprNode) && !isParseErrorHatch(value.exprNode)) {
+        this.expr(value.exprNode, scope, vfn);
+        // `onclick=check`: the function read as a value — the dispatcher calls it, unhandled.
+        if (handler) this.fnValueRefs(value.exprNode, scope, vfn);
+        continue;
+      }
+      if (value.kind === "expr" && typeof value.raw === "string") { this.unreadText(value.raw, scope, vfn); continue; }
+      this.opaque(value, scope, vfn);
+    }
+    if (Array.isArray(n.children)) for (const c of n.children) this.liftedMarkup(c, scope, fn);
   }
 
   /**
@@ -752,6 +984,14 @@ class Walker {
         // A bare-expr kept only as text (an `on mount { }` body, a bare `{ … }` block): its
         // statements are read below.
         if (kind === "bare-expr" && isParseErrorHatch(root) && typeof st.expr === "string") continue;
+        // S469 follow-up — a parse-error root is the statement's text the expression parser could
+        // not read. Where the statement carries a structured reading of it under another key
+        // (`check(p)?` ending an inline arm: `propagateOperandExpr`), that reading is walked; where
+        // it carries none, the text is read to refuse (fails closed).
+        if (isParseErrorHatch(root)) {
+          if (!hasStructuredExpression(st)) this.unreadText((root as unknown as { raw?: unknown }).raw, scope, fn);
+          continue;
+        }
         this.root(root, h, scope, fn);
       }
     }
@@ -764,6 +1004,7 @@ class Walker {
       // nowhere else, so a whole-statement call among them is reported here — unless the text
       // is itself the operand of a `!{}`.
       if (stmts) this.statements(stmts, scope, textCtx(st._onMountEffect === true ? PLAIN_FN : fn), handling === "operand" ? "operand" : "none");
+      else this.unreadText(st.expr, scope, st._onMountEffect === true ? PLAIN_FN : fn);
     }
   }
 }
