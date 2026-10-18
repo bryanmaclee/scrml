@@ -67,3 +67,67 @@ The §7.3.2 default check now uses the same resolver (closes the gap's param / m
   `relay(@session.userId)` in the expanded markup; the refusal follows `u` into it).
 - A name assigned in raw text: the argument check follows the raw text that writes it (scanned whole); the default
   check keeps its long-standing fail-closed reading (`followRawAssigned: false`) — no newly-accepting change there.
+
+## Measurement (direction of change: NEWLY-REJECTING)
+
+- In-process compile scan of every `.scrml` under examples, samples, conformance/cases, stdlib, benchmarks,
+  /home/bmacs/scrmlMaster/giti, /home/bmacs/scrmlMaster/flogence — 2960 sources, base = bd3e9e0d0 compiler,
+  head = this branch's compiler (both in-repo): **0 sources whose error-code set changed; 0 E-ARG-SERVER-IDENTITY;
+  0 new E-PARAM-DEFAULT-SERVER-IDENTITY.** (`repro/scan.mjs` + `repro/cmp.mjs`.)
+- First cut measured 2 REAL sites (examples/23-trucking-dispatch pages/dispatch/load-detail.scrml, load-new.scrml)
+  — both FALSE POSITIVES of the first cut, not identity flows: a function passed to a component prop
+  (`onTransition=transition`) was treated as "passed as a value → unfollowable", and the server call itself
+  (`transitionStatusServer(tok, loadId, target)`) counted as a mutating writer of its own arguments. Fixed at the
+  root: a markup-attribute use of a function contributes no sources (component expansion substitutes the prop,
+  so the component's calls are call sites of their own — verified the refusal still follows a component that
+  DOES call the prop with `@session.userId`), and a value computed by a server call is a server result (not
+  followed). Re-measured: 0.
+- `scripts/corpus-emit-differential.ts` (roots examples, samples, conformance, stdlib, benchmarks; 2847 sources;
+  base = archive of bd3e9e0d0, head = same + this change): compile-failure delta **0 newly failing / 0 newly
+  passing**, diagnostic changes 0, syntax delta 0, bare server-fn sites 29 → 29. 167 "content diffs" are ALL the
+  `_scrml_project_root` string (the two archives live at different paths): after normalizing that path, 8578 of
+  8578 artifacts are byte-identical. (Verdict prints "NOT A VALID COMPARISON" only because an archive has no git
+  revision.)
+- security-await-pack `classify.js` (base bd3e9e0d0 vs head): PASS 249 / PASS-REFUSED 136 / PASS-500 20 /
+  UNJUDGED 1 / PASS-DENY 8 / **FAIL 10 → identical; 0 new FAIL.**
+  **CORRECTION to commit 9c27a625e's message** ("security-await-pack: FAIL 10 -> 9"): that figure came from an
+  intermediate cut in which two pack shapes (m4/appExportConstAnn, m1/topLetAssignLater — no session at all) were
+  refused by E-ARG-SERVER-IDENTITY as FALSE POSITIVES ("the callback's arguments cannot be followed" for a lambda
+  bound by `export const` / a reassigned `let`). Fixed before that commit landed (a lambda bound to a name receives
+  what every call of the name passes; binding-provenance binds an exported value to its parsed tree); the
+  committed code measures FAIL 10 = 10. Both shapes are pinned as NOT-refused in the integration test.
+
+## Gates
+
+- pre-commit hook on 9c27a625e: 37178 pass / 125 skip / 13 todo / 0 fail (37316 tests, 1591 files).
+  Baseline was 37123 / 125 / 13 / 0 — +55 = the two new test files.
+- `scripts/types-gate.ts --check`: OK — 180 diagnostics (113 distinct), unchanged.
+- Validated against MAIN too: origin/main (bbddfd7b9, has #1434's F4 refusal) + #1442 + this branch's
+  compiler/src + tests patched cleanly; the 5 identity test files: 169 pass / 0 fail. Tests accept
+  E-ASYNC-FN-ESCAPES-AS-VALUE alongside (a lambda binding that calls a server function is refused by F4 on main).
+- facts.ts / state.ts regenerated (FACTS: +1 compiler/src file); `--check` PASS both; SPEC-INDEX regenerated.
+
+## Executed forged requests
+
+- base (origin/main): r1 ACCEPTED; forged request (attacker cookie, body `uid: "victim"`) → 200, row authored
+  `victim`. Same for r2 (`@currentUser.id`).
+- head: r1 / r2 REFUSED at compile (E-ARG-SERVER-IDENTITY), no artifacts. The fix form (`const uid =
+  session.userId` inside `add`) compiles and writes the REAL session id whatever the body says (integration test
+  "the fix: …", executed against the emitted server route).
+
+## Not covered / notes for the PA
+
+- Ruling (2)(d) (banked): a value the browser received from a server result (`@rows = loadRows()` then
+  `save(@rows[0].owner)`; a §52 server cell) is NOT refused — deliberately; the follower stops at server-computed
+  values. That is the server-only-value-kind deliberation.
+- Precision limits (fail-closed, measured 0 corpus hits): a lambda whose parameter flows into a server call is
+  refused as unfollowable when it is passed to a user function that hands the callback on to something other
+  than a direct call, or when it sits somewhere other than a call argument / a name binding / a markup attribute
+  (an object-literal field, a returned lambda).
+- Observed on this branch's base (pre-#1434), NOT on main: `export const w = (u) => add("hi", u)` in a page
+  compiles with no `w` in client.js (the handler calls an undefined `w`); the builder kept no `valueInitExpr` for
+  the un-annotated form, so the call inside is raw text. On main #1434's F4 refuses the binding
+  (E-ASYNC-FN-ESCAPES-AS-VALUE), so no follow-up filed.
+- Did NOT edit the gap marker (brief); added a resolution note under it in docs/known-gaps.md.
+- Message precision (after 9c27a625e): an `@currentUser.<field>` read is reported with its field (free-name.ts
+  `identityReadIn`, as `@session.<field>` already was), so the fix names `const uid = @currentUser.id`.

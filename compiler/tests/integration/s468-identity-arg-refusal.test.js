@@ -134,6 +134,12 @@ describe("s468 — identity passed as an argument to a server function is refuse
     });
   }
 
+  test("`@currentUser.id` — the message names the field and the server-side read", () => {
+    const r = compile(APP("", `<button onclick=add("hi", @currentUser.id)>a</button>`));
+    expectRefused(r, "computed in the browser from `@currentUser.id`");
+    expect(r.errors[0].message).toContain("`const uid = @currentUser.id`");
+  });
+
   test("a derived cell (`const <me> = @session.userId`)", () => {
     expectRefused(compile(APP(`const <me> = @session.userId`, `<button onclick=add("hi", @me)>a</button>`)), "`@me`");
   });

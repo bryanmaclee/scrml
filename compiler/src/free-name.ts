@@ -157,7 +157,12 @@ function identityReadIn(
       hit = isObject && parent.kind === "member" && typeof parent.property === "string" ? `session.${parent.property}` : "session";
       return;
     }
-    if (r.kind === "ident" && r.name === "@currentUser" && opts.currentUserAmbient) { hit = "@currentUser"; return; }
+    if (r.kind === "ident" && r.name === "@currentUser" && opts.currentUserAmbient) {
+      // s468 — the field read, as for `@session` (a diagnostic names `@currentUser.id`)
+      const parent = link.parent as Record<string, unknown> | null;
+      hit = parent && parent.kind === "member" && link.key === "object" && typeof parent.property === "string" ? `@currentUser.${parent.property}` : "@currentUser";
+      return;
+    }
     if (r.kind === "ident" && r.name === "@session" && opts.sessionProjection) {
       const parent = link.parent as Record<string, unknown> | null;
       hit = parent && parent.kind === "member" && link.key === "object" && typeof parent.property === "string" ? `@session.${parent.property}` : "@session";
