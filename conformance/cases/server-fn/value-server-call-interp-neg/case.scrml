@@ -1,0 +1,9 @@
+${
+    server function loadName(id: string) {
+        return "user " + id
+    }
+}
+<page>
+    <h1>Profile</>
+    <p class="name">${loadName("1")}</p>
+</page>

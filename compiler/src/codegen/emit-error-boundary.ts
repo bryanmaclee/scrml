@@ -226,10 +226,11 @@ export function compileBoundaryMarkup(
  * error variant's `.data` payload object (e.g. `result.data`).
  *
  * - Static template (no fields)  -> a single quoted string literal.
- * - Field template               -> `"prefix" + String(data.field) + "suffix"`.
+ * - Field template               -> `"prefix" + _scrml_error_boundary_text(data.field) + "suffix"`.
  *
- * Field values are coerced with `String(...)` and the surrounding HTML is a
- * compile-time-known literal, so the result is always valid JS.
+ * Field values are converted to HTML-escaped text (runtime-template.js
+ * `_scrml_error_boundary_text`) and the surrounding HTML is a compile-time-known
+ * literal, so the result is always valid JS and a payload never becomes markup.
  */
 export function emitBoundaryMarkupExpr(
   tpl: BoundaryMarkupTemplate,
@@ -256,7 +257,10 @@ export function emitBoundaryMarkupExpr(
       if (segments[i] !== "") pieces.push(JSON.stringify(segments[i]));
     } else {
       const field = segments[i];
-      pieces.push(`_scrml_g.String((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
+      // S468 fix round 1 (F3) — the template is written with innerHTML, so a payload
+      // value is HTML-escaped (text, never markup): §4.18.6 — an interpolated value
+      // "SHALL be escaped per the existing interpolation escaping rules".
+      pieces.push(`_scrml_error_boundary_text((${dataExpr}) != null ? (${dataExpr}).${field} : "")`);
     }
   }
   if (pieces.length === 0) return '""';

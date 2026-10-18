@@ -4187,7 +4187,9 @@ function _scrml_error_boundary_uncaught(envelope) {
 // compiler wraps each such call: a success passes through; an error envelope is
 // raised (an Error carrying it on '.scrmlError', as above) so the rest of the
 // render stops and the boundary's catch gets the TYPED failure. A Promise result
-// is checked when it settles.
+// (an asynchronous call — a server call, which is not allowed while rendering,
+// §13.7) has no value to test yet: it is refused as a host error, so the boundary
+// shows its fallback and nothing reads the Promise as a success.
 function _scrml_error_boundary_check(result) {
   if (result && typeof result === "object") {
     if (result.__scrml_error) {
@@ -4196,9 +4198,20 @@ function _scrml_error_boundary_check(result) {
       e.scrmlError = result;
       throw e;
     }
-    if (typeof result.then === "function") return result.then(_scrml_error_boundary_check);
+    if (typeof result.then === "function") {
+      result.then(null, function (err) { _scrml_error_boundary_log("render-time async call", err); });
+      throw new Error("scrml errorBoundary: an asynchronous call cannot be checked while rendering (§13.7)");
+    }
   }
   return result;
+}
+
+// A variant's 'renders' / the 'fallback=' markup interpolates payload values as
+// TEXT: HTML-escaped before the markup is written with innerHTML.
+function _scrml_error_boundary_text(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+    return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;";
+  });
 }
 
 // The typed failure a caught value carries, or null for a host throw (§19.6.8 B1).

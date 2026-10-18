@@ -316,3 +316,113 @@ describe("F — positions with no boundary catch are refused, not shipped uncaug
     expect(r.codes).toContain("E-ERROR-002");
   });
 });
+
+// ---------------------------------------------------------------------------
+// S468 fix round 1 (S239 review of 51efb6b36)
+// ---------------------------------------------------------------------------
+
+const XSS = (body) => `type AuthErr:enum = {
+    NotFound(id: string)
+        renders <p class="nf">Missing \${id}</p>
+}
+<pw> = "<" + "img src=x id=pwn>"
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::NotFound(p)
+        return true
+    }
+}
+<errorBoundary fallback={<div class="fb">FB</>}>
+    ${body}
+</>
+`;
+
+describe("F3 — a variant's `renders` payload is text, never markup (§4.18.6)", () => {
+  test("interpolation: the payload is HTML-escaped, no element is injected", async () => {
+    const page = await mount(XSS(`<p id="o">\${check(@pw) ? "LOGGED IN" : "rejected"}</p>`));
+    expect(page.q("#pwn")).toBe(null);
+    expect(page.q(".nf")?.textContent).toBe("Missing <img src=x id=pwn>");
+    expect(page.html()).not.toContain("LOGGED IN");
+  });
+
+  test("statement: the payload is HTML-escaped, no element is injected", async () => {
+    const page = await mount(XSS(`\${ const ok = check(@pw) }\n    <p id="o">\${ok ? "LOGGED IN" : "rejected"}</p>`));
+    expect(page.q("#pwn")).toBe(null);
+    expect(page.q(".nf")?.textContent).toBe("Missing <img src=x id=pwn>");
+  });
+
+  test("the runtime escape covers & < > \" '", () => {
+    const fn = new Function(`${SCRML_RUNTIME}\nreturn _scrml_error_boundary_text;`)();
+    expect(fn(`<a href="x" title='y'>&</a>`)).toBe("&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;");
+    expect(fn(null)).toBe("");
+  });
+});
+
+describe("F2 — a check the compiler would run AFTER the render is refused (page never ships dead)", () => {
+  test("a derived cell in a boundary (`const <ok> = check(@pw)`) is E-ERROR-002", () => {
+    const r = compile(`${CHECK}
+<pw> = "wrong"
+<errorBoundary fallback={<div>FB</>}>
+    \${ const <ok> = check(@pw) }
+    <p>\${@ok ? "LOGGED IN" : "rejected"}</p>
+</>
+`);
+    expect(r.codes).toContain("E-ERROR-002");
+  });
+
+  test("a plain statement in a boundary still compiles and is caught", async () => {
+    const page = await mount(`${CHECK}
+<pw> = "wrong"
+<errorBoundary fallback={<div class="fb">FB</>}>
+    \${ const ok = check(@pw) }
+    <p id="o">\${ok ? "LOGGED IN" : "rejected"}</p>
+</>
+<p id="alive">\${@pw}</p>
+`);
+    expect(page.thrown).toBe(null);
+    expect(page.q(".fb")?.textContent).toBe("FB");
+    expect(page.text("#alive")).toBe("wrong");
+  });
+});
+
+describe("F1 — a server `!` function during render in a boundary", () => {
+  const SERVER = `type AuthErr:enum = { Denied }
+<pw> = "wrong"
+\${
+    server function scheck(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+}
+`;
+  test("in an interpolation it is E-VALUE-SERVER-CALL (§19.6.6 / §13.7), reported once", () => {
+    const r = compile(`${SERVER}<errorBoundary fallback={<div>FB</>}>
+    <p>\${scheck(@pw) ? "LOGGED IN" : "rejected"}</p>
+</>
+`);
+    expect(r.codes).toEqual(["E-VALUE-SERVER-CALL"]);
+  });
+
+  test("in a statement it is E-VALUE-SERVER-CALL", () => {
+    const r = compile(`${SERVER}<errorBoundary fallback={<div>FB</>}>
+    \${ const ok = scheck(@pw) }
+    <p>\${ok ? "LOGGED IN" : "rejected"}</p>
+</>
+`);
+    expect(r.codes).toContain("E-VALUE-SERVER-CALL");
+  });
+
+  test("the runtime check refuses a Promise (no value to test) instead of passing it on", async () => {
+    const fn = new Function(`${SCRML_RUNTIME}\nreturn _scrml_error_boundary_check;`)();
+    const realErr = console.error;
+    console.error = () => {};
+    try {
+      expect(() => fn(Promise.resolve(true))).toThrow(/asynchronous call cannot be checked/);
+      expect(() => fn(Promise.reject(new Error("x")))).toThrow(/asynchronous call/);
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      console.error = realErr;
+    }
+    expect(fn(true)).toBe(true);
+  });
+});

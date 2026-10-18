@@ -1821,15 +1821,20 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     if (groupBoundaryChain && boundaryChecksEmittedCount() !== groupChecksBefore) {
       const emitted = lines.splice(groupLinesBefore).join("\n");
       const wrapped = wrapBoundaryRenderLogic(emitted, groupBoundaryChain);
-      if (wrapped === null) {
+      if (!wrapped.ok) {
         errors.push(new CGError(
           "E-ERROR-002",
-          "E-ERROR-002: a failable call made while rendering inside an '<errorBoundary>' could not be placed " +
-          "inside the boundary's catch, so the boundary cannot handle it. Handle it in place with '!{}' or 'match'.",
+          wrapped.reason === "deferred"
+            ? "E-ERROR-002: a failable call made inside an '<errorBoundary>' is evaluated later than the render " +
+              "(a derived value's formula, an initializer re-run on reset, or a block re-run by a reactive effect), " +
+              "outside the boundary's catch, so the boundary cannot handle it. Handle it in place with '!{}' or " +
+              "'match', or bind it in a plain statement (`const v = f(…)`) of the boundary's content."
+            : "E-ERROR-002: a failable call made while rendering inside an '<errorBoundary>' could not be placed " +
+              "inside the boundary's catch, so the boundary cannot handle it. Handle it in place with '!{}' or 'match'.",
           (stmts[0] as any)?.span ?? { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 },
         ));
       } else {
-        lines.push(wrapped);
+        lines.push(wrapped.code);
       }
     }
   }

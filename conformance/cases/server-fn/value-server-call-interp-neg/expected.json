@@ -1,0 +1,21 @@
+{
+  "id": "server-fn-value-server-call-interp-neg",
+  "description": "S468 fix round 1: a render-time call to a server function in a markup `${ … }` interpolation OUTSIDE any `<errorBoundary>` is a server call in a value position and is E-VALUE-SERVER-CALL (§13.7). impl#1 emits the code only for a server call an `<errorBoundary>` would otherwise handle (server-fn/error-boundary-value-server-call-neg, which this case replaces as the pin of the carried gap); here it still compiles at exit 0.",
+  "language-version": "1.0",
+  "spec": "§13.7",
+  "rationale": "§13.7 rule item 1 + normative statement: a call whose callee is server-placed SHALL NOT appear in a value position. Server data reaches markup through a `<request>` (§6.7.7).",
+  "expect": {
+    "codes": ["E-VALUE-SERVER-CALL"],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-server-call-s451",
+      "fails": {
+        "codes": [
+          "missing:E-VALUE-SERVER-CALL"
+        ]
+      }
+    }
+  }
+}

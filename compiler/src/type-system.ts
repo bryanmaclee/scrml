@@ -10274,6 +10274,8 @@ function annotateNodes(
   // (warn) instead of E-ERROR-002 (error) for unhandled CPS calls during the
   // deprecation cycle's stage 1 (v0.next).
   const fnCpsImplicitFailable = new Set<string>();
+  // S468 fix round 1 (F1) — functions placed on the server (collectFnErrorTypes).
+  const fnServerPlaced = new Set<string>();
 
   // S84 v0.2.4 #5-followon (Gap B.3) — stack tracking the current enclosing
   // function's return ResolvedType. Pushed on function-decl entry, popped
@@ -10516,6 +10518,14 @@ function annotateNodes(
             // exhaustive-match path unchanged. Adopters who want full
             // exhaustive matching add `!` explicitly with a custom errorType.
           }
+        }
+      }
+      // S468 fix round 1 (F1) — a server-placed function (keyword, route inference, or a
+      // CPS split): its client call returns a Promise. Read by `boundaryHandlesCall`.
+      {
+        const placed = routeMap?.functions?.get(`${filePath}::${(n.span as Span | undefined)?.start}`);
+        if ((n as { isServer?: boolean }).isServer === true || (placed && (placed.boundary === "server" || placed.cpsSplit))) {
+          fnServerPlaced.add(n.name as string);
         }
       }
       // Recurse into body and children for nested functions.
@@ -16062,7 +16072,9 @@ function annotateNodes(
       const renderTime = failableFnStack.length === 0 && handlerCheckDepth === 0
         && (n as Record<string, unknown>)._onMountEffect !== true;
       const root = n.exprNode as { kind?: string; callee?: { kind?: string } } | undefined;
-      if (renderTime && root && root.kind === "call" && root.callee && root.callee.kind === "ident") {
+      if (renderTime && fnServerPlaced.has(bareCallee)) {
+        boundaryHandlesCall({ call: null, calleeName: bareCallee, via: null, inFunction: false, inFailableFn: false, fromText: false }, n.span as Span);
+      } else if (renderTime && root && root.kind === "call" && root.callee && root.callee.kind === "ident") {
         boundaryCatchCalls.add(root as Record<string, unknown>);
       } else if (renderTime && !root) {
         // Carried as text only: nothing codegen lowers can test the result — refuse (fails closed).
@@ -16257,6 +16269,21 @@ function annotateNodes(
    * call it handles (§19.6.6), not only to a whole-statement call.
    */
   function boundaryHandlesCall(c: FailableCallCandidate, span: Span): void {
+    // S468 fix round 1 (F1) — §19.6.6: "A server call SHALL NOT occur at render time: in the
+    // boundary's content, as in any value position, it is E-VALUE-SERVER-CALL (§13.7), and the
+    // boundary SHALL NOT exempt it." Its client call returns a Promise, which no render-time test
+    // can read (the runtime check also refuses one — a call it cannot see as server-placed).
+    if (fnServerPlaced.has(c.calleeName)) {
+      const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
+      errors.push(new TSError(
+        "E-VALUE-SERVER-CALL",
+        `E-VALUE-SERVER-CALL: server function ${shown} is called while rendering inside an '<errorBoundary>'. ` +
+        `A server call cannot occur at render time, and the boundary does not exempt it (§13.7, §19.6.6). ` +
+        `Load the value with a '<request>' and read its failure from '<#id>.error'.`,
+        span,
+      ));
+      return;
+    }
     if (c.call === null || c.fromText) {
       const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
       errors.push(new TSError(
@@ -28465,7 +28492,7 @@ function processFile(
     const seenE002 = new Set<string>();
     for (let i = 0; i < errors.length; i++) {
       const e = errors[i];
-      if (!e || e.code !== "E-ERROR-002") continue;
+      if (!e || (e.code !== "E-ERROR-002" && e.code !== "E-VALUE-SERVER-CALL")) continue; // S468 r1: the boundary server-call refusal too
       const sp = e.span as Partial<Span> | undefined;
       const k = `${sp?.file ?? ""}|${sp?.start ?? ""}|${sp?.end ?? ""}|${sp?.line ?? ""}|${sp?.col ?? ""}|${e.message}`;
       if (seenE002.has(k)) { errors.splice(i, 1); i--; continue; }

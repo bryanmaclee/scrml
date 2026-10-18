@@ -83,3 +83,33 @@
 - 2026-10-17T17:15 full gate (unit + integration + conformance) on the working tree: 34880 pass / 0 fail / 125 skip
   (35018 tests, 1578 files). `bun scripts/facts.ts --write` (FACTS facts-table: compiler/src file/line counts) and
   `bun scripts/state.ts --write`; both `--check` PASS. No SPEC edit (none authorized), so no spec-index regen.
+
+## Fix round 1 (S239 review of frozen 51efb6b36, PR #1445)
+- 2026-10-17 REPRODUCED all items on 51efb6b36 with the reviewer harness (copied to ~/.cache/scrml-agent-tmp/s468-eb-r1/h,
+  pointed at this worktree; it runs the SHIPPED tree-shaken runtime):
+  F3 `renders <p>Missing ${id}</p>` + `fail AuthErr::NotFound(p)` with an `<img src=x id=pwn>` payload -> a live
+  `<img id="pwn">` in the page (interpolation AND statement forms). F2 `${ const <ok> = check(@pw) }` + `${@ok ? …}` ->
+  `THROWN: Error: scrml errorBoundary: render-time call failed` at load, page dead. F1 `${scheck(@pw) ? "LOGGED IN" : …}`
+  and `${ const ok = scheck(@pw) }` (server `!` fn) -> LOGGED IN for a wrong password. F4 `${ @show ? <p>${check(@pw) ?
+  …}</p> : "" }` -> LOGGED IN, inside or outside a boundary, identical on base 5c43c3b8e.
+- Governing: F3 §4.18.6 "The value produced by an `${expr}` interpolation … SHALL be escaped per the existing interpolation
+  escaping rules (the same rules that apply to `${...}` interpolation in any body or attribute position)". F1 §19.6.6 "A
+  server call SHALL NOT occur at render time: in the boundary's content, as in any value position, it is
+  E-VALUE-SERVER-CALL (§13.7), and the boundary SHALL NOT exempt it." F2 §19.6.6 (the boundary catches render-time calls)
+  — a check run after the render is outside the catch; refusing it is the fail-closed reading.
+- FIX F3: payload interpolations in `renders` / `fallback=` (and `<render of=>`, same sink) lower through
+  `_scrml_error_boundary_text` (HTML-escape & < > " ') — emit-error-boundary.ts.
+- FIX F2: `deferredBoundaryChecks` (emit-boundary-logic.ts, acorn over our emitted JS): a check inside a function that is
+  not invoked on the spot (IIFE = immediate) is refused E-ERROR-002, at both catch sites (statement group wrap,
+  interpolation render fn). Derived formulas, reset init thunks and `_scrml_effect` re-runs are therefore refused.
+- FIX F1: type-system `fnServerPlaced` (keyword / RI server boundary / CPS split) -> E-VALUE-SERVER-CALL for a server call
+  the boundary would handle (deduped like E-ERROR-002); runtime `_scrml_error_boundary_check` REFUSES a thenable (host
+  error -> fallback; its later rejection is logged) — the false "checked when it settles" comment and gap text corrected.
+  conformance server-fn/error-boundary-value-server-call-neg now XPASSes -> xfail removed; the carried
+  g-impl1-value-server-call-s451 is pinned by NEW server-fn/value-server-call-interp-neg (outside a boundary).
+- FILED: g-markup-in-interp-ternary-failable-call-unchecked-s468 (F4 HIGH, open, pre-existing),
+  g-errorboundary-derived-after-mount-not-typed-s468 (F6 LOW, resolved by the F2 refusal).
+- After (harness, head): F3 payload renders as text `Missing <img src=x id=pwn>`, no element; F2 / F1 refused at compile
+  time. Reviewer shapes1-8 (head): every remaining wrong-password LOGGED IN (s04/n04 F4, s14 lift, s21/n21/s22b/s22c a
+  failable function used as a VALUE — S467 "still open") is byte-for-byte the base behaviour; none introduced.
+  c2-component-interp-twice improved (the wrong instance now shows FB; base: LOGGED IN).

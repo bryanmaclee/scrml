@@ -84,15 +84,58 @@ function patternNames(p: any, out: string[]): void {
 }
 
 /**
- * Wrap module-init JS `code` (one boundary `${}` block's emitted statements) in
- * the catch of every boundary in `chain` (outermost first). Returns null when
- * the code does not parse (it always does — it is the compiler's own output —
- * and the caller then refuses the lowering rather than ship it uncaught).
+ * S468 fix round 1 (F2) — EMITTED inside a catch site is not EXECUTED inside it.
+ * A boundary check the compiler placed inside a function it generated and calls
+ * LATER — a derived cell's formula (`_scrml_derived_declare("ok", () => …)`), a
+ * reset init thunk, an `_scrml_effect` re-run — would raise outside every catch
+ * (and a raise at load kills the page's script). Count the
+ * `_scrml_error_boundary_check(…)` calls in `js` that sit inside a function which
+ * is not invoked on the spot (an IIFE is), read from the tree (acorn).
+ * `asExpression`: `js` is one expression (an interpolation's lowered value).
+ * Returns null when `js` does not parse.
  */
-export function wrapBoundaryRenderLogic(code: string, chain: BoundaryCatchInfo[]): string | null {
-  if (chain.length === 0) return code;
-  const ast = parse(code);
+export function deferredBoundaryChecks(js: string, asExpression: boolean): number | null {
+  const ast = parse(asExpression ? `(${js});` : js);
   if (!ast) return null;
+  let count = 0;
+  const FN = new Set(["FunctionExpression", "ArrowFunctionExpression", "FunctionDeclaration"]);
+  const visit = (n: any, deferred: boolean, immediateFn: any): void => {
+    if (!n || typeof n.type !== "string") return;
+    let inDeferred = deferred;
+    if (FN.has(n.type) && n !== immediateFn) inDeferred = true;
+    if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier"
+        && n.callee.name === "_scrml_error_boundary_check" && inDeferred) count++;
+    const calleeFn = n.type === "CallExpression" && n.callee && FN.has(n.callee.type) ? n.callee : null;
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
+      const v = n[k];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c === "object") visit(c, inDeferred, calleeFn); }
+      else if (v && typeof v === "object") visit(v, inDeferred, calleeFn);
+    }
+  };
+  visit(ast, false, null);
+  return count;
+}
+
+export type BoundaryWrapResult =
+  | { ok: true; code: string }
+  /** `unparsed`: the emitted code did not parse; `deferred`: a check would run after the catch (see deferredBoundaryChecks). */
+  | { ok: false; reason: "unparsed" | "deferred" };
+
+/**
+ * Wrap module-init JS `code` (one boundary `${}` block's emitted statements) in
+ * the catch of every boundary in `chain` (outermost first). Refused (the caller
+ * reports E-ERROR-002 rather than ship the call uncaught) when the code does not
+ * parse — it always does: it is the compiler's own output — or when a check in
+ * it sits in a function called after the run returns.
+ */
+export function wrapBoundaryRenderLogic(code: string, chain: BoundaryCatchInfo[]): BoundaryWrapResult {
+  if (chain.length === 0) return { ok: true, code };
+  const deferred = deferredBoundaryChecks(code, false);
+  if (deferred === null) return { ok: false, reason: "unparsed" };
+  if (deferred > 0) return { ok: false, reason: "deferred" };
+  const ast = parse(code);
+  if (!ast) return { ok: false, reason: "unparsed" };
   const letNames: string[] = [];
   const varNames: string[] = [];
   const hoisted: string[] = [];
@@ -134,7 +177,7 @@ export function wrapBoundaryRenderLogic(code: string, chain: BoundaryCatchInfo[]
       `}, ${boundaryDisplayFn(b, "")});`;
   }
   out.push(inner);
-  return out.join("\n");
+  return { ok: true, code: out.join("\n") };
 }
 
 /** Does the expression tree hold a boundary-check placeholder call (type-system.ts `applyBoundaryCatchWraps`)? */

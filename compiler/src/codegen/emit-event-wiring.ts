@@ -26,6 +26,9 @@ import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListCo
 import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
+import { deferredBoundaryChecks } from "./emit-boundary-logic.ts";
+import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { CGError } from "./errors.ts";
 
 /** An event binding recorded by HTML gen and consumed by client JS gen. */
 interface EventBinding {
@@ -2466,6 +2469,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // S468 — does the expression raise a typed failure (it lowered a boundary check)?
         const raisesTyped = boundaryChecksEmittedCount() !== checksBefore;
         const hi = raisesTyped ? "  " : ""; // the host-throw arm sits one level deeper when it does
+        // S468 fix round 1 (F2) — a check the lowering put inside a function called
+        // later (not on the spot) would raise outside this render's catch: refuse.
+        if (raisesTyped && deferredBoundaryChecks(ebExpr, true) !== 0) {
+          recordRefusedLowering(new CGError(
+            "E-ERROR-002",
+            "E-ERROR-002: a failable call made inside an '<errorBoundary>' is evaluated later than the render, " +
+            "outside the boundary's catch, so the boundary cannot handle it. Handle it in place with '!{}' or 'match'.",
+            (binding.exprNode as { span?: object } | undefined)?.span ?? {},
+          ), binding as object);
+        }
 
         const inTpl = binding.insideMountTemplate === true;
         const blk: string[] = [];
