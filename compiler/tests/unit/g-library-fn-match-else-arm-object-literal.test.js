@@ -107,20 +107,21 @@ describe("g-library-fn-match-else-arm-object-literal — class coverage", () => 
     expect(mod.e(9)).toEqual({}); // was undefined (fell off the IIFE end)
   });
 
-  it("object-SHORTHAND else arm `{ x }` matches the inline arm (both return { x }, not the tail value)", async () => {
-    // The parser resolves `{ x }` to an object shorthand, so BOTH arms return `{ x }`.
-    // This pins parity with the inline `1 :> { x }` path (#664) — the else arm must
-    // NOT diverge to the pre-fix block-tail value `x`.
+  it("object else arm `{ x: x }` matches the inline arm (both return { x: x }, not the tail value)", async () => {
+    // S469 (ruling, §18.5): the single-shorthand body `{ x }` is now
+    // E-MATCH-ARM-SHORTHAND-AMBIGUOUS, so this parity pin (#664 — the else arm must
+    // NOT diverge to the pre-fix block-tail value `x`) is written with the explicit
+    // object spelling.
     const SRC = `export fn sh(n: number, x: number) {
     return match n {
-        1 :> { x }
-        else :> { x }
+        1 :> { x: x }
+        else :> { x: x }
     }
 }`;
     const { out, outPath } = compileLib(SRC, "shorthand");
     // Both arms identical — the fix's whole purpose.
-    expect(out).toMatch(/if \(_scrml_match_\d+ === 1\) \{ return \{ x \}; \}/);
-    expect(out).toMatch(/else \{ return \{ x \}; \}/);
+    expect(out).toMatch(/if \(_scrml_match_\d+ === 1\) \{ return \{ ?x ?: ?x ?\}; \}/);
+    expect(out).toMatch(/else \{ return \{ ?x ?: ?x ?\}; \}/);
     const mod = await import(pathToFileURL(outPath).href);
     expect(mod.sh(1, 42)).toEqual({ x: 42 });
     expect(mod.sh(9, 42)).toEqual({ x: 42 }); // parity with the matching arm
