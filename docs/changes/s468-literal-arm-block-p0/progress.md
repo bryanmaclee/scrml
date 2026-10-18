@@ -239,3 +239,24 @@ New this round:
   compiler-root path. (vs origin/main aef6cfcb9 the branch also differs by main's commits since bbddfd7b9 —
   not a valid measure of this PR; the round-0 measurement vs bbddfd7b9 stands.)
 - Pre-commit gate on bac1c7ccd: 37795 pass, 0 fail.
+
+## 2026-10-18 — FIX ROUND 3 (ruling S469 "Compile error (Recommended)")
+
+- `{ foo }` (exactly one bare shorthand name, no `;`) is now **E-MATCH-ARM-SHORTHAND-AMBIGUOUS** (code name
+  provisional — owner's call) in every position. Raised by the PARSER where it reads the arm's tokens
+  (`parseArmBraceBody`); a `match` inside a larger expression (arms carried as text by the expression parser)
+  is re-read with the statement parser by `checkExpressionMatchArmBodies` (ast-builder.js, beside the S462
+  `given` re-read), forwarding only this code. The info lint W-MATCH-ARM-SHORTHAND-OBJECT and the
+  `SINGLE_SHORTHAND_ARM_BODY` switch are retired (no form still needs the lint). SPEC §18.5 bullet + §34 row
+  replaced; provenance S469, supersedes S468 item 5; direction newly-rejecting. Gap resolved.
+- **Corpus, measured** (`corpus-emit-differential`, roots examples, samples, conformance, stdlib, benchmarks —
+  2847 sources; base = git archive ae833fb26, head = this round): 0 newly failing, 0 newly passing, 0
+  diagnostic changes, 0 artifact content changes after root-path normalisation. giti + flogence (113 `.scrml`,
+  each compiled with head): 0 E-MATCH-ARM-SHORTHAND-AMBIGUOUS. **Real sites newly refused: 0.**
+- Test fixtures migrated: g-library-fn-match-else-arm-object-literal.test.js (`{ x }` -> `{ x: x }`, its
+  parity intent kept). Unit (D) rewritten: refused once in decl / let / return / argument / multi-scrutinee /
+  statement / lambda; the explicit spellings, `{ foo, bar }` and `{ foo; }` compile and run.
+- security-await-pack family `la4` (50 shapes: 12 head forms x const / let / return / argument, + statement +
+  lambda): all PASS-REFUSED with E-MATCH-ARM-SHORTHAND-AMBIGUOUS. Pack: 873 shapes, 876 pass.
+- Not covered (surfaced, not changed): a `!{}` handler arm `.E :> { foo }` reads as a block whose result is
+  `foo` (not an object) — the ruling's "every position" is read as every `match` position.
