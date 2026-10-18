@@ -166,6 +166,15 @@ function identityReadIn(
     if (!isBound("session")) {
       for (const frag of rawFragmentsOf(r)) if (rawReadsFreeName(frag, "session")) { hit = "session"; return; }
     }
+    // s468 — the ambient `@` identities in raw text the parser keeps unparsed (a
+    // block-bodied callback, a template interpolation): `xs.forEach((x) => { n =
+    // @session.userId })` is the same read as the structured one above. The deep
+    // follower's raw-name walk does not follow `@session` / `@currentUser` (they
+    // are reads, not bindings), so they are recognised here.
+    for (const frag of rawFragmentsOf(r)) {
+      if (opts.sessionProjection && rawReadsFreeName(frag, "@session")) { hit = "@session"; return; }
+      if (opts.currentUserAmbient && rawReadsFreeName(frag, "@currentUser")) { hit = "@currentUser"; return; }
+    }
   });
   return hit;
 }
