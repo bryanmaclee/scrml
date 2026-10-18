@@ -9,9 +9,9 @@ import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
-import { armBlockStatementsDetailed, objectLiteralArmValue } from "../arm-body-statements.ts";
+import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -6596,39 +6596,6 @@ export function _matchArmResultIsBlockBody(result: string): boolean {
   return true;
 }
 
-/**
- * §18 object-literal arm parity (g-library-fn-match-else-arm-object-literal-...).
- *
- * A BLOCK-FORM match arm — `else :> { x: 0 }`, `.V :> { x: 0 }`, `not :> { x: 0 }` —
- * is parsed by the AST builder into a `structuredBody` (statement nodes), whereas
- * the INLINE-form sibling `1 :> { x: 0 }` keeps a `result` STRING that #664 already
- * lowers correctly as a value (emitIifeBlockArmBody's object branch). So an
- * OBJECT-LITERAL body reaching the structuredBody path mis-lowers: `{ x: 0 }` is
- * read as a labeled-statement block whose "tail" is the bare ident `x`, emitting
- * `return x` (silent-wrong when `x` is in scope) — or, in decl position, the
- * malformed `_scrml_tilde = x : 0` (E-CODEGEN-INVALID-LOGIC).
- *
- * This recovers the brace-body source from the structuredBody and runs the SAME
- * object-vs-block classifier the inline path uses (`_matchArmResultIsBlockBody`) —
- * there is NO second predicate, so the two arm forms stay in lockstep by
- * construction. Returns the object-literal source string when (and only when) the
- * body resolves to an `object` node; otherwise null, so the caller keeps the
- * genuine-block structuredBody path (which threads tildeContext / engineCtx /
- * declaredNames that a string re-lowering would drop). The single-`bare-expr`
- * reconstruction relies on the node's retained raw `expr` text (`"x : 0"`), the
- * same field the §18.5 tail derivation already reads.
- */
-export function _objectLiteralArmFromStructuredBody(structuredBody: any): string | null {
-  // S468 r1 — the ONE reader (arm-body-statements.ts `objectLiteralArmValue`), shared
-  // with the AST builder and the type checker, so every stage agrees on what the arm
-  // holds. Same rule as before: rebuild the brace text from the body's one bare-expr's
-  // raw `expr` (its exprNode used to hold only the first key), `{}` for an empty body,
-  // and divert ONLY when that text reads as an `object` node — the same object-vs-block
-  // reading `_matchArmResultIsBlockBody` gives the inline form (`{ x }` shorthand
-  // included). A genuine BLOCK returns null and keeps the §18.5 structuredBody tail
-  // lowering (tildeContext / engineCtx / declaredNames a string re-lowering would drop).
-  return objectLiteralArmValue(structuredBody)?.text ?? null;
-}
 
 /**
  * §18.5 — is a block's trailing segment a value EXPRESSION (its result) rather
@@ -6828,8 +6795,8 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // lowered as the single-scrutinee decl path lowers a structured arm (an object-literal
       // body is the value; otherwise statements with the §18.5 tail assigned).
       if (structuredBody) {
-        const objArm = _objectLiteralArmFromStructuredBody(structuredBody);
-        if (objArm !== null) return [`${resultVar} = ${_awaitMatchArmServerCalls(emitArmValue(objArm, _makeExprCtx(opts)), opts)};`];
+        const objArm = emitObjectLiteralArm(structuredBody, _makeExprCtx(opts));
+        if (objArm !== null) return [`${resultVar} = ${_awaitMatchArmServerCalls(objArm, opts)};`];
         return _emitStructuredArmToVar(structuredBody, resultVar, opts, opts).map((l) => l.replace(/^  /, "")).filter((l) => l.trim() !== "");
       }
       const t = resultStr.trim();
@@ -6994,11 +6961,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       //
       // S468 — an OBJECT-LITERAL arm body (`.A :> { x: 1 }`, `1 :> { x: 1 }`) is a
       // VALUE, as the statement and IIFE lowerings already read it
-      // (`_objectLiteralArmFromStructuredBody`); emitted as statements it was
+      // (`emitObjectLiteralArm`); emitted as statements it was
       // `tilde = x : 1;` → E-CODEGEN-INVALID-LOGIC.
-      const _objArm = _objectLiteralArmFromStructuredBody(_body);
+      const _objArm = emitObjectLiteralArm(_body, _makeExprCtx(opts));
       if (_objArm !== null) {
-        bodyCode.push(`  ${tildeVar} = ${_awaitMatchArmServerCalls(emitArmValue(_objArm, _makeExprCtx(opts)), opts)};`);
+        bodyCode.push(`  ${tildeVar} = ${_awaitMatchArmServerCalls(_objArm, opts)};`);
       } else {
         bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
       }

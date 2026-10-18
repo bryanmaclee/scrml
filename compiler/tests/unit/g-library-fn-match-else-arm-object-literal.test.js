@@ -118,9 +118,10 @@ describe("g-library-fn-match-else-arm-object-literal — class coverage", () => 
     }
 }`;
     const { out, outPath } = compileLib(SRC, "shorthand");
-    // Both arms identical — the fix's whole purpose.
-    expect(out).toMatch(/if \(_scrml_match_\d+ === 1\) \{ return \{ x \}; \}/);
-    expect(out).toMatch(/else \{ return \{ x \}; \}/);
+    // Both arms identical — the fix's whole purpose. (S469: emitted from the one parsed
+    // object tree, so the spacing is the expression emitter's `{x}`.)
+    expect(out).toMatch(/if \(_scrml_match_\d+ === 1\) \{ return \{ ?x ?\}; \}/);
+    expect(out).toMatch(/else \{ return \{ ?x ?\}; \}/);
     const mod = await import(pathToFileURL(outPath).href);
     expect(mod.sh(1, 42)).toEqual({ x: 42 });
     expect(mod.sh(9, 42)).toEqual({ x: 42 }); // parity with the matching arm

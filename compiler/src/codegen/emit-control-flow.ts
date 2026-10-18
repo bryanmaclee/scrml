@@ -3,11 +3,11 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
-import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
-import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
+import { armBodyStatementsFromText, leaveInStatements, objectLiteralArmValue } from "../arm-body-statements.ts";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
@@ -3012,9 +3012,9 @@ function structuredIifeArmInner(structuredBody: any[], opts: any, _matchCtx: Emi
   // work, and no genVar side effects that would perturb the emitted differential).
   // Returns null for a genuine statement block, which then takes the §18.5 tail
   // path below unchanged.
-  const _objArm = _objectLiteralArmFromStructuredBody(structuredBody);
+  const _objArm = emitObjectLiteralArm(structuredBody, _matchCtx);
   if (_objArm !== null) {
-    structuredInner = `return ${_awaitMatchArmServerCalls(emitArmValue(_objArm, _matchCtx), opts ?? {})};`;
+    structuredInner = `return ${_awaitMatchArmServerCalls(_objArm, opts ?? {})};`;
   } else {
     const bodyLines = emitLogicBody(structuredBody, opts).filter(Boolean);
     // §18.5 — a block arm is `{ statement* expression? }` whose result is its
@@ -3596,9 +3596,9 @@ function stmtArmBodyLines(
 ): string[] {
   if (arm.structuredBody) {
     // An object-literal block-form arm (`else :> { x: 0 }`) is a VALUE: evaluate it.
-    const objArm = _objectLiteralArmFromStructuredBody(arm.structuredBody);
+    const objArm = emitObjectLiteralArm(arm.structuredBody, matchCtx);
     if (objArm !== null) {
-      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitArmValue(objArm, matchCtx), opts ?? {}));
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(objArm, opts ?? {}));
       return s ? [s] : [];
     }
     // The arm is a JS block: a name it declares is scoped to it, so it gets its own
@@ -3895,6 +3895,21 @@ export function structureServerArm(arm: MatchArm, mode: "client" | "server"): Ma
  */
 export function emitArmValue(text: string, ctx: EmitExprContext, node?: any): string {
   return emitExprField(serverArmExprNode(text, ctx.mode, node), text, ctx);
+}
+
+/**
+ * S469 (#1450 r1, F1 / F6) — an OBJECT-LITERAL block arm (`1 :> { g: check }`,
+ * `.A :> { foo }` — §18.5 shorthand, `{ foo: foo }`) emitted from the ONE reading
+ * of it: the object tree `objectLiteralArmValue` (arm-body-statements.ts) gives the
+ * AST builder, the type checker and codegen alike. The tree is emitted in BOTH
+ * modes (the client used to re-lower the brace TEXT through the token rewriter —
+ * a second reader of the same arm). Returns null for a genuine statement block.
+ */
+export function emitObjectLiteralArm(structuredBody: unknown, ctx: EmitExprContext): string | null {
+  const v = objectLiteralArmValue(structuredBody);
+  if (!v) return null;
+  const node = ctx.mode === "server" ? serverArmExprNode(v.text, ctx.mode, v.node) : v.node;
+  return emitExprField(node, v.text, ctx);
 }
 
 /**
