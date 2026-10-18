@@ -1266,7 +1266,15 @@ This subsection exists as a negative-space anchor — without it, model writers 
 
 **A raw-content body is display text: `<` and `>` are entity-encoded on output (S462 Q21).** What the author types is what the page shows, and nothing in a raw-content body builds an element, so nothing in it can execute. The rule closes the whole class; there is no list of dangerous names, attributes or schemes. Normatively:
 
-- Every `<` and `>` in a raw-content body SHALL be written to every output the body reaches (the served HTML, an `if` / `<match>` / engine template, a component body after its props are substituted, `^{ emit(…) }` output, a server-rendered (§52.8) row, and the client DOM an `<each>` row or a `lift` builds) as `&lt;` / `&gt;`. A component prop substituted into a raw body is encoded AFTER substitution.
+- Every `<` and `>` in a raw-content body SHALL be written to every output the body reaches (the served HTML, an `if` / `<match>` / engine template, a component body, `^{ emit(…) }` output, a server-rendered (§52.8) row, and the client DOM an `<each>` row or a `lift` builds) as `&lt;` / `&gt;`. A component prop reaches a raw body only as element CONTENT — use-site children or a slot fill (§66.15.2) — never through an interpolation; content placed in a raw body is encoded AFTER it is placed.
+
+**Raw content wins over interpolation, in a component too (S468).** Inside a `<pre>` / `<code>` body a `${…}` is display text, always — including in a component's `renders` body (§66) and a legacy component body (§15.9): it substitutes no prop, reads no cell, and displays exactly as written (`<pre>${t}</pre>` in a component body shows the five characters `${t}`). The first bullet of the normative statement above has no component exception. To show a prop's value as display text, place it OUTSIDE the raw body (`Value: ${t} <pre>…</pre>`), as the "Out-of-band opt-back-in deferred" paragraph below already says for a cell.
+
+> **Provenance:** ruling:user-voice-scrml.md S468 "go on the merge driver, your recs on the rest" — item 4: *"**§4.17 — raw content wins:** inside `<pre>`/`<code>` a `${…}` is display text, always, including in a component's `renders` body; the sentence about a component prop "substituted into a raw body" is amended to mean a prop passed as element CONTENT (children/slot), not an interpolation."* · supersedes: *"a component body after its props are substituted"* and *"A component prop substituted into a raw body is encoded AFTER substitution."* (S462 Q21 text).
+>
+> **Read-through (agent-drafted, S468, owner may revisit).** This section does not recognize `<slot/>` (or any tag) inside a raw body, so a `renders` body written `<pre><slot/></pre>` displays the text `<slot/>`; the "content placed in a raw body" clause therefore states the encoding guarantee for any placement path, and adds no recognition inside raw content. Whether `<slot/>` should be recognized inside a raw body is not ruled; recognizing it would be newly-accepting and is not written here.
+>
+> **Direction of change (pa-base §8): semantics-changed.** A component whose raw body holds `${prop}` used to display the prop's value (encoded); it now displays `${prop}`. **Status: Nominal / spec-ahead for impl#1** — impl#1 substitutes the prop (measured S468: `conformance/cases/raw-content/component-prop-displays-as-text` compiles to `<pre id="shown">&lt;img src=x onerror='window.pwned=5'&gt;</pre>`); it is not changed (S435: fail-safe — the substituted text is encoded — so not security), and the divergence is filed: `docs/known-gaps.md` `g-impl1-component-raw-body-substitutes-prop-s468`. The bootstrap builds the rule. Corpus impact not measured in this docs-only edit (owed by the build that lands it).
 - `&` SHALL NOT be encoded. An author entity (`&lt;b&gt;`, `&amp;`, `&#36;`) still decodes at render time and displays as the character it names; an entity never builds an element.
 - **Nested `<code>` / `<pre>`.** A nested `<code>…</code>` or `<pre>…</pre>` pair with NO attributes stays an element (the `<pre><code>…</code></pre>` wrapper); the text inside it is encoded by the same rule. Only a BALANCED pair qualifies — a closer pairs with the innermost unclosed opener of the same name, ASCII case-insensitive, optional whitespace before `>`; an unpaired opener or closer is text. A nested tag that carries any attribute (`<code class="lang-js">`) is text, not an element.
 - A client-DOM output SHALL produce the same nodes the served HTML produces for the same body (entities decoded, the nested pair an element) and SHALL NOT parse the body as live HTML (impl#1 parses the encoded body through an inert `<template>`).
@@ -14718,7 +14726,7 @@ const card = <div class="card">
 
 ### 15.9 Inline Prop Interpolation
 
-`${prop}` inside component markup text interpolates the value of a prop or variable.
+`${prop}` inside component markup text interpolates the value of a prop or variable — except inside a `<pre>` / `<code>` raw-content body, where it is display text (§4.17, S468 "raw content wins").
 
 ```scrml
 const greeting = <p>Hello, ${name}!</>
@@ -20762,7 +20770,7 @@ In a function the CPS split divides, the tier of each top-level statement is dec
 
 > **Provenance:** ruling:user-voice-scrml.md S468 "your recos on both" — item (1): *"**(1) = (c) compose.** `g-cps-rule1-split-callee-placement-ruling-s468`: in `save() { ?{INSERT…}.run(); @msg = "saved"; loadProducts() }` where `loadProducts` is itself CPS-split, §19.9.9.8 rule 1 keeps the call server-tier ("A statement that calls a function placed on the server SHALL be server-tier at the call site"), and the caller's server batch runs the callee's server half IN-PROCESS; the callee's cell writes join the caller's returned cell set — one round trip, atomic with the INSERT. Rejected: (a) keep refusing as the language rule; (b) re-tier the call into the browser as a second request. Under S435: SPEC text + a BOOTSTRAP build; impl#1 keeps the s468 E-ROUTE-002 refusal (fail-closed), the same split as dpa-023 F4/F5."* · amends: §12.4's S451 R2 bullet, whose "Not covered here" list now names this call (reconciled in the same edit, below) · supersedes: nothing written — §19.9.9.8 was silent on whether a split callee is "a function placed on the server".
 >
-> **Read-through (PA-drafted, S468, fail-closed).** The ruling speaks of the callee's "server half"; a split callee also has non-server statements. The text above runs those that rule 3 permits to move in the batch and refuses the caller (`E-RI-002`) when one needs the browser — the ruling rejected moving the call to the browser (b), and a browser statement inside a one-round-trip composition has nowhere else to run. "Atomic with the INSERT" is stated as "the same request, inside the caller's transactional envelope": §19.10.5 synthesizes an envelope only for a `!` handler with two or more queries, so a non-`!` caller has one request but no transaction. Both readings narrow, never widen, what the ruling admits; the owner may revisit either.
+> **Read-through (confirmed S468, fail-closed).** The ruling speaks of the callee's "server half"; a split callee also has non-server statements. The text above runs those that rule 3 permits to move in the batch and refuses the caller (`E-RI-002`) when one needs the browser — the ruling rejected moving the call to the browser (b), and a browser statement inside a one-round-trip composition has nowhere else to run. "Atomic with the INSERT" is stated as "the same request, inside the caller's transactional envelope": §19.10.5 synthesizes an envelope only for a `!` handler with two or more queries, so a non-`!` caller has one request but no transaction. Both readings narrow, never widen, what the ruling admits. Provenance: ruling:user-voice-scrml.md S468 "go on the merge driver, your recs on the rest" — item 2: *"#1448 PA read-throughs confirmed as drafted: (i) a composed CPS callee's non-server statements run in the caller's batch where rule 3 lets them move; a callee statement that needs the browser makes the CALLER E-RI-002; (ii) "atomic with the INSERT" = one request, inside the caller's transaction envelope if it has one (§19.10.5) — a non-`!` caller gets one round trip, no transaction. Rejected: a transaction around every composed batch."*
 >
 > **Status: Nominal / spec-ahead (S468).** impl#1 does not compose. With `s468-cps-unbound-cluster` (PR #1442, open when this was written) it refuses the shape with **`E-ROUTE-002`** (§12.4 R2 — the callee touches a cell), fail-closed; without that PR it emits a bare callee call into the server module that throws `ReferenceError` at run time. impl#1 is frozen for language semantics (S447) and keeps the refusal; the bootstrap builds composition (S435 split, as dpa-023 F4/F5). Ledger: `g-cps-split-callee-composition-nominal-s468`.
 >
@@ -27070,6 +27078,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-MSG-WITHOUT-ACCEPTS | §51.0.S | A state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration. (Catalog addition S154 — §51.0.S.) | Error |
 | E-ENGINE-MSG-ARM-POSITION | §51.0.S.2.3 | A pattern-arm head — `<arm-pattern> :>` (or a deprecated separator), with or without the legacy leading `\|` — appears in an engine state-child body AFTER render content. Message arms are the leading items of the body (recognised by position, §7.2.2); a later arm-shaped line is neither code nor display text. Resolution: move the arm above the render content. **Provenance:** `rationale:` the limiting option (fork rule); PA reading in its veto window, S452 (follows ruling:user-voice-scrml.md S452 "a. one spelling"). **Nominal / not yet emitted** — impl#1 renders such a line as text (`g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it. | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
+| E-VALIDATOR-CONTRADICTORY | §55.12.1 | A value's validators cannot all hold — no value satisfies the set, decided over literal arguments: numeric bounds (`min` / `max` / `gt` / `lt` / `gte` / `lte` / `eq` / `neq`), `length(…)` comparisons (with `req` on a `string` as `length(>=1)`), and `oneOf` / `notIn` / `eq` / `neq` membership — e.g. `length(>5) length(<3)`, `min(10) max(3)`. A validator with a cell-read argument (§55.11), `pattern(…)` and `.Custom` are not decided. **Provenance:** ruling:user-voice-scrml.md S468 "go on the merge driver, your recs on the rest" item 3 — *"Contradictory validators are a compile error (`length(>5) length(<3)` and kin — no value can ever be valid)."* **Nominal / bootstrap-owed — not yet emitted:** the bootstrap builds it; impl#1 carries the divergence (§34.0; `g-impl1-contradictory-validators-accepted-s468`). | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-DEBOUNCED-WITH-SERVER | §6.13, §52 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a `<x server>` server-authoritative cell. Server-authoritative writes go through the §52 server-write path, not the client-side debounce/throttle wrapper; the two surfaces don't compose. Server-side timing semantics are out of scope for this revision. Resolution: remove the reactivity attribute, or restructure so the client-side cell carries the timing and the server-authoritative cell receives the resolved value. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
@@ -43371,6 +43380,53 @@ both `length` and `pattern` failing yields `[.LengthFailed(...), .PatternMismatc
 **Custom validators** (`.Custom(tag)`) interleave with built-in validators in declaration
 order — the compiler doesn't reorder.
 
+#### 55.12.1 Validators no value can satisfy — `E-VALIDATOR-CONTRADICTORY` (S468)
+
+> **Status: Nominal / spec-ahead (S468).** NORMATIVE. The bootstrap builds it; **impl#1 does not emit it** and is
+> not changed for it (S435: not security, not bootstrap-serving — §34.0). Divergence filed: `docs/known-gaps.md`
+> `g-impl1-contradictory-validators-accepted-s468`.
+> **Provenance:** ruling:user-voice-scrml.md S468 "go on the merge driver, your recs on the rest" — item 3:
+> *"**Contradictory validators are a compile error** (`length(>5) length(<3)` and kin — no value can ever be valid).
+> SPEC sentence (§55) + a code; built in the BOOTSTRAP (S435: not security → no impl#1 change; impl#1 divergence
+> filed)."* · answers: `g-contradictory-validators-ruling-owed-s468` (the #1202 review) · supersedes: nothing
+> written — this section said validators COMPOSE and was silent on a set that cannot all hold.
+> **Direction of change (pa-base §8): newly-rejecting (by ruling).** Corpus impact not measured in this docs-only
+> edit; the bootstrap build that lands it measures it.
+
+A set of validators no value can satisfy SHALL be a compile error: **`E-VALIDATOR-CONTRADICTORY`** (§34). Validators
+compose (above): a value is valid only when every one holds. When they cannot all hold, every value is invalid,
+`isValid` is a compile-time `false`, and the gate of a form that binds the value never lets a submit through (§55.17.3) — a declaration
+mistake, not a run-time condition. The message names the value and the validators that conflict.
+
+**What the compiler decides.** The rule is decided over the validators whose arguments are literals:
+
+1. **Numeric bounds** — `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq` with literal numbers: contradictory when
+   no number meets every bound (`min(10) max(3)`, `gt(5) lt(5)`, `eq(4) max(3)`, `eq(4) neq(4)`).
+2. **Length** — the `length(…)` comparisons with literal integers, over the lengths `0, 1, 2, …`: contradictory when
+   no length meets every comparison (`length(>5) length(<3)`, `length(==4) length(>=5)`). On a `string` value `req`
+   counts as `length(>=1)` (`""` fails `req`), so `req length(<1)` is contradictory.
+3. **Membership** — `oneOf([…])`, `notIn([…])`, `eq`, `neq` with literal members: contradictory when no member is
+   left (`oneOf([.A]) notIn([.A])`, two `oneOf` sets with no common member, `eq(.B) oneOf([.A])`).
+
+**Not decided:** a validator whose argument reads a cell (`gte(@startDate)`, §55.11), whose bound is known only at
+run time; `pattern(…)` (whether two JavaScript regular expressions share a string is not decidable in general —
+backreferences, lookaround); and `.Custom(tag)` checks, which are opaque. A set that is contradictory only through
+one of these is accepted and reports every value as failing at run time, as composition already says.
+
+```scrml
+let <code:string="" length(>5) length(<3)/>
+let <age:number=0 min(10) max(3)/>
+```
+
+Both declarations are `E-VALIDATOR-CONTRADICTORY`: no length is both above 5 and below 3, and no number is both at
+least 10 and at most 3.
+
+> **Read-through (agent-drafted, S468, owner may revisit).** (i) The ruling's "no value can ever be valid" is read
+> as decided over literal arguments only (the three families above); the excluded validators narrow, never widen,
+> what is refused. (ii) The rule applies wherever the §55.1 vocabulary appears — state-cell declarations (§55.2),
+> refinement type expressions (§55.3) and schema columns (§55.4) — because §55.1 gives the predicates "the same
+> semantics at all three"; a refinement type no value inhabits is the same mistake.
+
 ### 55.13 The `reset` keyword interaction (cross-ref §6.8)
 
 The `reset(@cell)` keyword (§6.8) clears synthesized validity state in addition to
@@ -43453,6 +43509,7 @@ of the original D2 brief for the canonical listing):
 |---|---|---|
 | `E-SYNTHESIZED-WRITE` | Error | Assignment to auto-synthesized property (already in §34 from D1). |
 | `E-VALIDATOR-CIRCULAR-DEP` | Error | Circular dependency via cross-field predicate args (§55.11). |
+| `E-VALIDATOR-CONTRADICTORY` | Error | A value's validators cannot all hold — no value satisfies the set (literal-argument bounds, lengths, membership; §55.12.1, S468). Nominal — the bootstrap builds it; impl#1 carries the divergence. |
 | `E-DERIVED-WITH-VALIDATORS` | Error | Validators applied to a derived cell (§55.14). |
 | `E-VALIDATOR-DEAD` | Error | Validators on a value nothing can ever change: no bind, no write grant, not server-loaded, no use-site seed, no `persist=` (§55.5.2, S447). Bootstrap emits it under the superseded S444 trigger; the S447 trigger is Nominal — lands with the impl. |
 | `E-VALIDITY-NO-SURFACE` | Error | A surface property read on a top-level value that carries no validators (§55.5.1 rule 2, S447). Bootstrap emits it for every program cell; the S447 narrowing is Nominal — lands with the impl. |

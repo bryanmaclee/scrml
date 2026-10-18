@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 265 | 4 |
 | MED | 654 | 6 |
-| LOW | 434 | 0 |
+| LOW | 436 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -111,6 +111,22 @@ The long-standing cell-sync model: a cell is client state and its value travels 
 ### (S468 annotation for g-server-row-written-to-cell-ships-to-browser-s468 — the entry lives on branch `s468-await-f4-followups` / PR #1446, not on main at `bbddfd7b9`)
 
 **Direction ruled S468 (2d) — banked as dpa-071.** The same ruling text as the entry above covers `g-server-row-written-to-cell-ships-to-browser-s468` by name ("a value that came from a server result … becomes a server-only value kind that cannot cross the wire"). No `@gap` marker here — the id is #1446's. **Dependency:** when #1446 lands, copy this paragraph into that entry's body and delete this heading.
+
+### (S468 annotation for g-contradictory-validators-ruling-owed-s468 — the entry lives on branch `s468-bootstrap-failopen-gaps` / PR #1447, not on main at `bbddfd7b9`)
+
+**RULED S468 — a compile error; bootstrap-owed.** bryan (user-voice-scrml.md S468, "go on the merge driver, your recs on the rest", item 3, verbatim): *"**Contradictory validators are a compile error** (`length(>5) length(<3)` and kin — no value can ever be valid). SPEC sentence (§55) + a code; built in the BOOTSTRAP (S435: not security → no impl#1 change; impl#1 divergence filed)."* SPEC landed S468 (`s468-rulings-spec`, PR #1448): §55.12.1 — *"A set of validators no value can satisfy SHALL be a compile error: `E-VALIDATOR-CONTRADICTORY`"* — decided over literal arguments (numeric bounds, `length(…)`, membership; cell-read arguments, `pattern(…)` and `.Custom` not decided); §34 row and §55.15 row, both Nominal / bootstrap-owed. The bootstrap's `bindValAttrs` today lowers the empty intersection (`minlength="6" maxlength="2"`); the build refuses it instead. impl#1 divergence: [[g-impl1-contradictory-validators-accepted-s468]] (below). No `@gap` marker here — the id is #1447's. **Dependency (for whoever lands the second of #1447 / #1448):** flip `g-contradictory-validators-ruling-owed-s468` to `status=carried` (owed by the bootstrap; `prov=ruling:user-voice-scrml.md-S468-"go-on-the-merge-driver"-item-3`; drop `route=bryan`) — a `status=carried` gap needs an xfail conformance case, so add one asserting `E-VALIDATOR-CONTRADICTORY` on `length(>5) length(<3)` — then copy this paragraph into its body and delete this heading.
+
+### g-impl1-contradictory-validators-accepted-s468 — impl#1 DIVERGENCE (filed, not fixed — S435): validators no value can satisfy (`length(>5) length(<3)`, `min(10) max(3)`) compile at exit 0; SPEC §55.12.1 (S468) makes them `E-VALIDATOR-CONTRADICTORY` — `NEW S468; LOW; open`
+
+<!-- @gap id=g-impl1-contradictory-validators-accepted-s468 sev=LOW status=open locus=UNTRACED:compiler/src(no validator-set satisfiability check exists; the validator collection on a state-cell declaration is the natural site — not traced, docs-only filing) prov=ruling:user-voice-scrml.md-S468-"go-on-the-merge-driver,-your-recs-on-the-rest"-item-3;dispatch:s468-rulings-spec -->
+
+Governing: SPEC §55.12.1 (S468), §34 `E-VALIDATOR-CONTRADICTORY` (Nominal / bootstrap-owed). The ruling sends the build to the bootstrap and keeps impl#1 unchanged (not security: the value is invalid for every input and the §55.17.3 gate blocks the submit — fail-closed, not fail-open). LOW: the program is rejected-in-effect at run time rather than at compile time. Not measured on impl#1 in this docs-only filing (the #1447 review reports impl#1's Shape-2 `<v length(>2) length(==4)>` lowers no length attribute at all). Fix only if impl#1's policy changes; otherwise closes when impl#1 retires.
+
+### g-impl1-component-raw-body-substitutes-prop-s468 — impl#1 DIVERGENCE (filed, not fixed — S435): a `${prop}` inside a `<pre>` / `<code>` raw body in a component body is SUBSTITUTED (then encoded); SPEC §4.17 (S468 "raw content wins") makes it display text — `NEW S468; LOW; open`
+
+<!-- @gap id=g-impl1-component-raw-body-substitutes-prop-s468 sev=LOW status=open locus=UNTRACED:compiler/src/component-expander.ts(prop substitution into the component body runs over the raw-content text child — hypothesis, not traced) prov=ruling:user-voice-scrml.md-S468-"go-on-the-merge-driver,-your-recs-on-the-rest"-item-4;empirical:S468-rulings-spec(compile of conformance/cases/raw-content/component-prop-displays-as-text) -->
+
+Measured S468 on `adc8f0fe8` (impl#1): `conformance/cases/raw-content/component-prop-displays-as-text/case.scrml` (`const Box = <div props={ t: string }><pre id="shown">${t}</pre></div>`, used `<Box t="<img src=x onerror='window.pwned=5'>"/>`) compiles to `<pre id="shown">&lt;img src=x onerror='window.pwned=5'&gt;</pre>` — the prop's value, encoded. Under SPEC §4.17 as amended S468 the body displays `${t}`. Fail-safe (the substituted text is encoded; nothing executes), so not security → impl#1 is not changed (S435); the bootstrap builds the rule. **The conformance case asserts the superseded reading:** its `domAnchored` `#shown` text expects the prop's value and its `description` / `rationale` say "substituted … encoded AFTER substitution". It must be rewritten to the S468 rule (`#shown` text `${t}`, `#shown img` count 0 kept) and pinned as an xfail on impl#1 under this gap (flip to `status=carried` then). Not done in this docs-only change — it moves a conformance result and needs a build-side owner (the bootstrap raw-content unit).
 
 ### g-cps-carried-primitive-message-says-object-s467 — E-RI-002 for a carried PRIMITIVE local written by a closure says "`blk` may hold an object" — fails closed, wrong wording — `NEW S467 (filed); LOW; open`
 
