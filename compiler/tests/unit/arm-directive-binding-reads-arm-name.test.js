@@ -91,7 +91,7 @@ describe("arm-bound logic bindings — hoisted factory, bound per arm entry", ()
     expect(f.name).not.toBeNull();
     expect(f.params).toBe("_scrml_root, note");
     expect(f.body).toContain(`const _scrml_el = _scrml_root.querySelector('[data-scrml-bind-show=`);
-    expect(f.body).toContain(`_scrml_el.style.display = ((note === "hi")) ? "" : "none";`);
+    expect(f.body).toContain(`_scrml_el.style.display = ((_scrml_structural_eq(note, "hi"))) ? "" : "none";`);
     // the effect's disposer is collected by the factory, not region-tracked globally
     expect(f.body).toContain("const _scrml_region_track = function(_scrml_e, _scrml_d) { _scrml_arm_ds.push(_scrml_d); return _scrml_d; };");
     const wire = fnSource(js, /_scrml_match_\w+_wire_Note/);

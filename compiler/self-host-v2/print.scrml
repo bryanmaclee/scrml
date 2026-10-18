@@ -856,10 +856,14 @@ ${
 
     fn textBuilt(t: string) -> Built { return { nodes: [HNode.HText(t)], holes: [] } }
 
+    // s468 — a raw-content body's text (SPEC §4.17): `<` / `>` encoded, `&` kept.
+    fn rawTextBuilt(t: string) -> Built { return { nodes: [HNode.HRawText(t)], holes: [] } }
+
     fn buildNode(ctx: Ctx, v: View, path: int[]) -> Built {
         return match v {
             .El(tag: tag, attrs: attrs, kids: ks) :> buildEl(ctx, v, tag, attrs, ks, path)
             .Text(text: t) :> textBuilt(t)
+            .RawText(text: t) :> rawTextBuilt(t)
             .Dyn :> hole(HNode.HComment(""), path, v)
             .Cond :> hole(HNode.HComment("if"), path, v)
             .Each :> hole(HNode.HComment("each"), path, v)
@@ -969,6 +973,7 @@ ${
             .Instance(decl: d) :> true
             .El :> false
             .Text :> false
+            .RawText :> false
             .Dyn :> false
             .Cond :> false
             .Each :> false
@@ -987,6 +992,7 @@ ${
             .ResetOn(triggers: ds) :> false
             .El(tag: t) :> true
             .Text(text: t) :> true
+            .RawText(text: t) :> true
             .Dyn(e: e) :> true
             .Cond(arms: a) :> true
             .Each(src: s) :> true
@@ -1012,6 +1018,7 @@ ${
             .El(kids: ks) :> mountedInstances(ks)
             .Instance(decl: d) :> [v]
             .Text :> []
+            .RawText :> []
             .Dyn :> []
             .Cond :> []
             .Each :> []
@@ -1029,6 +1036,7 @@ ${
         return match v {
             .El(attrs: attrs) :> only(attrsJs(ctx, attrs, node))
             .Text :> only([])
+            .RawText :> only([])
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))])
             .Cond(arms: arms) :> condJs(nested(ctx), arms, node, tid + "/" + pathText(h.path))
             .Each(src: src, bind: bind, key: key, handles: hs, row: row) :> eachJs(ctx, src, bind, key, hs, row, node, tid + "/" + pathText(h.path))
@@ -1349,6 +1357,7 @@ ${
             .Instance(decl: d, attrs: attrs) :> d.id == ds.id && constructValue(attrs, idx) is given
             .El(tag: t) :> false
             .Text(text: t) :> false
+            .RawText(text: t) :> false
             .Dyn(e: e) :> false
             .Cond(arms: a) :> false
             .Each(src: s) :> false
@@ -1678,6 +1687,7 @@ ${
             .Instance(decl: ds, attrs: attrs, alias: alias) :> kidCreate(fctx, ds, attrs, alias, k)
             .El :> []
             .Text :> []
+            .RawText :> []
             .Dyn :> []
             .Cond :> []
             .Each :> []

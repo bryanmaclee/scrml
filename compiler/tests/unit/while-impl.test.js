@@ -639,7 +639,7 @@ describe("integration: while loop codegen", () => {
     const result = emitLogicNode(node);
     expect(result).toContain("while (pos < len) {");
     expect(result).toContain("pos = pos + 1;");
-    expect(result).toContain("if (src[pos] === 32) {");  // rewriteExpr normalizes == to ===
+    expect(result).toContain("if (_scrml_structural_eq(src[pos], 32)) {");  // §45.4 (S468): `src[pos]` is not provably primitive
     expect(result).toContain("break;");
   });
 

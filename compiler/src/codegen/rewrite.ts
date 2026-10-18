@@ -8,6 +8,7 @@ import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
 import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { lowerEqualityOps } from "./string-equality-lowering.ts";
 import { lowerIsPlaceholders, lowerPresenceCheck, lowerAbsenceCheck, isTrivialOperandText } from "./is-predicate-lowering.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
@@ -2658,46 +2659,19 @@ export function rewriteStructConstruction(expr: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Rewrite scrml equality operators to JavaScript strict equality (§45).
+ * Lower scrml equality operators per §45.4 (client Pass 18).
+ *
+ * §45.1: "`==` is scrml's sole equality operator. It performs structural value
+ * comparison." Both operands statically primitive -> `===` / `!==`; otherwise
+ * `_scrml_structural_eq(l, r)` / `!_scrml_structural_eq(l, r)` — the same
+ * decision the structured emitter (emit-expr.ts `emitBinary`) makes. The text is
+ * PARSED (acorn) and each `==` / `!=` node is rewritten in place; see
+ * string-equality-lowering.ts. (Until S468 this pass regex-replaced every `==`
+ * with `===` — reference equality for structs / maps / payload enums; gap
+ * g-structural-eq-emitted-as-strict-eq-outside-typed-fn-bodies-s464.)
  */
 export function rewriteEqualityOps(expr: string): string {
-  if (!expr || typeof expr !== "string") return expr;
-  if (!expr.includes("==") && !expr.includes("!=")) return expr;
-
-  const result: string[] = [];
-  let inString: string | null = null;
-  let i = 0;
-  let segStart = 0;
-
-  while (i < expr.length) {
-    const ch = expr[i];
-    if (inString === null) {
-      if (ch === '"' || ch === "'" || ch === '`') {
-        result.push(_rewriteEqualitySegment(expr.slice(segStart, i)));
-        inString = ch;
-        segStart = i;
-      }
-    } else {
-      if (ch === '\\') {
-        i++;
-      } else if (ch === inString) {
-        inString = null;
-        i++;
-        result.push(expr.slice(segStart, i));
-        segStart = i;
-        continue;
-      }
-    }
-    i++;
-  }
-  result.push(_rewriteEqualitySegment(expr.slice(segStart)));
-  return result.join("");
-}
-
-function _rewriteEqualitySegment(segment: string): string {
-  return segment
-    .replace(/([^!=])={2}(?!=)/g, "$1===")
-    .replace(/!={1}(?!=)/g, "!==");
+  return lowerEqualityOps(expr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2905,7 +2879,7 @@ export function rewriteReactiveAssign(expr: string): string {
  * Pass 15: rewriteStructConstruction — Name { fields } → { fields }; after enum variants consumed
  * Pass 16: rewriteFnKeyword         — fn → function; structural, before inline body fixup
  * Pass 17: rewriteInlineFunctionBodies — insert semicolons in merged function bodies
- * Pass 18: rewriteEqualityOps       — == → ===, != → !==; outermost to avoid false matches
+ * Pass 18: rewriteEqualityOps       — §45.4: == → _scrml_structural_eq (=== only when both operands are provably primitive); last
  *
  * Server passes omit rewriteRenderKeyword and rewriteEqualityOps. (Pass 4 `rewriteBunEval` retired S133 — see comment above.)
  * Server pass 7 uses rewriteServerReactiveRefs instead of rewriteReactiveRefs.

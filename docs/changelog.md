@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S468 — 2026-10-17/18 (bryan · theRog, first boot) — new machine set up; 4 PRs merged, 11 in flight; the bootstrap's server half (U1c) built + reviewed; eight impl#1 wrong-password paths found
+
+- **Machine:** theRog replaces the dead ASUS (setup + the XPS USB backup restored; see hand-off §6). Two machine/window shutdowns mid-run; every branch checkpointed at wrap.
+- **Merged:** #1434 (await P0 r8–r10, impl#1 enforces F4) · #1446 (#1434 follow-ups) · #1437 (hand-off rotation + maps refresh) · #1439 (a server-only helper gets no public route, §13.4 — closed a forged-ticket redeem and a user-email lookup leak in two examples).
+- **Reviewed, landing next:** #1442 (CPS identity / E-ROUTE-002 — closes a forged-admin privilege escalation) · #1441 (for-header comma lists) · #1443 (`==` structural) · #1445 (errorBoundary catches returned errors) · #1440 (bang-arm block values) · #1447 + #1449 (BOOTSTRAP: fail-open gaps; **U1c server half, awaits by construction, checkCore gates emission**) · #1448 (SPEC for the S468 rulings).
+- **In fix rounds:** #1444 (failable alias/match) · #1450 (literal/`_`/alternation match arms parsed — P0, 29 wrong-password shapes on main) · #1451 (E-ARG-SERVER-IDENTITY, ruling 2b).
+- **Rulings:** CPS split callees compose (1c); identity-as-argument refused + server-only identity kind banked as dpa-071 (2b+d); merge driver; contradictory validators = error; §4.17 raw content wins; `int` = safe integer; E-SQL-SLOT-IN-LITERAL; no `<slot/>` in raw; `{foo}` decl arm = shorthand object; hook sharding; CI speedup; two TS-policy exceptions.
+- **Lesson:** the impl#1 wrong-password family has one root — two readers of the same text (codegen vs the security check). The bootstrap reads one Core and is immune by construction. Focus confirmed on the bootstrap.
+
 ## S467 — 2026-10-15/17 (bryan · XPS) — S466 died with the ASUS; its carry-overs landed or re-rounded; dpa-023 ruled F1–F7; two P0s reviewed clean
 
 - **S466 (ASUS) died unwrapped**; its pushed branches survived, its local-only work (`s466-error-002-decl`) did not. S467 adopted everything.
