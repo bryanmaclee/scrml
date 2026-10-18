@@ -28,7 +28,18 @@ Branch `s469-bootstrap-parse-arms-union` from origin/main `c64b9f053`.
 parse.scrml's own source is still newline-armed (impl#1 builds it and does not read arm commas). The
 message string avoids `match <subj> {` — impl#1 rewrites that shape even inside a string literal.
 
+- [x] commit 1 (parser + unit tests) through the pre-commit gate (37,767 tests, 0 fail).
+- [x] **Acceptance cases** `compiler/self-host-v2/acceptance/**` (conformance layout: case.scrml +
+  expected.json = the TARGET), graded by `scripts/bootstrap-conformance.ts --cases`; pinned by
+  `slice-m4/acceptance.test.js` (STATUS table = today's verdicts). 7 cases: 5 PASS (4 with an
+  executed runtime half), 2 UNSUPPORTED (general union; program (a)).
+  Not in `conformance/cases/**`: SPEC §18.2 still forbids arm commas (dpa-073 not in SPEC yet) and
+  impl#1 does not read them (F5 step 1 owed) — no carried gap to xfail impl#1 against.
+- **Program (a) now stops at:** `Guess.toEnum(@inputVal)` (E-BOOTSTRAP-UNSUPPORTED call allowlist,
+  blocker 4); the `not :>` arm pattern (E-PARSE-ARM ×3 — the parser has no `not` pattern; part of the
+  §18 plain-value match unit, blocker 5); the value `match @g {…}` inside `${}` (two
+  E-BOOTSTRAP-UNSUPPORTED: handled-failable in a larger expression; match over a non-failable value).
+
 ## Next
 
-- bootstrap acceptance cases (program (a), comma arms, union opener) + regenerate docs.
-- pre-commit gate, push, PR.
+- regenerate docs/bootstrap-conformance.md; pre-commit gate; push; PR.

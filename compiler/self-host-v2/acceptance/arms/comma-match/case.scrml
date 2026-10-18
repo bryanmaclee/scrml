@@ -1,0 +1,18 @@
+// dpa-073 F2 — a `match` arm list is a comma list; the trailing `,` is optional; a `,` inside an arm body is the body's.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+    function join2(a: string, b: string) -> string { return a + ":" + b }
+    function ok() { @out = match load("a") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to", } }
+    function nf() { @out = match load("x") { .Ok(v) :> join2("ok", v), .NotFound(m) :> join2("nf", m), .Timeout :> "to" } }
+    <main>
+        <button id="ok" onclick=ok()>ok</button>
+        <button id="nf" onclick=nf()>nf</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

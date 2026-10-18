@@ -1,0 +1,29 @@
+// dpa-073 F2 — `!{}` handler arms take the same comma list (S452: one arm grammar), block arms included.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    let <n:int=0/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+    function v() { @out = load("x") !{ .NotFound(m) :> "nf:" + m, .Timeout :> "to", } }
+    function blk() {
+        load("y") !{
+            .NotFound(m) :> {
+                @out = m
+            },
+            .Timeout :> {
+                @n = @n + 1
+                @out = "to"
+            },
+        }
+    }
+    <main>
+        <button id="v" onclick=v()>v</button>
+        <button id="blk" onclick=blk()>blk</button>
+        <p id="out">${@out}</p>
+        <p id="n">${@n}</p>
+    </main>
+</program>
