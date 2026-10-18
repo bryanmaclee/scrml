@@ -50,7 +50,7 @@ ${
              findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { JsExpr, JsStmt, JsProp, jid, jstr, jnum, jcall, jmember, printModule } from "./js.scrml"
-    import { RouteOut, Ctx, serverCtx, serverFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
+    import { RouteOut, Ctx, coreRefusal, serverCtx, serverFnJs, symNameOf, routeJs, routeName, routePath, calledServerFns,
              sqlTextName, dbVarName } from "./print.scrml"
 
     export type ServerOutput:struct = { js: string, refused: string[], routes: RouteOut[] }
@@ -59,6 +59,9 @@ ${
     // has no server half to serve); `refused` names anything this printer will
     // not print (fail closed — nothing is printed then).
     export fn printServer(p: CoreProgram, jsFile: string, runtimeFile: string) -> ServerOutput {
+        // s468 fix round 1 (F3): the gate at emission — a Core checkCore rejects is never printed
+        const ill: string[] = coreRefusal(p)
+        if (ill.length > 0) return { js: "", refused: ill, routes: [] }
         const refused: string[] = serverPrintRefusal(p)
         if (refused.length > 0) return { js: "", refused: refused, routes: [] }
         const routed: ServerFn[] = calledServerFns(p)

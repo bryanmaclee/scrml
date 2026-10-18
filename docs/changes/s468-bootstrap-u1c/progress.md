@@ -162,3 +162,43 @@ Core" was REFINED: the server half needed its waits made Core FIRST (the §13 ga
   section is projected from session-WRAP commits, and this branch adds none), left for the PA's wrap.
 - The 2 `<schema>` cases (insert-returning, unique-constraint) are graded by slice-m4/server-artifact.test.js only
   (the case's DDL created by the test; the bootstrap refuses `<schema>`), with the case's seed and assertions.
+
+## Fix round 1 — S239 review of frozen ad2a592f0 (LAND-WITH-FOLLOW-UPS); reviewer scratch ~/.cache/scrml-agent-tmp/s468-rev-u1c/w/
+Every finding reproduced first, on ad2a592f0, with the reviewer's own scripts (repointed to this worktree).
+
+- **F1 MED (introduced) — FIXED.** Repro: s4.js `implicitProp` / `implicitPropChain` → checkCore
+  `C-S7: the raw outcome of a query is read outside its Attempt` (runtime right, Core ill-formed). Locus (traced): not
+  `attemptOf` — `lower.scrml lowerExpr`'s plan substitution read a `?{}` suspension point's raw bind; an implicitly
+  propagated `?{}` (§19.8.2, a Sql node with an FHandled fact) is a handled form and must read its Attempt's result
+  (`handledRead`). One condition added. Probes added: implicitProp, implicitPropRun, implicitPropThroughWait,
+  implicitPropNested (server-await-probes.js; each asserts checkCore clean and REJECTED/WELCOME).
+- **F3 — FIXED (the gate at emission).** `print.scrml coreRefusal(p)` = every checkCore finding as
+  `E-BOOTSTRAP-CORE-ILL-FORMED: … (<finding>)`; `printProgram` AND `printServer` print nothing when it is non-empty.
+  Repro → fixed: bite.js (Suspend → Attempt(FCall) on waiting `checkF`) was checkCore RED yet printed and answered
+  200 WELCOME; now `server.refused` names C-S8s and no server.js exists. Tests: the U1c unsuspend bite and the
+  reviewer's bite, both refused at emission by BOTH printers. Migrated: slice-m1 counter.browser.test.js (a forged
+  Write used to print a dangling reference — it is now refused, naming C2).
+- **F4 LOW — FIXED, newly-rejecting.** Governing: §8.1 "`${}` inside a SQL template SHALL be compiled to a positional
+  bound parameter in the generated database driver call." A `${…}` inside a quoted run (`'%${t}%'`, `"${c}"`) or an
+  SQL comment cannot be one (the driver reads the placeholder as text). `sql.scrml slotInLiteral` (quote / comment
+  state carried across runs; `''` escapes) → analyze refuses the site, naming the fix (`LIKE ${"%" + q + "%"}`).
+  Code: E-BOOTSTRAP-UNSUPPORTED — SPEC has NO code for this (searched §8.6, §34 E-SQL-*); **a §34 code is owed (PA
+  ruling)**. impl#1: emits `` _scrml_sql`… LIKE '%\${t}%'` `` — the escaped text, the value silently dropped (no
+  binding, no injection) — reported, not changed (S435). Corpus (base origin/main vs head, 2850 files, bootstrap
+  front end): **0 changed**.
+- **F5 LOW — NOT CHANGED, STOPPED for a ruling.** Reproduced (sec2.js "huge int": `1e300` decodes as `int`). Searched
+  §57 (44169-44420) and §14.1.2 / §7 for an `int` range: **no governing sentence** (§57 says nothing about integer
+  range; `int` is ruled a refinement of `number`, S404, with no bound). The codec is bootstrap-only (impl#1 has its
+  own). Recommendation: `int` = a JS safe integer (|n| ≤ 2^53−1) on BOTH encode and decode — a larger "integer" is
+  not exactly representable, so accepting it silently changes the value.
+- **PA ruling acted on:** the reviewer's 61 shapes (s1–s4) committed verbatim as slice-m4/server-await-probes-review.js
+  and gated by server-await-review.test.js — the floor (no wrong password WELCOMEd) plus each shape's class PINNED
+  (25 PASS, 1 DENY — `template`: a bootstrap string literal is not interpolated, nothing waits — 35 REFUSED with their
+  codes). 0 FAIL. The 424-shape pack test stays as a measurement only.
+- **Twin xfail gap: kept** `g-impl1-value-writes-state-codes-unimplemented-s449` (my call): the 6 twins fail on impl#1
+  exactly as the precedent `control-flow/if-chain-program-first-true-rt` does (the §66 opener: E-MARKUP-001 /
+  E-STATE-UNDECLARED / E-SCOPE-001), which that gap's locus names. A dedicated id would need a new carried entry and a
+  `state.ts --write`, which also rewrites master-list.md's (pre-existing stale) recent-sessions — PA domain. The
+  title-vs-locus mismatch is noted for the PA's next gap-ledger pass.
+- Gates: self-host-v2 2426 pass / 0 fail (72 files); SLICE_CORE=lowered slice-m1 99/0; lint 0; counter integration
+  46/46; bootstrap-conformance --check current; FACTS --check PASS.

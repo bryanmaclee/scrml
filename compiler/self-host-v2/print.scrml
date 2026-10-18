@@ -39,6 +39,7 @@ ${
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
     import { emitCss } from "./css.scrml"
+    import { checkCore } from "./check.scrml"
 
     export type Template:struct = { id: string, nodes: HNode[] }
     // s451 (U1a): `refused` — why the printer emitted NOTHING (empty `js` /
@@ -2006,7 +2007,23 @@ ${
         }
     }
 
+    // s468 (U1c fix round 1, F3) — THE GATE AT EMISSION. A printer prints only a
+    // Core `checkCore` accepts: the S467 §13 gate's C-S8s / C-SQL2 (a waiting call
+    // or a query that is not a Suspend's `on` would print UNAWAITED), and every
+    // other invariant. A Core that fails any check is a compiler defect: nothing is
+    // printed, and each finding is named. (Before: only tests and the conformance
+    // counter ran checkCore — a pass that produced an ill-formed Core printed it.)
+    export fn coreRefusal(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const finding of checkCore(p)) {
+            out = out.concat(["E-BOOTSTRAP-CORE-ILL-FORMED: the lowered Core fails checkCore — a compiler defect; nothing is printed (" + finding + ")"])
+        }
+        return out
+    }
+
     export fn printProgram(p: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
+        const ill: string[] = coreRefusal(p)
+        if (ill.length > 0) return { js: "", html: "", refused: ill, routes: [] }
         const refused: string[] = serverRefusal(p)
         if (refused.length > 0) return { js: "", html: "", refused: refused, routes: [] }
         const names: NameTable = planNames(p)

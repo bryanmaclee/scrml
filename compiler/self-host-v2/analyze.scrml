@@ -54,7 +54,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
+    import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
     import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
 
     // =========================================================================
@@ -16306,9 +16306,20 @@ ${
         if (pd is not) return { info: not, creates: false, st: st }
         const db: Db | not = pd.db
         if (db is not) return { info: not, creates: false, st: st }   // its `db=` was refused (E-SQL-005, reported)
+        // s468 (U1c fix round 1, F4) — §8.1: every `${…}` SHALL be a bound parameter; one
+        // inside a quoted run or a comment cannot be (the driver would read its placeholder as
+        // text: `LIKE '%?%'` matches a literal `?`, and the value is silently lost)
+        const sq: SlotQuote = slotInLiteral(s.q.chunks)
+        if (sq.slot >= 0) {
+            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + slotSigil() + "…}` #" + (sq.slot + 1) + " of this `" + sqlSigil() + "}` stands inside " + sq.what + " — there it cannot be a bound parameter (§8.1: every `" + slotSigil() + "…}` SHALL be one): the driver would read it as text and the value would be lost. Build the whole value outside the quotes and bind it — `LIKE " + slotSigil() + "\"%\" + q + \"%\"}`, not `LIKE '%" + slotSigil() + "q}%'`")
+            return { info: not, creates: false, st: st }
+        }
         const sf: SqlFacts = sqlFacts(s.q.chunks)
         return { info: { nid: s.nid, db: db.sym, kind: sf.kind, reads: sf.reads, writes: sf.writes, columns: sf.columns }, creates: sf.createsTable, st: st }
     }
+
+    // the `${` of a SQL value slot, for messages, in two pieces (as sqlSigil)
+    fn slotSigil() -> string { return "$" + "{" }
 
     fn sql004Text() -> string {
         return "this `" + sqlSigil() + "}` has no database scope (§8.1.1): no `<program db=…>`, no `<program>` whose single direct-child `<db src=…>` supplies its database, and no `<db src=…>` encloses it — whatever the number of databases in the file. Put `db=` on the enclosing `<program>` (`<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL), or move the query inside the `<db>` it means"

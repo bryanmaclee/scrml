@@ -315,7 +315,10 @@ ${
             const tmp: Sym | not = tempOf(plan, e.nid)
             if (tmp is given) return Expr.Local(tmp)
             const sa: SuspendAt | not = suspendAtOf(plan, e.nid)
-            if (sa is given && handledOfK(e.k) is not) return Expr.Local(sa.bind)
+            // s468 (U1c, fix round 1 F1): a `?{}` its `!` function propagates
+            // implicitly (§19.8.2) is a handled form too — it reads its Attempt's
+            // result (handledRead, below), never the raw settled outcome (C-S7)
+            if (sa is given && handledOfK(e.k) is not && sqlOfExpr(e.k) is not) return Expr.Local(sa.bind)
         }
         return lowerExprAt(c, e)
     }

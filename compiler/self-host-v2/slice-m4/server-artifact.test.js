@@ -159,13 +159,42 @@ describe("§13 gate bite — a waiting call that is not a Suspend is RED at chec
     expect(check(core).some((x) => x.startsWith("C-S8"))).toBe(true);
   });
 
-  test("printed anyway, the unsuspended program ACCEPTS A WRONG PASSWORD — the class the gate exists for", async () => {
+  // fix round 1 (F3) — the gate at EMISSION: neither printer prints a Core checkCore rejects.
+  test("the printers REFUSE the unsuspended Core (no server.js, no client.js) — naming the check", async () => {
     const { core } = compile(SRC);
     const bad = unsuspendCheck(core);
-    const sql = await realDb(["CREATE TABLE users (name TEXT, pw TEXT)"], { users: [{ name: "bob", pw: RIGHT }] });
-    const { srv, routes } = await serve(bad, sql);
-    const r = await post(srv, pathOf(routes, "f"), ["bob", WRONG]);
-    expect(r.json).toBe("WELCOME");     // a Promise is truthy: `!Promise` is false
+    const { client, server } = artifacts(bad);
+    expect(server.js).toBe("");
+    expect(server.refused.join("\n")).toContain("E-BOOTSTRAP-CORE-ILL-FORMED");
+    expect(server.refused.join("\n")).toContain("C-S8s");
+    expect(client.js).toBe("");
+    expect(client.refused.join("\n")).toContain("C-S8s");
+  });
+
+  test("the reviewer's bite (Suspend → Attempt(FCall) on a waiting `!` callee) is RED at checkCore AND refused at emission", async () => {
+    const s = SHAPES.failableGuard;
+    const { core } = compile(program(s.body, s.top));
+    const f = core.server.find((x) => x.sym.hint === "f");
+    let done = 0;
+    const walk = (stmts) => {
+      for (let i = 0; i < stmts.length; i++) {
+        const st = stmts[i];
+        if (st.variant === "Suspend" && st.data.on.variant === "Call" && st.data.on.data.callee.hint === "checkF") {
+          const then = st.data.then.stmts;
+          then[0].data.call = { variant: "FCall", data: { fn: st.data.on.data.callee, args: st.data.on.data.args } };
+          stmts.splice(i, 1, ...then);
+          done++;
+          return;
+        }
+        for (const k of ["then", "body", "thenB", "elseB"]) if (st.data && st.data[k] && st.data[k].stmts) walk(st.data[k].stmts);
+      }
+    };
+    walk(f.body.stmts);
+    expect(done).toBe(1);
+    expect(check(core).some((x) => x.startsWith("C-S8s"))).toBe(true);
+    const { server } = artifacts(core);
+    expect(server.js).toBe("");
+    expect(server.refused.join("\n")).toContain("C-S8s");
   });
 });
 
@@ -272,6 +301,23 @@ describe("the route — every path answers; nothing runs on a refused request", 
 // 5. SQL: values are bound, never text (§8.1); dedup evaluates once (§8.2)
 // =============================================================================
 describe("§8.1 — a value interpolated in SQL never appears in the SQL text sent to the driver (driver-call spy)", () => {
+  // fix round 1 (F4) — §8.1: every `${…}` SHALL be a bound parameter; one inside a quoted run or a
+  // comment cannot be (the driver reads `'%?%'` as text and the value is silently lost). Refused,
+  // naming the fix. (impl#1 emits `'%\${t}%'` — the value is dropped silently; reported, not changed.)
+  test("a `${…}` inside a SQL string literal, a quoted name or a comment is refused; bound outside the quotes it compiles", () => {
+    const at = (sql) => codes(P(`    type Cnt:struct = { n: int }
+    let <n:int=0/>
+    function q(t: string) -> int {
+        const r: Cnt = ${SQ}\`${sql}\`}.get() !{ _ :> { return 0 } }
+        return r.n
+    }`, `        <button id="go" onclick={ @n = q("a") !{ .Transport(t) :> return } }>go</button>`));
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE '%\${t}%'")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE \"\${t}\" = 1")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(at("SELECT COUNT(*) AS n FROM users -- \${t}\n")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE name = 'it''s' AND x = \${t}")).toEqual([]);
+    expect(at("SELECT COUNT(*) AS n FROM users WHERE name LIKE \${\"%\" + t + \"%\"}")).toEqual([]);
+  });
+
   const SRC = P(`    let <n:int=0/>
     type Cnt:struct = { n: int }
     function find(name: string, tag: string) -> int {
