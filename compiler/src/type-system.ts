@@ -72,7 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
-import { armStatements, objectLiteralArmValue, SINGLE_SHORTHAND_ARM_BODY } from "./arm-body-statements.ts";
+import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
@@ -20788,36 +20788,6 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
 }
 
 /**
- * The diagnostic for a match arm whose brace body is the single shorthand property
- * `{ name }` (§18.5, #1450 F6). Its severity follows the ONE policy switch,
- * arm-body-statements.ts `SINGLE_SHORTHAND_ARM_BODY` ("object" → info lint; "error" →
- * a compile error at the same site).
- */
-function singleShorthandArmDiagnostic(name: string, armSpan: Span): TSError {
-  return new TSError(
-    "W-MATCH-ARM-SHORTHAND-OBJECT",
-    matchArmShorthandObjectMessage(name),
-    armSpan,
-    SINGLE_SHORTHAND_ARM_BODY === "error" ? "error" : "info",
-  );
-}
-
-/**
- * Build the W-MATCH-ARM-SHORTHAND-OBJECT (§18.5 / §34) message for a match arm
- * whose brace body is the one-property shorthand object `{ name }`.
- */
-function matchArmShorthandObjectMessage(name: string): string {
-  return (
-    `W-MATCH-ARM-SHORTHAND-OBJECT: This match arm's body \`{ ${name} }\` is the object ` +
-    `\`{ ${name}: ${name} }\` (object shorthand), not a block whose result is \`${name}\` — a ` +
-    `brace arm body that reads as an object literal is the arm's value, as it is after ` +
-    `\`return\` or as an argument. Make the intent explicit: write \`{ ${name}: ${name} }\` ` +
-    `for the object, or the bare \`${name}\` (\`<pattern> :> ${name}\`) for its value. ` +
-    `See SPEC §18.5.`
-  );
-}
-
-/**
  * §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452) for `!{}` handler arms. A `!{}` arm
  * led by `|` is soft-deprecated (§63.1 Stage 1); one info-level lint per arm.
  *
@@ -21260,27 +21230,6 @@ function checkMatchDiagnostics(
         armSpan,
         "info",
       ));
-    }
-  }
-
-  // §18.5 / §34 — W-MATCH-ARM-SHORTHAND-OBJECT (S469, ruling S468 "safe ints only,
-  // your recs" item 5). A brace arm body that reads as an object literal is the arm's
-  // VALUE, so `{ foo }` is the shorthand object `{ foo: foo }` — as in a `return` or an
-  // argument — never a block whose tail is `foo`. It is the one brace body whose two
-  // readings both look intended, so the lint names both explicit spellings. Reads the
-  // arm through the ONE object-arm reader (`objectLiteralArmValue`), the reading the
-  // AST builder stored and codegen emits.
-  {
-    const armBody = (node as { body?: ASTNodeLike[] }).body ?? [];
-    for (const arm of armBody) {
-      if (!arm || typeof arm !== "object") continue;
-      if ((arm as ASTNodeLike).kind !== "match-arm-block") continue;
-      // `singleShorthand` is the PARSER's (from the arm's tokens: exactly one entry, a
-      // lone identifier, no `;`) — `{ ok; }` is a block and never reaches here.
-      const name = objectLiteralArmValue((arm as { body?: unknown }).body)?.singleShorthand;
-      if (!name) continue;
-      const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
-      errors.push(singleShorthandArmDiagnostic(name, armSpan));
     }
   }
 

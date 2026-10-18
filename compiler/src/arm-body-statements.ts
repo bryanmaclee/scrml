@@ -35,8 +35,7 @@
  * object. This function only reads that mark — it never rebuilds or re-parses text (S469
  * r2: the r1 version rebuilt `{ <expr> }` from the statement text, which had lost a `;`,
  * so the BLOCK `1 :> { ok; }` read as the object `{ ok: ok }` — truthy — and a wrong
- * password got in). Used by the type checker (`objectLiteralArmBodyNode`, the
- * W-MATCH-ARM-SHORTHAND-OBJECT lint) and codegen (`emitObjectLiteralArm`), so every
+ * password got in). Used by the type checker (`objectLiteralArmBodyNode`) and codegen (`emitObjectLiteralArm`), so every
  * stage agrees with the parser (§13.2 / §13.9.6: an async function stored in the object
  * is E-ASYNC-FN-ESCAPES-AS-VALUE).
  *
@@ -56,14 +55,24 @@ export function objectLiteralArmValue(body: unknown): { text: string; node: any;
 }
 
 /**
- * §18.5 (#1450 F6) — the ONE place that decides what a brace arm body that is the
- * single shorthand property `{ name }` (no `;`) is. Today (S468 ruling item 5, under
- * re-confirmation): the object `{ name: name }`, with the info lint
- * W-MATCH-ARM-SHORTHAND-OBJECT. To make it a compile ERROR instead, set this to
- * "error": the type checker's lint site (type-system.ts `singleShorthandArmDiagnostic`)
- * then reports the same site at severity "error", so the program does not build.
+ * §18.5 (ruling S469, supersedes S468 item 5) — a match-arm brace body that is exactly
+ * ONE bare shorthand name, `{ foo }` (no `;`), is a compile error in every position: it
+ * reads both as the object `{ foo: foo }` and as a block whose result is `foo`, and
+ * `{ ok }` read as a (truthy) object is a wrong-password trap. Reported by the parser
+ * where it reads the arm's tokens (ast-builder.js `parseArmBraceBody`; a `match` inside
+ * a larger expression is re-read by `checkExpressionMatchArmBodies`). The code name is
+ * provisional (owner's call).
  */
-export const SINGLE_SHORTHAND_ARM_BODY: "object" | "error" = "object";
+export const MATCH_ARM_SHORTHAND_AMBIGUOUS = "E-MATCH-ARM-SHORTHAND-AMBIGUOUS";
+
+export function matchArmShorthandAmbiguousMessage(name: string): string {
+  return (
+    `${MATCH_ARM_SHORTHAND_AMBIGUOUS}: This match arm's body \`{ ${name} }\` is ambiguous — it reads ` +
+    `both as the object \`{ ${name}: ${name} }\` and as a block whose result is \`${name}\`. Write ` +
+    `\`{ ${name}: ${name} }\` for the object, or the bare \`${name}\` (\`<pattern> :> ${name}\`) for its ` +
+    `value. See SPEC §18.5.`
+  );
+}
 
 const FN_KINDS = new Set(["function-decl", "fn-decl", "fn", "function", "closure", "lambda"]);
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt", "for-loop", "while-loop"]);

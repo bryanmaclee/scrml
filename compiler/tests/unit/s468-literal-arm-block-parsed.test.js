@@ -490,10 +490,11 @@ describe("(C) the analyses read a literal arm's body", () => {
   });
 });
 
-// S469 (#1450 F6; ruling S468 "safe ints only, your recs" item 5) — §18.5: a brace arm
-// body `{ foo }` is the shorthand OBJECT `{ foo: foo }` in every position (declaration,
-// `return`, argument), the same reading `return { foo }` and `f({ foo })` give;
-// W-MATCH-ARM-SHORTHAND-OBJECT (info) names the two explicit spellings.
+// S469 (#1450 F6; ruling S469 "Compile error", superseding S468 item 5) — §18.5: a brace arm
+// body that is exactly ONE bare shorthand name, `{ foo }` (no `;`), is
+// E-MATCH-ARM-SHORTHAND-AMBIGUOUS in every position (declaration, `let`, `return`, argument,
+// statement, multi-scrutinee, a lambda body); the message names `{ foo: foo }` and the bare
+// `foo`. Keyed objects and multi-property shorthand stay objects.
 function compileLibAll(name, source) {
   const filePath = join(TMP, `${name}.scrml`);
   writeFileSync(filePath, source.endsWith("\n") ? source : source + "\n");
@@ -502,53 +503,33 @@ function compileLibAll(name, source) {
   const all = [...(result.errors || []), ...(result.warnings || [])];
   return {
     errorCodes: all.filter((e) => e.severity == null || e.severity === "error").map((e) => e.code),
-    lints: all.filter((e) => e.code === "W-MATCH-ARM-SHORTHAND-OBJECT"),
+    ambiguous: all.filter((e) => e.code === "E-MATCH-ARM-SHORTHAND-AMBIGUOUS"),
     libPath: join(outDir, `${name}.js`),
   };
 }
 
-describe("(D) §18.5: a `{ foo }` arm body is the shorthand object, with a lint", () => {
-  test("decl, return and argument positions; literal, variant and `_` heads — all { foo: foo }", async () => {
-    const r = compileLibAll("shorthand", `type K:enum = { A, B }
-export fn decl(n: int) {
-  const foo = 7
-  const v = match n {
-    1 :> { foo }
-    else :> 0
+describe("(D) §18.5: a `{ foo }` arm body is E-MATCH-ARM-SHORTHAND-AMBIGUOUS", () => {
+  const SITES = {
+    decl: `export fn decl(n: int) {\n  const foo = 7\n  const v = match n {\n    1 :> { foo }\n    else :> 0\n  }\n  return v\n}`,
+    letV: `type K:enum = { A, B }\nexport fn letV(k: K) {\n  const foo = 7\n  let v = match k {\n    .A :> { foo }\n    else :> 0\n  }\n  return v\n}`,
+    ret: `type K:enum = { A, B }\nexport fn ret(k: K) {\n  const foo = 8\n  return match k {\n    ::A :> { foo }\n    else :> 0\n  }\n}`,
+    arg: `export fn arg(n: int) {\n  const foo = 9\n  return JSON.stringify(match n {\n    1 :> 0\n    _ :> { foo }\n  })\n}`,
+    multi: `export fn multi(a: int, b: int) {\n  const foo = 9\n  return match (a, b) {\n    (2, 2) :> 0\n    _ :> { foo }\n  }\n}`,
+    stmt: `export fn stmt(n: int) {\n  const foo = 9\n  let r = 0\n  match n {\n    1 | 2 :> { foo }\n    else :> { r = 1 }\n  }\n  return r\n}`,
+    lambda: `export fn lambda(n: int) {\n  const foo = 9\n  const g = (x) => match x {\n    "a" :> { foo }\n    else :> 0\n  }\n  return 0\n}`,
+  };
+  for (const [name, src] of Object.entries(SITES)) {
+    test(`refused, once, in position \`${name}\``, () => {
+      const r = compileLibAll(`amb-${name}`, src);
+      expect(r.errorCodes).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");
+      expect(r.ambiguous.length).toBe(1);
+      expect(r.ambiguous[0].message).toContain("`{ foo: foo }`");
+      expect(r.ambiguous[0].message).toContain("bare `foo`");
+      expect(existsSync(r.libPath)).toBe(false);
+    });
   }
-  return v
-}
-export fn ret(k: K) {
-  const foo = 8
-  return match k {
-    .A :> { foo }
-    else :> 0
-  }
-}
-export fn arg(n: int) {
-  const foo = 9
-  return JSON.stringify(match n {
-    1 :> 0
-    _ :> { foo }
-  })
-}`);
-    expect(r.errorCodes).toEqual([]);
-    // decl + return; a `match` nested inside a larger expression is still carried by the
-    // expression parser's raw arms (a separate locus, deferred), which the lint does not read.
-    expect(r.lints.length).toBe(2);
-    for (const l of r.lints) {
-      expect(l.severity).toBe("info");
-      expect(l.message).toContain("`{ foo: foo }`");
-      expect(l.message).toContain("bare `foo`");
-    }
-    const m = await loadLib(r.libPath);
-    expect(m.decl(1)).toEqual({ foo: 7 });
-    expect(m.decl(2)).toBe(0);
-    expect(m.ret("A")).toEqual({ foo: 8 });
-    expect(m.arg(3)).toBe('{"foo":9}');
-  });
 
-  test("the explicit spellings and a multi-property object do not lint", async () => {
+  test("the explicit spellings, multi-property shorthand and `{ foo; }` compile and run", async () => {
     const r = compileLibAll("shorthand-explicit", `export fn obj(n: int) {
   const foo = 7
   const bar = 1
@@ -556,18 +537,19 @@ export fn arg(n: int) {
     1 :> { foo: foo }
     2 :> foo
     3 :> { foo, bar }
+    4 :> { foo; }
     else :> { const t = foo
       t }
   }
   return v
 }`);
     expect(r.errorCodes).toEqual([]);
-    expect(r.lints).toEqual([]);
     const m = await loadLib(r.libPath);
     expect(m.obj(1)).toEqual({ foo: 7 });
     expect(m.obj(2)).toBe(7);
     expect(m.obj(3)).toEqual({ foo: 7, bar: 1 });
     expect(m.obj(4)).toBe(7);
+    expect(m.obj(5)).toBe(7);
   });
 });
 
@@ -646,7 +628,6 @@ export fn ms(ok: boolean) {
   }
 }`);
     expect(r.errorCodes).toEqual([]);
-    expect(r.lints).toEqual([]);
     const m = await loadLib(r.libPath);
     for (const f of ["lit", "colonV", "letAlt", "ms"]) {
       expect(m[f](false)).toBe(false);

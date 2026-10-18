@@ -103,6 +103,7 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
+import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -676,6 +677,62 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
     }
   };
   walk(nodes, null, false, false);
+}
+
+/**
+ * S469 (§18.5, E-MATCH-ARM-SHORTHAND-AMBIGUOUS in EVERY position) — a `match` inside a
+ * larger expression (`f(match n { … })`, `return String(match …)`, a lambda body) is
+ * carried by the expression parser as raw arm TEXT, which the statement parser's
+ * arm-body reader (`parseArmBraceBody`, where the error is raised) never sees. Such a
+ * match whose arms hold a `{` is re-read with the STATEMENT parser — the same reader the
+ * `given` pass above uses — and only that re-read's E-MATCH-ARM-SHORTHAND-AMBIGUOUS is
+ * reported (every other diagnostic was already produced on the primary path). Unlike the
+ * `given` pass this is parse-only (no scope), so a match inside a lambda and a
+ * multi-scrutinee match are re-read too. A match the owning statement already carries
+ * structured (`matchExpr`) was read by `parseArmBraceBody` there and is skipped.
+ */
+const _exprArmCheckIds = { next: 1_000_000_000 + 950_000_000 };
+function checkExpressionMatchArmBodies(nodes, errors, filePath) {
+  const seen = new WeakSet();
+  const reported = new Set();
+  const check = (m, owner) => {
+    if (!Array.isArray(m.rawArms) || !m.rawArms.some((a) => typeof a === "string" && a.includes("{"))) return;
+    if (owner && owner.matchExpr && (owner.initExpr === m || owner.exprNode === m)) return;
+    let head = "";
+    try {
+      head = Array.isArray(m.subjects) && m.subjects.length >= 2
+        ? "(" + m.subjects.map((s) => _emitStringFromTreeForMatch(s)).join(", ") + ")"
+        : _emitStringFromTreeForMatch(m.subject);
+    } catch { return; }
+    const sp = owner && owner.span ? owner.span : (m.span ?? { start: 0, line: 1, col: 1 });
+    const text = "match " + head + " {\n" + m.rawArms.join("\n") + "\n}";
+    let res = null;
+    try {
+      res = parseHandlerStatementListCore({ kind: "expr", raw: text, span: sp }, filePath, _exprArmCheckIds, null,
+        typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1);
+    } catch { res = null; }
+    for (const e of (res && res.parseErrors) || []) {
+      if (!e || e.code !== MATCH_ARM_SHORTHAND_AMBIGUOUS) continue;
+      const key = `${e.message}@${sp.start ?? 0}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      errors.push(e);
+    }
+  };
+  const walk = (n, owner, inExpr) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr); return; }
+    if (inExpr && n.kind === "match-expr") check(n, owner);
+    const nextOwner = !inExpr && typeof n.kind === "string" && n.span ? n : owner;
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (!v || typeof v !== "object") continue;
+      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k));
+    }
+  };
+  walk(nodes, null, false);
 }
 
 /**
@@ -9608,7 +9665,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * a `[computed]` key), `...spread`, or a lone identifier (shorthand) — and NO `;` at
    * the body's top level (a `;` makes it a statement list: a block). Returns
    * `{ singleShorthand }` (the name when the body is exactly one shorthand entry — §18.5
-   * `{ foo }`, see `SINGLE_SHORTHAND_ARM_BODY`) or null for a block.
+   * `{ foo }`, refused as E-MATCH-ARM-SHORTHAND-AMBIGUOUS by `parseArmBraceBody`) or null for a block.
    */
   function armBraceBodyObjectShape() {
     const entries = [[]];
@@ -9668,7 +9725,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const node = safeParseExprToNode(text, firstTok.span?.start ?? 0);
       if (node && node.kind === "object") {
         const stmt = { id: ++counter.next, kind: "bare-expr", expr: text, exprNode: node, objectLiteralArm: true, span: spanOf(firstTok, peek()) };
-        if (shape.singleShorthand) stmt.singleShorthand = shape.singleShorthand;
+        if (shape.singleShorthand) {
+          // §18.5 (ruling S469): a body that is exactly ONE bare shorthand name is refused —
+          // it reads both as the object `{ foo: foo }` and as a block whose result is `foo`.
+          stmt.singleShorthand = shape.singleShorthand;
+          errors.push(new TABError(MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage(shape.singleShorthand), tokenSpan(tokens[saved - 1] ?? firstTok, filePath)));
+        }
         return [stmt];
       }
       i = saved;
@@ -25976,6 +26038,8 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
   // argument, `x = match …`) is carried by the expression parser as raw arm text,
   // which reads no `given` arm. Those matches get the statement parser's arms.
   attachStructuredExpressionMatches(nodes, errors, filePath);
+  // S469 — §18.5 E-MATCH-ARM-SHORTHAND-AMBIGUOUS for a `match` inside an expression.
+  checkExpressionMatchArmBodies(nodes, errors, filePath);
 
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
