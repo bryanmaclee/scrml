@@ -487,57 +487,89 @@ ${
     // paren-free binder (`| .V m :>`) is read only after that `|`. A `match` arm takes no `|` (§18.2 `match-arm ::=
     // arm-pattern …`) — E-PARSE-ARM. (Engine message arms, §51.0.S, are not
     // parsed here.)
+    //
+    // s469 — the arm list is a COMMA list (dpa-073 F2 (iii) + F2 (i), S469):
+    // `match x { .A :> 1, .B :> 2, }` — a `,` after every arm, block arms
+    // included, the trailing one optional. The newline-separated list is still
+    // read during the migration (dpa-073 F5: enforcement comes after the
+    // `scrml fix` codemod; the bootstrap's own source is newline-separated, and
+    // impl#1, which builds it, does not read arm commas yet). ONE list takes ONE
+    // spelling: a list with a `,` between two arms and a boundary without one is
+    // E-MATCH-ARM-SEPARATOR, once, at the first arm that has no `,` before it.
     fn parseArms(tp: TP, guard: boolean) -> RArms {
         let t: TP = expectP(tp, "{")
         let arms: AArm[] = []
+        let commas: int = 0
+        let lastComma = false
+        let bareAt: int = -1
         while (!isP(t, "}") && !atEnd(t)) {
-            const before: int = t.i
-            let piped = false
-            const pipe: PTok = cur(t)
-            if (isP(t, "|")) {
-                if (!guard) t = diagAt(t, "E-PARSE-ARM", "a `match` arm takes no leading `|` (§18.2) — write `.V(x) :> …` (the `|` is a legacy spelling of a `!{}` handler arm only)", cur(t))
-                piped = true
-                t = adv(t)
-            }
-            const astart: int = cur(t).start
-            const pfrom: int = t.i
-            const dfrom: int = t.diags.length
-            const rp: RPat = parsePattern(t, guard && piped)
-            t = rp.tp
-            // r2: the lint names a rewrite, so only for an arm that PARSED — a
-            // non-empty pattern with no diagnostic of its own, followed by its
-            // separator (not an unsupported alternation, not error recovery)
-            const patOk: boolean = t.i > pfrom && t.diags.length == dfrom && sepAt(t, 0)
-            if (guard && piped && patOk) t = pipeLint(t, pipe, pfrom, rp.pat)
-            let legacy = false
-            const c: PTok = cur(t)
-            const g: PTok = peekAt(t, 1)
-            if (c.cls == TC.Punct && c.text == ":" && g.text == ">" && touching(c, g)) {
-                t = adv(adv(t))
-            } else if (c.cls == TC.Punct && c.text == "=>") {
-                legacy = true
-                t = adv(t)
-            } else if (c.cls == TC.Punct && c.text == "-" && g.text == ">" && touching(c, g)) {
-                legacy = true
-                t = adv(adv(t))
-            } else if (c.cls == TC.Punct && c.text == "|") {
-                // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
-                t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
-                // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
-                while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t) }
-                if (sepAt(t, 0)) t = adv(t)
-                if (isP(t, ">")) t = adv(t)
+            if (isP(t, ",")) {
+                // a `,` with no arm before it (`{ , .A :> 1 }`, `.A :> 1,, .B …`):
+                // one report, then the list goes on
+                t = adv(diagAt(t, "E-PARSE-ARM", "a `,` with no arm before it — an arm list puts one `,` after each arm (dpa-073 F2)", cur(t)))
             } else {
-                t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
+                if (arms.length > 0 && !lastComma && bareAt < 0) bareAt = t.i
+                const before: int = t.i
+                let piped = false
+                const pipe: PTok = cur(t)
+                if (isP(t, "|")) {
+                    if (!guard) t = diagAt(t, "E-PARSE-ARM", "a `match` arm takes no leading `|` (§18.2) — write `.V(x) :> …` (the `|` is a legacy spelling of a `!{}` handler arm only)", cur(t))
+                    piped = true
+                    t = adv(t)
+                }
+                const astart: int = cur(t).start
+                const pfrom: int = t.i
+                const dfrom: int = t.diags.length
+                const rp: RPat = parsePattern(t, guard && piped)
+                t = rp.tp
+                // r2: the lint names a rewrite, so only for an arm that PARSED — a
+                // non-empty pattern with no diagnostic of its own, followed by its
+                // separator (not an unsupported alternation, not error recovery)
+                const patOk: boolean = t.i > pfrom && t.diags.length == dfrom && sepAt(t, 0)
+                if (guard && piped && patOk) t = pipeLint(t, pipe, pfrom, rp.pat)
+                let legacy = false
+                const c: PTok = cur(t)
+                const g: PTok = peekAt(t, 1)
+                if (c.cls == TC.Punct && c.text == ":" && g.text == ">" && touching(c, g)) {
+                    t = adv(adv(t))
+                } else if (c.cls == TC.Punct && c.text == "=>") {
+                    legacy = true
+                    t = adv(t)
+                } else if (c.cls == TC.Punct && c.text == "-" && g.text == ">" && touching(c, g)) {
+                    legacy = true
+                    t = adv(adv(t))
+                } else if (c.cls == TC.Punct && c.text == "|") {
+                    // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
+                    t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
+                    // s452 r4: skip the rest of the alternation through its separator (one report, no follow-on E-PARSE-EXPR)
+                    while (!atEnd(t) && !isP(t, "}") && !sepAt(t, 0) && cur(t).line == c.line) { t = adv(t) }
+                    if (sepAt(t, 0)) t = adv(t)
+                    if (isP(t, ">")) t = adv(t)
+                } else {
+                    t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
+                }
+                const rb: RArmBody = parseArmBody(t)
+                t = rb.tp
+                const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy }
+                arms = arms.concat([arm])
+                t = bumpId(t)
+                lastComma = false
+                if (isP(t, ",")) {
+                    commas = commas + 1
+                    lastComma = true
+                    t = adv(t)
+                }
+                if (t.i == before) t = adv(t)
             }
-            const rb: RArmBody = parseArmBody(t)
-            t = rb.tp
-            const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy }
-            arms = arms.concat([arm])
-            t = bumpId(t)
-            if (t.i == before) t = adv(t)
         }
+        if (commas > 0 && bareAt >= 0) t = diagAt(t, "E-MATCH-ARM-SEPARATOR", mixedArmsReason(), t.toks[bareAt])
         return { arms: arms, tp: expectP(t, "}") }
+    }
+
+    // (No `match` keyword followed by a subject and `{` inside this string: impl#1,
+    // which compiles this file, rewrites that shape even inside a literal.)
+    fn mixedArmsReason() -> string {
+        return "this arm list mixes `,` and newline separators — one list takes one spelling: write a `,` after every arm, the trailing one optional (`{ .A :> 1, .B :> 2, }`, dpa-073 F2). The newline-separated list is still read until `scrml fix` migrates the corpus (dpa-073 F5)."
     }
 
     // s452 — W-ARM-PIPE-LEGACY (§19.4.5, Info; one per arm): the `|`-led `!{}`
@@ -712,7 +744,7 @@ ${
     }
 
     // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
-    // a `|` (the next arm), the first token on a later line unless the line
+    // a `,` (the arm-list separator, s469), a `|` (the next arm), the first token on a later line unless the line
     // above ends in a §7.2.2 rule-2 continuation token (`.Boom(m) :> "a:" +⏎ m`
     // is one arm — dpa-068 D12), or the start of the next arm on the same line
     // (`.A :> 1  .B :> 2` — a pattern followed by its separator, which no
@@ -724,6 +756,10 @@ ${
             const x: PTok = tp.toks[i]
             if (x.cls == TC.End) return i
             if (depth == 0 && i > tp.i) {
+                // s469: a `,` at depth 0 ends the arm (dpa-073 F2) — no
+                // expression holds a top-level `,`; one inside `( [ {` is the
+                // body's own (`f(a, b)`, `[1, 2]`)
+                if (x.cls == TC.Punct && x.text == ",") return i
                 if (x.line != tp.toks[i - 1].line && !continuesLine(tp.toks, i - 1)) return i
                 if (x.cls == TC.Punct && x.text == "|") return i
                 if (armStartsAt(tp.toks, i)) return i
@@ -2255,12 +2291,72 @@ ${
     }
 
     // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------
+    //
+    // s469 — a UNION in the type position (§66.2.4, S451: "a union type in an
+    // opener is legal with `|`; a bootstrap rejection of it is a parser bug"),
+    // spaced or not: `<g:Guess | not=…/>`, `<g:Guess|not/>`. No attribute
+    // starts with `|`, so a `|` (not `||`) after a member, past any spaces,
+    // always continues the type; the member after it ends where a member ends
+    // (its name and `[…]`), and the opener goes on from there — `=`, `/>`,
+    // `>`, or an attribute. `T | not` (either order) is the bootstrap's
+    // TMaybe; any other union (`int | string`) is read whole, then refused —
+    // the bootstrap type system has no general union.
     fn parseOpenerType(mp: MP) -> RMType {
+        const start: int = mp.pos
+        const first: RMType = openerTypeMember(mp, "`:`")
+        let m: MP = first.mp
+        let ty: AType = first.t
+        let members: int = 1
+        let nots: int = 0
+        let inner: AType = first.t
+        if (isNotType(first.t)) nots = 1
+        let going = true
+        while (going) {
+            const after: MP = skipSpace(m)
+            if (chAt(after, 0) == "|" && chAt(after, 1) != "|") {
+                const rm: RMType = openerTypeMember(skipSpace(mAdv(after, 1)), "`|`")
+                m = rm.mp
+                members = members + 1
+                if (isNotType(rm.t)) {
+                    nots = nots + 1
+                } else {
+                    inner = rm.t
+                }
+            } else {
+                going = false
+            }
+        }
+        if (members == 2 && nots == 1) {
+            ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TMaybe(inner) }
+            m = mBump(m)
+        } else if (members > 1) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the union type `" + mp.src.substring(start, m.pos) + "` is not in the bootstrap — its type system has `T | not` only (§66.2.4 admits any union here, S451)", start, m.pos)
+        }
+        // The type's SPAN runs to the end of the type TEXT: a continuation the
+        // slice cannot read (`fn()`) stays inside it, so the tag scanner's
+        // error on it lies within this type's span and the typer does not
+        // trust the type (the value that follows is not part of it).
+        const end: int = typeTextEnd(mp.src, m.pos)
+        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }
+        return { t: ty, mp: m }
+    }
+
+    fn isNotType(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> n == "not"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    // One member of an opener type: Name, Name[g, …][…]. `after` names what the
+    // member follows, for the message when it is missing.
+    fn openerTypeMember(mp: MP, after: string) -> RMType {
         const start: int = mp.pos
         const nm: RWord = readName(mp)
         let m: MP = nm.mp
         if (nm.w == "") {
-            m = mDiag(m, "E-PARSE-TYPE", "expected a type after `:`", start, start + 1)
+            m = mDiag(m, "E-PARSE-TYPE", "expected a type after " + after, start, start + 1)
         }
         let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
         m = mBump(m)
@@ -2277,12 +2373,6 @@ ${
             ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TSeq(ty, grantWords(inner)) }
             m = mBump(m)
         }
-        // The type's SPAN runs to the end of the type TEXT: a continuation the
-        // slice cannot read (`int|not`, `fn()`) stays inside it, so the tag
-        // scanner's error on it lies within this type's span and the typer
-        // does not trust the type (the value that follows is not part of it).
-        const end: int = typeTextEnd(mp.src, m.pos)
-        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }
         return { t: ty, mp: m }
     }
 
@@ -2911,7 +3001,12 @@ ${
                 const runEnd: int = lastEnd(tp)
                 if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
                 const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
-                if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
+                if (msgArmAt(tp)) {
+                    // s469: a §51.0.S.2.3 message-arm list (`.Go :> .Loading, …`,
+                    // newline- or comma-separated) — refused by name, never read
+                    // as display text
+                    m = mDiag(mAt(m, runEnd), "E-BOOTSTRAP-UNSUPPORTED", "engine message arms (`.Msg :> …` in a `<" + tag + ">` state-child body, §51.0.S.2.3) are not in the bootstrap", before, runEnd)
+                } else if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
                     const back: MP = backToMarkup(m, r.tp)
                     // §4.18.4: a `${`-carrying display-text literal renders as its segments
                     const dn: RNodes = displayNodes(back, r.e, before, tp)
@@ -2926,6 +3021,12 @@ ${
         }
         if (mLooking(m, "</")) m = parseCloser(m, tag)
         return { nodes: out, mp: m }
+    }
+
+    // Does a code run start with an arm head (`.V :>`, `| .V(m) :>`, `_ :>`)?
+    fn msgArmAt(tp: TP) -> boolean {
+        if (isP(tp, "|")) return armStartsAt(tp.toks, tp.i + 1)
+        return armStartsAt(tp.toks, tp.i)
     }
 
     // The position of the closing `"` of the display-text literal whose
