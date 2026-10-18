@@ -58,6 +58,7 @@
  *
  * USAGE
  *   bun scripts/host-global-scan.ts [--check] [--prune] [--concurrency N] [--roots a,b] [--modes m1,m2]
+ *            [--mode-shard i/N]   (CI: the modes of leg i of N — every mode in exactly one leg)
  *   --prune  rewrite the known-throws file without the in-scope entries that no longer throw
  *            (the list may only shrink by tooling; adding a key is a deliberate hand edit).
  * EXIT 0 = no violation · 1 = violations (listed) · 2 = the scan itself failed / scanned nothing / a compile threw that is not in KNOWN_THROWS.
@@ -430,7 +431,23 @@ if (flag("--shard")) {
 
 const t0 = Date.now();
 const roots = opt("--roots", "samples,examples,conformance,stdlib,benchmarks").split(",");
-const modes = opt("--modes", ALL_MODES.join(",")).split(",") as Mode[];
+// S469 (s468-ci-speedup) — `--mode-shard i/N` takes ALL_MODES[k] for every k ≡ i-1 (mod N). CI runs
+// the scan as N matrix legs this way, so the legs cover every mode BY CONSTRUCTION (a mode added to
+// ALL_MODES lands in some leg with no workflow edit; a hand-written per-leg mode list would rot).
+// With N=4 the legs are default+test · esm+library · embed · build (test/library compile only the
+// sources that use them, so they ride with a full-corpus mode). An unknown `--modes` name is refused.
+const modeShard = opt("--mode-shard", "");
+let modes: Mode[];
+if (modeShard) {
+  const m = /^(\d+)\/(\d+)$/.exec(modeShard);
+  const [i, n] = m ? [Number(m[1]), Number(m[2])] : [0, 0];
+  if (!m || n < 1 || i < 1 || i > n || n > ALL_MODES.length) { console.error(`host-global-scan: bad --mode-shard "${modeShard}" (want i/N, 1 <= i <= N <= ${ALL_MODES.length})`); process.exit(2); }
+  modes = ALL_MODES.filter((_, k) => k % n === i - 1);
+} else {
+  modes = opt("--modes", ALL_MODES.join(",")).split(",") as Mode[];
+}
+const unknownModes = modes.filter((m) => !(ALL_MODES as readonly string[]).includes(m));
+if (unknownModes.length) { console.error(`host-global-scan: unknown mode(s) ${unknownModes.join(", ")} (known: ${ALL_MODES.join(", ")})`); process.exit(2); }
 const conc = Math.max(1, Number(opt("--concurrency", "6")));
 const units = enumerate(roots);
 if (units.length === 0) { console.error("host-global-scan: enumerated nothing"); process.exit(2); }

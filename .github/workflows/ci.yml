@@ -383,15 +383,17 @@ jobs:
   # is already scoped to the modes a run covers, so the legs never misreport each other's keys.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   host-global:
-    name: host-global (${{ matrix.modes }})
+    name: host-global (${{ matrix.leg }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # Every mode exactly once across the legs. `test` and `library` compile only the sources that
-        # use them, so they ride with a full-corpus mode.
-        modes: ["default,test", "esm,library", "embed", "build"]
+        # `--mode-shard i/4` (S469): the script itself deals ALL_MODES round-robin across the legs, so
+        # every mode is in exactly one leg BY CONSTRUCTION — no hand-written mode list here to rot.
+        # 4 legs = default+test · esm+library · embed · build (test/library compile only the sources
+        # that use them, so they ride with a full-corpus mode). An unknown mode name exits 2.
+        leg: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -399,8 +401,8 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
-      - name: Host-global alias gate — modes ${{ matrix.modes }}
-        run: bun scripts/host-global-scan.ts --check --modes ${{ matrix.modes }}
+      - name: Host-global alias gate — mode shard ${{ matrix.leg }}/4
+        run: bun scripts/host-global-scan.ts --check --mode-shard ${{ matrix.leg }}/4
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # gate — THE REQUIRED CHECK. Aggregates every blocking job above. See the header: it must stay

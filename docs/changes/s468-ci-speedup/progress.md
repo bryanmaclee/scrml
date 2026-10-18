@@ -59,3 +59,18 @@ NEXT:
    watch exists (minor, compiler/src, out of scope); windows-only flakes (bind-address 20 s, §4 seeded fuzz 5 s,
    S27 §51.11 timer audit) — non-required job, untouched.
 No scratch bite-proof branch/PR was created.
+
+## S469 resume
+- Resumed at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a535997af4314ccf6, branch s469-ci-speedup from
+  origin/s468-ci-speedup 747b8675f; merged origin/main ee827e697 (31 commits, none touching .github/ or
+  scripts/ci-shards.ts) as 4c58d03e1 (pushed). Maps read (stamp 5c43c3b8e): NOT load-bearing for a workflow change.
+  PR #1455 scripts/test-sharded.ts is still OPEN and is a LOCAL multi-process runner (memory/slot/timeout machinery);
+  CI legs are separate runners, so they keep bun's native --shard + --timings (same LPT-by-duration idea) — no
+  logic duplicated, nothing to import.
+- Local recheck: bun 1.4.3 --shard/--timings/--update-timings/--reporter=junit on lsp 2 legs + reconcile = exact
+  partition; an absent scripts/ci-test-timings.json is tolerated by bun.
+- Baseline refreshed: main push run 39129462417 (ee827e697) — gate 18m52s; unit+conformance 1288 files / 28815
+  tests (444 s); tracking integration+lsp+commands 342 files / 7413 tests (700 s).
+- host-global legs: hand-written mode list replaced by `--mode-shard i/4` in scripts/host-global-scan.ts (legs =
+  ALL_MODES round-robin, complete by construction); unknown --modes names now exit 2 (previously a typo silently
+  compiled with default options under the wrong label).
