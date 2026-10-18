@@ -72,7 +72,7 @@ describe("W-IF-IN-EACH §1 — nested item-referencing if= warns", () => {
     const { clientJs } = compileToOutputs(NESTED_ITEM_SRC);
     expect(clientJs).toContain("create-time gate, NOT reactive (W-IF-IN-EACH, GH #409)");
     // The append gate itself is unchanged (behaviour-preserving — warning only).
-    expect(clientJs).toMatch(/if \(\(it\.note != ""\)\)/);
+    expect(clientJs).toMatch(/if \(\(!_scrml_structural_eq\(it\.note, ""\)\)\)/); // §45.4 (S468) structural
   });
 
   test("the contextual-sigil form (@.note) also warns", () => {

@@ -5,10 +5,10 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitFnValueParams, emitExprField, emitExprFromText, emitConditionField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, recordExprGuardError, asyncNameFactsOf, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { serverArmBlockStatements, serverArmExprNode, refuseServerArm } from "./arm-structure.ts";
+import { serverArmBlockStatements, serverArmExprNode, refuseServerArm, refuseUnreadableValueArm } from "./arm-structure.ts";
 import * as acorn from "acorn";
 import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
-import { bareBlockText, bareBlockSequenceTexts } from "../validators/defer-structure.ts";
+import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
@@ -890,6 +890,151 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
   }
   const rewritten = emitExprField(arm.handlerExpr, handler, _makeExprCtx({}));
   return rewritten.trim().endsWith(";") ? rewritten.trim() : rewritten.trim() + ";";
+}
+
+/**
+ * §19.4.3 / §18.5 (S468, g-block-bodied-bang-arm-drops-value-s467) — a BLOCK
+ * `!{}` arm whose last statement is an expression: the block's last expression
+ * is the arm's value, so it lands in `resultVar`.
+ *
+ * SPEC §19.4.3: "Yield a value of the call's success type: the arm is an
+ * expression, or a block whose last expression is that value (§18.5)." The text
+ * lowering (`emitArmBody` + `emitArmAssign`) read a multi-statement block as
+ * side effects only and emitted the tail as a bare statement (`false;`), so the
+ * guarded value stayed the error envelope — truthy — and
+ * `const ok = check(p) !{ .Denied :> { @msg = "d"; false } }` accepted a wrong
+ * password.
+ *
+ * The decision is made on the PARSED block (`armBlockStatementsDetailed`, the
+ * one reader of a text-carried arm body), with the same tail rule the `match`
+ * block arms use (`_blockTailIsValueExpr`, as in `_emitStructuredArmToVar`), so
+ * a `!{}` block arm and a `match` block arm agree on what yields a value. The
+ * leading statements go through the statement emitter and the tail through the
+ * expression emitter, from their nodes, on both boundaries. A tail that is
+ * itself a handled call (`… g(p) !{ … }`) yields that handler's value (its
+ * result slot, published through `tildeContext`).
+ *
+ * Returns null — the caller keeps its existing lowering — when the arm is not a
+ * non-empty braced block, the body does not parse (the caller's path records a
+ * server refusal), or the block does not end in an expression (it ends in a
+ * write, a declaration, a leave or a control statement: §19.4.3 "falls through",
+ * whose value-position diagnostic E-ERROR-012 is g-impl1-value-position-arm-
+ * fallthrough-s451).
+ */
+function emitBlockArmValueToResult(arm: LogicArm, resultVar: string, opts: EmitLogicOpts): string[] | null {
+  if (arm.failExpr) return null;
+  const handler = (arm.handler ?? "").trim();
+  if (!(handler.startsWith("{") && handler.endsWith("}"))) return null;
+  if (!handler.slice(1, -1).trim()) return null;
+  const parsed = armBlockStatementsDetailed(handler);
+  if (!parsed || !parsed.ok || !Array.isArray(parsed.stmts) || parsed.stmts.length === 0) return null;
+  const stmts = parsed.stmts;
+  const tail = stmts[stmts.length - 1];
+  if (!tail || typeof tail !== "object") return null;
+
+  let tailKind: "expr" | "guarded" | null = null;
+  let tailText = "";
+  if (tail.kind === "bare-expr" && !tail._onMountEffect) {
+    tailText = tail.expr ?? (tail.exprNode ? (() => { try { return emitStringFromTree(tail.exprNode); } catch { return ""; } })() : "");
+    if (_blockTailIsValueExpr(tailText)) tailKind = "expr";
+  } else if (tail.kind === "guarded-expr" && tail.guardedNode && tail.guardedNode.kind === "bare-expr") {
+    tailKind = "guarded";
+  }
+  if (!tailKind) return null;
+
+  // The body was parsed from the arm's text, so its spans are relative to that
+  // text under a probe file name. Anchor them in the author's file — each
+  // statement at its own line (the arm's handler source map) — so a
+  // position-reading lowering — `log()`'s `file:line` (§20.6), a diagnostic —
+  // names the author's file and line, not the probe.
+  const armSpan = (arm as { span?: { file?: string } }).span;
+  if (armSpan && typeof armSpan.file === "string") _anchorSpansAt(stmts, armSpan, (arm as { handlerSrcMap?: Array<[number, number, number]> }).handlerSrcMap ?? null);
+
+  // The arm is its own block scope: its declarations see the outer names but go
+  // into their own set (as in `_emitStructuredArmToVar`). Its statements are side
+  // effects, so they neither read nor repoint an outer `~` slot.
+  const armOpts: EmitLogicOpts = { ...opts, declaredNames: new Set<string>(opts.declaredNames ?? []), tildeContext: undefined };
+  const lines: string[] = [];
+  for (let i = 0; i < stmts.length - 1; i++) {
+    const code = emitLogicNode(stmts[i], armOpts);
+    if (code) for (const l of code.split("\n")) lines.push(`    ${l}`);
+  }
+  if (tailKind === "expr") {
+    // The tail is emitted from its parsed node; on the server through the
+    // fail-closed reader (`serverArmExprNode`), as every server arm value is.
+    const node = opts.boundary === "server" ? serverArmExprNode(tailText, "server", tail.exprNode, arm) : (tail.exprNode ?? null);
+    const rhs = _awaitMatchArmServerCalls(emitExprField(node, tailText, _makeExprCtx(armOpts)), opts);
+    lines.push(`    ${resultVar} = ${rhs};`);
+    return lines;
+  }
+  // A handled call as the tail: its handler's value is its result slot, which the
+  // guarded-expr lowering publishes through `tildeContext` (§32 Gap 5).
+  const slot: { var: string | null; mode: "single" } = { var: null, mode: "single" };
+  const code = emitLogicNode(tail, { ...armOpts, tildeContext: slot });
+  if (!slot.var) return null;
+  if (code) for (const l of code.split("\n")) lines.push(`    ${l}`);
+  lines.push(`    ${resultVar} = ${slot.var};`);
+  return lines;
+}
+
+/**
+ * Re-anchor every `span` in a subtree freshly parsed from an arm's handler text
+ * (`armBlockStatementsDetailed`) in the author's file.
+ *
+ * S468 fix round 1 — each STATEMENT is anchored at its OWN source position: its
+ * span holds a probe offset (`PROBE_BODY_OFFSET`), which is a handler-text offset,
+ * which the arm's `handlerSrcMap` (ast-builder `joinArmHandlerParts`) maps to the
+ * token's source offset and line. (Anchoring every statement at the arm's start
+ * made two `log()`s on lines 20 and 22 both print `app.scrml:20`.) An EXPRESSION
+ * node's span is relative to its own expression text, not to the probe, so it
+ * takes its enclosing statement's position — `log()` resolves its line from that
+ * offset (§20.6). A nested arm's `handlerSrcMap` (probe offsets too) is mapped the
+ * same way, so a nested handler's statements anchor in the author's file as well.
+ * Without a map (an arm built elsewhere) every span takes the arm's position.
+ */
+function _anchorSpansAt(
+  root: unknown,
+  at: { file?: string; start?: number; end?: number; line?: number; col?: number },
+  srcMap?: ReadonlyArray<readonly [number, number, number]> | null,
+): void {
+  const armPos = { start: at.start ?? 0, line: at.line ?? 1, col: at.col };
+  // A probe offset → the source offset and line it was read from (null: unmapped).
+  const toSource = (probeStart: unknown): { start: number; line: number; col?: number } | null => {
+    if (!srcMap || srcMap.length === 0 || typeof probeStart !== "number") return null;
+    const t = probeStart - PROBE_BODY_OFFSET + 1;
+    if (t < 0) return null;
+    let e: readonly [number, number, number] | null = null;
+    for (const m of srcMap) { if (m[0] <= t) e = m; else break; }
+    if (!e) return null;
+    return { start: e[1] + (t - e[0]), line: e[2] };
+  };
+  const seen = new Set<object>();
+  const walk = (n: any, enc: { start: number; line: number; col?: number }, inExpr: boolean): void => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, enc, inExpr); return; }
+    let here = enc;
+    const sp = n.span;
+    if (sp && typeof sp === "object") {
+      if (!inExpr) here = toSource(sp.start) ?? armPos;
+      const len = !inExpr && typeof sp.end === "number" && typeof sp.start === "number" && sp.end >= sp.start ? sp.end - sp.start : 0;
+      n.span = { ...sp, file: at.file, start: here.start, end: here.start + len, line: here.line, col: here === armPos ? at.col : sp.col };
+    }
+    const nested = Object.getOwnPropertyDescriptor(n, "handlerSrcMap");
+    if (nested && Array.isArray(nested.value)) {
+      const mapped = nested.value.map((m: [number, number, number]) => {
+        const s = toSource(m[1]);
+        return s ? [m[0], s.start, s.line] : [m[0], armPos.start, armPos.line];
+      });
+      Object.defineProperty(n, "handlerSrcMap", { value: mapped, enumerable: false, configurable: true, writable: true });
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") walk(v, here, inExpr || k === "exprNode" || /Expr$/.test(k));
+    }
+  };
+  walk(root, armPos, false);
 }
 
 /**
@@ -5002,11 +5147,31 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
         return [`    ${resultVar} = ${bare};`];
       };
 
+      // §19.4.3 — is the handler's result USED (a value position)? The guarded
+      // value is bound (`const` / `let` / an assignment, incl. the synthetic
+      // binding of an expression-position handler), returned, yielded, or written
+      // to a cell. (A handled call alone on its line is a statement position.)
+      const _gExpr = guardedNode && guardedNode.kind === "bare-expr" ? guardedNode.exprNode : null;
+      const guardValueUsed = !!(bindingName || returnsResult || yieldsResult || reactiveCellName || cellWriteNode ||
+        opts.exprPositionGuard || (_gExpr && _gExpr.kind === "assign"));
+
       if (arms.length > 0) {
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
-          const armCode = emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
+          // §19.4.3 / §18.5 (S468) — a block arm ending in an expression yields
+          // that expression: lowered from its parsed statements, tail into resultVar.
+          let blockValueLines = emitBlockArmValueToResult(arm, resultVar, opts);
+          // S468 fix round 1 — FAIL CLOSED: in a value position a braced arm the
+          // reader cannot read is a compile error on the client too (the server's
+          // reader already refuses it, `serverArmBlockStatements`). Never the text
+          // fallback below, which drops the arm's value: the guarded value stayed
+          // the (truthy) error envelope and a wrong password logged in.
+          if (!blockValueLines && guardValueUsed && opts.boundary !== "server" && refuseUnreadableValueArm(arm)) {
+            blockValueLines = [`    ${resultVar} = null; /* E-STMT-UNEXPECTED-TOKEN: unreadable value-position arm */`];
+          }
+          const armCode = blockValueLines ? "" : emitArmBody(arm, resultVar, opts.machineBindings ?? null, opts);
+          const armLines = (isExprBody: boolean): string[] => blockValueLines ?? emitArmAssign(armCode, isExprBody);
           // A non-block, non-re-fail arm body is a single EXPRESSION (emitArmBody
           // routes it through emitExprField); a multi-line one (a template literal)
           // must be assigned to resultVar as a unit, not split as statements.
@@ -5016,7 +5181,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, "", resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
+            for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
           } else {
             const variantName = (arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
@@ -5025,7 +5190,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
             if (arm.binding && arm.binding !== "_") {
               for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
             }
-            for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
+            for (const l of armLines(armIsExpr)) lines.push(l);
             lines.push(`  }`);
           }
           isFirst = false;

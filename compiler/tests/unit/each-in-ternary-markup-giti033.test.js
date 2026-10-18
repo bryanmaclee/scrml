@@ -346,7 +346,7 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Quotes survive: the string literal `"add"` and `"}"` are intact (not
       // dropped to bare idents / structural braces).
-      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_each_item.kind == "add"`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_structural_eq(_scrml_each_item.kind, "add")`);
       expect(foldChunkNamespacing(r.clientJs)).toContain(`? "}" :`);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
@@ -381,7 +381,7 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Regression guard: pre-fix this emitted `== add ? ... : none` (bare idents).
-      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_each_item.kind == "add"`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_structural_eq(_scrml_each_item.kind, "add")`);
       expect(foldChunkNamespacing(r.clientJs)).toContain(`: "none"`);
       expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/kind == add\b/);
       execFileSync("node", ["--check", r.clientPath]);

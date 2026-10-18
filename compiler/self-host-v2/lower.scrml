@@ -1076,7 +1076,41 @@ ${
     }
 
     fn htmlView(c: LC, e: AElem) -> View {
+        if (isRawContentElem(e)) return View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), rawViews(c, e.kids))
         return View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), lowerNodes(c, e.kids))
+    }
+
+    // s468 — a `<pre>` / `<code>` raw-content element (SPEC §4.17; the parser's
+    // isRawContentOpener — lowercase-first, not a `<*x>` reference): its body is
+    // text runs (View.RawText — `<` / `>` encoded, `&` kept) and the balanced
+    // attribute-less nested `<code>` / `<pre>` elements the parser kept.
+    fn isRawContentElem(e: AElem) -> boolean {
+        if (e.star || e.tag.length == 0) return false
+        const first: string = e.tag.substring(0, 1)
+        if (first >= "A" && first <= "Z") return false
+        const lower: string = e.tag.toLowerCase()
+        return lower == "pre" || lower == "code"
+    }
+
+    fn rawViews(c: LC, ns: ANode[]) -> View[] {
+        let out: View[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const vs: View[] = match k {
+                .Text(text: t) :> rawTextViews(t)
+                .Elem(e: e) :> lowerElem(c, e)
+                .Interp(e: x) :> lowerNode(c, n)
+                .DeclNode(d: d) :> lowerNode(c, n)
+                .Effect(w: w) :> lowerNode(c, n)
+            }
+            out = out.concat(vs)
+        }
+        return out
+    }
+
+    fn rawTextViews(t: string) -> View[] {
+        if (t == "") return []
+        return [View.RawText(t)]
     }
 
     fn useView(c: LC, e: AElem, d: Sym, a: Sym | not) -> View {
@@ -2565,6 +2599,7 @@ ${
             .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateViews(p, row))
             .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateViews(p, sl), al)
             .Text(text: x) :> v
+            .RawText(text: x) :> v
             .Dyn(e: x) :> v
             .Slot :> v
             .Star(decl: x) :> v
@@ -2634,6 +2669,7 @@ ${
             .Star(decl: d, inst: i) :> starFields(p, d, i, subst, seen)
             .Each(src: x) :> []
             .Text(text: x) :> []
+            .RawText(text: x) :> []
             .Dyn(e: x) :> []
             .Slot :> []
             .Effect(deps: x) :> []

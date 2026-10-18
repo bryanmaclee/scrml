@@ -2592,6 +2592,22 @@ function _scrml_structural_eq(a, b, seen) {
   }
   // A polyfilled Blob (happy-dom, jsdom) carries no Blob brand; catch it by class.
   if (typeof _scrml_g.Blob !== "undefined" && (a instanceof _scrml_g.Blob || b instanceof _scrml_g.Blob)) return false;
+  // §45.2 lists what == compares structurally: primitives, structs, enums,
+  // maps (and, above, the built-in value classes; below, arrays and host
+  // Map / Set). A struct, an enum value, and a §59 map are PLAIN records —
+  // prototype null or a realm's Object.prototype (read realm-safely: that
+  // prototype's own prototype is null). Any other object is not a scrml
+  // value — a DOM node, an Event, a host-class instance — and compares by
+  // IDENTITY, the lowering §45.2 gives asIs values; a === b above has
+  // already ruled identity out. (Read by its own enumerable keys, two
+  // same-tag DOM elements — no own keys — would be "equal".) Error keeps its
+  // branch: the §19 error classes are values compared by name / message /
+  // fields.
+  if (tag !== "[object Error]" && tag !== "[object Map]" && tag !== "[object Set]" && !_scrml_g.Array.isArray(a)) {
+    const pa = _scrml_g.Object.getPrototypeOf(a);
+    const pb = _scrml_g.Object.getPrototypeOf(b);
+    if ((pa !== null && _scrml_g.Object.getPrototypeOf(pa) !== null) || (pb !== null && _scrml_g.Object.getPrototypeOf(pb) !== null)) return false;
+  }
   // Cycle guard: value-cycles are FORBIDDEN in scrml (§6.5.1 reassignment-
   // canonical), but a malformed JS-host value reaching == could still carry
   // one. Track visited (a, b) pairs so a revisit terminates instead of
