@@ -336,6 +336,7 @@ jobs:
   # slices — the native bootstrap (impl#2, compiler/self-host-v2/) + the e2e-render-map tier.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   slices:
+    if: ${{ false }}   # THROWAWAY (s469-ci-bite-skip): a SKIPPED blocking job must turn `gate` red
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
