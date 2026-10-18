@@ -27,6 +27,7 @@ import { colorAsyncStatements, analyzeRawJsFragment } from "./js-async-analysis.
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 import { asyncFnValueDecl } from "./fn-valued-bindings.ts";
+import { moduleLevelDeclaredNames } from "./file-async-fns.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
@@ -1411,8 +1412,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
           typeof st.name === "string" && _asyncBindingEmit.names.has(st.name)) {
         // The group's declared-name set holds every top-level binding; an async one named
         // there would read as a shadowing local and its call would not be awaited.
+        // S466 r8 — the ONE module-level rule, shared with the server D-5 closure.
         const _dn = o.declaredNames instanceof Set
-          ? new Set<string>([...o.declaredNames].filter((n: string) => !_asyncBindingEmit.names.has(n)))
+          ? moduleLevelDeclaredNames(o.declaredNames, _asyncBindingEmit.names)
           : o.declaredNames;
         const _code = emitLogicNode(asyncFnValueDecl(st), { ...o, ..._asyncBindingEmit.opts, declaredNames: _dn });
         if (o.declaredNames instanceof Set) o.declaredNames.add(st.name);

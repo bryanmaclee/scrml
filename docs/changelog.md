@@ -9,6 +9,7 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 - **Reviewed, landing next:** #1434 await P0 rounds 8–10 — impl#1 enforces dpa-023 F4 (a waiting function is bound only by a `function` declaration); 551 pack shapes, 0 wrong passwords accepted. #1435 CPS P0 rounds 1–5 — an allow-list: a later batch admits a request value only if provably browser-only; review CLEAN.
 - **Rulings:** dpa-023 F1–F7 (opt-in `(not to T)` marker; cells only; the lifecycle type is the marker; F4 limit; no impl#1 rebuild; keep stale; failure at the declaration), impl#1 enforces F4, three §13.9 details, E-PARAM-DEFAULT-* names, docs-only PRs keep merging.
 - **Lesson:** both P0s converged only after switching from "detect the dangerous shape" to "admit only the provably safe shape".
+- **Machine change:** theRog (`/home/bmacs`) replaces the dead ASUS; XPS-only state (memory, S467 reviewer harnesses, setup checklist) is in `scrml-support/handOffs/xps-transfer-s467/`. The S467 wrap PR (#1436) was titled `docs(S467 wrap)`, which `scripts/state.ts`'s recent-sessions index does not recognise — this `wrap(s467)` commit is the recognised wrap anchor.
 
 ## S464 — 2026-10-11/13 (bryan · ASUS) — landed the S465 AUTO output in parallel + four ruled security/language arcs
 

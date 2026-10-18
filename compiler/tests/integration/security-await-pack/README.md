@@ -11,7 +11,7 @@ server does not await it, `if (!check(pass, hash))` tests a Promise and the wron
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8). 424 shapes. Data only. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8; `x1` the S239 review of r8; `r9` written by fix round 9; `y1`–`y3` the S467 review of r9; `z1`–`z4` the S467 review of r10). 640 shapes. Data only. |
 | `pack.js` | compile → load `app.server.js` → POST the `f` route with the wrong and the right password → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that accept a wrong password on main, each naming its gap) and `UNJUDGED` (shapes this instrument cannot judge) |
 | `await-probe-pack.test.js` | the gate: one test per shape |
@@ -30,11 +30,16 @@ defects that happen to refuse (`E-CODEGEN-INVALID-LOGIC`, …); the detail colum
 - a shape not in `KNOWN_FAIL` answers a wrong password WELCOME;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 424 shapes; a list entry names no shape;
+- the corpus stops holding exactly 640 shapes; a list entry names no shape;
 - the pinned hash stops verifying under `scrml:auth`'s `verifyPassword`.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression. `classify.js` prints the full table when you want it.
+
+S467 round 10 (dpa-023 F4, SPEC §13.9.6): a waiting function may be bound only by a `function`
+declaration, so every shape that binds one with `const` / `let` / `export const` — accepted and
+run by rounds 6–9, which coloured the binding — is now `PASS-REFUSED`
+(`E-ASYNC-FN-ESCAPES-AS-VALUE`). That is the ruled migration, not a regression; the shapes stay.
 
 ## Running
 
