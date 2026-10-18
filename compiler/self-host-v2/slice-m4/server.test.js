@@ -15,7 +15,7 @@
 // S451 R11: every `?{}` is failable; outside a `!` function an unhandled one
 // is E-ERROR-002. s451 (Ue) lifted the refusals of the handling forms (`!{}`,
 // `match`, a `!` function): a handled query lowers to Core as the call of a
-// Stmt.Attempt (Failable.FSql) — the tests that inspect the lowered query
+// Stmt.Attempt (s468 U1c: over the settled outcome of a Suspend on Expr.Query) — the tests that inspect the lowered query
 // handle it in the SOURCE (`!{ _ :> not }`) and read the Attempt.
 
 import { describe, test, expect, beforeAll } from "bun:test";
@@ -35,8 +35,8 @@ const lowerClean = (r) => {
   expect(r.diags.filter((d) => !d.code.startsWith("W-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
   return r.core;
 };
-// the query an Attempt runs (`stmts[i]` an Attempt over Failable.FSql)
-const attemptQuery = (st) => st.data.call.data.q;
+// the query a Suspend waits on (`stmts[i]` = `Suspend(o, Query(q), [Attempt(FSettled(o)) …])`, s468 U1c)
+const attemptQuery = (st) => st.data.on.data.q;
 const v = (x) => (x && typeof x === "object" ? x.variant : x);
 const SQ = "?" + "{";   // the sigil, for building sources in JS strings
 
@@ -115,9 +115,12 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   test("a `!{}` handler on the query handles it (§19.8.3 item 1): clean — and lowered as an Attempt over the query", () => {
     const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n    }`);
     expect(codes(src)).toEqual([]);
-    const at = run(src).core.server[0].body.stmts[0];
+    const sus = run(src).core.server[0].body.stmts[0];
+    expect(v(sus)).toBe("Suspend");
+    expect(v(sus.data.on)).toBe("Query");
+    const at = sus.data.then.stmts[0];
     expect(v(at)).toBe("Attempt");
-    expect(v(at.data.call)).toBe("FSql");
+    expect(v(at.data.call)).toBe("FSettled");
   });
 
   test("a `match` on a query's result handles it (§19.8.3 item 2): clean", () => {
@@ -514,8 +517,8 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
   });
 });
 
-describe("the lowered query in Core (s451 Ue: handled in the source, an Attempt's FSql)", () => {
-  test("a ServerFn holds the query as an Attempt's call: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
+describe("the lowered query in Core (s451 Ue: handled in the source; s468 U1c: a Suspend's `on`, its Attempt over the outcome)", () => {
+  test("a ServerFn holds the query as a Suspend's `on`: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
     const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ _ :> not }\n    }`));
     const core = lowerClean(r);
     expect(core.server.map((s) => s.sym.hint)).toEqual(["find"]);
@@ -592,7 +595,7 @@ describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
     const sf = core.server[0];
     const st = sf.body.stmts[0];
     const q = attemptQuery(st);
-    const bad = (q2) => ({ ...core, server: [{ ...sf, body: { stmts: [{ ...st, data: { ...st.data, call: { variant: "FSql", data: { q: q2 } } } }, ...sf.body.stmts.slice(1)] } }] });
+    const bad = (q2) => ({ ...core, server: [{ ...sf, body: { stmts: [{ ...st, data: { ...st.data, on: { variant: "Query", data: { q: q2 } } } }, ...sf.body.stmts.slice(1)] } }] });
     expect(issues(bad({ ...q, slots: [] }), "C-SQL1").length).toBeGreaterThan(0);
     expect(issues(bad({ ...q, slots: [3] }), "C-SQL1").length).toBeGreaterThan(0);
     expect(issues(bad({ ...q, db: { id: 9999, hint: "nope" } }), "C-SQL1").length).toBe(1);

@@ -150,7 +150,6 @@ ${
     fn failableKids(c: Failable) -> Node[] {
         return match c {
             .FCall(fn: f, args: args) :> exprNodes(args)
-            .FSql(q: q) :> exprNodes(q.params)
             .FSettled(outcome: o) :> []                 // s454 (U1b): a local, read where it settled
         }
     }
@@ -182,6 +181,7 @@ ${
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
             .ServerCall(fn: f, args: args) :> exprNodes(args)   // s454 (U1b)
+            .Query(q: q) :> exprNodes(q.params)                 // s468 (U1c): its values (the text is data)
         }
     }
 
@@ -360,6 +360,7 @@ ${
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
             .ServerCall(fn: x) :> []
+            .Query(q: x) :> []
         }
     }
 

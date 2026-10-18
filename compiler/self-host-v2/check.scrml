@@ -70,6 +70,10 @@
 //   C-SQL1, C-S1..C-S4 (s451, U1a) — the server boundary: see checkServer.
 //   C-S3 (s454 extended), C-S7, C-S8, C-E2 (extended) — the client half of a
 //       server call (U1b): see checkClientCalls.
+//   C-S8s, C-SQL2 (s468, U1c) — the server half, the S467 §13 gate: a server
+//       function `waits` iff it holds a Suspend, a call of a waiting function
+//       stands only as a Suspend's `on`, a query only as a Suspend's `on`
+//       (checkClientCalls); a server body is a continuation owner (C12).
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -282,18 +286,14 @@ ${
     // C-SQL1 (a query's text and values) + C-E2 + C-E3, for one Attempt.
     fn checkAttempt(p: CoreProgram, result: Sym | not, call: Failable, err: Sym, ok: OkArm, arms: ErrArm[]) -> string[] {
         let out: string[] = []
-        const q: SqlQuery | not = failableSql(call)
-        let want: Sym | not = p.sqlError
-        if (q is given) {
-            out = out.concat(checkSqlQuery(p, q))
-        } else {
-            const f: Sym | not = failableFn(call)
-            want = not
-            if (f is given) {
-                want = fnErr(p, f)
-                if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
-                if (want is not && (findFn(p, f) is given || findServerFn(p, f) is given)) out = out.concat(["C-E2: an Attempt calls " + f.hint + "(), which is not declared `!` (nothing to handle)"])
-            }
+        // (s468: a query's Attempt inspects a Suspend's settled outcome — FSettled — and its
+        // failure set is checked with the Suspend, checkSuspendCall; C-SQL1 there too)
+        const f: Sym | not = failableFn(call)
+        let want: Sym | not = not
+        if (f is given) {
+            want = fnErr(p, f)
+            if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
+            if (want is not && (findFn(p, f) is given || findServerFn(p, f) is given)) out = out.concat(["C-E2: an Attempt calls " + f.hint + "(), which is not declared `!` (nothing to handle)"])
         }
         if (want is given) {
             if (want.id != err.id) out = out.concat(["C-E2: an Attempt handles `" + err.hint + "` but its call fails with `" + want.hint + "`"])
@@ -397,7 +397,7 @@ ${
     //          surface, no Suspend — directly, or through a Fn it calls
     //          (transitively). Cells are client-held (§6.6.9); a server body
     //          awaits in place. (§12.4 R2's E-ROUTE-002, restated over Core.)
-    //   C-S2   a query (an Attempt's FSql) stands only in a ServerFn body — never in a Fn (a
+    //   C-S2   a query (an Expr.Query) stands only in a ServerFn body — never in a Fn (a
     //          pure `fn` included) or a declaration's initializers / views
     //   C-S3   client code never calls a ServerFn as a plain Call — a
     //          client→server call is a suspension (s454: checkClientCalls,
@@ -553,7 +553,7 @@ ${
         return match s {
             .Write(cap: c) :> "writes a cell (capability " + c.hint + ")"
             .Commit(writes: x) :> "commits cell writes"
-            .Suspend(bind: x) :> "suspends (a server body awaits in place)"
+            .Suspend(bind: x) :> ""      // s468 (U1c): a server body waits by Suspend too (its `on` is checked: a ServerCall there IS client)
             .ResetSurface(of: x) :> "resets a validity surface"
             .Unpersist(decl: x) :> "removes a persisted cell's storage"
             .Attempt(result: x) :> ""
@@ -575,6 +575,7 @@ ${
             .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
             .Validity(of: x) :> "reads a validity surface"
             .ServerCall(fn: x) :> "makes a client call of a server function (a server body calls one in place, §13.4)"
+            .Query(q: x) :> ""
             .Lit(lit: x) :> ""
             .Local(sym: x) :> ""
             .Read(place: x) :> ""
@@ -589,51 +590,46 @@ ${
         }
     }
 
-    fn nodeIsSql(n: Node) -> boolean {
+    fn nodeIsSql(n: Node) -> boolean { return nodeQuery(n) is given }
+
+    // s468 (U1c): a query is an Expr.Query (the `on` of a server-side Suspend) — its query, else not.
+    fn nodeQuery(n: Node) -> SqlQuery | not {
         return match n {
-            .NStmt(s: s) :> stmtSql(s) is given
-            .NExpr(e: x) :> false
-            .NProgram(p: x) :> false
-            .NDecl(d: x) :> false
-            .NField(f: x) :> false
-            .NFn(f: x) :> false
-            .NServerFn(f: x) :> false
-            .NBlock(b: x) :> false
-            .NPlace(pl: x) :> false
-            .NInst(i: x) :> false
-            .NPattern(pat: x) :> false
-            .NEdit(k: x) :> false
-            .NView(v: x) :> false
-            .NAttr(a: x) :> false
+            .NExpr(e: e) :> exprQuery(e)
+            .NStmt(s: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
         }
     }
 
-    // s451 (Ue): a query is the call of an Attempt (Failable.FSql) — its query, else not.
-    fn stmtSql(s: Stmt) -> SqlQuery | not {
-        return match s {
-            .Attempt(call: c) :> failableSql(c)
-            .Let(sym: x) :> not
-            .Assign(local: x) :> not
-            .Write(cap: x) :> not
-            .Commit(writes: x) :> not
-            .If(cond: x) :> not
-            .Return(e: x) :> not
-            .Eval(e: x) :> not
-            .Suspend(bind: x) :> not
-            .ResetSurface(of: x) :> not
-            .Defer(body: x) :> not
-            .Unpersist(decl: x) :> not
-            .Fail(err: x) :> not
-            .Join(k: x) :> not
-            .Jump(k: x) :> not
-        }
-    }
-
-    fn failableSql(c: Failable) -> SqlQuery | not {
-        return match c {
-            .FSql(q: q) :> q
-            .FSettled(outcome: x) :> not
-            .FCall(fn: x) :> not
+    fn exprQuery(e: Expr) -> SqlQuery | not {
+        return match e {
+            .Query(q: q) :> q
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .ServerCall(fn: x) :> not
         }
     }
 
@@ -662,7 +658,6 @@ ${
     fn failableFn(c: Failable) -> Sym | not {
         return match c {
             .FCall(fn: f) :> f
-            .FSql(q: x) :> not
             .FSettled(outcome: x) :> not
         }
     }
@@ -703,6 +698,7 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
     }
 
@@ -835,6 +831,7 @@ ${
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
         }
     }
 
@@ -856,6 +853,7 @@ ${
             .SeqCall(op: x) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
             .ServerCall(fn: x) :> "(not a cell read)"
+            .Query(q: x) :> "(not a cell read)"
         }
     }
 
@@ -1407,6 +1405,7 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
     }
 
@@ -1426,7 +1425,9 @@ ${
         let out: string[] = []
         for (const n of allNodes(Node.NProgram(p))) { out = out.concat(ownerTails(n)) }
         for (const f of p.fns) { out = out.concat(tailBlock(f.body, true, [], f.sym.hint + "()")) }
-        for (const s of p.server) { out = out.concat(tailBlock(s.body, false, [], "server function " + s.sym.hint + "()")) }
+        // s468 (U1c, the S467 §13 gate): a server function body is a continuation owner — its
+        // waits (a query, an in-place call of a waiting function) are Suspends at a block's tail
+        for (const s of p.server) { out = out.concat(tailBlock(s.body, true, [], "server function " + s.sym.hint + "()")) }
         return out
     }
 
@@ -1513,7 +1514,7 @@ ${
     }
 
     fn suspendTail(tail: boolean, last: boolean, where: string) -> string[] {
-        if (!tail) return ["C12: a Suspend in " + where + " stands outside a client owner's continuation (an effect body, a handler block, a client function body, a Suspend's `then`, a Join body, or a branch of an If that ends one)"]
+        if (!tail) return ["C12: a Suspend in " + where + " stands outside a continuation owner's tail (an effect body, a handler block, a function body — client or server —, a Suspend's `then`, a Join body, or a branch of an If that ends one)"]
         if (!last) return ["C12: a Suspend in " + where + " is not the last statement of its block — what follows it must be its continuation (`then`)"]
         return []
     }
@@ -1595,16 +1596,18 @@ ${
     // s454 (U1b) — THE CLIENT HALF OF A SERVER CALL, IN CORE (design §2.6):
     //   C-S3  an Expr.ServerCall names a ServerFn and stands ONLY as a
     //         Suspend's `on` in client code (never in a ServerFn — C-S1 says
-    //         so too); a CLIENT-REACHABLE Fn (one a declaration's views /
-    //         handlers / effects reach, through calls) never calls a ServerFn as
-    //         a plain call — a Fn that does is server-only (§12.2 Trigger 5,
-    //         re-derived here from Core) and no client root reaches it.
-    //   C-S7  a Suspend on a FAILABLE call — a ServerCall, or a Call of a Fn
-    //         whose `err` is some — has a `then` whose FIRST statement is an
-    //         Attempt over FSettled(its bind), and that bind is read nowhere
-    //         else (no Expr.Local / LocalPath of it, no other FSettled): the raw
-    //         outcome (a value or a Failure) reaches no other expression. An
-    //         FSettled stands only there. (The Core restatement of §19.9.10's
+    //         so: a ServerCall touches client state); a CLIENT-REACHABLE Fn (one
+    //         a declaration's views / handlers / effects reach, through calls)
+    //         never calls a ServerFn as a plain call — a Fn that does is
+    //         server-only (§12.2 Trigger 5, re-derived here from Core) and no
+    //         client root reaches it.
+    //   C-S7  a Suspend on a FAILABLE `on` — a ServerCall, a Call of a function
+    //         whose `err` is some, or (s468) a Query (§19.8.3: every query is
+    //         failable) — has a `then` whose FIRST statement is an Attempt over
+    //         FSettled(its bind), and that bind is read nowhere else (no
+    //         Expr.Local / LocalPath of it, no other FSettled): the raw outcome
+    //         (a value or a Failure) reaches no other expression. An FSettled
+    //         stands only there. (The Core restatement of §19.9.10's / §19.8.3's
     //         E-ERROR-002, as C-E1 is for a declared `!` call.)
     //   C-S8  Fn.waits is true iff the Fn's body holds a Suspend (any depth);
     //         a Call of a waiting Fn stands only as a Suspend's `on` (its value
@@ -1614,17 +1617,32 @@ ${
     //         (names, arities) in order, then ONE `Transport(t: ServerCallError)`
     //         — or the declared enum itself when it declares that variant — or,
     //         for a callee not declared `!`, exactly `{ Transport(t:
-    //         ServerCallError) }`; over FSettled of a Call, the callee's `err`.
+    //         ServerCallError) }`; over FSettled of a Call, the callee's `err`;
+    //         (s468) over FSettled of a Query, the program's `SqlError`.
+    // s468 (U1c) — THE SERVER HALF, the S467 §13 gate ("the server half awaits
+    // by construction"; U1 design §13 item 2: "a Core `waits` fact on server
+    // Fns, checked like C-S8"):
+    //   C-S8s ServerFn.waits is true iff its body holds a Suspend (any depth),
+    //         and a Call of a waiting ServerFn stands only as a Suspend's `on` —
+    //         C-S8 widened to ServerFns, so "a waiting call not awaited" is
+    //         unrepresentable on either side (the server printer prints `await`
+    //         at a Suspend and nowhere else).
+    //   C-SQL2 a Query stands ONLY as a Suspend's `on` (so every query is a
+    //         wait, and its outcome is inspected — C-S7), and C-SQL1 holds for
+    //         it (its text and values line up).
     // =========================================================================
     fn checkClientCalls(p: CoreProgram) -> string[] {
         let out: string[] = []
-        // where may a ServerCall / FSettled stand? (every Suspend's own `on` / first Attempt is legal)
+        // where may a ServerCall / Query / FSettled stand? (every Suspend's own `on` / first Attempt is legal)
         let legalOn: int = 0
+        let legalQuery: int = 0
         let legalSettled: int = 0
         let calls: int = 0
+        let queries: int = 0
         let settled: int = 0
         for (const n of allNodes(Node.NProgram(p))) {
             if (nodeServerCallSym(n) is given) calls = calls + 1
+            if (nodeQuery(n) is given) queries = queries + 1
             if (nodeSettled(n) is given) settled = settled + 1
             const sp: SuspendParts | not = nodeSuspendParts(n)
             if (sp is given) {
@@ -1632,6 +1650,11 @@ ${
                 if (on is given) {
                     legalOn = legalOn + 1
                     if (findServerFn(p, on) is not) out = out.concat(["C-S3: a ServerCall names `" + on.hint + "`, which is not a server function of the program"])
+                }
+                const q: SqlQuery | not = exprQuery(sp.on)
+                if (q is given) {
+                    legalQuery = legalQuery + 1
+                    out = out.concat(checkSqlQuery(p, q))
                 }
                 out = out.concat(checkSuspendCall(p, sp))
                 const first: Stmt | not = firstStmt(sp.then)
@@ -1644,12 +1667,8 @@ ${
             }
         }
         if (calls != legalOn) out = out.concat(["C-S3: " + (calls - legalOn) + " ServerCall(s) stand outside a Suspend's `on` (a client call of a server function is a suspension point, §12.3 / §19.9.10)"])
+        if (queries != legalQuery) out = out.concat(["C-SQL2: " + (queries - legalQuery) + " query(ies) stand outside a Suspend's `on` (a query is a wait — §13.8 item 2 — and is awaited where it stands, the S467 §13 gate)"])
         if (settled != legalSettled) out = out.concat(["C-S7: " + (settled - legalSettled) + " FSettled outcome(s) are not the call of the Attempt that begins their Suspend's `then`"])
-        for (const s of p.server) {
-            for (const n of allNodes(Node.NServerFn(s))) {
-                if (nodeSuspendParts(n) is given) out = out.concat(["C-S3: server function " + s.sym.hint + "() suspends — a server body calls in place (§13.4)"])
-            }
-        }
         // C-S3: client code never plain-calls a ServerFn — a Fn a client root
         // reaches, or one that touches client state itself (client by its own body)
         const reach: int[] = clientReachableFns(p).concat(clientTouchingFns(p))
@@ -1667,26 +1686,39 @@ ${
             if (holds && !f.waits) out = out.concat(["C-S8: " + f.sym.hint + "() holds a Suspend but is not `waits`"])
             if (!holds && f.waits) out = out.concat(["C-S8: " + f.sym.hint + "() is `waits` but holds no Suspend"])
         }
-        // C-S8: a Call of a waiting Fn stands only as a Suspend's `on`
+        // C-S8s (s468): the same fact for a server function
+        for (const s of p.server) {
+            const sholds: boolean = blockHoldsSuspend(s.body)
+            if (sholds && !s.waits) out = out.concat(["C-S8s: server function " + s.sym.hint + "() holds a Suspend (it waits on the server) but is not `waits`"])
+            if (!sholds && s.waits) out = out.concat(["C-S8s: server function " + s.sym.hint + "() is `waits` but holds no Suspend"])
+        }
+        // C-S8 / C-S8s: a Call of a waiting function (a Fn or a ServerFn) stands only as a Suspend's `on`
         let waitCalls: int = 0
         let waitOn: int = 0
         for (const n of allNodes(Node.NProgram(p))) {
             const c: Sym | not = nodePlainCall(n)
             if (c is given) {
-                const fd: Fn | not = findFn(p, c)
-                if (fd is given) { if (fd.waits) waitCalls = waitCalls + 1 }
+                if (fnWaits(p, c)) waitCalls = waitCalls + 1
             }
             const sp2: SuspendParts | not = nodeSuspendParts(n)
             if (sp2 is given) {
                 const oc: Sym | not = calledSym(sp2.on)
                 if (oc is given) {
-                    const fd2: Fn | not = findFn(p, oc)
-                    if (fd2 is given) { if (fd2.waits) waitOn = waitOn + 1 }
+                    if (fnWaits(p, oc)) waitOn = waitOn + 1
                 }
             }
         }
-        if (waitCalls != waitOn) out = out.concat(["C-S8: " + (waitCalls - waitOn) + " call(s) of a waiting function stand outside a Suspend's `on` (its value arrives later)"])
+        if (waitCalls != waitOn) out = out.concat(["C-S8s: " + (waitCalls - waitOn) + " call(s) of a waiting function stand outside a Suspend's `on` (its value arrives later — on the server, a call not awaited; S467 §13 gate)"])
         return out
+    }
+
+    // Is `s` a function (a Fn or a ServerFn) whose Core says it waits?
+    fn fnWaits(p: CoreProgram, s: Sym) -> boolean {
+        const f: Fn | not = findFn(p, s)
+        if (f is given) return f.waits
+        const sf: ServerFn | not = findServerFn(p, s)
+        if (sf is given) return sf.waits
+        return false
     }
 
     // C-S7 + C-E2 (extended) for one Suspend.
@@ -1694,40 +1726,45 @@ ${
         const sc: Sym | not = exprServerCallSym(sp.on)
         let failErr: Sym | not = not
         let remote = false
-        let callee: Sym | not = not
+        let callee: string = ""
         if (sc is given) {
             remote = true
-            callee = sc
+            callee = sc.hint + "()"
+        } else if (exprQuery(sp.on) is given) {
+            // s468: a query fails with the built-in SqlError (§19.8.1)
+            const se: Sym | not = p.sqlError
+            if (se is not) return ["C-E2: a query, but the program has no SqlError enum"]
+            failErr = se
+            callee = "a query"
         } else {
             const c: Sym | not = calledSym(sp.on)
             if (c is given) {
-                const fd: Fn | not = findFn(p, c)
-                if (fd is given) {
-                    failErr = fd.err
-                    callee = c
+                if (findFn(p, c) is given || findServerFn(p, c) is given) {
+                    failErr = fnErr(p, c)
+                    callee = c.hint + "()"
                 }
             }
         }
-        if (callee is not) return []
+        if (callee == "") return []
         if (!remote && failErr is not) return []        // a non-failable waiting call: its value is the bind
         const first: Stmt | not = firstStmt(sp.then)
         let at: AttemptParts | not = not
         if (first is given) at = attemptParts(first)
-        if (at is not) return ["C-S7: a Suspend on a failable call of " + callee.hint + "() does not begin its `then` with the Attempt that inspects the outcome"]
+        if (at is not) return ["C-S7: a Suspend on a failable " + callee + " does not begin its `then` with the Attempt that inspects the outcome"]
         let out: string[] = []
         const fs: Sym | not = failableSettled(at.call)
         if (fs is not) {
-            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee.hint + "() does not inspect the settled outcome (FSettled)"])
+            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee + " does not inspect the settled outcome (FSettled)"])
         } else if (fs.id != sp.bind.id) {
-            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee.hint + "() inspects another outcome than the Suspend's"])
+            out = out.concat(["C-S7: the Attempt after a Suspend on " + callee + " inspects another outcome than the Suspend's"])
         }
-        if (bindReadElsewhere(sp)) out = out.concat(["C-S7: the raw outcome of " + callee.hint + "() is read outside its Attempt"])
+        if (bindReadElsewhere(sp)) out = out.concat(["C-S7: the raw outcome of " + callee + " is read outside its Attempt"])
         // C-E2 (extended): the failure set
-        if (remote) {
-            const sf: ServerFn | not = findServerFn(p, callee)
+        if (remote && sc is given) {
+            const sf: ServerFn | not = findServerFn(p, sc)
             if (sf is given) out = out.concat(checkClientSet(p, sf, at.err))
         } else if (failErr is given) {
-            if (failErr.id != at.err.id) out = out.concat(["C-E2: the Attempt over " + callee.hint + "()'s outcome handles `" + at.err.hint + "`, but it fails with `" + failErr.hint + "`"])
+            if (failErr.id != at.err.id) out = out.concat(["C-E2: the Attempt over " + callee + "'s outcome handles `" + at.err.hint + "`, but it fails with `" + failErr.hint + "`"])
         }
         return out
     }
@@ -1814,6 +1851,7 @@ ${
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
             .ServerCall(fn: x) :> false
+            .Query(q: x) :> false
         }
     }
 
@@ -1901,7 +1939,6 @@ ${
         return match c {
             .FSettled(outcome: o) :> o
             .FCall(fn: x) :> not
-            .FSql(q: x) :> not
         }
     }
 
@@ -1946,6 +1983,7 @@ ${
     fn exprServerCallSym(e: Expr) -> Sym | not {
         return match e {
             .ServerCall(fn: f) :> f
+            .Query(q: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -2161,6 +2199,7 @@ ${
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
             .ServerCall(fn: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Query(q: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -2243,6 +2282,7 @@ ${
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
             .ServerCall(fn: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Query(q: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -2537,6 +2577,7 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
     }
 
@@ -2558,6 +2599,7 @@ ${
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
             .ServerCall(fn: x) :> []
+            .Query(q: x) :> []
         }
     }
 
@@ -2626,6 +2668,7 @@ ${
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
             .ServerCall(fn: x) :> not
+            .Query(q: x) :> not
         }
     }
 

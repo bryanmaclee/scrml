@@ -89,6 +89,7 @@ ${
             .SeqCall(op: x) :> "SeqCall"
             .Validity(of: x) :> "Validity"
             .ServerCall(fn: x) :> "ServerCall"
+            .Query(q: x) :> "Query"
         }
     }
 

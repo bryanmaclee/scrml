@@ -206,6 +206,15 @@ ${
         // the call's failure enum (§19.9.10) — is inspected by the Attempt that
         // begins the Suspend's `then` (C-S7), never read raw.
         ServerCall(fn: Sym, args: Expr[]),
+        // s468 (U1c) — a `?{}` QUERY (§8; U1a's SqlQuery). Legal ONLY as the `on`
+        // of a Suspend in a server-side body (check.scrml C-S2 / C-SQL2): a query
+        // is a wait (§13.8 item 2 — "a `?{}` query"), and the S467 §13 gate makes
+        // every server-side wait a Suspend, so the printer's ONE `await` rule
+        // ("await exactly at each Suspend") covers it. Its outcome — the rows, or a
+        // `SqlError` failure (§19.8.1) — is inspected by the Attempt that begins
+        // the Suspend's `then` (C-S7), never read raw. Its values are `q.params`
+        // — Exprs, never text: E-SQL-001 (§8.1) stays unrepresentable.
+        Query(q: SqlQuery),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 
@@ -218,12 +227,17 @@ ${
     // that inspects its result with arms total over its error enum — so an
     // unhandled failable is unrepresentable (§19.4.3 "SHALL NOT be ignored"):
     // an Expr.Call never names a function whose `err` is some (check.scrml
-    // C-E1), and a query is not an Expr at all.
+    // C-E1) — except as the `on` of a Suspend whose `then` begins with the
+    // Attempt that inspects it (C-S7) — and a query (an Expr.Query) stands only
+    // as such an `on`.
     //
-    // FSql (U1a's query, moved here from Expr): legal ONLY in a ServerFn body
-    // (check.scrml C-S2). Its values are `q.params` — Exprs, never text: there
-    // is no node that can carry a runtime value into SQL text, so E-SQL-001
-    // (§8.1) is unrepresentable rather than checked.
+    // s468 (U1c): a query is no longer a Failable. Ue's `FSql(q)` (an Attempt
+    // that ran the query in place) became `Suspend(o, Expr.Query(q), [Attempt(…,
+    // FSettled(o), SqlError, …) …])` — the S467 §13 gate: a server-side wait is a
+    // Suspend, so "a query not awaited" is unrepresentable, by the same two
+    // checks as a client call of a server function (C-S7 + the count of
+    // Query-as-`on`). The unhandled query stays unrepresentable: a Query stands
+    // only as a Suspend's `on`, and that Suspend's `then` begins with its Attempt.
     // -------------------------------------------------------------------------
     // s454 (U1b) — FSettled: the SETTLED outcome of the enclosing Suspend
     // (`outcome` = that Suspend's `bind`) — a server call's (design §2.1 "Suspend
@@ -233,7 +247,6 @@ ${
     // a raw outcome (a value or a Failure) reaches no other expression.
     export type Failable:enum = {
         FCall(fn: Sym, args: Expr[]),
-        FSql(q: SqlQuery),
         FSettled(outcome: Sym),
     }
     // The success branch: the result is bound to `bind`, `body` runs, and
@@ -342,10 +355,14 @@ ${
     // bind it to `bind` and run `then` — unless the effect that owns the
     // suspension was re-run (newest run wins) or torn down meanwhile, in which
     // case `then` never runs. The continuation is EXPLICIT: nothing follows a
-    // Suspend in its block, and a Suspend stands only at the tail of an
-    // `<effect>` body or of another Suspend's `then` (check.scrml C12). No
-    // source form produces one until server calls land (a server call will be
-    // its `on`); hand-built Core exercises it.
+    // Suspend in its block (check.scrml C12).
+    // s454 (U1b): on the client its `on` is a ServerCall or a call of a waiting
+    // client Fn. s468 (U1c, the S467 §13 gate): in a SERVER-side body (a ServerFn,
+    // or a Fn only server functions reach — §12.2 Trigger 5) it is THE wait: its
+    // `on` is a Query or an in-place Call of a function that waits on the server,
+    // and the server printer prints it as `const bind = await on;` followed by
+    // `then` — `await` exactly at each Suspend and nowhere else. There is no task
+    // on the server (no cell, no batch, nothing to cancel), so nothing is dropped.
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
         Assign(local: Sym, value: Expr),
@@ -575,7 +592,13 @@ ${
     // `ret` is its declared return type (`not`: none written). Placement lives
     // in the SHAPE of Core — a ServerFn, not a Fn with a flag — so no later pass
     // re-derives it. `err`: as Fn's (Ue).
-    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block, err: Sym | not }
+    // s468 (U1c) — `waits`: the S467 §13 gate's Core fact. The function WAITS on
+    // the server iff its body holds a Suspend (a Query, or an in-place call of a
+    // function that waits) — check.scrml C-S8s re-verifies it against the body,
+    // and a call of a waiting ServerFn stands only as a Suspend's `on`. The
+    // server printer prints `async function` iff `waits` (Fn.waits likewise for
+    // a server-only Fn). Attached by lower from the effect summary's `swaits`.
+    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block, err: Sym | not, waits: boolean }
 
     // One CoreProgram per linked program (a library's declarations appear in
     // the consumer's Core). `program` names the program declaration.
@@ -591,7 +614,7 @@ ${
         // program opts out with `<program reset="none">`.
         reset: boolean,
         // s451 (Ue): the built-in `SqlError` enum (§19.8.1) — the error type
-        // of every query (an Attempt's FSql); `not` when the program has none.
+        // of every query (the Attempt over a Query's settled outcome); `not` when the program has none.
         sqlError: Sym | not,
         // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10) — the
         // payload of every client call's `Transport` variant; `not` when no

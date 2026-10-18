@@ -1,0 +1,19 @@
+// §66 twin of server-db/sql-get-single-row-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    type LoadError:enum = { Db }
+    let <uid:int=0/>
+    let <name:string=""/>
+    function loadOne()! LoadError {
+        const u: User = ?{`SELECT id, name FROM users`}.get() !{ _ :> { fail .Db } }
+        return u
+    }
+    function load() {
+        const u: User = loadOne() !{ _ :> { return } }
+        @uid = u.id
+        @name = u.name
+    }
+    <main>
+        <button id="load" onclick=load()>Load</button>
+    </main>
+</program>
