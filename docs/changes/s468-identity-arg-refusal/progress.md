@@ -167,3 +167,20 @@ NOT done:
   (scan.mjs / cmp.mjs vs scan-base.json), corpus-emit-differential, S467 param probes
   (~/.cache/scrml-review-s467-param-r5/cases via repro/codesdir.mjs, base2 vs head). Run all before landing.
 - progress/known-gaps note to update with the round-1 figures; FACTS already regenerated in 89700c8ee.
+
+## RESUMED S469 (branch s469-1451, worktree agent-a7f8339dfedb7424e)
+
+- 2026-10-18 — resumed from origin/s468-identity-arg-refusal 89700c8ee; the old worktree's one uncommitted file
+  (this progress.md) carried over (byte-identical to the hand-off diff) — 7234a1ca1.
+- Merged origin/main 38e7ab398 (#1442 now on main; the stacked base dissolves) — e0e39ee1e. Conflicts only in
+  generated docs (SPEC-INDEX.md, FACTS.md) — regenerated; known-gaps gap-id union verified. Pre-commit gate on the
+  merge: 37677 pass / 125 skip / 13 todo / 0 fail (1602 files).
+- Reviewer harness re-run on the merged tree (a1–a6, f1–f4): ACCEPTED-SPOOFED attack probes are exactly the carried
+  H3 set a40 a45 b13 b14 b15 b16 b29 d16 d17 e08 + c13; every other attack probe REFUSED; controls f/g/h/m accepted
+  except f09 / f10 / f15 (flow-/field-insensitive refusals, carried) and f16 / g03 / g04 (a cell that DOES receive the
+  identity from another handler — true positives: the cell persists across clicks).
+- §12.4 bullet + §34 row NARROWED: "What the compiler follows" (exact list, incl. H1 defaults / rest / `arguments`,
+  H2 CPS browser statements, F2 mutated-parameter rule, F1 predicate-only reads), "Not covered", and "Known limits
+  of this check (impl#1)" — (a) alias mutation + component-prop object literal NOT refused, (b) flow-/field-
+  insensitive refusals — with the floor-not-the-model sentence pointing at dpa-071.
+- FILED `g-identity-arg-via-alias-mutation-s468` (MED, open) under the s467 entry; gap-counts regenerated (MED +1).
