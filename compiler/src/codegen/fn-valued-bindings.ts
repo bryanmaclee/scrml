@@ -753,6 +753,44 @@ function estreeMayHoldWaitingFn(
   return hit;
 }
 
+/** The names a destructuring pattern (`const [a, b] = …`, `for (const { a: r } of …)`) binds. */
+function patternNames(p: unknown): string[] {
+  const out: string[] = [];
+  const visit = (q: unknown): void => {
+    if (!q || typeof q !== "object") return;
+    const n = q as AnyNode;
+    if (typeof n.rest === "string" && n.rest) out.push(n.rest.replace(/^\.\.\./, ""));
+    const items = (n.kind === "destructure-array" ? n.elements : n.kind === "destructure-object" ? n.properties : null) as AnyNode[] | null;
+    for (const it of items ?? []) {
+      if (!it || typeof it !== "object") continue;
+      if (it.kind === "name") {
+        const b = typeof it.bindName === "string" ? it.bindName : it.name;
+        if (typeof b === "string" && b) out.push(b);
+      } else if (it.kind === "nested") visit(it.pattern);
+    }
+  };
+  visit(p);
+  return out;
+}
+
+/**
+ * Node kinds that bind no name for their children: the F4 judge's shadow set passes through
+ * them unchanged (`waitingBindingsOf` / `childShadow`). Any kind not listed is treated as one
+ * that may re-bind a name, and its children see no shadow (fail closed).
+ */
+const SHADOW_TRANSPARENT_KINDS = new Set([
+  // statements
+  "if-stmt", "if-expr", "if-chain", "while-stmt", "do-while-stmt", "return-stmt", "throw-stmt",
+  "bare-expr", "const-decl", "let-decl", "lin-decl", "tilde-decl", "lift-expr", "fail-expr",
+  "propagate-expr", "break-stmt", "continue-stmt", "defer-stmt", "yield-stmt", "export-decl",
+  "reactive-assign", "reactive-nested-assign", "reactive-explicit-set", "reactive-array-mutation",
+  // expressions (a lambda's `expr` / `block` body record included)
+  "expr", "block", "ident", "lit", "array", "object", "prop", "shorthand", "spread", "unary",
+  "binary", "assign", "ternary", "member", "index", "call", "new", "cast", "map-lit", "template",
+  "quasi", "tpl", "is-not", "is-not-not", "is-some", "is-variant", "reset-expr", "sql-ref",
+  "input-state-ref", "escape-hatch",
+]);
+
 function bindingNameOf(n: AnyNode): string {
   const nm = n.kind === "export-decl" ? n.exportedName : n.name;
   if (typeof nm === "string" && nm) return nm;
@@ -805,26 +843,73 @@ export function waitingBindingsOf(
     out.push({ name, node, how, textOnly: !judgeIn(value, text, shadow, []) });
   };
   /**
-   * The names a NESTED statement list (a function body, a block) binds for its whole extent
-   * that shadow an async name: each `const` / `let` / `lin` declared directly in it under a
-   * plain identifier whose own value, judged in the OUTER scope, is not waiting. Fail closed —
-   * these shadow nothing, so a reference to the name is still read as the async function: a
-   * declaration whose value may be waiting (that declaration is the one refused), a tilde
-   * declaration (block-nested, it is a write to the outer name), a destructuring, a
-   * `function` declaration (a nested helper is in the async set by name), a loop / catch
-   * header binding, and every file-scope binding.
+   * The shadow set of a NESTED statement list (a function body, a block) for its whole extent.
+   * A name is ADDED for each `const` / `let` / `lin` declared directly in it under a plain
+   * identifier whose own value, judged in the enclosing scope, is not waiting. A name is
+   * REMOVED — the list re-binds it to something that may wait, so a reference to it is read
+   * as the async function again (fail closed) — for each `function` declaration in it (hoisted
+   * over the whole list; a nested helper is in the async set by name), each `const` / `let` /
+   * `lin` whose own value may be waiting (that declaration is the one refused), and each name
+   * a destructuring declaration in it binds. Never shadowing: a tilde declaration (block-nested,
+   * it is a write to the outer name), and every file-scope binding.
    */
   const blockShadows = (stmts: unknown[], shadow: ReadonlySet<string>): ReadonlySet<string> => {
     let inner: Set<string> | null = null;
+    const drop = (name: string): void => {
+      if ((inner ?? shadow).has(name)) (inner ??= new Set(shadow)).delete(name);
+    };
+    for (const c of stmts) {
+      const d = c as AnyNode | null;
+      if (!d || typeof d !== "object") continue;
+      if (d.kind === "function-decl" && typeof d.name === "string") drop(d.name);
+      else if ((d.kind === "const-decl" || d.kind === "let-decl" || d.kind === "lin-decl") && d.name && typeof d.name === "object") {
+        for (const b of patternNames(d.name)) drop(b);
+      }
+    }
+    const base: ReadonlySet<string> = inner ?? shadow;
     for (const c of stmts) {
       const d = c as AnyNode | null;
       if (!d || typeof d !== "object") continue;
       if (d.kind !== "const-decl" && d.kind !== "let-decl" && d.kind !== "lin-decl") continue;
-      if (typeof d.name !== "string" || !d.name || !isAsync(d.name) || shadow.has(d.name)) continue;
-      if (judgeIn(d.initExpr, d.init, shadow, visibleNames(shadow))) continue;
-      (inner ??= new Set(shadow)).add(d.name);
+      if (typeof d.name !== "string" || !d.name || !isAsync(d.name)) continue;
+      if (judgeIn(d.initExpr, d.init, base, visibleNames(base))) drop(d.name);
+      else if (!(inner ?? shadow).has(d.name)) (inner ??= new Set(shadow)).add(d.name);
     }
     return inner ?? shadow;
+  };
+  /**
+   * The shadow set a node's CHILDREN see. Only a node kind that binds no name for its
+   * children passes the set through unchanged; a function literal adds its parameters and
+   * drops its own name (a named function expression's name is bound inside it); a `for`
+   * loop drops the names its header binds; every other kind — a `match` arm's payload, a
+   * `!{}` arm's error binding, a `catch` header, a `given` guard, markup, anything not listed —
+   * may re-bind a name, so its children see no shadow at all (fail closed: every async
+   * spelling is read as the async function there).
+   */
+  const childShadow = (node: AnyNode, shadow: ReadonlySet<string>): ReadonlySet<string> => {
+    if (isFnLiteralNode(node)) {
+      const self = node.kind === "escape-hatch" && typeof node.fnName === "string" ? node.fnName : null;
+      const own = paramNamesOf(node.params);
+      if (self === null || !shadow.has(self) || own.includes(self)) {
+        const add = own.filter((x) => !shadow.has(x));
+        return add.length ? new Set([...shadow, ...add]) : shadow;
+      }
+      const s = new Set(shadow);
+      s.delete(self);
+      for (const x of own) s.add(x);
+      return s;
+    }
+    if (shadow.size === 0) return shadow;
+    if (typeof node.kind !== "string") return shadow; // a structural record of its owner
+    if (node.kind === "for-stmt" || node.kind === "for-expr") {
+      if (node.variable == null) return new Set(); // C-style header: bindings held as text
+      const bound = typeof node.variable === "string" ? [node.variable] : patternNames(node.variable);
+      if (!bound.some((b) => shadow.has(b))) return shadow;
+      const s = new Set(shadow);
+      for (const b of bound) s.delete(b);
+      return s;
+    }
+    return SHADOW_TRANSPARENT_KINDS.has(node.kind) ? shadow : new Set();
   };
   const walk = (n: unknown, nested: boolean, shadow: ReadonlySet<string>): void => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
@@ -864,12 +949,9 @@ export function waitingBindingsOf(
       check(node.value, null, node, name, "written", shadow);
     }
     // A function's parameters shadow an outer name of the same spelling in its whole body
-    // (`function eqx(check, b) { const g = check … }` aliases the parameter).
-    let inner = shadow;
-    if (isFnLiteralNode(node)) {
-      const own = paramNamesOf(node.params).filter((x) => !shadow.has(x));
-      if (own.length) inner = new Set([...shadow, ...own]);
-    }
+    // (`function eqx(check, b) { const g = check … }` aliases the parameter); a node that may
+    // re-bind a name hands its children a smaller set (`childShadow`).
+    const inner = childShadow(node, shadow);
     for (const k of Object.keys(node)) {
       if (k === "span" || k === "valueInitExpr") continue;
       const c = node[k];
