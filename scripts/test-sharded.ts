@@ -8,8 +8,18 @@
 //               pre-commit hook passes to `bun test`. Unlike `bun test`'s positional args these are PATHS, not
 //               substring filters — the file set is enumerated here so it can be split. `--plan` prints it.
 //   --bail      stop EVERY shard on the first failure anywhere, print that failure, exit 1.
-//   --shards=N  shard count. Precedence: --shards, then $SCRML_HOOK_SHARDS, then min(floor(cores/2), 8).
+//   --shards=N  shard count. Precedence: --shards, then $SCRML_HOOK_SHARDS, then the memory-aware default:
+//               min(floor(cores/2), 8, floor((MemAvailable - reserve) / shard-mem)), at least 1. An explicit N is
+//               honoured as given (the per-shard ceiling below still bounds each shard).
 //               N=1 runs one `bun test` process over the same file list (no parallelism).
+//   --shard-timeout=S   wall-clock bound per shard, seconds ($SCRML_HOOK_SHARD_TIMEOUT_S, default 1200). A shard
+//               still running at S is killed (its whole process group, nothing else) and the run FAILS, naming
+//               the shard, the file it was in and its assigned files. Never a pass.
+//   --shard-mem=MB      RSS ceiling per shard, MB, summed over the shard's process group (bun test + every
+//               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB, default 3072). Over it -> killed, run FAILS, as above.
+//               Also the per-shard budget the default N is derived from. Sampled every second (Linux /proc;
+//               elsewhere the ceiling is not enforced and N falls back to os.freemem()).
+//   reserve     $SCRML_HOOK_MEM_RESERVE_MB (default 2048): memory left for everything else when deriving N.
 //   --verbose   stream every shard's output live (prefixed `[sK]`) instead of only failures + summaries.
 //   --plan      print the shard assignment (files + estimated seconds per shard) and exit 0 without running.
 //   any other `--flag` is passed through to every `bun test` invocation (e.g. `--timeout=20000`).
@@ -40,13 +50,19 @@
 // paths; values are an exponential moving average so one noisy run (a loaded machine) cannot skew the plan.
 // Writes are atomic (temp file + rename); a lost race only loses one run's refinement.
 //
+// ISOLATION / KILLING. Each shard is spawned `detached` (setsid): it is the leader of its own process group, so
+// the shard's PIDs are exactly that group. Timeout, memory ceiling, --bail and the runner's own SIGINT/SIGTERM/
+// SIGHUP all kill by group (`kill(-pgid)`) — never by name or command line, so the identical `bun test` runs of
+// other worktrees are untouched. Backstop: where coreutils `timeout` exists, each shard's command is wrapped in it
+// (shard-timeout + 60s, then SIGKILL), so a shard is bounded even if this runner itself is SIGKILLed.
+//
 // SERIAL PINS. A file listed in SERIAL_PINS below is assigned to shard 0 together with every other pinned file,
 // so pinned files never run concurrently with EACH OTHER. Use it only for tests that genuinely share an external
 // resource between files and cannot be isolated (per-process temp roots, port 0) — never as a way to skip.
 
 import { spawn } from "bun";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "fs";
-import { availableParallelism, cpus, homedir } from "os";
+import { availableParallelism, cpus, freemem, homedir } from "os";
 import { dirname, join, relative, resolve, sep } from "path";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -65,13 +81,49 @@ interface Options {
   shards: number;
   verbose: boolean;
   plan: boolean;
+  timeoutS: number;
+  memMb: number;
+  shardsWhy?: string;
   passthrough: string[];
   paths: string[];
 }
 
-function defaultShards(): number {
+// MemAvailable (bytes) from /proc/meminfo — the kernel's estimate of what can be allocated without swapping,
+// which counts reclaimable page cache (os.freemem() on Linux does not). Falls back to os.freemem().
+function availableMemoryBytes(): number {
+  try {
+    const m = /^MemAvailable:\s+(\d+) kB$/m.exec(readFileSync("/proc/meminfo", "utf8"));
+    if (m) return Number(m[1]) * 1024;
+  } catch {
+    /* not Linux */
+  }
+  return freemem();
+}
+
+const MB = 1024 * 1024;
+
+function defaultShards(memMb: number): { n: number; why: string } {
   const cores = typeof availableParallelism === "function" ? availableParallelism() : cpus().length;
-  return Math.max(1, Math.min(Math.floor(cores / 2), 8));
+  const reserveMb = envNumber("SCRML_HOOK_MEM_RESERVE_MB", 2048);
+  const availMb = Math.floor(availableMemoryBytes() / MB);
+  const byCores = Math.min(Math.floor(cores / 2), 8);
+  const byMem = Math.floor((availMb - reserveMb) / memMb);
+  const n = Math.max(1, Math.min(byCores, byMem));
+  return { n, why: `cores ${cores} -> ${byCores}; ${availMb} MB available - ${reserveMb} reserve / ${memMb} per shard -> ${Math.max(0, byMem)}` };
+}
+
+function envNumber(name: string, dflt: number): number {
+  const v = process.env[name];
+  return v !== undefined && v !== "" ? parsePositive(v, name) : dflt;
+}
+
+function parsePositive(raw: string, from: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.error(`test-sharded: ${from} must be a positive number, got ${JSON.stringify(raw)}`);
+    process.exit(2);
+  }
+  return n;
 }
 
 function parseShardCount(raw: string, from: string): number {
@@ -84,7 +136,7 @@ function parseShardCount(raw: string, from: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, passthrough: [], paths: [] };
+  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, passthrough: [], paths: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bail") o.bail = true;
@@ -92,12 +144,24 @@ function parseArgs(argv: string[]): Options {
     else if (a === "--plan") o.plan = true;
     else if (a.startsWith("--shards=")) o.shards = parseShardCount(a.slice("--shards=".length), "--shards");
     else if (a === "--shards") o.shards = parseShardCount(argv[++i] ?? "", "--shards");
+    else if (a.startsWith("--shard-timeout=")) o.timeoutS = parsePositive(a.slice("--shard-timeout=".length), "--shard-timeout");
+    else if (a.startsWith("--shard-mem=")) o.memMb = parsePositive(a.slice("--shard-mem=".length), "--shard-mem");
     else if (a.startsWith("-")) o.passthrough.push(a);
     else o.paths.push(a);
   }
+  if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200);
+  if (o.memMb === 0) o.memMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 3072);
+  o.shardsWhy = "explicit";
   if (o.shards === 0) {
     const env = process.env.SCRML_HOOK_SHARDS;
-    o.shards = env !== undefined && env !== "" ? parseShardCount(env, "SCRML_HOOK_SHARDS") : defaultShards();
+    if (env !== undefined && env !== "") {
+      o.shards = parseShardCount(env, "SCRML_HOOK_SHARDS");
+      o.shardsWhy = "SCRML_HOOK_SHARDS";
+    } else {
+      const d = defaultShards(o.memMb);
+      o.shards = d.n;
+      o.shardsWhy = d.why;
+    }
   }
   if (o.paths.length === 0) {
     console.error("test-sharded: no test paths given (e.g. compiler/tests/unit)");
@@ -248,7 +312,12 @@ interface ShardResult {
   output: string[];
   counts: Counts | null; // null when bun printed no summary (bail-out, crash, killed)
   failLines: string[];
-  killed: boolean;
+  // How the shard ended. "stopped" = this runner stopped it because ANOTHER shard failed under --bail (not a
+  // failure of its own). Every other non-"ok" outcome fails the run — including "signal": a shard killed by
+  // something other than this runner (the kernel OOM killer, a stray kill) has no summary and must never pass.
+  outcome: "ok" | "failed" | "stopped" | "timeout" | "memory" | "signal";
+  lastFile: string | null; // the last file header bun printed — the file a killed shard was most likely in
+  peakRssMb: number;
   seconds: number;
 }
 
@@ -362,59 +431,149 @@ async function main(): Promise<void> {
   const started = Date.now();
   console.log(
     `test-sharded: ${files.length} files in ${shards.length} shard(s)` +
-      `${opts.bail ? " (--bail)" : ""}; set SCRML_HOOK_SHARDS=1 for the single-process run`,
+      `${opts.bail ? " (--bail)" : ""} [N: ${opts.shardsWhy}]; timeout ${opts.timeoutS}s, ceiling ${opts.memMb} MB per shard;` +
+      ` SCRML_HOOK_SHARDS=1 for the single-process run`,
   );
 
+  const timeoutBin = Bun.which("timeout"); // coreutils backstop; absent on macOS — the runner's own timer remains
+  const groups = new Map<number, number>(); // shard index -> pgid (== the spawned leader's pid, via setsid)
   const procs = new Map<number, ReturnType<typeof spawn>>();
+  const stopReason = new Map<number, "stopped" | "timeout" | "memory">();
+  const peakRss = new Map<number, number>();
+  let peakTotalRss = 0;
   let bailedBy: number | null = null;
 
-  const stopOthers = (except: number) => {
-    for (const [i, p] of procs) if (i !== except && p.exitCode === null) p.kill("SIGTERM");
+  const killGroup = (index: number, sig: NodeJS.Signals) => {
+    const pgid = groups.get(index);
+    if (pgid === undefined) return;
+    try {
+      process.kill(-pgid, sig);
+    } catch {
+      /* group already gone */
+    }
   };
+  // Stop a shard: SIGTERM, then SIGKILL 5s later if anything in the group is still alive.
+  const stop = (index: number, why: "stopped" | "timeout" | "memory", sig: NodeJS.Signals = "SIGTERM") => {
+    if (!stopReason.has(index)) stopReason.set(index, why);
+    killGroup(index, sig);
+    if (sig !== "SIGKILL") setTimeout(() => killGroup(index, "SIGKILL"), 5000).unref();
+  };
+  const running = (index: number) => {
+    const p = procs.get(index);
+    return p !== undefined && p.exitCode === null && p.signalCode === null;
+  };
+  const stopOthers = (except: number) => {
+    for (const i of procs.keys()) if (i !== except && running(i) && !stopReason.has(i)) stop(i, "stopped");
+  };
+  const bail = (index: number) => {
+    if (opts.bail && bailedBy === null) {
+      bailedBy = index;
+      stopOthers(index);
+    }
+  };
+  // The runner itself interrupted (Ctrl-C on the hook, a killed terminal): take every shard down with it.
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.on(sig, () => {
+      for (const i of groups.keys()) killGroup(i, "SIGKILL");
+      console.error(`\ntest-sharded: interrupted by ${sig}; every shard killed.`);
+      process.exit(130);
+    });
+  }
+
+  // Memory sampler (Linux): every second, sum VmRSS over each shard's process group; a group over the ceiling is
+  // killed. Also the measurement source for the per-shard peak column.
+  const sampleMemory = () => {
+    let names: string[];
+    try {
+      names = readdirSync("/proc");
+    } catch {
+      return; // no /proc: ceiling not enforceable here
+    }
+    const byGroup = new Map<number, number>();
+    const wanted = new Set(groups.values());
+    for (const name of names) {
+      const c0 = name.charCodeAt(0);
+      if (c0 < 48 || c0 > 57) continue;
+      try {
+        const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+        const pgrp = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[2]);
+        if (!wanted.has(pgrp)) continue;
+        const kb = Number(/^VmRSS:\s+(\d+) kB$/m.exec(readFileSync(`/proc/${name}/status`, "utf8"))?.[1] ?? 0);
+        byGroup.set(pgrp, (byGroup.get(pgrp) ?? 0) + kb * 1024);
+      } catch {
+        /* process exited between readdir and read */
+      }
+    }
+    let total = 0;
+    for (const [index, pgid] of groups) {
+      if (!running(index)) continue;
+      const mb = (byGroup.get(pgid) ?? 0) / MB;
+      total += mb;
+      if (mb > (peakRss.get(index) ?? 0)) peakRss.set(index, mb);
+      if (mb > opts.memMb && !stopReason.has(index)) {
+        console.log(`[s${index}] MEMORY CEILING: ${mb.toFixed(0)} MB > ${opts.memMb} MB — killing shard ${index}`);
+        stop(index, "memory", "SIGKILL");
+        bail(index);
+      }
+    }
+    if (total > peakTotalRss) peakTotalRss = total;
+  };
+  const sampler = setInterval(sampleMemory, 1000);
 
   const results = await Promise.all(
     shards.map(async (shard): Promise<ShardResult> => {
       const junit = join(workDir, `shard-${shard.index}.xml`);
       const t0 = Date.now();
-      const proc = spawn(
-        [
-          process.execPath,
-          "test",
-          ...(opts.bail ? ["--bail"] : []),
-          ...opts.passthrough,
-          "--reporter=junit",
-          `--reporter-outfile=${junit}`,
-          ...shard.files.map((f) => `./${f}`),
-        ],
-        { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env },
-      );
+      const testCmd = [
+        process.execPath,
+        "test",
+        ...(opts.bail ? ["--bail"] : []),
+        ...opts.passthrough,
+        "--reporter=junit",
+        `--reporter-outfile=${junit}`,
+        ...shard.files.map((f) => `./${f}`),
+      ];
+      const cmd = timeoutBin ? [timeoutBin, "--kill-after=10", `${Math.ceil(opts.timeoutS) + 60}`, ...testCmd] : testCmd;
+      const proc = spawn(cmd, { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env, detached: true });
       procs.set(shard.index, proc);
+      groups.set(shard.index, proc.pid);
+      const timer = setTimeout(() => {
+        console.log(`[s${shard.index}] TIMEOUT: still running after ${opts.timeoutS}s — killing shard ${shard.index}`);
+        stop(shard.index, "timeout", "SIGKILL");
+        bail(shard.index);
+      }, opts.timeoutS * 1000);
       const output: string[] = [];
       const failLines: string[] = [];
+      let lastFile: string | null = null;
       const onLine = (line: string) => {
         output.push(line);
+        if (FILE_HEADER.test(line)) lastFile = line.slice(0, -1);
         if (opts.verbose) console.log(`[s${shard.index}] ${line}`);
         if (line.startsWith("(fail) ")) {
           failLines.push(line);
           if (!opts.verbose) console.log(`[s${shard.index}] ${line}`);
-          if (opts.bail && bailedBy === null) {
-            bailedBy = shard.index;
-            stopOthers(shard.index);
-          }
+          if (!stopReason.has(shard.index)) bail(shard.index);
         }
       };
       await Promise.all([pump(proc.stdout as ReadableStream<Uint8Array>, onLine), pump(proc.stderr as ReadableStream<Uint8Array>, onLine)]);
       const exitCode = await proc.exited;
-      const killed = proc.signalCode !== null && proc.signalCode !== undefined;
+      clearTimeout(timer);
+      // Anything the shard's tests left running in its group (a server a test never stopped) dies with it.
+      killGroup(shard.index, "SIGKILL");
       const seconds = (Date.now() - t0) / 1000;
       const counts = parseCounts(output);
+      const signalled = (proc.signalCode !== null && proc.signalCode !== undefined) || (timeoutBin !== null && (exitCode === 124 || exitCode === 137));
+      const ours = stopReason.get(shard.index);
+      let outcome: ShardResult["outcome"];
+      if (ours === "timeout" || ours === "memory") outcome = ours;
+      else if (exitCode === 0 && !signalled) outcome = "ok";
+      else if (ours === "stopped" && failLines.length === 0) outcome = "stopped";
+      else if (signalled && failLines.length === 0) outcome = timeoutBin !== null && exitCode === 124 ? "timeout" : "signal";
+      else outcome = "failed";
       // A shard that failed without printing a (fail) line (crash, error outside any test) still bails the run.
-      if (opts.bail && exitCode !== 0 && !killed && bailedBy === null) {
-        bailedBy = shard.index;
-        stopOthers(shard.index);
-      }
+      if (outcome !== "ok" && outcome !== "stopped") bail(shard.index);
       if (!opts.verbose) {
-        const status = killed ? "stopped" : exitCode === 0 ? "ok" : `FAILED (exit ${exitCode})`;
+        const status = outcome === "ok" ? "ok" : outcome === "stopped" ? "stopped" : `${outcome.toUpperCase()} (exit ${exitCode})`;
         const c = counts ? `${counts.pass} pass, ${counts.fail} fail, ${counts.skip} skip` : "no summary";
         console.log(`[s${shard.index}] ${status}: ${shard.files.length} files, ${c}, ${seconds.toFixed(1)}s`);
       }
@@ -425,16 +584,31 @@ async function main(): Promise<void> {
         /* killed / bailed before the report was written */
       }
       saveTimings(measured);
-      return { shard, exitCode, output, counts, failLines, killed, seconds };
+      return { shard, exitCode, output, counts, failLines, outcome, lastFile, peakRssMb: peakRss.get(shard.index) ?? 0, seconds };
     }),
   );
+  clearInterval(sampler);
   // ----- report -----
-  const failed = results.filter((r) => !r.killed && r.exitCode !== 0);
+  const failed = results.filter((r) => r.outcome !== "ok" && r.outcome !== "stopped");
   for (const r of failed) {
     // Keep the shard's full output on disk; print only the part that explains the failure.
     const log = join(workDir, `shard-${r.shard.index}.log`);
     writeFileSync(log, r.output.join("\n") + "\n");
-    console.log(`\n===== shard ${r.shard.index} (exit ${r.exitCode}) — failure report; full output: ${log} =====`);
+    const head =
+      r.outcome === "timeout"
+        ? `TIMED OUT (limit ${opts.timeoutS}s; killed after ${r.seconds.toFixed(0)}s)`
+        : r.outcome === "memory"
+          ? `KILLED AT THE MEMORY CEILING (${opts.memMb} MB; peak ${r.peakRssMb.toFixed(0)} MB)`
+          : r.outcome === "signal"
+            ? `KILLED BY A SIGNAL THIS RUNNER DID NOT SEND (exit ${r.exitCode}; OOM killer?)`
+            : `FAILED (exit ${r.exitCode})`;
+    console.log(`\n===== shard ${r.shard.index} ${head} — failure report; full output: ${log} =====`);
+    if (r.outcome !== "failed") {
+      console.log(`last file header printed: ${r.lastFile ?? "(none)"}`);
+      console.log(`assigned files (${r.shard.files.length}):`);
+      for (const f of r.shard.files) console.log(`  ${f}`);
+      console.log("last output:");
+    }
     for (const line of failureReport(r.output)) console.log(line);
   }
   if (failed.length === 0) rmSync(workDir, { recursive: true, force: true });
@@ -446,22 +620,29 @@ async function main(): Promise<void> {
     if (r.counts && r.counts.files !== r.shard.files.length) {
       integrity.push(`shard ${r.shard.index}: bun ran ${r.counts.files} files, ${r.shard.files.length} were assigned`);
     }
-    if (!r.killed && r.exitCode === 0 && !r.counts) {
+    if (r.outcome === "ok" && !r.counts) {
       integrity.push(`shard ${r.shard.index}: exited 0 but printed no test summary`);
     }
   }
 
   const total: Counts = { pass: 0, fail: 0, skip: 0, todo: 0, expects: 0, tests: 0, files: 0 };
-  console.log("\nshard  files   pass  fail  skip  todo  seconds");
+  console.log("\nshard  files   pass  fail  skip  todo  seconds  peakMB");
   for (const r of results) {
     const c = r.counts;
-    const state = r.killed ? "  (stopped by --bail)" : c ? "" : `  (no summary, exit ${r.exitCode})`;
+    const state =
+      r.outcome === "stopped"
+        ? "  (stopped by --bail)"
+        : r.outcome === "ok" || r.outcome === "failed"
+          ? c
+            ? ""
+            : `  (no summary, exit ${r.exitCode})`
+          : `  (${r.outcome.toUpperCase()})`;
     console.log(
       `${String(r.shard.index).padStart(5)}  ${String(r.shard.files.length).padStart(5)}  ` +
         (c
           ? `${String(c.pass).padStart(5)} ${String(c.fail).padStart(5)} ${String(c.skip).padStart(5)} ${String(c.todo).padStart(5)}`
           : "    -     -     -     -") +
-        `  ${r.seconds.toFixed(1).padStart(7)}${state}`,
+        `  ${r.seconds.toFixed(1).padStart(7)}  ${r.peakRssMb.toFixed(0).padStart(6)}${state}`,
     );
     if (c) for (const k of Object.keys(total) as (keyof Counts)[]) total[k] += c[k];
   }
@@ -472,12 +653,14 @@ async function main(): Promise<void> {
       `${total.pass} pass, ${total.fail} fail, ${total.skip} skip, ${total.todo} todo, ` +
       `${total.expects} expect() calls; ran ${total.tests} tests across ${total.files} files in ${wall}s wall`,
   );
+  console.log(`peak RSS, all shards together: ${peakTotalRss.toFixed(0)} MB (ceiling ${opts.memMb} MB per shard; timeout ${opts.timeoutS}s per shard)`);
 
   if (integrity.length > 0) {
     console.log("\nINTEGRITY ERROR:");
     for (const m of integrity) console.log(`  ${m}`);
   }
   if (bailedBy !== null) console.log(`\nBailed out: first failure in shard ${bailedBy}; other shards stopped.`);
+  if (failed.length > 0) console.log(`\nFAILED shard(s): ${failed.map((r) => `${r.shard.index} (${r.outcome})`).join(", ")}`);
   process.exit(failed.length > 0 || integrity.length > 0 || bailedBy !== null ? 1 : 0);
 }
 

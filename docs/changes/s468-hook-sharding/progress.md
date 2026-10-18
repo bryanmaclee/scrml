@@ -70,3 +70,31 @@ keep min(cores/2, 8) but cap N by available memory (≈1 GB/shard) — not done;
 **Next.** (1) Re-run measure.sh (alternating seq/shard, --bail, load + peak RSS recorded) 5x5 on the fixed branch;
 need zero flakes + identical counts every run. (2) Decide memory cap. (3) Final report. Scratch harness:
 `~/.cache/scrml-agent-tmp/s468-hook-sharding/{measure.sh,rss.sh,probe/}`.
+
+## RESUMED S469 (branch s469-hook-sharding from origin/s468-hook-sharding 68dad3bf7)
+
+- 2026-10-17T22:05 resumed at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a3f36bec616a6c6e4; carried the
+  uncommitted PAUSED note; bun install (puppeteer postinstall fails, irrelevant), pretest OK. Load ~9 at start, 25 GB
+  available. The shared timing cache ~/.cache/scrml/test-timings.json was ABSENT (first run re-planned by file size —
+  the cold fallback works: conformance-only 5 shards, 50.8s, all green).
+- 2026-10-17T22:20 runner bounded + memory-aware:
+  * N default = min(cores/2, 8, floor((MemAvailable - SCRML_HOOK_MEM_RESERVE_MB[2048]) / SCRML_HOOK_SHARD_MEM_MB[3072])),
+    >= 1. MemAvailable read from /proc/meminfo (counts reclaimable cache; os.freemem() fallback). The header line
+    prints how N was derived.
+  * Every shard spawned `detached` (setsid) = its own process group; ALL kills are `kill(-pgid)` of that group only
+    (never by name). Per-shard wall timeout (SCRML_HOOK_SHARD_TIMEOUT_S, 1200) and RSS ceiling summed over the group
+    (sampled 1s from /proc, SCRML_HOOK_SHARD_MEM_MB 3072) -> SIGKILL the group, --bail the rest, hook FAILS with
+    "TIMED OUT" / "KILLED AT THE MEMORY CEILING", last file header, the shard's assigned files and the tail of output.
+    Backstop: coreutils `timeout --kill-after=10 (T+60)` wraps each shard, so a shard is bounded even if the runner
+    is SIGKILLed. Runner SIGINT/SIGTERM/SIGHUP kill every shard group. Leftover processes in a finished shard's group
+    (a server a test never stopped) are killed at shard exit.
+  * BUG FIXED from the S468 runner: a shard killed by a signal the runner did NOT send (kernel OOM killer) was
+    classified "stopped" -> no failure, no integrity error -> hook exit 0. Now outcome "signal" = FAIL.
+  * Table gains peakMB per shard + a "peak RSS, all shards together" line (the measurement source).
+  * Bites (scratch tests outside the repo): hang test + --shard-timeout=8 -> exit 1 at 8.0s "TIMED OUT", other
+    shards OK, no leftover PID. 16 MB/20 ms allocator + --shard-mem=1000 -> killed at 1379 MB sample, exit 1
+    "KILLED AT THE MEMORY CEILING". External kill -9 of a shard's bun -> exit 1 "KILLED BY A SIGNAL THIS RUNNER DID
+    NOT SEND". SIGTERM to the runner -> exit 130, the shard's timeout+bun PIDs gone.
+  * Port/global isolation re-checked: every server-starting test in the hook set binds port 0 or a freePort()
+    (bind 0, read, close — a TOCTOU window shared with today's 10-agent concurrent sequential runs, not new);
+    fixed-number "ports" in the set (3000/7878/8181/4242/4321) are compile-input strings or fakes, never bound.
