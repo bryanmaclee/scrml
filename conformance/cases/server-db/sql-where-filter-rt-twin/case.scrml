@@ -1,0 +1,11 @@
+// §66 twin of server-db/sql-where-filter-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type User:struct = { id: int, name: string }
+    <admins:User[replace]=([])/>
+    function loadByRole(role: string) -> User[] {
+        return ?{`SELECT id, name FROM users WHERE role = ${role} ORDER BY id`}.all() !{ _ :> [] }
+    }
+    <main>
+        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return } }>Load admins</button>
+    </main>
+</program>

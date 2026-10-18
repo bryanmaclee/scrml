@@ -20,11 +20,12 @@
  * ═══ THE BUCKETS (each case lands in exactly one) ═══
  *
  *   PASS         codes half holds AND the runtime half (if the case has one) executed and held.
- *   CODES-ONLY   codes half holds; the case HAS a runtime half the bootstrap cannot execute — a
- *                server (serverDb / firstPaint / ssr) or tool (stdout) run. The bootstrap emits
- *                no server or tool artifact, so that half is not attempted. (s454 U1b: a
- *                `serverStub` case IS executed — the stub answers the bootstrap's own client
- *                calls over its route manifest; see `stubFetch`.)
+ *   CODES-ONLY   codes half holds; the case HAS a runtime half the bootstrap cannot execute — an
+ *                SSR (firstPaint / ssr) or tool (stdout) run. The bootstrap emits no SSR or tool
+ *                artifact, so that half is not attempted. (s454 U1b: a `serverStub` case IS
+ *                executed — the stub answers the bootstrap's own client calls over its route
+ *                manifest; see `stubFetch`. s468 U1c: a `serverDb` case IS executed — the
+ *                bootstrap's OWN server artifact answers them; see `serverFetch`.)
  *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing, a
  *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch —
  *                or (a §66 twin only) it emitted an E- code the case does not assert
@@ -124,6 +125,7 @@ const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe" && r !== "is-some" &
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");
 const BOOT_RUNTIME = join(SELF_HOST_V2, "slice-m1", "runtime", "runtime.js");
+const BOOT_SERVER_RUNTIME = join(SELF_HOST_V2, "slice-m1", "runtime", "server-runtime.js");
 export const DEFAULT_CASES_DIR = join(REPO_ROOT, "conformance", "cases");
 export const REPORT_PATH = join(REPO_ROOT, "docs", "bootstrap-conformance.md");
 
@@ -430,11 +432,12 @@ export function codeUnitCmp(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** The runtime half's server/tool selectors — halves the bootstrap emits no artifact for.
- *  (s454 U1b: `serverStub` is not one — its stub answers the client artifact's calls.) */
+/** The runtime half's SSR / tool selectors — halves the bootstrap emits no artifact for.
+ *  (s454 U1b: `serverStub` is not one — its stub answers the client artifact's calls. s468 U1c:
+ *  `serverDb` is not one — the bootstrap's own server artifact answers them, `serverFetch`.) */
 export function nonClientRuntimeKeys(c: LoadedCase): string[] {
   const e = c.expected.expect as Record<string, unknown>;
-  return ["serverDb", "firstPaint", "stdout", "ssr"].filter((k) => e[k] !== undefined && e[k] !== false);
+  return ["firstPaint", "stdout", "ssr"].filter((k) => e[k] !== undefined && e[k] !== false);
 }
 
 /** A route of the bootstrap's client artifact (print.scrml `Output.routes` — the manifest). */
@@ -486,6 +489,96 @@ export function stubFetch(stub: Record<string, unknown>, routes: BootRoute[]) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// s468 (U1c) — THE SERVER-EXECUTOR SEAM (U1 design §4, "a new server executor seam calls
+// `createServer({ sql: <case stub | real> })` for `serverDb` / `sqlEngine:"real"` cases"). The
+// bootstrap's OWN server artifact (print-server.scrml) answers the client artifact's calls — no
+// stub, no impl#1. The case's `serverDb` (impl-neutral, keyed by TABLE name) is the database:
+//   - `sqlEngine: "real"`: a fresh in-memory SQLite (Bun.SQL, the engine a deployed server runs),
+//     each seeded table created from its rows' keys and JS types (the adapter's loose-infer; a case
+//     with `<schema>` never gets here — the bootstrap refuses `<schema>`);
+//   - otherwise impl#1's adapter stub semantics (conformance/adapters/impl1-ts.ts makeSqlStub): every
+//     query answers its FROM table's rows (a fresh copy each time; WHERE / bound values ignored), a
+//     statement with no FROM answers [].
+// The host injects the driver (`connect`) and builds responses as plain records (`respond`) — the
+// GLOBAL Request / Response here are happy-dom's, which drop `Cookie` / `Set-Cookie`. The client's
+// requests carry `document.cookie` and a `Set-Cookie` answer is applied to it (the browser's jar), so
+// the §39.2.3 double-submit pair runs for real.
+// ---------------------------------------------------------------------------
+type ServerDb = Record<string, unknown[]>;
+type BootServer = { js: string; serverDb: ServerDb; sqlEngine: string };
+
+function headerBag(h: Record<string, unknown> | undefined) {
+  const m = new Map<string, string>();
+  for (const [k, v] of Object.entries(h ?? {})) m.set(k.toLowerCase(), String(v));
+  return { get: (n: string) => (m.has(String(n).toLowerCase()) ? (m.get(String(n).toLowerCase()) as string) : null) };
+}
+
+function stubSql(db: ServerDb) {
+  return (strings: TemplateStringsArray) => {
+    const q = strings.join(" ");
+    const m = /\bFROM\s+["'`]?(\w+)/i.exec(q);
+    const table = m ? m[1] : null;
+    const rows = table && Array.isArray(db[table]) ? db[table] : [];
+    return Promise.resolve(rows.map((r) => (r && typeof r === "object" ? { ...(r as object) } : r)));
+  };
+}
+
+async function realSql(db: ServerDb) {
+  const { SQL } = await import("bun");
+  const sql = new SQL(":memory:");
+  const qid = (id: string) => '"' + String(id).replace(/"/g, '""') + '"';
+  const colType = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? "INTEGER" : "REAL") : typeof v === "boolean" ? "INTEGER" : "TEXT");
+  for (const table of Object.keys(db)) {
+    const rows = Array.isArray(db[table]) ? db[table] : [];
+    const cols = new Map<string, string>();
+    for (const r of rows) {
+      if (r && typeof r === "object") for (const [k, v] of Object.entries(r as object)) if (!cols.has(k)) cols.set(k, colType(v));
+    }
+    if (cols.size === 0) throw new Error(`serverDb table "${table}" has no seed row to infer its columns from`);
+    await sql.unsafe(`CREATE TABLE ${qid(table)} (${[...cols].map(([c, t]) => `${qid(c)} ${t}`).join(", ")})`);
+    for (const r of rows) {
+      const keys = Object.keys(r as object);
+      const vals = keys.map((k) => { const v = (r as Record<string, unknown>)[k]; return typeof v === "boolean" ? (v ? 1 : 0) : v; });
+      await sql.unsafe(`INSERT INTO ${qid(table)} (${keys.map(qid).join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`, vals);
+    }
+  }
+  return sql;
+}
+
+/** A `fetch` over the bootstrap's server artifact; `inflight` counts requests not yet answered. */
+async function serverFetch(dir: string, server: BootServer) {
+  copyFileSync(BOOT_RUNTIME, join(dir, "runtime.js"));
+  copyFileSync(BOOT_SERVER_RUNTIME, join(dir, "scrml-server-runtime.js"));
+  writeFileSync(join(dir, "program.server.js"), server.js);
+  const mod = await import(join(dir, "program.server.js"));
+  const driver = server.sqlEngine === "real" ? await realSql(server.serverDb) : stubSql(server.serverDb);
+  const srv = mod.createServer({
+    connect: () => driver,
+    log: () => {},
+    respond: (status: number, headers: Record<string, unknown>, body: string | null) =>
+      ({ status, headers: headerBag(headers), text: () => Promise.resolve(body ?? "") }),
+  });
+  const state = { inflight: 0 };
+  const fetchFn = async (path: unknown, init: { method?: string; headers?: Record<string, unknown>; body?: string }) => {
+    state.inflight++;
+    try {
+      const doc = (globalThis as any).document;
+      const headers: Record<string, unknown> = { ...(init?.headers ?? {}) };
+      if (doc && doc.cookie) headers.Cookie = doc.cookie;
+      const body = init?.body ?? "";
+      const req = { url: "http://localhost" + String(path), method: init?.method ?? "GET", headers: headerBag(headers), text: () => Promise.resolve(body) };
+      const res = await srv.fetch(req);
+      const set = res.headers.get("Set-Cookie");
+      if (set && doc) doc.cookie = String(set).split(";")[0] + "; Path=/";
+      return res;
+    } finally {
+      state.inflight--;
+    }
+  };
+  return { fetchFn, state };
+}
+
 function between(html: string, open: string, close: string): string {
   const i = html.indexOf(open);
   const j = html.lastIndexOf(close);
@@ -499,14 +592,23 @@ function between(html: string, open: string, close: string): string {
  * (compiler/self-host-v2/slice-m3/substitute.js `executeClient`) does — duplicated here rather than
  * imported because importing that module builds the M3 ingest bundle as a side effect.
  */
-async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[]) {
+async function runBootstrapArtifact(html: string, js: string, input: InputStep[], serverStub: Record<string, unknown> | undefined, routes: BootRoute[], server?: BootServer) {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
-  GlobalRegistrator.register();
+  // s468 (U1c): a page served from an origin, so `document.cookie` holds the CSRF cookie
+  GlobalRegistrator.register(server ? { url: "http://localhost/" } : undefined);
   // s454 (U1b): the client artifact's server calls are answered by the case's stub (none: every call 501-free empty)
+  // s468 (U1c): or, for a `serverDb` case, by the bootstrap's own server artifact
   const realFetch = (globalThis as any).fetch;
-  (globalThis as any).fetch = stubFetch(serverStub ?? {}, routes);
   const clock = new FakeClock();
   const dir = mkdtempSync(join(tmpdir(), "scrml-bootconf-"));
+  let inflight = { inflight: 0 };
+  if (server) {
+    const sf = await serverFetch(dir, server);
+    (globalThis as any).fetch = sf.fetchFn;
+    inflight = sf.state;
+  } else {
+    (globalThis as any).fetch = stubFetch(serverStub ?? {}, routes);
+  }
   try {
     const doc = (globalThis as any).document;
     const strip = (s: string) => s.replace(/<script[^>]*><\/script>/g, "");
@@ -528,10 +630,13 @@ async function runBootstrapArtifact(html: string, js: string, input: InputStep[]
         }
         return { cells, derived: {} };
       },
-      settled() {
-        return new Promise((r) => {
-          Promise.resolve().then(() => setTimeout(r, 0));
-        });
+      // s468 (U1c): a server round trip is real I/O (and a CSRF retry is two of them) — settle
+      // only once no request is in flight, plus one hop for the continuations that follow.
+      async settled() {
+        const hop = () => new Promise<void>((r) => { Promise.resolve().then(() => setTimeout(r, 0)); });
+        await hop();
+        for (let i = 0; i < 1000 && inflight.inflight > 0; i++) await hop();
+        await hop();
       },
     };
     (globalThis as any).__scrml_conformance = hook;
@@ -771,7 +876,16 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
     if (out.refused && out.refused.length > 0) {
       return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: out.refused });
     }
-    const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[], ex.serverStub as Record<string, unknown> | undefined, (out.routes ?? []) as BootRoute[]);
+    // s468 (U1c): a `serverDb` case runs against the bootstrap's own server artifact
+    let server: BootServer | undefined;
+    if (ex.serverDb !== undefined) {
+      const so = boot.mods["print-server"].printServer(fe.core, "program.server.js", "scrml-server-runtime.js");
+      if (so.refused && so.refused.length > 0) {
+        return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: so.refused });
+      }
+      if (so.js !== "") server = { js: so.js, serverDb: ex.serverDb as ServerDb, sqlEngine: String(ex.sqlEngine ?? "stub") };
+    }
+    const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[], ex.serverStub as Record<string, unknown> | undefined, (out.routes ?? []) as BootRoute[], server);
     rtFailures = runtimeHalfFailures(ex, r);
   } catch (e) {
     return v("CRASH", "runtime half threw", {

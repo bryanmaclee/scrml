@@ -1,0 +1,14 @@
+// §66 twin of server-db/sql-join-two-tables-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type Book:struct = { title: string, author: string }
+    <list:Book[replace]=([])/>
+    function booksByAuthor(name: string) -> Book[] {
+        return ?{`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = ${name} ORDER BY b.id`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @list = booksByAuthor("Ada") !{ .Transport(t) :> return }
+    }
+    <main>
+        <button id="load" onclick=onLoad()>Load books</button>
+    </main>
+</program>

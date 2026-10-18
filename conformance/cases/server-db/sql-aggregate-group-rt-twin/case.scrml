@@ -1,0 +1,14 @@
+// §66 twin of server-db/sql-aggregate-group-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type Total:struct = { region: string, total: int }
+    <totals:Total[replace]=([])/>
+    function regionTotals() -> Total[] {
+        return ?{`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @totals = regionTotals() !{ .Transport(t) :> return }
+    }
+    <main>
+        <button id="load" onclick=onLoad()>Region totals</button>
+    </main>
+</program>

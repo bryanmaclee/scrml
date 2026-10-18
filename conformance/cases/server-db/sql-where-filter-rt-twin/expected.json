@@ -1,0 +1,68 @@
+{
+  "id": "server-db-sql-where-filter-rt-twin",
+  "description": "A WHERE with a BOUND parameter (`${role}`) evaluated by a real engine (RUNTIME, sqlEngine:\"real\"): only the two admins.",
+  "language-version": "1.0",
+  "spec": "§8.1, §8.2, §8.3",
+  "source-test": "conformance/cases/server-db/sql-where-filter-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-where-filter-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the §66 twin generator cannot type — O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. XFAIL on impl#1: it does not parse the §66 opener (`let <x:T=v/>`, `<x:T[replace]=(v)/>`) — the opener half of the carried gap named below (the precedent: control-flow/if-chain-program-first-true-rt); impl#1's own run of the same program is pinned by the legacy case.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice",
+          "role": "admin"
+        },
+        {
+          "id": 2,
+          "name": "Bob",
+          "role": "user"
+        },
+        {
+          "id": 3,
+          "name": "Carol",
+          "role": "admin"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "admins": [
+        {
+          "id": 1,
+          "name": "Alice"
+        },
+        {
+          "id": 3,
+          "name": "Carol"
+        }
+      ]
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)"
+        ]
+      }
+    }
+  }
+}

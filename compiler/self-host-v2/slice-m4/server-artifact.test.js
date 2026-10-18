@@ -368,9 +368,18 @@ describe("Trigger 5 is emission — a helper only the server reaches is in serve
 });
 
 // =============================================================================
-// 7. The twelve server-db/sql-*-rt cases, mirrored in §66 with their data and assertions
+// 7. The twelve server-db/sql-*-rt cases, each mirrored in §66 with ITS OWN seed,
+//    clicks and asserted state (the legacy sources are not §66: their untyped
+//    cells — `<x> = []`, `<x> = not` — cannot be twinned mechanically). The ten
+//    with no `<schema>` are ALSO conformance cases (`server-db/*-s66-rt`), graded
+//    by the counter's server-executor seam; the two that need `<schema>` DDL
+//    (insert-returning, unique-constraint) are graded here only — the bootstrap
+//    refuses `<schema>` — with the case's DDL created by the test.
+//    Where a mirror's cell differs in SHAPE from the legacy case (a `T | not` cell
+//    the §66 opener cannot type yet) the comment says so; the asserted VALUES are
+//    the case's.
 // =============================================================================
-async function endToEnd(src, ddl, seed, clicks, settleRounds = 6) {
+async function endToEnd(src, ddl, seed, clicks, settleRounds = 8) {
   const r0 = compile(src);
   expect(check(r0.core)).toEqual([]);
   const sql = await realDb(ddl, seed);
@@ -387,11 +396,12 @@ async function endToEnd(src, ddl, seed, clicks, settleRounds = 6) {
 }
 
 describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own artifacts (real in-memory SQLite)", () => {
-  test("sql-get-single-row-rt — `.get()` yields the FIRST row", async () => {
+  test("sql-get-single-row-rt — `.get()` yields the FIRST row ({id:1, name:\"Alice\"})", async () => {
+    // shape: the legacy `<current> = not` (a `User | not` cell) is two typed cells here
     const src = P(`    type User:struct = { id: int, name: string }
+    type LoadError:enum = { Db, Transport(t: ServerCallError) }
     let <uid:int=0/>
     let <name:string=""/>
-    type LoadError:enum = { Db, Transport(t: ServerCallError) }
     function loadOne()! LoadError {
         const u: User = ${SQ}\`SELECT id, name FROM users\`}.get() !{ _ :> { fail .Db } }
         return u
@@ -405,7 +415,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     expect([state.uid, state.name]).toEqual([1, "Alice"]);
   });
 
-  test("sql-all-array-shape-rt — `.all()` yields an array of row objects", async () => {
+  test("sql-all-array-shape-rt — `.all()` yields an array of row objects; #count reads 3", async () => {
     const src = P(`    type Widget:struct = { id: int, label: string }
     <rows:Widget[replace]=([])/>
     function loadAll() -> Widget[] {
@@ -417,57 +427,67 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
     expect(document.querySelector("#count").textContent).toBe("3");
   });
 
-  test("sql-select-hydrate-rt — a SELECT hydrates a cell", async () => {
-    const src = P(`    type Task:struct = { id: int, title: string }
-    <tasks:Task[replace]=([])/>
-    function loadTasks() -> Task[] {
-        return ${SQ}\`SELECT id, title FROM tasks\`}.all() !{ _ :> [] }
-    }`, `        <button id="load" onclick={ @tasks = loadTasks() !{ .Transport(t) :> return } }>Load</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE tasks (id INTEGER, title TEXT)"], { tasks: [{ id: 1, title: "write" }, { id: 2, title: "ship" }] }, ["#load"]);
-    expect(state.tasks).toEqual([{ id: 1, title: "write" }, { id: 2, title: "ship" }]);
+  test("sql-select-hydrate-rt — a SELECT hydrates a cell an `<each>` renders", async () => {
+    const src = P(`    type User:struct = { id: int, name: string }
+    <users:User[replace]=([])/>
+    function loadUsers() -> User[] {
+        return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] }
+    }`, `        <button id="load" onclick={ @users = loadUsers() !{ .Transport(t) :> return } }>Load</button>
+        <ul id="list"><each in=@users key=(@.id) as u><li class="row">\${u.name}</li></each></ul>
+        <p id="count">Count: \${@users.length}</p>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT)"], { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }] }, ["#load"]);
+    expect(state.users).toEqual([{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }]);
+    expect(document.querySelectorAll(".row").length).toBe(2);
+    expect(document.querySelector("#count").textContent).toBe("Count: 2");
   });
 
-  test("sql-multi-table-sequence-rt — two server calls in sequence, two tables", async () => {
+  test("sql-multi-table-sequence-rt — two routes, two tables, two clicks", async () => {
     const src = P(`    type User:struct = { id: int, name: string }
-    type Order:struct = { id: int, total: int }
+    type Post:struct = { id: int, title: string }
     <users:User[replace]=([])/>
-    <orders:Order[replace]=([])/>
+    <posts:Post[replace]=([])/>
     function loadUsers() -> User[] {
         return ${SQ}\`SELECT id, name FROM users\`}.all() !{ _ :> [] }
     }
-    function loadOrders() -> Order[] {
-        return ${SQ}\`SELECT id, total FROM orders\`}.all() !{ _ :> [] }
-    }
-    function loadBoth() {
-        @users = loadUsers() !{ .Transport(t) :> return }
-        @orders = loadOrders() !{ .Transport(t) :> return }
-    }`, `        <button id="load" onclick=loadBoth()>Load</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT)", "CREATE TABLE orders (id INTEGER, total INTEGER)"],
-      { users: [{ id: 1, name: "Alice" }], orders: [{ id: 7, total: 30 }, { id: 8, total: 12 }] }, ["#load"]);
-    expect(state.users).toEqual([{ id: 1, name: "Alice" }]);
-    expect(state.orders).toEqual([{ id: 7, total: 30 }, { id: 8, total: 12 }]);
+    function loadPosts() -> Post[] {
+        return ${SQ}\`SELECT id, title FROM posts\`}.all() !{ _ :> [] }
+    }`, `        <button id="lu" onclick={ @users = loadUsers() !{ .Transport(t) :> return } }>LoadUsers</button>
+        <button id="lp" onclick={ @posts = loadPosts() !{ .Transport(t) :> return } }>LoadPosts</button>
+        <p id="uc">\${@users.length}</p>
+        <p id="pc">\${@posts.length}</p>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT)", "CREATE TABLE posts (id INTEGER, title TEXT)"],
+      { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }], posts: [{ id: 10, title: "x" }, { id: 11, title: "y" }, { id: 12, title: "z" }] }, ["#lu", "#lp"]);
+    expect(state.users).toEqual([{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }]);
+    expect(state.posts).toEqual([{ id: 10, title: "x" }, { id: 11, title: "y" }, { id: 12, title: "z" }]);
+    expect([document.querySelector("#uc").textContent, document.querySelector("#pc").textContent]).toEqual(["2", "3"]);
   });
 
-  test("sql-aggregate-group-rt — GROUP BY + COUNT evaluated by the engine", async () => {
-    const src = P(`    type Count:struct = { role: string, n: int }
-    <counts:Count[replace]=([])/>
-    function countByRole() -> Count[] {
-        return ${SQ}\`SELECT role, COUNT(*) AS n FROM users GROUP BY role ORDER BY role\`}.all() !{ _ :> [] }
-    }`, `        <button id="load" onclick={ @counts = countByRole() !{ .Transport(t) :> return } }>Count</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, role TEXT)"],
-      { users: [{ id: 1, role: "admin" }, { id: 2, role: "user" }, { id: 3, role: "admin" }] }, ["#load"]);
-    expect(state.counts).toEqual([{ role: "admin", n: 2 }, { role: "user", n: 1 }]);
+  test("sql-aggregate-group-rt — SUM … GROUP BY evaluated by the engine", async () => {
+    const src = P(`    type Total:struct = { region: string, total: int }
+    <totals:Total[replace]=([])/>
+    function regionTotals() -> Total[] {
+        return ${SQ}\`SELECT region, SUM(amount) AS total FROM sales GROUP BY region ORDER BY region\`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @totals = regionTotals() !{ .Transport(t) :> return }
+    }`, `        <button id="load" onclick=onLoad()>Region totals</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE sales (id INTEGER, region TEXT, amount INTEGER)"],
+      { sales: [{ id: 1, region: "west", amount: 10 }, { id: 2, region: "east", amount: 20 }, { id: 3, region: "west", amount: 5 }] }, ["#load"]);
+    expect(state.totals).toEqual([{ region: "east", total: 20 }, { region: "west", total: 15 }]);
   });
 
   test("sql-order-limit-rt — ORDER BY … LIMIT evaluated by the engine", async () => {
-    const src = P(`    type Score:struct = { name: string, pts: int }
+    const src = P(`    type Score:struct = { player: string, points: int }
     <top:Score[replace]=([])/>
     function topTwo() -> Score[] {
-        return ${SQ}\`SELECT name, pts FROM scores ORDER BY pts DESC LIMIT 2\`}.all() !{ _ :> [] }
-    }`, `        <button id="load" onclick={ @top = topTwo() !{ .Transport(t) :> return } }>Top</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE scores (name TEXT, pts INTEGER)"],
-      { scores: [{ name: "a", pts: 5 }, { name: "b", pts: 9 }, { name: "c", pts: 7 }] }, ["#load"]);
-    expect(state.top).toEqual([{ name: "b", pts: 9 }, { name: "c", pts: 7 }]);
+        return ${SQ}\`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2\`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @top = topTwo() !{ .Transport(t) :> return }
+    }`, `        <button id="load" onclick=onLoad()>Top two</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE scores (id INTEGER, player TEXT, points INTEGER)"],
+      { scores: [{ id: 1, player: "a", points: 30 }, { id: 2, player: "b", points: 90 }, { id: 3, player: "c", points: 60 }] }, ["#load"]);
+    expect(state.top).toEqual([{ player: "b", points: 90 }, { player: "c", points: 60 }]);
   });
 
   test("sql-where-filter-rt — WHERE with a bound parameter (`${role}`)", async () => {
@@ -477,79 +497,103 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
         return ${SQ}\`SELECT id, name FROM users WHERE role = \${role} ORDER BY id\`}.all() !{ _ :> [] }
     }`, `        <button id="load" onclick={ @admins = loadByRole("admin") !{ .Transport(t) :> return } }>Load admins</button>`);
     const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT, role TEXT)"],
-      { users: [{ id: 1, name: "Ann", role: "admin" }, { id: 2, name: "Bo", role: "user" }, { id: 3, name: "Cy", role: "admin" }] }, ["#load"]);
-    expect(state.admins).toEqual([{ id: 1, name: "Ann" }, { id: 3, name: "Cy" }]);
+      { users: [{ id: 1, name: "Alice", role: "admin" }, { id: 2, name: "Bob", role: "user" }, { id: 3, name: "Carol", role: "admin" }] }, ["#load"]);
+    expect(state.admins).toEqual([{ id: 1, name: "Alice" }, { id: 3, name: "Carol" }]);
   });
 
   test("sql-join-two-tables-rt — a JOIN with a bound parameter", async () => {
-    const src = P(`    type Line:struct = { name: string, total: int }
-    <lines:Line[replace]=([])/>
-    function linesFor(min: int) -> Line[] {
-        return ${SQ}\`SELECT u.name AS name, o.total AS total FROM orders o JOIN users u ON u.id = o.user_id WHERE o.total >= \${min} ORDER BY o.total\`}.all() !{ _ :> [] }
-    }`, `        <button id="load" onclick={ @lines = linesFor(10) !{ .Transport(t) :> return } }>Load</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE users (id INTEGER, name TEXT)", "CREATE TABLE orders (id INTEGER, user_id INTEGER, total INTEGER)"],
-      { users: [{ id: 1, name: "Ann" }, { id: 2, name: "Bo" }], orders: [{ id: 1, user_id: 1, total: 5 }, { id: 2, user_id: 2, total: 12 }, { id: 3, user_id: 1, total: 30 }] }, ["#load"]);
-    expect(state.lines).toEqual([{ name: "Bo", total: 12 }, { name: "Ann", total: 30 }]);
+    const src = P(`    type Book:struct = { title: string, author: string }
+    <list:Book[replace]=([])/>
+    function booksByAuthor(name: string) -> Book[] {
+        return ${SQ}\`SELECT b.title AS title, a.name AS author FROM books b JOIN authors a ON a.id = b.author_id WHERE a.name = \${name} ORDER BY b.id\`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @list = booksByAuthor("Ada") !{ .Transport(t) :> return }
+    }`, `        <button id="load" onclick=onLoad()>Load books</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE authors (id INTEGER, name TEXT)", "CREATE TABLE books (id INTEGER, title TEXT, author_id INTEGER)"],
+      { authors: [{ id: 1, name: "Ada" }], books: [{ id: 1, title: "Notes", author_id: 1 }, { id: 2, title: "Essays", author_id: 1 }] }, ["#load"]);
+    expect(state.list).toEqual([{ title: "Notes", author: "Ada" }, { title: "Essays", author: "Ada" }]);
   });
 
-  test("sql-update-returning-rt — UPDATE … RETURNING the written row", async () => {
+  test("sql-update-returning-rt — UPDATE … RETURNING the written row (two bound parameters)", async () => {
     const src = P(`    type Item:struct = { id: int, qty: int }
-    <changed:Item[replace]=([])/>
-    function bump(id: int) -> Item[] {
-        return ${SQ}\`UPDATE items SET qty = qty + 1 WHERE id = \${id} RETURNING id, qty\`}.all() !{ _ :> [] }
-    }`, `        <button id="go" onclick={ @changed = bump(2) !{ .Transport(t) :> return } }>Bump</button>`);
-    const { state, sql } = await endToEnd(src, ["CREATE TABLE items (id INTEGER, qty INTEGER)"], { items: [{ id: 1, qty: 1 }, { id: 2, qty: 5 }] }, ["#go"]);
-    expect(state.changed).toEqual([{ id: 2, qty: 6 }]);
-    expect(await sql.unsafe("SELECT qty FROM items WHERE id = 2")).toEqual([{ qty: 6 }]);
+    <updated:Item[replace]=([])/>
+    function bump(id: int, by: int) -> Item[] {
+        return ${SQ}\`UPDATE items SET qty = qty + \${by} WHERE id = \${id} RETURNING id, qty\`}.all() !{ _ :> [] }
+    }
+    function onBump() {
+        @updated = bump(1, 3) !{ .Transport(t) :> return }
+    }`, `        <button id="go" onclick=onBump()>Bump qty</button>`);
+    const { state, sql } = await endToEnd(src, ["CREATE TABLE items (id INTEGER, qty INTEGER)"], { items: [{ id: 1, qty: 5 }] }, ["#go"]);
+    expect(state.updated).toEqual([{ id: 1, qty: 8 }]);
+    expect(await sql.unsafe("SELECT qty FROM items WHERE id = 1")).toEqual([{ qty: 8 }]);
   });
 
-  test("sql-delete-reflects-rt — a DELETE, then a SELECT reflects it", async () => {
-    const src = P(`    type Note:struct = { id: int, body: string }
-    <notes:Note[replace]=([])/>
-    function remove(id: int) {
-        ${SQ}\`DELETE FROM notes WHERE id = \${id}\`}.run() !{ _ :> { return } }
+  test("sql-delete-reflects-rt — a DELETE, then a COUNT reflects it (n = 2)", async () => {
+    // shape: the legacy `<remaining> = not` (a `{n} | not` cell) is an int cell here; the asserted count is the case's
+    const src = P(`    type Count:struct = { n: int }
+    let <remaining:int=-1/>
+    function removeTask(id: int) {
+        ${SQ}\`DELETE FROM tasks WHERE id = \${id}\`}.run() !{ _ :> { return } }
     }
-    function loadNotes() -> Note[] {
-        return ${SQ}\`SELECT id, body FROM notes ORDER BY id\`}.all() !{ _ :> [] }
+    function countTasks() -> int {
+        const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM tasks\`}.get() !{ _ :> { return -1 } }
+        return c.n
     }
-    function removeAndReload() {
-        remove(1) !{ .Transport(t) :> return }
-        @notes = loadNotes() !{ .Transport(t) :> return }
-    }`, `        <button id="go" onclick=removeAndReload()>Delete</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE notes (id INTEGER, body TEXT)"], { notes: [{ id: 1, body: "a" }, { id: 2, body: "b" }] }, ["#go"]);
-    expect(state.notes).toEqual([{ id: 2, body: "b" }]);
+    function onDelete() {
+        removeTask(2) !{ .Transport(t) :> return }
+    }
+    function onCount() {
+        @remaining = countTasks() !{ .Transport(t) :> return }
+    }`, `        <button id="del" onclick=onDelete()>Delete task 2</button>
+        <button id="count" onclick=onCount()>Count</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE tasks (id INTEGER, title TEXT)"], { tasks: [{ id: 1, title: "a" }, { id: 2, title: "b" }, { id: 3, title: "c" }] }, ["#del", "#count"]);
+    expect(state.remaining).toBe(2);
   });
 
-  test("sql-insert-returning-rt — INSERT … RETURNING (autoincrement id) and a follow-up COUNT", async () => {
+  test("sql-insert-returning-rt — INSERT … RETURNING (the <schema>'s autoincrement id) and a follow-up COUNT (n = 2)", async () => {
+    // the case's `<schema>` (notes { id: integer primary key, body: text }) as DDL — the bootstrap refuses `<schema>`
     const src = P(`    type Note:struct = { id: int, body: string }
     type Count:struct = { n: int }
     <inserted:Note[replace]=([])/>
-    let <total:int=0/>
+    let <total:int=-1/>
     function addNote(body: string) -> Note[] {
         return ${SQ}\`INSERT INTO notes (body) VALUES (\${body}) RETURNING id, body\`}.all() !{ _ :> [] }
     }
     function countNotes() -> int {
         const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM notes\`}.get() !{ _ :> { return -1 } }
         return c.n
-    }`, `        <button id="add" onclick={ @inserted = addNote("second") !{ .Transport(t) :> return } }>Add</button>
-        <button id="count" onclick={ @total = countNotes() !{ .Transport(t) :> return } }>Count</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)"], { notes: [{ body: "first" }] }, ["#add", "#count"]);
+    }
+    function onAdd() {
+        @inserted = addNote("second") !{ .Transport(t) :> return }
+    }
+    function onCount() {
+        @total = countNotes() !{ .Transport(t) :> return }
+    }`, `        <button id="add" onclick=onAdd()>Add note</button>
+        <button id="count" onclick=onCount()>Count</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)"], { notes: [{ id: 1, body: "first" }] }, ["#add", "#count"]);
     expect(state.inserted).toEqual([{ id: 2, body: "second" }]);
     expect(state.total).toBe(2);
   });
 
-  test("sql-unique-constraint-rt — the engine's UNIQUE constraint (INSERT OR IGNORE), then COUNT unchanged", async () => {
+  test("sql-unique-constraint-rt — the <schema>'s UNIQUE constraint (INSERT OR IGNORE), then COUNT unchanged (n = 1)", async () => {
     const src = P(`    type Count:struct = { n: int }
-    let <total:int=0/>
+    let <total:int=-1/>
     function tryAdd(email: string) {
         ${SQ}\`INSERT OR IGNORE INTO members (email) VALUES (\${email})\`}.run() !{ _ :> { return } }
     }
     function memberCount() -> int {
         const c: Count = ${SQ}\`SELECT COUNT(*) AS n FROM members\`}.get() !{ _ :> { return -1 } }
         return c.n
-    }`, `        <button id="add" onclick={ tryAdd("a@x.com") !{ .Transport(t) :> return } }>Add</button>
-        <button id="count" onclick={ @total = memberCount() !{ .Transport(t) :> return } }>Count</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ email: "a@x.com" }] }, ["#add", "#count"]);
+    }
+    function onAdd() {
+        tryAdd("a@x.com") !{ .Transport(t) :> return }
+    }
+    function onCount() {
+        @total = memberCount() !{ .Transport(t) :> return }
+    }`, `        <button id="add" onclick=onAdd()>Add duplicate</button>
+        <button id="count" onclick=onCount()>Count</button>`);
+    const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ id: 1, email: "a@x.com" }] }, ["#add", "#count"]);
     expect(state.total).toBe(1);
   });
 
@@ -562,7 +606,7 @@ describe("server-db/sql-*-rt — the design's twelve, on the bootstrap's own art
         }
         return "ok"
     }`, `        <button id="add" onclick={ @msg = add("a@x.com") !{ .Transport(t) :> return } }>Add</button>`);
-    const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ email: "a@x.com" }] }, ["#add"]);
+    const { state } = await endToEnd(src, ["CREATE TABLE members (id INTEGER PRIMARY KEY, email TEXT UNIQUE)"], { members: [{ id: 1, email: "a@x.com" }] }, ["#add"]);
     expect(state.msg).toBe("dup:members.email");
   });
 });

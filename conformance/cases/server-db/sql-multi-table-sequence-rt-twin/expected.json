@@ -1,0 +1,105 @@
+{
+  "id": "server-db-sql-multi-table-sequence-rt-twin",
+  "description": "Two server functions on two tables, two routes, two clicks (RUNTIME, serverDb).",
+  "language-version": "1.0",
+  "spec": "§8.3, §12.3",
+  "source-test": "conformance/cases/server-db/sql-multi-table-sequence-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-multi-table-sequence-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the §66 twin generator cannot type — O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. XFAIL on impl#1: it does not parse the §66 opener (`let <x:T=v/>`, `<x:T[replace]=(v)/>`) — the opener half of the carried gap named below (the precedent: control-flow/if-chain-program-first-true-rt); impl#1's own run of the same program is pinned by the legacy case.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice"
+        },
+        {
+          "id": 2,
+          "name": "Bob"
+        }
+      ],
+      "posts": [
+        {
+          "id": 10,
+          "title": "x"
+        },
+        {
+          "id": 11,
+          "title": "y"
+        },
+        {
+          "id": 12,
+          "title": "z"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#lu"
+      },
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#lp"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice"
+        },
+        {
+          "id": 2,
+          "name": "Bob"
+        }
+      ],
+      "posts": [
+        {
+          "id": 10,
+          "title": "x"
+        },
+        {
+          "id": 11,
+          "title": "y"
+        },
+        {
+          "id": 12,
+          "title": "z"
+        }
+      ]
+    },
+    "domAnchored": [
+      {
+        "selector": "#uc",
+        "text": "2"
+      },
+      {
+        "selector": "#pc",
+        "text": "3"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-STATE-UNDECLARED=4",
+          "prefix:E-MARKUP-001 (matches forbidden E-*)",
+          "prefix:E-STATE-UNDECLARED (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:83e8dc1ba479defd"
+      }
+    }
+  }
+}

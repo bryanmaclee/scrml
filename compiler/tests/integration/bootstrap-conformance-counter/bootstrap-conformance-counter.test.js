@@ -44,6 +44,8 @@ const KNOWN = {
   "runtime/fail-runtime": ["FAIL", false],
   "runtime/codes-only": ["CODES-ONLY", true],
   "runtime/server-stub": ["PASS", false],
+  "runtime/server-db": ["PASS", false],
+  "runtime/server-db-real": ["PASS", false],
   "refused/unsupported": ["UNSUPPORTED", false],
   "refused/legacy": ["PASS", false],
   "refused/invalid": ["INVALID", false],
@@ -91,6 +93,34 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     const fail = await classifyCase(boot, bad);
     expect(fail.bucket).toBe("FAIL");
     expect(fail.failures.join("\n")).toContain("seen");
+  }, { timeout: 60000 });
+
+  // s468 (U1c, U1 design §4 "a new server executor seam"): a `serverDb` case's runtime half EXECUTES
+  // against the bootstrap's OWN server artifact (print-server.scrml + server-runtime.js) — no stub.
+  // Bites: (1) the case's seed changes → the asserted state no longer holds (the server really reads the
+  // case's database); (2) the real engine evaluates the WHERE (the stub engine, which ignores it, would
+  // answer every row — so the same case on the stub engine FAILs).
+  test("a serverDb case runs against the bootstrap's own server artifact (and the database it reads is the case's)", async () => {
+    const cs = loadCases(FIXTURES);
+    const c = cs.find((x) => x.relDir === "runtime/server-db");
+    const pass = await classifyCase(boot, c);
+    expect([pass.bucket, pass.reason, pass.runtimeExecuted]).toEqual(["PASS", "codes+runtime", true]);
+    const bad = structuredClone(c);
+    bad.expected.expect.serverDb = { people: [{ id: 9, name: "z" }] };
+    const fail = await classifyCase(boot, bad);
+    expect(fail.bucket).toBe("FAIL");
+    expect(fail.failures.join("\n")).toContain("state: cell 'rows'");
+  }, { timeout: 60000 });
+
+  test("sqlEngine: real — the engine evaluates the bound WHERE; on the stub engine the same case FAILs", async () => {
+    const cs = loadCases(FIXTURES);
+    const c = cs.find((x) => x.relDir === "runtime/server-db-real");
+    const pass = await classifyCase(boot, c);
+    expect([pass.bucket, pass.runtimeExecuted]).toEqual(["PASS", true]);
+    const stub = structuredClone(c);
+    delete stub.expected.expect.sqlEngine;
+    const fail = await classifyCase(boot, stub);
+    expect(fail.bucket).toBe("FAIL");
   }, { timeout: 60000 });
 
   // s452-boot-arm-pipe: a parse-phase Info lint (W-ARM-PIPE-LEGACY) is an ACCEPTED form — graded,
@@ -274,7 +304,7 @@ describe("the report states its own scope", () => {
     const some = all.filter((c) => c.relDir.startsWith("runtime/"));
     const r = await runBootstrapConformance(boot, some, all.length, "runtime/");
     const md = renderReport(r);
-    expect(md).toContain(`**4 of ${all.length} cases attempted** (filter: \`runtime/\`)`);   // s454: + runtime/server-stub
+    expect(md).toContain(`**6 of ${all.length} cases attempted** (filter: \`runtime/\`)`);   // s454: + runtime/server-stub; s468: + runtime/server-db, server-db-real
     for (const b of ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "NOT-TWINNED", "UNSUPPORTED", "CRASH", "INVALID"]) expect(md).toContain(`| ${b} |`);
     expect(md).toContain("- `runtime/fail-runtime` (runtime)");
   }, { timeout: 60000 });
@@ -353,7 +383,7 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
     expect(plain.exitCode).toBe(0);
-    expect(plain.stdout.toString()).toContain("15 of 15 cases attempted");   // s454: + runtime/server-stub
+    expect(plain.stdout.toString()).toContain("17 of 17 cases attempted");   // s454: + runtime/server-stub; s468: + runtime/server-db, server-db-real
     expect(plain.stdout.toString()).toContain("### §66 twins");
     expect(run("--fail-on-fail").exitCode).toBe(1);
     const none = run("--filter", "no-such-case-anywhere");

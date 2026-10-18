@@ -1,0 +1,14 @@
+// §66 twin of server-db/sql-order-limit-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type Score:struct = { player: string, points: int }
+    <top:Score[replace]=([])/>
+    function topTwo() -> Score[] {
+        return ?{`SELECT player, points FROM scores ORDER BY points DESC LIMIT 2`}.all() !{ _ :> [] }
+    }
+    function onLoad() {
+        @top = topTwo() !{ .Transport(t) :> return }
+    }
+    <main>
+        <button id="load" onclick=onLoad()>Top two</button>
+    </main>
+</program>

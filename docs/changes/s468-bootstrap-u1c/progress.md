@@ -113,3 +113,52 @@ Core" was REFINED: the server half needed its waits made Core FIRST (the §13 ga
   valuePosition → E-VALUE-SERVER-CALL). 0 FAIL.
 - Bite: f's `Suspend(Call(check))` unsuspended → checkCore C-S8s RED; `check.waits` forced false → C-S8s RED; the
   unsuspended program printed anyway ANSWERS "WELCOME" TO A WRONG PASSWORD (the defect class, reproduced and gated).
+
+## 2026-10-17T23:45Z — step 1 landed; measurements; step 2 (the server-executor seam + the server-db twins)
+(Correction: the step-1 heading above says 23:40Z; it was written at ~23:25Z.)
+
+### Direction of change + measured corpus impact (step 1)
+- Classification: **inert for acceptance on every program the bootstrap compiled before**, except one deliberate
+  **newly-rejecting** limb: a call of a function that WAITS ON THE SERVER, standing in a position that cannot wait
+  (`&&`/`||` right operand, a ternary branch, a `!{}`/`match` arm, a `defer` body, a lambda, an indexed-write value)
+  INSIDE a server-side body, is now E-BOOTSTRAP-UNSUPPORTED (before: accepted, lowered to a plain in-place call — the
+  printer emitted no server artifact, so it never ran). Governing: §13.8 "Everywhere else a waiting value SHALL be a
+  compile error" + U1 design §13 item 2 last bullet (the same refusal positions as the client).
+- MEASURED (bootstrap front end, base = origin/main archive vs head, every `.scrml` under examples/, samples/,
+  conformance/cases/, stdlib/ — 2840 files, each compiled alone): **0 files changed** (Error-code multisets identical;
+  54 compile clean on both). `bootstrap-conformance.ts`: per-case diff vs baseline EMPTY.
+- The impl#1 security-await pack (424 shapes) through the BOOTSTRAP front end, as written
+  (slice-m4/server-await-pack.test.js): **424 / 424 refused at compile time** — every shape imports `scrml:auth`
+  (no stdlib import in the bootstrap; E-IMPORT-NOT-EXPORTED 420, E-BOOTSTRAP-UNSUPPORTED 424) and uses the legacy
+  dialect (E-PARSE-CLOSER / E-PARSE-UNCLOSED 424, untyped parameters). 0 compiled, so 0 could accept a wrong password.
+  These refusals are NOT "the SPEC's code" (amendment item 4's pass criterion for a refusal); they are fail-closed, and
+  the pass-criterion evidence is the bootstrap-expressible translation (server-await-probes.js: 25 PASS, 5 refused
+  E-BOOTSTRAP-UNSUPPORTED — not-yet-lowered positions, fail closed —, 1 refused E-VALUE-SERVER-CALL — the SPEC's code).
+
+### Step 2 — the server-executor seam + the server-db twins (executed)
+- scripts/bootstrap-conformance.ts: `serverDb` is no longer a non-client key. A `serverDb` case's runtime half runs the
+  client artifact against the bootstrap's OWN server artifact (`serverFetch`: print-server.scrml's `createServer` with
+  `host.connect` = the case's database — `sqlEngine: "real"` → a fresh in-memory Bun.SQL SQLite, tables loose-inferred
+  from the seed rows (impl#1's adapter rule; a `<schema>` case never gets here — the bootstrap refuses `<schema>`);
+  otherwise impl#1's stub rule (a query answers its FROM table's rows); `host.respond` = plain records (the global
+  Request/Response are happy-dom's and drop Cookie/Set-Cookie); the page at `http://localhost/` so `document.cookie`
+  works; `settled()` waits until no request is in flight). URL contract: the MANIFEST (decision 1) — the seam never
+  matches a URL shape.
+- 10 new conformance cases, `conformance/cases/server-db/<case>-twin` — the §66 twin of each `<schema>`-less
+  `sql-*-rt` case: the case's program, seed, clicks and asserted values (two cell SHAPES differ — a `T | not` cell the
+  §66 opener cannot type yet is typed cells; said in each description). Bootstrap: **10/10 PASS (codes + runtime)**.
+  impl#1 (`bun conformance/run.ts`): 4 PASS outright (aggregate-group, join-two-tables, order-limit, update-returning —
+  no mark), 6 XFAIL on the carried gap `g-impl1-value-writes-state-codes-unimplemented-s449` (impl#1 does not parse
+  the §66 `let <x:T=v/>` opener — E-MARKUP-001 / E-STATE-UNDECLARED / E-SCOPE-001), signatures captured with
+  `--xfail-signature`. Two twins were re-shaped so impl#1's failure is ONLY that gap's: no `ServerCallError` in a type
+  annotation (impl#1's OPEN `g-builtin-error-types-unknown-in-annotation-position-s466`), no `=-1` initializer
+  (impl#1 E-ATTR-001). conformance (impl#1): 1728/1805 pass + 77 xfail (was 71 of 1795) — 0 fail.
+- Counter: PASS 189 → **199** (exactly the 10 twins; per-case diff vs baseline: 10 NEW, 0 changed). Runtime half
+  executed for 81 cases (was 71). `docs/bootstrap-conformance.md` regenerated; `--check` current.
+- Counter tests: fixtures `runtime/server-db` (stub engine) + `runtime/server-db-real` (real engine), with two bites
+  (a changed seed → FAIL on the state; the real-engine case on the stub engine → FAIL). 46/46.
+- FACTS: conformance cases 1795 → 1805 (`facts.ts --write`; `--check` PASS). `state.ts --check`: gap-counts PASS;
+  `@generated:recent-sessions (master-list.md)` STALE — not touched by this branch (master-list.md unchanged; the
+  section is projected from session-WRAP commits, and this branch adds none), left for the PA's wrap.
+- The 2 `<schema>` cases (insert-returning, unique-constraint) are graded by slice-m4/server-artifact.test.js only
+  (the case's DDL created by the test; the bootstrap refuses `<schema>`), with the case's seed and assertions.

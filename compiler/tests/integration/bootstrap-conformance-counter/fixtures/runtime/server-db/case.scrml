@@ -1,0 +1,13 @@
+<program db="./app.db">
+    type Row:struct = { id: int, name: string }
+    <rows:Row[replace]=([])/>
+
+    function load() -> Row[] {
+        return ?{`SELECT id, name FROM people`}.all() !{ _ :> [] }
+    }
+
+    <main>
+        <p id="count">${@rows.length}</p>
+        <button id="go" onclick={ @rows = load() !{ .Transport(t) :> return } }>go</button>
+    </main>
+</program>

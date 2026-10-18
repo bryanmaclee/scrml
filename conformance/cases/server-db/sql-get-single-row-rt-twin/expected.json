@@ -1,0 +1,51 @@
+{
+  "id": "server-db-sql-get-single-row-rt-twin",
+  "description": "§8.3 `.get()` single-row hydrate (RUNTIME, serverDb) — the first row of the seeded table reaches the client. The legacy `<current> = not` cell (a `User | not`, which the §66 opener cannot type yet) is two typed cells here; the asserted values are the case's ({id: 1, name: \"Alice\"}).",
+  "language-version": "1.0",
+  "spec": "§8.3, §52.1",
+  "source-test": "conformance/cases/server-db/sql-get-single-row-rt",
+  "rationale": "The bootstrap-gradable twin of server-db/sql-get-single-row-rt: that case is in the legacy declaration form (`<x> = []` / `<x> = not` cells the §66 twin generator cannot type — O35), so the pure bootstrap grades it NOT-TWINNED. This twin runs the bootstrap's OWN server artifact (s468 U1c print-server.scrml + server-runtime.js) through the counter's server-executor seam. XFAIL on impl#1: it does not parse the §66 opener (`let <x:T=v/>`, `<x:T[replace]=(v)/>`) — the opener half of the carried gap named below (the precedent: control-flow/if-chain-program-first-true-rt); impl#1's own run of the same program is pinned by the legacy case.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice"
+        },
+        {
+          "id": 2,
+          "name": "Bob"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "uid": 1,
+      "name": "Alice"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=1",
+          "prefix:E-SCOPE-001 (matches forbidden E-*)"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}

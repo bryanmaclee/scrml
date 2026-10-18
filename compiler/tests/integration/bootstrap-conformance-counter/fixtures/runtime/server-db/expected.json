@@ -1,0 +1,14 @@
+{
+  "id": "fixture-server-db",
+  "description": "KNOWN PASS (codes + runtime, s468 U1c): a handler's client call of a server function, answered by the bootstrap's OWN server artifact (print-server.scrml) through the counter's server-executor seam over the case's serverDb (the stub engine: a query answers its FROM table's rows).",
+  "language-version": "1.0",
+  "spec": "§12.3, §8.3",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "serverDb": { "people": [{ "id": 1, "name": "a" }, { "id": 2, "name": "b" }] },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "rows": [{ "id": 1, "name": "a" }, { "id": 2, "name": "b" }] },
+    "domAnchored": [{ "selector": "#count", "text": "2" }]
+  }
+}
