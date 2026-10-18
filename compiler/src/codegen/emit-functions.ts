@@ -6,7 +6,7 @@ import { CGError } from "./errors.ts";
 import { handledSqlGuardInner } from "./sql-attempt.ts";
 import { planBatchCellReturn, cpsCellsApplyLines, multiBatchReturnCell, cpsCarriedLocals } from "./cps-cell-writes.ts";
 import { isServerOnlyNode, collectFunctions, collectTopLevelStatements } from "./collect.ts";
-import { fnValuedBindingsOf } from "./fn-valued-bindings.ts";
+import { fnValuedBindingsOf, bindingPseudoFnsOf, isAnonFnValueName } from "./fn-valued-bindings.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn, injectFnBodyServerCallAwaits, _clientServerFnNames, asyncImportedLocalsOfFile } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
@@ -600,8 +600,7 @@ export function computeClientAsyncSets(
   // (emit-reactive-wiring.ts) and every client call site awaits it exactly like a
   // `function` declaration (§13.2: it "MAY be called directly (the compiler awaits
   // the call)"). The pseudo functions join the fixpoint only — never `clientFns`.
-  const _bindingPseudoFns = fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never))
-    .map((b) => b.pseudoFn as unknown as ASTNode);
+  const _bindingPseudoFns = bindingPseudoFnsOf(fnValuedBindingsOf(collectTopLevelStatements(ctx.fileAST as never))) as unknown as ASTNode[];
   const _clientAsyncFnNames = computeAsyncFnNames(
     [..._clientFns, ..._bindingPseudoFns],
     null,
@@ -610,6 +609,8 @@ export function computeClientAsyncSets(
     _exportRegistry,
     _serverFnNames,
   );
+  // S467 r9 — an anonymous function value's pseudo name is a fixpoint member only.
+  for (const n of [..._clientAsyncFnNames]) if (isAnonFnValueName(n)) _clientAsyncFnNames.delete(n);
   return { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames };
 }
 

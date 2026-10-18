@@ -12,6 +12,13 @@
  * program the browser never runs that code for.
  *
  * A binding the client DOES name keeps the read, and the gate refuses it (fail closed).
+ *
+ * S468 (merge of #1435 into s467-await-r10, which enforces SPEC §13.9.6 / dpa-023 F4):
+ * a WAITING function is bound only by a `function` declaration, so every `const w =
+ * (a, b) => verifyPassword(a, b)` here is now itself refused
+ * (E-ASYNC-FN-ESCAPES-AS-VALUE). The prune guarantee is pinned on the legal form —
+ * `function w(a, b) { return verifyPassword(a, b) }` — and the const forms pin the
+ * refusal (fail closed either way: no auth read reaches the client bundle).
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
@@ -50,30 +57,50 @@ const app = (top, handler) => `<program db="./app.db">
 
 describe("S466 — a dead client fn-valued binding does not keep a server-only stdlib read alive", () => {
   test("used only by server code: compiles, no auth read and no binding in the client bundle", () => {
-    const r = compile(app(`const w = (a, b) => verifyPassword(a, b)`, `@out = f("bob", "x")`));
+    const r = compile(app(`function w(a, b) { return verifyPassword(a, b) }`, `@out = f("bob", "x")`));
     expect(r.errors).toEqual([]);
     expect(r.clientJs).not.toContain("_scrml_stdlib.auth");
-    expect(r.clientJs).not.toMatch(/\bconst w\b/);
-    expect(r.serverJs).toMatch(/\bw = async/);
+    expect(r.clientJs).not.toMatch(/\b(const|function) w\b/);
+    expect(r.serverJs).toMatch(/\basync function w\(/);
+    expect(r.serverJs).toMatch(/!await w\(pass, row\.pw\)/);
   });
 
   test("a chain of bindings (b calls a calls the stdlib export) is dropped to a fixpoint", () => {
-    const r = compile(app(`const a = (p, h) => verifyPassword(p, h)
-  const w = (p, h) => a(p, h)`, `@out = f("bob", "x")`));
+    const r = compile(app(`function a(p, h) { return verifyPassword(p, h) }
+  function w(p, h) { return a(p, h) }`, `@out = f("bob", "x")`));
     expect(r.errors).toEqual([]);
     expect(r.clientJs).not.toContain("_scrml_stdlib.auth");
-    expect(r.clientJs).not.toMatch(/\bconst (a|w)\b/);
+    expect(r.clientJs).not.toMatch(/\b(const|function) (a|w)\b/);
   });
 
   test("a binding the CLIENT calls keeps the read, and the chunk gate refuses it", () => {
     const r = compile(app(`const w = (a, b) => verifyPassword(a, b)`, `@out = w("x", "y") ? "y" : "n"`));
     expect(r.errors).toContain("E-STDLIB-CLIENT-CHUNK-MISSING");
+    expect(r.errors).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  });
+
+  test("a `function` the client calls is placed on the server: no auth read in the client bundle", () => {
+    const r = compile(app(`function w(a, b) { return verifyPassword(a, b) }`, `@out = w("x", "y") ? "y" : "n"`));
+    expect(r.errors).toEqual([]);
+    expect(r.clientJs).not.toContain("_scrml_stdlib.auth");
+    expect(r.serverJs).toMatch(/\basync function w\(/);
   });
 
   test("a binding that reaches no stdlib read is left as it was (dead or not)", () => {
-    const r = compile(app(`const w = (a, b) => verifyPassword(a, b)
+    const r = compile(app(`function w(a, b) { return verifyPassword(a, b) }
   const dbl = (x) => x * 2`, `@out = f("bob", "x")`));
     expect(r.errors).toEqual([]);
     expect(r.clientJs).toMatch(/\bconst dbl\b/);
+  });
+
+  test("S468 — the const-bound waiting forms are refused (SPEC §13.9.6), never shipped", () => {
+    for (const top of [
+      `const w = (a, b) => verifyPassword(a, b)`,
+      `const a = (p, h) => verifyPassword(p, h)
+  const w = (p, h) => a(p, h)`,
+    ]) {
+      const r = compile(app(top, `@out = f("bob", "x")`));
+      expect(r.errors).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    }
   });
 });

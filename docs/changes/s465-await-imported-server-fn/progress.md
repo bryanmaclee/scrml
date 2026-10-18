@@ -623,3 +623,196 @@
   skip / 0 fail; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp +
   commands 726 / 3 skip / 0; facts, state, spec-index, bootstrap-conformance, corpus-compile-floor --check PASS;
   host-global-scan exit 0; browser-baseline --check PASS (48 asserted, 0 of 2 env-excluded observed).
+
+## Fix round 8 (S239 review of f84da20a3) — branch s466-await-r8
+- 2026-10-14 r8 start: `s466-await-r8` cut from origin/s465-await-r5 f84da20a3; brief archived as BRIEF-r8.md
+  (8a7e2f6ec). Reviewer probes3 (m1–m4, 61 shapes) copied; harness gained the reviewer's `files:` support (without
+  it the m1 chain3* shapes read as E-IMPORT-006 — a harness artifact, not a compiler change). REPRODUCED all five:
+  bindNotBinding, libBindChainNot, topBindingAwaitedInBinding, appExportConstAnn, libExportConstAnnInner →
+  wrong password WELCOME.
+- HIGH-1 root CONFIRMED: emit-server `planModuleBindingClosure` emitted each module binding with `declaredNames:
+  new Set(byName.keys())`, and the server await branches (emit-expr `isStdlibAsyncCallee` path, the peer path)
+  treat a declared name as a shadowing local — so `w` in `const v = (p, h) => !w(p, h)` was never awaited. The
+  same bug r7 fixed by hand on the client. FIX: ONE rule, `file-async-fns.ts moduleLevelDeclaredNames(names,
+  asyncNames)` — a module binding is not a local; the async ones leave the set; the binding's own params / inner
+  declarations still shadow (pinned: paramShadowsBinding). Used by the server D-5 copy and the client
+  top-level copy (emit-reactive-wiring `emitTopStmt`, r7's hand-written filter replaced). Other emitters checked:
+  every other `declaredNames` construction is a params / block-scope set (emit-control-flow / emit-logic
+  `blockScopedDeclaredNames`, emitLambda's child set, emitLibraryFnMember's params) — no other module-scope set.
+- HIGH-2 root CONFIRMED: `fn-valued-bindings.ts` read an export's init with a regex over `s.raw` that cannot pass
+  a `: (p: string) => boolean` annotation; the ss1 emitter read `valueInit`. FIX: the AST builder attaches
+  `valueInit` / `valueInitExpr` (the parsed init) to the UNANNOTATED plain function-value export too
+  (`export const f = (…) => …` / `= function …` / `= x => …`; same raw — narrowed to function-value inits after
+  the gate showed the generic path owns `match` / multi-declarator / `?{}` value exports: 7 tests);
+  `fn-valued-bindings` reads `valueInitExpr` (no `raw` read left in fn-valued-bindings.ts / file-async-fns.ts). The
+  ss1 copy of an async exported value is emitted `async` with the await facts (emit-server const branch, from the
+  parsed init; emit-logic `_logicOptsFromExprCtx` now carries the await facts for a function value lowered from
+  an expression context).
+- LOW (both fixed): `asyncFnNamesOfFile` without a stash FAILS CLOSED (every file-scope function / binding / known
+  async import is async). Channel `onserver:*` handler (ch1): emitted `async` when its emitted body awaits at
+  its own level (`bodyTextHasOwnAwait`); the WS callbacks already await it (emit-channel §19.10.6) — was a sync
+  function holding `await` → E-CODEGEN-INVALID-LOGIC.
+- Found and fixed while measuring: with HIGH-2's parsed init, `export const check = function (p, h) { return
+  verifyPassword(p, h) }` in a lib now compiled (r7: E-CODEGEN-INVALID-LOGIC) — and threw `verifyPassword is not
+  defined`: the value-only `.server.js` (`_generateValueOnlyServerJs`) was written with NO import lines. It now
+  emits the referenced imports (usage-pruned). g-lib-export-const-lambda-missing-import-s465 → resolved.
+- MERGE of origin/main 7f2b81418 (#1424 = the squash of r1–r7, tree identical to f84da20a3): the four add/add
+  conflicts resolved by a real 3-way merge against the content base f84da20a3 (`git merge-file`) — every file
+  merged clean to the r8 version; tree unchanged (3ce0d9bed).
+- PROBES (392 = 331 + 61 probes3, executed vs bun:sqlite, final tip): wrong passwords accepted **0**. Old 331:
+  RUN-OK 228 / ERR 92 / runtime-fail-closed 11 (r7: 226 / 92 / 13 — libLambda and libFnExpr now run). probes3
+  61: RUN-OK 25 / ERR 34 / runtime-fail-closed 2 / ACCEPTED 0 (reviewer on f84da20a3: 20 / 34 / 2 / **5**).
+- CORPUS (corpus-emit-differential; base = archive of origin/main 7f2b81418, head = this tree; examples, samples,
+  conformance; 2784 sources): 0 newly failing, 0 newly passing, 0 diagnostic changes, syntax delta 0; 165
+  artifacts differ — ALL by the absolute tree root only (0 real emit changes).
+- GATES: pre-commit (unit + integration + conformance + compiler/tests/*.test.js) 36405 pass / 0 fail on the final
+  code commit; types-gate OK (180, unchanged); lint-no-default-arm 0; self-host-v2 slices 2280 / 0; lsp + commands
+  726 / 3 skip / 0; facts (regenerated), state, spec-index, bootstrap-conformance, corpus-compile-floor --check
+  PASS; host-global-scan exit 0; gen-md-shim current; browser-baseline --check PASS.
+
+## Fix round 9 (S239 review of e4b2c24e4: DO-NOT-LAND) — branch s467-await-r9
+- 2026-10-15T09:45:53Z r9 start: s467-await-r9 cut from origin/s466-await-r8 e4b2c24e4. Next: reproduce HIGH-1 (paren/async arrow export init unclassified), HIGH-2 (value-only import lines), MED-1 (import of never-emitted .server.js).
+- r9 work (uncommitted until the PAUSED commit below): ast-builder generic export path attaches `valueInitExpr` to every
+  plain-named const/let export; fn-valued-bindings.ts classifies the PARSED init (literal in any spelling = the
+  binding's function, written `async` read off the node; ternary / `||`/`&&`/`??` arms, aliases, returned functions,
+  later `let`/tilde writes = escapes, coloured with the binding via pseudo fns, refused when async —
+  E-ASYNC-FN-ESCAPES-AS-VALUE, reported once per binding from codegen/index.ts via file-async-fns
+  `fileScopeAsyncEscapesOf`); expression-parser escape hatch carries acorn `async`; api.js
+  `reconcileValueOnlyImports` (MED-1/HIGH-2: a value-only .server.js imports only names the target's emitted
+  .server.js exports); security-await-pack brought from main + families x1 (reviewer, verbatim) and r9 (18 new),
+  KNOWN_FAIL emptied, count 463; new test compiler/tests/integration/s467-await-r9.test.js (10 pass).
+
+## PAUSED (S467)
+- DONE: HIGH-1 (root: parsed-init classifier, no token-shape list; `_isFnValueInitAt` kept only as parse routing),
+  HIGH-2 / MED-1 (api.js reconcile), PA addendum p2_ternary (client) → E-ASYNC-FN-ESCAPES-AS-VALUE (pinned in
+  s467-await-r9.test.js). PROBES on the working tree: full pack 424 + x1 21 = 445 shapes → **0 FAIL**
+  (PASS 288 / PASS-REFUSED 138 / PASS-500 14 / PASS-DENY 4 / UNJUDGED 1); base.tsv had 10 FAIL, branch.tsv 4. r9
+  family 18 shapes: 0 FAIL. Moved FAIL→REFUSED: m5 libExportTernaryFn / libExportImportedValue / libExportCurried,
+  x1 parenArrowSingle (E-ASYNC-FN-ESCAPES-AS-VALUE); x1 asyncArrowExport(Await) / voAsyncArrow → E-ASYNC-NOT-IN-SCRML
+  (the async arrow now reaches the checker); m5 libExportParen, x1 voParen → PASS; x1 voTypeImportUse /
+  voComponentImportUnused, m7 voUsesClientOnlyComponent → PASS (was PASS-500); m7 voUsesEnumFromTypeLib PASS-DENY
+  (as base: enums have no server value in a value-only module — open).
+- GATES on the working tree: unit 25837/1 fail (s457-string-url D, flaky under load, passes alone);
+  integration+conformance+compiler/tests/*.test.js 10564/1 fail = foreign-sealed-scope "under Node the slice gets a
+  working require too" — PRE-EXISTING ON origin/main ON THIS MACHINE (Node v21.6.0: no ESM detection /
+  getBuiltinModule). It blocks the pre-commit hook; not bypassed. types:check OK (180 unchanged);
+  commands+lsp 726/3 skip/0.
+- HALF-DONE: corpus differential (base = origin/main archive, head = origin/main + r8/r9 patch, roots examples,
+  samples, conformance/cases, giti + flogence copies) — base captured (2897 / 1776 compiled), head capture was
+  running at pause. Scratch: ~/.cache/scrml-agent-tmp/s467-await-r9/corpus/.
+- NEXT: (1) run the hook on a machine with Node >= 22 (or have the user rule on the env test) and commit/push;
+  (2) finish corpus diff + self-host-v2 bootstrap + facts/state/spec-index/gen-md-shim --check; (3) rerun the
+  463-shape pack via `bun compiler/tests/integration/security-await-pack/classify.js`.
+- RESUME NOTE: bryan ruled S467 that impl#1 will ENFORCE dpa-023 F4 (a waiting function may be bound only by a
+  `function` declaration → E-ASYNC-FN-ESCAPES-AS-VALUE) once the SPEC text lands. That changes round 9's
+  direction from COLOURING fn-valued bindings to REFUSING them: the r6–r9 pseudo-fn colouring of `const f = (…) => …`
+  becomes a refusal; the escape judge here (fileScopeAsyncEscapesOf) is the natural place to widen.
+- 2026-10-15 CORPUS (done after the block above): diff = 0 newly failing / 0 newly passing / 0 diagnostic
+  changes / syntax delta 0 / bare server-fn sites 36 = 36; 170 artifact content diffs NOT yet inspected (r8 saw
+  165, all absolute-tree-root only); the verdict says INCOMPARABLE only because both archive trees lack a git
+  revision. COMMIT BLOCKED by the pre-commit hook (the Node-v21.6 foreign-sealed-scope test above; not bypassed):
+  the r9 change set is STAGED in the worktree, NOT committed or pushed. Backup patch (git apply --index):
+  ~/.cache/scrml-agent-tmp/s467-await-r9/r9-staged.patch
+
+## RESUMED (S467, round 9 cont.) — branch s467-await-r9
+- 2026-10-15 resume at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a0ff927ec641522dc: base origin/s466-await-r8
+  e4b2c24e4; commit-blocker fix `deea6e822` (s461 unregisters happy-dom — same content as main #1429); the paused
+  patch committed as `9ab02ba1c` (the hook PASSED on Node v26: the Node-21 foreign-sealed-scope failure is gone).
+- CORPUS 170 emit diffs, classified by normalising the two archive roots (`…/corpus/base` / `…/corpus/head`):
+  165 are `_scrml_project_root` absolute-path noise only; the other 5 (4 content + 1 renamed runtime file) are ONE
+  real change in samples/compilation-tests/s457-host-global-alias (page entry): the client runtime gained the
+  `equality` chunk (`_scrml_structural_eq`) though no client file calls it. Cause: the r9 `valueInitExpr` copy on
+  `export const SAME_SHAPE = { a: 1 } == { a: 1 }` (a server-only value export) was walked by
+  compute-pgo-flags' presence walker. FIX `1aad4bb9b`: the three presence walkers skip `valueInitExpr` (a parsed
+  copy no client emitter lowers from; a client-emitted export still lights the chunk through the post-emit
+  `_scrml_structural_eq(` reference gate). The fixture's runtime is byte-identical to base again; new
+  compiler/tests/unit/s467-pgo-value-init-copy.test.js (3) pins both directions.
+- MERGE `db1a7eaa7`: origin/main 179f9b346 (#1423, #1425, #1426, #1428, #1429). Real 3-way merge; add/add on the pack
+  files kept the branch superset (463 shapes, KNOWN_FAIL empty); s461 test took main; FACTS regenerated; known-gaps
+  count hunk regenerated by state.ts (MED 644 = main 645 − the r8-resolved g-lib-export-const-lambda entry), entry
+  hunks kept; gap-id set == union of both sides (2101).
+- PACK on the merged tip (classify.js and the reviewer run.mjs, both): 463 shapes, **0 FAIL** — PASS 289 /
+  PASS-REFUSED 154 / PASS-500 15 / PASS-DENY 4 / UNJUDGED 1. x1: PASS 15 / REFUSED 5 / 500 1; r9: PASS 1 /
+  REFUSED 16 / 500 1 (libExportNs: `auth is not defined` at bundle load — fails closed).
+- GATES on the merged tip: pre-commit hook 34674 pass / 0 fail; compiler/tests/*.test.js 2239 / 0; types:check OK
+  (180, unchanged); facts / state / spec-index / bootstrap-conformance / gen-md-shim --check current;
+  corpus-compile-floor PASS; host-global-scan exit 0; lint-no-default-arm (bun) 0 violations; browser-baseline
+  --check PASS (48 asserted; a first run under the concurrent pre-push suite timed out, the quiet rerun passed); commands+lsp
+  763 / 3 skip / 1 fail — dev-watcher-snapshot-identity (ctime), ALSO FAILS on an origin/main archive on this
+  machine (pre-existing, environmental); self-host-v2 2272 / 8 fail — the S440 spread-write all-or-nothing tests
+  in slice-m2/front.test.js, pass alone, fail in the combined run, IDENTICAL 8 on an origin/main 179f9b346
+  archive (pre-existing, order-dependent).
+- F4 NOTE (not implemented here, per bryan's S467 ruling — separate dispatch once the SPEC text lands): the escape
+  judge already refuses every async function value that leaves a binding by a route the compiler cannot await
+  (alias, ternary / `||` / `&&` / `??` arm, returned function, later `let`/tilde write) — `fileScopeAsyncEscapesOf`
+  in codegen/file-async-fns.ts, reported once per binding from codegen/index.ts. What it does NOT refuse is the
+  direct `const f = (…) => …` / `const f = async (…) => …` binding itself: that is still COLOURED (pseudo fn in the
+  fixpoint, call sites awaited). F4 = widen the same judge so a waiting function bound by anything but a
+  `function` declaration is E-ASYNC-FN-ESCAPES-AS-VALUE; the classifier (fn-valued-bindings.ts) already
+  identifies exactly those bindings.
+
+## Round 10 (F4 enforcement) — branch s467-await-r10
+- 2026-10-16 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-ae30b00096cd063da, cut from
+  origin/s467-await-r9 e5155a5bb. Rule: dpa-023 F4 (SPEC §13.9.6 on PR #1430; ruling:user-voice-scrml.md S467
+  "b it is" + "yes on the impl#1 enforce F4") — an async-colored function is bound ONLY by a `function`
+  declaration; every binding / later write whose value is or may be one is E-ASYNC-FN-ESCAPES-AS-VALUE.
+- IMPL: codegen/fn-valued-bindings.ts `waitingBindingsOf` (every const/let/lin/tilde decl, every value
+  export, every `=`/`||=`/`&&=`/`??=` write, block-nested tilde re-declarations, an export whose init the
+  builder split into the next statement) judged by `mayHoldWaitingFn` (tree: a function value whose body
+  references an async name at ANY position of the init; an async name used other than as a direct callee;
+  escape hatches re-parsed as ESTree by the same rules; unparsed text by a fail-closed text rule). Legal:
+  direct calls (data), combinator callbacks (searched for a returned function), scheduler args, `typeof`,
+  sync lambdas, parameter shadows. Text-only refusals are `cascadeOnly` (a precise error for the same
+  unreadable text is not displaced; the compile fails either way). file-async-fns.ts `waitingBindingsOfFile`
+  (+ namespace imports of scrml modules count as async; caller-context-propagated SYNC helpers do not — the
+  §12.2 #284 first-class reference, conformance server-db/first-class-fn-ref-server-helper-rt). Reported
+  once per binding from codegen/index.ts with the binding name and the `function name(…) { return … }` fix.
+  Round 9's escape judge (`escapingAsyncValuesOf` / `fileScopeAsyncEscapesOf`) removed; the pseudo-fn
+  colouring KEPT with a comment (dead for shipped output; six emitters still read it on a failing compile).
+- COMMIT fd8a1be4f (hook passed: 34888 tests). Fixtures flipped to E-ASYNC-FN-ESCAPES-AS-VALUE, each
+  kept with a `function`-declared migrated twin that runs: s465-await-r6 (12 HIGH-1 shapes → F4_REFUSED;
+  7 migrated; client H1 split refuse/migrated; shadow probe migrated), r7 (MED-D asyncArrowStrArrow; MED-C
+  cl2/cl3/w(2) → refused + migrated, executed), r8 (all 9 → REFUSED; 7 migrated; ss1 test on the
+  `function` form), r9 (p3 paren arrow → refused; MED-1 probes rewritten value-only), s440 (arrow-bound
+  helper: + the F4 code beside the sync-callback code), peer-call dispatch (+2 binding refusals). New
+  compiler/tests/integration/s467-await-r10.test.js (35). Pack + y1/y2/y3 (551; README / count / known-fail
+  note). Not migrated: r6 inFileInSomeCallback — `function w` used only inside a `.some` callback is not
+  placed on the server (g-fn-reached-only-through-lambda-not-on-server-s466, 500 fail-closed).
+- GAPS filed: g-file-scope-let-written-in-block-stale-on-server-s467 (MED-2 data form; the async form is
+  now refused), g-server-js-imports-module-without-server-file-s467 (the F4 rewrite target `export
+  function` + an enum/component import → unloadable bundle; pre-existing on base). Annotated:
+  g-top-level-async-closure-called-later-accept-all (closed by refusal), g-imported-async-server-fn-not-
+  awaited-s465.
+- MERGE origin/main 22da975a8 (#1427 server param defaults, #1430 the dpa-023 SPEC incl. §13.9.6):
+  emit-server onserver:* handler head (kept main's `_wsSig` signature + r8's `_wsHeadIdx` async upgrade);
+  FACTS regenerated; known-gaps: count hunk regenerated, main's two new s467 entries + this branch's
+  resolved g-lib-export-const-lambda heading; gap-id set == union (2109). SPEC: one carried-gaps sentence
+  (§13.2 ⚑ list) made accurate — g-top-level-async-closure… is refused under §13.9.6, not coloured.
+- PACK (merged tree, classify.js): 551 shapes, 0 FAIL — PASS 220 / PASS-REFUSED 315 / PASS-500 12 /
+  PASS-DENY 3 / UNJUDGED 1. vs r9 tip (same 551): FAIL→REFUSED 9 (y1/voIife, y1/topLetIfWrite, y2/voIife,
+  y2/voAnnotIife, y2/topLetIfLit, y3/vo2Iife, vo2IifeLit, vo2Bind, vo2Annot); PASS→REFUSED 87 and
+  PASS-500→REFUSED 7 — every one binds a waiting function (list: ~/.cache/scrml-agent-tmp/s467-await-r10/
+  flips.txt); PASS-DENY→REFUSED 2 (E-PARAM-DEFAULT-AWAIT, from #1427).
+- CORPUS (corpus-emit-differential; base = origin/main f79a624df archive = 22da975a8 for compiler/corpus;
+  head = merged tree; examples, samples, conformance/cases, stdlib, giti + flogence copies; 2951 sources):
+  0 newly failing / 0 newly passing; 2 diagnostic-code changes, both already-failing conformance negatives
+  gaining E-ASYNC-FN-ESCAPES-AS-VALUE beside their sync-callback code (auth-async-stdlib-sync-callback-neg,
+  server-fn-in-sync-callback-pos); 165 artifact diffs + 108 text-only = absolute/relative root paths only
+  (normalised: 0 real); syntax delta 0; bare server-fn call sites 36 = 36.
+- MERGE COMMIT cd796e1b6 pushed (hook: 34890 pass / 60 skip / 0 fail). GATES on it: compiler/tests/*.test.js
+  2239 / 0; types:check OK (180, unchanged); bootstrap slices (lint-no-default-arm 0; m1 99, m2 612, m1
+  lowered 99, m3 60, m4 1343, codec 166, v2 lexer 337 — all 0 fail, run per directory as CI does);
+  commands+lsp 763 / 3 skip / 1 fail = dev-watcher-snapshot-identity (ctime) — fails identically on the
+  origin/main archive (pre-existing, environmental); facts / state / spec-index / gen-md-shim /
+  bootstrap-conformance / corpus-compile-floor --check PASS.
+- OPEN for the PA: (1) SPEC §13.9.6 reads "a waiting lambda is legal ONLY as the direct argument of an
+  awaited collection method"; impl#1 also leaves a scheduler argument legal inside a binding init
+  (`const t = setTimeout(() => save(), 0)` — §13.2's exemption, per the PA reading under §13.9.6).
+  (2) "async-colored" vs a SYNC helper placed on the server only by caller-context propagation (emitted as an
+  async in-process peer): impl#1 does not count it (the §12.2 #284 first-class reference stays legal —
+  conformance server-db/first-class-fn-ref-server-helper-rt); the SPEC definition does not say. (3) Nested
+  bindings now carry E-ASYNC-FN-ESCAPES-AS-VALUE beside their pre-existing sync-callback code (two conformance
+  negatives gained it). (4) The F4 rewrite's target forms hit two pre-existing defects: a `function` used only
+  in a `.some` callback is not server-placed (g-fn-reached-only-through-lambda-not-on-server-s466) and an
+  `export function` lib importing an enum/component emits an unloadable import
+  (g-server-js-imports-module-without-server-file-s467).
