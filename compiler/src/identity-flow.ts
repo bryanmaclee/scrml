@@ -488,8 +488,9 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
           for (const fn of fnsAt(n.name, n)) push(fn, { node: n, filePath, args: [], wholeFrom: null, byRef: true });
           continue;
         }
-        if (n.kind === "ident" && typeof n.name === "string" && !n.name.startsWith("@")) {
-          // a function passed along as a value (not the callee of a call)
+        if ((n.kind === "ident" || n.kind === "shorthand") && typeof n.name === "string" && !n.name.startsWith("@")) {
+          // a function passed along as a value (not the callee of a call); an object
+          // shorthand `{ save }` passes it as `{ save: save }` does
           const p = parentOf(n);
           if (p && p.kind === "call" && p.callee === n) continue;
           if (p && p.kind === "assign" && p.target === n) continue; // `f = …` rebinds f; it does not pass it
@@ -628,7 +629,7 @@ export function buildIdentityFlow(input: IdentityFlowInput): IdentityFlow {
             gseen.add(x as object);
             if (Array.isArray(x)) { for (const y of x) walk(y); return; }
             const o = x as AnyNode;
-            if (o.kind === "ident" && o.name === pn) {
+            if ((o.kind === "ident" || o.kind === "shorthand") && o.name === pn) {
               const op = parentOf(o);
               const sc = scopeOf(pn, o);
               if (sc.kind === "param" && sc.owner === g) {

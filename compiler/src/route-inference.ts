@@ -9871,13 +9871,21 @@ export function runRI(input: RIInput): RIOutput {
           const argWhat = t.index !== null
             ? `argument ${t.index + 1}${pName ? ` (\`${pName}\`)` : ""} of this call of server function \`${fnName}\``
             : `a value this call of server function \`${fnName}\` receives`;
+          // S469 re-review: say only what the compiler knows. A read in the argument
+          // itself CARRIES the identity; a binding the follower reaches it through MAY
+          // (the follower is flow- and field-insensitive, §12.4 "Known limits"); an
+          // unfollowable binding may carry one too.
+          const through = !hit.unresolved && hit.via && hit.via !== hit.read ? hit.via : null;
+          const what = hit.unresolved || through !== null ? "may carry an identity" : "carries an identity";
           const why = hit.unresolved
-            ? `its value comes from \`${hit.read}\`, which the compiler cannot follow (${hit.why ?? "its provenance is not readable"}), so it may carry an identity`
-            : `it is computed in the browser from \`${hit.read}\`` + (hit.via && hit.via !== hit.read ? ` (through \`${hit.via}\`)` : "");
+            ? `its value comes from \`${hit.read}\`, which the compiler cannot follow (${hit.why ?? "its provenance is not readable"}), so it cannot rule out an identity`
+            : through !== null
+              ? `it reads \`${through}\`, which can hold a value computed in the browser from \`${hit.read}\`, and the compiler cannot rule that out`
+              : `it is computed in the browser from \`${hit.read}\``;
           const serverRead = hit.unresolved ? null : identityServerRead(hit.read);
           const err = new RIError(
             "E-ARG-SERVER-IDENTITY",
-            `E-ARG-SERVER-IDENTITY: ${argWhat} carries an identity — ${why}. The arguments of a server ` +
+            `E-ARG-SERVER-IDENTITY: ${argWhat} ${what} — ${why}. The arguments of a server ` +
             `function are sent by the browser, and any HTTP request can send a different value, so \`${fnName}\` ` +
             `would act as whoever the request names (§6.6.9: server-only identity SHALL NEVER be marshalled from the ` +
             `client; §12.4). Fix: remove the ${pName ? `\`${pName}\` ` : ""}parameter and read the identity on the ` +

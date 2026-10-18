@@ -168,7 +168,7 @@ describe("s468 — identity passed as an argument to a server function is refuse
   });
 
   test("through a `const` lambda's parameter (`const w = (u) => add(\"hi\", u)` + `w(@session.userId)`)", () => {
-    expectRefused(compile(APP(`const w = (u) => add("hi", u)`, `<button onclick=w(@session.userId)>w</button>`)), "(through `u`)");
+    expectRefused(compile(APP(`const w = (u) => add("hi", u)`, `<button onclick=w(@session.userId)>w</button>`)), "it reads `u`, which can hold a value computed in the browser from `@session.userId`");
   });
 
   test("through a function passed to a component prop (the component calls it with the identity)", () => {
@@ -190,7 +190,7 @@ describe("s468 — identity passed as an argument to a server function is refuse
 `,
     });
     expect(codes(r.errors)).toEqual(["E-ARG-SERVER-IDENTITY"]);
-    expect(r.errors[0].message).toContain("(through `u`)");
+    expect(r.errors[0].message).toContain("it reads `u`, which can hold a value computed in the browser from `@session.userId`");
   });
 
   test("a CPS-split server function is a server function too", () => {
@@ -343,6 +343,64 @@ describe("s468 fix round 1 — F2: user calls write only the parameters they mut
   });
   test("a callee that passes the parameter to a mutating callee (transitive) still taints", () => {
     expectRefused(compile(APP(`function fill(o, v) { o.u = v }\n  function outer(o, v) { fill(o, v) }\n  function go() {\n    const o = {}\n    outer(o, @session.userId)\n    add("hi", o)\n  }`, `<button onclick=go()>g</button>`)));
+  });
+});
+
+// S469 re-review of #1451 (MED fail-open): an object SHORTHAND property `{ u }` reads `u`
+// exactly as the longhand `{ u: u }` does. Before the fix every shape below compiled, and a
+// forged request (attacker cookie, body `uid: "VICTIM"`) wrote a row authored VICTIM.
+describe("S469 — object shorthand `{ u }` carries the identity like `{ u: u }`", () => {
+  const shapes = {
+    "`const o = { userId }` + `o.userId`": `function go() {\n    const userId = @session.userId\n    const o = { userId }\n    add("hi", o.userId)\n  }`,
+    "inline `{ u }.u`": `function go() {\n    const u = @session.userId\n    add("hi", { u }.u)\n  }`,
+    "inside an array `[{ u }]`": `function go() {\n    const u = @session.userId\n    const xs = [{ u }]\n    add("hi", xs[0].u)\n  }`,
+    "passed to a lambda `f({ u })`": `function go() {\n    const u = @session.userId\n    const f = (o) => o.u\n    add("hi", f({ u }))\n  }`,
+    "passed to a function `pick({ u })`": `function pick(o) { return o.u }\n  function go() {\n    const u = @session.userId\n    add("hi", pick({ u }))\n  }`,
+    "mixed with literal fields `{ a: \"x\", u, b: 1 }`": `function go() {\n    const u = @session.userId\n    const o = { a: "x", u, b: 1 }\n    add("hi", o.u)\n  }`,
+    "through a spread `{ ...{ u } }`": `function go() {\n    const u = @session.userId\n    const o = { ...{ u } }\n    add("hi", o.u)\n  }`,
+    "the object itself as the argument `add(\"hi\", { u })`": `function go() {\n    const u = @session.userId\n    add("hi", { u })\n  }`,
+    "a client function's parameter `{ u }`": `function relay(u) {\n    const o = { u }\n    add("hi", o.u)\n  }\n  function go() { relay(@session.userId) }`,
+    "`Object.assign(o, { u })`": `function go() {\n    const u = @session.userId\n    const o = {}\n    Object.assign(o, { u })\n    add("hi", o.u)\n  }`,
+    "`xs.push({ u })`": `function go() {\n    const u = @session.userId\n    const xs = []\n    xs.push({ u })\n    add("hi", xs[0].u)\n  }`,
+    "`@currentUser.id` via `{ id }`": `function go() {\n    const id = @currentUser.id\n    add("hi", { id }.id)\n  }`,
+  };
+  for (const [label, body] of Object.entries(shapes)) {
+    test(label, () => {
+      expectRefused(compile(APP(body, `<button onclick=go()>g</button>`)));
+    });
+  }
+  test("at top level: `const o = { u }` + `onclick=add(\"hi\", o.u)`", () => {
+    expectRefused(compile(APP(`const u = @session.userId\n  const o = { u }`, `<button onclick=add("hi", o.u)>a</button>`)));
+  });
+  test("a cell write `@o = { u }`", () => {
+    expectRefused(compile(APP(`<o> = { u: "" }\n  function grab() {\n    const u = @session.userId\n    @o = { u }\n  }`, `<button onclick=grab()>g</button><button onclick=add("hi", @o.u)>a</button>`)));
+  });
+  test("a server default `uid = { session }.session.userId` reads the builtin (E-PARAM-DEFAULT-SERVER-IDENTITY)", () => {
+    const r = compile(`<program db="./app.db" auth="required">
+  function add(name, uid = { session }.session.userId) {
+    ?{\`INSERT INTO posts (author, body) VALUES (\${uid}, \${name})\`}.run()
+  }
+  <button onclick=add("hi")>a</button>
+</program>
+`);
+    expect(codes(r.errors)).toContain("E-PARAM-DEFAULT-SERVER-IDENTITY");
+  });
+  test("NOT refused: a shorthand over non-identity data", () => {
+    const r = compile(APP(`function go() {\n    const u = @draft\n    add("hi", { u }.u)\n  }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors).filter((c) => !ALSO.has(c))).toEqual([]);
+  });
+});
+
+// S469 re-review — the message says only what the compiler knows.
+describe("S469 — E-ARG-SERVER-IDENTITY message precision", () => {
+  test("a read in the argument itself: \"carries an identity — it is computed in the browser from …\"", () => {
+    const r = compile(APP(`function go() { add("hi", @last == @session.userId) }`, `<button onclick=go()>g</button>`));
+    expectRefused(r, "carries an identity — it is computed in the browser from `@session.userId`");
+  });
+  test("through a binding: \"may carry an identity\" and \"cannot rule that out\" (flow-insensitive case)", () => {
+    const r = compile(APP(`function go() {\n    let q = @session.userId\n    q = "x"\n    add("hi", q)\n  }`, `<button onclick=go()>g</button>`));
+    expectRefused(r, "may carry an identity — it reads `q`, which can hold a value computed in the browser from `@session.userId`, and the compiler cannot rule that out");
+    expect(r.errors[0].message).not.toContain("carries an identity");
   });
 });
 

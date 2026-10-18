@@ -202,3 +202,30 @@ NOT done:
   files outside the pre-commit gate: 48 fail standalone on this branch AND on the origin/main archive (same files, same or larger counts on main) (E-TYPE-031 `email`
   validator in bug60, transitions, engine dispatch, soft-nav, …) — pre-existing; 3 (s462 handler-helpers, s457
   url-guard, e2e detector-validation) pass standalone on this branch — full-run cross-file interference. Pre-commit gate: 0 fail.
+
+## FIX ROUND 2 (S469 re-review of f9be1befc = LAND-WITH-FOLLOWUPS)
+
+- 1 MED (object shorthand fail-open) — CONFIRMED by execution before the fix: `const o = { userId }` +
+  `add("hi", o.userId)`, `{ u }.u`, `[{ u }]`, `pick({ u })`, top-level, `@o = { u }`, mixed, spread,
+  `add("hi", { u })`, a parameter `{ u }`, `Object.assign(o, { u })`, `xs.push({ u })`, `{ id }` of
+  `@currentUser.id` — all ACCEPTED-SPOOFED (row author VICTIM). Cause as the reviewer said: the deep follower
+  (free-name.ts `identityReadInDefaultDeep`) followed only `kind: "ident"`; the parser's `{kind:"shorthand", name}`
+  property was never followed. FIXED in every identity walker that reads names: the deep follower; the
+  `session`-builtin reader (`{ session }` in a server default — E-PARAM-DEFAULT-SERVER-IDENTITY); identity-flow.ts
+  call index (a function shorthand `{ save }` is a function passed as a value — fail closed, as `{ save: save }`)
+  and the lambda-hand-on walk (`{ cb }` hands the callback on). All 15 shapes now REFUSED; tests added
+  (integration "S469 — object shorthand").
+  NOT touched (outside identity; surfaced): `exprReadsFreeSession` (server-PLACEMENT trigger) also ignores a
+  shorthand `{ session }` — a function whose only `session` use is `{ session }` is not server-placed.
+- 2 LOW — §12.4 Known limits (a) now names predicate laundering / implicit flow (n14 `.find(...).owner`, n15
+  `if (x == @session.userId) q = x`), both re-executed ACCEPTED-SPOOFED, stated plainly as delivering the
+  identity's value; the predicate rule is called a deliberate gap. §34 row likewise.
+- 3 LOW — f09 (`@x == @session.userId`) moved to "refused by design" (a browser "is this me" answer). Message:
+  a read in the argument itself "carries an identity — it is computed in the browser from …"; a value reached
+  through a binding "may carry an identity — it reads `q`, which can hold a value computed in the browser from …,
+  and the compiler cannot rule that out"; unresolved "may carry an identity — … so it cannot rule out an
+  identity". Two existing assertions on "(through `u`)" updated to the new wording.
+- Corpus (item 1 can only add identity refusals): head scan over examples, samples, conformance/cases, stdlib,
+  benchmarks, giti, flogence = 3001 sources → E-ARG-SERVER-IDENTITY 0, E-PARAM-DEFAULT-SERVER-IDENTITY 0. One
+  CRASH (samples/gauntlet-s19-phase4/nested-comments.scrml, stack overflow) is pre-existing — the same in every
+  S468 scan including base.

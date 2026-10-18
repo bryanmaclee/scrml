@@ -201,6 +201,8 @@ function identityReadIn(
     if (hit !== null) return;
     if (pruner && pruner(n, link)) return;
     const r = n as Record<string, unknown>;
+    // `{ session }` (an object SHORTHAND) reads the free builtin whole
+    if (r.kind === "shorthand" && r.name === "session" && !isBound("session")) { hit = "session"; return; }
     if (r.kind === "ident" && r.name === "session" && !isBound("session")) {
       const parent = link.parent as Record<string, unknown> | null;
       const isObject = parent && (parent.kind === "member" || parent.kind === "index") && link.key === "object";
@@ -364,7 +366,10 @@ export function identityReadInDefaultDeep(
       if (hit !== null) return;
       if (pruner && pruner(n, link)) return;
       const r = n as Record<string, unknown>;
-      if (r.kind === "ident" && typeof r.name === "string") {
+      // an object SHORTHAND property `{ u }` reads the name `u` exactly as `{ u: u }`
+      // does (S469 re-review of #1451: `const o = { userId }` + `add("hi", o.userId)`
+      // was accepted while the longhand was refused)
+      if ((r.kind === "ident" || r.kind === "shorthand") && typeof r.name === "string") {
         if (!r.name.startsWith("@") && isBound(r.name)) return;
         follow(r.name);
         return;
