@@ -1,6 +1,33 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-12T07:45:00Z  commit: 41af4153a
+# generated: 2026-10-17T19:18:33Z  commit: 5c43c3b8e
+# ⛑ **S468 STAMP — `41af4153a` -> `5c43c3b8e`. 94 COMMITS, 24 first-parent (the S465 maps refresh 8822c4d34 … #1436 the S467 wrap; 15 merge
+# commits incl. #1414 land/s464-batch): S462 landings — a braceless `if (c) a else b` keeps its else / an unclaimed `else` is
+# E-STMT-UNEXPECTED-TOKEN (3bfeec600, fd8f3b01f), structural client template emitter (4b14e4fcb), every runtime helper the
+# emitted client names is shipped (93b60f7af), §67 `<md>` phase 2 — a static `<md>` is lowered at build time by the ONE
+# `scrml:md` reader (`md-lower.ts` + `md-reader.js`, 739b602a5 …), `?{}` result tails apply to the value — `.get().name` no
+# longer serves the whole row (#1407, P0 hash leak); S465 — lift `<pre>`/`<code>` bodies are raw text (#1409); S464 — quoted
+# handlers + static executable URLs/srcdoc refused, E-ATTR-QUOTED-HANDLER / E-ATTR-STATIC-EXECUTABLE (#1416), statement-position
+# markup refused E-MARKUP-STATEMENT-NOT-RENDERED + emitted-JS parse floor on EVERY compile + safe `promote --match` (#1417), a
+# plain `fn` is never a route or async (#1419), no value holds a function E-VALUE-FUNCTION-STORED + `scrml:time`
+# `Debouncer`/`Throttler` struct API (#1418, #1422), imported/async server helpers awaited — ONE per-file async set
+# (`codegen/file-async-fns.ts`) + server text guard (#1424, P0), enum-cell type from a qualified initializer + `ParseError`
+# import-only (#1423), `scrml fix` refuses a file that does not compile (#1425), server-placed functions keep their parameter
+# defaults + E-PARAM-DEFAULT-* (#1427, #1433), the 424-shape security await probe pack (#1428); S467 — SPEC §13.8 one rule
+# for waiting values + §13.9 pending cells (Nominal on impl#1; #1430, #1432), an unhandled failable call used as a value is
+# E-ERROR-002 (#1431), CPS-split functions keep server logic and server values on the server (#1435, P0). Incremental
+# refresh in the main checkout on branch `wrap/s468` = `origin/main` `5c43c3b8e` + an uncommitted docs-only hand-off rotation
+# (source tree = `5c43c3b8e`; no file deleted or renamed under `compiler/src` — incremental is sound for every map).**
+# MAP-STAMP RULE: `bun scripts/state.ts --check` at pass start: `maps: 94 commits behind HEAD (watermark 41af4153a, HEAD
+# 5c43c3b8e)` = `git log --oneline 41af4153a..5c43c3b8e` (94).
+# ⛑ FIGURES AT `5c43c3b8e` (executed this pass): `facts.ts --check` PASS · FACTS `compiler/src` **340,511 lines / 303 files**
+# (+16,281 lines; +17 files: 16 `.ts`/`.js` modules + `md-reader.d.ts` — see structure.map.md S468; `git ls-tree` = 304) ·
+# test files **1,765** by `git ls-tree -r --name-only 5c43c3b8e compiler/tests | grep -c '\.test\.'` (+47; FACTS rule 1,750) ·
+# `compiler/SPEC.md` **49,366** lines (+662; NEW §13.8, §13.9, §17.6.10.1, §19.9.9.8, §41.21) · conformance **1795**
+# `case.scrml` (+37) · `bootstrap-conformance.ts --check`: **current** · FACTS CLI verbs **14** (unchanged) · **16 new
+# diagnostic code literals** in `compiler/src`, every one with a §34 row (see error.map.md S468) · known-gaps heading/marker
+# drift **73** (was 72) · `state.ts --check` @generated sections PASS. Conformance suite / full test suite NOT re-run this pass.
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE PRIOR HEADER (stamp `41af4153a`), CARRIED. ━━━━━━━
 # ⛑ **S465 STAMP — `8ce6d61b5` -> `41af4153a`. 51 COMMITS (#1356 the S458 maps refresh … #1405 the S462 wrap):
 # S458 addendum + §21.4 `export *` spec (#1357/#1358); S459 — host-global alias (#1361/#1362), unquoted attribute values read
 # whole + E-EVENT-UNBOUND (#1363), ship-strip of browser JS (#1365), `^{}` closed allow-list (#1359); S460 — runtime
@@ -515,6 +542,56 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S468 pass (this pass, stamp `5c43c3b8e`)
+
+Window `41af4153a..5c43c3b8e` (94 commits). Scan mode INCREMENTAL. Docs scanned: the in-window changed `.md` set outside `.claude/`, `handOffs/`
+and `docs/changes/` (`README.md`, `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `compiler/tests/integration/security-await-pack/
+README.md` (NEW), `docs/{FACTS,PA-SCRML-PRIMER,bootstrap-conformance,changelog,known-gaps,pr-reviews}.md`,
+`docs/articles/llm-kickstarter-v2-2026-05-04.md`, `hand-off.md`, `master-list.md`; 24 `docs/changes/s46x-*` / `s441-*` dispatch
+dirs = historical by design, compliant) + a §34 row check for all 16 new code literals (16/16 present) + a repo-wide grep of
+current docs for the retired `scrml:time` decorator API, quoted event handlers (`onclick="…"` with no `${}`), and functions
+stored in object literals (none outside the two findings below) + EXECUTED: `facts.ts --check` (PASS), `bootstrap-conformance.ts
+--check` (current), `state.ts --check` (@generated PASS; maps 94 behind; known-gaps drift 73). §13.9 is marked
+"Nominal / spec-ahead — impl#1 does not implement it" in its own status line: compliant (honest about impl#1).
+Non-compliant: 2 new (N-S468-1, N-S468-2; N-S468-2 supersedes N-S458-2) + 3 carried · Uncertain: 1 new + 4 carried ·
+Prior findings closed: 0.
+
+### N-S468-1 — docs/articles/llm-kickstarter-v1-2026-04-25.md teaches the retired `scrml:time` decorator API
+**Reason:** content (superseded doc; grep-mismatch against §41.21)
+**Detail:** :243 lists `debounce(fn, ms)`, `throttle(fn, ms)` and :252 says `debounce(fn, ms)` is "a **function** decorator
+(wraps a callback)". At `5c43c3b8e` `stdlib/time/index.scrml` :294/:311 return `Debouncer` / `Throttler` structs, and calling one is
+E-TIMER-STRUCT-MISUSE (`value-function-stored.ts` ~:930, SPEC §41.21). v2 (`llm-kickstarter-v2-2026-05-04.md` :1223) was
+updated this window; v1 declares itself pinned to scrmlTS commit `b1ce432` and is superseded by v2.
+**Suggested disposition:** deref to scrml-support/archive/ (superseded by v2).
+
+### N-S468-2 — known-gaps heading/marker drift 72 -> 73 (supersedes N-S458-2)
+**Reason:** content-heuristic (`state.ts --check` drift list, WARN-only)
+**Detail:** 73 entries whose heading status differs from their `@gap` marker (first listed: `docs/known-gaps.md:1416`
+`g-user-function-named-id-breaks-click-dispatch-s457`, `:1428` `g-onclick-unquoted-call-chain-drops-callback-s457`, `:1496`
+`g-string-url-refinement-admits-executable-schemes` — the same three N-S458-2 named, still unsynced).
+**Suggested disposition:** update to match current (sync headings to markers).
+
+### Carried non-compliant (re-grepped at `5c43c3b8e`, still open)
+- **S465 kickstarter `~`** — `docs/articles/llm-kickstarter-v2-2026-05-04.md:1794` still says `lift` "accumulates markup into the
+  implicit `~` accumulator"; SPEC §32.6 says each `lift` re-initialises `~`.
+- **N-S457-1** — `docs/known-gaps.md:24165` `g-api-compile-write-true-ignores-application-scope-refusal` still heading/marker `open`.
+- **N-S457-2** — `compiler/SPEC.md` still cites `compiler/src/commands/refusal-gate.js` (3 mentions).
+
+## Uncertain docs (needs human review) — S468 pass
+
+### `docs/known-gaps.md:699` `g-imported-async-server-fn-not-awaited-s465` — heading `open (fix in flight)` after the fix landed
+**Reason:** the entry says "Status stays open until the PA lands the branch"; the branch landed as #1424 (`7f2b81418`). Residue
+shapes are listed in `compiler/tests/integration/security-await-pack/known-fail.js` `KNOWN_FAIL` (10 entries, each naming a gap).
+**What to check:** whether the entry should flip to `resolved` (residue tracked under the gaps `KNOWN_FAIL` names) or stay open
+with "(fix in flight)" removed from the heading.
+
+### Carried (unchanged, re-grepped at `5c43c3b8e`)
+- `compiler/SPEC.md` §14.12.6.1 (:14419) still teaches `given u :> { … }` as caller form 1 for `(not to T)`; §42.2.3
+  soft-deprecates it, and impl#1 does not credit `if (u is given)` (gap `g-lifecycle-is-given-does-not-narrow-s465`, open).
+- `docs/known-gaps.md` `G-SQL-ERROR-SURFACE-UNWIRED` — heading still `open`; premise narrowed by #1305.
+- `compiler/SPEC.md:20943` — E-ERROR-016 "no compiler emits it yet" (impl#2 emits it).
+- `compiler/SPEC.md` E-CG-003 row and the `E-TENANT-WRITE` sentence — as in the S454 pass.
 
 ## S465 pass (stamp `41af4153a`) — new findings
 
