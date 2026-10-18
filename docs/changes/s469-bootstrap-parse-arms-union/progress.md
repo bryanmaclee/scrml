@@ -80,3 +80,12 @@ message string avoids `match <subj> {` — impl#1 rewrites that shape even insid
    (the check exists only for cells) — pre-existing, also for plain `T[]`.
 2. **LOW — E-DERIVED-WRITE advice on a tape-typed derived cell** no longer says "declare it `let`";
    it names E-GRANT-LET-ON-SEQUENCE and `T[replace]`. Non-sequence derived cells keep the advice.
+
+## Review r3 — addressed
+
+1. The two no-`let` advice branches (`wholeFieldWrite`, `derivedMessage`) see through `| not`
+   (`seqElem(unMaybe(f.ty))`); test pins both messages.
+2. Filed in docs/known-gaps.md (counts via `scripts/state.ts --write`), each re-executed on 8ca23db90:
+   g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469 (MED),
+   g-bootstrap-callsite-grant-subset-unchecked-s469 (LOW, latent),
+   g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469 (MED, §66.12.6 rule 4).

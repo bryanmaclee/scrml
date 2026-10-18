@@ -337,6 +337,16 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       const c = codes(inProg(`    <xs:int[] | not=not/>\n    function w() { @xs = [1]; }\n    function r() { @xs.shift(); }`));
       expect(c.filter((x) => x === "E-WRITE-NOT-GRANTED").length).toBe(2);
     });
+    test("r3: the no-`let` advice sees through `| not` — a locked `Entry[] | not` cell and a derived one", () => {
+      const locked = diag(inProg(`    <xs:Entry[] | not=[]/>\n    function w() { @xs = []; }`), "E-WRITE-NOT-GRANTED");
+      expect(locked).toBeDefined();
+      expect(locked.message).not.toContain("Declare it `let");
+      expect(locked.message).toContain("`T[replace]`");
+      const derived = diag(inProg(`    function give() -> Entry[] | not { return [] }\n    <ys=(give())/>\n    function w() { @ys = []; }`), "E-DERIVED-WRITE");
+      expect(derived).toBeDefined();
+      expect(derived.message).not.toContain("declare it `let`");
+      expect(derived.message).toContain("E-GRANT-LET-ON-SEQUENCE");
+    });
     test("a non-tape `T | not` in code positions is unaffected, either order", () => {
       expect(codes(inProg(`    function ok(n: int | not) -> not | string { return not }`))).toEqual([]);
       expect(codes(inProg(`    type Box:struct = { s: string | not }\n    let <b:Box=({ s: not })/>\n    function w() { @b.s = "x"; }`))).toEqual([]);
