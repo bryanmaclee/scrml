@@ -210,3 +210,32 @@ New this round:
   (a wildcard-only `match` inside an expression emits `else` with no `if` -> E-CODEGEN-INVALID-LOGIC, fails
   closed); g-dg-002-false-on-read-in-match-arm-block-in-fn-s469 (false E-DG-002 for a cell read only inside a
   decl-position match arm block in a function; also for `.V` arms).
+
+## 2026-10-17 — FIX ROUND 2 (S239 re-review of 435d55cd4 = DO-NOT-LAND)
+
+- **Blocker reproduced** (new family la3, 27 shapes, classify.js): on 435d55cd4 21 FAIL — a one-statement
+  BLOCK arm `{ ok; }` read as the shorthand object `{ ok: ok }` (truthy) in every head form (`1`, `-1`,
+  `1 | 2`, `"bob"`, `"bob" | "amy"`, `true`, `.A`, `::A`, `.A | .B`, `else`, multi-scrutinee `_` / `else`),
+  `const` / `let`, multi-line, and `return` position. Cause confirmed: `objectLiteralArmValue` rebuilt
+  `{ ${expr} }` from the statement text, which had lost the `;`. On origin/main aef6cfcb9: 3 FAIL
+  (semiRetLit / semiRetVariant / semiRetAltStr — return position, arm text).
+- **Fix:** the decision moved into the parser, from TOKENS: `armBraceBodyObjectShape` (ast-builder.js)
+  — object iff a non-empty comma list of `key: v` / `...s` / `[k]: v` / lone IDENT entries with no
+  top-level `;`; `parseArmBraceBody` collects an object arm with the parser's own `collectBracedBody` and
+  stores the object node + `objectLiteralArm` (+ `singleShorthand`) at parse time, else `parseRecursiveBody`.
+  `markObjectLiteralArmBody` deleted; `objectLiteralArmValue` now only reads the parser's mark (the
+  text rebuild + `parseExprToNode` are gone). F6 switch: `SINGLE_SHORTHAND_ARM_BODY` (arm-body-statements.ts)
+  — "error" makes the lint site (`singleShorthandArmDiagnostic`, type-system.ts) a compile error.
+- la3 on fix round 2: 26 PASS + 1 PASS-REFUSED (`semiWild`, wildcard-only decl match: E-CODEGEN-INVALID-LOGIC
+  on main and 435d55cd4 too — gap g-expr-position-wildcard-only-match-malformed-s469 widened). Pack 826 pass.
+- `{ undefined }`: `undefined` is a KEYWORD token, so not a shorthand: a block again, as on main (item 2
+  restored naturally). Unit (E) pins it.
+- SPEC §18.5 bullet now states the token rule; provenance corrected — semantics-changed for a `.V` / `::V`
+  arm in a `const` declaration (base bbddfd7b9 blockTailIdentV = `R:7`, now `{ foo: 7 }`), inert for the
+  other measured positions; the single-shorthand form is flagged as under re-confirmation. Gap entry
+  corrected ("base and branch alike" was wrong) and set RULING-GATED.
+- Corpus differential (examples, samples, conformance, stdlib — 2840 sources), round 2 vs 435d55cd4:
+  0 newly failing / 0 newly passing, 0 diagnostic changes, 0 artifact content changes after normalising the
+  compiler-root path. (vs origin/main aef6cfcb9 the branch also differs by main's commits since bbddfd7b9 —
+  not a valid measure of this PR; the round-0 measurement vs bbddfd7b9 stands.)
+- Pre-commit gate on bac1c7ccd: 37795 pass, 0 fail.
