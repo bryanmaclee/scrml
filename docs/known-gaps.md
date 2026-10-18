@@ -30,11 +30,36 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 263 | 4 |
-| MED | 663 | 6 |
+| HIGH | 264 | 4 |
+| MED | 664 | 6 |
 | LOW | 438 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-value-form-if-for-failable-call-unchecked-s469 — (security) a `!` call reached through a VALUE-FORM `if` / `for` was never E-ERROR-002: `const ok = if (check(p)) { lift true } else { lift false }`, `… { lift check(p) } …`, `const vs = for (x of [p]) { lift check(x) }`, a failable fn LIFTED as a value (`const g = if (c) { lift check } else { lift plain }; g(p)`) compiled, and a WRONG PASSWORD LOGGED IN — `NEW S469 (#1444 re-review); HIGH; RESOLVED S469`
+
+<!-- @gap id=g-value-form-if-for-failable-call-unchecked-s469 sev=HIGH status=resolved locus=compiler/src/failable-value-calls.ts(ifExpr / forExpr / lift-expr never read; decl keys not classified)+compiler/src/type-system.ts(reportUnhandledFailableValueCall) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");review:S468-1444-re-review;dispatch:s469-value-form-if-for-failable -->
+
+A value-form `if` / `for` on a declaration is carried as `ifExpr` / `forExpr` with `init: ""` (ast-builder.js). The E-ERROR-002 walk read neither key: `isExprNodeValue` rejects `if-expr` / `for-expr`, and neither is a statement-child key. `visitNode` descends only array-valued keys, so the condition, the body statements and the `lift` operands went unchecked. The walk did not read a `lift-expr` anywhere either. Reproduced on `a74a32eca`: the 8 shapes above, a destructuring default (`const { ok = check(p) } = {}`), a bare call or nested `if` in a value-form body, and a rendered `${ for (…) { lift check(x) ? "LOGGED IN" : "rejected" } }` all compiled clean. **RESOLVED S469** (branch `s469-value-form-if-for-failable`):
+- **What is read.** `ifExpr` / `forExpr` are read as statements: the condition and iterable as values, the bodies as statements. A `lift` operand is a value position, and `lift-expr` is in `VALUE_POSITION_STMT_KINDS`.
+- **Fn-value refusal.** A failable function read as a VALUE in a `lift` operand is refused with E-ERROR-002 ("lifted as a VALUE"). E-IMPL1-FAILABLE-FN-VALUE is not on main yet.
+- **Untrusted handlers in a value-form body.** Inside a value-form body only a statement `!{}` (and `?`, executed) is trusted as a handler. A `match` on a failable call there is refused, because the type system never stamps `__matchSubjectFailable` there and codegen compares the error object as a plain value (executed: a wrong password logged in). The `<errorBoundary>` exemption does not apply there.
+- **Refused everywhere.** `lift f() !{ … }` is refused: codegen guards the lift's result, not the call's (see `g-lift-guard-applied-to-lift-not-call-s469`).
+- **Unknown keys fail closed.** Every declaration key is classified (`DECL_KEY_CLASSES`). A key with no class is read in full as a value position. A test enumerates the keys ast-builder.js writes on a declaration (acorn) and fails on an unclassified one.
+
+Corpus (`scripts/corpus-emit-differential.ts`, examples / samples / conformance/cases / stdlib, base = archive of `a74a32eca`): 2851 sources on both sides, 0 newly failing, 0 diagnostic changes, and no client artifact differs (the 171 differing server bundles differ only in the embedded project-root path). Pins: `compiler/tests/unit/e-error-002-value-form-if-for-s469.test.js`.
+
+### g-value-form-body-not-visited-by-type-system-s469 — the type system's main walk never visits the body of a value-form `if` / `for` (`const a = if (c) { … }`): no scope, type or codegen-stamp check runs there — `lift nosuchname` and `const q: number = "str"` in one compile clean — `NEW S469 (filed; pre-existing); HIGH; open`
+
+<!-- @gap id=g-value-form-body-not-visited-by-type-system-s469 sev=HIGH status=open locus=compiler/src/type-system.ts(visitNode descends only array-valued keys; a decl's `ifExpr` / `forExpr` is an object) prov=empirical:S469-executed-on-a74a32eca;dispatch:s469-value-form-if-for-failable -->
+
+Executed S469 on `a74a32eca`: `const a = if (p) { lift nosuchname } else { lift 1 }` is not E-SCOPE-001, and `const q: number = "str"` inside the body is not a type error. Codegen reads stamps the walk writes. The one confirmed security consequence: a `match` on a failable call there is lowered as a plain-value match, so its arms never see the failure. E-ERROR-002 is now refused there instead (`g-value-form-if-for-failable-call-unchecked-s469`), but the other checks (scope, types, and any server/auth check that runs in `visitNode`) have NOT been audited for value-form bodies. Fix direction: have `visitNode` visit `ifExpr` / `forExpr` (statement-shaped) under the declaration's scope. Then the E-ERROR-002 handler restriction in value-form bodies can be lifted.
+
+### g-lift-guard-applied-to-lift-not-call-s469 — `lift check(x) !{ .Denied :> … }` lowers the `!{}` against the LIFT's result (`_scrml_lift(() => …check(x)…)`), never the call's: the error object is lifted unchecked — `NEW S469 (filed; pre-existing); MED; open (refused, fails closed)`
+
+<!-- @gap id=g-lift-guard-applied-to-lift-not-call-s469 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(guarded-expr over a lift-expr) prov=empirical:S469-executed-on-a74a32eca;dispatch:s469-value-form-if-for-failable -->
+
+Executed S469: in a value-form `for`, a wrong password logged in. In a value-form `if`, a right password was rejected. A rendered `for` emitted `let r = _scrml_lift(…check(x)…); if (r && r.__scrml_error) …`. It is now refused with E-ERROR-002 ("a '!{}' written on a 'lift'"). The remedy is `const v = check(x) !{ … }` then `lift v`. Fix direction: lower the guard on the lift operand, then lift the guarded value.
 
 ### g-type-params-attempt-garbage-cascade-s469 — a generics attempt (`function id<T>(x: T) -> T { return x }`) gets an unrelated-looking cascade in BOTH compilers: impl#1 reports `E-SCOPE-001` on a later binding (`a` undeclared) plus `E-MARKUP-STATEMENT-NOT-RENDERED` on the `<T>`; the bootstrap reports 11 diagnostics; nothing mentions type parameters — `NEW S469; MED; open`
 
