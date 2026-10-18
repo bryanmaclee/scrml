@@ -271,16 +271,27 @@ export function gapIdCounts(text: string): Map<string, number> {
 
 /** Blank out fenced code blocks (``` / ~~~), keeping line structure. */
 export function stripFences(text: string): string {
-  let fence: string | null = null;
-  return text.split("\n").map((ln) => {
-    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(ln);
-    if (fence === null) {
-      if (m) { fence = m[1][0]; return ""; }
-      return ln;
-    }
-    if (m && m[1][0] === fence) fence = null;
-    return "";
-  }).join("\n");
+  // CommonMark fence rules (S469 delta review): an opener is ≤3 spaces + ≥3 backticks or tildes; a
+  // BACKTICK opener's info string may not contain a backtick (so inline code that merely starts a line
+  // with ```` is not a fence); a fence closes only on a line of ≥ the opener's length of the SAME char
+  // followed by nothing but whitespace. ⚑ An opener with NO closer is treated as NOT a fence — CommonMark
+  // would run it to EOF, but here that would hide every marker below it from the self-check, so the
+  // error direction is chosen to be COUNTING (a false refusal is safe; a hidden drop is not).
+  const lines = text.split("\n");
+  const out = lines.slice();
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i].replace(/\r$/, ""));
+    if (!m) continue;
+    const ch = m[1][0], len = m[1].length;
+    if (ch === "`" && m[2].includes("`")) continue;
+    const close = new RegExp(`^ {0,3}${ch === "`" ? "`" : "~"}{${len},}[ \\t]*$`);
+    let j = i + 1;
+    while (j < lines.length && !close.test(lines[j].replace(/\r$/, ""))) j++;
+    if (j >= lines.length) continue; // unclosed → not a fence
+    for (let k = i; k <= j; k++) out[k] = "";
+    i = j;
+  }
+  return out.join("\n");
 }
 
 /**

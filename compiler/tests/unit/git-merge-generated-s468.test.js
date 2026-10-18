@@ -251,6 +251,41 @@ describe("gap-id union self-check", () => {
     expect(gapIdSelfCheck(m("g-a"), m("g-a") + m("g-a"), "", m("g-a")).ambiguous).toEqual(["g-a"]);
   });
 
+  // S469 delta review HIGH: the first stripFences took inline code that merely STARTS a line with
+  // ```` (docs/known-gaps.md ~L22816) as an unclosed fence and hid every marker below it — 498 real
+  // entries, the whole ledger tail where the union rule operates — so dropping one passed the check.
+  const LEDGER = readFileSync(join(REPO, "docs/known-gaps.md"), "utf8");
+  const rawIdCount = (t) => {
+    let n = 0;
+    for (const m of t.matchAll(/<!--\s*@gap\s+([\s\S]*?)\s*-->/g)) {
+      const id = m[1].trim().split(/\s+/).find((p) => p.startsWith("id="))?.slice(3);
+      if (id && !id.startsWith("<")) n++;
+    }
+    return n;
+  };
+
+  test("BITE (S469 delta): on the REAL ledger, the fence-aware count equals the raw marker count", () => {
+    const counted = [...gapIdCounts(LEDGER).values()].reduce((s, n) => s + n, 0);
+    expect(rawIdCount(LEDGER)).toBeGreaterThan(2000);
+    expect(counted).toBe(rawIdCount(LEDGER));
+  });
+
+  test("BITE (S469 delta): dropping a ledger-TAIL entry (the G-PARALLEL-PRS one) from the real ledger is reported dropped", () => {
+    const id = "g-parallel-prs-conflict-on-committed-generated-docs-s460";
+    const re = new RegExp(`<!--\\s*@gap\\s+id=${id}\\b[^>]*-->\\n?`);
+    expect(re.test(LEDGER)).toBe(true);
+    const lost = LEDGER.replace(re, "");
+    expect(gapIdSelfCheck(LEDGER, LEDGER, LEDGER, lost).dropped).toEqual([id]);
+  });
+
+  test("CommonMark fences: a backtick info string with a backtick is inline code; a short closer does not close; unclosed is not a fence", () => {
+    const mk = (id) => `<!-- @gap id=${id} sev=LOW status=open -->`;
+    expect(gapIdCounts(["```` inline `code` here", mk("g-1")].join("\n")).size).toBe(1);
+    expect(gapIdCounts(["````", mk("g-2"), "```", "still inside", "````", mk("g-3")].join("\n"))).toEqual(new Map([["g-3", 1]]));
+    expect(gapIdCounts(["~~~", mk("g-4")].join("\n")).size).toBe(1); // unclosed → counted
+    expect(gapIdCounts(["~~~", mk("g-5"), "~~~", mk("g-6")].join("\n"))).toEqual(new Map([["g-6", 1]]));
+  });
+
   test("BITE (S469 review #6): a marker inside a CODE FENCE does not stand in for a dropped entry", () => {
     const fence = "```\n<!-- @gap id=g-x sev=LOW status=open -->\n```\n";
     const entry = "<!-- @gap id=g-x sev=LOW status=open -->\n";

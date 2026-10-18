@@ -114,3 +114,17 @@
   PA ruling applied: the stray half-table near known-gaps L663 is deleted; gap-counts PASS.
 - Unit file 24 -> 33 tests, all pass. MUTATION CHECK: undoing each fix in place makes its bite test fail
   (#1, #2, #3 x2, #5, #6 fences, #6 multiplicity, #7), and the tree is restored byte-identical afterwards.
+- Pushed 22090f367. Full `bun run test`: 40163 pass / 171 skip / 52 fail, none of them in the driver tests (the same
+  unrelated browser/e2e/s457 set, plus commands/dev-child-dies-with-parent). Real replays: see the PR body.
+
+## DELTA RE-REVIEW at 22090f367 — 1 new HIGH (from fix 6)
+
+- 2026-10-18 `stripFences` read docs/known-gaps.md ~L22816 (inline code that starts a line with ````) as an
+  unclosed fence and swallowed to EOF: 498 of the 2126 real markers were hidden (counted 1628). Fix: CommonMark
+  rules — a backtick info string may not contain a backtick; a fence closes only on a line of >= the opener's
+  length of the same char; an UNCLOSED opener is not a fence (the error direction is counting).
+  Bites on the REAL ledger: fence-aware count == raw count, and dropping the G-PARALLEL-PRS tail entry is
+  reported dropped. With the old stripFences swapped back in, both fail (Received 1628 / dropped []) and so
+  does the CommonMark-rules unit. Unit file 33 -> 36.
+- LOW acknowledged, not fixed (safe direction): both sides deleting DIFFERENT copies of a doubly-filed id gives
+  a false refusal.
