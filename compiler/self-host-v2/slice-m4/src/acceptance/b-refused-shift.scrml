@@ -1,0 +1,15 @@
+// acceptance/b-refused-shift.scrml — a deliberately REFUSED tape write (s469-bootstrap-cli).
+// The refused-write harness of scrml-support/docs/workability/today-scrml-distance-2026-10-18.md
+// §3 (b), with «WRITE» = `@audit.shift();`. `@audit` grants only `append`: removing from the
+// front is not granted, so the compile must fail with E-WRITE-NOT-GRANTED (§66.19.5) and
+// `scrml-boot compile` must exit non-zero.
+<program>
+    type Entry:struct = { at: int, actor: string, action: string }
+    type Frame:struct = { name: string }
+    <audit:Entry[free, append]=[]/>
+    <stack:Frame[free, append, pop]=[]/>
+    function bad() {
+        @audit.shift();
+    }
+    <main><button onclick=bad()>x</button><p>${@audit.length} ${@stack.length}</p></main>
+</program>

@@ -100,8 +100,26 @@ export function loadBootstrap() {
  */
 export function loadBundle(bundle, modules) {
   if (cache.has(bundle)) return cache.get(bundle);
+  const built = buildBundleChunks(bundle, modules);
+  const loaded = { mods: evaluateChunks(built.chunks), warnings: built.warnings };
+  cache.set(bundle, loaded);
+  return loaded;
+}
+
+/** The impl#1 input files of a bundle: the `<program>` entry + every module that exists. */
+export function bundleInputFiles(bundle, modules) {
+  return [bundle, ...modules.map((m) => join(SELF_HOST_V2, m))].filter((f) => existsSync(f));
+}
+
+/**
+ * The BUILD half of `loadBundle` (s469-bootstrap-cli): impl#1 compiles the
+ * bundle, and the emitted chunks come back as plain data `{ name, deps, src }`
+ * in file order, so a caller can cache them (scripts/scrml-boot.ts keys a disk
+ * cache on the inputs' content) and load them later with `evaluateChunks`.
+ */
+export function buildBundleChunks(bundle, modules) {
   const outDir = mkdtempSync(join(tmpdir(), "self-host-v2-bundle-"));
-  const inputFiles = [bundle, ...modules.map((m) => join(SELF_HOST_V2, m))].filter((f) => existsSync(f));
+  const inputFiles = bundleInputFiles(bundle, modules);
   const result = compileScrml({ inputFiles, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
   const errs = (result.errors ?? []).filter((e) => e && e.code !== undefined);
   if (errs.length > 0) {
@@ -112,8 +130,16 @@ export function loadBundle(bundle, modules) {
     const src = readFileSync(file, "utf8");
     const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
     const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
-    return { file, src, name: reg ? reg[1] : null, deps };
+    return { name: reg ? reg[1] : null, deps, src };
   });
+  return { chunks, warnings: result.warnings ?? [] };
+}
+
+/**
+ * The LOAD half of `loadBundle`: evaluate the chunks in dependency order
+ * against one shared registry. Returns `mods` (module base name → exports).
+ */
+export function evaluateChunks(chunks) {
   const registry = {};
   const pending = chunks.filter((c) => c.name !== null);
   while (pending.length > 0) {
@@ -126,7 +152,5 @@ export function loadBundle(bundle, modules) {
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;
   if (process.env.SCRML_BOOT_DIAG_LOG && mods.analyze) mods.analyze = logAnalyze(mods.analyze, process.env.SCRML_BOOT_DIAG_LOG);
-  const loaded = { mods, warnings: result.warnings ?? [] };
-  cache.set(bundle, loaded);
-  return loaded;
+  return mods;
 }
