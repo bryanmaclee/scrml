@@ -22,3 +22,15 @@ SPEC §66.2.5, §66.12.4, §66.12.6, §66.19.1/.4/.5, §66.21 (on main since #14
 
 ## Done
 - [x] branch + progress.md
+- [x] README edits: §1 intro note (impl#1 spelling); §2 tasks cell relabelled as before-picture + ruled
+      granted spelling; Why-scrml `let <count…/>`; Specified intro (no window for tape cells; O62);
+      item 1 `let` before `<` + `;` function; item 3 `:struct` + `let` children; item 4 tapes
+      (grant tokens vs O10, field-edit reason, `;` in refusal comments, §66.12.6 paragraph);
+      bootstrap "Not in yet" list extended.
+- [x] snippet-gate: 128/128 pass; drift 27/27 ok (no snippet file changed).
+- item 4 local-tape sentence (`let out: Item[free, append] = [];` + push) → bootstrap
+  E-BOOTSTRAP-UNSUPPORTED (no edit of a local in Core). Cell part (push, spread) compiles with
+  `at: number` + Date.now().
+
+## Next
+- commit; wait for #1467 → merge origin/main; push; PR.
