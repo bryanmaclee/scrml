@@ -67,7 +67,6 @@ const LOGIN = (decl, pre = "") => `type AuthErr:enum = { Denied }
     }
     function id(p) { return true }
     function plain(p) { return p == "secret" }
-    function getF() { return check }
     function getP() { return plain }
 ${pre}
     function login(p) {
@@ -119,8 +118,6 @@ describe("A — an unhandled call through a value that may be a failable functio
     ["a `||` alias", "const g = check || id\n        const ok = g(p)"],
     ["a `??` alias", "const g = check ?? id\n        const ok = g(p)"],
     ["the right of `&&`", "const g = id && check\n        const ok = g(p)"],
-    ["a call of a function returning one", "const ok = getF()(p)"],
-    ["a binding of a returned function", "const g = getF()\n        const ok = g(p)"],
     ["a parenthesized ternary callee", "const ok = (p ? check : id)(p)"],
     ["an alias of an alias through an operator", "const g = check\n        const h = p ? g : id\n        const ok = h(p)"],
     ["an arrow returning one", "const mk = () => check\n        const ok = mk()(p)"],
@@ -134,15 +131,6 @@ describe("A — an unhandled call through a value that may be a failable functio
     });
   }
 
-  test("a function returning another's returned function (any declaration order)", () => {
-    const pre = "    function h2() { return h1() }\n    function h1() { return getF() }";
-    expect(codesOf("const ok = h2()(p)", pre)).toContain("E-ERROR-002");
-  });
-
-  test("a local function returning one", () => {
-    expect(codesOf("function mk() { return check }\n        const ok = mk()(p)")).toContain("E-ERROR-002");
-  });
-
   test("the message names the function and the alias", () => {
     const r = compileSource(LOGIN("const g = p ? check : id\n        const ok = g(p)"));
     expect(r.messages.join("\n")).toMatch(/'check' \(called through 'g'\)/);
@@ -153,7 +141,6 @@ describe("A2 — values that cannot be a failable function stay clean", () => {
   const shapes = [
     ["a ternary over plain functions", "const g = p ? plain : id\n        const ok = g(p)"],
     ["a returned plain function", "const ok = getP()(p)"],
-    ["the left of `&&` (only tested)", "const g = check && plain\n        const ok = g(p)"],
     ["a call RESULT is not the function", "const r = check(p) !{ .Denied :> false }\n        const ok = r"],
     ["a parameter shadowing the name", "const t = (check) => check(1)\n        const ok = t(plain)"],
   ];
@@ -172,23 +159,8 @@ describe("A2 — values that cannot be a failable function stay clean", () => {
 const PLAIN_DENY = "    function plainDeny(p) { return AuthErr::Denied }";
 
 describe("B — handled through an alias / returned function: executed", () => {
-  test("`g(p) !{ … }` through a ternary alias", async () => {
-    await expectRejectsWrong("const g = p ? check : id\n        const ok = g(p) !{ .Denied :> false }");
-  });
-  test("`getF()(p) !{ … }`", async () => {
-    await expectRejectsWrong("const ok = getF()(p) !{ .Denied :> false }");
-  });
   test("`match g(p)` through `const g = check` (was: compiled and LOGGED IN)", async () => {
     await expectRejectsWrong("const g = check\n        const ok = match g(p) { .Denied :> false  _ :> true }");
-  });
-  test("`match g(p)` through a const ternary both of whose arms are failable", async () => {
-    await expectRejectsWrong("const g = p == \"\" ? check : check\n        const ok = match g(p) { .Denied :> false  _ :> true }");
-  });
-  test("`match getF()(p)` (every return of getF is a failable function)", async () => {
-    await expectRejectsWrong("const ok = match getF()(p) { .Denied :> false  _ :> true }");
-  });
-  test("`match mk()(p)` with `const mk = () => check`", async () => {
-    await expectRejectsWrong("const mk = () => check\n        const ok = match mk()(p) { .Denied :> false  _ :> true }");
   });
   test("a statement-position `match g(p)` through `const g = check`", async () => {
     await expectRejectsWrong("const g = check\n        let ok = false\n        match g(p) {\n            .Denied :> { ok = false }\n            _ :> { ok = true }\n        }");
@@ -255,11 +227,10 @@ describe("C1 — a callee that MAY be a plain function is not provably failable:
     ["a ternary alias over a plain function", "const g = p == \"wrong\" ? plainDeny : check\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
     ["a `||` alias", "const g = plainDeny || check\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
     ["a ternary callee", "const ok = match (p == \"wrong\" ? plainDeny : check)(p) { .Denied :> false  _ :> true }"],
-    ["a returned function that may be plain", "const ok = match getQ(p)(p) { .Denied :> false  _ :> true }"],
     ["a `let` alias written again", "let g = check\n        if (p == \"wrong\") { g = plainDeny }\n        const ok = match g(p) { .Denied :> false  _ :> true }"],
     ["statement position", "const g = p == \"wrong\" ? plainDeny : check\n        let ok = false\n        match g(p) { .Denied :> { ok = false }  _ :> { ok = true } }"],
   ];
-  const pre = PLAIN_DENY + "\n    function getQ(q) { if (q == \"wrong\") { return plainDeny }\n        return check }";
+  const pre = PLAIN_DENY;
   for (const [label, decl] of shapes) {
     test(label, () => {
       expect(codesOf(decl, pre)).toContain("E-ERROR-002");
@@ -271,8 +242,8 @@ describe("C1 — a callee that MAY be a plain function is not provably failable:
     expect(r.messages.join("\n")).toMatch(/subject of a 'match', but the function called there may also be one that is not failable/);
   });
 
-  test("a §18.19 multi-scrutinee head keeps its rule (its lowering reads each value's own variant)", async () => {
-    await expectRejectsWrong("const g = p == \"wrong\" ? plainDeny : check\n        const ok = match (g(p), 1) { (.Denied, _) :> false  _ :> true }", PLAIN_DENY);
+  test("a §18.19 multi-scrutinee head over such an alias: refused (the alias reads `check` as a value)", () => {
+    expect(codesOf("const g = p == \"wrong\" ? plainDeny : check\n        const ok = match (g(p), 1) { (.Denied, _) :> false  _ :> true }", PLAIN_DENY)).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   });
 });
 
@@ -348,28 +319,24 @@ describe("C3 — server function (F3): an operator-widened subject is refused at
 });
 
 // ---------------------------------------------------------------------------
-// D — F5: function facts are judged BY BINDING, never by name across the file
+// D — (was F5, by-binding return facts) S469 fix round 2: what a function RETURNS is not analysed.
+// A `return` that could yield a failable function is itself refused (E-IMPL1-FAILABLE-FN-VALUE),
+// so no accepted program returns one; a plain returned function stays clean.
 // ---------------------------------------------------------------------------
 
-describe("D — a function's returns are judged where it is declared (F5)", () => {
-  test("the review's shape: a local plain `getF` is clean while another function's nested `getF` returns check", () => {
-    expect(codesOf(
-      "function getF2() { return plain }\n        const ok = getF2()(p)",
-      "    function other() { function getF2() { return check }\n        return getF2()(\"x\") !{ _ :> false } }")).toEqual([]);
+describe("D — returning a failable function is refused; returning a plain one is clean", () => {
+  test("a local function returning check", () => {
+    expect(codesOf("function getF2() { return check }\n        const ok = getF2()(p)")).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   });
-  test("a local `getF` returning check is still E-ERROR-002 when called unhandled", () => {
-    expect(codesOf(
-      "function getF2() { return check }\n        const ok = getF2()(p)",
-      "    function other() { function getF2() { return plain }\n        return getF2()(\"x\") }")).toContain("E-ERROR-002");
+  test("a nested function elsewhere returning check is refused where it is written", () => {
+    expect(codesOf("function getF2() { return plain }\n        const ok = getF2()(p)",
+      "    function other() { function getF2() { return check }\n        return getF2()(\"x\") !{ _ :> false } }")).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   });
-  test("a local `getF` used before its declaration (hoisted) is judged by that declaration", () => {
-    expect(codesOf(
-      "const ok = getF2()(p)\n        function getF2() { return plain }",
-      "    function other() { function getF2() { return check }\n        return getF2()(\"x\") !{ _ :> false } }")).toEqual([]);
+  test("a local plain getF is clean", () => {
+    expect(codesOf("function getF2() { return plain }\n        const ok = getF2()(p)")).toEqual([]);
   });
-  test("a local shadow of a failable name declared later is not provable: refused in a match subject", () => {
-    expect(codesOf(
-      "function getF2() { return check }\n        const ok = match getF2()(p) { .Denied :> false  _ :> true }\n        const check = plain")).toContain("E-ERROR-002");
+  test("a returned plain function (top level) is clean", () => {
+    expect(codesOf("const ok = getP()(p)")).toEqual([]);
   });
 });
 
@@ -409,14 +376,82 @@ describe("E — termination on a cyclic call graph (S469 hang)", () => {
     expect(Date.now() - t).toBeLessThan(10000);
   }, 30000);
 
-  test("a failable function reachable only THROUGH the cycle is still found (fail closed)", () => {
+  test("a failable function reachable only THROUGH the cycle: refused at its `return` (fail closed)", () => {
     const extra = CYCLE_FNS + "    function login(p) { const ok = getB(1)(p)\n        return ok }\n";
-    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-fail").codes).toContain("E-ERROR-002");
+    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-fail").codes).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   }, 30000);
 
   test("a cycle never makes a match subject provable (refused)", () => {
     const extra = CYCLE_FNS
       + "    function login(p) { const ok = match getB(1)(p) { .Denied :> false  _ :> true }\n        return ok }\n";
-    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-match").codes).toContain("E-ERROR-002");
+    expect(compileSource(recursiveCallGraph(6, extra), "cyclic-match").codes).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   }, 30000);
+});
+
+// ---------------------------------------------------------------------------
+// F — S469 fix round 2 (F4; ruling:user-voice-scrml.md S469 "Split + audit"). The LANGUAGE lets a
+// failable function be used as a value (§19.4.3); impl#1 cannot follow such a value to its call,
+// so it refuses every read outside callee position except a `const` alias by name
+// (E-IMPL1-FAILABLE-FN-VALUE — an impl#1 limitation). These shapes compiled and LOGGED IN on a
+// wrong password before (pack KNOWN_FAIL VALUE).
+// ---------------------------------------------------------------------------
+
+describe("F — a failable function read as a value is E-IMPL1-FAILABLE-FN-VALUE", () => {
+  const shapes = [
+    ["passed as an argument", "const apply = (f, x) => f(x)\n        const ok = apply(check, p)"],
+    ["a `.map` callback", "const ok = [p].map(check)[0]"],
+    ["an identity wrapper", "const id2 = (f) => f\n        const ok = id2(check)(p)"],
+    ["returned from an arrow", "const mk = () => check\n        const ok = mk()(p)"],
+    ["returned from a function", "function mk() { return check }\n        const ok = mk()(p)"],
+    ["a ternary alias", "const g = p ? check : id\n        const ok = g(p)"],
+    ["a `let` alias", "let g = check\n        const ok = g(p)"],
+    ["an alias READ as a value", "const g = check\n        const ok = [p].map(g)[0]"],
+    ["an object member", "const o = { f: check }\n        const ok = true"],
+    ["a destructuring default", "const { g = check } = {}\n        const ok = g(p)"],
+    ["a parameter default", "const t = (q, f = check) => f(q)\n        const ok = t(p)"],
+    ["a closure write", "let g = id\n        const set = () => { g = check }\n        set()\n        const ok = g(p)"],
+    ["the left of `&&`", "const g = check && plain\n        const ok = g(p)"],
+  ];
+  for (const [label, decl] of shapes) {
+    test(label, () => {
+      expect(codesOf(decl)).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+    });
+  }
+  test("the review's H1 reproducer (a returned function through a cycle) is refused", () => {
+    const pre = "    function A(k) { if (k > 5) return B(k - 1)\n        return check }\n" +
+      "    function B(k) { return A(k + 1) }\n    function R(k) { const t = A(k)\n        return B(k) }";
+    expect(codesOf("const ok = R(1)(p)", pre)).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+  test("the message says it is an impl#1 limitation, not a language rule", () => {
+    const r = compileSource(LOGIN("const ok = [p].map(check)[0]"));
+    expect(r.messages.join("\n")).toMatch(/limitation of this compiler \(impl#1\), not a language rule/);
+  });
+});
+
+describe("F1 — a `const` alias (the one accepted read) is checked in an event handler too", () => {
+  // Accepted on HEAD 00363bc75: the handler checks read the callee by NAME.
+  const pre = "    const h = check";
+  test("`onclick=h(\"wrong\")` is E-ERROR-002", () => {
+    expect(compileSource(LOGIN("const ok = false", pre).replace('onclick=login("wrong")', 'onclick=h("wrong")')).codes).toContain("E-ERROR-002");
+  });
+  test("the bare reference `onclick=h` is E-ERROR-002", () => {
+    expect(compileSource(LOGIN("const ok = false", pre).replace('onclick=login("wrong")', "onclick=h")).codes).toContain("E-ERROR-002");
+  });
+  test("handled with `!{}` it compiles", () => {
+    expect(compileSource(LOGIN("const ok = false", pre).replace('onclick=login("wrong")', 'onclick={ h("wrong") !{ .Denied :> @msg = "rejected" } }')).codes).toEqual([]);
+  });
+});
+
+describe("F2 — accepted: a call, a `const` alias, a shadowing name, a plain function value", () => {
+  const shapes = [
+    ["a `const` alias, handled at the call", "const g = check\n        const ok = g(p) !{ .Denied :> false }"],
+    ["an alias of an alias", "const g = check\n        const h = g\n        const ok = h(p) !{ .Denied :> false }"],
+    ["a parameter shadowing the name", "const t = (check) => check(1)\n        const ok = t(plain)"],
+    ["a plain function as a value", "const ok = [p].map(plain)[0]"],
+  ];
+  for (const [label, decl] of shapes) {
+    test(label, () => {
+      expect(codesOf(decl)).toEqual([]);
+    });
+  }
 });

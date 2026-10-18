@@ -107,6 +107,14 @@ export interface FailableCallCandidate {
    * (S468 fix round 1): the match cannot discriminate its error, so it does not handle the call.
    */
   matchSubjectNotProvable?: boolean;
+  /**
+   * S469 fix round 2 (F4, ruling "Split + audit") — not a call: a READ of a failable function as a
+   * value outside callee position (`apply(check)`, `return check`, `p ? check : id`, `{ check }`).
+   * impl#1 cannot follow such a value to its eventual call, so it refuses the read
+   * (E-IMPL1-FAILABLE-FN-VALUE — an impl#1 limitation, not the language rule). The one read it
+   * accepts is a `const` alias of the function (`const g = check`), which it does follow.
+   */
+  fnValueRead?: boolean;
 }
 
 export type RootHandling =
@@ -497,7 +505,19 @@ class Walker {
         return;
       }
       case "escape-hatch": this.escapeHatch(node as unknown as Record<string, unknown>, scope, fn); return;
-      case "ident": case "sql-ref": case "input-state-ref": case "markup-value": return;
+      case "ident": {
+        // A bare name in a value position (a callee by bare name never reaches here — `report`
+        // handles it above): a read of the function as a VALUE when it may be a failable one.
+        if (typeof node.name === "string") {
+          const target = resolveName(node.name, scope, this.env);
+          if (target !== null) {
+            this.cb({ call: null, calleeName: target, via: target === node.name ? null : node.name,
+              inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fnValueRead: true });
+          }
+        }
+        return;
+      }
+      case "sql-ref": case "input-state-ref": case "markup-value": return;
       case "array": for (const el of node.elements) this.expr(el as ExprNode, scope, fn); return;
       case "object":
         for (const p of node.props) {
@@ -627,7 +647,7 @@ class Walker {
     }
   }
 
-  patternDefaults(pat: unknown, scope: LocalScope, fn: FnCtx): void {
+  patternDefaults(pat: unknown, scope: LocalScope | null, fn: FnCtx): void {
     const seen = new WeakSet<object>();
     const go = (v: unknown): void => {
       if (!v || typeof v !== "object" || seen.has(v as object)) return;
@@ -688,14 +708,9 @@ class Walker {
         }
       }
     }
-    // A local function that returns a failable function: calling it yields one (hoisted, like the name).
-    for (const s of stmts) {
-      const st = s as Record<string, unknown> | null;
-      if (!st || typeof st !== "object" || st.kind !== "function-decl" || typeof st.name !== "string") continue;
-      const ret = failableFnReturnedByDecl(st, block, this.env);
-      if (ret.may !== null) block.returns.set(st.name, ret.may);
-      if (ret.exact !== null) block.exactReturns.set(st.name, ret.exact);
-    }
+    // (S469 fix round 2 — what a LOCAL function declaration returns is no longer analysed: a
+    // `return` that could yield a failable function is itself refused, E-IMPL1-FAILABLE-FN-VALUE;
+    // see type-system.ts `fnFactsReturns`.)
     for (const s of stmts) if (s && typeof s === "object") this.statement(s as Record<string, unknown>, block, fn, handling);
   }
 
@@ -863,9 +878,15 @@ class Walker {
         // A bare-expr kept only as text (an `on mount { }` body, a bare `{ … }` block): its
         // statements are read below.
         if (kind === "bare-expr" && isParseErrorHatch(root) && typeof st.expr === "string") continue;
+        // S469 fix round 2 (F4) — the one value read of a failable function impl#1 accepts: a
+        // `const` alias of it by name (`const g = check`), which the walk follows (recordAlias).
+        if (kind === "const-decl" && key === "initExpr" && root.kind === "ident") continue;
         this.root(root, h, scope, fn);
       }
     }
+    // S469 fix round 2 (F4) — a destructuring declaration's pattern (`const { g = check } = o`)
+    // carries its defaults as expressions under `name`: they are values like any other.
+    if (DECL_KINDS.has(kind) && st.name && typeof st.name === "object") this.patternDefaults(st.name, scope, fn);
     // Text-only: a multi-statement `on mount` body carries no exprNode; a bare `{ … }` block (or
     // any statement text the expression parser could not read) carries a parse-error hatch.
     const textOnly = st._onMountEffect === true ? !st.exprNode || isParseErrorHatch(st.exprNode) : isParseErrorHatch(st.exprNode);
@@ -936,11 +957,6 @@ function failableFnReturnedByBody(
   return facts;
 }
 
-function failableFnReturnedByDecl(st: Record<string, unknown>, scope: LocalScope | null, env: FailableEnv): ReturnFacts {
-  if (!Array.isArray(st.body)) return NO_RETURNS;
-  return failableFnReturnedByBody(st, st.params, st.body as unknown[], st.fnKind === "fn", scope, env);
-}
-
 /**
  * What a CALL of `value` returns (`ReturnFacts`), when `value` is itself a function (or names one):
  * an arrow whose body may yield one, a name whose call may, either side of a choice. Provable
@@ -990,16 +1006,6 @@ function lambdaOrValueReturns(
     case "cast": return lambdaOrValueReturns(value.expression, scope, env, lk, depth + 1);
     default: return NO_RETURNS;
   }
-}
-
-/**
- * What a function declaration returns (`ReturnFacts`) — for the caller's binding facts
- * (`env.resolveOuterReturns` / `env.resolveOuterReturnsExact`). The caller roots `env` at the
- * scope that holds the declaration, so every free name in the body resolves where the function
- * was declared (S468 fix round 1: by binding, never by name across the file).
- */
-export function failableFnReturnedBy(fnDecl: Record<string, unknown>, env: FailableEnv): ReturnFacts {
-  return failableFnReturnedByDecl(fnDecl, null, env);
 }
 
 /**

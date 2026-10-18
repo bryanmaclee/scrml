@@ -279,3 +279,43 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
   `argExprNodes[i]` (rewriteEachScopeInExprNode + emitExprField). Pack n11 += call-form arg + 3 nested containers
   (56 shapes); bite on HEAD's emit-each: 4 FAIL (each, each in each, if in each, each in component). n12 += 5 `export *`
   shapes + imported call-form in a row (16). Pack 226 -> 260 shapes; 0 new FAIL.
+- commit 00363bc75 (H2 + H3; gate 37450 pass / 0 fail). Not pushed yet (an existing-ref push runs the suite on the working
+  tree; pushed after the F4 commit).
+
+## 2026-10-18 — F4 (ruled: ruling:user-voice-scrml.md S469 "Split + audit")
+- SPEC §19.4.3: new paragraph "A failable function used as a value (S469)" — MAY be passed / returned / bound; its
+  failability travels with its TYPE (§19.4.4 "The `!` modifier SHALL be part of the function's type signature"); every
+  eventual call checked. Nominal for impl#1. §19.13 + §34 rows E-IMPL1-FAILABLE-FN-VALUE ("impl#1-only — provisional name,
+  owner's call"); `s34-census --check-new` PASS. Carried-gaps paragraph: the "owed a ruling" clause, the returned-function
+  match-subject clause and the alias-flow clause rewritten; `export *` named.
+- impl#1: failable-value-calls.ts Walker.expr `ident` — a value read of a (may-be) failable function reports a candidate
+  `fnValueRead`; exempt: the whole initializer of a `const` declaration being that ident (the alias it follows);
+  destructuring pattern defaults are now walked (`const { g = check } = {}` was unread). type-system.ts
+  reportUnhandledFailableValueCall emits E-IMPL1-FAILABLE-FN-VALUE (message: an impl#1 limitation, not a language rule);
+  a boundary does not contain it; the handler check-only copy keeps it. Declared component callback props
+  (`<Btn onSave=risky/>`) refused with the same code. `<formFor onsubmit>` and handler references unchanged (S441 rule).
+- Found while doing it: the const alias is now the sanctioned read, but `const h = check` + `onclick=h` / `onclick=h()`
+  compiled on 00363bc75 (the handler checks read the callee by NAME). Both now resolve through the alias
+  (resolveFailableCallee) -> E-ERROR-002. Closes g-failable-handler-indirect-reference-unchecked (cell / member / conditional
+  are refused as value reads). Pack n13; unit F1.
+- Retired (dead by construction — no accepted program returns a failable function): TS `declReturnFacts` + its memo /
+  per-query cache / generation counter (and the soundness comment the re-review refuted); fnFactsReturns /
+  fnFactsReturnsExact read recorded binding facts only; the Walker's local-function returns pass;
+  `failableFnReturnedBy` / `failableFnReturnedByDecl`. L1 (dense 80-fn graph): 1.9 s (re-review: 14.9 s on 5092a14fa).
+- H1 reproducer (A/B/R cycle, `R(1)(p)`): E-IMPL1-FAILABLE-FN-VALUE at `return check` — refused by construction.
+- Pack: 21 VALUE shapes PASS-REFUSED; KNOWN_FAIL empty; 265 shapes, FAIL 0.
+- Tests: s468 unit file restated (shapes now refused moved to section F; fixture `getF` removed — it is refused);
+  F (13 refused shapes + H1 + message), F1 (alias handler), F2 (accepted forms).
+- Conformance: error/handler-failable-reference-component-prop-neg now asserts the SPEC's clean compile (notCodes
+  E-IMPL1-FAILABLE-FN-VALUE) and is an impl1-ts xfail on the carried gap; NEW error/failable-fn-value-passed-handled-neg
+  (a failable fn passed as a value, handled at its call) — impl1-ts xfail. Runner: 1723 pass + 73 xfail of 1796, exit 0.
+- CORPUS (new refusal): every .scrml under examples/ samples/ stdlib/ benchmarks/ conformance/ + ../giti + ../flogence,
+  compiled one by one (2960 files): 3 E-IMPL1-FAILABLE-FN-VALUE sites, ALL conformance fixtures (2 in
+  handler-failable-reference-component-prop-neg, 1 in handler-failable-reference-via-component-prop-pos which already
+  expects E-ERROR-002). **0 real sites newly refused.**
+- M1 filed (HIGH, open): g-match-failable-ok-named-error-variant-reads-as-success-s469 — executed: wrong AND right password
+  LOGGED IN. Locus emitMatchTagDiscriminator. Not fixed (shared by every failable match lowering).
+- Gaps: g-failable-function-used-as-value-unchecked-s468 -> resolved (by refusal), NEW carried
+  g-impl1-failable-fn-value-refused-s469, g-failable-alias-through-operator-or-returned-fn-s467 -> resolved,
+  g-failable-handler-indirect-reference-unchecked -> resolved. Markers kept RESOLVED: handler-attribute (H2 closed, n11 56
+  shapes 0 FAIL) and imported-failable (H3 closed, n12 16 shapes 0 FAIL).

@@ -11,38 +11,15 @@
 // Measured S468 fix round 1 (branch s468-failable-alias-and-match): 24 shapes. For comparison, the
 // same 188 shapes on base 5c43c3b8e: 63 FAIL; on the frozen review head 7ecae57eb: 47 FAIL.
 // S469 (fix round 1, agent 2): 21 of 226 — the HANDLER and SERVER_STMT entries were fixed (deleted;
-// families n11 / n12 added), only the VALUE class (ruling owed) remains.
+// families n11 / n12 added), only the VALUE class (ruling owed) remained.
+// S469 fix round 2: 0 of 260.
 
-// A failable function reaches a call through a value flow the "may be a failable function" judgement
-// does not model (passed as an argument, a callback, a curried / identity-wrapped return, a parameter
-// default, a destructuring default, a closure write, a write after use in a loop). The root refusal
-// (a failable function SHALL NOT be read as a value outside callee position) is OWED A RULING: no SPEC
-// sentence makes the read illegal (§14.3 explicitly lets a function flow PASSED), see the gap entry.
-const VALUE = "g-failable-function-used-as-value-unchecked-s468";
-
-export const KNOWN_FAIL = {
-  "n1/alias in loop (pre)": VALUE,
-  "n1/alias via closure write": VALUE,
-  "n1/alias param default": VALUE,
-  "n1/alias apply (pre)": VALUE,
-  "n1/alias apply lambda": VALUE,
-  "n1/alias map callback": VALUE,
-  "n1/alias filter callback": VALUE,
-  "n1/alias some callback": VALUE,
-  "n1/ret lambda curried": VALUE,
-  "n1/ret fn curried": VALUE,
-  "n1/ret via param identity": VALUE,
-  "n1/ret via param identity alias": VALUE,
-  "n1/ret iife block": VALUE,
-  "n1/ret through apply": VALUE,
-  "n2/expr curried": VALUE,
-  "n2/expr id(check)": VALUE,
-  "n2/expr apply": VALUE,
-  "n7/ret iife fn-expr": VALUE,
-  "n7/closure reassign": VALUE,
-  "n7/alias destructure default": VALUE,
-  "n7/alias param default lambda": VALUE,
-};
+// S469 fix round 2: EMPTY. The 21 VALUE shapes (`g-failable-function-used-as-value-unchecked-s468`) are
+// refused by construction — bryan RULED F4 (ruling:user-voice-scrml.md S469 "Split + audit"): the
+// language lets a failable function be used as a value; impl#1 refuses every read of one outside
+// callee position except a `const` alias by name (E-IMPL1-FAILABLE-FN-VALUE, an impl#1 limitation,
+// carried as `g-impl1-failable-fn-value-refused-s469`).
+export const KNOWN_FAIL = {};
 
 // Shapes this instrument CANNOT judge: client pages with no #wrong button (a client function calling
 // a SERVER `check`; the decision needs the server half run). Listed so the hole is named.

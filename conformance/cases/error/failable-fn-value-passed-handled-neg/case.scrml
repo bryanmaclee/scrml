@@ -1,0 +1,15 @@
+${
+    type LoadError:enum = { Empty }
+    function risky(n)! -> LoadError {
+        if (n < 1) fail LoadError::Empty
+        return n
+    }
+    function applyOr(f, n) {
+        return f(n) !{ .Empty :> 0 }
+    }
+    function total() {
+        return applyOr(risky, 2)
+    }
+}
+
+<p id="out">${total()}</p>

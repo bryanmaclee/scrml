@@ -75,8 +75,8 @@
 import { armStatements } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
-import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableFnReturnedBy, failableBindingFacts } from "./failable-value-calls.ts";
-import type { FailableEnv, FailableCallCandidate, RootHandling, ReturnFacts } from "./failable-value-calls.ts";
+import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
+import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { parseStatementText, textBodiesOf } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
@@ -11071,8 +11071,6 @@ function annotateNodes(
   const fnDeclsByScope = new WeakMap<object, Map<string, ASTNodeLike[]>>();
   const fnDeclScope = new WeakMap<object, Scope>();
   const declaredAheadByScope = new WeakMap<object, Set<string>>();
-  // Bumped on every recorded binding fact (memo key of `declReturnFacts`).
-  let failableFactsGeneration = 0;
   function registerFnDecl(scope: Scope, decl: ASTNodeLike): void {
     ensureTopLevelFnDecls();
     if (typeof decl.name !== "string" || fnDeclScope.has(decl)) return;
@@ -11082,7 +11080,6 @@ function annotateNodes(
     list.push(decl);
     m.set(decl.name, list);
     fnDeclScope.set(decl, scope);
-    failableFactsGeneration++;
   }
   /** A function body's scope: register its direct declarations (hoisted) and every name it declares. */
   function registerFnBodyScope(scope: Scope, body: unknown): void {
@@ -16131,6 +16128,23 @@ function annotateNodes(
     // is keyed by NAME, so an `<each in=@fns as risky>` row's `onclick=risky()`
     // would otherwise be taken for the file's failable `risky` (S440 F7).
     if (bareCallee && handlerCheckDepth > 0 && isShadowedByLocalBinding(bareCallee)) return;
+    // S469 fix round 2 (F4) — a `const` alias of a failable function is the one value read
+    // impl#1 accepts, so a handler that calls it (`const h = check` + `onclick=h()`) is a call of
+    // that function: judged by the alias, not by the name (it compiled and logged in before).
+    if (bareCallee && handlerCheckDepth > 0 && !fnCanFail.has(bareCallee) && !inGuarded) {
+      const aliased = resolveFailableCallee(bareCallee);
+      if (aliased !== null && !fnCpsImplicitFailable.has(aliased)) {
+        errors.push(new TSError(
+          "E-ERROR-002",
+          `E-ERROR-002: Result of failable function '${aliased}' (called through '${bareCallee}') is not handled ` +
+          `in this event handler. Catch it with '!{}' (e.g. '${bareCallee}(…) !{ | .Variant :> … }'), match the ` +
+          `result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised ` +
+          `in event handlers (§19.6.6).`,
+          n.span as Span,
+        ));
+        return;
+      }
+    }
     if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
       if (fnCpsImplicitFailable.has(bareCallee)) {
         if (!enclosingFnCanFail) {
@@ -16273,38 +16287,30 @@ function annotateNodes(
     return null;
   }
 
-  /** The failable function a CALL of `name` may return (fail closed). */
+  /**
+   * The failable function a CALL of `name` may return — from a recorded binding fact only
+   * (`const mk = () => check` is recorded, and refused at its `check` read).
+   *
+   * S469 fix round 2 (F4, ruling:user-voice-scrml.md S469 "Split + audit") — what a function
+   * DECLARATION returns is no longer analysed. impl#1 refuses every read of a failable function
+   * as a value outside callee position except a `const` alias by name
+   * (E-IMPL1-FAILABLE-FN-VALUE), so a `return` that could yield one (`return check`, `return g`,
+   * `return c ? check : id`) is itself refused: in an ACCEPTED program no declared function
+   * returns a failable function, and the analysis could only add diagnostics to a program that
+   * is already refused. It is retired with its cost and its flaw — the S468/S469 cycle handling
+   * (`declReturnFacts`) was exponential on recursive call graphs before S469 and, after the
+   * per-query cache, could memoize a partial result read through a path that did not run
+   * through the in-progress declaration (review of 5092a14fa, H1/L1). Nothing replaces it.
+   */
   function fnFactsReturns(name: string, from: Scope = scopeChain.current): string | null {
     const r = resolveFnBinding(name, from, false);
-    switch (r.k) {
-      case "alias": return failableReturnsByScope.get(r.scope)?.get(name) ?? null;
-      case "decl": {
-        for (const d of r.decls) {
-          const f = declReturnFacts(d, r.scope);
-          if (f.may !== null) return f.may;
-        }
-        return null;
-      }
-      case "shadow": return null;
-      default: {
-        // Nothing binds it here (e.g. a block-level declaration used before it): any
-        // declaration of that name in the file, judged where it was declared — fail closed.
-        for (const d of allFnDecls) {
-          if (d.name !== name) continue;
-          const f = declReturnFacts(d, fnDeclScope.get(d) ?? scopeChain.global);
-          if (f.may !== null) return f.may;
-        }
-        return null;
-      }
-    }
+    return r.k === "alias" ? failableReturnsByScope.get(r.scope)?.get(name) ?? null : null;
   }
 
-  /** The failable functions a CALL of `name` PROVABLY returns, or null. */
+  /** The failable functions a CALL of `name` PROVABLY returns (recorded binding facts only), or null. */
   function fnFactsReturnsExact(name: string, from: Scope = scopeChain.current): string[] | null {
     const r = resolveFnBinding(name, from, true);
-    if (r.k === "alias") return failableExactReturnsByScope.get(r.scope)?.get(name) ?? null;
-    if (r.k === "decl") return r.decls.length === 1 ? declReturnFacts(r.decls[0], r.scope).exact : null;
-    return null;
+    return r.k === "alias" ? failableExactReturnsByScope.get(r.scope)?.get(name) ?? null : null;
   }
 
   /** The failable function a callee name may be, from the live scope (S467 r2 name). */
@@ -16320,68 +16326,6 @@ function annotateNodes(
       scope = scope.parent;
     }
     return scopeChain.global;
-  }
-
-  /**
-   * S468 fix round 1 (F5) — what a function DECLARATION returns, judged where it is
-   * declared: every free name in its body resolves from `root` (the scope that holds
-   * the declaration), never by name across the file — a nested `function getF()` in
-   * one function does not decide what an unrelated `getF` returns. Memoized per
-   * declaration while the bindings visible from `root` and the recorded binding facts
-   * are unchanged; a recursive reference reads "nothing", and a result computed
-   * through one is not memoized across queries.
-   *
-   * S469 (the hang): each declaration is evaluated AT MOST ONCE per top-level query
-   * (`declFactsQuery`). Without it, a result computed through a cycle was recomputed
-   * every time any path reached it, so a recursive-descent module (the bootstrap's
-   * `parse.scrml`, reached from `link.scrml`: dozens of mutually recursive `fn`s that
-   * `return` each other's calls) re-walked every SIMPLE PATH of its return-call graph
-   * — exponential time and memory; the pre-commit gate ran 49 min / 24 GB in
-   * `bootstrap-conformance-counter`. Reusing a cycle-dependent result inside the same
-   * query is sound: a cycle-dependent result lacks only what flows through a
-   * declaration still in progress, and that declaration's own evaluation adds it
-   * (DFS reachability); a reader of such an entry is marked cycle-dependent too, so
-   * it is never memoized beyond the query either.
-   */
-  const declFactsInProgress = new Set<object>();
-  let declFactsCycleHit = false;
-  const declFactsMemo = new WeakMap<object, { sig: string; facts: ReturnFacts }>();
-  let declFactsQuery: Map<object, { facts: ReturnFacts; cyclic: boolean }> | null = null;
-  function declReturnFacts(decl: ASTNodeLike, root: Scope): ReturnFacts {
-    if (declFactsInProgress.has(decl)) { declFactsCycleHit = true; return { may: null, exact: null }; }
-    const inQuery = declFactsQuery?.get(decl);
-    if (inQuery) { if (inQuery.cyclic) declFactsCycleHit = true; return inQuery.facts; }
-    let size = 0;
-    for (let s: Scope | null = root; s !== null; s = s.parent) size += s.bindings.size;
-    const sig = `${size}:${failableFactsGeneration}`;
-    const memo = declFactsMemo.get(decl);
-    if (memo && memo.sig === sig) return memo.facts;
-    const topLevel = declFactsQuery === null;
-    if (topLevel) declFactsQuery = new Map();
-    const outerCycle = declFactsCycleHit;
-    declFactsCycleHit = false;
-    declFactsInProgress.add(decl);
-    let facts: ReturnFacts;
-    try {
-      const rooted: FailableEnv = {
-        ...failableEnv,
-        onFailableMatchSubject: undefined,
-        resolveOuter: (n) => fnFactsIs(n, root),
-        resolveOuterReturns: (n) => fnFactsReturns(n, root),
-        resolveOuterExact: (n) => fnFactsIsExact(n, root),
-        resolveOuterReturnsExact: (n) => fnFactsReturnsExact(n, root),
-      };
-      facts = failableFnReturnedBy(decl as Record<string, unknown>, rooted);
-    } finally {
-      declFactsInProgress.delete(decl);
-      if (topLevel) declFactsQuery = null;
-    }
-    if (!topLevel) declFactsQuery!.set(decl, { facts, cyclic: declFactsCycleHit });
-    // The query's root is complete once it returns (nothing else is in progress), so its
-    // result is memoized even when a cycle was met on the way.
-    if (topLevel || !declFactsCycleHit) declFactsMemo.set(decl, { sig, facts });
-    declFactsCycleHit = outerCycle || declFactsCycleHit;
-    return facts;
   }
 
   /**
@@ -16485,7 +16429,9 @@ function annotateNodes(
     // the parsers that build it (a re-parsed interpolation starts at 1:1).
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
-      if (renderTimeInBoundary && !c.inFunction) return;
+      // A boundary contains render-time CALLS (§19.6.6); a failable function read as a value is
+      // not a call it can contain (S469 F4).
+      if (renderTimeInBoundary && !c.inFunction && c.fnValueRead !== true) return;
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // A binding that may hold a failable function — `const g = check`, `p ? check : id`,
@@ -16531,13 +16477,11 @@ function annotateNodes(
             let m = failableAliasesByScope.get(owner);
             if (!m) { m = new Map(); failableAliasesByScope.set(owner, m); }
             m.set(name, facts.is);
-            failableFactsGeneration++;
           }
           if (returns !== null) {
             let m = failableReturnsByScope.get(owner);
             if (!m) { m = new Map(); failableReturnsByScope.set(owner, m); }
             m.set(name, returns);
-            failableFactsGeneration++;
           }
           if (isExact !== null) {
             let m = failableExactByScope.get(owner);
@@ -16612,7 +16556,7 @@ function annotateNodes(
       }
       const span = (attr.span ?? value.span ?? n.span) as Span;
       const onCall = (c: FailableCallCandidate): void => {
-        if (renderTimeInBoundary && !c.inFunction) return;
+        if (renderTimeInBoundary && !c.inFunction && c.fnValueRead !== true) return;
         reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, false);
       };
       if (value.kind === "call-ref" && typeof value.name === "string") {
@@ -16633,6 +16577,22 @@ function annotateNodes(
     c: FailableCallCandidate, span: Span, enclosingFnCanFail: boolean, inDefer: boolean,
   ): void {
     const calleeName = c.calleeName;
+    if (c.fnValueRead === true) {
+      // S469 fix round 2 (F4) — ruling:user-voice-scrml.md S469 "Split + audit": the LANGUAGE
+      // lets a failable function be used as a value (§19.4.3 — its failability travels with its
+      // type, so every eventual call is checked); impl#1 cannot follow such a value to its call,
+      // so it refuses the read. An impl#1 limitation, said so plainly; not the language rule.
+      const named = c.via ? `'${calleeName}' (through '${c.via}')` : `'${calleeName}'`;
+      errors.push(new TSError(
+        "E-IMPL1-FAILABLE-FN-VALUE",
+        `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function used as a value: ${named} ` +
+        `is read here other than as a call. This is a limitation of this compiler (impl#1), not a ` +
+        `language rule — scrml allows it. Call it directly, alias it with 'const' ` +
+        `('const g = ${calleeName}'), or handle it at the call with '!{}'.`,
+        span,
+      ));
+      return;
+    }
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
     if (inDefer) {
       errors.push(new TSError(
@@ -17050,7 +17010,7 @@ function annotateNodes(
         });
         scopeChain.pop();
         const produced = errors.splice(before);
-        for (const e of produced) if (e && e.code === "E-ERROR-002") errors.push(e);
+        for (const e of produced) if (e && (e.code === "E-ERROR-002" || e.code === "E-IMPL1-FAILABLE-FN-VALUE")) errors.push(e);
       }
       // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — the walk
       // above reads a CHECK-ONLY re-parse of the value, so the `match` stamps it applies land
@@ -17115,12 +17075,31 @@ function annotateNodes(
             ? (parentRec._componentPropNames as unknown[])
             : null;
           const isDeclaredComponentProp = !!declaredProps && declaredProps.includes(attr.name);
+          // S469 fix round 2 (F4) — a failable function handed to a component as a declared
+          // callback prop (`<Btn onSave=risky/>`) is a function VALUE: the language allows it
+          // (§19.4.3), but impl#1 cannot verify the component's call of it, so it refuses it
+          // (E-IMPL1-FAILABLE-FN-VALUE). Only the call site of an EXPANDED component is judged
+          // here once: the prop attribute merged onto its root.
+          // S469 fix round 2 — the reference judged by what it names: a failable function, or a
+          // `const` alias of one (`const h = check` + `onclick=h`), the one value read impl#1 follows.
+          const refTarget = refName ? (fnCanFail.has(refName) ? refName : resolveFailableCallee(refName)) : null;
+          if (refName && refTarget !== null && isDeclaredComponentProp && parentTag !== "formFor"
+              && !isShadowedByLocalBinding(refName)) {
+            errors.push(new TSError(
+              "E-IMPL1-FAILABLE-FN-VALUE",
+              `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function used as a value: '${refName}' ` +
+              `is passed to a component as its '${attr.name as string}' prop. This is a limitation of this ` +
+              `compiler (impl#1), not a language rule — scrml allows it. Pass a function that handles the ` +
+              `call (e.g. one that calls '${refName}(…) !{ … }'), or call it directly in the component.`,
+              (valueSpan ?? attr.span) as Span,
+            ));
+          }
           if (
             refName
+            && refTarget !== null
             && !isDeclaredComponentProp
             && parentTag !== "formFor"
-            && fnCanFail.has(refName)
-            && !fnCpsImplicitFailable.has(refName)
+            && !fnCpsImplicitFailable.has(refTarget)
           ) {
             // Inside an expanded component, a handler that wires a callback PROP
             // as its raw reference (`onclick=onSave`) was substituted with the
