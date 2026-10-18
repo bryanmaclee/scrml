@@ -3946,6 +3946,11 @@ export function generateHtml(
 
     // For logic blocks embedded in markup, emit a placeholder span for client JS
     if (node.kind === "logic") {
+      // S468 (§19.6.6) — a `${}` block inside an `<errorBoundary>` subtree: record
+      // the enclosing boundaries (outermost first) so emit-reactive-wiring runs the
+      // block's statements inside their catch (emit-boundary-logic.ts). collect.ts
+      // carries the stamp to each child statement, as it does `_placeholderId`.
+      if (boundaryStack.length > 0) (node as any)._errorBoundaryChain = boundaryStack.slice();
       // ss15 item-2 (S214) -- DEFAULT-LOGIC-MODE GUARD.
       //
       // A logic node whose enclosing markup parent is <program>/<page>/<channel>
@@ -4204,6 +4209,11 @@ export function generateHtml(
             // guard (if any) so emit-event-wiring gates this interpolation's
             // effect on the same predicate as the toggle.
             const ifg = ifGuardStack.length > 0 ? ifGuardStack[ifGuardStack.length - 1] : null;
+            // S468 (§19.6.6) — this interpolation is rendered by the boundary's render
+            // function, under its catch (emit-event-wiring.ts). emit-reactive-wiring
+            // reads the mark to skip the module-init re-evaluation of one that holds a
+            // boundary-handled `!` call (it would run that call outside the slot's catch).
+            if (eb) (child as any)._boundaryRendered = true;
             registry.addLogicBinding(eb
               ? {
                   placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs,

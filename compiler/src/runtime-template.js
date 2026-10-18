@@ -4182,6 +4182,75 @@ function _scrml_error_boundary_uncaught(envelope) {
 }
 
 // ---------------------------------------------------------------------------
+// §19.6.6 errorBoundary render-time call check (chunk: 'boundary')
+// A render-time '!' call inside a boundary RETURNS its error. The
+// compiler wraps each such call: a success passes through; an error envelope is
+// raised (an Error carrying it on '.scrmlError', as above) so the rest of the
+// render stops and the boundary's catch gets the TYPED failure. A Promise result
+// (an asynchronous call — a server call, which is not allowed while rendering,
+// §13.7) has no value to test yet: it is refused as a host error, so the boundary
+// shows its fallback and nothing reads the Promise as a success.
+function _scrml_error_boundary_check(result) {
+  if (result && typeof result === "object") {
+    if (result.__scrml_error) {
+      var e = new Error("scrml errorBoundary: render-time call failed with " +
+        (result.type || "Error") + "::" + (result.variant || "?"));
+      e.scrmlError = result;
+      throw e;
+    }
+    if (typeof result.then === "function") {
+      result.then(null, function (err) { _scrml_error_boundary_log("render-time async call", err); });
+      throw new Error("scrml errorBoundary: an asynchronous call cannot be checked while rendering (§13.7)");
+    }
+  }
+  return result;
+}
+
+// A variant's 'renders' / the 'fallback=' markup interpolates payload values as
+// TEXT: HTML-escaped before the markup is written with innerHTML.
+function _scrml_error_boundary_text(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
+    return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;";
+  });
+}
+
+// The typed failure a caught value carries, or null for a host throw (§19.6.8 B1).
+function _scrml_error_boundary_failure(err) {
+  var env = err && typeof err === "object" ? err.scrmlError : null;
+  return env && typeof env === "object" && env.__scrml_error ? env : null;
+}
+
+// §19.6.6 — run a boundary's render-time statements (module-init code) inside
+// its catch. display(envelope) returns the HTML to show (variant renders, else
+// fallback) or null: the boundary cannot show it, so propagate (§19.6.8 B3).
+function _scrml_error_boundary_run(boundaryId, body, display) {
+  try {
+    body();
+  } catch (err) {
+    var envelope = _scrml_error_boundary_failure(err);
+    var html = display(envelope);
+    if (html === null) throw err;
+    _scrml_error_boundary_log(boundaryId, envelope || err);
+    _scrml_error_boundary_show(boundaryId, html);
+  }
+}
+
+// Replace a boundary's content. Before the document is parsed, wait for
+// DOMContentLoaded (this listener precedes the page's boot listener, so the
+// boundary's own interpolations then find no slot to render into).
+function _scrml_error_boundary_show(boundaryId, html) {
+  var doc = _scrml_g.document;
+  if (!doc) return;
+  var sel = '[data-scrml-error-boundary="' + boundaryId + '"]';
+  var el = doc.querySelector(sel);
+  if (el) { el.innerHTML = html; return; }
+  doc.addEventListener("DOMContentLoaded", function () {
+    var later = doc.querySelector(sel);
+    if (later) later.innerHTML = html;
+  }, { once: true });
+}
+
+// ---------------------------------------------------------------------------
 // §35.1 Global input state registry — maps user-supplied id → state object
 // ---------------------------------------------------------------------------
 

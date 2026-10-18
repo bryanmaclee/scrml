@@ -2400,26 +2400,70 @@ export function call(route, args, task) {
       settle(malformed("the request could not be encoded"));
       return;
     }
-    let pending;
-    try {
-      const init = { method: "POST", headers: { "Content-Type": "application/json" }, body };
-      if (controller) init.signal = controller.signal;
-      pending = globalThis.fetch(route.path, init);
-    } catch {
-      settle(unreachable());
-      return;
-    }
-    Promise.resolve(pending).then(
-      (resp) => {
-        let status;
-        try { status = resp.status; } catch { settle(unreachable()); return; }
-        Promise.resolve()
-          .then(() => resp.text())
-          .then((text) => settle(classifySafely(route, status, text)), () => settle(unreachable()));
-      },
-      () => settle(unreachable()),
-    );
+    // s468 (U1c) — §39.2.3 baseline double-submit CSRF: every request carries the
+    // `scrml_csrf` cookie's value as `X-CSRF-Token` (the server compares the two).
+    // A request made before the cookie exists is refused (403, not an envelope)
+    // with a cookie planted to retry with: the call is retried ONCE with it, and
+    // only the final answer is classified (U1b design Item 3.2 "if it does, the
+    // retry is inside rt.call"). No retry when the token did not change.
+    const send = (attempt) => {
+      const tok = csrfToken();
+      const headers = { "Content-Type": "application/json" };
+      if (tok !== "") headers[CSRF_HEADER] = tok;
+      let pending;
+      try {
+        const init = { method: "POST", headers, body };
+        if (controller) init.signal = controller.signal;
+        pending = globalThis.fetch(route.path, init);
+      } catch {
+        settle(unreachable());
+        return;
+      }
+      Promise.resolve(pending).then(
+        (resp) => {
+          let status;
+          try { status = resp.status; } catch { settle(unreachable()); return; }
+          Promise.resolve()
+            .then(() => resp.text())
+            .then((text) => {
+              if (settled) return;
+              if (attempt === 0 && status === 403 && !isErrorEnvelopeText(text)) {
+                const fresh = csrfToken();
+                if (fresh !== "" && fresh !== tok) { send(1); return; }
+              }
+              settle(classifySafely(route, status, text));
+            }, () => settle(unreachable()));
+        },
+        () => settle(unreachable()),
+      );
+    };
+    send(0);
   });
+}
+
+// s468 (U1c): the double-submit pair (server-runtime.js checks it).
+export const CSRF_COOKIE = "scrml_csrf";
+export const CSRF_HEADER = "X-CSRF-Token";
+
+// The `scrml_csrf` cookie's value ("" — none, or no document).
+function csrfToken() {
+  const d = globalThis.document;
+  if (!d) return "";
+  let jar;
+  try { jar = String(d.cookie ?? ""); } catch { return ""; }
+  for (const part of jar.split(";")) {
+    const i = part.indexOf("=");
+    if (i < 0) continue;
+    if (part.slice(0, i).trim() === CSRF_COOKIE) {
+      try { return decodeURIComponent(part.slice(i + 1).trim()); } catch { return ""; }
+    }
+  }
+  return "";
+}
+
+function isErrorEnvelopeText(text) {
+  const j = parseJson(text);
+  return j.ok && isErrorEnvelope(j.value);
 }
 
 // s454 fix round F1 — `classify` throws only on a COMPILER defect (a CodecDefect: a descriptor of an

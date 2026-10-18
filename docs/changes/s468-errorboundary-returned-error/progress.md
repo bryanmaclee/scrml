@@ -1,0 +1,150 @@
+# progress — s468-errorboundary-returned-error
+
+- 2026-10-17T15:17 start at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a3a683e4c47d6e0bd, base origin/main 5c43c3b8e. bun install (puppeteer postinstall failed — network), pretest OK.
+- 2026-10-17T15:30 REPRODUCED on origin/main 5c43c3b8e (happy-dom, SCRML_RUNTIME + client.js), scratch harness
+  `~/.cache/scrml-agent-tmp/s468-errorboundary-returned-error/repro/run.mjs`:
+  - r1 (gap repro): `<errorBoundary fallback={<div id="fb">FALLBACK</>}> ${ const ok = check("wrong") } <p id="out">${ok ? "LOGGED IN" : "rejected"}</p> </>`
+    -> compiles, 0 errors; renders `LOGGED IN`; no log. Emitted: `const ok = _scrml_check_3("wrong");` at module init, and the
+    boundary's render fn tests only the interpolation's final value (`ok ? … : …`, a string).
+  - r2: `${check("wrong") + "!"}` -> `[object Object]!`; `${check("wrong") ? "LOGGED IN" : "rejected"}` -> `LOGGED IN`.
+  - r3: `${ @m = checkCode(@entry) }` inside a boundary: the error object is written to `@m`; `<p>${@m}</p>` OUTSIDE the
+    boundary renders `[object Object]`. (`${v}` of a bound error inside the boundary IS caught — only because the
+    interpolation's final value happens to be the envelope.)
+- Governing sentences (SPEC §19.6.6): "`<errorBoundary>` SHALL catch error variants produced by any `!` function call made
+  while RENDERING its direct or nested markup content (a `${…}` interpolation, for example)." and "Within an
+  `<errorBoundary>`, a RENDER-time call to a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002;
+  the boundary satisfies the handling requirement." §19.6.3: "When a `!` function call inside an `<errorBoundary>` produces
+  an error variant: 1. If the error variant has a `renders` clause (§19.2), the `renders` clause markup is displayed …
+  2. … NO `renders` clause and the `<errorBoundary>` has a `fallback` attribute, the `fallback` markup is displayed."
+  §19.6.6: "The compiler SHALL verify, at compile time, that every error variant reachable inside an `<errorBoundary>`
+  either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be
+  E-ERROR-005." §19.6.4 / §19.6.6: "Nested `<errorBoundary>` elements SHALL follow inner-catches-first semantics."
+- Locus trace: the hypothesis (codegen boundary lowering contains a thrown failure only) HELD and is REFINED: the boundary
+  catch exists only in `emit-event-wiring.ts` (the per-interpolation `_scrml_eb_render_*` fn) and it tests the
+  interpolation's FINAL value; nothing tests the result of the CALL. The set of calls the boundary must catch is decided
+  in `type-system.ts` (`checkFailableCallsInValuePositions` / `checkFailableCallsInAttrValues` /
+  `checkUnhandledFailableBareCall` exemption `renderTimeInBoundary`) and never reaches codegen. Statement-level boundary
+  logic is emitted by `emit-reactive-wiring.ts` at module init, outside any catch.
+- 2026-10-17T15:32 WIP start commit be015bc60 landed (hook baseline on origin/main + docs only: 37099 pass / 0 fail / 125 skip /
+  13 todo, 37237 tests in 1587 files, 881 s). Pushed.
+- 2026-10-17T15:45 FIX (root, not position): the boundary now tests the result AT THE CALL.
+  - type-system.ts: the existing render-time-in-boundary exemption (value positions + whole-statement calls) now RECORDS
+    each handled call (`boundaryHandlesCall`); after the walk `applyBoundaryCatchWraps` wraps each in place in the
+    per-compilation placeholder `PH_EB_CHECK` (placeholder-nonce.ts). A call with no node (markup call-ref attr) or
+    found in text the walk parsed itself (`FailableCallCandidate.fromText`, new in failable-value-calls.ts) cannot be
+    wrapped -> E-ERROR-002 (fails closed). E-ERROR-005 coverage (`checkBoundaryCoverage`) now applies to every call the
+    boundary handles, not only to a whole-statement call.
+  - emit-expr.ts: the placeholder lowers to `_scrml_error_boundary_check(call)` ONLY inside a catch site
+    (`withBoundaryCatchSite`); elsewhere refused E-ERROR-002. `refuseUnloweredBoundaryChecks` (called from codegen
+    index.ts) refuses any wrapped call that no emitter lowered (an `<each>` row lowers from source text).
+  - emit-event-wiring.ts: interpolation render fn = catch site; its catch routes a raised typed failure
+    (`_scrml_error_boundary_failure`) into the existing renders -> fallback dispatch; host throws unchanged (§19.6.8).
+  - emit-reactive-wiring.ts + NEW codegen/emit-boundary-logic.ts: a boundary `${}` block's module-init statements are a
+    catch site; if any check was lowered, the emitted JS is wrapped in `_scrml_error_boundary_run(id, body, display)`, one
+    per enclosing boundary, innermost inside; top-level declarations hoisted (acorn over our own emitted JS).
+    Groups never span two boundary chains. A boundary display-interpolation holding a check is no longer re-evaluated at
+    module init (it would run the call a 2nd time outside the slot catch) — emit-html `_boundaryRendered` mark.
+  - runtime-template.js (errors chunk): `_scrml_error_boundary_check` / `_failure` / `_run` / `_show`.
+- r1/r2/r3 after: r1 -> FALLBACK (no LOGGED IN), logged; r2 -> both FALLBACK; r3 -> inner fallback, renders for Empty,
+  `@m` outside stays "init".
+- Position sweep (shapes.mjs): template-literal `${}` -> E-ERROR-002 (fromText); value-form `${ if }` arm -> E-ERROR-002
+  (codegen refusal); `!{}` arm value -> caught; `if (check())` statement -> caught; `<div if=…>` interpolation -> caught
+  (render fn); `String(check())` -> caught; attribute `title=${…}` -> E-ERROR-002; `<each>` row -> E-ERROR-002
+  (unlowered refusal); arrow body -> E-ERROR-002 (not render-time, unchanged).
+- FOUND (out of scope, filed `g-lift-markup-failable-call-unchecked-s468`, HIGH): a `!` call in LIFTED markup is neither
+  E-ERROR-002 nor caught — `lift <p>${check(it) ? "LOGGED IN" : "rejected"}</p>` renders LOGGED IN on origin/main
+  5c43c3b8e AND on this branch, inside or outside a boundary (executed, happy-dom).
+- Direction of change: semantics-changed (returned error in a boundary now caught; boundary interpolation with a handled
+  call evaluated once, not twice) + newly-rejecting (render positions with no boundary catch site: attribute values,
+  each rows, arm bodies, mount-deferred lift groups, text-carried positions; and E-ERROR-005 for value-position calls in a
+  boundary without fallback). Corpus measurement: below.
+- 2026-10-17T16:20 commit cf1bd5836 (hook: 37118 pass / 0 fail / 125 skip). Push BLOCKED by the pre-push generated-doc
+  gate (docs/FACTS.md facts-table stale) — regen after the last content commit, as the gate says.
+- CORPUS (scripts/corpus-emit-differential.ts; roots examples, samples, conformance/cases, stdlib; base = `git archive
+  origin/main` 5c43c3b8e, head = cf1bd5836 tree): 2840 sources both sides, compile outcome 1700 ok / 1140 failed on BOTH;
+  compile-failure SET delta 0 newly failing / 0 newly passing; diagnostic-CODE changes 0; diagnostic-text-only 1
+  (samples/login.scrml — an already-failing sample whose E-CG-001 message cites a client-bundle line number that moved
+  with the runtime). => **newly-rejecting: 0 corpus sites.** The tool prints "NOT A VALID COMPARISON" only because the
+  base side is an archive (git rev-parse fails at capture) — the enumeration and compile sets are identical.
+  Artifact diffs: every page shipping the 'errors' runtime chunk grew by the helpers (+2279 B raw) — not minimal.
+- Security await pack (classify.js --json), base vs head: 424 shapes each, identical class per shape (PASS 249,
+  PASS-REFUSED 136, PASS-500 20, FAIL 10, PASS-DENY 8, UNJUDGED 1) — 0 new FAIL.
+- 2026-10-17T16:35 MINIMAL RUNTIME: the four helpers moved to their own runtime chunk 'boundary' (runtime-chunks.ts
+  RUNTIME_CHUNK_ORDER + marker + CHUNK_DEPENDENCIES boundary -> errors), shipped only when the client names one; the
+  interpolation render fn emits the typed-failure routing only when its expression lowered a check, so a boundary with
+  no render-time `!` call is byte-identical to base. Chunk-count pins 43 -> 44 (runtime-tree-shaking, c10).
+- 2026-10-17T16:55 CORPUS re-measured after the 'boundary' chunk (head2 = working tree): 2840 / 2840 sources; compile-failure
+  delta 0 / 0; diagnostic changes 0 code / 0 text-only; syntax delta 0. Client artifacts (client.js / html / runtime /
+  client-assets) differ in EXACTLY 7 sources — conformance/cases/error-boundary/{fallback, nested-inner-catches,
+  no-renders-falls-to-fallback, renders-multifield-payload, success-transparent, terse-fallback-closer, variant-renders},
+  each a render-time `!` call inside a boundary (the call is now checked; its module-init duplicate is gone). Every other
+  client artifact in the corpus is byte-identical to base. The remaining 188 diffs are `*.server.js` whose only change is
+  the absolute `_scrml_project_root` path of the two capture trees.
+- 2026-10-17T17:15 full gate (unit + integration + conformance) on the working tree: 34880 pass / 0 fail / 125 skip
+  (35018 tests, 1578 files). `bun scripts/facts.ts --write` (FACTS facts-table: compiler/src file/line counts) and
+  `bun scripts/state.ts --write`; both `--check` PASS. No SPEC edit (none authorized), so no spec-index regen.
+
+## Fix round 1 (S239 review of frozen 51efb6b36, PR #1445)
+- 2026-10-17 REPRODUCED all items on 51efb6b36 with the reviewer harness (copied to ~/.cache/scrml-agent-tmp/s468-eb-r1/h,
+  pointed at this worktree; it runs the SHIPPED tree-shaken runtime):
+  F3 `renders <p>Missing ${id}</p>` + `fail AuthErr::NotFound(p)` with an `<img src=x id=pwn>` payload -> a live
+  `<img id="pwn">` in the page (interpolation AND statement forms). F2 `${ const <ok> = check(@pw) }` + `${@ok ? …}` ->
+  `THROWN: Error: scrml errorBoundary: render-time call failed` at load, page dead. F1 `${scheck(@pw) ? "LOGGED IN" : …}`
+  and `${ const ok = scheck(@pw) }` (server `!` fn) -> LOGGED IN for a wrong password. F4 `${ @show ? <p>${check(@pw) ?
+  …}</p> : "" }` -> LOGGED IN, inside or outside a boundary, identical on base 5c43c3b8e.
+- Governing: F3 §4.18.6 "The value produced by an `${expr}` interpolation … SHALL be escaped per the existing interpolation
+  escaping rules (the same rules that apply to `${...}` interpolation in any body or attribute position)". F1 §19.6.6 "A
+  server call SHALL NOT occur at render time: in the boundary's content, as in any value position, it is
+  E-VALUE-SERVER-CALL (§13.7), and the boundary SHALL NOT exempt it." F2 §19.6.6 (the boundary catches render-time calls)
+  — a check run after the render is outside the catch; refusing it is the fail-closed reading.
+- FIX F3: payload interpolations in `renders` / `fallback=` (and `<render of=>`, same sink) lower through
+  `_scrml_error_boundary_text` (HTML-escape & < > " ') — emit-error-boundary.ts.
+- FIX F2: `deferredBoundaryChecks` (emit-boundary-logic.ts, acorn over our emitted JS): a check inside a function that is
+  not invoked on the spot (IIFE = immediate) is refused E-ERROR-002, at both catch sites (statement group wrap,
+  interpolation render fn). Derived formulas, reset init thunks and `_scrml_effect` re-runs are therefore refused.
+- FIX F1: type-system `fnServerPlaced` (keyword / RI server boundary / CPS split) -> E-VALUE-SERVER-CALL for a server call
+  the boundary would handle (deduped like E-ERROR-002); runtime `_scrml_error_boundary_check` REFUSES a thenable (host
+  error -> fallback; its later rejection is logged) — the false "checked when it settles" comment and gap text corrected.
+  conformance server-fn/error-boundary-value-server-call-neg now XPASSes -> xfail removed; the carried
+  g-impl1-value-server-call-s451 is pinned by NEW server-fn/value-server-call-interp-neg (outside a boundary).
+- FILED: g-markup-in-interp-ternary-failable-call-unchecked-s468 (F4 HIGH, open, pre-existing),
+  g-errorboundary-derived-after-mount-not-typed-s468 (F6 LOW, resolved by the F2 refusal).
+- After (harness, head): F3 payload renders as text `Missing <img src=x id=pwn>`, no element; F2 / F1 refused at compile
+  time. Reviewer shapes1-8 (head): every remaining wrong-password LOGGED IN (s04/n04 F4, s14 lift, s21/n21/s22b/s22c a
+  failable function used as a VALUE — S467 "still open") is byte-for-byte the base behaviour; none introduced.
+  c2-component-interp-twice improved (the wrong instance now shows FB; base: LOGGED IN).
+
+## S469 — brought up to date with main 38e7ab398 (merge, not rebase)
+
+Branch `s469-1445-up` = `origin/s468-errorboundary-returned-error` (8153691e3) + `git merge origin/main`.
+
+### failable-value-calls.ts — `Walker` match/`!{}` arm resolution
+
+- **`ht` on main** comes from 59f96f7b2 (`fix(§19.4.3 E-ERROR-002, S468 r2)`, landed via #1440
+  `s468-bang-arm-block-value`): `ht = a.handler.trim()`. #1440 added a NEW first branch — a BRACED
+  arm body is read as its statement list (`env.parseStatements(ht)`) instead of `handlerExpr`
+  (which stopped after the first statement, letting a later unhandled failable call escape
+  E-ERROR-002). The last-resort branch merely switched to the trimmed `ht` (equivalent input).
+- **`textCtx(fn)` in #1445** marks candidates found in text the walk PARSED itself
+  (`fromText: true`). Codegen lowers that text independently, so a boundary-check wrap placed on
+  the walk's own parse is never seen; `boundaryHandlesCall` therefore refuses a `fromText` call
+  with E-ERROR-002 ("a handler arm, match arm, ...") instead of recording it in
+  `boundaryCatchCalls`.
+- **Resolution:** main's `ht` condition/argument + #1445's `textCtx(fn)` on the last-resort
+  branch, AND `textCtx(fn)` on #1440's new `blockStmts` branch too — that branch also walks
+  nodes parsed from text, so #1445's invariant applies to it (a conflict-hunk-only resolution
+  would have left it at plain `fn`). The `handlerExpr` branch stays `fn` (an AST node codegen
+  sees), as in #1445.
+- **Verified by probe** (`${ const ok = check("wrong") !{ | .Denied :> <body> } }` inside an
+  `<errorBoundary>`): with `textCtx` on `blockStmts`, braced multi-/single-statement arm bodies
+  give E-ERROR-002 with the correct "handler arm, match arm" message; an unbraced arm compiles,
+  the boundary catches, FALLBACK renders. With plain `fn` on `blockStmts` it still fails closed,
+  but only through the later unlowered-wrap net, with a wrong message ("an '<each>' row, a
+  component ..."). Both behaviours kept: #1440's whole-block walk + #1445's fromText refusal.
+
+### Other resolutions
+- type-system.ts import: union (`PH_EB_CHECK, isCompilerPlaceholderName` from placeholder-nonce;
+  `cStyleInitDeclaration` added to the defer-structure import).
+- FACTS.md / bootstrap-conformance.md: regenerated by script. known-gaps.md: only the
+  @generated count hunk conflicted; entries auto-merged; counts regenerated by `state.ts --write`.
+  Gap-id union check: union of both parents = 2145 ids; result = 2145; missing 0.
