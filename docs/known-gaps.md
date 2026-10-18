@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 654 | 6 |
-| LOW | 435 | 0 |
+| MED | 655 | 6 |
+| LOW | 436 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -93,6 +93,24 @@ SPEC §19.4.3 says a block-bodied arm's last expression is the arm's value. impl
 <!-- @gap id=g-cps-server-half-trusts-client-held-cell-s467 sev=MED status=open locus=compiler/src/route-inference.ts(carriedValueAdmission — cells are synced client state, not admission-checked locals)+§19.9.9.8 prov=review:S467-cps-r5-INFO;empirical:S467(base 9/9 forged rows, #1435 branch 3/4) -->
 
 The long-standing cell-sync model: a cell is client state and its value travels with the request. When the cell's value came from a server result in an earlier call, the server trusting it later breaks the spirit of §19.9.9.8 ("a server value never travels to the client and back"). #1435 narrows it (forged rows 9→3, 9→4 on probes cell_prev_call / cell_direct in ~/.cache/scrml-review-s467-cps-r4/h/, XPS) but does not close it. Needs a SPEC decision: is a cell written from a server result a server value for §19.9.9.8 purposes?
+
+### g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 — a file-scope helper called from a server function only through a BLOCK-nested `function` declaration or a callback lambda is not emitted in the server bundle: `function run(p, h) { if (p) { function chk2(a, b) { return helper(a, b) } return chk2(p, h) } … }` → `ReferenceError: helper is not defined` (HTTP 500) — `NEW S468 (filed; pre-existing); LOW; open (fails closed)`
+
+<!-- @gap id=g-server-bundle-omits-helper-reached-from-nested-fn-or-lambda-s468 sev=LOW status=open locus=UNTRACED-hypothesis:compiler/src/codegen/emit-server.ts(server-fn body walk `_walk` / `_calledPeerNames` ~:4906 and planModuleBindingClosure — the server-side helper reach does not follow a call inside a block-nested function declaration or a callback lambda) prov=review:S468-rev-1434(f.mjs transitive_*);empirical:S468-await-f4-followups(gap1.mjs, gap1b.mjs, f3b.mjs) -->
+
+Reported by the #1434 review as "an inner `function check(a,b){ return helper(a,b) }` re-declaring an imported async name"; S468 narrowing shows the re-declared name is irrelevant. Executed on `9357d9b59` (= `bbddfd7b9`) with `~/.cache/scrml-agent-tmp/s468-rev-1434/drv/drive.mjs` (wrong- and right-password requests): `blockFnOtherName` (a block-nested `function chk2` → `helper` → imported async `c9`) and `blockFnSameNameNoOuter` → 500 `helper is not defined`; the same nested function at the TOP of the function body (`topFnOuterConst`, `directCallNoShadow`) → correct 200s. The server bundle emits `run`'s nested function verbatim but no `helper` (the client bundle carries `_scrml_helper_N`). Same miss through a callback lambda: `rows.findLast((r) => pr(pass, r))` / `rows.some((r) => pr(pass, r))` with a file-scope `function pr(p, r) { return check(p, r.pw) }` (imported async `check`) → 500 `pr is not defined` (f3b.mjs `findLastNoBindTop`, `someNoBindTop`). Fails closed today, but it MASKS a second miss: for `.findLast` / `.findLastIndex` / `.reduceRight` the sync-callback backstop (E-SERVER-FN-IN-SYNC-CALLBACK / E-ASYNC-STDLIB-IN-SYNC-CALLBACK) does not fire for such a helper (`.sort` does), so once the helper is emitted the callback would see an unawaited Promise (always truthy) unless F4 refuses the binding. Fixing the emission without fixing the backstop turns a 500 into a wrong answer — fix both together. Reproducers: `~/.cache/scrml-agent-tmp/s468-await-f4-followups/gap1.mjs`, `gap1b.mjs`, `f3b.mjs` (XPS).
+
+### g-server-row-written-to-cell-ships-to-browser-s468 — a server function that writes a whole SQL row into a client cell (`@out = ?{SELECT name, pw …}.get()`) and a client lambda that then reads `@out.name` ships the FULL row, password hash included, to the browser — `NEW S468 (filed; pre-existing on main; PA call, owner may re-rank); MED; open`
+
+<!-- @gap id=g-server-row-written-to-cell-ships-to-browser-s468 sev=MED status=open locus=compiler/src/route-inference.ts(cell writes from a server result are synced client state — the value is serialized whole to the client)+§19.9.9.8 prov=review:S468-rev-1434;empirical:S468-await-land(probe/cells-probe.mjs srvLambdaWrites — HASH-ON-WIRE on main-tree, r10-tree and agent tree) -->
+
+Probe `~/.cache/scrml-agent-tmp/s468-await-land/probe/cells-probe.mjs` shape `srvLambdaWrites`: `function go(k) { @out = ?{SELECT name, pw FROM users WHERE name = 'bob'}.get(); const f = () => { @out = "L:" + @out.name }; f() }` — the response carries the row including `pw` (HASH-ON-WIRE) on main and on the #1434 tree alike. Tension with §19.9.9.8 ("server values stay on the server"): the program wrote the row into a cell, and a cell is client state. Ruling owed: is a server result written into a cell a server value for §19.9.9.8? Ties to g-cps-server-half-trusts-client-held-cell-s467 (the inbound direction of the same model). Not fixed: a SPEC decision precedes any code change.
+
+### g-await-pack-classify-json-stray-lines-s468 — `classify.js --json` printed stray `false` / `true` lines before the JSON — `NEW S468 (filed + fixed in s468-await-f4-followups); LOW; resolved`
+
+<!-- @gap id=g-await-pack-classify-json-stray-lines-s468 sev=LOW status=resolved locus=compiler/tests/integration/security-await-pack/classify.js(shape s3/consoleThen runs `console.log(check(…))` in the loaded server bundle, writing to stdout) prov=review:S468-rev-1434 -->
+
+Fixed: in `--json` mode `console.log` is routed to stderr while shapes run and the JSON is printed through the saved original; stdout now parses as JSON (640 shapes).
 
 ### g-cps-carried-primitive-message-says-object-s467 — E-RI-002 for a carried PRIMITIVE local written by a closure says "`blk` may hold an object" — fails closed, wrong wording — `NEW S467 (filed); LOW; open`
 
