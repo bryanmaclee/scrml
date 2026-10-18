@@ -256,3 +256,27 @@ Corpus: corpus-emit-differential, both sides archives of the same tree (base = 3
 files): 2857 sources, 0 newly failing / 0 newly passing, 0 diagnostic-code changes, 8533 / 8533 artifacts identical
 after normalizing paths / path-derived hash ids; the 1 "text-only" diagnostic change is a path-derived dispatcher
 id in a message. **No real source changes placement or output.**
+
+## FIX ROUND 4 (S469 delta re-review of 90a6df97a = DO-NOT-LAND, one root)
+
+Root: round 3 routed a shorthand's value through `emitIdent`; for `{ @x }` (shorthand name `@x`) that emitted
+`{ "@x": <cell read> }` — newly ACCEPTING a construct that main / pre-f9be1befc refused (E-CODEGEN-INVALID-LOGIC),
+and the checks that read a property VALUE (E-REACTIVE-003, the identity follower, E-SESSION-AMBIENT-SERVER) never
+saw it: G1 server `{ @owner }` → `_scrml_body["owner"]` (forged VICTIM), G2 `{ @currentUser }` / `{ @session }`
+arguments spoofed, G3 no SPEC meaning, G4 only the internal backstop caught a server `{ @session }`.
+Fix: `{ @x }` is refused at the FRONT END — NEW E-OBJECT-SHORTHAND-CELL (provisional name — owner's call) in
+gauntlet-phase1-checks.js `checkObjectShorthandCell` (Stage 3.005, structural walk of the parsed tree), message
+naming `{ x: @x }`; codegen `emitProp` keeps a backstop with the same code (never lowers `{ @x }`). Shared message:
+NEW compiler/src/object-shorthand-cell.ts. SPEC §6.1.2 bullet ("NOT a name") + §34 row; `{ @x }` is given no
+meaning. Non-`@` shorthands keep round 3's emitIdent lowering.
+Re-executed (reviewer harness): G1, G2 (both), G3, G4 → REFUSED with exactly E-OBJECT-SHORTHAND-CELL; longhands
+`{ c: @owner }` → E-REACTIVE-003, `{ s: @session }` → E-ARG-SERVER-IDENTITY, `{ count: @count }` compiles.
+v05 nit: when the argument is not itself the identity read (an object / template / binding), the fix now reads
+"stop sending the identity and read the identity on the server, inside `add` (`session.userId`); give `uid` only
+data that is not the identity" instead of `const uid = session.userId`; the direct form keeps `const uid = …`.
+Tests: integration "S469 — `{ @x }` is E-OBJECT-SHORTHAND-CELL" (G1, G1 longhand, G2 ×2, G2 longhand, G3, G3
+longhand, G4, v05).
+Corpus: 3001 sources (examples, samples, conformance/cases, stdlib, benchmarks, giti, flogence): 0
+E-OBJECT-SHORTHAND-CELL, 0 E-ARG-SERVER-IDENTITY, 0 E-PARAM-DEFAULT-SERVER-IDENTITY. The 28 E-CODEGEN-INVALID-LOGIC
+sources are identical on the 90a6df97a compiler (25 of 28 byte-equal code sets; the 3 stdlib differences are the
+known archive-stdlib-path artifact). **0 changes.**

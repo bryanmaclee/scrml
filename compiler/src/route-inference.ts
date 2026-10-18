@@ -9883,14 +9883,24 @@ export function runRI(input: RIInput): RIOutput {
               ? `it reads \`${through}\`, which can hold a value computed in the browser from \`${hit.read}\`, and the compiler cannot rule that out`
               : `it is computed in the browser from \`${hit.read}\``;
           const serverRead = hit.unresolved ? null : identityServerRead(hit.read);
+          // S469 re-review (v05): `const uid = session.userId` is the fix only when the
+          // argument IS the identity read (`add("hi", @session.userId)`). For a value that
+          // wraps or derives from it (`{ u: @session.userId }`, a template, a binding) the
+          // parameter holds something else, so name the server read, not a replacement.
+          const argIsTheRead = through === null && !hit.unresolved && !!tnode && !tnode._identityRawParamOf &&
+            (tnode.kind === "member" || tnode.kind === "index" || tnode.kind === "ident");
+          const fix = argIsTheRead
+            ? `Fix: remove the ${pName ? `\`${pName}\` ` : ""}parameter and read the identity on the server, inside ` +
+              `\`${fnName}\`` + (serverRead ? ` — \`${pName ? `const ${pName} = ` : ""}${serverRead}\`` : " (`session.<field>`, §20.5)") + `.`
+            : `Fix: stop sending the identity and read the identity on the server, inside \`${fnName}\`` +
+              (serverRead ? ` (\`${serverRead}\`)` : " (`session.<field>`, §20.5)") +
+              `; give ${pName ? `\`${pName}\` ` : "the argument "}only data that is not the identity.`;
           const err = new RIError(
             "E-ARG-SERVER-IDENTITY",
             `E-ARG-SERVER-IDENTITY: ${argWhat} ${what} — ${why}. The arguments of a server ` +
             `function are sent by the browser, and any HTTP request can send a different value, so \`${fnName}\` ` +
             `would act as whoever the request names (§6.6.9: server-only identity SHALL NEVER be marshalled from the ` +
-            `client; §12.4). Fix: remove the ${pName ? `\`${pName}\` ` : ""}parameter and read the identity on the ` +
-            `server, inside \`${fnName}\`` +
-            (serverRead ? ` — \`${pName ? `const ${pName} = ` : ""}${serverRead}\`` : " (`session.<field>`, §20.5)") + `.`,
+            `client; §12.4). ${fix}`,
             sp,
           );
           err.severity = "error";

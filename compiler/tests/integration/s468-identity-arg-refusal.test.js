@@ -404,6 +404,68 @@ describe("S469 — E-ARG-SERVER-IDENTITY message precision", () => {
   });
 });
 
+// S469 delta re-review (G1–G4): a shorthand `{ @x }` has no meaning (§6.1.2 — `@x` is a
+// read, not a name). Lowering shorthands through emitIdent (round 3) briefly accepted it as
+// `{ "@x": … }`, bypassing E-REACTIVE-003 and the identity follower. It is refused at the
+// front end (E-OBJECT-SHORTHAND-CELL), and the explicit longhand is still checked.
+describe("S469 — `{ @x }` is E-OBJECT-SHORTHAND-CELL; `{ x: @x }` is still checked", () => {
+  const ADD_OWNER = (decl) => `<program db="./app.db" auth="required">
+  <owner> = ""
+  function add(name) {
+    const o = ${decl}
+    const uid = Object.values(o)[0]
+    ?{\`INSERT INTO posts (author, body) VALUES (\${uid}, \${name})\`}.run()
+  }
+  <button onclick=add("hi")>a</button>
+</program>
+`;
+  const expectShorthandRefused = (r, name) => {
+    expect(codes(r.errors)).toEqual(["E-OBJECT-SHORTHAND-CELL"]);
+    expect(r.errors[0].message).toContain(`\`{ ${name.slice(1)}: ${name} }\``);
+    expect(r.serverJs).toBe("");
+  };
+  test("G1: a server function's `{ @owner }` is refused (was: `_scrml_body[\"owner\"]`, forged row VICTIM)", () => {
+    expectShorthandRefused(compile(ADD_OWNER("{ @owner }")), "@owner");
+  });
+  test("G1 longhand `{ c: @owner }` is still E-REACTIVE-003", () => {
+    expect(codes(compile(ADD_OWNER("{ c: @owner }")).errors)).toEqual(["E-REACTIVE-003"]);
+  });
+  test("G2: `{ @currentUser }[\"@currentUser\"].id` as an argument is refused", () => {
+    expectShorthandRefused(compile(APP("", `<button onclick=add("hi", { @currentUser }["@currentUser"].id)>a</button>`)), "@currentUser");
+  });
+  test("G2: `const o = { @session }` + `Object.values(o)[0].userId` is refused", () => {
+    expectShorthandRefused(compile(APP(`function go() {\n    const o = { @session }\n    add("hi", Object.values(o)[0].userId)\n  }`, `<button onclick=go()>g</button>`)), "@session");
+  });
+  test("G2 longhand `{ s: @session }` is still E-ARG-SERVER-IDENTITY", () => {
+    expectRefused(compile(APP(`function go() {\n    const o = { s: @session }\n    add("hi", Object.values(o)[0].userId)\n  }`, `<button onclick=go()>g</button>`)));
+  });
+  test("G3: a client `{ @count }` is refused (no meaning given to it)", () => {
+    expectShorthandRefused(compile(APP(`<count> = 0\n  function go() { @last = JSON.stringify({ @count }) }`, `<button onclick=go()>g</button>`)), "@count");
+  });
+  test("G3 longhand `{ count: @count }` compiles", () => {
+    const r = compile(APP(`<count> = 0\n  function go() { @last = JSON.stringify({ count: @count }) }`, `<button onclick=go()>g</button>`));
+    expect(codes(r.errors)).toEqual([]);
+  });
+  test("G4: a server function's `{ @session }` is refused at the front end (not only by the internal backstop)", () => {
+    const r = compile(`<program db="./app.db" auth="required">
+  function add(name) {
+    const o = { @session }
+    const uid = o["@session"].userId
+    ?{\`INSERT INTO posts (author, body) VALUES (\${uid}, \${name})\`}.run()
+  }
+  <button onclick=add("hi")>a</button>
+</program>
+`);
+    expectShorthandRefused(r, "@session");
+    expect(codes(r.errors)).not.toContain("E-INTERNAL-SESSION-AMBIENT-SERVER");
+  });
+  test("v05: an object argument wrapping the identity gets a fix that is not `const uid = session.userId`", () => {
+    const r = compile(APP("", `<button onclick=add("hi", { u: @session.userId })>a</button>`));
+    expectRefused(r, "stop sending the identity and read the identity on the server, inside `add` (`session.userId`)");
+    expect(r.errors[0].message).not.toContain("const uid = session.userId");
+  });
+});
+
 describe("s468 — NOT refused", () => {
   test("the fix: the server function reads the session itself — writes the REAL id whatever the request says", async () => {
     if (typeof globalThis.document !== "undefined") return; // native Request only (Cookie header)

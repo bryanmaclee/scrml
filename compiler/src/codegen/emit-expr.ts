@@ -51,6 +51,7 @@ import { CGError } from "./errors.ts";
 import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { splitTemplateLiteral, lexicalCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { OBJECT_SHORTHAND_CELL, isCellShorthandName, objectShorthandCellMessage } from "../object-shorthand-cell.ts";
 import { emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
@@ -1874,6 +1875,13 @@ function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
       // skipped emitIdent, so a server `{ session }` slipped past E-SESSION-VALUE and
       // emitted a bare `session` → ReferenceError at request time; the longhand was
       // refused). A name emitIdent leaves unchanged keeps the shorthand.
+      // `{ @x }` has no meaning (§6.1.2 — `@x` is an access, not a name): refused at
+      // the front end (E-OBJECT-SHORTHAND-CELL, gauntlet-phase1-checks.js); this is
+      // the backstop for a tree that reaches codegen anyway — never lowered.
+      if (isCellShorthandName(prop.name)) {
+        recordRefusedLowering(new CGError(OBJECT_SHORTHAND_CELL, objectShorthandCellMessage(prop.name), prop.span as never, "error"), prop as never);
+        return `${JSON.stringify(prop.name)}: undefined /* E-OBJECT-SHORTHAND-CELL */`;
+      }
       const val = emitIdent({ kind: "ident", name: prop.name, span: prop.span } as IdentExpr, ctx);
       return val === prop.name ? prop.name : `${emitObjectKey(prop.name)}: ${val}`;
     }

@@ -85,6 +85,7 @@ import {
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
+import { OBJECT_SHORTHAND_CELL, isCellShorthandName, objectShorthandCellMessage } from "./object-shorthand-cell.ts";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -1081,6 +1082,45 @@ function checkSchemaDeclarations(ast, filePath, errors) {
  * @param {{ filePath: string, ast: object }} tabResult
  * @returns {GauntletError[]}
  */
+// ---------------------------------------------------------------------------
+// E-OBJECT-SHORTHAND-CELL (S469, provisional — owner's call) — `{ @x }`
+// ---------------------------------------------------------------------------
+
+/**
+ * An object SHORTHAND whose name is a cell read — `{ @count }` — has no meaning
+ * in scrml: a shorthand takes its key from the variable it reads, and `@count` is
+ * the canonical ACCESS form of a cell (§6.1.2), not a name a key can take. Before
+ * S469 it failed at code generation (E-CODEGEN-INVALID-LOGIC — the `@` reached
+ * JavaScript); routing shorthands through the identifier lowering would otherwise
+ * have accepted it as `{ "@count": … }`, bypassing E-REACTIVE-003, the identity
+ * follower and E-SESSION-AMBIENT-SERVER, all of which read a property VALUE. It is
+ * refused here, before name resolution, with the explicit spelling as the fix.
+ * The walk is structural over the parsed tree; raw text the parser keeps unparsed
+ * is not parsed here (codegen keeps a backstop with the same code).
+ */
+function checkObjectShorthandCell(ast, filePath, errors) {
+  if (!ast || typeof ast !== "object") return;
+  const seen = new WeakSet();
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (n.kind === "object" && Array.isArray(n.props)) {
+      for (const p of n.props) {
+        if (p && p.kind === "shorthand" && isCellShorthandName(p.name)) {
+          errors.push(new GauntletError(
+            OBJECT_SHORTHAND_CELL,
+            objectShorthandCellMessage(p.name),
+            p.span ?? n.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+      }
+    }
+    for (const k of Object.keys(n)) if (k !== "span" && k !== "parent") visit(n[k]);
+  };
+  visit(ast);
+}
+
 export function runGauntletPhase1Checks(bsResult, tabResult) {
   const errors = [];
   const filePath = tabResult?.filePath ?? bsResult?.filePath ?? "<unknown>";
@@ -1090,6 +1130,7 @@ export function runGauntletPhase1Checks(bsResult, tabResult) {
   checkFileScopeDuplicateBindings(tabResult?.ast, filePath, errors);
   checkSchemaPlacement(tabResult?.ast, filePath, errors);
   checkSchemaDeclarations(tabResult?.ast, filePath, errors);
+  checkObjectShorthandCell(tabResult?.ast, filePath, errors);
 
   return errors;
 }
