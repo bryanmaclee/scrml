@@ -130,6 +130,8 @@ export const PH_TILDE = (): string => placeholderName("tilde");
 export const PH_SQL_PLACEHOLDER = (): string => placeholderName("sql_placeholder");
 export const PH_SQL_REF = (): string => placeholderName("sql_ref");
 export const PH_GUARD = (): string => placeholderName("guard");
+/** §19.6.6 (S468) — a render-time `!` call an `<errorBoundary>` handles (type-system marks it; codegen lowers it). */
+export const PH_EB_CHECK = (): string => placeholderName("eb_check");
 
 // The parameterised placeholders (`<prefix><Name>__`).
 export const PHP_BARE_VARIANT = (): string => placeholderPrefix("bare_variant");

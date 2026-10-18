@@ -424,6 +424,10 @@ export function collectTopLevelLogicStatements(fileAST: FileAST): Node[] {
           if ((node as any)._placeholderId && !child._placeholderId) {
             child._placeholderId = (node as any)._placeholderId;
           }
+          // S468 (§19.6.6) — the enclosing `<errorBoundary>` chain (emit-html.ts).
+          if ((node as any)._errorBoundaryChain && !(child as any)._errorBoundaryChain) {
+            (child as any)._errorBoundaryChain = (node as any)._errorBoundaryChain;
+          }
           // S108 Bug 5 Phase 3 — Propagate the constant-folded marker from the
           // logic wrapper (set by emit-html.ts when an interpolation folds to a
           // compile-time literal). emit-reactive-wiring.ts's file-scope walker
