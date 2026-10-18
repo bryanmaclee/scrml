@@ -4068,6 +4068,63 @@ function armPatternChainReachesArrow(peek, k) {
 }
 
 /**
+ * S468 r1 (F4/F5) — an arm HEAD the compiler cannot classify, read at a match body's
+ * arm level: a `|`-chain (or a single alternate) of arm-pattern alternates ending at an
+ * arm arrow, in which some alternate is outside §18.2 / §18.16 or the alternates mix
+ * kinds. Returns `{ arrowK, why }` (arrowK = peek-offset of the arrow) or null. Such an
+ * arm used to fall to the text path, where codegen's `parseMatchArm` read no form for
+ * it and DROPPED the arm silently — its body never ran, failing open when that body was
+ * the one that rejected (`1 | .A :> { if (!check(…)) return "REJECTED" }`). Refused:
+ *   - a template literal (`` `bob` :> ``) — §18.16 admits a string LITERAL; a template
+ *     is an expression (with `${…}` it is not even constant);
+ *   - `not` inside an alternation (`1 | not :>`) — `not` is a whole arm of its own;
+ *   - a parenthesized single pattern (`(1) :>`) — not an arm-pattern (a product arm
+ *     needs a multi-scrutinee head, §18.19);
+ *   - literal and variant alternates mixed (`1 | .A :>`, `"bob" | .A :>`) with no
+ *     wildcard — no single scrutinee comparison covers both.
+ */
+function unclassifiableArmHead(peek) {
+  let k = 0;
+  let why = null;
+  let lits = 0;
+  let vars = 0;
+  let wild = false;
+  let count = 0;
+  for (;;) {
+    const t = peek(k);
+    if (!t || t.kind === "EOF") return null;
+    let end;
+    if (t.kind === "STRING" && t.isTemplate) {
+      why = why ?? "a template literal is not a match arm pattern; §18.16 admits a string literal (`\"…\"`)";
+      end = k + 1;
+      lits++;
+    } else if (t.kind === "KEYWORD" && t.text === "not") {
+      end = k + 1;
+    } else if (t.kind === "PUNCT" && t.text === "(") {
+      end = scanPastBalancedParens(peek, k);
+      if (end < 0) return null;
+      why = why ?? "a parenthesized pattern is not a match arm pattern (a product arm `(p1, …, pN)` needs a multi-scrutinee head, §18.19)";
+    } else {
+      end = scanArmPatternAlternate(peek, k);
+      if (end < 0) return null;
+      if ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::")) vars++;
+      else if ((t.kind === "IDENT" && t.text === "_") || (t.kind === "KEYWORD" && t.text === "else")) wild = true;
+      else lits++;
+    }
+    if (t.kind === "KEYWORD" && t.text === "not") why = why ?? "`not` is an arm of its own (`not :> …`), not an alternate of an alternation";
+    count++;
+    k = end;
+    if (matchArrowGlyphAt(peek, k)) break;
+    const bar = peek(k);
+    if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return null;
+    k++;
+  }
+  if (count === 1 && why && peek(0).kind === "KEYWORD" && peek(0).text === "not") return null; // `not :>` itself
+  if (!why && !wild && lits > 0 && vars > 0) why = "an alternation mixes literal and variant alternates; write each as its own arm";
+  return why ? { arrowK: k, why } : null;
+}
+
+/**
  * S468 r1 — a block arm whose body is an OBJECT LITERAL (`.A :> { g: check }`,
  * `1 :> { x: 1 }`) is a value, not statements; `parseRecursiveBody` reads it as one
  * `bare-expr` whose exprNode is only the first key. Store the object tree the ONE
@@ -9586,6 +9643,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * only the `else`; the body that follows parses normally (the build fails).
    */
   function rejectDanglingElse(prevNode) {
+    // S468 r1 (F3): `else /* c */ :> { … }` is the wildcard arm — drop a comment in
+    // an arm head before asking whether an arm arrow follows the `else`.
+    dropArmHeadComments();
     const t = peek();
     if (!(t.kind === "KEYWORD" && t.text === "else")) return false;
     // S462 — widened from "directly after an if-stmt" to "any statement-leading
@@ -11857,7 +11917,41 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Parse a single statement and return an AST node.
    * Handles: let, const, @reactive, lift, for, if, while, return, bare-expr.
    */
+  /**
+   * S468 r1 (F3) — a COMMENT inside a match-arm HEAD (`1 /* c *\/ :> {`,
+   * `.A /* c *\/ :>`, `1 | /* c *\/ 2 :>`, `1 // c⏎ :> {`, `else /* c *\/ :>`) is
+   * trivia: it must not change which arm form reads the arm. Every arm form reads
+   * its head token by token at fixed peek offsets, so a comment token between two
+   * head tokens made each form decline and the arm fell to the TEXT path — where no
+   * analysis read its body (a wrong password accepted, §13.2 / §13.9.6). At a match
+   * body's arm level, when the tokens up to the arm arrow — comments skipped — form
+   * an arm head (`armPatternChainArrowOffset`, or `not`), the comment tokens from
+   * the head through the arrow (and up to the body's first token) are removed from
+   * the stream, so the arm is read exactly as if they were absent.
+   */
+  function dropArmHeadComments() {
+    if (!(_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth)) return;
+    const phys = [];
+    let sawComment = false;
+    for (let p = i; p < tokens.length && phys.length < 256; p++) {
+      if (tokens[p].kind === "COMMENT") { sawComment = true; continue; }
+      phys.push(p);
+      if (tokens[p].kind === "PUNCT" && (tokens[p].text === "{" || tokens[p].text === "}" || tokens[p].text === ";")) break;
+    }
+    if (!sawComment || phys.length === 0) return;
+    const peekNC = (k) => (k >= 0 && k < phys.length ? tokens[phys[k]] : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } });
+    let arrowK = armPatternChainArrowOffset(peekNC, 0);
+    if (arrowK < 0 && peekNC(0).kind === "KEYWORD" && peekNC(0).text === "not" && matchArrowGlyphAt(peekNC, 1)) arrowK = 1;
+    if (arrowK < 0) return;
+    const arrow = matchArrowGlyphAt(peekNC, arrowK);
+    if (!arrow) return;
+    // Up to (not including) the first token of the arm body.
+    const end = arrowK + arrow.len < phys.length ? phys[arrowK + arrow.len] : (phys[phys.length - 1] + 1);
+    for (let p = end - 1; p >= i; p--) if (tokens[p].kind === "COMMENT") tokens.splice(p, 1);
+  }
+
   function parseOneStatement() {
+    dropArmHeadComments();
     const tok = peek();
 
     // BLOCK_REF — embedded child block
@@ -14027,6 +14121,31 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           body: blockBody,
           span: spanOf(startTok, peek()),
         };
+      }
+    }
+
+    // S468 r1 (F4/F5) — an arm head the compiler cannot classify is REFUSED here, at
+    // the parser, rather than kept as text that codegen silently drops (see
+    // `unclassifiableArmHead`). The arm's body is consumed so the rest of the match
+    // still parses; the compile fails.
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth && !isOldPresenceGuardPattern()) {
+      const _bad = unclassifiableArmHead(peek);
+      if (_bad) {
+        const startTok = tok;
+        const headText = [];
+        for (let _h = 0; _h < _bad.arrowK; _h++) headText.push(consume().text);
+        const _arrowB = matchArrowGlyphAt(peek, 0);
+        for (let _a = 0; _a < (_arrowB ? _arrowB.len : 0); _a++) consume();
+        if (peek().kind === "PUNCT" && peek().text === "{") { consume(); collectBracedBody(); }
+        else collectExpr(null, { armBody: true });
+        errors.push(new TABError(
+          "E-PARSE-001",
+          `E-PARSE-001: \`${headText.join(" ").slice(0, 60)}\` is not a match arm pattern the compiler can read: ${_bad.why}. ` +
+          "An arm pattern is a variant (`.V`, `.V(…)`), a §18.16 literal (a string, a number, `true` / `false`), " +
+          "`else` / `_`, `not`, or a `|` alternation of variants or of literals (§18.2, §18.16).",
+          tokenSpan(startTok, filePath),
+        ));
+        return null;
       }
     }
 

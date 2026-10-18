@@ -51,6 +51,12 @@ function matchArms(src) {
   return out;
 }
 
+/** The parser's error codes for `src`. */
+function parseErrorCodes(src) {
+  const r = buildAST(splitBlocks("t.scrml", src));
+  return (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+}
+
 const inFn = (matchSrc) => `<program>\n\${\n  type K:enum = { A, B, C }\n  function f(n, s, b, k) {\n${matchSrc}\n    return 0\n  }\n}\n</program>\n`;
 
 describe("(A) AST: every arm head with a `{ … }` body is a match-arm-block with a parsed body", () => {
@@ -99,9 +105,59 @@ describe("(A) AST: every arm head with a `{ … }` body is a match-arm-block wit
     expect(json.includes('"match-arm-block"')).toBe(false);
   });
 
-  test("a head mixing literal and variant alternates stays on the text path (unchanged)", () => {
-    const [arms] = matchArms(inFn(`    match n {\n      .A | 1 :> { return 1 }\n      else :> { return 9 }\n    }`));
-    expect(arms[0].kind).toBe("bare-expr");
+  // S468 r1 (F4/F5) — a head the compiler cannot classify is REFUSED (it used to be
+  // kept as text that codegen silently dropped, failing open).
+  for (const [name, head] of [
+    ["literal and variant alternates mixed", ".A | 1 :>"],
+    ["string and variant alternates mixed", `"bob" | .A :>`],
+    ["a template literal", "`bob` :>"],
+    ["a template literal with an interpolation", "`${s}` :>"],
+    ["`not` inside an alternation", "1 | not :>"],
+    ["a parenthesized single pattern", "(1) :>"],
+  ]) {
+    test(`unclassifiable head is E-PARSE-001: ${name} (block and single-expression body)`, () => {
+      expect(parseErrorCodes(inFn(`    match n {\n      ${head} { return 1 }\n      else :> { return 9 }\n    }`))).toContain("E-PARSE-001");
+      expect(parseErrorCodes(inFn(`    const v = match n {\n      ${head} 1\n      else :> 9\n    }`))).toContain("E-PARSE-001");
+    });
+  }
+
+  test("an alternation holding `_` stays the wildcard arm (not refused) even when mixed", () => {
+    const src = inFn(`    match n {\n      1 | .A | _ :> { return 1 }\n    }`);
+    expect(parseErrorCodes(src)).not.toContain("E-PARSE-001");
+    expect(matchArms(src)[0][0].isWildcard).toBe(true);
+  });
+
+  // S468 r1 (F3) — a comment in an arm head is trivia: the arm is read as without it.
+  for (const [name, head, field, value] of [
+    ["block comment before the arrow", "1 /* c */ :>", "literals", ["1"]],
+    ["block comment after the arrow", "1 :> /* c */", "literals", ["1"]],
+    ["line comment before the arrow", "1 // c\n      :>", "literals", ["1"]],
+    ["comment between alternates", "1 | /* c */ 2 :>", "literals", ["1", "2"]],
+    ["comment after a string head", `"bob" /* c */ :>`, "literals", ['"bob"']],
+    ["comment after a variant", ".A /* c */ :>", "variant", "A"],
+    ["comment after `else`", "else /* c */ :>", "isWildcard", true],
+    ["comment after `_`", "_ /* c */ :>", "isWildcard", true],
+  ]) {
+    test(`comment in an arm head: ${name}`, () => {
+      const src = inFn(`    match n {\n      2 :> { return 2 }\n      ${head} { const g = 1\n        return g }\n    }`);
+      expect(parseErrorCodes(src)).toEqual([]);
+      const arm = matchArms(src)[0][1];
+      expect(arm.kind).toBe("match-arm-block");
+      expect(arm[field]).toEqual(value);
+      expect(arm.body.map((s) => s.kind)).toEqual(["const-decl", "return-stmt"]);
+    });
+  }
+
+  // S468 r1 (F1) — an object-literal block arm carries the OBJECT tree on its body, read by
+  // the one reader shared with the type checker and codegen.
+  test("an object-literal block arm's body holds the object tree (every analysis sees its values)", () => {
+    const [arms] = matchArms(inFn(`    const v = match n {\n      1 :> { g: k, h: [b] }\n      .A :> { g: k }\n      else :> { z: 0 }\n    }`));
+    for (const arm of arms) {
+      expect(arm.kind).toBe("match-arm-block");
+      expect(arm.body).toHaveLength(1);
+      expect(arm.body[0].objectLiteralArm).toBe(true);
+      expect(arm.body[0].exprNode.kind).toBe("object");
+    }
   });
 });
 
@@ -226,6 +282,38 @@ export fn k(x: K) {
     const m = await loadLib(r.libPath);
     expect([m.lab(1), m.lab(-1), m.lab(2), m.lab(3), m.lab(9)]).toEqual(["one", "minus", "few", "few", "many"]);
   });
+
+  test("S468 r1 (F2): a multi-scrutinee `_` / `else` BLOCK arm runs its body (it was dropped)", async () => {
+    const r = compileLib("multiwild", `export fn stmt(a: int, b: int) {
+  let r = "none"
+  match (a, b) {
+    (1, 2) :> { r = "one-two" }
+    _ :> { const t = "wild"
+      r = t }
+  }
+  return r
+}
+export fn decl(a: int, b: int) {
+  const v = match (a, b) {
+    (1, 2) :> "one-two"
+    else :> { const t = a + b
+      t }
+  }
+  return v
+}
+export fn ret(a: int, b: int) {
+  return match (a, b) {
+    (1, 2) :> "one-two"
+    _ :> { const t = "w"
+      t + "ild" }
+  }
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect([m.stmt(1, 2), m.stmt(3, 4)]).toEqual(["one-two", "wild"]);
+    expect([m.decl(1, 2), m.decl(3, 4)]).toEqual(["one-two", 7]);
+    expect([m.ret(1, 2), m.ret(3, 4)]).toEqual(["one-two", "wild"]);
+  });
 });
 
 function compileApp(name, source) {
@@ -340,6 +428,32 @@ describe("(C) the analyses read a literal arm's body", () => {
     const all = [...(result.errors ?? []), ...(result.warnings ?? [])];
     expect(all.filter((e) => e.code === "W-DEAD-FUNCTION").map((e) => e.message)).toEqual([]);
   });
+
+  for (const [name, arms] of [
+    ["literal", `1 :> { g: verifyPassword }\n      else :> { g: verifyPassword }`],
+    ["variant", `.A :> { g: verifyPassword }\n      else :> { g: verifyPassword }`],
+    ["nested array", `1 :> { g: [verifyPassword] }\n      else :> { g: [verifyPassword] }`],
+  ]) {
+    test(`§13.2: an async function stored in an object-literal block arm (${name}) is refused`, () => {
+      const subj = name === "variant" ? "const n: K = .A" : "const n = 1";
+      const codes = compileApp(`objarm-${name.replace(/\s+/g, "-")}`, `<program>
+\${
+  import { verifyPassword } from "scrml:auth"
+  type K:enum = { A, B }
+  function run(p: string, h: string) {
+    ${subj}
+    const o = match n {
+      ${arms}
+    }
+    return o
+  }
+}
+<button onclick={ run("a", "b") }>go</button>
+</program>
+`);
+      expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    });
+  }
 
   test("§18.8: a variant alternation block arm covers every alternate (no false E-TYPE-020)", () => {
     const ok = compileApp("cover", `<program>

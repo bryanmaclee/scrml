@@ -6823,7 +6823,15 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // which swallowed an arm's `return` / `fail` and broke `break` / `continue`).
   if (Array.isArray(matchExpr.scrutineeExprs) && matchExpr.scrutineeExprs.length >= 2) {
     const resultVar = genVar("tilde");
-    const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string): string[] => {
+    const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string, structuredBody?: any[] | null): string[] => {
+      // S468 r1 (F2) — a `_ :> { … }` / `else :> { … }` block arm: its parsed statements,
+      // lowered as the single-scrutinee decl path lowers a structured arm (an object-literal
+      // body is the value; otherwise statements with the §18.5 tail assigned).
+      if (structuredBody) {
+        const objArm = _objectLiteralArmFromStructuredBody(structuredBody);
+        if (objArm !== null) return [`${resultVar} = ${_awaitMatchArmServerCalls(emitArmValue(objArm, _makeExprCtx(opts)), opts)};`];
+        return _emitStructuredArmToVar(structuredBody, resultVar, opts, opts).map((l) => l.replace(/^  /, "")).filter((l) => l.trim() !== "");
+      }
       const t = resultStr.trim();
       if (!t) return [];
       // §18.2 `leave-stmt` (S462 W1): the arm leaves; it assigns nothing.

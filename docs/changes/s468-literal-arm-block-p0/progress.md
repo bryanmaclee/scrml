@@ -123,3 +123,60 @@ block arm, the variant-alternation block arm and the `::V` block arm, not only l
   `let _scrml_tilde_N = o.n = 2;` — pre-existing for `.V` arms, now shared by literal arms. Correct, not tidy.
 - E-MU-001 fires on `for (let i = 0; i < 1; …) { i = 5 }` although `i` is read in the condition
   (pre-existing at top level; seen via the s465-r3 fixture).
+
+## 2026-10-17 — FIX ROUND 1 (S239 review of 4369d0bb9, PR #1450; artifacts ~/.cache/scrml-agent-tmp/s468-rev-litarm/)
+
+Resumed after a machine shutdown: pushed 12cd1f95a, committed + pushed 4369d0bb9 (progress), then the round.
+Every finding reproduced first on this branch with the reviewer's driver before fixing.
+
+**Correction to the first round.** "a `_ :> { … }` whole-product arm of a multi-scrutinee match is the
+wildcard (was a false E-TYPE-020 / dropped arm)" — WRONG as written: the typer stopped reporting E-TYPE-020,
+but all three multi-scrutinee lowerings still DROPPED the block body (`msWildDeny*` FAIL on base and on
+12cd1f95a; `msLitAltWild` newly FAIL on 12cd1f95a). Fixed below (F2).
+
+- **F1 (P0, INTRODUCED by round 0).** `const o = match name { "bob" :> { g: check } … }` then
+  `o.g(pass, hash)`: codegen emitted `_scrml_tilde = {g: check}` (its reader: the brace body as an object),
+  while value-function-stored / the F4 walks read the body's one statement, whose exprNode was the FIRST KEY
+  (`g`) — two readers disagreed. Reproduced: objArmDecl, objArmDeclVariant, objDeclLet, objDeclArr,
+  objDeclNested, objDeclStr, objReturnLit, serverFnObjRet FAIL on 4369d0bb9; objReturnVariant FAIL on main too.
+  Fix: ONE reader `objectLiteralArmValue` (arm-body-statements.ts); the parser applies it to every block-arm
+  body (`markObjectLiteralArmBody`: the body's statement now carries the object tree), and the typer's
+  `objectLiteralArmBodyNode` and codegen's `_objectLiteralArmFromStructuredBody` delegate to it. All refused
+  now (E-ASYNC-FN-ESCAPES-AS-VALUE + E-VALUE-FUNCTION-STORED); objArmStmtReturn / objArmDirectCall (a direct
+  call result in an object arm) still PASS. The E-ERROR-002 closure the reviewer confirmed is kept.
+- **F2 (P0, pre-existing).** `emitMultiScrutineeMatch` (value IIFE), `emitMultiScrutineeMatchStmt` and the
+  decl lowering (emit-logic `emitMatchExprDecl` multi-scrutinee callback) emitted a whole-product wildcard from
+  `child.result`, which a `match-arm-block` lacks. Now the block's statements (IIFE: `structuredIifeArmInner`
+  with the single-scrutinee leave rule; statement: `stmtArmBodyLines` on the structured arm; decl: object arm
+  as value else `_emitStructuredArmToVar`). msWildDeny / Else / Decl / DeclElse / msLitAltWild PASS;
+  sem2 multiScrutWild* return "wild".
+- **F3 (P0, pre-existing).** A COMMENT in an arm head made every arm form decline. `dropArmHeadComments`
+  (ast-builder.js) runs at the start of `parseOneStatement` and of `rejectDanglingElse` (for
+  `else /* c */ :>`): at arm level, when the tokens up to the arm arrow — comments skipped — form an arm head
+  (`armPatternChainArrowOffset`, or `not`), the COMMENT tokens from the head through the arrow are spliced out
+  (precedent: the tokens.splice at the markup-text relex). cmtVariant / cmtElse / cmtAltMid /
+  cmtLineBeforeArrow / cmtStrHead / cmtInlineHof / commentBeforeArrow… all now read as structured arms.
+- **F4 / F5.** `unclassifiableArmHead` (ast-builder.js) — at arm level, before Form 4 — refuses with
+  E-PARSE-001 a head whose alternates are outside §18.2 / §18.16 or mix kinds: literal + variant mixed (no
+  wildcard), `(1) :>`, `1 | not :>`, a template literal. Governing: §18.16.1 `literal-arm-pattern ::=
+  string-literal | number-literal | boolean-literal` (a template is not a string literal; `` `${name}` `` is
+  not constant); §18.2 `arm-pattern ::= variant-pattern | wildcard-arm | whole-error-arm | is-pattern` +
+  §18.16's `literal-arm-pattern` — `not` and `( … )` are not alternates. These arms were silently dropped by
+  codegen (fail open: mixedDrop / parenDrop / notAltDrop FAIL on base and round 0). E-PARSE-001 is the code
+  the parser already uses for "not a match arm" (`reportOrphanArmLines`); the message names §18.2 / §18.16.
+  An alternation holding `_` / `else` stays the wildcard arm (not refused).
+- **Filed:** g-match-arm-brace-shorthand-object-vs-block-tail-s468 (F6, LOW, ruling owed — `{ foo }` reads as
+  object shorthand, §18.5 would read a block tail; recommendation in the entry) and
+  g-mu-001-c-for-loop-var-read-in-condition-s468 (LOW, pre-existing false E-MU-001).
+
+**Gates (fix round 1).**
+- Reviewer families on the branch: la2 (= atk1–atk5 verbatim, 101 shapes): 0 FAIL (14 PASS, 86 PASS-REFUSED,
+  1 PASS-DENY `cpsMsWild` — a CPS-split response the instrument cannot read; the wrong password returns
+  `__scrml_exit REJECTED`). sem1/sem2 semantic shapes: tmplHead / tmplInterp now E-PARSE-001 (were "matched"),
+  multiScrutWild* now "wild" (were "none").
+- Unit file s468-literal-arm-block-parsed: 53 pass (adds unclassifiable-head refusals, comment-in-head
+  reading, the object-arm tree, object-arm refusal ×3, multi-scrutinee wildcard block executed ×3).
+- Corpus differential (2840 sources, base bbddfd7b9 vs round-1 head): 0 newly failing / 0 newly passing,
+  0 E-PARSE-001 anywhere; same 9 diagnostic-code changes (info / W-DEAD-FUNCTION removals) and the same 3
+  formatting-only artifact diffs as round 0. giti + flogence: 0 error-code differences.
+- Real (non-test-fixture) sites newly refused: 0.

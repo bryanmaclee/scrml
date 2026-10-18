@@ -2931,6 +2931,18 @@ function emitMultiScrutineeMatch(
       const prefix = conditionIndex === 0 ? "if" : "else if";
       lines.push(`  ${prefix} (${condition}) ${bodyEmit}`);
       conditionIndex++;
+    } else if (isWholeWildcard && child.kind === "match-arm-block") {
+      // S468 r1 (F2) — a whole-product wildcard with a `{ … }` BLOCK body (`_ :> { … }`,
+      // `else :> { … }`) is a `match-arm-block`: its body is its statements, not a
+      // `result` string. It used to be emitted from the (absent) result — the block
+      // was DROPPED, so the arm did nothing (a rejecting branch never ran). Emitted as
+      // the single-scrutinee IIFE emits a structured arm, with the same leave rule.
+      const leaves = armLeaves(matchArmBlockToMatchArm(child));
+      if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+        refuseLeavingValueArm(node, leaves, opts);
+      }
+      const inner = structuredIifeArmInner(Array.isArray(child.body) ? child.body : [], opts, matchCtx);
+      lines.push(`  else ${inner ? `{ ${inner} }` : `{}`}`);
     } else if (isWholeWildcard) {
       const bodyEmit = emitMultiArmBody(resultStr, "", matchCtx, opts);
       lines.push(`  else ${bodyEmit}`);
@@ -3467,11 +3479,11 @@ export function emitMatchStmt(node: any, opts?: any): string {
  * the function kept going (the decl-position sibling of
  * g-stmt-match-block-return-falls-through, measured S462 against bun:sqlite).
  */
-export function emitMultiScrutineeMatchInline(node: any, opts: any, armBody: (resultStr: string) => string[]): string {
+export function emitMultiScrutineeMatchInline(node: any, opts: any, armBody: (resultStr: string, structuredBody?: any[] | null) => string[]): string {
   return emitMatchInline(node, opts, armBody);
 }
 
-function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: string) => string[]): string {
+function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: string, structuredBody?: any[] | null) => string[]): string {
   const engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null =
     opts?.engineBindings ?? null;
   const engineCtx: EngineRewriteCtx | null = (engineBindings || opts?.engineVarNames) ? {
@@ -3647,7 +3659,7 @@ function emitMultiScrutineeMatchStmt(
   engineCtx: EngineRewriteCtx | null,
   matchMode: "client" | "server",
   opts?: any,
-  armBodyOverride?: (resultStr: string) => string[],
+  armBodyOverride?: (resultStr: string, structuredBody?: any[] | null) => string[],
 ): string {
   const N = scrutineeExprs.length;
   const rawScrutinees: string[] = Array.isArray(node.scrutinees) ? node.scrutinees : [];
@@ -3666,8 +3678,15 @@ function emitMultiScrutineeMatchStmt(
   const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
     ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
     : [];
-  const armBody = armBodyOverride ?? ((resultStr: string): string[] =>
-    stmtArmBodyLines(structureServerArm({ kind: "wildcard", test: null, binding: null, result: resultStr }, matchMode), node, engineCtx, null, matchMode, matchCtx, opts));
+  // S468 r1 (F2) — `structuredBody`: a whole-product wildcard with a `{ … }` block
+  // body (`_ :> { … }`, a `match-arm-block`) hands its parsed statements, not a
+  // `result` string (it has none — its block used to be DROPPED).
+  const armBody = armBodyOverride ?? ((resultStr: string, structuredBody?: any[] | null): string[] =>
+    stmtArmBodyLines(
+      structuredBody
+        ? { kind: "wildcard", test: null, binding: null, result: "", structuredBody }
+        : structureServerArm({ kind: "wildcard", test: null, binding: null, result: resultStr }, matchMode),
+      node, engineCtx, null, matchMode, matchCtx, opts));
 
   let conditionIndex = 0;
   for (const child of (node.body ?? []) as any[]) {
@@ -3697,7 +3716,8 @@ function emitMultiScrutineeMatchStmt(
       conditionIndex++;
     } else if (isWholeWildcard) {
       lines.push(conditionIndex === 0 ? `{` : `else {`);
-      for (const l of armBody(resultStr)) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      const _block = child.kind === "match-arm-block" ? (Array.isArray(child.body) ? child.body : []) : null;
+      for (const l of armBody(resultStr, _block)) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
       lines.push(`}`);
     } else {
       // Fail closed exactly as emitMultiScrutineeMatch does (g-match-lowering-arm-drop F3).
