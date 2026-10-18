@@ -355,3 +355,104 @@ describe("F7 — a `__` key is a flag, or it is read", () => {
     expect(found({ kind: "const-decl", name: "ok", init: "", __enclosingFnCanFail: true, __inDeferBody: false }).length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix round 2 (the #1470 review)
+// ---------------------------------------------------------------------------
+
+/** A page whose `#out` shows `@msg`; `#wrong` / `#right` set `@pw`; `body` is extra markup. */
+const MSG = (top, body) => `${AUTH}
+<msg> = "init"
+<pw> = "wrong"
+\${
+${CHECK}
+${top}
+}
+<button id="wrong" onclick=\${@pw = "wrong"}>go</button>
+<button id="right" onclick=\${@pw = "secret"}>go</button>
+${body}
+<p id="out">\${@msg}</p>
+`;
+
+describe("r2 F1 — a lifted attribute value that swallowed later attributes is read whole", () => {
+  // `parseLiftTag` folds `id=${…}` and every attribute after it into one value; codegen still
+  // emits the `onclick`. On the r1 head the walk read only the `$` the value parsed to.
+  const wrong = [
+    ["the review repro: `id=${\"wrong\"}` before `onclick`", "id=${\"wrong\"}"],
+    ["`class=${x}` before `onclick`", "class=${x}"],
+  ];
+  for (const [name, attr] of wrong) {
+    test(name, () => {
+      const src = MSG("", `<div>\${ for (const x of ["wrong"]) { lift <button ${attr} onclick={ @msg = check(x) ? "LOGGED IN" : "rejected" }>go</button> } }</div>`);
+      expect(codesOf(src)).toContain("E-ERROR-002");
+    });
+  }
+
+  test("in a value-form `for`", () => {
+    expect(codesOf(LOGIN("const vs = for (const x of [p]) { lift <button id=${\"a\"} onclick={ @msg = check(x) ? \"a\" : \"b\" }>go</button> }\n        const ok = vs.length > 5"))).toContain("E-ERROR-002");
+  });
+
+  // (A braced handler holding `check(x) !{ … }` in lifted markup does not lower on #1464's head
+  // either — E-CODEGEN-INVALID-LOGIC — so the handled call sits in a function the handler calls.)
+  test("right password: a lifted handler after an `id=${…}` value, calling a function that handles the call", async () => {
+    const LOGIN_FN = "    function login(p) { const ok = check(p) !{ | _ :> false }\n        if (ok) { @msg = \"LOGGED IN\" } else { @msg = \"rejected\" } }";
+    const page = await boot(MSG(LOGIN_FN, "<div>${ for (const x of [@pw]) { lift <button id=${\"go\"} onclick=login(x)>go</button> } }</div>"));
+    await page.click("#wrong");
+    await page.click("#go");
+    expect(page.text("#out")).toBe("rejected");
+    await page.click("#right");
+    await page.click("#go");
+    expect(page.text("#out")).toBe("LOGGED IN");
+  });
+});
+
+/** RENDER with a top-level helper function `mk`. */
+const RENDER_MK = (fn) => RENDER("${mk(@pw)}").replace("    function plain(p)", `    ${fn}\n    function plain(p)`);
+
+describe("r2 F2 — `return <markup>` is read", () => {
+  test("the review repro: an interpolation in returned markup", () => {
+    expect(codesOf(RENDER_MK("function mk(p) { return <b>${check(p) ? \"LOGGED IN\" : \"rejected\"}</b> }"))).toContain("E-ERROR-002");
+  });
+
+  test("an attribute of returned markup", () => {
+    expect(codesOf(RENDER_MK("function mk(p) { return <b if=(check(p))>LOGGED IN</b> }"))).toContain("E-ERROR-002");
+  });
+
+  test("right password: a handled call in returned markup", async () => {
+    await expectLoginRejectsWrongAcceptsRight(RENDER_MK("function mk(p) { return <b>${(check(p) !{ | _ :> false }) ? \"LOGGED IN\" : \"rejected\"}</b> }"));
+  });
+});
+
+describe("r2 F3 — destructuring defaults in a `for` head are read", () => {
+  const wrong = [
+    ["an object pattern", "let ok = false\n        for (const { a = check(p) } of [{}]) { ok = a }"],
+    ["an array pattern", "let ok = false\n        for (const [a = check(p)] of [[]]) { ok = a }"],
+    ["a value-form `for`", "const vs = for (const { a = check(p) } of [{}]) { lift a }\n        const ok = vs[0]"],
+  ];
+  for (const [name, decl] of wrong) {
+    test(name, () => {
+      expect(codesOf(LOGIN(decl))).toContain("E-ERROR-002");
+    });
+  }
+
+  test("right password: a non-failable default", async () => {
+    await expectLoginRejectsWrongAcceptsRight(LOGIN("let ok = false\n        for (const { a = plain(p) } of [{}]) { ok = a }"));
+  });
+});
+
+describe("r2 F4 — a §18.19 multi-scrutinee match on a failable call is handled (no false refusal)", () => {
+  const ok = [
+    ["the call as the first scrutinee", "const ok = match (check(p), 1) { (.Denied, _) :> false\n        _ :> true }"],
+    ["through an alias", "const g = check\n        const ok = match (g(p), 1) { (.Denied, _) :> false\n        _ :> true }"],
+    ["the call as the second scrutinee", "const ok = match (1, check(p)) { (_, .Denied) :> false\n        _ :> true }"],
+  ];
+  for (const [name, decl] of ok) {
+    test(`right password: ${name}`, async () => {
+      await expectLoginRejectsWrongAcceptsRight(LOGIN(decl));
+    });
+  }
+
+  test("wrong password: the call under an operator inside a scrutinee is still refused", () => {
+    expect(codesOf(LOGIN("const ok = match (check(p) || 1, 1) { (.Denied, _) :> false\n        _ :> true }"))).toContain("E-ERROR-002");
+  });
+});

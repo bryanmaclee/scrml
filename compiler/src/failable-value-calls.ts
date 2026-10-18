@@ -43,7 +43,7 @@
  */
 
 import type { ExprNode, CallExpr, LambdaExpr } from "./types/ast.ts";
-import { templateInterpolationNodesAll, guardCallArmsRaw } from "./expression-parser.ts";
+import { templateInterpolationNodesAll, guardCallArmsRaw, hasLostTrailingContent } from "./expression-parser.ts";
 import { tokenizeLogic } from "./tokenizer.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
@@ -312,6 +312,21 @@ export const DECL_KEY_CLASSES: ReadonlyMap<string, "expr" | "value-form" | "stat
   ["sqlNode", "opaque"], ["foreignNode", "opaque"], ["renderSpec", "opaque"], ["validators", "opaque"],
 ] as const);
 
+/**
+ * S469 follow-up (§19.4.3) — the object-valued keys a NON-declaration statement carries that are
+ * not expression trees and not child statements (STATEMENT_CHILD_KEYS), classified. Measured on
+ * the corpus (examples / samples / conformance/cases / stdlib / benchmarks / compiler/tests):
+ * `return-stmt.markupNode` (a `return <markup>` — before, never read: a wrong password logged in),
+ * `return-stmt.sqlNode`, `match-arm-inline.leaveStmt` (the arm's leaving statement), `for-stmt.variable`
+ * (a destructuring head — its defaults were never read), `bare-expr._refusalSpan`. Any other
+ * object-valued key is read conservatively (`opaque`): fails closed. The e-error-002 value-form
+ * test D enumerates the keys ast-builder.js writes on statements and fails on an unclassified one.
+ */
+export const STMT_KEY_CLASSES: ReadonlyMap<string, "markup" | "pattern" | "statement" | "inert" | "opaque"> = new Map([
+  ["markupNode", "markup"], ["variable", "pattern"], ["leaveStmt", "statement"],
+  ["sqlNode", "opaque"], ["foreignNode", "opaque"], ["productPatterns", "opaque"], ["_refusalSpan", "inert"],
+] as const);
+
 /** Statement kinds a conservative ("opaque") read walks as statements rather than field by field. */
 const OPAQUE_STATEMENT_KINDS = new Set([...VALUE_POSITION_STMT_KINDS, "if-expr", "for-expr"]);
 
@@ -527,6 +542,13 @@ class Walker {
     const tagged = handling === "statement-call" ? taggedTemplateParts(node) : null;
     if (tagged !== null) { this.templateInterpolations(tagged.quasi, node, scope, fn); return; }
     this.expr(node, scope, fn);
+  }
+
+  /** `text` parses as one expression with nothing dropped (no parse error, no lost trailing text). */
+  readsWhole(text: string): boolean {
+    if (text.trim() === "") return true;
+    const n = this.env.parseExpr(text);
+    return !!n && !isParseErrorHatch(n) && !hasLostTrailingContent(n);
   }
 
   /** The `${ … }` interpolations of template-literal text (`quasi`), each a value position. */
@@ -766,6 +788,49 @@ class Walker {
   }
 
   /**
+   * S469 follow-up — one key of a NON-declaration statement whose value is a structure, not an
+   * expression tree (STMT_KEY_CLASSES). True when the key was read here (the generic root loop
+   * skips it); false for an expression tree (or a list of them), which that loop reads. A key
+   * with no class is read conservatively (`opaque`) — fails closed, as DECL_KEY_CLASSES does.
+   */
+  stmtKey(st: Record<string, unknown>, key: string, scope: LocalScope | null, fn: FnCtx): boolean {
+    const v = st[key];
+    if (v === null || typeof v !== "object") return false;
+    if (isExprNodeValue(v) || (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object" || isExprNodeValue(x)))) {
+      // §18.19 — a multi-scrutinee head `match (a, b)` is carried twice: `scrutineeExprs` (each
+      // scrutinee, handled as a subject) and `headerExpr`, the comma SEQUENCE as an escape hatch
+      // holding the same text. The structured reading is the one walked.
+      if (key === "headerExpr" && Array.isArray(st.scrutineeExprs) && st.scrutineeExprs.length > 0
+          && (v as { kind?: unknown; nativeKind?: unknown }).kind === "escape-hatch"
+          && (v as { nativeKind?: unknown }).nativeKind === "SequenceExpression") return true;
+      return false;
+    }
+    switch (STMT_KEY_CLASSES.get(key)) {
+      case "inert": return true;
+      case "markup":
+        // `return <b>${check(p) ? "a" : "b"}</b>`: markup an expression holds.
+        this.liftedMarkup(v, scope, { ...fn, inLiftedMarkup: true });
+        return true;
+      case "pattern":
+        // A `for` head's destructuring pattern: its defaults are values (`for (const { a = check(p) } of xs)`).
+        this.patternDefaults(v, new LocalScope(scope), fn);
+        return true;
+      case "statement":
+        if (!Array.isArray(v) && typeof (v as { kind?: unknown }).kind === "string") {
+          this.statement(v as Record<string, unknown>, new LocalScope(scope), fn, "none");
+          return true;
+        }
+        this.opaque(v, scope, fn);
+        return true;
+      default:
+        // `sqlNode`, or a key this walk has not been taught: every expression tree in it is a
+        // value position, every statement in it is walked as a statement.
+        this.opaque(v, scope, fn);
+        return true;
+    }
+  }
+
+  /**
    * S469 — one key of a declaration, by its class (DECL_KEY_CLASSES). True when the key was read
    * here (the generic root loop skips it); false for an "expr" key, which that loop reads.
    */
@@ -932,6 +997,12 @@ class Walker {
         this.expr(value.exprNode, scope, vfn);
         // `onclick=check`: the function read as a value — the dispatcher calls it, unhandled.
         if (handler) this.fnValueRefs(value.exprNode, scope, vfn);
+        // Two readers of one text: `parseLiftTag` can fold `attr=${…}` AND every attribute after
+        // it into one value (`raw` = `${"a"}onclick={ @m = check(x) }`, `exprNode` = the ident
+        // `$`) while codegen still emits the later attributes. Unless `raw` reads as ONE whole
+        // expression (nothing dropped), it is read too, to refuse
+        // (`g-lift-tag-attr-value-swallows-attrs-s469`).
+        if (typeof value.raw === "string" && !this.readsWhole(value.raw)) this.unreadText(value.raw, scope, vfn);
         continue;
       }
       if (value.kind === "expr" && typeof value.raw === "string") { this.unreadText(value.raw, scope, vfn); continue; }
@@ -996,6 +1067,7 @@ class Walker {
         continue;
       }
       if (isDecl && this.declKey(st, key, scope, fn, handling)) continue;
+      if (!isDecl && this.stmtKey(st, key, scope, fn)) continue;
       const v = st[key];
       const roots = Array.isArray(v) ? v : [v];
       for (const root of roots) {
