@@ -94,9 +94,9 @@ export interface FailableCallCandidate {
    */
   text?: string;
   /**
-   * S469 follow-up — the call is inside markup a `lift` produces (`lift <li>${check(x)}</li>`).
-   * The main walk does not visit lifted markup, so an `<errorBoundary>` cannot be trusted to
-   * test it there (refused, like `fromText`).
+   * S469 follow-up — the call is inside markup a `lift` produces (`lift <li>${check(x)}</li>`)
+   * or markup an expression holds (`c ? <p>${check(p)}</p> : ""`). The main walk visits
+   * neither, so an `<errorBoundary>` cannot be trusted to test it there (refused, like `fromText`).
    */
   inLiftedMarkup?: boolean;
   /**
@@ -426,7 +426,13 @@ class Walker {
         return;
       }
       case "escape-hatch": this.escapeHatch(node as unknown as Record<string, unknown>, scope, fn); return;
-      case "ident": case "sql-ref": case "input-state-ref": case "markup-value": return;
+      case "markup-value":
+        // S469 follow-up — markup held by an expression (`${ c ? <p>${check(p) ? "a" : "b"}</p> : "" }`)
+        // renders its interpolations and attribute values like lifted markup does: read the same
+        // way (`g-markup-in-interp-ternary-failable-call-unchecked-s468`; before, a leaf).
+        this.liftedMarkup((node as unknown as { node?: unknown }).node, scope, { ...fn, inLiftedMarkup: true });
+        return;
+      case "ident": case "sql-ref": case "input-state-ref": return;
       case "array": for (const el of node.elements) this.expr(el as ExprNode, scope, fn); return;
       case "object":
         for (const p of node.props) {

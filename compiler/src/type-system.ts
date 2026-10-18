@@ -16307,7 +16307,7 @@ function annotateNodes(
       errors.push(new TSError(
         "E-ERROR-002",
         `E-ERROR-002: Result of failable function ${shown} is not handled. The call is made while ` +
-        `rendering inside an '<errorBoundary>', but at this position (${c.inLiftedMarkup ? "markup produced by 'lift'" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : c.call === null ? "a markup attribute value, or text impl#1 does not read structurally" : "a handler arm, match arm, template literal or loop initializer"}) ` +
+        `rendering inside an '<errorBoundary>', but at this position (${c.inLiftedMarkup ? "markup produced by 'lift' or held by an expression" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : c.call === null ? "a markup attribute value, or text impl#1 does not read structurally" : "a handler arm, match arm, template literal or loop initializer"}) ` +
         `impl#1 cannot route its error to the boundary, so the boundary does not handle it. Handle it in place with ` +
         `'${c.calleeName}(…) !{ | .Variant :> … }' or 'match', or bind it in a statement of the boundary's content ` +
         `('\${ const v = ${c.calleeName}(…) }') and use 'v'.`,

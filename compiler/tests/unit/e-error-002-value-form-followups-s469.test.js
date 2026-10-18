@@ -13,7 +13,8 @@
  *        text names a failable function, otherwise refused as unreadable (fails closed).
  *   F1b — lifted MARKUP (`lift <li>${check(x) ? "LOGGED IN" : "rejected"}</li>`) was never read
  *        (`g-lift-markup-failable-call-unchecked-s468`); executed on #1464's head, a wrong
- *        password rendered LOGGED IN.
+ *        password rendered LOGGED IN. The same reader now serves markup an EXPRESSION holds
+ *        (`${ c ? <p>${check(p) ? … }</p> : "" }`, `g-markup-in-interp-ternary-failable-call-unchecked-s468`).
  *   F2 — a TAGGED TEMPLATE (`check\`${p}\``) calls its tag, but the expression tree carries it as
  *        an escape hatch with only `raw`, which the walk did not read: `const ok = check\`${p}\``
  *        compiled and a wrong password logged in. Every other ESTree node carried that way
@@ -194,6 +195,24 @@ ${CHECK}
   test("right password: a handled call in lifted markup compiles and renders correctly", async () => {
     await expectLoginRejectsWrongAcceptsRight(RENDER(
       "${ for (x of [@pw]) { lift <li>${(check(x) !{ | _ :> false }) ? \"LOGGED IN\" : \"rejected\"}</li> } }"));
+  });
+
+  // The same reader serves markup an EXPRESSION holds (`g-markup-in-interp-ternary-failable-call-unchecked-s468`).
+  test("markup held by an interpolation's ternary (on #1464's head: a wrong password rendered LOGGED IN)", () => {
+    expect(codesOf(RENDER("${ @pw != \"\" ? <p>${check(@pw) ? \"LOGGED IN\" : \"rejected\"}</p> : \"\" }"))).toContain("E-ERROR-002");
+  });
+
+  test("markup held by an expression, inside an `<errorBoundary>`, is refused", () => {
+    const src = RENDER("${ @pw != \"\" ? <p>${check(@pw) ? \"LOGGED IN\" : \"rejected\"}</p> : \"\" }")
+      .replace("type AuthErr:enum = { Denied }", "type AuthErr:enum = { Denied renders <b>denied</b> }")
+      .replace("<div id=\"out\">", "<errorBoundary>\n<div id=\"out\">").replace(/<\/div>\n$/, "</div>\n</errorBoundary>\n");
+    const d = compileSource(src).errors.filter((e) => e.code === "E-ERROR-002");
+    expect(d.some((e) => /held by an expression/.test(e.message))).toBe(true);
+  });
+
+  test("right password: a handled call in markup held by an expression", async () => {
+    await expectLoginRejectsWrongAcceptsRight(RENDER(
+      "${ @pw != \"\" ? <p>${(check(@pw) !{ | _ :> false }) ? \"LOGGED IN\" : \"rejected\"}</p> : \"\" }"));
   });
 
   test("lifted markup with no failable call is not reported", () => {
