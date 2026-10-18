@@ -6,7 +6,10 @@
 
 ## ⏭ NEXT-SESSION PICKUP (ordered)
 
-### 0. FIRST: every in-flight branch was checkpointed + PAUSED at wrap — read each branch's `progress.md` "## PAUSED (S468 wrap)" block
+### 0. FIRST: the agents hit the API session limit mid-checkpoint — the WIP is salvaged in `scrml-support/handOffs/s468-wip-patches/` (read its INDEX.md)
+Most agents did NOT finish their PAUSED checkpoint (API session limit, reset 9:40pm MT 2026-10-17). Their uncommitted work + unpushed commits are saved as patches in scrml-support (`git am` / `git apply --index` onto the listed base). Most valuable: `lf/bootstrap-failopen` = the landing agent's completed + verified main-merge into #1447 (push it to land #1447); `s468-failable-alias-and-match` = #1444's unreviewed fix round. The agent transcripts are saved too — resume them by SendMessage rather than re-dispatching.
+
+### 0b. Then read each branch's `progress.md` "## PAUSED (S468 wrap)" block where one exists
 The machine/window died TWICE this session with agents mid-hook. At wrap every agent was told to commit + push + write a PAUSED block. Verify each branch tip on origin (`git ls-remote`) before resuming; a missing PAUSED block = that agent did not finish checkpointing → inspect its worktree under `.claude/worktrees/agent-*` (all retained, §6) — any `~/.cache/scrml-agent-tmp/s468-*-wrap.patch` is an uncommittable diff an agent saved instead.
 
 ### 1. PR board at wrap (main = af0cda50a, after #1439)
