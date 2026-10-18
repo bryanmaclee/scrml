@@ -22,6 +22,10 @@
 //       count is visible next to the old single-run count.
 //       Exit 0 = every suite is an exact partition · 1 = a violation (listed) · 2 = bad invocation.
 //
+//   bun scripts/ci-shards.ts needs <workflow.yml>
+//       Exit 1 unless every job except gate/tracking/windows is in `gate.needs` (and each need is a
+//       real job, and gate keeps `if: always()`): a blocking job missing from needs gates nothing.
+//
 //   bun scripts/ci-shards.ts merge-timings <out.json> <in.json>…
 //       Merges bun `--update-timings` outputs (one per shard leg, uploaded as CI artifacts) into the
 //       committed balance table `scripts/ci-test-timings.json`. The table only BALANCES the shards —
@@ -134,8 +138,32 @@ function mergeTimings(out: string, inputs: string[]): number {
   return 0;
 }
 
+/** NON-blocking by design (ci.yml header); every other job must be one the `gate` aggregator needs. */
+const NON_BLOCKING = new Set(["gate", "tracking", "windows"]);
+
+function needsLint(workflow: string): number {
+  let y: any;
+  try { y = (Bun as any).YAML.parse(readFileSync(workflow, "utf8")); }
+  catch (e) { console.error(`ci-shards needs: cannot parse ${workflow}: ${e}`); return 2; }
+  const jobs = y?.jobs ?? {};
+  const gate = jobs.gate;
+  if (!gate) { console.log(`✗ ${workflow} has no \`gate\` job`); return 1; }
+  const needs = new Set<string>([gate.needs ?? []].flat());
+  let bad = 0;
+  if (!/\balways\(\)/.test(String(gate.if ?? ""))) { console.log(`✗ gate has no \`if: always()\` — a skipped/failed need would SKIP gate, and a skipped required check passes`); bad++; }
+  for (const name of Object.keys(jobs)) {
+    if (NON_BLOCKING.has(name)) continue;
+    if (!needs.has(name)) { console.log(`✗ job \`${name}\` is not in gate.needs — it would run and gate nothing`); bad++; }
+  }
+  for (const n of needs) if (!(n in jobs)) { console.log(`✗ gate.needs names \`${n}\`, which is not a job`); bad++; }
+  if (bad) { console.error(`ci-shards needs: ${bad} problem(s)`); return 1; }
+  console.log(`ci-shards needs: gate needs every blocking job (${[...needs].join(", ")}); non-blocking: ${[...NON_BLOCKING].filter((n) => n !== "gate").join(", ")}`);
+  return 0;
+}
+
 const [cmd, ...rest] = process.argv.slice(2);
+if (cmd === "needs" && rest.length === 1) process.exit(needsLint(rest[0]));
 if (cmd === "reconcile" && rest.length >= 2) process.exit(reconcile(rest[0], rest.slice(1)));
 if (cmd === "merge-timings" && rest.length >= 2) process.exit(mergeTimings(rest[0], rest.slice(1)));
-console.error("usage: bun scripts/ci-shards.ts reconcile <reports-dir> <suite>=<dir>[,<dir>…]…\n       bun scripts/ci-shards.ts merge-timings <out.json> <in.json>…");
+console.error("usage: bun scripts/ci-shards.ts needs <workflow.yml>\n       bun scripts/ci-shards.ts reconcile <reports-dir> <suite>=<dir>[,<dir>…]…\n       bun scripts/ci-shards.ts merge-timings <out.json> <in.json>…");
 process.exit(2);

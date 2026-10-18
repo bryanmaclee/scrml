@@ -35,6 +35,14 @@
 #   default, and a skipped required check reads as satisfied — the aggregator would then wave through
 #   exactly the run it exists to stop.
 #
+#   ⚑ BUN IS PINNED (S469 review): every `setup-bun` step names bun-version "1.4.3", the version CI resolved
+#   when this layout was measured. The gate now RELIES on bun's `--shard=i/N`, `--timings` /
+#   `--update-timings` and junit-reporter shape (scripts/ci-shards.ts reads its `<testsuite file=…>`).
+#   An unpinned `setup-bun` resolves package.json's ">=1.3.13" to the latest release, so an upstream change
+#   to any of those could alter what the gate checks with no commit here. Bump it deliberately, in a PR.
+#   ⚑ `checks` runs `scripts/ci-shards.ts needs`: every job except `gate` / `tracking` / `windows` must be in
+#   `gate.needs`, so a blocking job added later cannot be silently non-blocking.
+#
 #   NON-BLOCKING jobs: `tracking` (bootstrap conformance count + severity-table staleness, never in `gate`)
 #   and `windows` (OS-path-separator surface; runs on main, nightly, and PRs touching path-handling code).
 #
@@ -150,6 +158,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in this job
@@ -227,6 +237,11 @@ jobs:
         run: bun scripts/delta-lint.ts
       # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
       # DIFF-SCOPED: silent on the legacy corpus by construction.
+      # S469 review — the aggregator only blocks on what it `needs`. A job added to this file and left
+      # out of `gate.needs` would run, could fail, and would gate nothing.
+      - name: Every blocking job is in gate.needs (scripts/ci-shards.ts needs)
+        if: ${{ !cancelled() }}
+        run: bun scripts/ci-shards.ts needs .github/workflows/ci.yml
       - name: §34.0 row-provenance gate (new error-code rows state where they fire)
         if: ${{ !cancelled() }}
         run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'HEAD~1' }}
@@ -248,33 +263,36 @@ jobs:
   # speed with timeouts that fire under load.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   unit:
-    name: unit (${{ matrix.shard }}/3)
+    name: unit (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
+        # Leg i/N come from strategy.job-index/job-total — the count is written ONCE, as this list.
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in unit/conformance
         run: bun install --frozen-lockfile
-      - name: unit + conformance — shard ${{ matrix.shard }}/3
+      - name: unit + conformance — shard ${{ strategy.job-index }}+1 of ${{ strategy.job-total }}
         run: >-
           bun test compiler/tests/unit compiler/tests/conformance
-          --shard=${{ matrix.shard }}/3
+          --shard=$(( ${{ strategy.job-index }} + 1 ))/${{ strategy.job-total }}
           --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
-          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-unit-${{ matrix.shard }}-of-3.xml"
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-unit-$(( ${{ strategy.job-index }} + 1 ))-of-${{ strategy.job-total }}.xml"
       - name: Upload shard report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: test-report-unit-${{ matrix.shard }}
+          name: test-report-unit-${{ strategy.job-index }}
           path: |
-            ${{ runner.temp }}/junit-unit-${{ matrix.shard }}-of-3.xml
+            ${{ runner.temp }}/junit-unit-*.xml
             ${{ runner.temp }}/timings.json
           retention-days: 14
           if-no-files-found: warn
@@ -290,7 +308,7 @@ jobs:
   # `pretest` runs here: integration/s464-quoted-handler-refused reads samples/compilation-tests/dist.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   integration:
-    name: integration (${{ matrix.shard }}/3)
+    name: integration (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -301,25 +319,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"   # no browser in integration/lsp/commands
         run: bun install --frozen-lockfile
       - name: Populate test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: integration + lsp + commands — shard ${{ matrix.shard }}/3
+      - name: integration + lsp + commands — shard ${{ strategy.job-index }}+1 of ${{ strategy.job-total }}
         run: >-
           bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
-          --shard=${{ matrix.shard }}/3
+          --shard=$(( ${{ strategy.job-index }} + 1 ))/${{ strategy.job-total }}
           --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
-          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-3.xml"
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-$(( ${{ strategy.job-index }} + 1 ))-of-${{ strategy.job-total }}.xml"
       - name: Upload shard report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: test-report-integration-${{ matrix.shard }}
+          name: test-report-integration-${{ strategy.job-index }}
           path: |
-            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-3.xml
+            ${{ runner.temp }}/junit-integration-*.xml
             ${{ runner.temp }}/timings.json
           retention-days: 14
           if-no-files-found: warn
@@ -334,6 +354,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps (incl. puppeteer's Chromium)
         run: bun install --frozen-lockfile
       - name: Populate browser-test fixtures (samples/compilation-tests/dist)
@@ -359,6 +381,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps (incl. Chromium — slice-m3's css oracle drives puppeteer)
         run: bun install --frozen-lockfile
       # S437 — the native bootstrap lives outside the bunfig test root, so a plain `bun test` never runs
@@ -401,26 +425,30 @@ jobs:
   # is already scoped to the modes a run covers, so the legs never misreport each other's keys.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   host-global:
-    name: host-global (${{ matrix.leg }}/2)
+    name: host-global (${{ matrix.leg }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # `--mode-shard i/2` (S469): the script itself deals ALL_MODES round-robin across the legs, so
+        # `--mode-shard i/N` (S469): the script itself deals ALL_MODES round-robin across the legs, so
         # every mode is in exactly one leg BY CONSTRUCTION — no hand-written mode list here to rot.
-        # 2 legs = default+embed+test · esm+build+library (~175 s of scan each on run 39142073562's
-        # per-mode times). An unknown mode name exits 2.
+        # i and N come from `strategy.job-index` / `strategy.job-total` (S469 review): the leg COUNT is
+        # written once, as this list, so a second literal cannot drift from it and strand a mode group.
+        # The list's VALUES only label the jobs. 2 legs = default+embed+test · esm+build+library (~180 s
+        # of scan each). N > 6 (more legs than modes) exits 2. An unknown mode name exits 2.
         leg: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
-      - name: Host-global alias gate — mode shard ${{ matrix.leg }}/2
-        run: bun scripts/host-global-scan.ts --check --mode-shard ${{ matrix.leg }}/2
+      - name: Host-global alias gate — mode shard ${{ strategy.job-index }}+1 of ${{ strategy.job-total }}
+        run: bun scripts/host-global-scan.ts --check --mode-shard $(( ${{ strategy.job-index }} + 1 ))/${{ strategy.job-total }}
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # gate — THE REQUIRED CHECK. Aggregates every blocking job above. See the header: it must stay
@@ -446,6 +474,8 @@ jobs:
       - uses: actions/checkout@v4
         if: ${{ !cancelled() }}
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
         if: ${{ !cancelled() }}
       - name: Download shard reports
         if: ${{ !cancelled() }}
@@ -479,6 +509,8 @@ jobs:
         with:
           fetch-depth: 0   # the same base diff the blocking currency step makes (de-dup below)
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
       - name: Install deps
         env:
           PUPPETEER_SKIP_DOWNLOAD: "true"
@@ -547,6 +579,8 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "no path-handling file changed in this PR — Windows suite not needed (it runs on main + nightly)"
           fi
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.3"   # PINNED (S469) — see the header note on bun
         if: ${{ steps.need.outputs.run == 'true' }}
       - name: Install deps
         if: ${{ steps.need.outputs.run == 'true' }}

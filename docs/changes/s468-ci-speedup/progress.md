@@ -125,3 +125,13 @@ No scratch bite-proof branch/PR was created.
   merge queue" (or Settings -> Rules -> Rulesets -> New branch ruleset, target main). Merge method: merge commit;
   build concurrency 2; min group 1; max group 5; wait time 5 min (moot at min 1); "only merge non-failing PRs"
   ON; status-check timeout 30 min. Prerequisite: this PR's `merge_group:` trigger must be ON main first.
+- S469 review round (LAND-WITH-FOLLOWUPS at 97847e764):
+  1. Leg i/N now come from `strategy.job-index`/`strategy.job-total` in unit, integration AND host-global — the
+     count is written once (the matrix list). Dry YAML eval (Actions' expansion simulated): unit 1/3..3/3,
+     integration 1/3..3/3 with junit-<suite>-i-of-3.xml, host-global --mode-shard 1/2, 2/2; round-robin covers
+     all 6 modes exactly once for every N in 1..6, N>6 exits 2.
+  2. `bun scripts/ci-shards.ts needs .github/workflows/ci.yml` (new subcommand) runs in `checks`. Bites: slices
+     dropped from needs -> exit 1; gate `if: success()` -> exit 1; a new job not in needs -> exit 1; real file -> 0.
+  3. PR body corrected (security-failable-pack is on unmerged #1444, not here).
+  4. host-global-scan.ts comment N=4 -> N=2.
+  5. setup-bun pinned to bun-version "1.4.3" in all 9 steps, with the reason in the header.

@@ -434,7 +434,7 @@ const roots = opt("--roots", "samples,examples,conformance,stdlib,benchmarks").s
 // S469 (s468-ci-speedup) — `--mode-shard i/N` takes ALL_MODES[k] for every k ≡ i-1 (mod N). CI runs
 // the scan as N matrix legs this way, so the legs cover every mode BY CONSTRUCTION (a mode added to
 // ALL_MODES lands in some leg with no workflow edit; a hand-written per-leg mode list would rot).
-// With N=4 the legs are default+test · esm+library · embed · build (test/library compile only the
+// CI uses N=2: default+embed+test · esm+build+library (test/library compile only the
 // sources that use them, so they ride with a full-corpus mode). An unknown `--modes` name is refused.
 const modeShard = opt("--mode-shard", "");
 let modes: Mode[];
