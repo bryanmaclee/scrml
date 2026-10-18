@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 265 | 4 |
+| HIGH | 266 | 4 |
 | MED | 650 | 7 |
-| LOW | 435 | 0 |
+| LOW | 437 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -101,6 +101,24 @@ Executed S468 fix round 1 (happy-dom, wrong + right password) on base `5c43c3b8e
 <!-- @gap id=g-match-failable-ok-named-error-variant-reads-as-success-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchTagDiscriminator — a failable result's tag is the error's `.variant`, or "Ok" for a success; an error whose variant IS named `Ok` gets the success tag)+compiler/src/type-system.ts(no diagnostic refuses an error enum declaring `Ok`, or a failable match whose `.Ok` arm is ambiguous) prov=review:S469-re-review-of-5092a14fa-M1;empirical:S469-executed-happy-dom -->
 
 `type AuthErr:enum = { Ok, Denied }`, `function check(p)! -> AuthErr { if (p != "secret") fail AuthErr::Ok⏎ return true }`, `const ok = match check(p) { .Ok :> true  _ :> false }` compiles clean and, executed (happy-dom), shows LOGGED IN for the wrong AND the right password (on main and on PR #1444). The lowering's discriminator is `(r && r.__scrml_error === true) ? r.variant : "Ok"`, so the failure's own variant `Ok` collides with the success tag. Fix direction (not taken in #1444 — every failable `match` lowering shares the discriminator): refuse an error enum that declares a variant named `Ok` (it can never be told from success under §19.7.1's `.Ok` arm), or give success a tag no variant can carry.
+
+### g-value-form-if-for-unwalked-for-e-error-002-s469 — (security) a value-form `if` / `for` initializer is never walked for E-ERROR-002: `const ok = if (p != "") { lift check(p) } else { lift false }` compiles and a wrong password logs in — `NEW S469 (filed; pre-existing on main); HIGH; open (fix in flight in a separate PR)`
+
+<!-- @gap id=g-value-form-if-for-unwalked-for-e-error-002-s469 sev=HIGH status=open locus=compiler/src/failable-value-calls.ts(the declaration carries the value-form as `ifExpr` / `forExpr` with `init: ""`; `isExprNodeValue` (~:370), `EXPR_NODE_KINDS` (~:340) and `STATEMENT_CHILD_KEYS` (~:348) omit those keys, so the walk never enters them) prov=review:S469-re-review-of-94b422aa9 -->
+
+Reported by the re-review of PR #1444 at `94b422aa9` (pre-existing on main): `const ok = if (p != "") { lift check(p) } else { lift false }` — the `lift`ed failable call is never seen by the value-position walk, so the declaration binds the error object and a wrong password logs in. The same holds for the value form of `for`. Not fixed in #1444: a separate fix PR is in flight.
+
+### g-exported-const-alias-of-failable-not-failable-in-importer-s469 — an exported `const` alias of a `!` function (`export const g = check`) is not failable in the importer — `NEW S469 (filed; latent); LOW; open`
+
+<!-- @gap id=g-exported-const-alias-of-failable-not-failable-in-importer-s469 sev=LOW status=open locus=compiler/src/api.js(resolveFnThroughReExport ~:3099 — the import's binding is read off FUNCTION declarations only; a `const` alias exported in its place resolves to nothing) prov=review:S469-re-review-of-94b422aa9 -->
+
+impl#1 accepts a `const` alias of a failable function (`const g = check`, S469 F4), and api.js `resolveFnThroughReExport` reads an imported name's declaration from the exporting file's `function-decl`s only, so `import { g }` of an exported alias is not failable in the importer and `g(p)` would go unchecked. Latent today: codegen drops the export (the alias never reaches the importer at run time). Fix direction: resolve an exported `const` alias to the function it aliases (the exporting file's recorded alias), or refuse exporting an alias of a failable function.
+
+### g-match-failable-through-export-star-falsely-refused-s469 — `match check(p)` on a `!` function imported through `export *` is refused (E-ERROR-002) although it is handled — `NEW S469 (filed); LOW; open (fails closed)`
+
+<!-- @gap id=g-match-failable-through-export-star-falsely-refused-s469 sev=LOW status=open locus=compiler/src/api.js(the importer's imported TYPES are not seeded through `export *` — resolveTypeThroughReExport ~:2941 chases named re-exports only)+compiler/src/type-system.ts(importedFailableUnreadableErr — an import whose error enum is unreadable is not a provable match subject) prov=review:S469-re-review-of-94b422aa9;dispatch:s469-failable-r2-H3 -->
+
+Since S469 (H3) the FUNCTION is followed through `export *`, so `check(p)` is failable in the importer; its error enum (`AuthErr`, imported through the same `export *`) does not resolve there, so the `match` cannot be lowered to discriminate it and impl#1 refuses the subject with E-ERROR-002. A false refusal — fail closed, never a wrong-password path; `!{}` handles the call. Fix direction: seed imported types through `export *` with the module resolver's one reader (`resolveExportedBinding`), as the function side now does.
 
 ### g-match-failable-subject-in-handler-attribute-not-discriminated-s468 — (security) `match check("wrong")` written inline in an event-handler ATTRIBUTE compiles and compares the error object as a plain value: a wrong password logs in — `NEW S468 (filed; pre-existing on base); HIGH; RESOLVED S469 (PR #1444 fix round 1)`
 
