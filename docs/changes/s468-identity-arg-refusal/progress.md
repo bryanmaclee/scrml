@@ -131,3 +131,39 @@ The §7.3.2 default check now uses the same resolver (closes the gap's param / m
 - Did NOT edit the gap marker (brief); added a resolution note under it in docs/known-gaps.md.
 - Message precision (after 9c27a625e): an `@currentUser.<field>` read is reported with its field (free-name.ts
   `identityReadIn`, as `@session.<field>` already was), so the fix names `const uid = @currentUser.id`.
+
+## FIX ROUND 1 (S239 review of 79b34a878, PR #1451) — commit 89700c8ee
+
+Reproduced every item with the reviewer harness `~/.cache/scrml-agent-tmp/s468-rev-idarg/h/` (run.mjs over
+a1–a6, f1–f4) on 79b34a878 before fixing.
+- H1 DONE: a `function` declaration's parameter default (source text) is read from at-refs.ts's parsed default
+  tree, resolved where the function is declared; destructured `{ u } = {…}` parameters (a `destructure-object`
+  pattern as `name`) are bound. b23, d11, d12, e15–e18 now REFUSED.
+- H2 DONE: a CPS-split callee is followed as a helper with its server statements pruned (free-name.ts
+  `prune`); only wholly-server calls are server results. k01/k02 REFUSED; a CPS helper whose server batch reads
+  `session.userId` but returns browser data is not refused (test).
+- F1 DONE: predicate subtrees (filter/find/findIndex/findLast/findLastIndex/some/every/sort/toSorted callbacks,
+  ternary + `if` conditions) do not taint — argument check only (`ignorePredicates`); §7.3.2 default check
+  unchanged. m01/m02/m03/f17 accepted; a ternary BRANCH / `.map` still refused (tests).
+- F2 DONE: per-parameter mutation summary (identity-flow.ts `paramMutated` over the injected `localsWrittenBy`,
+  now taking a `callArgWritten` hook): a user call writes argument i only if the callee mutates parameter i
+  (transitive, positional; rebinding is not mutation; recursion fails closed). f14/g01/g02/h03/m04 accepted;
+  g02 (identity in the used position) and mutate-through-callee still refused (tests).
+- H4 (rest params / `arguments`) — CLOSED rather than filed: `"... args"` (the builder's spacing) now binds,
+  and `arguments` in a function resolves to every argument of every call. e01/e02/e06 REFUSED (tests).
+- Gate on 89700c8ee: pre-commit 37200 pass / 125 skip / 0 fail; targeted suites (identity, s466 param
+  defaults, s468 cps, s467 carried admission, s462 cps) 446/0; types-gate unchanged.
+
+## PAUSED (S468 wrap)
+
+Done: H1, H2, F1, F2 (code + tests, commit 89700c8ee); H4 closed in code (not filed).
+NOT done:
+- SPEC narrow: the §12.4 bullet / §34 row still read as written in 9c27a625e; they must be narrowed to what is
+  enforced and list the carried limits (H3 alias mutation; component-prop object values `o={ u: @session… }`
+  — probe c13, still accepted; f09/f10/f15 flow-/field-insensitive refusals) pointing at the gaps + dpa-071.
+- H3 gap NOT filed yet (MED): mutation through an alias — a40, a45, b13–b16, b29, d16, d17, e08 still
+  ACCEPTED-SPOOFED; c13 (component prop object) to go in the same entry. H4 needs no gap (closed) — note it.
+- Re-measure NOT finished for round 1: security-await-pack classify (FAIL set == base), corpus scan
+  (scan.mjs / cmp.mjs vs scan-base.json), corpus-emit-differential, S467 param probes
+  (~/.cache/scrml-review-s467-param-r5/cases via repro/codesdir.mjs, base2 vs head). Run all before landing.
+- progress/known-gaps note to update with the round-1 figures; FACTS already regenerated in 89700c8ee.
