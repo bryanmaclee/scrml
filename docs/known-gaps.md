@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 655 | 6 |
-| LOW | 436 | 0 |
+| LOW | 435 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -25638,8 +25638,10 @@ Verified from the CI logs (`gh run view <id> --attempt 1 --log-failed`, `windows
 
 **Severity LOW:** the Windows job is not a required check, and a re-run passes. The cost is a red X on landings and a re-run each time. Same class as [[g-flaky-timing-tests-s459]], [[g-windows-timer-audit-test-flaky-s454]] and [[g-specifier-resolution-test-hook-timeout-knife-edge]].
 
-### G-PARALLEL-PRS-CONFLICT-ON-COMMITTED-GENERATED-DOCS-S460 — every pair of parallel PRs conflicts on the committed generated docs (SPEC-INDEX line ranges, FACTS, bootstrap-conformance, the known-gaps §0 counts), so each landing forces a serial re-merge and regenerate of every other open PR — `NEW S460; LOW; open (process / tooling)`
-<!-- @gap id=g-parallel-prs-conflict-on-committed-generated-docs-s460 sev=LOW status=open locus=searched:scripts/regen-spec-index.ts,scripts/facts.ts,scripts/state.ts,scripts/bootstrap-conformance.ts prov=empirical:s460-landings-1370-1371-1372-copy-in-each-re-merged -->
+### G-PARALLEL-PRS-CONFLICT-ON-COMMITTED-GENERATED-DOCS-S460 — every pair of parallel PRs conflicts on the committed generated docs (SPEC-INDEX line ranges, FACTS, bootstrap-conformance, the known-gaps §0 counts), so each landing forces a serial re-merge and regenerate of every other open PR — `NEW S460; LOW; RESOLVED S468 (option (b), ruled S468 item 1)`
+<!-- @gap id=g-parallel-prs-conflict-on-committed-generated-docs-s460 sev=LOW status=resolved locus=scripts/git-merge-generated.ts(new merge driver — masks generated regions, merges hand text, regenerates gap-counts from the merged text, provisional+pending for cross-file content)+scripts/git-hooks/post-merge+scripts/git-hooks/post-rewrite(phase-2 regen)+.gitattributes(merge attribute scrml-generated)+scripts/git-hooks/install.sh(per-clone driver config) prov=empirical:s460-landings-1370-1371-1372-copy-in-each-re-merged;dispatch:s468-generated-merge-driver(8-of-9-open-PRs-merged-into-main-with-zero-markers) -->
+
+**Resolved S468** (branch `s468-generated-merge-driver`) — option (b), a merge driver, with one correction to its premise: a driver CANNOT "run the regenerate script" over the merged tree, because git runs it while the working tree still holds the pre-merge files (executed on git 2.55, `git merge` and `git rebase`). So it is two phases. In the merge, `scripts/git-merge-generated.ts` masks every generated region, merges only hand-written text, regenerates `@generated:gap-counts` exactly from the merged ledger text, and gives content derived from other files (FACTS, SPEC-INDEX totals + row ranges, recent-sessions, the bootstrap report) a provisional value. After the merge, the `post-merge` / `post-rewrite` hooks (or `--regen`) regenerate that from the merged tree. The S439 hazard named above is now a refusal: the gap-id union self-check fails the merge if any `@gap` id from either side would be dropped or duplicated. Measured: all 9 open S468 PRs merged into main — 8 with zero markers and `state.ts` / `facts.ts` / `regen-spec-index.ts --check` all PASS; the 9th (`s468-rulings-spec`) stops on its one hand-written entry hunk, as it should. **Still needed, by design:** the driver is per-clone config (`./scripts/git-hooks/install.sh`); GitHub's server-side merge never runs it, so a PR stays `dirty` until its branch is updated locally; and two PRs adding entries at the same spot in the ledger still need a hand 3-way.
 
 S460: #1370, #1371, #1372 and the copy-in branch were each re-merged against main after a sibling landed. In each case the conflicts were in generated files: `docs/SPEC-INDEX.md` (any SPEC edit shifts every later section's line range), the FACTS output, `docs/bootstrap-conformance.md`, and the `docs/known-gaps.md` §0 count table. None of them is hand-authored, but each is committed, so any two PRs that touch SPEC or gaps collide. The risk is more than wasted time: at S439, resolving a gap-count hunk with `--theirs` dropped a hand-written entry, and the regenerate hid the loss.
 
