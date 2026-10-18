@@ -1,0 +1,8 @@
+// §18.8.1: an enum match that misses a variant, with no wildcard, is E-TYPE-020.
+<program>
+    type Color:enum = { Red, Green, Blue }
+    let <c:Color=.Red/>
+    <main>
+        <p>${match @c { .Red :> "r", .Green :> "g", }}</p>
+    </main>
+</program>

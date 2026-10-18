@@ -248,10 +248,9 @@ describe("§19.7 — `match` on a failable result", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("a") {\n            .NotFound(m) :> @n = 1\n            .Timeout :> @n = 2\n        }\n    }`))).toEqual(["E-TYPE-020"]);
   });
 
-  test("a `match` over a value that cannot fail is the §18 match unit's — refused", () => {
+  test("a `match` over a value that cannot fail is the §18 plain-value match (s469: admitted, not an Attempt)", () => {
     const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            .B :> 2\n        }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("§18");
+    expect(codes(src)).toEqual([]);
   });
 
   test("an error enum with a variant named `Ok` cannot be matched (ambiguous with the success arm) — refused", () => {

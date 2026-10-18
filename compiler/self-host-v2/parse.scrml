@@ -612,6 +612,8 @@ ${
             .PWild :> false
             .PWhole(bind: b) :> false
             .PBare(bind: b) :> false
+            .PNot :> false
+            .PLit(e: x) :> false
         }
     }
 
@@ -637,11 +639,11 @@ ${
     fn parsePattern(tp: TP, guard: boolean) -> RPat {
         const a: PTok = cur(tp)
         const b: PTok = peekAt(tp, 1)
-        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard)
-        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard)
+        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v, guard, "")
+        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, "")
         if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b)) {
             const n: PTok = peekAt(tp, 2)
-            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard)
+            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v, guard, "")
         }
         if ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else")) {
             const t: TP = adv(tp)
@@ -654,11 +656,34 @@ ${
             }
             return { pat: APat.PWild, tp: t }
         }
+        // s469 — the absence arm `not :>` (§18.2: "`not` is not a bare name
+        // here: it is the absence arm (§42)"; §42.2.3)
+        if ((a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not" && sepAt(tp, 1)) return { pat: APat.PNot, tp: adv(tp) }
+        // s469 — a literal arm (§18.16.1: a string, number or boolean literal)
+        if ((a.cls == TC.Str || a.cls == TC.Num || ((a.cls == TC.Keyword || a.cls == TC.Ident) && (a.v == "true" || a.v == "false"))) && sepAt(tp, 1)) {
+            const rl: RExpr = parsePrimary(tp)
+            return { pat: APat.PLit(rl.e), tp: rl.tp }
+        }
+        if (a.cls == TC.Punct && a.text == "-" && b.cls == TC.Num && touching(a, b) && sepAt(tp, 2)) {
+            const rn: RExpr = mkE(adv(adv(tp)), a.start, AExprK.Num("-" + b.v))
+            return { pat: APat.PLit(rn.e), tp: rn.tp }
+        }
         // s452 — a bare identifier as the WHOLE pattern (`err :>`, §18.2): a
         // pattern of its own, so analyze reports E-MATCH-BARE-BINDER by name
         if (a.cls == TC.Ident && sepAt(tp, 1)) {
             const bb: ABind = { nid: tp.nid, span: mkSpan(a.start, a.end), name: a.v }
             return { pat: APat.PBare(bb), tp: bumpId(adv(tp)) }
+        }
+        // s469 — `E.V` / `E::V`, a qualified pattern (§18.13: "`TypeName.VariantName`
+        // (fully qualified) SHALL always be valid"); analyze checks `E`
+        if (a.cls == TC.Ident && b.cls == TC.Variant && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v, guard, a.v)
+        if (a.cls == TC.Ident && b.cls == TC.Punct && b.text == "." && touching(a, b)) {
+            const qn: PTok = peekAt(tp, 2)
+            if ((qn.cls == TC.Ident || qn.cls == TC.Keyword) && touching(b, qn)) return patBinds(adv(adv(adv(tp))), qn, qn.v, guard, a.v)
+        }
+        if (a.cls == TC.Ident && b.text == ":" && touching(a, b) && peekAt(tp, 2).text == ":" && touching(b, peekAt(tp, 2))) {
+            const qc: PTok = peekAt(tp, 3)
+            if ((qc.cls == TC.Ident || qc.cls == TC.Keyword) && touching(peekAt(tp, 2), qc)) return patBinds(adv(adv(adv(adv(tp)))), qc, qc.v, guard, a.v)
         }
         if (a.cls == TC.Ident && (b.text == "." || b.text == ":") && touching(a, b)) {
             // `E.V` / `E::V` — a qualified pattern
@@ -666,11 +691,11 @@ ${
             while (!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && peekAt(t, 1).text == ">") && !isP(t, "=>")) { t = adv(t) }
             return { pat: APat.PWild, tp: t }
         }
-        return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `_` or `else`), found `" + a.text + "`", a) }
+        return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `" + a.text + "`", a) }
     }
 
     // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
-    fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean) -> RPat {
+    fn patBinds(tp: TP, nameTok: PTok, name: string, guard: boolean, qual: string) -> RPat {
         const o: PTok = cur(tp)
         if (o.cls == TC.Punct && o.text == "(" && touching(nameTok, o)) {
             let t: TP = adv(tp)
@@ -685,7 +710,7 @@ ${
                 }
                 if (isP(t, ",")) t = adv(t)
             }
-            return { pat: APat.PName(name, binds, true), tp: expectP(t, ")") }
+            return { pat: APat.PName(name, binds, true, qual), tp: expectP(t, ")") }
         }
         // `.V m` — the paren-free payload binder: in a `!{}` arm the legacy
         // spelling of `.V(m)` (§19.4.3 ruling 2: "the same pattern as `| .V(m)
@@ -696,17 +721,26 @@ ${
         if (o.cls == TC.Ident && o.line == nameTok.line && o.v != "_") {
             if (!guard) {
                 const d: TP = diagAt(tp, "E-PARSE-ARM", binderReason(), o)
-                return { pat: APat.PName(name, [], false), tp: adv(d) }
+                return { pat: APat.PName(name, [], false, qual), tp: adv(d) }
             }
             const bnd: ABind = { nid: tp.nid, span: mkSpan(o.start, o.end), name: o.v }
-            return { pat: APat.PName(name, [bnd], false), tp: bumpId(adv(tp)) }
+            return { pat: APat.PName(name, [bnd], false, qual), tp: bumpId(adv(tp)) }
         }
-        return { pat: APat.PName(name, [], false), tp: tp }
+        return { pat: APat.PName(name, [], false, qual), tp: tp }
     }
 
     // An arm's body: a `{ block }`, or one expression read up to `armEnd`.
     fn parseArmBody(tp: TP) -> RArmBody {
         if (isP(tp, "{")) {
+            // s469 — §18.5 (ruling S469 "Compile error (Recommended)", extended to
+            // every arm kind by dpa-072 F9): a brace body that is exactly ONE bare
+            // shorthand name, `{ foo }` (no `;`), reads both as the object
+            // `{ foo: foo }` and as a block whose result is `foo`
+            const sh: PTok = peekAt(tp, 1)
+            if (sh.cls == TC.Ident && sh.v != "not" && peekAt(tp, 2).text == "}") {
+                const rs: RBlock = parseBlock(diagAt(tp, "E-MATCH-ARM-SHORTHAND-AMBIGUOUS", shorthandArmReason(sh.v), sh))
+                return { body: AArmBody.ArmBlock(rs.b), tp: rs.tp }
+            }
             const rb: RBlock = parseBlock(tp)
             return { body: AArmBody.ArmBlock(rb.b), tp: rb.tp }
         }
@@ -741,6 +775,10 @@ ${
             st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
         }
         return { body: AArmBody.ArmExpr(r.e), tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+    }
+
+    fn shorthandArmReason(n: string) -> string {
+        return "the arm body `{ " + n + " }` reads two ways — as the object `{ " + n + ": " + n + " }` and as a block whose result is `" + n + "` (§18.5). Write `{ " + n + ": " + n + " }` for the object, or the bare `" + n + "` (`<pattern> :> " + n + "`) for its value"
     }
 
     // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
@@ -800,6 +838,11 @@ ${
         if (a.cls == TC.Variant) j = i + 1
         if (j < 0 && a.cls == TC.Punct && a.text == "." && i + 1 < ts.length && touching(a, ts[i + 1]) && (ts[i + 1].cls == TC.Ident || ts[i + 1].cls == TC.Keyword)) j = i + 2
         if (j < 0 && a.cls == TC.Punct && a.text == ":" && i + 2 < ts.length && ts[i + 1].text == ":" && touching(a, ts[i + 1]) && touching(ts[i + 1], ts[i + 2])) j = i + 3
+        // s469: the absence arm `not :>` and a literal arm (`"a" :>`, `1 :>`, `-1 :>`, `true :>`)
+        if (j < 0 && (a.cls == TC.Ident || a.cls == TC.Keyword) && a.v == "not") return sepTokAt(ts, i + 1)
+        if (j < 0 && (a.cls == TC.Str || a.cls == TC.Num)) return sepTokAt(ts, i + 1)
+        if (j < 0 && (a.cls == TC.Ident || a.cls == TC.Keyword) && (a.v == "true" || a.v == "false")) return sepTokAt(ts, i + 1)
+        if (j < 0 && a.cls == TC.Punct && a.text == "-" && i + 1 < ts.length && ts[i + 1].cls == TC.Num && touching(a, ts[i + 1])) return sepTokAt(ts, i + 2)
         if (j < 0 && ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else"))) {
             j = i + 1
             // s452: `_ err` / `else err` — the wildcard's one binder (§18.6.1)
@@ -826,6 +869,17 @@ ${
             }
         }
         if (j >= ts.length - 1) return false
+        const s: PTok = ts[j]
+        const g: PTok = ts[j + 1]
+        if (s.cls != TC.Punct) return false
+        if (s.text == ":" && g.text == ">" && touching(s, g)) return true
+        if (s.text == "=>") return true
+        return s.text == "-" && g.text == ">" && touching(s, g)
+    }
+
+    // s469 — is there an arm separator (`:>`, `=>`, `->`) at token `j`?
+    fn sepTokAt(ts: PTok[], j: int) -> boolean {
+        if (j + 1 >= ts.length) return false
         const s: PTok = ts[j]
         const g: PTok = ts[j + 1]
         if (s.cls != TC.Punct) return false

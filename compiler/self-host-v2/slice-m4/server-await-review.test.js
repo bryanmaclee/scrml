@@ -31,8 +31,9 @@ const REVIEW_EXPECT = {
   // a scrml string literal is not interpolated in the bootstrap: `"${check(…)}"` is the text itself, so nothing waits
   "s1/template": ["DENY"],
   "s1/concat": ["REFUSED", ["E-OPERATOR-OPERAND-TYPE"]],
-  "s1/matchScrut": ["REFUSED", ["E-ERROR-013", "E-PARSE-ARM", "E-SYNTAX-010"]],
-  "s1/matchArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-ARM"]],
+  // s469: literal arms (`true :>`, `"bob" :>`) parse now (§18.16) — E-PARSE-ARM gone; over a failable (a server call) a literal arm is E-TYPE-VARIANT, never a wildcard
+  "s1/matchScrut": ["REFUSED", ["E-ERROR-013", "E-TYPE-VARIANT"]],
+  "s1/matchArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/structField": ["PASS"],
   "s1/arrayLit": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/indexWrite": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -56,7 +57,8 @@ const REVIEW_EXPECT = {
   "s1/arithmetic": ["PASS"],
   "s1/unusedResult": ["PASS"],
   "s1/returnCheckDirect": ["PASS"],
-  "s2/matchEnumScrut": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469: the §18 plain-value match — compiles, and RUNS on the server: wrong → REJECTED, right → WELCOME
+  "s2/matchEnumScrut": ["PASS"],
   "s2/matchEnumArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/matchStmtArmCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/givenSubj": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-tape-subject",
+  "description": "a `match` over a tape (`int[append] | not`) is refused, not unwrapped.",
+  "language-version": "1.0",
+  "spec": "§66.12 (S469 no-unconstrained) · §18.8.2",
+  "rationale": "S469: no position escapes the grant check — a match never hands an unwrapped tape to its arms.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

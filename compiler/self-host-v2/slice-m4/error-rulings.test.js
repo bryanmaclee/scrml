@@ -155,9 +155,9 @@ describe("§18.2 / §18.6.1 — E-MATCH-BARE-BINDER", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            else err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
   });
 
-  test("`_ <name>` on a `match` whose subject is NOT a failable result (the §18 match unit stays refused beside it)", () => {
+  test("`_ <name>` on a `match` whose subject is NOT a failable result (s469: the §18 plain-value match — only the binder is refused)", () => {
     const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            _ rest :> 2\n        }\n    }`);
-    expect(codes(src).slice().sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-MATCH-BARE-BINDER"]);
+    expect(codes(src).slice().sort()).toEqual(["E-MATCH-BARE-BINDER"]);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toContain("only where that value is an error");
   });
 
@@ -320,9 +320,9 @@ describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fa
     expect(codes(src)).toEqual([]);
   });
 
-  test("a `match` on a non-failable value is not affected (the §18 `match` unit — refused as before)", () => {
+  test("a `match` on a non-failable value is not affected — no E-ERROR-013 (s469: the §18 plain-value match, admitted)", () => {
     const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            .B :> 2\n        }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(src)).toEqual([]);
   });
 
   test("near-miss: a `!{}` on a `!` call and on a `?{}` compile", () => {

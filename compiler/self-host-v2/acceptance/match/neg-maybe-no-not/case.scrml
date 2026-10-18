@@ -1,0 +1,9 @@
+// §42.7: a `T | not` match with no `not` arm and no `else` is E-MATCH-012.
+<program>
+    type Guess:enum = { Yes, No }
+    let <s:string=""/>
+    <g:Guess | not=(Guess.toEnum(@s))/>
+    <main>
+        <p>${match @g { .Yes :> "y", .No :> "n", }}</p>
+    </main>
+</program>

@@ -1,0 +1,36 @@
+{
+  "id": "acceptance-toenum-prototype-keys",
+  "description": "`toEnum(\"constructor\" | \"__proto__\" | \"toString\" | \"no\" | \"\")` is `not`; `toEnum(\"No\")` is `.No`.",
+  "language-version": "1.0",
+  "spec": "§14.4.1",
+  "rationale": "§14.4.1: \"returns the corresponding enum variant, or `not` if no variant matches … String matching is case-sensitive\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "not"
+      },
+      {
+        "selector": "#b",
+        "text": "not"
+      },
+      {
+        "selector": "#c",
+        "text": "not"
+      },
+      {
+        "selector": "#d",
+        "text": "No"
+      },
+      {
+        "selector": "#e",
+        "text": "not"
+      },
+      {
+        "selector": "#f",
+        "text": "not"
+      }
+    ]
+  }
+}

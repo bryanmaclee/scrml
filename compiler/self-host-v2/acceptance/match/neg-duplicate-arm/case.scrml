@@ -1,0 +1,8 @@
+// §18.14.2: two arms for the same variant is E-TYPE-023.
+<program>
+    type Color:enum = { Red, Green }
+    let <c:Color=.Red/>
+    <main>
+        <p>${match @c { .Red :> "r", .Red :> "again", .Green :> "g", }}</p>
+    </main>
+</program>

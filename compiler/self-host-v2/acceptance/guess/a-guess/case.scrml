@@ -1,3 +1,4 @@
+// bryan's guess program (a): toEnum + a value `match` with a `not` arm, in markup.
 <program>
     type Guess:enum = { Yes, No }
 
@@ -6,7 +7,8 @@
 
     <main>
         <form><input type="text" placeholder="answer here" bind:value=@inputVal/></form>
-        <p id="say">${match @g { .Yes :> "yeppers", .No :> "nope", not :> "length " + @inputVal.length, }}</p>
+        <p id="say">${match @g { .Yes :> "yeppers", .No :> "nope", not :> "not a guess", }}</p>
+        <p id="len">length ${@inputVal.length}</p>
         <p id="real" if=(@g is given)>you picked a real answer</p>
     </main>
 </program>
