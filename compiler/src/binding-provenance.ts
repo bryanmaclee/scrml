@@ -73,6 +73,20 @@ function patternNames(pat: unknown, out: string[]): void {
   }
 }
 
+/**
+ * The names a declaration node binds: `n.name` when it is a plain name, every name
+ * of the destructuring pattern otherwise (s468 — shared with identity-flow.ts, which
+ * resolves a name to the scope that declares it).
+ */
+export function declaredNamesOf(n: unknown): string[] {
+  if (!n || typeof n !== "object") return [];
+  const o = n as AnyNode;
+  if (typeof o.name === "string") return [o.name];
+  const names: string[] = [];
+  patternNames(o.name, names);
+  return names;
+}
+
 /** The root identifier an assignment target writes through (`x`, `x.p`, `x[i].q` → `x`). */
 function targetRoot(t: unknown): string | null {
   let cur = t as AnyNode | null;
@@ -123,12 +137,7 @@ export function bindingsOfFile(
       else add(nm, { kind: "unresolved", why });
     }
   };
-  const declNames = (n: AnyNode): string[] => {
-    if (typeof n.name === "string") return [n.name];
-    const names: string[] = [];
-    patternNames(n.name, names);
-    return names;
-  };
+  const declNames = (n: AnyNode): string[] => declaredNamesOf(n);
   const resolveSource = (src: string): string | null => {
     const abs = resolveImport ? resolveImport(src, fp) : null;
     return abs && holds(abs) ? abs : null;
@@ -203,8 +212,15 @@ export function bindingsOfFile(
             }
           }
         } else if (typeof n.exportedName === "string" && (ek === "const" || ek === "let" || ek === "var")) {
-          // An exported value keeps only its raw text (an exported function also
-          // gets a synthetic `function-decl`, collected above).
+          // s468 — the parsed initialiser, when the builder kept one (`valueInitExpr`):
+          // the TREE node, so a location-aware reader (identity-flow.ts) can place it
+          // and follow the calls of an exported lambda into its parameters.
+          if (n.valueInitExpr && typeof n.valueInitExpr === "object") {
+            add(n.exportedName, { kind: "expr", node: n.valueInitExpr, filePath: fp });
+            break;
+          }
+          // An exported value otherwise keeps only its raw text (an exported function
+          // also gets a synthetic `function-decl`, collected above).
           let init: string | null = typeof n.valueInit === "string" ? String(n.valueInit).trim() : null;
           if (init == null) {
             const m = String(n.raw ?? "").match(/^\s*export\s+(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*(?::[^=]*)?=\s*([\s\S]+)$/);

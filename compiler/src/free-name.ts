@@ -202,6 +202,12 @@ export type IdentityNameResolution =
       owners: Array<{ params?: unknown; body?: unknown }>;
       serverCell?: string | null;
       unresolved?: string | null;
+      /**
+       * s468 — the binding the name resolved to (a location-aware resolver: the same
+       * name in two scopes is two bindings). Each binding is followed once. Absent →
+       * the name itself is the key.
+       */
+      key?: string | null;
     };
 
 export interface IdentityRead {
@@ -262,23 +268,32 @@ export function identityReadInDefaultDeep(
      * unless a file-scope `<session>` cell owns the name.
      */
     helperSessionProjection: boolean;
-    resolveName: (name: string) => IdentityNameResolution;
+    /**
+     * Every value source of `name`. `at` is the owner being scanned when the name
+     * was met (an owner a location-aware resolver built carries `_identityAt`, the
+     * node its free names resolve at) — a resolver may ignore it.
+     */
+    resolveName: (name: string, at?: unknown) => IdentityNameResolution;
+    /** s468 — the node the ROOT expression's free names resolve at (location-aware resolvers). */
+    rootAt?: unknown;
   },
 ): IdentityRead | null {
   const visited = new Set<string>();
-  const scan = (owner: { params?: unknown; body?: unknown }, via: string | null): IdentityRead | null => {
+  const scan = (owner: { params?: unknown; body?: unknown; _identityAt?: unknown }, via: string | null): IdentityRead | null => {
     const direct = identityReadIn(owner, {
       currentUserAmbient: opts.currentUserAmbient,
       sessionProjection: via === null ? opts.sessionProjection : opts.helperSessionProjection,
     });
     if (direct !== null) return { read: direct, via, unresolved: false };
     let hit: IdentityRead | null = null;
+    const at = owner._identityAt ?? owner;
     const follow = (name: string): void => {
       if (hit !== null) return;
       if (name === "session" || name === "@session" || name === "@currentUser") return;
-      if (visited.has(name)) return;
-      visited.add(name);
-      const res = opts.resolveName(name);
+      const res = opts.resolveName(name, at);
+      const key = res !== null && typeof res.key === "string" ? res.key : name;
+      if (visited.has(key)) return;
+      visited.add(key);
       if (res === null) return;
       if (res.serverCell) { hit = { read: res.serverCell, via: via ?? (name === res.serverCell ? null : name), unresolved: false }; return; }
       if (res.unresolved) { hit = { read: name, via: via ?? name, unresolved: true, why: res.unresolved }; return; }
@@ -305,5 +320,5 @@ export function identityReadInDefaultDeep(
     });
     return hit;
   };
-  return scan({ params, body: [defaultExpr] }, null);
+  return scan({ params, body: [defaultExpr], _identityAt: opts.rootAt }, null);
 }
