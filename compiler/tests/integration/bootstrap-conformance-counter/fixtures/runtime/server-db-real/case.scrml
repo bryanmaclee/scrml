@@ -1,0 +1,12 @@
+<program db="./app.db">
+    type Row:struct = { id: int, name: string }
+    <rows:Row[replace]=([])/>
+
+    function byRole(role: string) -> Row[] {
+        return ?{`SELECT id, name FROM people WHERE role = ${role} ORDER BY id`}.all() !{ _ :> [] }
+    }
+
+    <main>
+        <button id="go" onclick={ @rows = byRole("admin") !{ .Transport(t) :> return } }>go</button>
+    </main>
+</program>

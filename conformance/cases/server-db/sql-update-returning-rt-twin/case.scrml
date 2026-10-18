@@ -1,0 +1,14 @@
+// §66 twin of server-db/sql-update-returning-rt — the same program, seed, clicks and asserted values in the dialect the bootstrap parses.
+<program db="./app.db">
+    type Item:struct = { id: int, qty: int }
+    <updated:Item[replace]=([])/>
+    function bump(id: int, by: int) -> Item[] {
+        return ?{`UPDATE items SET qty = qty + ${by} WHERE id = ${id} RETURNING id, qty`}.all() !{ _ :> [] }
+    }
+    function onBump() {
+        @updated = bump(1, 3) !{ .Transport(t) :> return }
+    }
+    <main>
+        <button id="go" onclick=onBump()>Bump qty</button>
+    </main>
+</program>

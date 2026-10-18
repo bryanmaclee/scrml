@@ -3829,6 +3829,8 @@ function _compileScrmlImpl(options = {}) {
   // nothing (generateValueOnlyServerJs returns "") — the warning correctly
   // still fires (there is genuinely nothing to import).
   // ---------------------------------------------------------------------------
+  // The outputs whose `.server.js` the value-only emitter wrote (S467 r9 — reconciled below).
+  const valueOnlyOutputs = new Set();
   function emitValueOnlyServerJsForDanglingImports() {
     if (!cgResult.outputs) return;
     // Index file ASTs + output objects by absolute source path so a resolved
@@ -3883,9 +3885,40 @@ function _compileScrmlImpl(options = {}) {
           // Attach the minimal value-only .server.js to the target output so the
           // parse-gate + write phase pick it up and the invariant check resolves.
           target.serverJs = valueOnly;
+          valueOnlyOutputs.add(target);
           grew = true;
         }
       }
+    }
+    reconcileValueOnlyImports(outputByAbsSource);
+  }
+
+  // ---------------------------------------------------------------------------
+  // S467 r9 (MED-1) — a value-only `.server.js` imports, from another local module,
+  // only the names that module's emitted `.server.js` really exports. The value-only
+  // emitter (emit-server `_generateValueOnlyServerJs`) writes an import for every name
+  // its values reference — but an imported TYPE (an enum), a markup component, or any
+  // name its module emits no server value for has no server export, and a module with
+  // no server content has no `.server.js` at all. ESM does not degrade per name: one
+  // such import made the WHOLE value-only module — and every server bundle importing
+  // it — fail to load. Decided here, off the emitted output, once every value-only file
+  // exists (the same rule `reconcileServerReExports` applies to re-exports). A name left
+  // out is then simply not defined in that module: a value that reads it fails when it
+  // runs, not the bundle.
+  // ---------------------------------------------------------------------------
+  function reconcileValueOnlyImports(outputByAbsSource) {
+    const importLineRe = /^import\s*\{([^}]*)\}\s*from\s*(["'])(\.\.?\/[^"']+\.server\.js)\2;?[ \t]*$/gm;
+    for (const [filePath, output] of cgResult.outputs) {
+      if (!valueOnlyOutputs.has(output) || !output.serverJs) continue;
+      output.serverJs = output.serverJs.replace(importLineRe, (line, clause, _q, relServer) => {
+        const target = outputByAbsSource.get(serverImportTargetSource(filePath, relServer));
+        if (!target) return line; // outside this compile — not ours to judge
+        const exported = target.serverJs ? serverExportedNamesOf(target.serverJs) : new Set();
+        const kept = clause.split(",").map((p) => p.trim()).filter(Boolean)
+          .filter((p) => exported.has(p.split(/\s+as\s+/)[0].trim()));
+        if (kept.length === 0) return "";
+        return `import { ${kept.join(", ")} } from ${JSON.stringify(relServer)};`;
+      });
     }
   }
 

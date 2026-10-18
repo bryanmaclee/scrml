@@ -12,23 +12,14 @@
 // it missed m2/topBindingAwaitedInBinding, which the reviewers' own r7 and r8 BASE runs also show
 // accepting a wrong password.
 
-const GAP = "g-imported-async-server-fn-not-awaited-s465";
-
+// S467 fix round 9: all ten close (the parsed-init classifier in codegen/fn-valued-bindings.ts —
+// the r8 binding rule and the r9 escape rule). Measured on s467-await-r9: 0 shapes accept a wrong
+// password. The map stays so a regression has a place to be named.
+// S467 fix round 10 (dpa-023 F4, §13.9.6): + families y1–y3 (the S467 review of r9, which found
+// four y3 shapes and y1/voIife, y2/voIife, y2/voAnnotIife, y1/topLetIfWrite, y2/topLetIfLit
+// answering WELCOME on r9). Measured on s467-await-r10: 551 shapes, 0 accept a wrong password.
+// + families z1–z4 (the S467 review of r10; 640 shapes): 0 accept a wrong password.
 export const KNOWN_FAIL = {
-  // r7 — a module-level binding whose lambda body calls an async helper, called through a second binding
-  "m2/topBindingAwaitedInBinding": GAP,
-  // r7 — `!` over a binding that calls a binding
-  "m3/bindNotBinding": GAP,
-  "m3/libBindChainNot": GAP,
-  // r7 — an annotated `export const` lambda
-  "m4/appExportConstAnn": GAP,
-  "m4/libExportConstAnnInner": GAP,
-  // r8 — a binding calling a `let` binding; export paths (ternary, imported value, binding-of-binding, curried)
-  "m5/bindCallsLetBinding": GAP,
-  "m5/libExportTernaryFn": GAP,
-  "m5/libExportImportedValue": GAP,
-  "m5/libExportBindingOfBinding": GAP,
-  "m5/libExportCurried": GAP,
 };
 
 // Shapes this server-route instrument CANNOT judge: they compile, but `f` is not a server route

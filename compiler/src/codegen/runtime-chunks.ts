@@ -157,6 +157,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'modules',
   'meta',
   'errors',
+  'boundary',
   'input',
   'equality',
   'deep_reactive',
@@ -313,6 +314,11 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   modules:        "§21.3 cross-file module registry (chunk: 'modules')",
   meta:           '§22.5 meta.emit() runtime',
   errors:         '§19 Built-in error types',
+  // §19.6.6 (S468) — the render-time `!` call check of an `<errorBoundary>`
+  // (_scrml_error_boundary_check / _failure / _run / _show). Shipped only when the emitted
+  // client names one of them (RUNTIME_HELPER_DEFINING_CHUNK), i.e. only by a page with a
+  // render-time `!` call inside a boundary — the 'errors' chunk ships on far more pages.
+  boundary:       "§19.6.6 errorBoundary render-time call check (chunk: 'boundary')",
   input:          '§35.1 Global input state registry',
   equality:       '§45 Structural equality',
   deep_reactive:  'Fine-grained reactivity primitives (Reactivity Phase 1)',
@@ -572,6 +578,8 @@ export const CHUNK_DEPENDENCIES: Partial<Record<RuntimeChunkName, RuntimeChunkNa
   reset: ['errors'],
   ssr: ['errors'],
   urlguard: ['errors'],
+  // §19.6.6 (S468) — `_scrml_error_boundary_run` reports through `_scrml_error_boundary_log`.
+  boundary: ['errors'],
   // S461 — the engine <onTimeout> helpers (`_scrml_engine_arm_state_timers`, …) arm and clear
   // through `_scrml_machine_arm_timer` / `_scrml_machine_clear_timer`, which moved out of the
   // always-included 'core' into 'machine'.

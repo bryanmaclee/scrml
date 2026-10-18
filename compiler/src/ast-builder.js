@@ -684,6 +684,22 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
  * and other module-level helpers that need ExprNode but lack access to the
  * closure-scoped safeParseExprToNode inside parseLogicBody.
  */
+/**
+ * s468 (ruling S464 cfor-comma "b") — a C-style `for` header records its
+ * `cStyleParts` when every clause it WRITES was read. An empty clause
+ * (`for (; c; u)`, `for (;;)`) is absent from the grammar and has no part.
+ * Before s468 any empty clause dropped the whole record, so the other clauses
+ * reached codegen as raw text: the comma operator in the condition
+ * (`for (; i < j, j > 0; i++)`) compiled at exit 0 and no later stage saw the
+ * clauses as expressions.
+ */
+function cStyleClausesRead(match, parts) {
+  const written = (i) => typeof match[i] === "string" && match[i].trim().length > 0;
+  return (!written(1) || !!parts.initExpr) &&
+    (!written(2) || !!parts.condExpr) &&
+    (!written(3) || !!parts.updateExpr);
+}
+
 export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
   if (!expr || typeof expr !== "string" || !expr.trim()) return undefined;
   if (shouldSkipExprParse(expr)) {
@@ -12512,7 +12528,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts && _cStyleParts.initExpr && _cStyleParts.condExpr && _cStyleParts.updateExpr ? { cStyleParts: _cStyleParts } : {}),
+        ...(_cStyleParts && cStyleClausesRead(_cStyleMatch, _cStyleParts) ? { cStyleParts: _cStyleParts } : {}),
         span: spanOf(startTok, peek()),
       };
     }
@@ -15781,7 +15797,34 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _nameTok2 = peek(1);
         const _hasPlainName = !!_nameTok2 && (_nameTok2.kind === "IDENT" || _nameTok2.kind === "KEYWORD");
         const _hasAnnotation = peek(2)?.text === ":";
-        if (_isConstLet && _hasPlainName && _hasAnnotation) {
+        // S466 r8 (HIGH-2, Rule 7) — the UNANNOTATED plain-named value export
+        // (`export const f = (p, h) => …`) gets the same parsed init (`valueInitExpr`):
+        // a consumer reads the node, never a regex over `raw`. Its raw is the same token
+        // join the generic path built. A markup-valued init (`= <div>…`, a component) is
+        // left to the generic path — collecting from a bare `<` would open markup mode.
+        // A block-valued init (`= ?{…}…`, `= _{…}`) also stays on the generic path, which
+        // splits it for the fail-closed E-CG-006 / server-only handling.
+        // Narrowed to a FUNCTION-VALUE init (the shape the async coloring reads):
+        // `function …`, `x => …`, `(…) => …` — every other unannotated value export
+        // keeps the generic path byte-for-byte (its `match` / multi-declarator / SQL
+        // handling lives there).
+        const _isFnValueInitAt = (k) => {
+          const t0 = peek(k);
+          if (!t0) return false;
+          if (t0.kind === "KEYWORD" && t0.text === "function") return true;
+          if (t0.kind === "IDENT" && peek(k + 1)?.text === "=>") return true;
+          if (t0.text !== "(") return false;
+          let depth = 0;
+          for (let j = k; j < k + 4096; j++) {
+            const t = peek(j);
+            if (!t || t.kind === "EOF") return false;
+            if (t.text === "(") depth++;
+            else if (t.text === ")") { depth--; if (depth === 0) return peek(j + 1)?.text === "=>"; }
+          }
+          return false;
+        };
+        const _plainInit = peek(2)?.text === "=" && peek(3)?.text !== "=" && _isFnValueInitAt(3);
+        if (_isConstLet && _hasPlainName && (_hasAnnotation || _plainInit)) {
           const _valKind = consume().text;             // const | let
           const _valName = consume().text;             // NAME
           const _valTypeAnn = collectTypeAnnotation(); // consumes `: TYPE` (bracket-aware)
@@ -16003,6 +16046,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (declMatch) {
           exportNode.exportKind = declMatch[1];
           exportNode.exportedName = declMatch[2];
+        }
+      }
+
+      // S467 r9 (HIGH-1) — every plain-named value export carries its PARSED init
+      // (`valueInitExpr`), not only the shapes the annotated / function-literal path
+      // above intercepts. The async coloring (codegen/fn-valued-bindings.ts) classifies
+      // that tree — `((p, h) => …)`, `async (p, h) => …`, `c ? (…) => … : …`, an alias,
+      // a curried arrow — so an export it cannot see no longer ships uncoloured. The
+      // tokens are verified (`const|let NAME = …`, not `==`) before the init text is cut
+      // off the collected expression. Parsed WITHOUT diagnostics (the emitters re-parsed
+      // this same text silently before, so no new error can appear here); a markup init
+      // (a component) and a server-only `?{}` / `_{}` init are not values and get none.
+      if ((exportNode.exportKind === "const" || exportNode.exportKind === "let") && exportNode.exportedName &&
+          Array.isArray(tokens) && tokens[_iBeforeCollect + 1]?.text === exportNode.exportedName &&
+          tokens[_iBeforeCollect + 2]?.text === "=" && tokens[_iBeforeCollect + 3]?.text !== "=") {
+        const _initText = expr.replace(/^\s*(?:const|let)\s+[\w$]+\s*=\s*/, "").trim();
+        if (_initText && !_initText.startsWith("<") && !_initText.includes("?{") && !_initText.startsWith("_{")) {
+          let _initNode = null;
+          try { _initNode = parseExprToNode(_initText, filePath, span?.start ?? 0); } catch (_e) { _initNode = null; }
+          if (_initNode) exportNode.valueInitExpr = _initNode;
         }
       }
 
@@ -17736,7 +17799,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts2 && _cStyleParts2.initExpr && _cStyleParts2.condExpr && _cStyleParts2.updateExpr ? { cStyleParts: _cStyleParts2 } : {}),
+        ...(_cStyleParts2 && cStyleClausesRead(_cStyleMatch2, _cStyleParts2) ? { cStyleParts: _cStyleParts2 } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
@@ -19564,6 +19627,37 @@ function reemitHandlerStringToken(tok) {
 }
 
 /**
+ * S468 — join a `!{}` arm handler's token texts into the arm's `handler` text
+ * (one "\n" where the source line changes, else one space — BUG-ASI-ERROR-ARM)
+ * and record where each token came from: one `[textOffset, sourceStart,
+ * sourceLine]` entry per token, in text order.
+ *
+ * The joined text does not keep the source layout (blank lines collapse, runs of
+ * spaces become one), so a statement codegen re-reads from it
+ * (`armBlockStatementsDetailed`) cannot find its own source position from the
+ * text alone. The map lets it anchor each re-read statement at its OWN line —
+ * `log()`'s `file:line` (§20.6), a diagnostic — rather than at the arm's first.
+ */
+function joinArmHandlerParts(parts, partLines, partStarts) {
+  let text = "";
+  const srcMap = [];
+  for (let pi = 0; pi < parts.length; pi++) {
+    if (pi > 0) text += partLines[pi] > partLines[pi - 1] ? "\n" : " ";
+    if (typeof partStarts[pi] === "number") srcMap.push([text.length, partStarts[pi], partLines[pi]]);
+    text += parts[pi];
+  }
+  return { text, srcMap };
+}
+
+/** Attach a handler source map to an arm (non-enumerable: position data, not structure). */
+function setArmHandlerSrcMap(arm, srcMap) {
+  if (arm && typeof arm === "object" && Array.isArray(srcMap) && srcMap.length > 0) {
+    Object.defineProperty(arm, "handlerSrcMap", { value: srcMap, enumerable: false, configurable: true, writable: true });
+  }
+  return arm;
+}
+
+/**
  * S452 — is the token at `i` the start of a PIPE-LESS `!{}` handler arm?
  *
  * `!{}` handler arms use the §18.2 `match`-arm grammar (ruling:
@@ -20005,6 +20099,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
@@ -20028,18 +20123,15 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
 
       // Join with newline when consecutive tokens are on different source lines.
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
 
       const _handlerTrimmed = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed,
@@ -20049,7 +20141,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         ...(legacyPipe ? { legacyPipe } : {}),
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
       // Canonical arm syntax (§19.4.3): ::TypeName(binding) -> handler
       // No leading pipe. Binding may be bare ident or paren-wrapped `(ident)`.
@@ -20097,6 +20189,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = [];
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth2 = 0; // S452 r3 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
@@ -20120,15 +20213,13 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      // Join with newline when consecutive tokens are on different source lines.
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
       const _handlerTrimmed3 = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed3,
@@ -20136,7 +20227,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         armArrow: armArrow2,
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else if (
       i + 1 < tokens.length &&
       (tok.kind === "IDENT" || tok.kind === "KEYWORD") &&
@@ -20161,6 +20252,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      const handlerPartStarts = []; // parallel: source offset of each part (S468)
       let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
@@ -20183,16 +20275,13 @@ function parseErrorTokens(tokens, filePath, errors) {
           handlerParts.push(tokens[i].text);
         }
         handlerPartLines.push(tokens[i].span?.line ?? 0);
+        handlerPartStarts.push(tokens[i].span?.start);
         i++;
       }
       // Join with newline when consecutive tokens are on different source lines.
-      let handlerJoined = handlerParts.length === 0 ? "" : handlerParts[0];
-      for (let pi = 1; pi < handlerParts.length; pi++) {
-        const sep = (handlerPartLines[pi] > handlerPartLines[pi - 1]) ? "\n" : " ";
-        handlerJoined += sep + handlerParts[pi];
-      }
+      const { text: handlerJoined, srcMap: handlerSrcMap } = joinArmHandlerParts(handlerParts, handlerPartLines, handlerPartStarts);
       const _handlerTrimmed2 = handlerJoined.trim();
-      arms.push({
+      arms.push(setArmHandlerSrcMap({
         pattern,
         binding,
         handler: _handlerTrimmed2,
@@ -20200,7 +20289,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         armArrow: armArrow3,
         ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
-      });
+      }, handlerSrcMap));
     } else {
       // S452 r3 — never skip silently: a comment between arms is fine; any
       // other token here starts no arm and would be dropped -> E-PARSE-001.

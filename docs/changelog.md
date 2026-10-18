@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S468 — 2026-10-17/18 (bryan · theRog, first boot) — new machine set up; 4 PRs merged, 11 in flight; the bootstrap's server half (U1c) built + reviewed; eight impl#1 wrong-password paths found
+
+- **Machine:** theRog replaces the dead ASUS (setup + the XPS USB backup restored; see hand-off §6). Two machine/window shutdowns mid-run; every branch checkpointed at wrap.
+- **Merged:** #1434 (await P0 r8–r10, impl#1 enforces F4) · #1446 (#1434 follow-ups) · #1437 (hand-off rotation + maps refresh) · #1439 (a server-only helper gets no public route, §13.4 — closed a forged-ticket redeem and a user-email lookup leak in two examples).
+- **Reviewed, landing next:** #1442 (CPS identity / E-ROUTE-002 — closes a forged-admin privilege escalation) · #1441 (for-header comma lists) · #1443 (`==` structural) · #1445 (errorBoundary catches returned errors) · #1440 (bang-arm block values) · #1447 + #1449 (BOOTSTRAP: fail-open gaps; **U1c server half, awaits by construction, checkCore gates emission**) · #1448 (SPEC for the S468 rulings).
+- **In fix rounds:** #1444 (failable alias/match) · #1450 (literal/`_`/alternation match arms parsed — P0, 29 wrong-password shapes on main) · #1451 (E-ARG-SERVER-IDENTITY, ruling 2b).
+- **Rulings:** CPS split callees compose (1c); identity-as-argument refused + server-only identity kind banked as dpa-071 (2b+d); merge driver; contradictory validators = error; §4.17 raw content wins; `int` = safe integer; E-SQL-SLOT-IN-LITERAL; no `<slot/>` in raw; `{foo}` decl arm = shorthand object; hook sharding; CI speedup; two TS-policy exceptions.
+- **Lesson:** the impl#1 wrong-password family has one root — two readers of the same text (codegen vs the security check). The bootstrap reads one Core and is immune by construction. Focus confirmed on the bootstrap.
+
 ## S467 — 2026-10-15/17 (bryan · XPS) — S466 died with the ASUS; its carry-overs landed or re-rounded; dpa-023 ruled F1–F7; two P0s reviewed clean
 
 - **S466 (ASUS) died unwrapped**; its pushed branches survived, its local-only work (`s466-error-002-decl`) did not. S467 adopted everything.
@@ -9,6 +18,7 @@ A rolling log of what just landed and what's actively underway in the compiler. 
 - **Reviewed, landing next:** #1434 await P0 rounds 8–10 — impl#1 enforces dpa-023 F4 (a waiting function is bound only by a `function` declaration); 551 pack shapes, 0 wrong passwords accepted. #1435 CPS P0 rounds 1–5 — an allow-list: a later batch admits a request value only if provably browser-only; review CLEAN.
 - **Rulings:** dpa-023 F1–F7 (opt-in `(not to T)` marker; cells only; the lifecycle type is the marker; F4 limit; no impl#1 rebuild; keep stale; failure at the declaration), impl#1 enforces F4, three §13.9 details, E-PARAM-DEFAULT-* names, docs-only PRs keep merging.
 - **Lesson:** both P0s converged only after switching from "detect the dangerous shape" to "admit only the provably safe shape".
+- **Machine change:** theRog (`/home/bmacs`) replaces the dead ASUS; XPS-only state (memory, S467 reviewer harnesses, setup checklist) is in `scrml-support/handOffs/xps-transfer-s467/`. The S467 wrap PR (#1436) was titled `docs(S467 wrap)`, which `scripts/state.ts`'s recent-sessions index does not recognise — this `wrap(s467)` commit is the recognised wrap anchor.
 
 ## S464 — 2026-10-11/13 (bryan · ASUS) — landed the S465 AUTO output in parallel + four ruled security/language arcs
 
