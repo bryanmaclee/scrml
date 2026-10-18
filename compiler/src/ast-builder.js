@@ -103,7 +103,7 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
-import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage } from "./arm-body-statements.ts";
+import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "./markup-statement-refusal.ts";
@@ -5685,6 +5685,16 @@ function sqlOperandPositionAfter(lastTok, refTok, ternaryColonTok) {
   return false;
 }
 
+// ECMAScript reserved words in strict-mode / module code — never an IdentifierReference,
+// so never a shorthand property name (S469 r4, §18.5 E-MATCH-ARM-SHORTHAND-AMBIGUOUS).
+const ES_STRICT_RESERVED_WORDS = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete",
+  "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if",
+  "implements", "import", "in", "instanceof", "interface", "let", "new", "null", "package",
+  "private", "protected", "public", "return", "static", "super", "switch", "this", "throw",
+  "true", "try", "typeof", "var", "void", "while", "with", "yield",
+]);
+
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
@@ -9667,6 +9677,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * `{ singleShorthand }` (the name when the body is exactly one shorthand entry — §18.5
    * `{ foo }`, refused as E-MATCH-ARM-SHORTHAND-AMBIGUOUS by `parseArmBraceBody`) or null for a block.
    */
+  // S469 r4 — a word JS reads as a shorthand property name: an identifier, or a scrml
+  // KEYWORD token that is not an ECMAScript strict-mode reserved word (`{ type }`,
+  // `{ from }`, `{ get }`, `{ async }`, `{ undefined }` are JS shorthand; `{ return }`,
+  // `{ break }`, `{ null }`, `{ this }` cannot be). Scrml's contextual words that lex as
+  // identifiers (`when`, `partial`, `given`, `not`, …) are IDENT tokens already.
+  function isShorthandNameTok(t) {
+    if (!t) return false;
+    if (t.kind === "IDENT") return true;
+    return t.kind === "KEYWORD" && !ES_STRICT_RESERVED_WORDS.has(t.text);
+  }
+
   function armBraceBodyObjectShape() {
     const entries = [[]];
     let depth = 0;
@@ -9697,12 +9718,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     for (const e of entries) {
       const a = e[0];
       if ((a.kind === "OPERATOR" || a.kind === "PUNCT") && a.text === "...") continue;
-      if (a.kind === "IDENT" && e.length === 1) continue; // shorthand
+      if (e.length === 1 && isShorthandNameTok(a)) continue; // shorthand
       if ((a.kind === "IDENT" || a.kind === "KEYWORD" || a.kind === "STRING" || a.kind === "NUMBER") && isColon(e[1])) continue;
       if (a.kind === "PUNCT" && a.text === "[" && e[1] && e[1].kind === "PUNCT" && e[1].text === "]" && isColon(e[2])) continue;
       return null;
     }
-    const single = entries.length === 1 && entries[0].length === 1 && entries[0][0].kind === "IDENT";
+    const single = entries.length === 1 && entries[0].length === 1 && isShorthandNameTok(entries[0][0]);
     return { singleShorthand: single ? entries[0][0].text : null };
   }
 
@@ -9720,17 +9741,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     if (shape) {
       const saved = i;
       const firstTok = peek();
+      if (shape.singleShorthand) {
+        // §18.5 (ruling S469): a body that is exactly ONE bare shorthand name is refused —
+        // it reads both as the object `{ foo: foo }` and as a block whose result is `foo`.
+        // Raised from the tokens, whatever the expression parser makes of the word.
+        errors.push(new TABError(MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage(shape.singleShorthand), tokenSpan(tokens[saved - 1] ?? firstTok, filePath)));
+      }
       const { body } = collectBracedBody(); // consumes through the matching `}`
       const text = `{ ${body} }`;
       const node = safeParseExprToNode(text, firstTok.span?.start ?? 0);
       if (node && node.kind === "object") {
         const stmt = { id: ++counter.next, kind: "bare-expr", expr: text, exprNode: node, objectLiteralArm: true, span: spanOf(firstTok, peek()) };
-        if (shape.singleShorthand) {
-          // §18.5 (ruling S469): a body that is exactly ONE bare shorthand name is refused —
-          // it reads both as the object `{ foo: foo }` and as a block whose result is `foo`.
-          stmt.singleShorthand = shape.singleShorthand;
-          errors.push(new TABError(MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage(shape.singleShorthand), tokenSpan(tokens[saved - 1] ?? firstTok, filePath)));
-        }
+        if (shape.singleShorthand) stmt.singleShorthand = shape.singleShorthand;
         return [stmt];
       }
       i = saved;
@@ -14024,6 +14046,39 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Consume `(` … `)` (parenCloseK is the peek-offset of the `)`).
         for (let k = 0; k <= prod.parenCloseK; k++) consume();
         for (let _a = 0; _a < prod.arrow.len; _a++) consume(); // arm arrow
+        // S469 r4 — a `{ … }` product-arm body is read by the SAME arm-body reader as
+        // every other arm form (`parseArmBraceBody`: object-vs-block from the tokens,
+        // E-MATCH-ARM-SHORTHAND-AMBIGUOUS for `{ ok }`). An object body is the arm's
+        // VALUE (`result` / `resultExpr` = the parser's object); a block is its
+        // statements (`structuredBody`), which every multi-scrutinee lowering emits.
+        if (peek().kind === "PUNCT" && peek().text === "{") {
+          consume(); // `{`
+          const armBodyNodes = parseArmBraceBody();
+          const objArm = objectLiteralArmValue(armBodyNodes);
+          if (objArm) {
+            return {
+              id: ++counter.next,
+              kind: "match-arm-inline",
+              test: "__product__",
+              productPatterns,
+              armArrow: prod.arrow.glyph,
+              result: objArm.text,
+              resultExpr: objArm.node,
+              objectLiteralArm: true,
+              span: spanOf(startTok, peek()),
+            };
+          }
+          return {
+            id: ++counter.next,
+            kind: "match-arm-inline",
+            test: "__product__",
+            productPatterns,
+            armArrow: prod.arrow.glyph,
+            result: "",
+            structuredBody: armBodyNodes,
+            span: spanOf(startTok, peek()),
+          };
+        }
         const { expr: result } = collectExpr(null, { armBody: true });
         const trimmedResult = result.trim();
         return {

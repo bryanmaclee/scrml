@@ -42,4 +42,18 @@ for (const [nm, scrut, subj, head, rest, en] of HEADS) {
   SHAPES[`shArg${nm}`] = { top, body: OK + `${scrut}\n    const allowed = Boolean(match ${subj} {\n${arms(head, rest)}    })\n    ` + R(`!allowed`) };
 }
 SHAPES.shStmt = { body: OK + `const n = 1\n    let allowed = false\n    match n {\n      1 :> { ok }\n      else :> { allowed = false; }\n    }\n    ` + R(`!allowed`) };
+// S469 r4 — §18.19 PRODUCT arms (`(p1, p2) :> { … }`) kept their body as text, so `{ ok }` there
+// was neither refused nor classified (WELCOME on 187294fd8 and on main). Now read by the same arm
+// reader: `{ ok }` / `{ ok, }` REFUSED; `{ ok; }` a block that REJECTS.
+const P2 = `const a = 1\n    const b = 2`;
+const prod = (kw, head, body, rest) => ({ body: OK + `${P2}\n    ${kw} allowed = match (a, b) {\n      ${head} :> ${body}\n      ${rest}\n    }\n    ` + R(`!allowed`) });
+SHAPES.prodDecl = prod("const", "(1, 2)", "{ ok }", "(_, _) :> false");
+SHAPES.prodDeclWild = prod("const", "(2, 2) :> false\n      (_, _)", "{ ok }", "");
+SHAPES.prodDeclTrailComma = prod("const", "(1, 2)", "{ ok, }", "(_, _) :> false");
+SHAPES.prodLet = prod("let", "(1, _)", "{ ok }", "(_, _) :> false");
+SHAPES.prodStr = { body: OK + `const s: string = name\n    const b = 1\n    const allowed = match (s, b) {\n      ("bob", 1) :> { ok }\n      (_, _) :> false\n    }\n    ` + R(`!allowed`) };
+SHAPES.prodRet = { top: `function run(ok) { const a = 1\n    const b = 2\n    return match (a, b) {\n      (1, 2) :> { ok }\n      (_, _) :> false\n    } }`, body: OK + R(`!run(ok)`) };
+SHAPES.prodArg = { body: OK + `${P2}\n    const allowed = Boolean(match (a, b) {\n      (1, 2) :> { ok }\n      (_, _) :> false\n    })\n    ` + R(`!allowed`) };
+SHAPES.prodSemiRejects = prod("const", "(1, 2)", "{ ok; }", "(_, _) :> false");
+SHAPES.prodKeyedRejects = { body: OK + `${P2}\n    const o = match (a, b) {\n      (1, 2) :> { v: ok }\n      (_, _) :> { v: false }\n    }\n    ` + R(`!o.v`) };
 SHAPES.shLambda = { body: OK + `const pick = (x) => match x {\n      1 :> { ok }\n      else :> false\n    }\n    ` + R(`!pick(1)`) };

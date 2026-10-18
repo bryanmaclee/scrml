@@ -588,9 +588,20 @@ describe("(E) object-vs-block from the arm's tokens", () => {
       expect(body[0].singleShorthand ?? null).toBe(single);
     }
   });
-  test("`{ undefined }` is a block whose result is `undefined` (a keyword is not a shorthand name)", () => {
-    const body = armBody(`    const v = match n {\n      1 :> { undefined }\n      else :> false\n    }`);
-    expect(body[0].objectLiteralArm).toBeUndefined();
+  test("a word JS reads as a shorthand name is refused even when scrml lexes it as a keyword; ES reserved words are blocks", () => {
+    // S469 r4: `{ type }`, `{ from }`, `{ undefined }`, `{ get }`, `{ async }`, … are JS
+    // shorthand (`{ type: type }`) — the same two-readings form as `{ foo }`.
+    for (const w of ["type", "from", "is", "as", "get", "set", "server", "fn", "async", "undefined", "when", "partial"]) {
+      const codes = parseErrorCodes(inFn(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`));
+      expect([w, codes.includes("E-MATCH-ARM-SHORTHAND-AMBIGUOUS")]).toEqual([w, true]);
+    }
+    // A strict-mode reserved word is never a shorthand property: `{ return }` / `{ null }` /
+    // `{ this }` are blocks.
+    for (const w of ["return", "null", "this", "true"]) {
+      const src = inFn(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`);
+      expect([w, parseErrorCodes(src).includes("E-MATCH-ARM-SHORTHAND-AMBIGUOUS")]).toEqual([w, false]);
+      expect(armBody(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`)[0]?.objectLiteralArm).toBeUndefined();
+    }
   });
   test("executed: `{ ok; }` yields ok's VALUE in decl, let, return and multi-scrutinee positions", async () => {
     const r = compileLibAll("semi-block", `type K:enum = { A, B }
@@ -633,5 +644,91 @@ export fn ms(ok: boolean) {
       expect(m[f](false)).toBe(false);
       expect(m[f](true)).toBe(true);
     }
+  });
+});
+
+// S469 r4 (#1450 delta re-review) — a §18.19 PRODUCT arm `(p1, …, pN) :> { … }` kept its body
+// as TEXT, so `(1, 2) :> { ok }` was neither refused nor read by the token classifier (a wrong
+// password accepted, on main too). Its `{ … }` body now goes through the same arm-body reader
+// (`parseArmBraceBody`): `{ ok }` is refused, `{ ok; }` is a block (`structuredBody`), a keyed
+// object is the arm's value.
+describe("(F) §18.19 product arms read their brace body like every other arm", () => {
+  test("`{ ok }` / `{ ok, }` product-arm bodies are refused in decl, return and argument position", () => {
+    for (const [name, src] of Object.entries({
+      decl: `export fn a(ok: boolean) {\n  const x = 1\n  const y = 2\n  const allowed = match (x, y) {\n    (1, 2) :> { ok }\n    (_, _) :> false\n  }\n  return allowed\n}`,
+      ret: `export fn b(ok: boolean) {\n  const x = 1\n  const y = 2\n  return match (x, y) {\n    (1, 2) :> false\n    (_, _) :> { ok, }\n  }\n}`,
+      arg: `export fn c(ok: boolean) {\n  const x = "bob"\n  const y = 1\n  return Boolean(match (x, y) {\n    ("bob", 1) :> { ok }\n    (_, _) :> false\n  })\n}`,
+    })) {
+      const r = compileLibAll(`prod-amb-${name}`, src);
+      expect([name, r.ambiguous.length]).toEqual([name, 1]);
+    }
+  });
+  test("executed: product-arm blocks yield their tail, keyed objects their value, payload bindings resolve", async () => {
+    const r = compileLibAll("prod-exec", `type K:enum = { A, B(n: number) }
+export fn semi(ok: boolean) {
+  const a = 1
+  const b = 2
+  const allowed = match (a, b) {
+    (1, 2) :> { ok; }
+    (_, _) :> true
+  }
+  return allowed
+}
+export fn letTail(ok: boolean) {
+  const a = 1
+  const b = 2
+  let allowed = match (a, b) {
+    (1, _) :> {
+      const t = ok
+      t
+    }
+    (_, _) :> true
+  }
+  return allowed
+}
+export fn ret(ok: boolean) {
+  const a = "bob"
+  const b = 1
+  return match (a, b) {
+    ("bob", 1) :> { ok; }
+    (_, _) :> true
+  }
+}
+export fn obj(ok: boolean) {
+  const a = 1
+  const b = 2
+  const o = match (a, b) {
+    (1, 2) :> { v: ok }
+    (_, _) :> { v: true }
+  }
+  return o.v
+}
+export fn stmt(ok: boolean) {
+  const a = 1
+  const b = 2
+  let allowed = true
+  match (a, b) {
+    (1, 2) :> { allowed = ok }
+    (_, _) :> { allowed = true }
+  }
+  return allowed
+}
+export fn bind(ok: boolean) {
+  const k: K = K.B(3)
+  const b = 2
+  const r = match (k, b) {
+    (.B(n), 2) :> { const q = n + 1
+      q }
+    (_, _) :> 0
+  }
+  return ok ? r : r
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    for (const f of ["semi", "letTail", "ret", "obj", "stmt"]) {
+      expect([f, m[f](false)]).toEqual([f, false]);
+      expect([f, m[f](true)]).toEqual([f, true]);
+    }
+    expect(m.bind(true)).toBe(4);
   });
 });

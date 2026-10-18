@@ -2927,7 +2927,20 @@ function emitMultiScrutineeMatch(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       const prelude = preludes.join("");
-      const bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
+      // S469 r4 — a `{ … }` product-arm BLOCK body arrives parsed (`structuredBody`,
+      // the parser's `parseArmBraceBody`): emitted as a structured arm, with the
+      // same leave rule as the whole-product wildcard block below.
+      let bodyEmit: string;
+      if (Array.isArray(child.structuredBody)) {
+        const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: "", structuredBody: child.structuredBody });
+        if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+          refuseLeavingValueArm(node, leaves, opts);
+        }
+        const inner = structuredIifeArmInner(child.structuredBody, opts, matchCtx);
+        bodyEmit = `{ ${prelude}${inner} }`;
+      } else {
+        bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
+      }
       const prefix = conditionIndex === 0 ? "if" : "else if";
       lines.push(`  ${prefix} (${condition}) ${bodyEmit}`);
       conditionIndex++;
@@ -3711,7 +3724,7 @@ function emitMultiScrutineeMatchStmt(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       lines.push(`${conditionIndex === 0 ? "if" : "else if"} (${condition}) {`);
-      for (const l of [...preludes, ...armBody(resultStr)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      for (const l of [...preludes, ...armBody(resultStr, Array.isArray(child.structuredBody) ? child.structuredBody : null)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
       lines.push(`}`);
       conditionIndex++;
     } else if (isWholeWildcard) {

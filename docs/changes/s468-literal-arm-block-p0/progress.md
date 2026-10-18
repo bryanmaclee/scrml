@@ -260,3 +260,30 @@ New this round:
   lambda): all PASS-REFUSED with E-MATCH-ARM-SHORTHAND-AMBIGUOUS. Pack: 873 shapes, 876 pass.
 - Not covered (surfaced, not changed): a `!{}` handler arm `.E :> { foo }` reads as a block whose result is
   `foo` (not an object) — the ruling's "every position" is read as every `match` position.
+
+## 2026-10-18 — FIX ROUND 4 (S239 delta re-review of 187294fd8 = LAND-WITH-FOLLOWUPS)
+
+- **1 (HIGH, pre-existing): §18.19 product arms** kept their body as text — `match (a, b) { (1, 2) :> { ok }
+  (_, _) :> false }` let a wrong password in on 187294fd8 and on main. The product-arm parser now reads a
+  `{ … }` body with the SAME `parseArmBraceBody`: `{ ok }` / `{ ok, }` -> E-MATCH-ARM-SHORTHAND-AMBIGUOUS; an
+  object body is the arm's value (`result`/`resultExpr` = the parser's object, `objectLiteralArm`); a block is
+  `structuredBody`, emitted by both multi-scrutinee lowerings (IIFE: `structuredIifeArmInner` + the payload
+  prelude + the leave rule; statement/decl: the `armBody(result, structuredBody)` callback). Payload bindings
+  resolve inside the block (unit F, `(.B(n), 2) :> { const q = n + 1⏎ q }` = 4). la4 + 9 product shapes: 7
+  refused, `{ ok; }` and a keyed object REJECT.
+- **2 (LOW): keyword shorthand.** A lone word JS reads as a shorthand property — an IDENT, or a scrml KEYWORD
+  that is NOT an ECMAScript strict-mode reserved word — is the single-shorthand form: refused `{ type }`,
+  `{ from }`, `{ is }`, `{ as }`, `{ get }`, `{ set }`, `{ server }`, `{ fn }`, `{ async }`, `{ undefined }`,
+  `{ of }`, `{ match }`, `{ lift }`, `{ fail }`, … (`when` / `partial` / `given` / `not` lex as IDENT and were
+  already refused). Left as blocks: the ES reserved words (`return`, `break`, `continue`, `null`, `this`,
+  `true`, `false`, `let`, `static`, `public`, `await`, `yield`, `typeof`, `new`, …). Error raised from the
+  tokens even when the expression parser cannot read the word as an object. `{ undefined }` is therefore now
+  refused (round 2 had made it a block).
+- **3 filed:** shapes added to g-match-value-position-server-call-no-autoawait (MED, open — same sync value
+  IIFE mechanism); NEW g-raw-match-arm-object-failable-call-unhandled-s469 (MED). Pack family la5 (4 shapes):
+  the three client shapes listed in UNJUDGED as KNOWN HOLES (the server-route instrument cannot judge a client
+  decision — a KNOWN_FAIL entry needs a judged FAIL); the server twin is PASS-REFUSED (E-CODEGEN-INVALID-LOGIC).
+- Corpus (2847 sources, base = archive of 187294fd8): 0 newly failing / passing, 0 diagnostic changes; 3
+  artifacts differ — formatting only (product-arm blocks now structured-emitted; one `;;` empty statement
+  in returned-multi-match-braced-leave-and-inner-break, the pre-existing `bodyLines.join("; ")` in
+  structuredIifeArmInner). giti + flogence (113): 0 error-code differences.

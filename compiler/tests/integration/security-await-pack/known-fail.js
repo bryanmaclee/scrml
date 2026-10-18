@@ -31,4 +31,9 @@ export const KNOWN_FAIL = {
 // Judging these needs the client half run (the conformance `serverDb` mode — see README.md).
 export const UNJUDGED = {
   "s12/nestedServerCall": "f is a client fn: `inner(name, pass) ? \"WELCOME\" : \"REJECTED\"` runs in the client (§13.7 value-position server call)",
+  // S469 r4 — KNOWN HOLES the server-route instrument cannot judge (the decision runs in the
+  // client). Each ACCEPTS a wrong password in the client today (emit inspected, S469):
+  "la5/rawClientSrvCall": "KNOWN HOLE g-match-value-position-server-call-no-autoawait: client `Boolean(match n { 1 :> inner(…) … })` returns an unawaited Promise from the value IIFE — always truthy",
+  "la5/rawClientSrvCallObj": "KNOWN HOLE g-match-value-position-server-call-no-autoawait: client raw object arm `{ v: inner(…) }` stores an unawaited Promise",
+  "la5/rawClientObjFailable": "KNOWN HOLE g-raw-match-arm-object-failable-call-unhandled-s469: client raw object arm `{ ok: chkC(p) }` — a `!` call with no E-ERROR-002; a failure object is truthy",
 };
