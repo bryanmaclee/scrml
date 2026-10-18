@@ -41,7 +41,7 @@ function filesOf(s, defaultLib) {
   return files;
 }
 
-describe("the impl#1 await pack (424 reviewer shapes) against the bootstrap — no wrong password is ever WELCOMEd", () => {
+describe("the impl#1 await pack (every shape it holds) against the bootstrap — no wrong password is ever WELCOMEd", () => {
   test("every shape: refused at compile time, or its server artifact rejects the wrong password", async () => {
     const tally = { shapes: 0, refused: 0, pass: 0, fail: 0, other: 0 };
     const refusedCodes = {};
@@ -80,7 +80,11 @@ describe("the impl#1 await pack (424 reviewer shapes) against the bootstrap — 
     }
     // the measurement (recorded in docs/changes/s468-bootstrap-u1c/progress.md)
     console.log("bootstrap × await pack:", JSON.stringify(tally), JSON.stringify(refusedCodes));
-    expect(tally.shapes).toBe(424);
+    // the pack grows (424 at S467; more families since) — count it from the pack itself, never a constant;
+    // the S467 floor is the minimum (a pack that SHRANK below it would be a truncated probe)
+    const packSize = families.reduce((n, fam) => n + Object.keys(fam.shapes).length, 0);
+    expect(tally.shapes).toBe(packSize);
+    expect(packSize).toBeGreaterThanOrEqual(424);
     expect(failures).toEqual([]);
     expect(tally.fail).toBe(0);
   }, 600000);
