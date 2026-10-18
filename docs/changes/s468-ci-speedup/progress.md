@@ -114,3 +114,14 @@ No scratch bite-proof branch/PR was created.
   on 4-vCPU runners (a required gate must not buy speed with load-sensitive timeouts). Final shape: unit 3 ·
   integration 3 (timing-balanced) · host-global 2 (194/157 s measured) · checks · browser · slices = 11
   blocking jobs + gate + tracking (+ windows when the path filter matches) — 13-14 jobs, down from 17.
+- Run 4 (39148411794, 70d05dfd9, final shape): attempt 1 GREEN, `gate` concluded 280 s after the run was created
+  (baseline 1132 s). Per job (s): checks 212 · unit 140/166/140 · integration 263/232/257 · browser 107 · slices
+  179 · host-global 196/193 (modes default+embed+test | esm+build+library, both 181 s scans) · gate 12. Runner time
+  2594 s incl. windows 475 s (baseline 2594 s incl. windows 778 s) — 2119 s on PRs that skip windows. Reconcile:
+  unit 1290/1290 files, 28855 tests; integration 344/344 files, 7440 tests; exact partitions. Attempt 2 (re-run
+  as a flake sample): GREEN, gate at +319 s (one unit leg waited ~136 s for a runner).
+- PR #1459 retitled "~5min", body rewritten with the measurements + proofs. Not merged.
+- Merge queue recommendation (for bryan; NOT applied): Settings -> Branches -> main rule -> Edit -> "Require
+  merge queue" (or Settings -> Rules -> Rulesets -> New branch ruleset, target main). Merge method: merge commit;
+  build concurrency 2; min group 1; max group 5; wait time 5 min (moot at min 1); "only merge non-failing PRs"
+  ON; status-check timeout 30 min. Prerequisite: this PR's `merge_group:` trigger must be ON main first.
