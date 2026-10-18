@@ -74,3 +74,22 @@ No scratch bite-proof branch/PR was created.
 - host-global legs: hand-written mode list replaced by `--mode-shard i/4` in scripts/host-global-scan.ts (legs =
   ALL_MODES round-robin, complete by construction); unknown --modes names now exit 2 (previously a typo silently
   compiled with default options under the wrong label).
+- First real run, PR #1459 (run 39137191221, 40d42f25f): ALL GREEN. `gate` concluded 331 s after the run was
+  created (was 1132 s on main run 39129462417) — 5.5 min vs 18.9 min. Critical path = integration 1/3 (309 s,
+  unbalanced: no timing table yet). Per job (s): checks 110 · unit 127/163/163 · integration 309/209/161 ·
+  browser 133 · slices 152 · host-global 114/75/84/128 · gate 16 · tracking 114 · windows 709 (non-required;
+  ran because ci.yml is in its path filter). Runner time 2767 s incl. windows (baseline run 2594 s incl.
+  windows); ~2058 s on a PR that does not trigger windows. Queue delay 3-4 s for every job.
+- Coverage (reconcile in that run, same SHA): unit+conformance 1289 files (expected 1289) / 28830 tests —
+  the UNSHARDED windows run of the same SHA: 1289 files / 28828 tests; integration+lsp+commands 343 files
+  (expected 343) / 7436 tests (old tracking on ee827e697: 342 files / 7413 tests in bun's own count). Every
+  old-gate step is present in exactly one new job (step-by-step diff of main's ci.yml vs this one); the
+  self-host-v2-lexer filter now runs inside the integration suite. Nothing dropped.
+- Rebalanced: scripts/ci-test-timings.json committed (1632 per-file timings merged from the run's 6 shard
+  artifacts via `ci-shards.ts merge-timings`); integration 3 -> 4 legs (~620 s of test time vs ~410 s unit).
+- PA update (S469): repo transferred to the scrml-lang ORGANIZATION (owner.type Organization verified; rulesets
+  []; required_status_checks contexts ["gate"] strict; GraphQL mergeQueue(main) = null = not configured yet).
+  ADDED `merge_group:` trigger: every blocking job + `gate` run unconditionally on it (no event `if:` on
+  any of them — verified by parsing the YAML); tracking + windows skip merge_group (non-blocking; they run on
+  the queue's push to main). PR-base steps fall back to merge_group.base_sha. Settings untouched.
+- Bite PRs opened: #1461 (failing lsp assertion), #1462 (slices forced skipped).

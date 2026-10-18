@@ -82,6 +82,15 @@ on:
       - 'handOffs/**'
       - 'docs/**'
   pull_request:
+  # S469 — MERGE QUEUE. The repo moved to the `scrml-lang` ORGANIZATION (merge queue is org-only), so
+  # the queue can be enabled. When it is, GitHub builds each queued group on a temporary
+  # `gh-readonly-queue/main/…` ref and fires `merge_group`; the required `gate` check must report on that
+  # event too, or the queue waits on a check that never arrives. Every blocking job + the `gate`
+  # aggregator therefore runs unconditionally on `merge_group` (none of them carries an event `if:`);
+  # only the NON-blocking `tracking` and `windows` sit it out (they run again on the push to main that
+  # the queue's merge produces). PR-base-relative steps read `merge_group.base_sha` here.
+  # Adding the trigger changes nothing until bryan enables "Require merge queue" in the settings.
+  merge_group:
   # S468 — NIGHTLY full run of `main`. Exists for the `windows` job (which no longer runs on every
   # PR — see its header), and doubles as a daily re-run of the whole gate on the trunk, which is
   # how an intermittent that slipped through a PR shows up without waiting for the next merge.
@@ -195,9 +204,9 @@ jobs:
       # `conformance/*.ts`, so a PR touching only those can stale it without tripping this step.
       # `git diff` erroring (bad base SHA) counts as "touched" — the check runs (fail closed).
       - name: Bootstrap conformance report current (PRs touching conformance/cases or self-host-v2)
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
         run: |
-          if git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
+          if git diff --quiet "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}"...HEAD -- conformance/cases compiler/self-host-v2; then
             echo "no conformance/cases or compiler/self-host-v2 change in this PR — report currency not required here"
           else
             bun scripts/bootstrap-conformance.ts --check
@@ -220,7 +229,7 @@ jobs:
       # DIFF-SCOPED: silent on the legacy corpus by construction.
       - name: §34.0 row-provenance gate (new error-code rows state where they fire)
         if: ${{ !cancelled() }}
-        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
+        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'HEAD~1' }}
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   # unit — unit + conformance, sharded across the matrix with bun's own `--shard=i/N`.
@@ -273,13 +282,14 @@ jobs:
   # `pretest` runs here: integration/s464-quoted-handler-refused reads samples/compilation-tests/dist.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   integration:
-    name: integration (${{ matrix.shard }}/3)
+    name: integration (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        # 4 legs (S469): measured ~620 s of test time vs ~410 s for unit+conformance (run 39137191221).
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -289,19 +299,19 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Populate test fixtures (samples/compilation-tests/dist)
         run: bun run pretest
-      - name: integration + lsp + commands — shard ${{ matrix.shard }}/3
+      - name: integration + lsp + commands — shard ${{ matrix.shard }}/4
         run: >-
           bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
-          --shard=${{ matrix.shard }}/3
+          --shard=${{ matrix.shard }}/4
           --timings="$RUNNER_TEMP/timings.json" --timings=scripts/ci-test-timings.json --update-timings
-          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-3.xml"
+          --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit-integration-${{ matrix.shard }}-of-4.xml"
       - name: Upload shard report
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: test-report-integration-${{ matrix.shard }}
           path: |
-            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-3.xml
+            ${{ runner.temp }}/junit-integration-${{ matrix.shard }}-of-4.xml
             ${{ runner.temp }}/timings.json
           retention-days: 14
           if-no-files-found: warn
@@ -452,6 +462,7 @@ jobs:
   # S468: integration + lsp + commands and the browser tier LEFT this job (now in the gate).
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   tracking:
+    if: ${{ github.event_name != 'merge_group' }}   # non-blocking; re-runs on the queue's push to main
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 15
@@ -503,6 +514,7 @@ jobs:
   # pull_request merge commit's own two parents — fail closed: if the diff cannot be computed, it runs.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   windows:
+    if: ${{ github.event_name != 'merge_group' }}   # non-blocking; re-runs on the queue's push to main
     runs-on: windows-latest
     continue-on-error: true
     timeout-minutes: 30
