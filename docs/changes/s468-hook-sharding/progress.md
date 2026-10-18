@@ -129,3 +129,36 @@ need zero flakes + identical counts every run. (2) Decide memory cap. (3) Final 
   <that file>` (neither the runner nor this branch's test edit is in that set) -> pre-existing cross-tier pollution,
   not this unit's. Not chased (outside the hook's set; flagged for the owner).
 - DONE. Hook default = sharded, bounded, memory-aware; SCRML_HOOK_SHARDS=1 = the original command.
+
+## S239 REVIEW ROUND (LAND-WITH-FOLLOWUPS on df0dbaba3)
+
+- 2026-10-18 MED (concurrent hooks oversubscribe): MACHINE-WIDE SLOT BUDGET. Every shard of every hook holds one
+  flock'd slot file under ~/.cache/scrml/hook-slots/ while it runs: `timeout ... flock -n -E 199 slot-K sh -c 'echo
+  MARKER; exec "$@"' sh bun test ...`. Busy -> exit 199 at once (no output) -> try the next slot; all busy -> the
+  shard announces "waiting for a machine-wide test slot", retries every 1-2s, bounded by SCRML_HOOK_SLOT_WAIT_S (1800)
+  -> "NEVER STARTED: no machine-wide test slot" = FAIL. The marker line (filtered out) confirms acquisition — no
+  timing guess. Slots = min(cores/2, floor(MemTotal x 0.8 / 3072)) = 8 here (a machine property, so all hooks agree;
+  SCRML_HOOK_SLOTS overrides). Lock on flock(1)'s fd inside the shard's group -> kernel releases on death.
+  * Found while wiring it: GNU `timeout` calls setpgid(0,0) unless it is already the leader, so placed INSIDE flock it
+    moved bun out of the shard's group (sampler read 2 MB/shard; group kills would have missed bun). `timeout` is now
+    outermost (the detached leader, setpgid a no-op) — re-proven: conformance peak 1250 MB/shard read correctly,
+    timeout bite (6.0s, exit 1) and ceiling bite (1376 MB > 1000, exit 1) still red, no leftover PIDs.
+  * Proofs (isolated slot dir via SCRML_TEST_TIMINGS): SLOTS=1 + 3 shards -> two announce waiting, run one after the
+    other, all green; SLOTS=1 held externally + --slot-wait=4 -> "NO SLOT ... never started", exit 1. SIGKILL of the
+    runner mid-shard -> slot stays held while the orphaned shard group lives (correct: the slot follows the PROCESSES,
+    so an orphan cannot be double-booked), released (0 held) when the coreutils backstop kills the group 59s later,
+    no process left in the group.
+  * 3 hooks at once, run 1 (this worktree + 2 file copies, real slot dir, budget 8): all EXIT 0, 422/432/448s, each
+    37432 pass / 0 fail / 125 skip / 13 todo / 1591 files; 7 of 15 shards announced waiting (214-231s) and then ran.
+    The lslocks sampler peaked at 9 ROWS on 2 of 124 samples — re-run 2 counts unique slot paths vs raw rows to settle
+    whether that was a fork-time double listing (see next entry).
+- LOW (timeout overflow): every second-valued setting (SCRML_HOOK_SHARD_TIMEOUT_S / --shard-timeout, slot-wait) is
+  refused above 2,000,000 -> exit 2, message names the bound. Proven: 3000000 and 2147484 both exit 2.
+- LOW (N=1 false-red): a memory-DERIVED N of 1 doubles the ceiling (6144 MB) and says so in the header. Proven with
+  SCRML_HOOK_MEM_RESERVE_MB=8000: "-> 1; N=1 -> ceiling lifted to 6144 MB". An explicit N=1 keeps the configured one.
+- 2026-10-18 3 hooks at once, run 2 (same setup; sampler now counts UNIQUE slot paths, raw lslocks rows, and
+  `bun test` shard processes machine-wide): all EXIT 0 — 230 / 422 / 424s, each 37432 / 0 / 125 / 13, 1591 files.
+  Max unique slots held 8 (= budget); max bun-test shard processes on the machine 8; raw lslocks rows peaked at 9 ->
+  run 1's "9" was a double listing of one lock (fork-time fd), not a 9th shard. Peak RSS per hook 3.9-5.6 GB, summed
+  bounded by 8 x ceiling. Whichever hook wins the slots first finishes first (230s); the others queue — cost is
+  latency for the later committers, not memory.

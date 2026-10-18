@@ -19,7 +19,13 @@
 //               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB, default 3072). Over it -> killed, run FAILS, as above.
 //               Also the per-shard budget the default N is derived from. Sampled every second (Linux /proc;
 //               elsewhere the ceiling is not enforced and N falls back to os.freemem()).
+//               A memory-derived N of 1 (memory already short; the whole suite in one shard) doubles the ceiling,
+//               so the normal single-process peak (~2.8 GB) cannot false-red it.
 //   reserve     $SCRML_HOOK_MEM_RESERVE_MB (default 2048): memory left for everything else when deriving N.
+//   --slot-wait=S       how long a shard may wait for a machine-wide slot ($SCRML_HOOK_SLOT_WAIT_S, default 1800);
+//               past it the shard never starts and the run FAILS ("NEVER STARTED: no machine-wide test slot").
+//   slots       $SCRML_HOOK_SLOTS: the machine-wide concurrent-shard budget (default below, MACHINE-WIDE SLOTS).
+//   Second-valued settings above 2,000,000 are refused (exit 2): setTimeout would overflow and fire at once.
 //   --verbose   stream every shard's output live (prefixed `[sK]`) instead of only failures + summaries.
 //   --plan      print the shard assignment (files + estimated seconds per shard) and exit 0 without running.
 //   any other `--flag` is passed through to every `bun test` invocation (e.g. `--timeout=20000`).
@@ -56,13 +62,21 @@
 // other worktrees are untouched. Backstop: where coreutils `timeout` exists, each shard's command is wrapped in it
 // (shard-timeout + 60s, then SIGKILL), so a shard is bounded even if this runner itself is SIGKILLed.
 //
+// MACHINE-WIDE SLOTS. N per hook is chosen from memory at that hook's start and reserves nothing, so ten hooks
+// starting together would each pick N for the whole box. Every shard of every hook on the host therefore also
+// holds one flock'd slot file under ~/.cache/scrml/hook-slots/ (next to the timing cache) while it runs; with all
+// slots held, a shard WAITS (announced, bounded by slot-wait) rather than start. The lock is on flock(1)'s fd
+// inside the shard's process group, so the kernel releases it when the shard's processes die — never a pid file,
+// never stale. Placement depends on the plan: which shard waits, and so which files run later, varies with load.
+// Without `flock` on PATH (macOS) the budget is not enforced and the runner says so.
+//
 // SERIAL PINS. A file listed in SERIAL_PINS below is assigned to shard 0 together with every other pinned file,
 // so pinned files never run concurrently with EACH OTHER. Use it only for tests that genuinely share an external
 // resource between files and cannot be isolated (per-process temp roots, port 0) — never as a way to skip.
 
 import { spawn } from "bun";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, mkdirSync } from "fs";
-import { availableParallelism, cpus, freemem, homedir } from "os";
+import { availableParallelism, cpus, freemem, homedir, totalmem } from "os";
 import { dirname, join, relative, resolve, sep } from "path";
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -83,6 +97,7 @@ interface Options {
   plan: boolean;
   timeoutS: number;
   memMb: number;
+  slotWaitS: number;
   shardsWhy?: string;
   passthrough: string[];
   paths: string[];
@@ -112,18 +127,54 @@ function defaultShards(memMb: number): { n: number; why: string } {
   return { n, why: `cores ${cores} -> ${byCores}; ${availMb} MB available - ${reserveMb} reserve / ${memMb} per shard -> ${Math.max(0, byMem)}` };
 }
 
-function envNumber(name: string, dflt: number): number {
+function envNumber(name: string, dflt: number, max?: number): number {
   const v = process.env[name];
-  return v !== undefined && v !== "" ? parsePositive(v, name) : dflt;
+  return v !== undefined && v !== "" ? parsePositive(v, name, max) : dflt;
 }
 
-function parsePositive(raw: string, from: string): number {
+// setTimeout holds a signed 32-bit millisecond count; anything larger fires immediately. 2e6 s (~23 days) is far
+// past any sane bound and well inside it.
+const MAX_SECONDS = 2_000_000;
+
+function parsePositive(raw: string, from: string, max = Number.MAX_SAFE_INTEGER): number {
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) {
-    console.error(`test-sharded: ${from} must be a positive number, got ${JSON.stringify(raw)}`);
+  if (!Number.isFinite(n) || n <= 0 || n > max) {
+    console.error(`test-sharded: ${from} must be a positive number${max < Number.MAX_SAFE_INTEGER ? ` <= ${max}` : ""}, got ${JSON.stringify(raw)}`);
     process.exit(2);
   }
   return n;
+}
+
+// MACHINE-WIDE SLOT BUDGET. N per hook is derived from memory at that hook's START, and nothing reserves it — ten
+// agents committing together would each see the same free memory and together ask for several times the box.
+// So every shard of every hook on the host also holds one of SLOTS flock'd slot files under
+// ~/.cache/scrml/hook-slots/ while it runs. SLOTS = min(floor(cores/2), floor(MemTotal * 0.8 / ceiling)), >= 1
+// ($SCRML_HOOK_SLOTS overrides). It is a property of the machine, not of the moment, so concurrent hooks agree.
+const SLOT_BUSY = 199;
+const SLOT_MARKER = "__scrml_test_sharded_slot_acquired__";
+
+function totalMemoryBytes(): number {
+  try {
+    const m = /^MemTotal:\s+(\d+) kB$/m.exec(readFileSync("/proc/meminfo", "utf8"));
+    if (m) return Number(m[1]) * 1024;
+  } catch {
+    /* not Linux */
+  }
+  return totalmem();
+}
+
+function slotBudget(memMb: number): { count: number; dir: string; flock: string; why: string } | null {
+  const flock = Bun.which("flock");
+  if (!flock) return null;
+  const dir = join(dirname(timingsPath()), "hook-slots");
+  mkdirSync(dir, { recursive: true });
+  const env = process.env.SCRML_HOOK_SLOTS;
+  if (env !== undefined && env !== "") return { count: parseShardCount(env, "SCRML_HOOK_SLOTS"), dir, flock, why: "SCRML_HOOK_SLOTS" };
+  const cores = typeof availableParallelism === "function" ? availableParallelism() : cpus().length;
+  const totalMb = Math.floor(totalMemoryBytes() / MB);
+  const byMem = Math.floor((totalMb * 0.8) / memMb);
+  const count = Math.max(1, Math.min(Math.floor(cores / 2), byMem));
+  return { count, dir, flock, why: `cores ${cores} -> ${Math.floor(cores / 2)}; ${totalMb} MB total x 0.8 / ${memMb} per shard -> ${byMem}` };
 }
 
 function parseShardCount(raw: string, from: string): number {
@@ -136,7 +187,7 @@ function parseShardCount(raw: string, from: string): number {
 }
 
 function parseArgs(argv: string[]): Options {
-  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, passthrough: [], paths: [] };
+  const o: Options = { bail: false, shards: 0, verbose: false, plan: false, timeoutS: 0, memMb: 0, slotWaitS: 0, passthrough: [], paths: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--bail") o.bail = true;
@@ -144,12 +195,14 @@ function parseArgs(argv: string[]): Options {
     else if (a === "--plan") o.plan = true;
     else if (a.startsWith("--shards=")) o.shards = parseShardCount(a.slice("--shards=".length), "--shards");
     else if (a === "--shards") o.shards = parseShardCount(argv[++i] ?? "", "--shards");
-    else if (a.startsWith("--shard-timeout=")) o.timeoutS = parsePositive(a.slice("--shard-timeout=".length), "--shard-timeout");
+    else if (a.startsWith("--shard-timeout=")) o.timeoutS = parsePositive(a.slice("--shard-timeout=".length), "--shard-timeout", MAX_SECONDS);
+    else if (a.startsWith("--slot-wait=")) o.slotWaitS = parsePositive(a.slice("--slot-wait=".length), "--slot-wait", MAX_SECONDS);
     else if (a.startsWith("--shard-mem=")) o.memMb = parsePositive(a.slice("--shard-mem=".length), "--shard-mem");
     else if (a.startsWith("-")) o.passthrough.push(a);
     else o.paths.push(a);
   }
-  if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200);
+  if (o.timeoutS === 0) o.timeoutS = envNumber("SCRML_HOOK_SHARD_TIMEOUT_S", 1200, MAX_SECONDS);
+  if (o.slotWaitS === 0) o.slotWaitS = envNumber("SCRML_HOOK_SLOT_WAIT_S", 1800, MAX_SECONDS);
   if (o.memMb === 0) o.memMb = envNumber("SCRML_HOOK_SHARD_MEM_MB", 3072);
   o.shardsWhy = "explicit";
   if (o.shards === 0) {
@@ -161,6 +214,13 @@ function parseArgs(argv: string[]): Options {
       const d = defaultShards(o.memMb);
       o.shards = d.n;
       o.shardsWhy = d.why;
+      // Memory-derived N=1 happens only when memory is already short, and then the WHOLE suite is one shard: the
+      // per-shard ceiling (sized for 1/Nth of the suite) would false-red it (sequential peaks ~2.8 GB). Lift it to
+      // twice the configured value — still a bound against a runaway, no longer a trap for the normal run.
+      if (d.n === 1) {
+        o.memMb *= 2;
+        o.shardsWhy += `; N=1 -> ceiling lifted to ${o.memMb} MB`;
+      }
     }
   }
   if (o.paths.length === 0) {
@@ -315,7 +375,7 @@ interface ShardResult {
   // How the shard ended. "stopped" = this runner stopped it because ANOTHER shard failed under --bail (not a
   // failure of its own). Every other non-"ok" outcome fails the run — including "signal": a shard killed by
   // something other than this runner (the kernel OOM killer, a stray kill) has no summary and must never pass.
-  outcome: "ok" | "failed" | "stopped" | "timeout" | "memory" | "signal";
+  outcome: "ok" | "failed" | "stopped" | "timeout" | "memory" | "signal" | "noslot";
   lastFile: string | null; // the last file header bun printed — the file a killed shard was most likely in
   peakRssMb: number;
   seconds: number;
@@ -520,6 +580,17 @@ async function main(): Promise<void> {
   };
   const sampler = setInterval(sampleMemory, 1000);
 
+  const slots = slotBudget(envNumber("SCRML_HOOK_SHARD_MEM_MB", 3072)); // the configured ceiling, not an N=1 lift: every hook on the host must agree
+  if (slots === null) console.log("test-sharded: no `flock` on PATH — machine-wide slot budget NOT enforced on this host");
+  else console.log(`test-sharded: machine-wide budget ${slots.count} concurrent shard(s) across every hook on this host [${slots.why}]`);
+  const neverStarted = (shard: Shard, outcome: "stopped" | "noslot"): ShardResult => {
+    if (outcome === "noslot") {
+      console.log(`[s${shard.index}] NO SLOT: every machine-wide slot stayed busy for ${opts.slotWaitS}s — shard ${shard.index} never started`);
+      bail(shard.index);
+    }
+    return { shard, exitCode: null, output: [], counts: null, failLines: [], outcome, lastFile: null, peakRssMb: 0, seconds: 0 };
+  };
+
   const results = await Promise.all(
     shards.map(async (shard): Promise<ShardResult> => {
       const junit = join(workDir, `shard-${shard.index}.xml`);
@@ -533,19 +604,21 @@ async function main(): Promise<void> {
         `--reporter-outfile=${junit}`,
         ...shard.files.map((f) => `./${f}`),
       ];
-      const cmd = timeoutBin ? [timeoutBin, "--kill-after=10", `${Math.ceil(opts.timeoutS) + 60}`, ...testCmd] : testCmd;
-      const proc = spawn(cmd, { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env, detached: true });
-      procs.set(shard.index, proc);
-      groups.set(shard.index, proc.pid);
-      const timer = setTimeout(() => {
-        console.log(`[s${shard.index}] TIMEOUT: still running after ${opts.timeoutS}s — killing shard ${shard.index}`);
-        stop(shard.index, "timeout", "SIGKILL");
-        bail(shard.index);
-      }, opts.timeoutS * 1000);
+      // The coreutils `timeout` backstop goes OUTERMOST: without --foreground it calls setpgid(0, 0), so anywhere
+      // but the group leader it would move bun into a group of its own — out of reach of the group kill and the
+      // memory sampler. As the detached leader that call is a no-op and flock / sh / bun stay in the shard's group.
+      const bound = (inner: string[]) => (timeoutBin ? [timeoutBin, "--kill-after=10", `${Math.ceil(opts.timeoutS) + 60}`, ...inner] : inner);
+      // Machine-wide slot: `flock -n -E 199 <slot-file> sh -c 'echo MARKER; exec "$@"' sh <cmd>` takes the slot
+      // atomically and starts the shard only if it was free; busy -> exit 199 at once, nothing printed. The marker
+      // line (filtered out of the output) says the slot was taken — no timing guess. The lock lives on flock's fd and
+      // dies with the shard's process group, so a killed runner never leaks a slot. Slots are tried from a
+      // per-shard offset; when every one is busy the shard waits (bounded by slot-wait) instead of oversubscribing.
       const output: string[] = [];
       const failLines: string[] = [];
       let lastFile: string | null = null;
+      let onAcquired: () => void = () => {};
       const onLine = (line: string) => {
+        if (line === SLOT_MARKER) return onAcquired();
         output.push(line);
         if (FILE_HEADER.test(line)) lastFile = line.slice(0, -1);
         if (opts.verbose) console.log(`[s${shard.index}] ${line}`);
@@ -555,12 +628,58 @@ async function main(): Promise<void> {
           if (!stopReason.has(shard.index)) bail(shard.index);
         }
       };
-      await Promise.all([pump(proc.stdout as ReadableStream<Uint8Array>, onLine), pump(proc.stderr as ReadableStream<Uint8Array>, onLine)]);
+      const spawnOpts = { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env, detached: true } as const;
+      const pumpAll = (p: ReturnType<typeof spawn>) =>
+        Promise.all([pump(p.stdout as ReadableStream<Uint8Array>, onLine), pump(p.stderr as ReadableStream<Uint8Array>, onLine)]);
+      let proc: ReturnType<typeof spawn>;
+      let pumped: Promise<unknown>;
+      let slotWaitAnnounced = false;
+      for (let attempt = 0; ; attempt++) {
+        if (bailedBy !== null) return neverStarted(shard, "stopped");
+        if (slots === null) {
+          proc = spawn(bound(testCmd), spawnOpts);
+          pumped = pumpAll(proc);
+          break;
+        }
+        const slot = (shard.index + attempt + process.pid) % slots.count;
+        const p = spawn(
+          bound([slots.flock, "-n", "-E", String(SLOT_BUSY), join(slots.dir, `slot-${slot}`), "sh", "-c", `echo ${SLOT_MARKER}; exec "$@"`, "sh", ...testCmd]),
+          spawnOpts,
+        );
+        const acquired = new Promise<"acquired">((res) => (onAcquired = () => res("acquired")));
+        const pp = pumpAll(p);
+        const first = await Promise.race([acquired, p.exited]);
+        if (first === SLOT_BUSY) {
+          await pp;
+          if ((attempt + 1) % slots.count === 0) {
+            if ((Date.now() - t0) / 1000 > opts.slotWaitS) return neverStarted(shard, "noslot");
+            if (!slotWaitAnnounced) {
+              console.log(`[s${shard.index}] waiting for a machine-wide test slot (all ${slots.count} busy; bounded at ${opts.slotWaitS}s)`);
+              slotWaitAnnounced = true;
+            }
+            await Bun.sleep(1000 + Math.floor(Math.random() * 1000));
+          }
+          continue;
+        }
+        proc = p; // acquired — or flock itself failed, which surfaces as this shard's failure with its output
+        pumped = pp;
+        break;
+      }
+      if (slotWaitAnnounced) console.log(`[s${shard.index}] got a slot after ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+      const tRun = Date.now();
+      procs.set(shard.index, proc);
+      groups.set(shard.index, proc.pid);
+      const timer = setTimeout(() => {
+        console.log(`[s${shard.index}] TIMEOUT: still running after ${opts.timeoutS}s — killing shard ${shard.index}`);
+        stop(shard.index, "timeout", "SIGKILL");
+        bail(shard.index);
+      }, opts.timeoutS * 1000);
+      await pumped;
       const exitCode = await proc.exited;
       clearTimeout(timer);
       // Anything the shard's tests left running in its group (a server a test never stopped) dies with it.
       killGroup(shard.index, "SIGKILL");
-      const seconds = (Date.now() - t0) / 1000;
+      const seconds = (Date.now() - tRun) / 1000;
       const counts = parseCounts(output);
       const signalled = (proc.signalCode !== null && proc.signalCode !== undefined) || (timeoutBin !== null && (exitCode === 124 || exitCode === 137));
       const ours = stopReason.get(shard.index);
@@ -599,9 +718,11 @@ async function main(): Promise<void> {
         ? `TIMED OUT (limit ${opts.timeoutS}s; killed after ${r.seconds.toFixed(0)}s)`
         : r.outcome === "memory"
           ? `KILLED AT THE MEMORY CEILING (${opts.memMb} MB; peak ${r.peakRssMb.toFixed(0)} MB)`
-          : r.outcome === "signal"
+          : r.outcome === "noslot"
+            ? `NEVER STARTED: no machine-wide test slot within ${opts.slotWaitS}s (other hooks held all of them)`
+            : r.outcome === "signal"
             ? `KILLED BY A SIGNAL THIS RUNNER DID NOT SEND (exit ${r.exitCode}; OOM killer?)`
-            : `FAILED (exit ${r.exitCode})`;
+              : `FAILED (exit ${r.exitCode})`;
     console.log(`\n===== shard ${r.shard.index} ${head} — failure report; full output: ${log} =====`);
     if (r.outcome !== "failed") {
       console.log(`last file header printed: ${r.lastFile ?? "(none)"}`);
