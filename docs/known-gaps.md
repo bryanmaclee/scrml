@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 652 | 6 |
+| MED | 653 | 6 |
 | LOW | 438 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -61,6 +61,12 @@ Executed on the #1450 branch (S469): `export fn arg(n: int) { const foo = 9; ret
 <!-- @gap id=g-dg-002-false-on-read-in-match-arm-block-in-fn-s469 sev=LOW status=open locus=searched:compiler/src/dependency-graph.ts(reader accounting for E-DG-002 — does not descend into a `match-expr` arm body reached through a declaration's matchExpr)—not-traced prov=dispatch:s469-literal-arm-r1(executed on the #1450 branch) -->
 
 Executed on the #1450 branch (S469), client app: `function pick() { const v = match k { .A :> { a: @count } else :> { a: 0 } }; return v }` rendered via `${JSON.stringify(pick())}` — E-DG-002 (warning) "`@count` is declared but never consumed"; the same for a literal arm with a statement block (`1 :> { const q = @count⏎ q }`). The same read in an `if` block in the same function is counted (no E-DG-002). The emitted code reads the cell correctly (`_scrml_cs_reactive_get("count")`). A false warning that tells the author to delete a cell in use, hence worth fixing; the variant-arm case predates S468.
+
+### g-raw-match-arm-object-failable-call-unhandled-s469 — a `!` (failable) call inside a raw OBJECT arm of a `match` written inside a larger expression (`JSON.stringify(match n { 1 :> { ok: chk(p) } … })`) gets no E-ERROR-002 on the client — the failure object is truthy, so `o.ok` reads as success — `NEW S469; MED; open`
+
+<!-- @gap id=g-raw-match-arm-object-failable-call-unhandled-s469 sev=MED status=open locus=searched:compiler/src/failable-value-calls.ts(forEachCallInValuePosition — raw inline-match arms are reached, but a call inside an object-literal arm value in a raw arm is not)+compiler/src/expression-parser.ts(rawArms)—not-traced prov=review:S239-delta-re-review-of-#1450@187294fd8;dispatch:s469-literal-arm-r4(executed on the #1450 branch) -->
+
+Executed on the #1450 branch (S469 r4), client: `function g(pass) { const v = JSON.stringify(match n { 1 :> { ok: chk(pass) }⏎ else :> { ok: false } }) … }` with `function chk(p)! -> E` compiles with no E-ERROR-002 and emits `return { ok : _scrml_chk_6 ( pass ) };` — the `!` call's result (an error object on failure) is stored unhandled. §19.4.3 makes every unhandled `!` call E-ERROR-002 (the S467 value-position rule). The same shape in a SERVER function is refused, but as E-CODEGEN-INVALID-LOGIC (a compiler-defect code), not E-ERROR-002. Pinned as a known hole: security-await-pack `la5/rawClientObjFailable` (UNJUDGED — a client decision); server twin `la5/rawObjFailable` (PASS-REFUSED). Same root as the expression-parser `rawArms` item.
 
 ### g-mu-001-c-for-loop-var-read-in-condition-s468 — E-MU-001 fires on a C-style `for` loop variable that is read only in the loop CONDITION (`for (let i = 0; i < 1; …) { i = 5 }`) — `NEW S468; LOW; open (pre-existing)`
 
@@ -8125,6 +8131,8 @@ So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.
 
 ### g-match-value-position-server-call-no-autoawait — a server call in a client `match` used in an INTERPOLATION / value position (`<p>${ match k { 1 :> getFlag().ok  _ :> false } }</p>`) lowers via the `emitMatchExpr` SYNC IIFE (not the tilde-temp decl path), where `await` is illegal — so it ships a bare unawaited Promise — `NEW S318-peter (sibling sweep of g-match-arm-server-call-no-autoawait); MED; open (the R26-corrected "sync IIFE" position — genuinely needs the IIFE made async+awaited, or CPS-split)`
 <!-- @gap id=g-match-value-position-server-call-no-autoawait sev=MED status=open -->
+
+**S469 (#1450 r4) — more shapes, same mechanism.** Any `match` written INSIDE a larger expression (its arms carried as raw text by the expression parser) lowers to the same synchronous value IIFE, so a client server-call arm value is never awaited. Emit inspected on the #1450 branch: `if (Boolean(match n { 1 :> inner(name, pass)⏎ else :> false })) { return "WELCOME" }` emits `if (_scrml_match_N === 1) return _scrml_fetch_inner_M ( name , pass );` inside the IIFE — the branch tests a Promise and is always taken (a wrong password WELCOME in the client); a raw object arm `{ v: inner(name, pass) }` stores the Promise. The same raw arms are also invisible to route / dead-function analysis (`inner` drew a false W-DEAD-FUNCTION). Pinned as known holes: security-await-pack `la5/rawClientSrvCall`, `la5/rawClientSrvCallObj` (listed in `UNJUDGED` — the server-route instrument cannot judge a client decision). Same root as the expression-parser `rawArms` one-reader item ([[g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode]]).
 
 ### g-match-block-arm-server-call-no-autoawait — a server call in a BLOCK-body value arm (`match k { 1 => { getFlag().ok } … }`) stays bare: the structured-body arm path in `emitMatchExprDecl` bypasses `armResultLine` (where the S318 auto-await was added), so the raw-result fix does not reach it — `NEW S318-peter (residual of g-match-arm-server-call-no-autoawait); MED; resolved (fixed by S330 #469/#470; stale-open)`
 <!-- @gap id=g-match-block-arm-server-call-no-autoawait sev=MED status=resolved -->
