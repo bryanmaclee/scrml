@@ -180,3 +180,5 @@ but all three multi-scrutinee lowerings still DROPPED the block body (`msWildDen
   0 E-PARSE-001 anywhere; same 9 diagnostic-code changes (info / W-DEAD-FUNCTION removals) and the same 3
   formatting-only artifact diffs as round 0. giti + flogence: 0 error-code differences.
 - Real (non-test-fixture) sites newly refused: 0.
+
+## 2026-10-17T22:02:37-06:00 — s469-literal-arm-r1 resume at /home/bmacs/scrmlMaster/scrml/.claude/worktrees/agent-a47310f83fb21b193; fast-forwarded to 0322961fe (from old worktree)
