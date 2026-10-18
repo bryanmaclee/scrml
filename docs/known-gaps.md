@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 262 | 4 |
-| MED | 659 | 6 |
-| LOW | 437 | 0 |
+| MED | 660 | 6 |
+| LOW | 438 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -113,6 +113,19 @@ Reproduced (S468 fix round 1, happy-dom, on `684420b36` and on the fix-round hea
 <!-- @gap id=g-identity-arg-via-alias-mutation-s468 sev=MED status=open locus=compiler/src/identity-flow.ts(the location-aware resolver follows writes to a binding by its OWN name; a write through another name bound to the same object is not a source)+compiler/src/route-inference.ts(Step 6c) prov=review:S239-s468-identity-arg-refusal-r1(H3);spec:§12.4("Known limits of this check (impl#1)");spec:§6.6.9("`@session` is server-only identity and SHALL NEVER be marshalled from the client") -->
 
 Reviewer probes (S239 r1 on `79b34a878`, harness `~/.cache/scrml-agent-tmp/s468-rev-idarg/h/`, executed against the emitted server route with a forged body): a40, a45, b13, b14, b15, b16, b29, d16, d17, e08 (alias mutation) and c13 (component-prop object literal) are still ACCEPTED-SPOOFED after fix round 1 (re-run S469 on the merged branch). The direct forms — `o.u = @session.userId`, `@o.u = …`, a helper that mutates its parameter, a callback assigning an outer local — ARE refused. Closing this inside the per-argument follower means an alias / points-to analysis; the deliberated direction is identity as a server-only value kind (dpa-071), which would make the question moot (an identity value could not reach the browser-sent side of a call by any route). SPEC §12.4 lists this as a known limit. H4 of the same review (rest parameters / `arguments`) was CLOSED in code, not filed.
+
+
+### g-component-prop-object-cell-shorthand-literal-string-s469 — a component prop written `p={ { @count } }` is emitted as a LITERAL attribute string (`"{ @count } }"` in the client JS) instead of being refused — the component receives text, not a value; same on main — `NEW S469 (found by the round-4 re-review of #1451; not fixed there, out of scope); MED; open`
+
+<!-- @gap id=g-component-prop-object-cell-shorthand-literal-string-s469 sev=MED status=open locus=compiler/src/component-expander.ts(a prop value `{ { … } }` — the outer braces are the attribute's expression form; the inner object literal is not parsed as an expression, so E-OBJECT-SHORTHAND-CELL's front-end walk never sees it) prov=review:S469-1451-r4;spec:§6.1.2 -->
+
+Executed S469 on the s469-1451 branch (a8fe547e5 + round 5): `const Card = <div props={ p: object }>…</div>` + `<Card p={ { @count } }/>` compiles with no error; the emitted client JS carries the text `{ @count } }` as the prop. Pre-existing (main is the same). Expected: the prop value is an expression, and `{ @count }` inside it is E-OBJECT-SHORTHAND-CELL (§6.1.2 "NOT a name"); `{ count: @count }` would then be the value.
+
+### g-cell-shorthand-generic-codegen-error-positions-s469 — `{ @x }` in positions the front-end walk does not parse (a block-bodied callback kept as raw text, `[1].forEach((k) => { … { @count } … })`; a match-arm body; and the member form `{ @count.x }`, which is not a shorthand at all) is refused only by the generic E-CODEGEN-INVALID-LOGIC ("could not lower this construct"), with no source location and no fix — `NEW S469 (found by the round-4 re-review of #1451; refused, so not a leak — a message gap); LOW; open`
+
+<!-- @gap id=g-cell-shorthand-generic-codegen-error-positions-s469 sev=LOW status=open locus=compiler/src/gauntlet-phase1-checks.js(checkObjectShorthandCell — parses template / `?{}` / parameter-default text, not escape-hatch raw text or match-arm bodies)+compiler/src/expression-parser.ts(`{ @x.y }` fails to parse as an object literal) prov=review:S469-1451-r4;spec:§6.1.2 -->
+
+Executed S469: both shapes fail the compile (fail closed) with `E-CODEGEN-INVALID-LOGIC`, span null. Better: E-OBJECT-SHORTHAND-CELL at the real line/column naming `{ count: @count }` (and for `{ @count.x }`, `{ x: @count.x }`) — the front-end walk would need to parse raw escape-hatch text / arm bodies the way codegen does.
 
 ### g-cps-server-half-trusts-client-held-cell-s467 — a CPS server half reads a CELL's value back from the request: `const was = @allowed` before the first server statement, or `if (!@ok && !@allowed) return` — if an earlier call's server result set `@allowed`, the browser can forge it — `NEW S467 (filed; pre-existing, narrowed by #1435); MED; open`
 

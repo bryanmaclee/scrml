@@ -466,6 +466,64 @@ describe("S469 — `{ @x }` is E-OBJECT-SHORTHAND-CELL; `{ x: @x }` is still che
   });
 });
 
+// S469 round-4 re-review: one report per site, at its real line/column; the three text
+// positions only codegen used to parse; and `@x` as a destructuring target (it was dropped
+// silently: `const { @count } = o` compiled to `const {  } = o;`).
+describe("S469 — E-OBJECT-SHORTHAND-CELL: once, located, every position, patterns", () => {
+  const PROG = (body) => `<program db="./app.db">\n  <count> = 0\n  <last> = ""\n${body}</program>\n`;
+  const only = (r) => {
+    const hits = r.errors.filter((e) => e.code === "E-OBJECT-SHORTHAND-CELL");
+    expect(hits.length).toBe(1); // reported ONCE (front end; the codegen backstop does not repeat it)
+    return hits[0];
+  };
+  test("a plain `{ @count }`: one report at its real line and column", () => {
+    const r = compile(PROG(`  function go() {\n    @last = JSON.stringify({ @count })\n  }\n  <button onclick=go()>a</button>\n`));
+    const e = only(r);
+    expect([e.span.line, e.span.col]).toEqual([5, 30]);
+  });
+  test("two sites in one function: two reports, each at its own column", () => {
+    const r = compile(PROG(`  function go() {\n    @last = JSON.stringify([{ @count }, { @count }])\n  }\n  <button onclick=go()>a</button>\n`));
+    const hits = r.errors.filter((e) => e.code === "E-OBJECT-SHORTHAND-CELL");
+    expect(hits.map((e) => [e.span.line, e.span.col])).toEqual([[5, 31], [5, 43]]);
+  });
+  test("inside a template literal `${…}` of a client function", () => {
+    const e = only(compile(PROG("  function go() {\n    @last = `v=${JSON.stringify({ @count })}`\n  }\n  <button onclick=go()>a</button>\n")));
+    expect([e.span.line, e.span.col]).toEqual([5, 35]);
+  });
+  test("a parameter default `function go(o = { @count })` — with a source location", () => {
+    const e = only(compile(PROG(`  function go(o = { @count }) {\n    @last = JSON.stringify(o)\n  }\n  <button onclick=go()>a</button>\n`)));
+    expect([e.span.line, e.span.col]).toEqual([4, 21]);
+  });
+  test("a `?{}` query's `${…}` slot", () => {
+    const r = compile(PROG("  function save() {\n    ?{`INSERT INTO t (v) VALUES (${JSON.stringify({ @count })})`}.run()\n  }\n  <button onclick=save()>a</button>\n"));
+    const e = only(r);
+    expect(e.span.line).toBe(5);
+  });
+  const patterns = {
+    "`const { @count } = o`": [`    const o = { count: 1 }\n    const { @count } = o\n`, "{ @count }"],
+    "`let { a, @count } = o`": [`    const o = { a: 1 }\n    let { a, @count } = o\n    @last = String(a)\n`, "{ @count }"],
+    "`const { a: @count } = o`": [`    const o = { a: 1 }\n    const { a: @count } = o\n`, "{ a: @count }"],
+    "`const [ @count ] = xs`": [`    const [ @count ] = [1]\n`, "[ @count ]"],
+    "`for (const { @count } of xs)`": [`    for (const { @count } of [{ count: 1 }]) { @last = "x" }\n`, "{ @count }"],
+  };
+  for (const [label, [body, shown]] of Object.entries(patterns)) {
+    test(`a destructuring target ${label} is refused (was: the binding dropped silently)`, () => {
+      const r = compile(PROG(`  function go() {\n${body}  }\n  <button onclick=go()>a</button>\n`));
+      const e = only(r);
+      expect(e.message).toContain(`cannot be a destructuring target in \`${shown}\``);
+      expect(e.span.line).toBeGreaterThan(1);
+    });
+  }
+  test("a destructuring PARAMETER `function go({ @count })` is refused", () => {
+    const e = only(compile(PROG(`  function go({ @count }) {\n    @last = "x"\n  }\n  <button onclick=go({ count: 1 })>a</button>\n`)));
+    expect([e.span.line, e.span.col]).toEqual([4, 17]);
+  });
+  test("NOT refused: an ordinary destructuring `const { count } = o` + `@count = count`", () => {
+    const r = compile(PROG(`  function go() {\n    const o = { count: 1 }\n    const { count: n } = o\n    @count = n\n  }\n  <button onclick=go()>a</button>\n`));
+    expect(codes(r.errors)).toEqual([]);
+  });
+});
+
 describe("s468 — NOT refused", () => {
   test("the fix: the server function reads the session itself — writes the REAL id whatever the request says", async () => {
     if (typeof globalThis.document !== "undefined") return; // native Request only (Cookie header)

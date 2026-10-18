@@ -86,6 +86,8 @@ import {
 // route-inference.ts imports them the same way.
 import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
 import { OBJECT_SHORTHAND_CELL, isCellShorthandName, objectShorthandCellMessage } from "./object-shorthand-cell.ts";
+import { parseExprToNode, tokenizeTemplateInterpolations } from "./expression-parser.ts";
+import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -1095,30 +1097,83 @@ function checkSchemaDeclarations(ast, filePath, errors) {
  * have accepted it as `{ "@count": … }`, bypassing E-REACTIVE-003, the identity
  * follower and E-SESSION-AMBIENT-SERVER, all of which read a property VALUE. It is
  * refused here, before name resolution, with the explicit spelling as the fix.
- * The walk is structural over the parsed tree; raw text the parser keeps unparsed
- * is not parsed here (codegen keeps a backstop with the same code).
+ *
+ * Positions read: every parsed expression tree, AND the text the builder keeps
+ * unparsed and codegen parses later — a template literal's `${…}` interpolations,
+ * a `?{}` query's `${…}` slots, and a parameter default kept as text
+ * (`function go(o = { @x })`). Each fragment is parsed here the way codegen will.
+ *
+ * Location: an expression tree's spans carry line 1 / col 1 and offsets that may
+ * be relative to a re-parsed substring, so the report is placed by finding the
+ * shorthand in the source text inside the nearest enclosing node with a real
+ * position (a statement / declaration), in source order; failing that, at that
+ * enclosing node.
  */
-function checkObjectShorthandCell(ast, filePath, errors) {
+function checkObjectShorthandCell(ast, filePath, errors, sourceText) {
   if (!ast || typeof ast !== "object") return;
+  const src = typeof sourceText === "string" ? sourceText : null;
+  const usedOffsets = new Set();
+  const hasRealLine = (sp) => !!sp && typeof sp === "object" && typeof sp.line === "number" &&
+    typeof sp.start === "number" && typeof sp.end === "number" && !(sp.line === 1 && sp.col === 1);
+  const lineColAt = (off) => {
+    let line = 1, lineStart = 0;
+    for (let i = 0; i < off; i++) if (src.charCodeAt(i) === 10) { line++; lineStart = i + 1; }
+    return { line, col: off - lineStart + 1 };
+  };
+  const place = (name, anchor) => {
+    const fallback = anchor ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+    if (!src || !anchor || typeof anchor.start !== "number" || typeof anchor.end !== "number") return fallback;
+    const esc = name.replace(/[$]/g, "\\$&");
+    // `{ @x` / `, @x` followed by `,` / `}` / `=` (a default) — a shorthand, not `@x:` or `@x.y`
+    const re = new RegExp(`[{,]\\s*(${esc})(?![\\w$])(?=\\s*[,}=])`, "g");
+    re.lastIndex = Math.max(0, anchor.start);
+    const stop = Math.min(src.length, Math.max(anchor.end, anchor.start));
+    for (let m = re.exec(src); m && m.index < stop; m = re.exec(src)) {
+      const off = m.index + m[0].length - m[1].length;
+      if (usedOffsets.has(off)) continue;
+      usedOffsets.add(off);
+      const { line, col } = lineColAt(off);
+      return { file: filePath, start: off, end: off + name.length, line, col };
+    }
+    return fallback;
+  };
+  const report = (name, anchor) => {
+    const err = new GauntletError(OBJECT_SHORTHAND_CELL, objectShorthandCellMessage(name), place(name, anchor));
+    err.cellName = name; // api.js: the codegen backstop does not report this site again
+    errors.push(err);
+  };
+  const parseFragment = (text) => {
+    try { return parseExprToNode(text, filePath, 0); } catch { return null; }
+  };
   const seen = new WeakSet();
-  const visit = (n) => {
+  const visit = (n, anchor) => {
     if (!n || typeof n !== "object" || seen.has(n)) return;
     seen.add(n);
-    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (Array.isArray(n)) { for (const c of n) visit(c, anchor); return; }
+    const here = hasRealLine(n.span) ? n.span : anchor;
     if (n.kind === "object" && Array.isArray(n.props)) {
-      for (const p of n.props) {
-        if (p && p.kind === "shorthand" && isCellShorthandName(p.name)) {
-          errors.push(new GauntletError(
-            OBJECT_SHORTHAND_CELL,
-            objectShorthandCellMessage(p.name),
-            p.span ?? n.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-          ));
+      for (const p of n.props) if (p && p.kind === "shorthand" && isCellShorthandName(p.name)) report(p.name, here);
+    }
+    // text codegen parses later
+    if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string" && n.raw.includes("@")) {
+      for (const seg of tokenizeTemplateInterpolations(n.raw)) if (seg.kind === "expr") visit(parseFragment(seg.text), here);
+    }
+    if (n.kind === "sql") {
+      for (const f of ["query", "body"]) {
+        const q = n[f];
+        if (typeof q === "string" && q.includes("@")) for (const i of liveSqlInterpolations(q)) visit(parseFragment(i.expr), here);
+      }
+    }
+    if (Array.isArray(n.params)) {
+      for (const pr of n.params) {
+        if (pr && typeof pr === "object" && typeof pr.defaultValue === "string" && pr.defaultValue.includes("@") && !pr.defaultExpr) {
+          visit(parseFragment(pr.defaultValue), here);
         }
       }
     }
-    for (const k of Object.keys(n)) if (k !== "span" && k !== "parent") visit(n[k]);
+    for (const k of Object.keys(n)) if (k !== "span" && k !== "parent") visit(n[k], here);
   };
-  visit(ast);
+  visit(ast, null);
 }
 
 export function runGauntletPhase1Checks(bsResult, tabResult) {
@@ -1130,7 +1185,7 @@ export function runGauntletPhase1Checks(bsResult, tabResult) {
   checkFileScopeDuplicateBindings(tabResult?.ast, filePath, errors);
   checkSchemaPlacement(tabResult?.ast, filePath, errors);
   checkSchemaDeclarations(tabResult?.ast, filePath, errors);
-  checkObjectShorthandCell(tabResult?.ast, filePath, errors);
+  checkObjectShorthandCell(tabResult?.ast, filePath, errors, tabResult?._sourceText);
 
   return errors;
 }

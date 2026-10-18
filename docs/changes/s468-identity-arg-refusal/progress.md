@@ -280,3 +280,30 @@ Corpus: 3001 sources (examples, samples, conformance/cases, stdlib, benchmarks, 
 E-OBJECT-SHORTHAND-CELL, 0 E-ARG-SERVER-IDENTITY, 0 E-PARAM-DEFAULT-SERVER-IDENTITY. The 28 E-CODEGEN-INVALID-LOGIC
 sources are identical on the 90a6df97a compiler (25 of 28 byte-equal code sets; the 3 stdlib differences are the
 known archive-stdlib-path artifact). **0 changes.**
+
+## FIX ROUND 5 (S469 re-review of a8fe547e5 = LAND-WITH-FOLLOWUPS — "human workable")
+
+1 One report per site: the front-end error and the codegen backstop carry `cellName`; api.js `collectErrors`
+  drops a CG E-OBJECT-SHORTHAND-CELL when the front end already refused the same `{ @x }` in the same file (the
+  E-SCRIPT-001 / E-STYLE-001 backstop precedent; a synthetic-file copy matches any file). A backstop report with no
+  front-end refusal of that name in its file is kept. Limit: per file + name, not per byte (a copy re-parsed from
+  text cannot share the original's span) — a missed SECOND `{ @x }` of the same name in the same file would be
+  folded into the first report; the compile fails either way.
+2 Real line/column: expression-tree spans are line 1 / col 1 (expression-parser `spanFromEstree`) with offsets
+  that may be substring-relative (measured: off by 2 in p1). The check now places a report by finding the
+  shorthand in `tabResult._sourceText` inside the nearest enclosing node with a real position, in source order
+  (two sites → two columns, tested); fallback is that node's span. Tested: [5,30], [5,31]+[5,43], template [5,35],
+  default [4,21].
+3 New front-end positions (the text codegen parses later): template-literal `${…}` (tokenizeTemplateInterpolations),
+  `?{}` slots (liveSqlInterpolations), a parameter default kept as text (`params[].defaultValue` — it now has a
+  location). Each fragment parsed with parseExprToNode, as codegen does.
+4 `@x` as a DESTRUCTURING TARGET — same code (E-OBJECT-SHORTHAND-CELL; one root: `@x` where a name is required),
+  its own message (`destructureCellMessage`): refused in ast-builder.js `parseDestructurePattern`
+  (`refuseCellTarget`) for `{ @x }`, `{ k: @x }`, `[ @x ]`, and so for destructuring parameters and `for … of`
+  variables — before, the pattern parser's "unexpected token → consume" branch dropped it (`const {  } = o;`;
+  `{ k: @x }` produced E-PARSE-001 cascades). Newly-rejecting a silent miscompile. SPEC §6.1.2 bullet + §34 row.
+Corpus (3001 sources, same roots): E-OBJECT-SHORTHAND-CELL 0, identity codes 0, E-CODEGEN-INVALID-LOGIC 28 and
+CRASH 1 — both unchanged from round 4. **0 changes.**
+Filed (out of scope): g-component-prop-object-cell-shorthand-literal-string-s469 (MED — `p={ { @count } }` emitted
+as a literal string, executed), g-cell-shorthand-generic-codegen-error-positions-s469 (LOW — `{ @x.y }`, match-arm,
+block-bodied callback refused only by generic E-CODEGEN-INVALID-LOGIC, no location). Gap counts regenerated.

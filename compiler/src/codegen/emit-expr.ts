@@ -1879,7 +1879,10 @@ function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
       // the front end (E-OBJECT-SHORTHAND-CELL, gauntlet-phase1-checks.js); this is
       // the backstop for a tree that reaches codegen anyway — never lowered.
       if (isCellShorthandName(prop.name)) {
-        recordRefusedLowering(new CGError(OBJECT_SHORTHAND_CELL, objectShorthandCellMessage(prop.name), prop.span as never, "error"), prop as never);
+        const cgErr = new CGError(OBJECT_SHORTHAND_CELL, objectShorthandCellMessage(prop.name), prop.span as never, "error");
+        // api.js drops this backstop report when the front end refused the same `{ @x }` in the file
+        (cgErr as unknown as { cellName: string }).cellName = prop.name;
+        recordRefusedLowering(cgErr, prop as never);
         return `${JSON.stringify(prop.name)}: undefined /* E-OBJECT-SHORTHAND-CELL */`;
       }
       const val = emitIdent({ kind: "ident", name: prop.name, span: prop.span } as IdentExpr, ctx);
