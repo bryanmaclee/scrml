@@ -77,7 +77,7 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
-import { parseStatementText, textBodiesOf } from "./validators/defer-structure.ts";
+import { parseStatementText, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
@@ -15001,6 +15001,18 @@ function annotateNodes(
             }
           } else if (typeof initExpr.name === "string") {
             scopeChain.bind(initExpr.name, { kind: "variable", resolvedType: tAsIs() });
+          } else if (cStyleInitDeclaration(initExpr) !== null) {
+            // s468 (ruling S464 cfor-comma "b") — a declarator LIST
+            // (`let i = 0, j = n`) binds every declarator, read from the tree the
+            // codegen emits (`cStyleInitDeclaration`). The text regex below matched
+            // only the declarator after the keyword, so a body read of `j` was
+            // E-SCOPE-001.
+            for (const d of cStyleInitDeclaration(initExpr)!.declarators) {
+              const t = (d as Record<string, unknown>).target as { kind?: string; name?: string } | undefined;
+              if (t && t.kind === "ident" && typeof t.name === "string") {
+                scopeChain.bind(t.name, { kind: "variable", resolvedType: tAsIs() });
+              }
+            }
           } else if (typeof initExpr.raw === "string") {
             // safeParseExprToNode bails to escape-hatch `{ kind: "escape-hatch",
             // raw: "let i = 2" }` for C-style init text that isn't a single

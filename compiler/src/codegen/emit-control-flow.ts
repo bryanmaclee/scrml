@@ -917,11 +917,17 @@ function _emitForStmtInner(
       // read and lowered through the expression emitter like any other expression,
       // so a call in them is awaited / classified as anywhere else.
       const _cDecl = cStyleInitDeclaration(_cParts?.initExpr);
+      // s468 — an EMPTY clause (`for (; c; u)`, `for (;;)`) has no part and emits
+      // nothing; the front-end records the other clauses' parts (cStyleClausesRead).
+      const _cInitText = cStyleMatch[1].trim();
+      const _cCondText = cStyleMatch[2].trim();
+      const _cUpdateText = cStyleMatch[3].trim();
       const init = _cDecl
         ? `${_cDecl.keyword} ${_cDecl.declarators.map((d: any) => emitExpr(d, _cCtx)).join(", ")}`
-        : emitCForHeaderList(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
-      const cond = emitConditionField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
-      const update = emitCForHeaderList(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+        : _cInitText === "" ? ""
+        : emitCForHeaderList(_cParts?.initExpr, _cInitText.replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+      const cond = _cCondText === "" ? "" : emitConditionField(_cParts?.condExpr, _cCondText, _cCtx);
+      const update = _cUpdateText === "" ? "" : emitCForHeaderList(_cParts?.updateExpr, _cUpdateText.replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`${forLabelPrefix(node)}for (${init}; ${cond}; ${update}) {`);
 
       // S465 r3 — the header's declared loop variables are in scope in the body:

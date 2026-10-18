@@ -5228,7 +5228,10 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     // bare run may be, and scrml has no comma operator"). S465 r4: a C-style `for`
     // header's comma init / update (`i = 0, j = 5`, `i++, j--`) is the same
     // operator — the SPEC names no exception for headers — so it is refused here
-    // too (recorded for the owner in progress.md r4). On the server its text fallback was also never
+    // too (recorded for the owner in progress.md r4) — SUPERSEDED by ruling S464 "b" (SPEC
+    // §40.8, S468 sentence): a header's init / update list is lowered element by element
+    // before it reaches here (emit-control-flow `emitCForHeaderList`), so only a VALUE-
+    // position sequence is refused. On the server its text fallback was also never
     // awaited (`(0, check(p, h))` shipped a Promise — truthy — so a wrong
     // password passed), so it is refused rather than lowered as text.
     // (Measured r3: refusing EVERY non-arrow hatch on the server also rejects
