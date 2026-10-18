@@ -38,3 +38,28 @@
 - NOT changed (needs a ruling — gate change): pre-push could refuse while a pending record exists, closing the
   hand-conflict path for gap-counts / recent-sessions (the only paths no pre-push currency check covers).
 - Commit 2 (feature) in the hook; commit 3 = ledger flip + this file.
+
+## PAUSED (S468 wrap)
+
+- 2026-10-17 paused on the coordinator's wrap instruction. FEATURE COMPLETE; the only thing outstanding was this report.
+- **Done:** scripts/git-merge-generated.ts (the driver + `--regen` + `--pending`); state.ts exports `gapCountsSection`;
+  post-merge and post-rewrite hooks (phase 2); install.sh (per-clone driver config + an info/attributes mirror);
+  .gitattributes; README; 16 unit tests; the ledger entry g-parallel-prs-conflict-on-committed-generated-docs-s460
+  marked resolved. Pre-commit gate on every commit: 37448 pass / 125 skip / 13 todo / 0 fail.
+- **Proven (scratch clone, its own config):** all 9 open S468 PRs merged into main. 8 merged with 0 markers and state.ts,
+  facts.ts and SPEC-INDEX `--check` all PASS. s468-rulings-spec stops on its hand-written entry hunk. The pair
+  #1447 into #1448 is clean. The rebase path passes. A SPEC-INDEX row-range pair merges clean. Two bites shown: a
+  corrupted section is regenerated, and a dropped gap id fails the self-check.
+- **Next (PA):** land the branch with a file-delta. Then run `./scripts/git-hooks/install.sh` once from the MAIN
+  checkout, or run the two `git config merge.scrml-generated.*` lines and the info/attributes mirror by hand.
+  Rulings still open: (1) should pre-push refuse while a pending record exists? (2) should two PRs adding ledger
+  entries at the same spot be merged by keeping both (a union), which would stop the s468-rulings-spec kind of stop?
+  (3) should the stray half table at known-gaps ~L668 be deleted?
+
+## RESUMED (S469, branch s469-merge-driver)
+
+- 2026-10-17T22:03-06:00 RESUMED in worktree agent-a3008128d4bfb5fb7 from origin tip 2d0fb1f78 + the unpushed
+  ledger commit (applied from the backup patch) + the PAUSED note above (the uncommitted diff). bun install
+  (puppeteer postinstall exit 1 — browser download, not load-bearing), pretest OK. Ruling (2) is answered by the
+  S469 brief title ("union gap entries"). Remaining: an idempotent install on the pretest path, a fail-closed
+  fallback when bun or the script is unavailable, a UNION of same-spot gap-entry additions, and the bite proofs.
