@@ -93,3 +93,17 @@ No scratch bite-proof branch/PR was created.
   any of them — verified by parsing the YAML); tracking + windows skip merge_group (non-blocking; they run on
   the queue's push to main). PR-base steps fall back to merge_group.base_sha. Settings untouched.
 - Bite PRs opened: #1461 (failing lsp assertion), #1462 (slices forced skipped).
+- Run 2 (39142073562, e08348f3e, 17 jobs): green, but WAITED ~19 min for runners (first ubuntu job started
+  at +1136 s, with three other runs in flight right after the org transfer; the Free org plan allows 20
+  concurrent jobs). Durations once running: integration 4 legs 123-222 s, unit 140-162 s, host-global 79-134 s,
+  slices 186 s, gate 11 s; runner time 2803 s incl. windows 610 s. A 17-job fan-out is the wrong shape under
+  a 20-job org cap, so the legs drop to unit 2 · integration 2 · host-global 2, and each test leg runs
+  `bun test --parallel` (worker processes, implies --isolate). Local check (32 cores, --parallel=4): unit+conf
+  1288 files / 28815 tests 0 fail in 106 s; integration+lsp+commands 342 files / 7413 tests 0 fail in 120 s;
+  junit under --parallel reconciles as an exact partition. 11 jobs a run (9 blocking + gate + tracking), plus
+  windows when the path filter matches.
+- Bite proofs DONE (both throwaway PRs closed, branches deleted): #1461 (failing assertion in
+  compiler/tests/lsp/workspace-l2.test.js) -> run 39139592294 "integration: failure" -> gate FAIL; #1462
+  (slices `if: false`) -> run 39140391972 "slices: skipped" -> gate FAIL ("failure, cancellation and skip all
+  count"). Coverage note: the CI file count can exceed a local enumeration because pull_request runs test the
+  PR MERGED with current main (run 1 included compiler/tests/unit/s468-identity-read-raw-text.test.js from main).
