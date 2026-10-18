@@ -37,3 +37,36 @@
   accumulates in arbitrary combinations; none changes cwd or env.
 - Runner: failure report now prints only the failing file sections (tail 150 lines each) + summary; full shard log
   kept under ~/.cache/scrml/test-sharded-runs/<pid>-*/ (pruned after 24h), not $TMPDIR.
+
+## PAUSED (S468 wrap)
+
+**Done.** `scripts/test-sharded.ts` (enumerate the hook's file set; LPT plan over measured per-file junit times
+cached at `~/.cache/scrml/test-timings.json`, EMA, shared by worktrees; one `bun test` per shard; `--bail` stops all
+shards; per-shard file-count integrity check; TOTAL line; failure report = failing file sections, full log kept under
+`~/.cache/scrml/test-sharded-runs/`). pre-commit + pre-push full-suite path wired to it; `SCRML_HOOK_SHARDS=1` (or a
+branch without the script) runs the exact original single-process command. README updated.
+
+**Measured so far (NOT the brief's 5x5 — incomplete).** Shared box, ~10 agents.
+| run | wall | load start->end | peak RSS | counts |
+|---|---|---|---|---|
+| hook seq (commit 1) | 867.9s | ~21 | - | 37432 pass / 0 fail / 125 skip / 13 todo, 1591 files |
+| hook seq (commit 2) | 820.4s | - | - | same |
+| shard (pre-measure, cold plan) | 271.6s | 22->20 | - | same |
+| round 1 seq | 659.1s | 12.3->8.6 | 2.5 GB | same |
+| round 1 shard | 127.1s | 8.6->18.8 | 7.4 GB | same |
+| round 2 seq | 781.8s | 18.8->10.2 | 2.6 GB | same |
+| round 2 shard | 127.2s | 10.2->19.1 | 7.7 GB | FAIL (bail) — the happy-dom leak below |
+Speed-up ~5-6x (≈2 min vs 11-14 min). Shards balanced 110-125s each; critical-path floor ~70-110s (trucking-dispatch-smoke,
+corpus-bridge, bootstrap-conformance-counter, await-probe-pack).
+
+**Tests isolated.** One: `unit/is-predicate-in-function-expression-1333.test.js` left happy-dom registered ->
+afterAll unregister (bite-proven against reserved-double-prefix-s457). Systematic 1591-file alone+probe sweep after
+the fix: 0 files leak non-native web globals / window / cwd / env; every file passes alone. No pins, no skips.
+
+**Open concern for the owner.** Peak RSS 7.4-7.7 GB per sharded run vs 2.5 GB sequential (8 shards); with ~10 agents
+committing at once that peak is real memory pressure, though GB·s per commit is lower (≈940 vs ≈1650). Recommendation:
+keep min(cores/2, 8) but cap N by available memory (≈1 GB/shard) — not done; brief fixed the default formula.
+
+**Next.** (1) Re-run measure.sh (alternating seq/shard, --bail, load + peak RSS recorded) 5x5 on the fixed branch;
+need zero flakes + identical counts every run. (2) Decide memory cap. (3) Final report. Scratch harness:
+`~/.cache/scrml-agent-tmp/s468-hook-sharding/{measure.sh,rss.sh,probe/}`.
