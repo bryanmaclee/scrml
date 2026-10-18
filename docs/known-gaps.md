@@ -21879,8 +21879,8 @@ reactive body, not a handler; the runtime effect was not probed.
 The S441 reference rule (§19.4.3 "Handler references") catches a DIRECT reference (`onclick=risky`, `${risky}`,
 `{ risky }`). Measured S441, each of these compiles at exit 0 although the dispatcher calls `risky` and discards its
 error: `<fnc> = risky` + `onclick=@fnc`; `const o = { m: risky }` + `onclick=o.m`; `onclick=${ @c ? risky : plain }`;
-`const h = risky` + `onclick=h`. An imported `!` function is not recognised as failable at all (the carried §19.4.3
-gap), so its reference is unchecked too (relayed from the review; not re-executed). These are outside the ruling's
+`const h = risky` + `onclick=h`. (An imported `!` function was not recognised as failable at all, so its reference
+was unchecked too; since S469 it is — `g-imported-failable-function-never-checked`, resolved.) These are outside the ruling's
 direct-reference scope as implemented; catching them needs function-value flow (or a type-level failable marker on
 function values). Follow-up.
 
@@ -21936,12 +21936,28 @@ NOT be ignored" — a value-position call that is not matched / `?` / `!{}` is u
 `risky()` in a function body fires E-ERROR-002 TWICE (the function-body walker and the bare-expr case both fire), and
 a bare IDENT statement `risky` fires (the ident limb of extractCalleeNameFromNode treats a reference as a call).
 
-### g-imported-failable-function-never-checked — a `!` function imported from another file is never treated as failable — `NEW S440 (filed; pre-existing); MED; open`
-<!-- @gap id=g-imported-failable-function-never-checked sev=MED status=open locus=compiler/src/type-system.ts(fnCanFail / fnErrorTypes are built from this file's function-decls only — ~:9120) prov=review:S440-fix-round-F8;empirical:S440-reproduced-by-compile -->
+### g-imported-failable-function-never-checked — a `!` function imported from another file is never treated as failable — `NEW S440 (filed; pre-existing); HIGH (S468: a live wrong-password path); RESOLVED S469 (branch s469-failable-r1 / PR #1444)`
+<!-- @gap id=g-imported-failable-function-never-checked sev=HIGH status=resolved locus=compiler/src/type-system.ts(fnCanFail / fnErrorTypes are built from this file's function-decls only — ~:9120) prov=review:S440-fix-round-F8;empirical:S440-reproduced-by-compile;empirical:S469-executed-happy-dom -->
 
 `lib.scrml`: `export function risky()! -> LoadError { fail LoadError.Empty }`. `main.scrml`: `import { risky } from
 './lib.scrml'`, then `function go() { risky() }`, `<button onclick=risky()>`, `<button onclick={ risky(); @r = 1 }>`
 → zero diagnostics. E-ERROR-002 (and `?`/E-ERROR-004 reasoning) never sees an imported failable.
+
+**Resolved S469** (PR #1444 fix round 1). Executed on the branch's HEAD before the fix (happy-dom): `import { check, AuthErr }`
++ `const ok = check(p)` compiled and a wrong password LOGGED IN; `const ok = match check(p) { .Denied :> false  _ :> true }`
+compiled and LOGGED IN too (the match was not stamped failable, so the error object was compared as a plain value). Now
+`type-system.ts` adds each imported declaration (api.js `importedFnDeclsByFile`: renames and re-exports followed) that is
+declared `!` — or that the route map body-splits (CPS-implicit) — to `fnCanFail`; its error enum is resolved in the
+EXPORTING file's scope (`resolveImportedFnSignatures` -> `FnSignature.errorEnum`) and registered only when the importer's
+registry holds the same enum under that name (`sameEnumShape`). When it does not (the enum not imported, or a different
+local enum of that name), the import is still failable but a `match` on its result is refused (E-ERROR-002, a message
+naming the cause) — fail closed — while `!{}` / `?` handle it. All four shapes above now report E-ERROR-002 (the bare
+reference `onclick=risky` too, by the S441 rule); `risky() !{ _ :> 0 }` compiles; `const v = risky()?` in a `!` function
+compiles. Tests: `compiler/tests/unit/failable-imported-s469.test.js` (16; executed wrong/right password). Not covered:
+an imported function's facts beyond its own `!` (what an imported function RETURNS is not modelled — `import { getF }`
++ `getF()(p)` is the value-flow class of `g-failable-function-used-as-value-unchecked-s468`); a render-time call inside
+an `<errorBoundary>` is contained by the rule and its returned error is still not caught at run time
+(`g-errorboundary-runtime-does-not-catch-returned-error-value-s467`).
 
 ### g-component-fn-prop-bare-call-handler-unsubstituted — `<button props={ act: fn } onclick=act()>` emits a literal `act()` — `NEW S440 (filed; pre-existing); MED; open`
 <!-- @gap id=g-component-fn-prop-bare-call-handler-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — the call-ref attribute value's NAME is not substituted by a function-valued prop) prov=empirical:S440-reproduced-by-compile-and-emit -->

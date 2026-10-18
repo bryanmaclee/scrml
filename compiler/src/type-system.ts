@@ -9957,6 +9957,23 @@ function inferEnumFromQualifiedVariantInit(
   return t;
 }
 
+/**
+ * S469 — two resolutions of ONE enum declaration (the exporting file's and the importer's)
+ * agree: same name, same variants in order, same payload field names in order. Used to
+ * decide that an imported `!` function's error enum is readable in the importing file.
+ */
+function sameEnumShape(a: EnumType, b: EnumType): boolean {
+  if (a.name !== b.name || a.variants.length !== b.variants.length) return false;
+  for (let i = 0; i < a.variants.length; i++) {
+    const va = a.variants[i], vb = b.variants[i];
+    if (va.name !== vb.name) return false;
+    const fa = va.payload ? [...va.payload.keys()] : [];
+    const fb = vb.payload ? [...vb.payload.keys()] : [];
+    if (fa.length !== fb.length || fa.some((f, j) => f !== fb[j])) return false;
+  }
+  return true;
+}
+
 function annotateNodes(
   fileAST: FileAST,
   scopeChain: ScopeChain,
@@ -10505,6 +10522,42 @@ function annotateNodes(
     ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
     ?? [];
   collectFnErrorTypes(fileTopLevelNodes);
+
+  // S469 (P0, g-imported-failable-function-never-checked) — an IMPORTED `!` function is a
+  // failable function in the importing file too. §19.4.3: "A call to a `!` function SHALL NOT
+  // be ignored"; §19.4.4: "An unhandled `!` function call SHALL be a compile error
+  // (E-ERROR-002)" — neither is limited to functions declared in the calling file. Before, the
+  // failable set was built from this file's declarations only, so `import { check } from
+  // "./auth.scrml"` + `const ok = check(p)` compiled and a wrong password logged in.
+  // Read off the exporting file's DECLARATION (api.js `importedFnDeclsByFile`, through
+  // re-exports and renames). A server function the exporting file's route map body-splits is
+  // CPS-implicitly failable, as for a local one. The error enum is registered only when the
+  // importer's registry holds that same enum under its name (§19.4.4.1: an enum); otherwise
+  // the import is failable with an error type this file cannot read, and a `match` on its
+  // result cannot be lowered to discriminate it — `importedFailableUnreadableErr` makes such a
+  // subject unprovable, so it is refused (E-ERROR-002), never compared as a plain value.
+  const importedFailableUnreadableErr = new Set<string>();
+  for (const [localName, d] of importedFnDecls ?? []) {
+    if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
+    const fnNode = d.fnNode;
+    let failable = fnNode.canFail === true;
+    let cpsImplicit = false;
+    if (!failable) {
+      const entry = routeMap?.functions?.get(`${d.depFilePath}::${(fnNode.span as Span | undefined)?.start}`);
+      if (entry && entry.cpsSplit) { failable = true; cpsImplicit = true; }
+    }
+    if (!failable) continue;
+    fnCanFail.add(localName);
+    if (cpsImplicit) { fnCpsImplicitFailable.add(localName); continue; }
+    const errName = typeof fnNode.errorType === "string" ? fnNode.errorType.trim() : "";
+    const depEnum = importedFnSignatures?.get(localName)?.errorEnum;
+    const here = errName ? typeRegistry.get(errName) : undefined;
+    if (depEnum && here && here.kind === "enum" && sameEnumShape(here as EnumType, depEnum)) {
+      fnErrorTypes.set(localName, errName);
+    } else {
+      importedFailableUnreadableErr.add(localName);
+    }
+  }
 
   // §14.10 — the call-argument bare-variant walker's signature table: this
   // file's functions PLUS the functions it imports (their DECLARED parameter
@@ -16197,8 +16250,12 @@ function annotateNodes(
       return d.canFail === true || fnCpsImplicitFailable.has(name) ? [name] : null;
     }
     // A failable name no declaration in the file binds and no local binding shadows: a
-    // built-in failable bound by import (`parseVariant`, §41.13) — it IS that function.
-    if (r.k === "unknown" && fnCanFail.has(name) && !allFnDecls.some((d) => d.name === name)) return [name];
+    // built-in failable bound by import (`parseVariant`, §41.13), or (S469) an imported `!`
+    // function — it IS that function. Not provable when its error enum is unreadable here:
+    // the `match` lowering could not discriminate the error (`importedFailableUnreadableErr`).
+    if (r.k === "unknown" && fnCanFail.has(name) && !allFnDecls.some((d) => d.name === name)) {
+      return importedFailableUnreadableErr.has(name) ? null : [name];
+    }
     return null;
   }
 
@@ -16589,6 +16646,19 @@ function annotateNodes(
         `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
         span,
         "warning",
+      ));
+      return;
+    }
+    if (c.matchSubjectNotProvable === true && importedFailableUnreadableErr.has(calleeName)) {
+      // S469 — an imported `!` function whose error enum this file cannot read (not imported
+      // under its name, or a different enum of that name): the match cannot discriminate it.
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled: it is the subject of a ` +
+        `'match', but '${calleeName}' is imported and its error type is not available in this file, ` +
+        `so the match cannot tell its error from a plain value. Import the error type from the ` +
+        `module that declares '${calleeName}', or catch the call with '!{}'.`,
+        span,
       ));
       return;
     }
@@ -29377,6 +29447,11 @@ type FnSignature = {
   returnType: ResolvedType;
   /** Read off an IMPORTED declaration (resolveImportedFnSignatures). */
   imported?: boolean;
+  /**
+   * S469 (imported failable) — an imported `!` function's declared error type, resolved in
+   * the EXPORTING file's scope (absent when it is not declared or does not resolve to an enum).
+   */
+  errorEnum?: EnumType;
 };
 
 /**
@@ -29432,7 +29507,14 @@ function resolveImportedFnSignatures(
         }
         params.push({ name: paramName, type });
       }
-      out.set(localName, { params, returnType: tAsIs(), imported: true });
+      // S469 — the error enum of an imported `!` function, read where it was declared.
+      let errorEnum: EnumType | undefined;
+      const errAnnot = d.fnNode.errorType;
+      if (d.fnNode.canFail === true && typeof errAnnot === "string" && errAnnot.trim().length > 0) {
+        const t = resolveTypeExpr(errAnnot, reg);
+        if (t.kind === "enum") errorEnum = t as EnumType;
+      }
+      out.set(localName, { params, returnType: tAsIs(), imported: true, ...(errorEnum ? { errorEnum } : {}) });
     } catch {
       // A signature that cannot be read is simply absent: its call arguments stay
       // unstamped (the codegen side then refuses to guess) — never a crash.

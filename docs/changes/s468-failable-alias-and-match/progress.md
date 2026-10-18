@@ -203,3 +203,27 @@ benchmarks/ (2847 .scrml, 136 files declare 172 failable functions) + giti (82 .
   bootstrap-conformance-counter.test.js 30 s, passes. Regression tests: failable-alias-and-match-s468 section E (14-fn graph
   bounded; failable reachable only through a cycle still E-ERROR-002; a cycle never makes a match subject provable). The first
   E test hangs (killed at 60 s) on the pre-fix type-system.ts.
+
+## 2026-10-17 — commits ce2dad109 (WIP brought over; gate 37358 pass / 0 fail) + 5e9981149 (hang fix; gate 37358 / 0)
+- First push of s469-failable-r1 (new ref) blocked by the pre-push generated-doc gate: docs/FACTS.md facts-table STALE
+  (line counts). Regenerate after the last content commit.
+
+## 2026-10-17 — imported-failable P0 (g-imported-failable-function-never-checked; S468 hand-off: "imported failable unchecked
+   (added to the #1444 round)")
+- Governing: §19.4.3 "A call to a `!` function SHALL NOT be ignored"; §19.4.4 "An unhandled `!` function call SHALL be a
+  compile error (E-ERROR-002)" — not limited to the calling file's declarations.
+- Reproduced on HEAD 5e9981149 (executed, happy-dom): `import { check, AuthErr } from "./lib.scrml"` + `const ok = check(p)`
+  -> compiles, wrong password LOGGED IN; `match check(p) { .Denied :> false  _ :> true }` -> compiles, LOGGED IN (unstamped).
+- Locus: type-system.ts fnCanFail / fnErrorTypes from this file's function-decls only. HELD.
+- Fix: imported decls (api.js importedFnDeclsByFile — renames + re-exports) declared `!` or CPS-split by the route map ->
+  fnCanFail (+ fnCpsImplicitFailable). Error enum resolved in the exporting file's scope (resolveImportedFnSignatures ->
+  FnSignature.errorEnum); registered in fnErrorTypes only when the importer's registry holds the same enum by name
+  (sameEnumShape). Otherwise `importedFailableUnreadableErr`: still failable, but not a provable match subject -> E-ERROR-002
+  with its own message (fail closed); `!{}` / `?` handle it.
+- Direction: newly-rejecting. Corpus: text scan of every `import {…} from "…scrml"` against `function NAME(…)!` in the
+  target: examples/ samples/ conformance/ stdlib/ benchmarks/ compiler/self-host-v2 (2912 files, 259 .scrml import lines)
+  + giti + flogence (113 files): **0** sites import a failable function -> 0 newly refused.
+- Tests: compiler/tests/unit/failable-imported-s469.test.js (16): 10 fail on HEAD's type-system.ts, all pass after.
+- Not covered (named in the gap entry): an imported function's RETURNED facts (`import { getF }` + `getF()(p)`, the VALUE
+  class); a render-time call inside `<errorBoundary>` (imprepro imp/imp3: accepted by the rule, still LOGGED IN at run time —
+  g-errorboundary-runtime-does-not-catch-returned-error-value-s467, open, separate PR).
