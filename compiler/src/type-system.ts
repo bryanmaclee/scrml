@@ -72,7 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
-import { armStatements } from "./arm-body-statements.ts";
+import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
@@ -14475,7 +14475,7 @@ function annotateNodes(
           // E-SCOPE-001 — or, when a same-named binding was in scope, nothing,
           // and the value expressions went unchecked). Codegen already lowers
           // this body as the object value (emit-logic
-          // `_objectLiteralArmFromStructuredBody`, from the node's raw `expr`
+          // `emitObjectLiteralArm`, from the node's raw `expr`
           // text); check the SAME object expression here instead.
           const objectBody = objectLiteralArmBodyNode(armBody, filePath);
           if (objectBody) visitNode(objectBody);
@@ -17430,8 +17430,14 @@ function annotateNodes(
           const body = Array.isArray(o.body) ? o.body as Array<Record<string, unknown>> : [];
           for (const arm of body) {
             if (!arm) continue;
-            if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
-            else if (arm.kind === "match-arm-block") heads.push(arm.isWildcard ? "_" : String(arm.variant ?? ""));
+            // S468 — a variant alternation arm (block or inline) names every alternate.
+            if (arm.kind === "match-arm-inline" && Array.isArray(arm.alternates)) for (const v of arm.alternates as unknown[]) heads.push(String(v));
+            else if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
+            else if (arm.kind === "match-arm-block") {
+              if (arm.isWildcard) heads.push("_");
+              else if (Array.isArray(arm.alternates)) for (const v of arm.alternates as unknown[]) heads.push(String(v));
+              else heads.push(String(arm.variant ?? ""));
+            }
             else if (typeof arm.expr === "string") heads.push(_armVariant(String(arm.expr).split(/:>|=>|->/)[0] ?? ""));
           }
           for (const r of (Array.isArray(o.rawArms) ? o.rawArms as string[] : [])) heads.push(_armVariant(String(r).split(/:>|=>|->/)[0] ?? ""));
@@ -20754,17 +20760,37 @@ function extractArmsFromMatchNode(node: ASTNodeLike): ExtractedArms {
       continue;
     }
     if (arm.kind === "match-arm-block") {
+      const alternates = (arm as { alternates?: unknown }).alternates;
+      const literals = (arm as { literals?: unknown }).literals;
       if (arm.isWildcard) pushWildcard(false);
       else if (arm.isNotArm) pushWildcard(true);
+      // S468 — a variant alternation block arm (`.A | .B :> { … }`, ast-builder
+      // Form 4): EVERY alternate counts toward coverage, as for the text form.
+      else if (Array.isArray(alternates) && alternates.length > 0) {
+        for (const v of alternates) if (typeof v === "string") pushVariant(v);
+      }
+      // S468 — a §18.16 literal block arm (`1 :> { … }`, `"a" | "b" :> { … }`):
+      // no variant coverage, recorded as the inline string arm is.
+      else if (Array.isArray(literals) && literals.length > 0) {
+        armPatterns.push({ kind: "unknown", armText: String((arm as { pattern?: unknown }).pattern ?? literals.join(" | ")) } as ParsedArmPattern);
+      }
       else if (arm.variant) pushVariant(arm.variant as string);
       continue;
     }
     // Structured match-arm-inline nodes from the AST builder.
     if (arm.kind === "match-arm-inline") {
       const test: string = (arm as { test?: string }).test ?? "";
+      const alternates = (arm as { alternates?: unknown }).alternates;
+      const literals = (arm as { literals?: unknown }).literals;
       if (test === "else") pushWildcard(false);
       else if (test === "not") pushWildcard(true);
-      else {
+      // S468 — a head the AST builder recorded from its tokens (Inline Form 6):
+      // a variant alternation counts every alternate; a literal arm counts none.
+      else if (Array.isArray(alternates) && alternates.length > 0) {
+        for (const v of alternates) if (typeof v === "string") pushVariant(v);
+      } else if (Array.isArray(literals) && literals.length > 0) {
+        armPatterns.push({ kind: "unknown", armText: test } as ParsedArmPattern);
+      } else {
         // Extract variant name from test pattern: ".VariantName" or ".Variant(binding)"
         const vMatch = test.match(/^(?:\.|::)\s*([A-Z][A-Za-z0-9_]*)/);
         if (vMatch) pushVariant(vMatch[1]);
@@ -21346,7 +21372,10 @@ function checkMatchDiagnostics(
       const glyph = (arm as { armArrow?: string }).armArrow;
       if (glyph !== "=>" && glyph !== "->") continue;
       const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
+      // `pattern` — the head as written, on a Form 4 block arm (S468: a literal /
+      // alternation / `_` head).
       const test = String((arm as { test?: unknown }).test
+        ?? (arm as { pattern?: unknown }).pattern
         ?? ((arm as { isWildcard?: boolean }).isWildcard ? "else"
           : (arm as { variant?: unknown }).variant
             ? "." + String((arm as { variant?: unknown }).variant)
@@ -21802,21 +21831,15 @@ function stampArmResultVariants(matchNode: ASTNodeLike, positionType: ResolvedTy
  * parsed by the AST builder as ONE `bare-expr` whose raw `expr` is the brace
  * interior), return a synthetic `bare-expr` carrying the whole object as its
  * exprNode, so scope/type checks see the object's VALUES and never its keys.
- * Mirrors codegen's `_objectLiteralArmFromStructuredBody` + the
- * `_matchArmResultIsBlockBody` classifier (emit-logic.ts): reconstruct
- * `{ <expr> }` and treat it as a value iff it parses to an `object` node.
- * `null` for every genuine statement block.
+ * The reading is the ONE shared reader (`objectLiteralArmValue`,
+ * arm-body-statements.ts — codegen's and the AST builder's too, S468 r1).
+ * `null` for every genuine statement block (and for an empty body: nothing to check).
  */
-function objectLiteralArmBodyNode(armBody: ASTNodeLike[], filePath: string): ASTNodeLike | null {
+function objectLiteralArmBodyNode(armBody: ASTNodeLike[], _filePath: string): ASTNodeLike | null {
   if (armBody.length !== 1) return null;
-  const only = armBody[0] as { kind?: string; expr?: unknown; span?: Span } | undefined;
-  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
-  const candidate = `{ ${only.expr} }`;
-  let parsed: { kind?: string } | null = null;
-  try { parsed = parseExprToNode(candidate, filePath, only.span?.start ?? 0) as { kind?: string } | null; }
-  catch { parsed = null; }
-  if (!parsed || parsed.kind !== "object") return null;
-  return { ...(only as object), expr: candidate, exprNode: parsed } as unknown as ASTNodeLike;
+  const v = objectLiteralArmValue(armBody);
+  if (!v) return null;
+  return { ...(armBody[0] as object), expr: v.text, exprNode: v.node } as unknown as ASTNodeLike;
 }
 
 /**
