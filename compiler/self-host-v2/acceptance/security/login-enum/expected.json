@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-security-login-enum",
+  "description": "login over an enum result: wrong password → `denied`, right password → `welcome bryan`.",
+  "language-version": "1.0",
+  "spec": "§18 · §45",
+  "rationale": "Security lens (S469 brief): `match` decides control flow; the deny arm must be reachable and chosen by its own tag test.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      },
+      {
+        "selector": "#right",
+        "text": "welcome bryan"
+      }
+    ]
+  }
+}

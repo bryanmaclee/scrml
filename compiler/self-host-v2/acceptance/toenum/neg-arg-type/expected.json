@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-toenum-neg-arg-type",
+  "description": "E-TYPE-031: `toEnum`'s argument is an int.",
+  "language-version": "1.0",
+  "spec": "§14.4.1",
+  "rationale": "`toEnum` has the signature `string -> E | not`.",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

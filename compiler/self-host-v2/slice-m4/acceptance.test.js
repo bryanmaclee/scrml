@@ -27,10 +27,60 @@ const STATUS = {
   "opener/union-maybe": ["PASS", []],
   // a general union needs a union type in the bootstrap's type system
   "opener/union-multi-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  // program (a): the opener union and the comma arms parse (blockers 2, 3). It stops at
-  // blocker 4 (`Guess.toEnum(…)`) and blocker 5 (the §18 plain-value `match`: its `not :>`
-  // arm pattern — E-PARSE-ARM — and a `match` over a non-failable value in an interpolation).
-  "guess/a-guess": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-ARM"]],
+  // program (a) (s469: blockers 4 and 5 landed — `toEnum` and the plain-value `match`):
+  // compiles and runs. Its `not` arm shows a constant (see guess/a-guess-verbatim).
+  "guess/a-guess": ["PASS", []],
+  "guess/a-guess-no": ["PASS", []],
+  "guess/a-guess-other": ["PASS", []],
+  // the report's text verbatim: `"length " + @inputVal.length` is string + int, which the
+  // S440 operator rule refuses — correctly; the explicit conversion it needs is the next wall
+  "guess/a-guess-verbatim": ["PASS", ["E-OPERATOR-OPERAND-TYPE"]],
+  // s469 — the §18 plain-value match unit, toEnum, §45 `==`, and the security lens
+  "match/enum-value": ["PASS", []],
+  "match/eq-maybe-struct": ["PASS", []],
+  "match/literal": ["PASS", []],
+  "match/literal-no-else": ["PASS", ["W-MATCH-002"]],
+  "match/neg-duplicate-arm": ["PASS", ["E-TYPE-023"]],
+  "match/neg-literal-over-enum": ["PASS", ["E-TYPE-028"]],
+  "match/neg-maybe-no-not": ["PASS", ["E-MATCH-012"]],
+  "match/neg-missing-variant": ["PASS", ["E-TYPE-020"]],
+  "match/neg-shorthand-arm": ["PASS", ["E-MATCH-ARM-SHORTHAND-AMBIGUOUS"]],
+  "match/neg-struct-subject": ["PASS", ["E-TYPE-024"]],
+  "match/neg-tape-subject": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "match/not-arm": ["PASS", []],
+  "match/payload-bind": ["PASS", []],
+  "security/login-enum": ["PASS", []],
+  "security/login-literal": ["PASS", []],
+  "security/login-literal-no-else": ["PASS", ["W-MATCH-002"]],
+  "security/login-maybe": ["PASS", []],
+  // #1471 review HIGH-1: a `-> T | not` finder that falls off the end is refused; with `return not` the deny arm runs
+  "security/falloff-value": ["PASS", ["E-TYPE-043"]],
+  "security/falloff-stmt": ["PASS", ["E-TYPE-043"]],
+  "security/falloff-string": ["PASS", ["E-TYPE-043"]],
+  "security/falloff-enum": ["PASS", ["E-TYPE-043"]],
+  "security/return-not-value": ["PASS", []],
+  "security/return-not-stmt": ["PASS", []],
+  "security/return-not-string": ["PASS", []],
+  "security/return-not-enum": ["PASS", []],
+  // #1471 delta review: the rest of the fall-off class, and `== not`
+  "security/falloff-failable": ["PASS", ["E-RETURN-INCOMPLETE"]],
+  "security/falloff-unannotated": ["PASS", ["E-RETURN-INCOMPLETE"]],
+  // #1471 round 2 (bryan: "Always explicit"): bare returns, and no-value results read as values
+  "security/bare-return-failable": ["PASS", ["E-RETURN-INCOMPLETE"]],
+  "security/bare-return-maybe": ["PASS", ["E-TYPE-043"]],
+  "security/novalue-guard": ["PASS", ["E-TYPE-001"]],
+  "security/novalue-ok": ["PASS", ["E-TYPE-001"]],
+  "security/novalue-plain": ["PASS", ["E-TYPE-001"]],
+  // #1471 round 3: `void` is a type — a wrapper's `return <void call>`
+  "security/wrap-failable": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-typed": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-unannotated": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-void": ["PASS", ["E-TYPE-001"]],
+  "security/eq-not": ["PASS", ["E-EQ-002"]],
+  "security/bare-return": ["PASS", ["E-TYPE-043"]],
+  "security/failable-fails": ["PASS", []],
+  "toenum/neg-arg-type": ["PASS", ["E-TYPE-031"]],
+  "toenum/prototype-keys": ["PASS", []],
 };
 
 let verdicts;
@@ -63,12 +113,16 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });
-  test("program (a) no longer stops at the opener union (E-PARSE-TAG) or the arm commas; it stops at toEnum and the plain-value match", () => {
-    const v = verdicts["guess/a-guess"];
-    expect(v.emitted).not.toContain("E-PARSE-TAG");
-    expect(v.emitted).not.toContain("E-MATCH-ARM-SEPARATOR");
-    const f = v.failures.join("\n");
-    expect(f).toContain("only calls of a named function"); // `Guess.toEnum(@inputVal)` — blocker 4
-    expect(f).toContain("it arrives with the §18 `match` unit"); // the value `match` — blocker 5
+  test("program (a) compiles and RUNS on the bootstrap — the first human-written program to (s469)", () => {
+    for (const rel of ["guess/a-guess", "guess/a-guess-no", "guess/a-guess-other"]) {
+      expect([rel, verdicts[rel].bucket, verdicts[rel].emitted, verdicts[rel].runtimeExecuted]).toEqual([rel, "PASS", [], true]);
+    }
+  });
+  test("the security cases ran their runtime half (the deny arm was taken, not merely compiled)", () => {
+    for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys",
+                       "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
+                       "security/failable-fails"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
   });
 });

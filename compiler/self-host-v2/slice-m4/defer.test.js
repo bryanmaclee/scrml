@@ -177,8 +177,8 @@ describe("the static codes (§19.16.1–§19.16.3)", () => {
   });
 
   test("narrowing at the defer: kept for a local nothing rebinds, dropped for one that is rebound (the exit may see `not`)", () => {
-    clean(P(`    function go(x: int | not) {\n        if (x != not) {\n            defer @n = x + 1\n        }\n    }\n    function h() {\n        go(3)\n    }`, ["h"]));
-    expect(codes(P(`    function go(y: int | not) {\n        let x: int | not = y\n        if (x != not) {\n            defer @n = x + 1\n            x = not\n        }\n    }`, []))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    clean(P(`    function go(x: int | not) {\n        if (x is given) {\n            defer @n = x + 1\n        }\n    }\n    function h() {\n        go(3)\n    }`, ["h"]));
+    expect(codes(P(`    function go(y: int | not) {\n        let x: int | not = y\n        if (x is given) {\n            defer @n = x + 1\n            x = not\n        }\n    }`, []))).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
 
   test("a clean defer in a pure `fn` (no prohibited effect)", () => {

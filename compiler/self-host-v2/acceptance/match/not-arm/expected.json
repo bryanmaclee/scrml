@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-match-not-arm",
+  "description": "a `match` over `string | not`: the `not` arm, then `else` using `@name` as a `string` (narrowed — `+` takes no `T | not`).",
+  "language-version": "1.0",
+  "spec": "§18.2 · §42.2.3 · §42.7",
+  "rationale": "§42.2.3: `match x { not :> A  else :> B }` — \"the present case is the arm after `not :>`\".",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#in"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#who",
+        "text": "hi bryan"
+      }
+    ]
+  }
+}

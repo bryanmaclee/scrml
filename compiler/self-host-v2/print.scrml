@@ -507,8 +507,23 @@ ${
     fn patTest(ctx: Ctx, p: Pattern, on: JsExpr) -> JsExpr {
         return match p {
             .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx, on)
-            .PLit(lit: l) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
+            .PLit(lit: l) :> litTest(ctx, l, on)
             .PWild :> JsExpr.JBool(true)
+        }
+    }
+
+    // s469 (review HIGH-1) — the ABSENCE pattern tests `== null`, as `is not`
+    // does (IsNot): absence is `null` AND `undefined` (§42.5) — a value from the
+    // host (or any `undefined` that reaches a match) takes the `not` arm, never
+    // the present arm. Every other literal compares by `===`.
+    fn litTest(ctx: Ctx, l: Literal, on: JsExpr) -> JsExpr {
+        return match l {
+            .Absent :> JsExpr.JBin(JsOp.LooseEq, on, JsExpr.JNull)
+            .Int(v: x) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
+            .Num(v: x) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
+            .Str(v: x) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
+            .Bool(v: x) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
+            .Variant(enumSym: x) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
         }
     }
 

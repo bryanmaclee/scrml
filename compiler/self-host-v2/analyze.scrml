@@ -246,6 +246,7 @@ ${
         VHost(call: HostCall),                            // s444: a host call (`Date.now()`) — the closed HostCall set
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
         VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
+        VToEnum(enumSym: Sym),                            // s469: `E.toEnum(s)` (§14.4.1) — a call node: `string -> E | not`
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -335,7 +336,26 @@ ${
         FHandled(h: HandledFact),
         FArm(idx: int),
         FFail(err: Sym, idx: int),
+        FPlain(m: PlainMatch),
     }
+    // s469 — THE §18 PLAIN-VALUE `match` (keyed by its AExprK.Handled node): a
+    // `match` whose subject is not a failable result. Its arms are FArm facts:
+    // idx ≥ 0 a variant of `es`, -1 the wildcard (`_` / `else`), -5 the absence
+    // arm `not :>`, -6 a literal arm (its literal is the VLit of the pattern's
+    // expression), -3 an arm that did not resolve (reported).
+    //   `kind` — 0 an enum (`es`), 1 string, 2 number, 3 bool, 4 not known;
+    //   `maybe` — the subject may be `not` (its type is `T | not`, or a `not` arm
+    //     is written); `known` — the binder knew the subject's type (else the
+    //     typer checks the arms against it); `wild` — a wildcard arm is written;
+    //   `exhaustive` — every value the subject can hold has an arm (else the
+    //     value form yields `not` for the rest, §18.16.3);
+    //   `stmt` — the form stands as a statement (its arms yield no value);
+    //   `scrut` / `pick` — the statement form's locals: the subject, evaluated
+    //     once, and the index of the arm it takes; `arms` — per arm, the inner
+    //     binders the statement form reads a payload through.
+    export type PlainArm:struct = { nid: int, inner: Sym[] }
+    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean,
+                                      stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
 
     export type NameTable:struct = { facts: NameFact[], nids: int[], at: int[] }
@@ -689,6 +709,7 @@ ${
         errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
         sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
+        voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -888,6 +909,8 @@ ${
             if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st, unresolved: false }
             i = i + 1
         }
+        // s469 (review L3): `asIs` is a built-in type (§14.1.2) the bootstrap does not have — refused by name, not "unknown"
+        if (n == "asIs") return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-BOOTSTRAP-UNSUPPORTED", "the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type"), unresolved: true }
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`"), unresolved: true }
     }
 
@@ -2881,6 +2904,8 @@ ${
             .PWild :> []
             .PWhole(bind: b) :> bindersOf([b])
             .PBare(bind: b) :> bindersOf([b])
+            .PNot :> []
+            .PLit(e: x) :> []
         }
     }
 
@@ -4244,7 +4269,7 @@ ${
         decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()) }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs) }
         return { g: g, st: st }
     }
 
@@ -4505,9 +4530,9 @@ ${
     // function); `serverOwn` — its own body places it on the server (§12.2
     // T1/T4), so a call made in it is server→server whatever the rest of the
     // program does (§19.9.10 "Not affected: A server→server call").
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean }
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string, fnSym: int, serverOwn: boolean, stmtCall: int }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "", fnSym: -1, serverOwn: false, stmtCall: -1 } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -4516,7 +4541,7 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
@@ -4527,17 +4552,25 @@ ${
     // (named in E-ERROR-012's message).
     fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
+    }
+
+    // s469 (#1471 round-2 MED-2): `nid` is a call evaluated as a STATEMENT (its result is
+    // not read), or one whose no-value use another rule already reports (an arm's value,
+    // E-ERROR-012) — resolveCall does not report it as a value use.
+    fn withStmtCall(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: nid })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat, fnSym: f.fnSym, serverOwn: f.serverOwn, stmtCall: f.stmtCall })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -4595,8 +4628,9 @@ ${
 
     // The conditional handle a condition tests for presence ("" — none): a
     // BARE `@h` (the ruled spelling, `if=@color`), where `@h` is a conditional
-    // handle in scope not narrowed by a `given`. (`@h != not` is not taken:
-    // its `@h` lowers as a snapshot read — still S437's read rule.)
+    // handle in scope not narrowed by a `given`. (`@h is given` is not taken:
+    // its `@h` lowers as a snapshot read — still S437's read rule. `@h != not`
+    // is E-EQ-002 since s469.)
     fn presenceHandle(env: Env, c: AExpr) -> string {
         return condHandleNamed(env, atName(c))
     }
@@ -4731,7 +4765,7 @@ ${
             .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
-            .Handled(h: h) :> resolveHandled(env, e, h, false, st)   // s451 (Ue)
+            .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
         }
     }
 
@@ -4919,6 +4953,11 @@ ${
     }
 
     fn resolveMember(env: Env, e: AExpr, obj: AExpr, name: string, st0: AS) -> RX {
+        // s469 — a QUALIFIED unit variant `E.V` (§14.4, §18.13: "always valid"):
+        // `E` is a type name (no local shadows it), not a value — never resolved
+        // as one. A payload variant is construction, which Core has no value for.
+        const qv: RX | not = qualVariantValue(env, e, obj, name, st0)
+        if (qv is given) return qv
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
         // `.length` of a sequence or a string is a primitive (a read, never a place).
@@ -5107,6 +5146,11 @@ ${
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
+                // s469 — `E.toEnum(s)` (§14.4.1): a typed built-in, `string -> E | not`
+                if (m.method == "toEnum") {
+                    const te: RX | not = resolveToEnum(env, e, m, args, st0)
+                    if (te is given) return te
+                }
             }
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function, " + dateNowText() + ", and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap", st0)
         }
@@ -5119,6 +5163,11 @@ ${
             if (cf.failable && env.fx.subject != e.nid) return plain(not, bySite(env, siteOf(env), conflictDiags(env, cf, e), [], unhandledCall(env, e, cf.name, sp)))
             // s454 (U1b): a server function's call made on the client is failable (§19.9.10)
             if (cf.serverOwn && env.fx.subject != e.nid) return plain(not, remoteUnhandled(env, e, cf, sp))
+            // s469 (#1471 r3): a call of a VOID function has type `void` (voidFns) — refused in
+            // every value position (§18.3, E-TYPE-001). Not a value position: a statement call
+            // (and an arm's value, whose E-ERROR-012 is reported by the arm rule), or the
+            // operand of a `return` in a function that is itself void (it passes `void` on).
+            if (isVoidFn(env.g, cf.sym.id) && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(sp, env.file, e.span, "E-TYPE-001", "`" + cf.name + "(…)` is `void` (no path of it returns a value) — it cannot be used as a value (§18.3); call it as a statement, or make it `return` a value on every path"))
             return plain(not, sp)
         }
         return plain(not, st)
@@ -5208,6 +5257,254 @@ ${
         return out
     }
 
+    // s469 (review HIGH-1) — A FUNCTION WITH A DECLARED RETURN TYPE THAT CAN
+    // FALL OFF THE END. JS gives `undefined` there, a value no scrml program may
+    // produce (§42.5) — and an absence test that missed it let a wrong password
+    // in. Refused, fail closed:
+    //   - `-> T` (no `| not`): §17.6 / §34 E-TYPE-043 — "a code path that
+    //     returns `not` … implicitly by falling off the end of the function body";
+    //   - `-> T | not`: whether falling off MEANS `not` is a language decision
+    //     not taken for the bootstrap (§42.7 says so of a server function only),
+    //     so it is refused (E-BOOTSTRAP-UNSUPPORTED — write `return not`), never
+    //     lowered to an implicit `return not`.
+    // A path that leaves by `return <value>` (an `if` whose branches all do; a
+    // statement `match` whose arms all do and which is exhaustive — a
+    // failable `match` is total by E-TYPE-020) does not fall off. A `!`
+    // function has no success-type slot (§19.4.1): not judged here.
+    fn fallOffPass(g: Globals, t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const fs of g.fns) {
+            // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span)) out = out.concat(fallOffDiags(g, t, fs))
+        }
+        return out
+    }
+
+    // s469 — bryan's ruling "Always explicit" (#1471 round 2): no implicit tail return anywhere;
+    // a declared-return function (`-> T | not` included) `return`s on every path — `return not;`
+    // written out; a function with no return type returns nothing, and if any path of it returns
+    // a value, every path must.
+    fn fallOffDiags(g: Globals, t: Tables, fs: FnSrc) -> Diag[] {
+        const b: ABlock = fs.f.body
+        const r: AType | not = fs.f.ret
+        const file: string = fs.info.file
+        const n: string = fs.info.name
+        // a `!` function (no success-type slot, §19.4.1) or an unannotated one: if any path
+        // returns a value, every path returns one (or fails) — a bare `return` included
+        // (in a `!` function it is a SUCCESS carrying nothing: `.Ok(v)` would take it)
+        if (fs.info.failable || r is not) {
+            if (hasValueReturn(g, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
+            return []
+        }
+        if (fs.info.ret is not || declaresVoid(r)) return []
+        const ty: string = typeText(r)
+        // a bare `return` returns nothing, never `not`: write `return not;` (`-> T | not`) or a value
+        if (blockHasBareReturn(b)) return [newDiag("E-TYPE-043", "`" + n + "` is declared `-> " + ty + "` but has a bare `return` — a declared-return function returns a value on every path (§17.6); write `return <value>;`" + notFix(r), file, fs.f.span)]
+        if (fallsNever(t, b, false)) return []
+        if (tailValue(b)) return [newDiag("E-TYPE-043", "`" + n + "` ends in an expression it does not `return` — scrml has no implicit tail return; write `return <expr>;` (§17.6)", file, fs.f.span)]
+        return [newDiag("E-TYPE-043", "`" + n + "` is declared `-> " + ty + "` but can reach the end of its body without a `return` — a declared-return function returns on every path, `return not;` written out (§17.6); end every path with `return <value>;`" + notFix(r), file, fs.f.span)]
+    }
+
+    fn incompleteWhat(b: ABlock) -> string {
+        if (blockHasBareReturn(b)) return "has a bare `return`"
+        return "reaches the end of the body"
+    }
+
+    fn incompleteFix(failable: boolean) -> string {
+        if (failable) return " or `fail …`"
+        return ""
+    }
+
+    fn notFix(r: AType) -> string {
+        const k: ATypeK = r.k
+        return match k {
+            .TMaybe(inner: i) :> " — for the absent case, `return not;`"
+            .TName(name: x) :> ""
+            .TSeq(elem: e) :> ""
+        }
+    }
+
+    fn typeText(r: AType) -> string {
+        const k: ATypeK = r.k
+        return match k {
+            .TName(name: x) :> x
+            .TSeq(elem: e) :> typeText(e) + "[…]"
+            .TMaybe(inner: i) :> typeText(i) + " | not"
+        }
+    }
+
+    // =========================================================================
+    // s469 (#1471 round 3) — "NO VALUE" IS A TYPE: `void` (§18.3: "A void match may not appear
+    // on the right-hand side of an assignment"; bryan's ruling "Always explicit": a function
+    // with no return type returns nothing). A function's result is VOID when it is declared
+    // `-> void`, or it has no declared return type (unannotated, or `!` — whose SUCCESS has no
+    // type slot, §19.4.1) and no path returns a value. `return f()` of a void `f` is not a value:
+    // it passes `void` on (so an unannotated function whose every return is such a pass-through
+    // is void too) — computed to a fixpoint over the program's functions, once (Globals.voids).
+    // A call of a void function has type `void`, and ONE reader refuses `void` in every value
+    // position (resolveCall for a call; noSuccessUse for a handled `!` call's success value):
+    // E-TYPE-001. A declared `-> T` function is never void.
+    // =========================================================================
+    fn voidFns(fs: FnSrc[]) -> int[] {
+        let v: int[] = []
+        for (const f of fs) {
+            const r: AType | not = f.f.ret
+            if (r is not) {
+                v = v.concat([f.info.sym.id])
+            } else if (declaresVoid(r)) {
+                v = v.concat([f.info.sym.id])
+            }
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            let next: int[] = []
+            for (const f of fs) {
+                if (v.indexOf(f.info.sym.id) >= 0) {
+                    if (fnDeclaredVoid(f) || !valueReturnIn(fs, v, f.f.body)) {
+                        next = next.concat([f.info.sym.id])
+                    } else {
+                        changed = true
+                    }
+                }
+            }
+            v = next
+        }
+        return v
+    }
+
+    fn fnDeclaredVoid(f: FnSrc) -> boolean {
+        const r: AType | not = f.f.ret
+        if (r is not) return false
+        return declaresVoid(r)
+    }
+
+    // Is a function's result `void` (a call of it has type `void`)?
+    fn isVoidFn(g: Globals, sym: int) -> boolean {
+        return g.voids.indexOf(sym) >= 0
+    }
+
+    // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included) — a `return`
+    // whose operand is not `void` (`return f()` of a void `f` passes `void` on)?
+    fn hasValueReturn(g: Globals, b: ABlock) -> boolean {
+        return valueReturnIn(g.fns, g.voids, b)
+    }
+
+    fn valueReturnIn(fs: FnSrc[], v: int[], b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtValueReturn(fs, v, s)) return true
+        }
+        return false
+    }
+
+    fn stmtValueReturn(fs: FnSrc[], v: int[], s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> retIsValue(fs, v, x)
+            .If(cond: c, thenB: tb, elseB: el) :> blocksValueReturn(fs, v, allExprBlocks(c)) || blocksValueReturn(fs, v, thenElse(tb, el))
+            .Given(name: n, subject: x, body: gb) :> blocksValueReturn(fs, v, allExprBlocks(x)) || valueReturnIn(fs, v, gb)
+            .Eval(e: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
+            .Local(name: n, init: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksValueReturn(fs: FnSrc[], v: int[], bs: ABlock[]) -> boolean {
+        for (const b of bs) {
+            if (valueReturnIn(fs, v, b)) return true
+        }
+        return false
+    }
+
+    // A `return` operand that is a value: present, and not a call of a void function.
+    fn retIsValue(fs: FnSrc[], v: int[], x: AExpr | not) -> boolean {
+        if (x is not) return false
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return true
+        const n: string = exprName(c)
+        if (n == "") return true
+        for (const f of fs) {
+            if (f.info.name == n) return v.indexOf(f.info.sym.id) < 0
+        }
+        return true
+    }
+
+    // Does `b` end in a value expression (not a write) — a §48.11 tail return?
+    fn tailValue(b: ABlock) -> boolean {
+        if (b.stmts.length == 0) return false
+        const x: AExpr | not = evalOf(b.stmts[b.stmts.length - 1])
+        if (x is not) return false
+        if (isWriteExpr(x)) return false
+        // a statement `match` whose arms are all blocks (`:> return …`, `:> { … }`) yields no value
+        const h: AHandled | not = handledOf(x.k)
+        if (h is given) {
+            const arms: AArm[] | not = matchArmsOf(h.how)
+            if (arms is given) {
+                let allBlocks = true
+                for (const a of arms) {
+                    const body: AArmBody = a.body
+                    const isB: boolean = match body {
+                        .ArmBlock(b: bb) :> true
+                        .ArmExpr(e: ee) :> false
+                    }
+                    if (!isB) allBlocks = false
+                }
+                if (allBlocks) return false
+            }
+        }
+        return true
+    }
+
+    // Does every path through `b` leave with a value (or fail)?
+    fn fallsNever(t: Tables, b: ABlock, bareOk: boolean) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtLeavesAll(t, s, bareOk)) return true
+        }
+        return false
+    }
+
+    fn stmtLeavesAll(t: Tables, s: AStmt, bareOk: boolean) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x is given || bareOk
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb, bareOk) && elseLeavesAll(t, el, bareOk)
+            .Eval(e: x) :> matchLeavesAll(t, x, bareOk)
+            .Given(name: n) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    fn elseLeavesAll(t: Tables, el: ABlock | not, bareOk: boolean) -> boolean {
+        if (el is not) return false
+        return fallsNever(t, el, bareOk)
+    }
+
+    // A statement `match` every arm of which leaves, and which takes every value.
+    fn matchLeavesAll(t: Tables, e: AExpr, bareOk: boolean) -> boolean {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return false
+        const arms: AArm[] | not = matchArmsOf(h.how)
+        if (arms is not) return false
+        const pm: PlainMatch | not = plainFactOf(failFact(t.fails, e.nid))
+        if (pm is given) {
+            if (!pm.exhaustive) return false
+        }
+        for (const a of arms) {
+            const body: AArmBody = a.body
+            const leaves: boolean = match body {
+                .ArmBlock(b: b) :> fallsNever(t, b, bareOk)
+                .ArmExpr(e: x) :> false
+            }
+            if (!leaves) return false
+        }
+        return arms.length > 0
+    }
+
     fn fnCallsFunctionDiag(env: Env, e: AExpr, cf: FnInfo, why: string) -> Diag {
         return newDiag("E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`", env.file, e.span)
     }
@@ -5275,6 +5572,50 @@ ${
         let result: Type | not = guess
         if (!isFilter) result = mappedType(ot, rl.x.ty)
         return plain(result, addValue(st, e.nid, ValueFact.VSeqCall(op)))
+    }
+
+    fn qualVariantValue(env: Env, e: AExpr, obj: AExpr, name: string, st: AS) -> RX | not {
+        const n: string = exprName(obj)
+        if (n == "") return not
+        if (atName(obj) != "" || lookupLocal(env, n) is given) return not
+        const ts: Sym | not = typeNamedHere(env, n)
+        if (ts is not) return not
+        const es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+        if (es is not) return not
+        const i: int = variantIndex(env.g.types, es, name)
+        if (i < 0) return diagX(env, e, "E-TYPE-VARIANT", "`" + n + "." + name + "` — `" + name + "` is not a variant of `" + n + "`", st)
+        const vs: VariantDef[] = enumVariantsOf(env.g, es)
+        if (vs[i].fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + name + "` carries a payload — constructing a payload variant value is not in the bootstrap yet (only `fail` builds one)", st)
+        return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VVariant(es, i)))
+    }
+
+    // s469 — `E.toEnum(s)` (SPEC §14.4.1): "accepts a string value and returns
+    // the corresponding enum variant, or `not` if no variant matches … The
+    // return type is `E | not` … String matching is case-sensitive — the string
+    // must exactly match the variant name as declared." A typed signature
+    // (`string -> E | not`, the typer checks the argument), never an untyped
+    // escape. `E` must name an enum whose variants are all unit variants: a
+    // payload variant has no value a name alone could produce (the SPEC does
+    // not say what `toEnum` gives for one), so such an enum is refused — fail
+    // closed. Lowered (lower.scrml toEnumExpr) to a `match` of `===` tests on
+    // each declared name, never a property lookup: `"constructor"`,
+    // `"__proto__"` and `"toString"` give `not`. `not` when `E` names no type
+    // (the call is then refused by the general rule); a local named `E`
+    // shadows the type.
+    fn resolveToEnum(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
+        const n: string = exprName(m.obj)
+        if (n == "") return not
+        if (lookupLocal(env, n) is given) return not
+        const ts: Sym | not = typeNamedHere(env, n)
+        if (ts is not) return not
+        const es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
+        if (es is not) return diagX(env, e, "E-SCOPE-001", "`" + n + "` is not an enum — `toEnum` is defined on enum types (§14.4.1)", resolveExprs(env, args, not, st0))
+        if (args.length != 1) return diagX(env, e, "E-CALL-ARITY", "`" + n + ".toEnum(…)` takes one argument, the string to convert (§14.4.1); " + args.length + " given", resolveExprs(env, args, not, st0))
+        const st: AS = resolveExpr(env, args[0], Type.Str, st0).st
+        for (const v of enumVariantsOf(env.g, es)) {
+            if (v.fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".toEnum(…)` on an enum with a payload variant (`." + v.sym.hint + "`) — a name alone cannot build its payload, and §14.4.1 does not say what it gives; the bootstrap admits `toEnum` on an enum of unit variants only", st)
+        }
+        return plain(Type.Maybe(Type.Named(es)), addValue(st, e.nid, ValueFact.VToEnum(es)))
     }
 
     fn oneArg(args: AExpr[]) -> AExpr | not {
@@ -5384,7 +5725,8 @@ ${
             return plain(Type.Bool, addValue(r.st, e.nid, ValueFact.VOp(PrimOp.Not)))
         }
         // s460: `x is given` / `x is not` (§42.2.4) — an absence check over a
-        // value of any type, lowered as `x != not` / `x == not` are
+        // value of any type (IsSome / IsNot: `!= null` / `== null`, so `undefined`
+        // is absent too, §42.5)
         const isGiven: boolean = op == UnOp.IsGiven
         const isAbsent: boolean = op == UnOp.IsNot
         if (isGiven || isAbsent) {
@@ -5427,13 +5769,29 @@ ${
 
     // `==` is structural (§45): primitive compare for scalars and nullary
     // enums, the runtime's structural equality for structs and sequences.
+    // s469 — §45: `==` is EqPrim (JS `===`) only where the operand type is
+    // PROVABLY a scalar or an enum of unit variants — a `T | not` of one
+    // included (`not` is `null`, which `===` compares exactly). Anything else is
+    // EqStruct (the runtime's structural `eq`): a struct, a tape, an enum with
+    // a payload variant (its value is an object), a `T | not` of any of those
+    // (before s469 `(User | not) == (User | not)` compiled to a REFERENCE
+    // compare — the Maybe hid the struct), and a type the binder cannot prove.
     fn isStructural(env: Env, t: Type | not) -> boolean {
-        if (t is not) return false
-        if (seqElem(t) is given) return true
-        const s: Sym | not = namedOf(t)
-        if (s is not) return false
-        if (isEnumType(env.g.types, t) is given) return false
+        if (t is not) return true
+        const inner: Type = unMaybe(t)
+        const k: int = kindOf(inner)
+        if (k <= 3) return false
+        if (k == 5) return true
+        const es: Sym | not = isEnumType(env.g.types, inner)
+        if (es is given) return hasPayloadVariant(env, es)
         return true
+    }
+
+    fn hasPayloadVariant(env: Env, es: Sym) -> boolean {
+        for (const v of enumVariantsOf(env.g, es)) {
+            if (v.fields.length > 0) return true
+        }
+        return false
     }
 
     fn resolveBinary(env: Env, e: AExpr, op: BinOp, l: AExpr, r: AExpr, st0: AS) -> RX {
@@ -5448,11 +5806,20 @@ ${
             rl = resolveExpr(env, l, not, st0)
             rr = resolveExpr(env, r, rl.x.ty, rl.st)
         }
-        const st: AS = rr.st
+        let st: AS = rr.st
+        // s469 #1471 delta review: `x == not` / `x != not` is §45 E-EQ-002 (E-TYPE-042 retired
+        // S305 into it) — absence is `x is not` / `x is given`, which test `null` AND `undefined`
+        if ((op == BinOp.Eq || op == BinOp.Ne) && (isNotLit(l) || isNotLit(r))) {
+            let fix: string = "x is not"
+            if (op == BinOp.Ne) fix = "x is given"
+            st = addDiag(st, env.file, e.span, "E-EQ-002", "absence is tested with `is not` / `is given`, not equality against `not` — write `" + fix + "` (§45, §42.2)")
+        }
         const lt: Type | not = rl.x.ty
+        let et: Type | not = lt
+        if (et is not) et = rr.x.ty
         return match op {
-            .Eq :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, lt), true))))
-            .Ne :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, lt), false))))
+            .Eq :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, et), true))))
+            .Ne :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, et), false))))
             .Add :> plain(lt, addValue(st, e.nid, ValueFact.VOp(addOp(lt, rr.x.ty))))
             .Sub :> plain(lt, addValue(st, e.nid, ValueFact.VOp(PrimOp.Sub)))
             .Mul :> plain(lt, addValue(st, e.nid, ValueFact.VOp(PrimOp.Mul)))
@@ -5507,7 +5874,7 @@ ${
     // constructed by field name (§66.18: never positionally).
     fn resolveObject(env: Env, e: AExpr, ps: AProp[], expected: Type | not, st0: AS) -> RX {
         let st: AS = dupKeys(env, ps, st0)
-        const s: Sym | not = namedOf(expectedOr(expected))
+        const s: Sym | not = namedOf(unMaybe(expectedOr(expected)))
         if (s is not) {
             return diagX(env, e, "E-TYPE-STRUCT-CONTEXT", "an object literal needs a struct type from its position (an annotated declaration or field)", resolvePropValues(env, ps, st))
         }
@@ -6217,7 +6584,7 @@ ${
             .Index(obj: o) :> resolveExpr(env, e, not, st).st
             .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
             .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
-            .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, st).st   // s451 (Ue)
+            .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, not, st).st   // s451 (Ue)
         }
     }
 
@@ -6234,7 +6601,7 @@ ${
             if (rootIsLocal(env, m.obj)) return localEditRefused(env, e, m.method, args, st)
         }
         if (m is given) return resolveEditCall(env, e, m, args, st)
-        return resolveExpr(env, e, not, st).st
+        return resolveExpr(withStmtCall(env, e.nid), e, not, st).st
     }
 
     // `@x.push(v)` / `@x.unshift(v)` — a sequence EDIT named by its method
@@ -7078,6 +7445,8 @@ ${
             .PWild :> []
             .PWhole(bind: b) :> [b.name]
             .PBare(bind: b) :> [b.name]
+            .PNot :> []
+            .PLit(e: x) :> []
         }
     }
 
@@ -7211,7 +7580,7 @@ ${
     // s454 (U1b): a subject that calls a server-triggered function (§12.2 T1/T4,
     // FnInfo.serverOwn) from a site that is (or may be) on the client is judged
     // against the CLIENT call's failure set (§19.9.10) — remoteHandled.
-    fn resolveHandled(env: Env, e: AExpr, h: AHandled, stmt: boolean, st0: AS) -> RX {
+    fn resolveHandled(env: Env, e: AExpr, h: AHandled, stmt: boolean, expected: Type | not, st0: AS) -> RX {
         let st: AS = st0
         const subj: AExpr = h.subject
         const sc: FnInfo | not = serverCalleeNamed(env, subj)
@@ -7226,8 +7595,11 @@ ${
                 .Guard(arms: x) :> rs0.x.ty
                 .MatchOn(arms: x) :> not
             }
-            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, rs0.st))
+            return plain(ty, remoteHandled(env, e, h, subj, sc, site, stmt, noSuccessUse(env, e, h, sc, stmt, rs0.st)))
         }
+        // s469 — the §18 plain-value `match`: a subject that is not a failable result
+        const pma: AArm[] | not = matchArmsOf(h.how)
+        if (pma is given && !failableSubjectNamed(env, subj)) return plainMatch(env, e, subj, pma, stmt, expected, st)
         if (!stmt && env.fx.whole != e.nid) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable (`?`, `!{ … }`, `match`) " + ue2Reason())
         const rs: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
         st = rs.st
@@ -7241,6 +7613,9 @@ ${
             failable = true
             err = env.g.sqlErrorSym
         }
+        // s469 (#1471 round-2 MED-2): a `!` function that never returns a value has NO success
+        // value — reading it (the handled form's value, or a `.Ok(v)` binder) would be `undefined`
+        if (f is given) st = noSuccessUse(env, e, h, f, stmt, st)
         const how: AHow = h.how
         return match how {
             .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
@@ -7345,6 +7720,32 @@ ${
                                                            outcome: rs.s, remote: remote }))
     }
 
+    fn noSuccessUse(env: Env, e: AExpr, h: AHandled, f: FnInfo, stmt: boolean, st: AS) -> AS {
+        if (!f.failable) return st
+        if (!isVoidFn(env.g, f.sym.id)) return st
+        // `?` / `!{}` in a value position yield the success value; a `match`'s value is its arms'
+        // (it reads the success value only through a bound `.Ok(v)`)
+        let reads: boolean = !stmt
+        const arms: AArm[] | not = matchArmsOf(h.how)
+        if (arms is given) {
+            reads = false
+            for (const a of arms) {
+                const pn: PatName | not = patName(a.pat)
+                if (pn is given) {
+                    if (pn.name == "Ok") {
+                        for (const b of pn.binds) {
+                            if (b.name != "_") reads = true
+                        }
+                    }
+                }
+            }
+        }
+        if (!reads) return st
+        return addDiag(st, env.file, e.span, "E-TYPE-001", "`" + f.name + "(…)` succeeds with no value (no path of it returns one) — its success value cannot be read here (§18.3: void is not assignable); handle it as a statement (`" + f.name + "(…) !{ … }` alone), or bind `.Ok` with `_`")
+    }
+
+
+
     // `!{ arms }` / `match subject { arms }`.
     fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
         let st: AS = st0
@@ -7360,6 +7761,375 @@ ${
         st = ra.st
         for (const d of coverDiags(env, e, subj, err, isMatch, ra, -1, err.hint)) { st = withDiag(st, d) }
         return handledFact(env, e, err, stmt, not, [], not, st)
+    }
+
+    // =========================================================================
+    // s469 — THE §18 PLAIN-VALUE `match` (SPEC §18; today-scrml-distance
+    // blocker 5): a `match` whose subject is NOT a failable result — an enum, a
+    // `T | not`, a string / number / bool (§18.16). It lowers to Core's
+    // `Expr.Match` (a value) or, as a statement, to one `Match` that picks the
+    // arm followed by an `if` chain on its index; an arm is chosen by its own
+    // test — the variant TAG (§45: a nullary variant compares by value, a
+    // payload variant by its `variant` tag), the absence check, or `===` on a
+    // literal — never by falling through to the last arm.
+    //   - variant arms bind their payload positionally (§18.7, E-TYPE-021);
+    //   - a literal arm over an enum is E-TYPE-028 (§18.16.2);
+    //   - exhaustiveness (§18.8.1): an enum match that misses a variant and has
+    //     no wildcard is E-TYPE-020; a `T | not` match with no `not` arm and no
+    //     wildcard is E-MATCH-012 (§42.7); a string / number match, or a bool
+    //     match missing a value, with no wildcard is W-MATCH-002 (§18.16.2);
+    //     a wildcard after full coverage is W-MATCH-001 (§18.6);
+    //   - duplicate arms E-TYPE-023, an arm after the wildcard E-SYNTAX-010;
+    //   - a struct subject E-TYPE-024 (§18.8.2); a tape subject is refused
+    //     (fail closed: a tape — `T[g…] | not` included — never reaches a
+    //     match, so no unwrapped tape loses its grants here).
+    // Slice limit: in a VALUE position an arm is one expression (Core's Match
+    // arm is an Expr) — a `{ … }` arm with statements, or a leaving arm, is
+    // refused there; as a statement every arm form is admitted.
+    // =========================================================================
+    fn matchArmsOf(how: AHow) -> AArm[] | not {
+        return match how {
+            .MatchOn(arms: a) :> a
+            .Propagate :> not
+            .Guard(arms: x) :> not
+        }
+    }
+
+    // Is the subject a failable — a `?{}`, or a call of a `!` function — by the
+    // binder's own name rule (a local of that name shadows the function)?
+    fn failableSubjectNamed(env: Env, subj: AExpr) -> boolean {
+        if (sqlOfK(subj.k) is given) return true
+        const c: AExpr | not = calleeOf(subj.k)
+        if (c is not) return false
+        const n: string = exprName(c)
+        if (n == "") return false
+        if (lookupLocal(env, n) is given) return false
+        const f: FnInfo | not = fnNamed(env.g, n)
+        if (f is not) return false
+        return f.failable
+    }
+
+    type PSubj:struct = { kind: int, es: Sym | not, maybe: boolean, known: boolean, code: string, msg: string }
+
+    fn psubj(kind: int, es: Sym | not, maybe: boolean, known: boolean) -> PSubj {
+        return { kind: kind, es: es, maybe: maybe, known: known, code: "", msg: "" }
+    }
+
+    fn psubjBad(code: string, msg: string) -> PSubj {
+        return { kind: 4, es: not, maybe: true, known: true, code: code, msg: msg }
+    }
+
+    // What the subject is, from its type — or, when the binder does not know
+    // it (a call's result, an unannotated local), from the arms (§18.13: a
+    // shorthand variant resolves against the one enum that has it).
+    fn plainSubject(env: Env, ty: Type | not, arms: AArm[]) -> PSubj {
+        if (ty is not) return armsSubject(env, arms)
+        const inner: Type = unMaybe(ty)
+        const maybe: boolean = maybeInner(ty) is given
+        const k: int = kindOf(inner)
+        if (k == 0 || k == 1) return psubj(2, not, maybe, true)
+        if (k == 2) return psubj(1, not, maybe, true)
+        if (k == 3) return psubj(3, not, maybe, true)
+        if (k == 5 || k == 6) return psubjBad("E-BOOTSTRAP-UNSUPPORTED", "a `match` over a tape (`" + typeName(ty) + "`) — §18 matches an enum, a `T | not`, or a string, number or bool; a tape is none of those (read it with `.length`, `.filter`, `.map` or `<each>`)")
+        const es: Sym | not = isEnumType(env.g.types, inner)
+        if (es is given) return psubj(0, es, maybe, true)
+        // a `S | not` of a struct: a presence `match` (`not :>` / `else :>`, §18.8.2 "union types") — kind 4
+        if (maybe) return psubj(4, not, maybe, true)
+        return psubjBad("E-TYPE-024", "a `match` over `" + typeName(inner) + "`, which is not an enum — a `match` is valid over an enum, a `T | not` and the literal types, not over a struct (§18.8.2)")
+    }
+
+    fn armsSubject(env: Env, arms: AArm[]) -> PSubj {
+        let maybe = false
+        for (const a of arms) {
+            if (isNotPat(a.pat)) maybe = true
+        }
+        for (const a2 of arms) {
+            const pn: PatName | not = patName(a2.pat)
+            if (pn is given) {
+                if (pn.qual != "") {
+                    const qs: Sym | not = typeNamedHere(env, pn.qual)
+                    if (qs is given) {
+                        const qe: Sym | not = isEnumType(env.g.types, Type.Named(qs))
+                        if (qe is given) return psubj(0, qe, maybe, false)
+                    }
+                    return psubjBad("E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum type in scope (§18.13)")
+                }
+                const r: EnumOf = enumHaving(env, pn.name)
+                if (r.n == 1) return psubj(0, r.es, maybe, false)
+                if (r.n == 0) return psubjBad("E-TYPE-VARIANT", "`." + pn.name + "` is not a variant of any enum in scope")
+                return psubjBad("E-VARIANT-AMBIGUOUS", "`." + pn.name + "` is a variant of more than one enum, and the subject's type is not known here — give the subject a declared type (§18.13)")
+            }
+            const lit: AExpr | not = litPatOf(a2.pat)
+            if (lit is given) {
+                const li: LitInfo = litInfo(lit)
+                if (li.kind > 0) return psubj(li.kind, not, maybe, false)
+            }
+        }
+        return psubj(4, not, maybe, false)
+    }
+
+    type EnumOf:struct = { es: Sym | not, n: int }
+
+    // Does `qual` name an enum that declares `name` (a qualified pattern, §18.13)?
+    fn qualNames(env: Env, qual: string, name: string) -> boolean {
+        const qs: Sym | not = typeNamedHere(env, qual)
+        if (qs is not) return false
+        return variantIndex(env.g.types, qs, name) >= 0
+    }
+
+    fn enumHaving(env: Env, name: string) -> EnumOf {
+        let found: Sym | not = not
+        let n = 0
+        for (const t of env.g.types) {
+            const s: Sym = typeDefSym(t.def)
+            if (t.file != builtinFile() && variantIndex(env.g.types, s, name) >= 0) {
+                found = s
+                n = n + 1
+            }
+        }
+        return { es: found, n: n }
+    }
+
+    fn isNotPat(p: APat) -> boolean {
+        return match p {
+            .PNot :> true
+            .PName(name: n) :> false
+            .PWild :> false
+            .PWhole(bind: b) :> false
+            .PBare(bind: b) :> false
+            .PLit(e: x) :> false
+        }
+    }
+
+    fn litPatOf(p: APat) -> AExpr | not {
+        return match p {
+            .PLit(e: x) :> x
+            .PNot :> not
+            .PName(name: n) :> not
+            .PWild :> not
+            .PWhole(bind: b) :> not
+            .PBare(bind: b) :> not
+        }
+    }
+
+    // A literal arm's kind (1 string, 2 number, 3 bool; 0 not a literal) and its
+    // duplicate key.
+    type LitInfo:struct = { kind: int, key: string }
+
+    fn litOf(kind: int, key: string) -> LitInfo { return { kind: kind, key: key } }
+
+    fn litInfo(x: AExpr) -> LitInfo {
+        const k: AExprK = x.k
+        return match k {
+            .Str(v: s) :> litOf(1, "s:" + s)
+            .Num(raw: r) :> litOf(2, "n:" + Number(r))
+            .Bool(v: b) :> litOf(3, "b:" + boolText(b))
+            .Name(name: n) :> litOf(0, "")
+            .At(name: n) :> litOf(0, "")
+            .AtItem :> litOf(0, "")
+            .NotLit :> litOf(0, "")
+            .Recovered :> litOf(0, "")
+            .Variant(name: n) :> litOf(0, "")
+            .Member(obj: o) :> litOf(0, "")
+            .Call(callee: c) :> litOf(0, "")
+            .Unary(op: o) :> litOf(0, "")
+            .Binary(op: o) :> litOf(0, "")
+            .Ternary(test: t) :> litOf(0, "")
+            .Assign(target: t) :> litOf(0, "")
+            .ArrayLit(elems: es) :> litOf(0, "")
+            .ObjectLit(props: ps) :> litOf(0, "")
+            .Spread(e: sx) :> litOf(0, "")
+            .Index(obj: ix) :> litOf(0, "")
+            .Lambda(params: lp) :> litOf(0, "")
+            .Sql(q: q) :> litOf(0, "")
+            .Handled(h: hx) :> litOf(0, "")
+        }
+    }
+
+    fn kindLabel(k: int) -> string {
+        if (k == 0) return "an enum"
+        if (k == 1) return "a string"
+        if (k == 2) return "a number"
+        if (k == 3) return "a bool"
+        return "a value that is neither an enum nor a literal type"
+    }
+
+    type RPArm:struct = { idx: int, key: string, env: Env, st: AS }
+
+    fn rparm(idx: int, key: string, env: Env, st: AS) -> RPArm { return { idx: idx, key: key, env: env, st: st } }
+
+    // One arm's pattern: its FArm index, its literal key, the env its body is
+    // resolved in (payload binders bound, §18.7).
+    fn plainArm(env: Env, a: AArm, sk: PSubj, vs: VariantDef[], st0: AS) -> RPArm {
+        let st: AS = st0
+        const armEnv: Env = withSubject(withWhole(env, -1), -1)
+        const p: APat = a.pat
+        const pn: PatName | not = patName(p)
+        if (pn is given) {
+            const es: Sym | not = sk.es
+            if (es is not) {
+                if (sk.code == "" && (sk.kind != 4 || sk.known)) st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`." + pn.name + "` is a variant pattern, but the subject is " + kindLabel(sk.kind) + " — match it with literal arms (§18.16)")
+                const rb0: RBinds = bindArm(armEnv, pn.binds, [], st)
+                return rparm(-3, "", rb0.env, rb0.st)
+            }
+            const i: int = variantIndex(env.g.types, es, pn.name)
+            if (pn.qual != "") {
+                const qs: Sym | not = typeNamedHere(env, pn.qual)
+                let same = false
+                if (qs is given) same = qs.id == es.id
+                if (!same) st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` names `" + pn.qual + "`, but the subject is `" + es.hint + "` (§18.13)")
+            }
+            if (i < 0) {
+                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`." + pn.name + "` is not a variant of `" + es.hint + "` (its variants: " + variantNamesOf(vs).join(", ") + ")")
+                const rb1: RBinds = bindArm(armEnv, pn.binds, [], st)
+                return rparm(-3, "", rb1.env, rb1.st)
+            }
+            const fs: FieldDef[] = vs[i].fields
+            if (pn.parens && pn.binds.length != fs.length) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + "` carries " + fs.length + " value(s) but the pattern binds " + pn.binds.length + " — bind one name (or `_`) per payload field, in declaration order (§18.7)")
+            const rb: RBinds = bindArm(armEnv, pn.binds, fs, st)
+            return rparm(i, "", rb.env, rb.st)
+        }
+        const lit: AExpr | not = litPatOf(p)
+        if (lit is given) {
+            st = resolveExpr(armEnv, lit, not, st).st
+            const li: LitInfo = litInfo(lit)
+            if (sk.code == "" && sk.kind == 0) {
+                const en: Sym | not = sk.es
+                let nm: string = "an enum"
+                if (en is given) nm = "`" + en.hint + "`"
+                st = addDiag(st, env.file, a.span, "E-TYPE-028", "the literal arm `" + subjectLabel(lit) + "` is not valid over the enum type " + nm + " — write `.Variant` arms (§18.16.2)")
+            } else if (sk.code == "" && (sk.kind != 4 || sk.known) && li.kind != sk.kind) {
+                st = addDiag(st, env.file, a.span, "E-TYPE-001", "the literal arm `" + subjectLabel(lit) + "` is " + kindLabel(li.kind) + ", but the subject is " + kindLabel(sk.kind) + " (§18.16)")
+            }
+            return rparm(-6, li.key, armEnv, st)
+        }
+        if (isNotPat(p)) {
+            // s469 (review L1): a `not` arm on a subject that can never be `not` is dead
+            // — the E-TYPE-044 rule (§17.6: a presence test on a type without `| not`)
+            // (review L1: a dead `not` arm is the typer's — plainSubjectCheck — which sees a refused type as Unknown, Rule C)
+            return rparm(-5, "", armEnv, st)
+        }
+        const wb: WholePat | not = wholePatOf(p)
+        if (wb is given) {
+            // E-MATCH-BARE-BINDER is reported (plainMatchBinderDiags): bound, and
+            // counted as the wildcard — one report, no cascade
+            const rw: RBinds = bindArm(armEnv, [wb.b], [], st)
+            return rparm(-1, "", rw.env, rw.st)
+        }
+        return rparm(-1, "", armEnv, st)
+    }
+
+    // An arm's value (the value form): one expression — an expression arm, or
+    // a `{ e }` block of one expression.
+    fn plainArmValue(env: Env, a: AArm, want: Type | not, st: AS) -> RX {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmExpr(e: x) :> plainValueExpr(env, x, want, st)
+            .ArmBlock(b: b) :> plainValueBlock(env, b, want, st)
+        }
+    }
+
+    fn plainValueExpr(env: Env, x: AExpr, want: Type | not, st: AS) -> RX {
+        if (isWriteExpr(x)) return plain(not, addDiag(resolveStmtExpr(env, x, st), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a write as an arm of a `match` whose value is used — use the `match` as a statement (each arm a write), or write the `match`'s value: `@x = match … { … }`"))
+        return resolveExpr(env, x, want, st)
+    }
+
+    fn plainValueBlock(env: Env, b: ABlock, want: Type | not, st: AS) -> RX {
+        if (b.stmts.length == 1) {
+            const x: AExpr | not = evalOf(b.stmts[0])
+            if (x is given) return plainValueExpr(env, x, want, st)
+        }
+        return plain(not, addDiag(resolveBlock(env, b, st), env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as a statement and write the result in each arm"))
+    }
+
+    fn plainMatch(env: Env, e: AExpr, subj: AExpr, arms: AArm[], stmt: boolean, expected: Type | not, st0: AS) -> RX {
+        let st: AS = plainMatchBinderDiags(env, arms, st0)
+        const rs: RX = resolveExpr(withWhole(env, -1), subj, not, st)
+        st = rs.st
+        const sk: PSubj = plainSubject(env, rs.x.ty, arms)
+        if (sk.code != "") st = addDiag(st, env.file, subj.span, sk.code, sk.msg)
+        let vs: VariantDef[] = []
+        const es0: Sym | not = sk.es
+        if (es0 is given) vs = enumVariantsOf(env.g, es0)
+        let covered: int[] = []
+        let lits: string[] = []
+        let wild = false
+        let notSeen = false
+        let want: Type | not = expected
+        let result: Type | not = not
+        let parms: PlainArm[] = []
+        for (const a of arms) {
+            if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§18.2; `bun scrml migrate --fix` rewrites it)")
+            if (wild) st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(false))
+            const ra: RPArm = plainArm(env, a, sk, vs, st)
+            st = ra.st
+            const idx: int = ra.idx
+            let dup = false
+            if (idx >= 0) {
+                if (covered.indexOf(idx) >= 0) dup = true
+                covered = covered.concat([idx])
+            }
+            if (idx == -5) {
+                if (notSeen) dup = true
+                notSeen = true
+            }
+            if (idx == -6 && ra.key != "") {
+                if (lits.indexOf(ra.key) >= 0) dup = true
+                lits = lits.concat([ra.key])
+            }
+            if (dup && !wild) st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same case — the first arm already takes it, so this one is unreachable (§18.14.2 E-TYPE-023: duplicate match arm)")
+            if (idx == -1) wild = true
+            st = addFail(st, a.nid, FailFact.FArm(idx))
+            let inner: Sym[] = []
+            if (stmt) {
+                for (const b of patBindsOf(a.pat)) {
+                    const rb: RSym = mint(st, b.name)
+                    st = rb.st
+                    inner = inner.concat([rb.s])
+                }
+            }
+            parms = parms.concat([{ nid: a.nid, inner: inner }])
+            if (stmt) {
+                st = resolveArmBody(ra.env, a, a.body, { stmt: true, subj: subj, isMatch: true, what: "" }, st)
+            } else {
+                const rv: RX = plainArmValue(ra.env, a, want, st)
+                st = rv.st
+                if (want is not) want = rv.x.ty
+                if (result is not) result = rv.x.ty
+            }
+        }
+        const maybe: boolean = sk.maybe || notSeen
+        const absentDone: boolean = !maybe || notSeen || wild
+        let exh: boolean = wild
+        if (sk.code == "") {
+            if (sk.kind == 0) {
+                let missing: string[] = []
+                let i = 0
+                for (const v of vs) {
+                    if (covered.indexOf(i) < 0) missing = missing.concat(["." + v.sym.hint])
+                    i = i + 1
+                }
+                let en: string = "the enum"
+                if (es0 is given) en = "`" + es0.hint + "`"
+                if (!wild && missing.length > 0) st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over " + en + " is not exhaustive: it does not cover " + missing.join(", ") + " — add those arms, or end with `else :>` (§18.8.1)")
+                if (missing.length == 0 && absentDone) exh = true
+                if (wild && missing.length == 0 && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: every case of " + en + " already has an arm (§18.6)")
+            }
+            if (sk.kind == 3) {
+                const both: boolean = lits.indexOf("b:true") >= 0 && lits.indexOf("b:false") >= 0
+                if (both && absentDone) exh = true
+                if (wild && both && (!maybe || notSeen)) st = addDiag(st, env.file, e.span, "W-MATCH-001", "the wildcard arm is unreachable: `true` and `false` both have an arm (§18.6)")
+                if (!wild && !both) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over a bool does not cover both `true` and `false` — a value with no arm gives `not`; add the other arm, or an `else` arm (§18.16.2)")
+            }
+            if ((sk.kind == 1 || sk.kind == 2) && !wild) st = addDiag(st, env.file, e.span, "W-MATCH-002", "this `match` over " + kindLabel(sk.kind) + " has no `else` arm — a value with no arm gives `not`; consider adding `else :>` (§18.16.2)")
+            if (maybe && !notSeen && !wild) st = addDiag(st, env.file, e.span, "E-MATCH-012", "this `match` is over a `T | not` value but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
+        }
+        const r1: RSym = mint(st, "subject")
+        const r2: RSym = mint(r1.st, "arm")
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen,
+                                                      stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
+        if (!exh && result is given) result = Type.Maybe(unMaybe(result))
+        return plain(result, st)
     }
 
     fn okVariantMsg(err: Sym) -> string {
@@ -7751,6 +8521,10 @@ ${
             const rw: RBinds = bindWhole(armEnv, wb.b, err, st)
             armEnv = rw.env
             st = rw.st
+        } else if (isNotPat(p) || litPatOf(p) is given) {
+            // s469 — the §18 plain-value patterns are not patterns over a failure:
+            // never read as a wildcard (that would take every case)
+            st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + patLabel(p) + "` is not a pattern over a failable result — its arms are `.Ok(v)` (in a `match`) and the variants of `" + err.hint + "` (§19.7)")
         } else if (pn is not) {
             idx = -1
         } else if (isMatch && pn.name == "Ok") {
@@ -7761,6 +8535,8 @@ ${
             st = rb.st
         } else {
             const i: int = variantIndex(env.g.types, err, pn.name)
+            // s469 — a qualified `E.V` (§18.13): `E` must name an enum that declares `V`
+            if (pn.qual != "" && i >= 0 && !qualNames(env, pn.qual, pn.name)) st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", "`" + pn.qual + "." + pn.name + "` — `" + pn.qual + "` is not an enum that declares `" + pn.name + "` (the failure here is `" + err.hint + "`, §18.13)")
             if (i < 0) {
                 let what: string = "`." + pn.name + "` is not a variant of `" + err.hint + "`"
                 if (pn.name == "Ok") what = "`.Ok` is the success value of a `match` — a `!{ … }` handler's arms are failures only"
@@ -7788,14 +8564,16 @@ ${
         return { idx: idx, st: st }
     }
 
-    type PatName:struct = { name: string, binds: ABind[], parens: boolean }
+    type PatName:struct = { name: string, binds: ABind[], parens: boolean, qual: string }
 
     fn patName(p: APat) -> PatName | not {
         return match p {
-            .PName(name: n, binds: bs, parens: pr) :> { name: n, binds: bs, parens: pr }
+            .PName(name: n, binds: bs, parens: pr, qual: q) :> { name: n, binds: bs, parens: pr, qual: q }
             .PWild :> not
             .PWhole(bind: b) :> not
             .PBare(bind: b) :> not
+            .PNot :> not
+            .PLit(e: x) :> not
         }
     }
 
@@ -7815,6 +8593,8 @@ ${
             .PBare(bind: b) :> { b: b, viaElse: false, bare: true }
             .PName(name: n) :> not
             .PWild :> not
+            .PNot :> not
+            .PLit(e: x) :> not
         }
     }
 
@@ -7939,7 +8719,7 @@ ${
     // function that yields nothing falls through.
     fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
         if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
-        const st: AS = resolveExpr(withWholeAt(env, x.nid, "the value of an enclosing arm"), x, not, st0).st
+        const st: AS = resolveExpr(withStmtCall(withWholeAt(env, x.nid, "the value of an enclosing arm"), x.nid), x, not, st0).st
         return pendNoValue(env, a, cx, x, st)
     }
 
@@ -8152,6 +8932,8 @@ ${
             .PWild :> "_"
             .PWhole(bind: b, viaElse: v) :> wholeLabel(b.name, v)
             .PBare(bind: b) :> b.name
+            .PNot :> "not"
+            .PLit(e: x) :> subjectLabel(x)
         }
     }
 
@@ -8361,7 +9143,11 @@ ${
 
     fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
         if (e is not) return st
-        return resolveExpr(withWholeAt(env, e.nid, "a `return` operand"), e, not, st).st
+        // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
+        // anywhere else a `return` operand is a value position
+        let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
+        if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
+        return resolveExpr(renv, e, not, st).st
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
@@ -9901,7 +10687,7 @@ ${
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
             const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "",
-                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn }
+                                  fnSym: fs.info.sym.id, serverOwn: fs.info.serverOwn, stmtCall: -1 }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
@@ -10494,14 +11280,13 @@ ${
     // where a `T | not` place IS narrowed, or it would refuse correct code.
     // The slice's narrowing forms (it parses no `is some` / `given` over a
     // value): the explicit tests `x is given` / `x is not` (s460, §42.4
-    // statement 8), a presence comparison `x != not` / `x == not` (either
-    // side), and a bare `T | not` condition `if (x)` (a presence test,
+    // statement 8), and a bare `T | not` condition `if (x)` (a presence test,
     // truthiness Q1) — narrowing the `if` / `else` branch, the ternary arm,
     // the right operand of `&&` / `||`, an element under `if=` (its other
     // attributes and children), and the rest of a block after an `if` whose
     // other branch always `return`s. They combine through `&&` / `||` and
-    // through a `!` applied to one of those BOOLEAN tests (`!(x is not)`,
-    // `!(x == not)`); a `!` over a bare `T | not` is not a combination — it is
+    // through a `!` applied to one of those BOOLEAN tests (`!(x is not)`);
+    // a `!` over a bare `T | not` is not a combination — it is
     // refused (E-OPERATOR-OPERAND-TYPE: `!` takes booleans, S440 Gotcha Q2),
     // because a bare optional is a presence test only as a WHOLE condition.
     // A place is named by its key: a local by its Sym (`#id`), a cell /
@@ -10713,7 +11498,9 @@ ${
         }
     }
 
-    // `x != not` proves `x` present when true; `x == not` when false.
+    // A presence comparison against `not` (`x != not` / `x == not`). s469: the binder
+    // refuses that spelling (E-EQ-002, §45) — this narrowing only keeps the typer quiet
+    // on the refused form (one report, no cascade); `is given` / `is not` are the tests.
     fn presenceCmp(env: TEnv, l: AExpr, r: AExpr, ne: boolean) -> Narrowing {
         let key: string = ""
         if (isNotLit(r)) key = nKey(env, l)
@@ -10727,7 +11514,7 @@ ${
 
     fn unaryNarrowing(env: TEnv, op: UnOp, x: AExpr) -> Narrowing {
         // s460: `x is given` proves `x` present when true; `x is not` when
-        // false (as `x != not` / `x == not` do — §42.4 statement 8)
+        // false (§42.4 statement 8)
         if (op == UnOp.IsGiven) return { yes: [nKey(env, x)], no: [] }
         if (op == UnOp.IsNot) return { yes: [], no: [nKey(env, x)] }
         const isNot: boolean = op == UnOp.Not
@@ -11505,6 +12292,7 @@ ${
             .VHost(call: c) :> known(Type.Num)
             .VSeqCall(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
+            .VToEnum(enumSym: s) :> VType.Unknown
             not :> VType.Unknown
         }
     }
@@ -11518,6 +12306,7 @@ ${
             .VHost(call: c) :> not
             .VSeqCall(op: x) :> not
             .VLambda(params: ps) :> not
+            .VToEnum(enumSym: s) :> not
             not :> not
         }
     }
@@ -11918,6 +12707,7 @@ ${
     fn lambdaSyms(f: ValueFact | not) -> Sym[] {
         return match f {
             .VLambda(params: ps) :> ps
+            .VToEnum(enumSym: s) :> []
             .VLit(lit: l) :> []
             .VVariant(enumSym: s) :> []
             .VStructOf(ty: s) :> []
@@ -11940,7 +12730,43 @@ ${
             .VStructOf(ty: s) :> VType.Unknown
             .VOp(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
+            .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
             not :> VType.Unknown
+        }
+    }
+
+    // s469 — `E.toEnum(s)`'s signature is `string -> E | not` (§14.4.1).
+    fn toEnumArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
+        if (args.length != 1) return ts
+        if (!isToEnumFact(valueFact(env.t.values, e.nid))) return ts
+        return checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the argument of `toEnum` (a string, §14.4.1)", ts)
+    }
+
+    fn isVariantFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VVariant(enumSym: s) :> true
+            .VToEnum(enumSym: s) :> false
+            .VLit(lit: l) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VSeqCall(op: o) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
+    }
+
+    fn isToEnumFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VToEnum(enumSym: s) :> true
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VSeqCall(op: o) :> false
+            .VLambda(params: ps) :> false
+            not :> false
         }
     }
 
@@ -11953,6 +12779,9 @@ ${
     }
 
     fn typeMember(env: TEnv, e: AExpr, f: NameFact | not, obj: AExpr, ts: TypeState) -> RVT {
+        // s469: a qualified unit variant `E.V` (the binder's VVariant; `E` is a type, not typed)
+        const vf: ValueFact | not = valueFact(env.t.values, e.nid)
+        if (isVariantFact(vf)) return rvt(valueType(vf), ts)
         const ro: RVT = typeExpr(env, obj, ts)
         return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
@@ -11983,7 +12812,7 @@ ${
     }
 
     // `&&` / `||`: the right operand is evaluated only when the left one is
-    // true / false, so it is typed under that narrowing (`x != not && x > 0`).
+    // true / false, so it is typed under that narrowing (`x is given && x > 0`).
     fn typeBinary(env: TEnv, e: AExpr, f: ValueFact | not, bop: BinOp, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
         const rl: RVT = typeExpr(env, l, ts)
         let renv: TEnv = env
@@ -12566,7 +13395,7 @@ ${
         let ts: TypeState = typeExprs(env, args, ts0)
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
-        if (s is not) return rvt(builtinCallType(env, e, callee, ts), ts)
+        if (s is not) return rvt(builtinCallType(env, e, callee, ts), toEnumArgCheck(env, e, args, ts))
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity
@@ -12774,6 +13603,8 @@ ${
     // inference knows it); a `match` yields Unknown (its arms' join is not
     // computed — no check fires on Unknown).
     fn typeHandled(env: TEnv, e: AExpr, h: AHandled, ts0: TypeState) -> RVT {
+        const pm: PlainMatch | not = plainFactOf(failFact(env.t.fails, e.nid))
+        if (pm is given) return typePlain(env, e, h, pm, ts0)
         const rs: RVT = typeExpr(env, h.subject, ts0)
         let ts: TypeState = rs.ts
         const err: Sym | not = handledErr(failFact(env.t.fails, e.nid))
@@ -12807,11 +13638,124 @@ ${
         return rvt(VType.Unknown, ts)
     }
 
+    // s469 — the §18 plain-value `match` (the binder's FPlain fact). Its
+    // subject is typed; in every arm but the `not` arm a `T | not` place is
+    // narrowed to `T` (§42.7: "`match` … narrowing"; §42.2.3 — "the present
+    // case is the arm after `not :>`"); the arms' binders take their payload
+    // fields' types; the value is the JOIN of the arms' values (§18.4), and a
+    // non-exhaustive match also yields `not` (§18.16.3). Where the binder did
+    // not know the subject's type, the arms are checked against it here.
+    fn typePlain(env: TEnv, e: AExpr, h: AHandled, m: PlainMatch, ts0: TypeState) -> RVT {
+        const rs: RVT = typeExpr(env, h.subject, ts0)
+        let ts: TypeState = plainSubjectCheck(env, e, h.subject, m, rs.vt, rs.ts)
+        let present: string[] = []
+        const st0: Type | not = knownOf(rs.vt)
+        let subjMaybe: boolean = m.maybe
+        if (st0 is given) {
+            if (maybeInner(st0) is given) subjMaybe = true
+        }
+        if (subjMaybe) present = condNarrowing(env, h.subject).yes
+        let vt: VType = VType.Unknown
+        let first = true
+        for (const a of handledArms(h)) {
+            const af: FailFact | not = failFact(env.t.fails, a.nid)
+            let aenv: TEnv = env
+            if (armIdx(af) != -5 && present.length > 0) aenv = tNarrow(aenv, present)
+            const fs: FieldDef[] = armFields(env.t, m.es, af)
+            let i = 0
+            for (const b of patBindsOf(a.pat)) {
+                const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
+                let bvt: VType = VType.Unknown
+                if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) bvt = known(fs[i].ty)
+                if (bs is given) aenv = tWithLocal(aenv, bs, bvt)
+                i = i + 1
+            }
+            const body: AArmBody = a.body
+            const one: AExpr | not = plainOneExpr(body)
+            if (m.stmt || one is not) {
+                for (const x of armExprOf(body)) {
+                    if (assignValue(x) is given) {
+                        ts = typeStmtExpr(aenv, x, ts)
+                    } else {
+                        ts = typeExpr(aenv, x, ts).ts
+                    }
+                }
+                for (const b2 of armBlockOf(body)) { ts = typeBlock(aenv, b2, ts) }
+            } else {
+                const r: RVT = typeExpr(aenv, one, ts)
+                ts = r.ts
+                if (first) {
+                    vt = r.vt
+                } else {
+                    vt = joinVT(vt, r.vt)
+                }
+                first = false
+            }
+        }
+        if (m.stmt) return rvt(VType.Unknown, ts)
+        if (!m.exhaustive) vt = joinVT(vt, VType.Absent)
+        return rvt(vt, ts)
+    }
+
+    // The one expression a value-position arm is (`e`, or `{ e }`), else not.
+    fn plainOneExpr(body: AArmBody) -> AExpr | not {
+        return match body {
+            .ArmExpr(e: x) :> x
+            .ArmBlock(b: b) :> oneEvalOf(b)
+        }
+    }
+
+    fn oneEvalOf(b: ABlock) -> AExpr | not {
+        if (b.stmts.length != 1) return not
+        return evalOf(b.stmts[0])
+    }
+
+    export fn plainFactOf(f: FailFact | not) -> PlainMatch | not {
+        return match f {
+            .FPlain(m: m) :> m
+            .FHandled(h: x) :> not
+            .FArm(idx: x) :> not
+            .FFail(err: x) :> not
+            not :> not
+        }
+    }
+
+    // The arms against the subject's type, where the binder could not see it
+    // (an unannotated local, a call's result): the enum the arms name must be
+    // the subject's (E-TYPE-VARIANT), a literal arm's type must be the
+    // subject's (E-TYPE-001), and a `T | not` subject owes a `not` arm or a
+    // wildcard (E-MATCH-012).
+    fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
+        const t: Type | not = knownOf(v)
+        if (t is not) return ts
+        const inner: Type = unMaybe(t)
+        const k: int = kindOf(inner)
+        let out: TypeState = ts
+        // s469 (review L1): a `not` arm on a subject that cannot be `not` is dead — the
+        // E-TYPE-044 rule (§17.6: a presence test on a type without `| not`)
+        if (m.notArm && maybeInner(t) is not && k != 5) out = report(out, env, e.span, "E-TYPE-044", "a `not` arm on a subject whose type (`" + typeName(t) + "`) does not include `| not` — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
+        if (m.known) return out
+        const es: Sym | not = m.es
+        if (m.kind == 0 && es is given) {
+            const ns: Sym | not = namedOf(inner)
+            let same = false
+            if (ns is given) same = ns.id == es.id
+            if (!same) out = report(out, env, subj.span, "E-TYPE-VARIANT", "the arms are variants of `" + es.hint + "`, but the subject is `" + typeName(t) + "` (§18.13)")
+        }
+        if (m.kind == 1 && k != 2) out = report(out, env, subj.span, "E-TYPE-001", "the arms are string literals, but the subject is `" + typeName(t) + "` (§18.16)")
+        if (m.kind == 2 && k != 0 && k != 1) out = report(out, env, subj.span, "E-TYPE-001", "the arms are number literals, but the subject is `" + typeName(t) + "` (§18.16)")
+        if (m.kind == 3 && k != 3) out = report(out, env, subj.span, "E-TYPE-001", "the arms are bool literals, but the subject is `" + typeName(t) + "` (§18.16)")
+        if (k == 5) out = report(out, env, subj.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over a tape (`" + typeName(t) + "`) — §18 matches an enum, a `T | not`, or a string, number or bool")
+        if (maybeInner(t) is given && !m.maybe && !m.wild) out = report(out, env, e.span, "E-MATCH-012", "this `match` is over a `T | not` value (`" + typeName(t) + "`) but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
+        return out
+    }
+
     fn handledErr(f: FailFact | not) -> Sym | not {
         return match f {
             .FHandled(h: h) :> h.err
             .FArm(idx: x) :> not
-            .FFail(err: x) :> not
+            .FPlain(m: m) :> m.es
+            .FFail(err: y) :> not
             not :> not
         }
     }
@@ -12833,6 +13777,7 @@ ${
             .FArm(idx: i) :> i
             .FHandled(h: x) :> -3
             .FFail(err: x) :> -3
+            .FPlain(m: pm) :> -3
             not :> -3
         }
     }
@@ -12843,6 +13788,8 @@ ${
             .PWild :> []
             .PWhole(bind: b) :> [b]
             .PBare(bind: b) :> [b]
+            .PNot :> []
+            .PLit(e: x) :> []
         }
     }
 
@@ -12867,6 +13814,7 @@ ${
             .FFail(err: e, idx: i) :> armFields(t, e, FailFact.FArm(i))
             .FHandled(h: x) :> []
             .FArm(idx: x) :> []
+            .FPlain(m: pm) :> []
             not :> []
         }
     }
@@ -12981,7 +13929,7 @@ ${
 
     // The narrowing an `if` leaves: the INTERSECTION of what each path leaves
     // (a path that always `return`s leaves nothing to join — the other path's
-    // narrowing holds, e.g. after `if (x == not) { return }`). The env's own
+    // narrowing holds, e.g. after `if (x is not) { return }`). The env's own
     // locals and settled types stay the enclosing block's.
     fn joinPaths(env: TEnv, a: TEnv, aExits: boolean, b: TEnv, bExits: boolean) -> TEnv {
         if (aExits && !bExits) return withNarrowed(env, b.narrowed)
@@ -14162,6 +15110,7 @@ ${
             .VOp(op: o) :> false
             .VStructOf(ty: t) :> false
             .VLambda(params: ps) :> false
+            .VToEnum(enumSym: s) :> true
             not :> false
         }
     }
@@ -17820,6 +18769,8 @@ ${
 
     // Is `e` a suspension point (and of which kind)?
     fn suspendKindAt(cx: PCx, e: AExpr) -> SuspendK | not {
+        // s469: a plain-value `match` is no suspension point (its subject, a kid, may be)
+        if (plainFactOf(failFact(cx.t.fails, e.nid)) is given) return not
         if (cx.server) return serverSuspendKind(cx, e)
         const h: AHandled | not = handledOf(e.k)
         if (h is given) {
@@ -17881,6 +18832,7 @@ ${
             .FHandled(h: h) :> h
             .FArm(idx: x) :> not
             .FFail(err: x) :> not
+            .FPlain(m: pm) :> not
             not :> not
         }
     }
@@ -18182,7 +19134,7 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         // s468: static executable attribute values (§5.2 S464) and impure `fn` bodies (§48.3.3)
-        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum))
+        const sinkDiags: Diag[] = staticExecPass(ra.g, bound).concat(fnWritePass(ra.g, sum)).concat(fallOffPass(ra.g, bound))
         const typed: RTyping = typeProgram(files, bound, st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(sinkDiags))
         // s451 (U1a): route placement, the queries and the databases
         const pp: RPlaced = placePass(ra.g, bound, st, sum)

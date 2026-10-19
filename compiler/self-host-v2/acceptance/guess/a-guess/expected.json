@@ -1,18 +1,33 @@
 {
-  "id": "acceptance-a-guess",
-  "description": "bryan's guess program, as he meant it (today-scrml-distance-2026-10-18 §3 (a)): a `Guess | not` derived from the input by `toEnum`, a comma-armed value `match` with a `not` arm, an `is given` condition.",
+  "id": "acceptance-guess-a-guess",
+  "description": "bryan's guess program (a) — typing `Yes` shows \"yeppers\" and the second line.",
   "language-version": "1.0",
-  "spec": "§66.2.4 (S451) · dpa-073 F2 (S469) · §14.4.1 · §18 · §42.2.3",
-  "rationale": "Typing `Yes` shows \"yeppers\" and the second line; typing `maybe` shows \"length 5\" and hides it. The source is the report's §3 (a) verbatim (plus two `id`s for the selectors).",
+  "spec": "§66.2.4 (S451) · dpa-073 F2 · §14.4.1 · §18 · §42.2.3",
+  "rationale": "today-scrml-distance-2026-10-18 §3 (a), with the `not` arm's value `\"length \" + @inputVal.length` replaced: under the S440 operator rule (Gotcha Q1) `string + int` is E-OPERATOR-OPERAND-TYPE (see guess/a-guess-verbatim), and the bootstrap has no explicit int→string conversion yet, so the length is shown on its own line.",
   "expect": {
     "codes": [],
     "input": [
-      { "input": "input", "value": "Yes" },
-      { "wait": "settle" }
+      {
+        "input": "input",
+        "value": "Yes"
+      },
+      {
+        "wait": "settle"
+      }
     ],
     "domAnchored": [
-      { "selector": "#say", "text": "yeppers" },
-      { "selector": "#real", "count": 1 }
+      {
+        "selector": "#say",
+        "text": "yeppers"
+      },
+      {
+        "selector": "#real",
+        "count": 1
+      },
+      {
+        "selector": "#len",
+        "text": "length 3"
+      }
     ]
   }
 }

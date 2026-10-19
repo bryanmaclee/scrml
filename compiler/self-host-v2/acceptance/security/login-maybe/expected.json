@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-security-login-maybe",
+  "description": "login over `User | not`: wrong password → `denied`, right password → `welcome`.",
+  "language-version": "1.0",
+  "spec": "§18 · §42",
+  "rationale": "Security lens: the `not` arm is chosen by the absence check, never by falling through.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      },
+      {
+        "selector": "#right",
+        "text": "welcome"
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+// the success value of a `!` check that has none, read by `!{}`: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    type Denied:enum = { Bad }
+    function chk(pw: string)! Denied {
+        if (pw != "hunter2") fail .Bad
+    }
+    function attempt(pw: string) -> string {
+        const r: string = chk(pw) !{ _ :> "denied" }
+        if (r == "denied") return "denied"
+        return "welcome"
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

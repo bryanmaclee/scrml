@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-literal-over-enum",
+  "description": "E-TYPE-028: a string arm over an enum.",
+  "language-version": "1.0",
+  "spec": "§18.16.2",
+  "rationale": "§18.16.2: \"Mixing literal arms with variant arms over a pure enum type SHALL be a compile error (E-TYPE-028)\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-028"
+    ],
+    "codeCounts": {
+      "E-TYPE-028": 1
+    }
+  }
+}

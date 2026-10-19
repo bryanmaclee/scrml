@@ -1,0 +1,7 @@
+// §18.16.2: a string match with no `else` warns, and a value no arm names gives `not` — never the last arm.
+<program>
+    let <role:string="guest"/>
+    <main>
+        <p id="s">[${match @role { "admin" :> "all", "editor" :> "some", }}]</p>
+    </main>
+</program>

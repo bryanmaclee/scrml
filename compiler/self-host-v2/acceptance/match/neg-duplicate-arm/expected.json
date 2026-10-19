@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-duplicate-arm",
+  "description": "E-TYPE-023: `.Red` twice.",
+  "language-version": "1.0",
+  "spec": "§18.14.2",
+  "rationale": "§18.14.2: \"This SHALL be a compile error (E-TYPE-023: duplicate match arm).\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-023"
+    ],
+    "codeCounts": {
+      "E-TYPE-023": 1
+    }
+  }
+}

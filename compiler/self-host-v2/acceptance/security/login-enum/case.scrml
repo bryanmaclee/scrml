@@ -1,0 +1,25 @@
+// match on an enum result decides a login: the wrong password takes the deny arm.
+<program>
+    type Auth:enum = { Granted, Denied }
+    let <wrong:string=""/>
+    let <right:string=""/>
+    function check(pw: string) -> Auth {
+        if (pw == "hunter2") return .Granted
+        return .Denied
+    }
+    function attempt(pw: string) -> string {
+        return match check(pw) {
+            .Granted :> "welcome bryan"
+            .Denied :> "denied"
+        }
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-match-payload-bind",
+  "description": "payload binding in a `return match` (value) and in a statement `match` whose arms write a cell, over error values (the payload-variant values the bootstrap builds today come from `fail`).",
+  "language-version": "1.0",
+  "spec": "§18.3 · §18.5 · §18.7",
+  "rationale": "§18.7: \"Bindings are assigned left-to-right in the order the fields were declared\"; §18.3: `return match` is valid.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "slow"
+      },
+      {
+        "selector": "#log",
+        "text": "busy slow"
+      }
+    ]
+  }
+}

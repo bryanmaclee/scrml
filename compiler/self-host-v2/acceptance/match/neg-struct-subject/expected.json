@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-struct-subject",
+  "description": "E-TYPE-024: a struct subject.",
+  "language-version": "1.0",
+  "spec": "§18.8.2",
+  "rationale": "§18.8.2: \"Attempting to match a struct-typed value SHALL be a compile error (E-TYPE-024)\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-024"
+    ],
+    "codeCounts": {
+      "E-TYPE-024": 1
+    }
+  }
+}

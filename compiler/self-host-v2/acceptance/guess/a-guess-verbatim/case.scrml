@@ -1,0 +1,13 @@
+// program (a) exactly as the report wrote it: `"length " + @inputVal.length` is string + int.
+<program>
+    type Guess:enum = { Yes, No }
+
+    let <inputVal:string=""/>
+    <g:Guess | not=(Guess.toEnum(@inputVal))/>
+
+    <main>
+        <form><input type="text" placeholder="answer here" bind:value=@inputVal/></form>
+        <p id="say">${match @g { .Yes :> "yeppers", .No :> "nope", not :> "length " + @inputVal.length, }}</p>
+        <p id="real" if=(@g is given)>you picked a real answer</p>
+    </main>
+</program>
