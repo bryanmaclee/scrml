@@ -4,6 +4,7 @@
 > **Amendments applied:** 2026-04-07 — §48 added: `fn` redefined as constrained state factory (E-FN-001..E-FN-009, W-FN-001). §7.3 updated to reflect `fn`/`function` distinction.
 > **Amendments applied:** 2026-04-08 — Self-hosting gauntlet R1 findings: §48 relaxed `fn` from "state factory" to "pure function, any return type." §7.3.1 nested function declarations. §7.3.2 default parameter values. §14.3.1 optional struct fields (`= not`). Appendix D: JS standard library access in logic contexts.
 > **Amendments applied:** 2026-04-07 — §49 added: `while`, `do...while`, `break`, `continue` with labeled control flow (E-LOOP-001..E-LOOP-007).
+> **Amendments applied:** 2026-10-18 (S469) — §49 rewritten: one loop keyword `for` (iterate / condition / counted / infinite heads), `while` and `do...while` retired, the `a..b` / `a..=b` range head, the value form from every head (E-LOOP-007 rewritten), index reads (§49.13) and the trap kind (§19.17). §17.4, §8.10.1, §32.6, §35.4, §48.2 and the §66.12.2 bounded-length token amended to match.
 > **Amendments applied:** 2026-04-07 — §50 added: Assignment as Expression (W-ASSIGN-001, E-ASSIGN-001..E-ASSIGN-004).
 > **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
 > **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
@@ -9502,7 +9503,13 @@ A for-loop whose body contains a single keyed `?{}` read SHALL be rewritten to a
 
 A for-loop is a *Tier 2 candidate* iff all of the following hold, matched syntactically:
 
-1. Loop header is `for (let x of xs)` or `for (const x of xs)` (iteration binding is a single identifier).
+1. Loop header is `for (x of xs)`, `for (let x of xs)` or `for (const x of xs)` (iteration binding is a single identifier, with or without a binder keyword).
+
+   > **Amendment S469 — the keywordless binder is a candidate.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F1 *"One `for`
+   > (Recommended)"*; defect 6 of the loops deep-dive §4.2 (the §17.4 canonical keywordless binder was missing from this
+   > list). **supersedes:** *"Loop header is `for (let x of xs)` or `for (const x of xs)` (iteration binding is a single
+   > identifier)."* **Direction of change:** newly-accepting for the rewrite (a text gap; impl#1's detection of the
+   > keywordless binder was not checked — Nominal until it is).
 2. Loop body contains exactly one `?{}` block whose template matches `... WHERE <column> = ${x.<field>} ...` (single equality predicate on the loop binding).
 3. The `?{}` block is terminated with `.get()` or `.all()`. `.run()` is excluded (see §8.10.5). `.prepare()` is invalid in scrml — see §44.3 / E-SQL-006.
 4. No other `?{}` blocks appear in the loop body.
@@ -16729,7 +16736,22 @@ ${ for x of @items {        ⟵ E-FOR-UNPARENTHESIZED-HEAD
 } }
 ```
 
-— is **`E-FOR-UNPARENTHESIZED-HEAD`** (§34). Without the parentheses the parser cannot bind the iterable and mis-reads it as the bare token `of`, so codegen emits `for (const x of of)` — valid to `node --check` but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). The compiler rejects it and recovers by parsing the head as if parenthesized, so no broken loop is emitted. The fix is the canonical parenthesized form `for (x of @items) { ... }`. (The legacy braceless English form `for item in @items { ... }` — value-iteration — is a separate accepted spelling and is left unchanged; a `for (... in ...)` *inside* parentheses is `E-CTRL-011`.)
+— is **`E-FOR-UNPARENTHESIZED-HEAD`** (§34). Without the parentheses the parser cannot bind the iterable and mis-reads it as the bare token `of`, so codegen emits `for (const x of of)` — valid to `node --check` but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). The compiler rejects it and recovers by parsing the head as if parenthesized, so no broken loop is emitted. The fix is the canonical parenthesized form `for (x of @items) { ... }`. (The legacy braceless English form `for item in @items { ... }` is removed (S469, below) and is refused under the same code; a `for (... in ...)` *inside* parentheses is `E-CTRL-011`.)
+
+> **Amendment S469 — the Tier-0 form is §49's value form, and the braceless `in` spelling is removed.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F7 *"Yes, keep separate (Recommended)"* (*"`<each>` stays the canonical,
+> separate markup iteration element; `${ for … lift }` stays as the value form in an interpolation"*); F8 *"Remove
+> (Recommended)"* (*"the legacy braceless `for x in xs` is removed"*); F1 *"One `for` (Recommended)"*.
+> **supersedes:** *"(The legacy braceless English form `for item in @items { ... }` — value-iteration — is a separate
+> accepted spelling and is left unchanged …)"*.
+> **Direction of change:** newly-rejecting for `for x in xs` (0 non-doc corpus sites, loops deep-dive §5) —
+> Nominal on impl#1 (frozen; it still accepts the form, §49.8).
+
+**The loop is §49's `for`.** The head grammar is §49.2.1, and every head (iterate, condition, counted, infinite)
+may appear here. `${ for (…) { lift <li/>; } }` is §49.6's value form written as the sole content of an
+interpolation: its lifts are the rendered result. It is not a separate list-render construct, and `<each>`
+(§17.7) stays the canonical markup element beside it. Range heads work here too: `${ for (i of 0..@n) { lift
+<li>${i}</li>; } }`.
 
 **The `${ ... }` wrapper is mandatory (S203).** Control flow in a markup body — `for`, `if`, `while` — is logic, and logic in a markup body MUST live inside a `${ ... }` logic block (§7). A bare control-flow statement written directly in a markup body (no surrounding `${ ... }`), e.g.
 
@@ -22312,6 +22334,47 @@ body may not contain); §19.4.3 (the handling requirement rule 3 narrows); §19.
 host-JS precedent the lowering follows); §19.9.3 / §19.9.5 / §19.9.9 (body-split — §19.16.5); §35 (`lin`
 — §19.16.9); §48 (`fn` — §19.16.4).
 
+### 19.17 Runtime Traps — Defined Runtime Errors
+
+> **Amendment S469 — the trap kind.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F4 *"Trap + `.at()`
+> (Recommended)"* (*"`xs[i]` has type `T`. An out-of-range read is a DEFINED RUNTIME ERROR, scrml's first general
+> runtime trap; a §19 error kind is owed."*). **supersedes:** nothing struck. It qualifies §19.1's *"Errors are
+> values that flow through the type system and are checked at compile time"*: a trap is the one kind of error
+> that is not such a value. §19.1's *"There is NO try/catch. There are NO exceptions."* stands — a trap cannot be
+> caught in scrml source.
+> **Direction of change:** semantics-defined (previously unspecified — impl#1 reads JavaScript's `undefined`).
+> **Nominal / spec-ahead — not yet emitted** by any implementation (§49.8).
+
+A **trap** is a defined runtime error: a condition the language defines as an error, that the compiler cannot
+always rule out before the program runs, and that is **not a value of any `!` error type**.
+
+**The kinds.** v1 has one general trap:
+
+| Code | Raised by | Section |
+|---|---|---|
+| `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length` (Nominal / spec-ahead — not yet emitted) | §49.13 |
+
+(`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
+S440, are earlier runtime errors at a value boundary. They keep their own sections.)
+
+**Normative statements:**
+
+- A trap SHALL stop the current unit of execution at the trapping expression: no later statement of the event
+  handler, render, reactive effect, server request or top-level logic block that raised it runs.
+- A trap SHALL NOT be a `!` error. `!{}`, `?` and `match` do not see it, and a function is not failable because
+  it contains an expression that may trap (§19.4). There is no way to catch a trap in scrml source. To avoid one,
+  test first, or use the non-trapping form (`xs.at(i)`, §49.13).
+- For §19.6.8 and §19.16 a trap is a **non-`!` runtime error**. Raised during a render or a reactive effect inside
+  an `<errorBoundary>`, it is caught by the boundary's backstop (§19.6.8 B2, B3); raised in an event handler, it
+  is reported as §19.6.8 B7 requires; a `defer` registered in a block it passes through runs (§19.16.2).
+- Raised in server code, a trap SHALL fail the request as an internal error: HTTP 500, with only the fixed
+  `Internal Server Error` text reaching the client; the index, the length and the location stay off the wire
+  (the §13 server Promise trap, S462, is the precedent).
+- Inside a `transaction { }` block, a trap SHALL roll the transaction back before it propagates *(PA reading:
+  §19.10.3 names `fail`, a SQL error and the exits, not a non-`!` runtime error; this fails closed)*.
+- Every trap SHALL be reported to scrml's logging surface (§19.6.8 B5) with its code, the source location and,
+  for `E-INDEX-OUT-OF-RANGE-RT`, the index and the length. It SHALL NOT be swallowed silently.
+
 ---
 
 ## 20. Navigation API
@@ -26489,6 +26552,12 @@ If `~` IS referenced anywhere in the current `${ }` body, ALL `lift` calls in th
 - This rule is all-or-nothing per logic context: either `~` is in use (referenced somewhere) and all `lin` obligations apply, or `~` is not in use and none apply.
 - A `lift` in value-lift mode (§17.6) SHALL initialize `~`, subject to the same elision rule. If `~` is not referenced anywhere in the enclosing `${}` body, the lin obligation is elided for value-lift mode `lift` calls, identical to accumulation mode.
 - An if-as-expression used as a binding (`const a = if (...) { lift 3 }`) does NOT force a `~` consumption obligation when `~` is not separately referenced, because the `lift` result is captured in `a`.
+- A `lift` captured by a loop bound as a value (`const xs = for (…) { lift e; };`, §49.6) does NOT initialize `~`: the lifted values are the loop's result. After a statement loop, `~` holds the most recently lifted value, as for any `lift` — never a tape of every value the loop lifted.
+
+> **Amendment S469 — loops and `~`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F5 *"Yes, specify it (Recommended)"*
+> (*"E-LOOP-007 is rewritten and the `let r = ~` pattern retires"*); defect 4 of the loops deep-dive §4.2.
+> **supersedes:** §49.6's *"~ holds the array of lifted values"* and §49.6.1's `let result = ~` pattern, which
+> contradicted the first sentence of this subsection. This subsection's rule wins; the last bullet above is new.
 
 ### 32.7 Worked Examples
 
@@ -26978,9 +27047,14 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LOOP-002 | §49.9 | `continue` outside any loop | Error |
 | E-LOOP-003 | §49.9 | `break label` — label not found or not a loop | Error |
 | E-LOOP-004 | §49.9 | `continue label` — label not found or not a loop | Error |
-| E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary | Error |
+| E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary; ALSO (S469) a `break`/`continue` inside a loop bound as a value (§49.6, rule 6) that targets a loop outside it — **Nominal / spec-ahead for that limb, not yet emitted**. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"*; the boundary is a PA reading (fails closed). | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
-| E-LOOP-007 | §49.9 | `while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception | Error |
+| E-LOOP-007 | §49.9, §49.6 | **Rewritten S469.** A loop bound as a value (`const xs = for (…) { … };`, §49.6) whose body contains no `lift` on any path — its value could only be the empty tape. Binding a loop is otherwise legal from every head. The former meaning (*"`while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception"*) retires with `while` and the `~` pattern. **Nominal / spec-ahead — not yet emitted** in the rewritten meaning (impl#1 is frozen, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F5 *"Yes, specify it (Recommended)"* (*"E-LOOP-007 is rewritten"*). | Error |
+| E-LOOP-WHILE-RETIRED | §49.4.1, §49.9 | A `while (cond) { … }` statement — `while` retired S469; fix-it `for (cond) { … }` (`scrml fix` rewrites it). `while` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `while` as a carried legacy divergence, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
+| E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
+| E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
+| E-RANGE-BOUND-NOT-INT | §49.2.5, §49.9 | A range bound whose type is not `int`. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"*. | Error |
+| E-INDEX-OUT-OF-RANGE-RT | §49.13, §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
 | W-ASSIGN-001 | §50.4 | `=` in condition position without double parentheses | Warning |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
@@ -27187,7 +27261,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) Under §66 the derived cell is a LOCKED declaration with a reactive initializer (§66.9 rule 3), and on an unannotated cycle this code outranks `E-DECL-TYPE-NOT-INFERABLE` (§66.3 rule 8, S462 — ruling:user-voice-scrml.md S462 "go on the package"). (S462: also emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (the derived-cycle check, `derivedCycles`) — program cells, direct `@` reads; a cycle only through a function's body is not traced there — a divergence from §6.6.10's SHALL, filed `g-bootstrap-derived-cycle-through-function-s462`.) | Error |
 | E-USE-INVALID-CTX | §41.12 | `registerMessages(map)` (or another project-level registration API) called from a non-top-level context (inside a function body, inside a worker `<program>`). Registration must happen at app initialisation. (Stage 0b D4) | Error |
 | E-CTRL-011 | §17.4 | `for (... in ...)` is not a valid scrml loop form. scrml iterates values via `of`: `for (item of @items)`. The `in` keyword iterates object keys in JavaScript and does not appear in scrml's vocabulary. (Catalog addition S64 audit; emitted at `compiler/src/ast-builder.js:4087-4093, 6517-6519`) | Error |
-| E-FOR-UNPARENTHESIZED-HEAD | §17.4, §17.4a | (S308.) A braceless (unparenthesized) `for … of` loop head — `for x of @items { ... }` or `for x of @items lift ...` — written without the parentheses the canonical form requires (§17.4a `**Syntax:**` `for (let x of collection) { ... }`). The braceless-head parse branch handles only the legacy English `in` form (`for item in @items { ... }`, value-iteration); a braceless `of` is NOT consumed, so `collectExpr` mis-reads the iterable as the bare token `of` and codegen emits `for (const x of of)` — valid to `node --check`, but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). **Reject + recover:** fires this code once per offending head and RECOVERS by consuming the `of` and collecting the real iterable, so no broken loop is emitted and downstream analysis does not cascade. **Does NOT fire:** the canonical parenthesized `for (x of @items) { ... }`; the legacy braceless English `for item in @items { ... }` form (left unchanged); a `for (... in ...)` inside parentheses (that is `E-CTRL-011`). Emitted in the for-statement parse path at `compiler/src/ast-builder.js` (the braceless-head branch). Partitions into `result.errors`. | Error |
+| E-FOR-UNPARENTHESIZED-HEAD | §17.4, §17.4a | (S308.) A braceless (unparenthesized) `for … of` loop head — `for x of @items { ... }` or `for x of @items lift ...` — written without the parentheses the canonical form requires (§17.4a `**Syntax:**` `for (let x of collection) { ... }`). The braceless-head parse branch handles only the legacy English `in` form (`for item in @items { ... }`, value-iteration); a braceless `of` is NOT consumed, so `collectExpr` mis-reads the iterable as the bare token `of` and codegen emits `for (const x of of)` — valid to `node --check`, but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). **Reject + recover:** fires this code once per offending head and RECOVERS by consuming the `of` and collecting the real iterable, so no broken loop is emitted and downstream analysis does not cascade. **Does NOT fire:** the canonical parenthesized `for (x of @items) { ... }`; the legacy braceless English `for item in @items { ... }` form (left unchanged); a `for (... in ...)` inside parentheses (that is `E-CTRL-011`). Emitted in the for-statement parse path at `compiler/src/ast-builder.js` (the braceless-head branch). Partitions into `result.errors`. ⚑ **S469 — the legacy braceless `for item in @items { ... }` form is REMOVED** (ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F8 *"Remove (Recommended)"*) and is refused under this code with the fix-it `for (item of @items) { ... }`; the *"Does NOT fire: … the legacy braceless English `for item in @items { ... }` form (left unchanged)"* clause above is superseded. **Nominal / spec-ahead for that limb — not yet emitted** (impl#1 still accepts the form, §49.8). | Error |
 | E-CONDITION-HEAD-UNPARENTHESIZED | §49.2.3, §50.2.1, §50.2.3 | `provenance: spec:§50.2.3-the-outer-parens-are-the-while-condition's-required-parens` (S414.) **An `if` or `while` condition head whose outermost `(` closes and whose condition then CONTINUES past it** — `while (n + 1) < 4 { ... }`, `if (n + 1) < 4 { ... }`, `while (a) && (b) { ... }`. §49.2.1 (`'while' '(' expression ')'`) and §50.2.1 (`while-stmt`, `if-stmt-logic`) make the parens the CONDITION's own delimiters, and §50.2.3 says so in words — "the outer parens are the while condition's **required** parens" — so the parens must wrap the WHOLE condition and these heads are not legal. The canonical fix is `while (n + 1 < 4)` or `while ((n + 1) < 4)`. ⚑ **THE SYMPTOM WAS SILENT, WHICH IS WHY THIS IS AN ERROR AND NOT A WARNING.** The head collector stopped the instant the outermost `(` closed, so everything after the `)` was DROPPED — and because that remainder includes the `{`, the whole body went with it: `while (n + 1) < 4 { n = n + 1 }` emitted `while (n + 1) {\n}` at **exit 0 with zero diagnostics**, an infinite loop whenever the condition depends on the body; `if (n + 1) < 4 { n = 0 }` silently lost its branch the same way; `while (a) && (b) { ... }` produced no artifact and a confusing downstream `E-CODEGEN-INVALID-LOGIC`. ⚑ **ONE DEFECT, TWO ARRIVAL DATES, ONE ROOT.** `if` has used `collectIfCondition()` all along and truncated identically on both sides of #933; the three `while` parse sites inherited the truncation when #933 switched them there from `collectExpr("{")`. The fix is in the collector, so `if` and all three `while` sites close together. ⛔ **REJECT WITHOUT RECOVERY — and unlike `E-FOR-UNPARENTHESIZED-HEAD` above, this code deliberately does NOT repair the head.** It fires ONCE per offending head and the collector then stops at the closing `)`, exactly as it did before this code existed; whatever follows is parsed as whatever follows a condition. **The emitted output for an offending head is therefore NOT meaningful — the build fails, and a correct artifact for a failed build buys nothing.** Three successively tighter recovery bounds were implemented and withdrawn, each deleting or fabricating source in a NEW shape: (1) bounded at `{`/`;`/statement keywords, an IDENT stopped nothing, so `if (a) && (b) n = 1` plus a following `n = n + 5` ate BOTH statements; (2) plus a value/operator check that accepted ANY punct, so every punctuation-starting body was eaten — `(out = 7)` absorbed as a call argument, `!flag` deleted, and `++n`/`-n`/`.ok` deleted with `b++`/`b - n`/`b.ok` **INVENTED**; (3) plus a conservative operator set — but the bound knew "can this token follow a value", not "is this OPERAND FINISHED", so after an accepted operator the scan ate the operand HEAD and stopped at its SUFFIX, landing INSIDE the author's own condition: `if (a) && b[0] { out = 7 }` emitted `if (a && b) { [0]; }` with `out = 7` deleted, and `while (i) < n >> 1 { i = i + 1 }` emitted `while (i < n) { }` — **an infinite loop, where the non-recovering parse emits `while (i) { }`, which terminates.** Recovery reproduced the very defect this code is named after. The S308 precedent is not a counter-example: its recovery is a BOUNDED LOCAL REPAIR (consume one `of`, collect the iterable); an open-ended scan over arbitrary trailing tokens is a different thing. The precedent's principle is "do not cascade", and stopping at the `)` does not cascade — it is exactly the pre-existing parse. ⚑ **THE CONTINUATION SET IS DELIBERATELY CONSERVATIVE — DO NOT WIDEN IT.** The code fires only when the token immediately after the closing `)` is one of `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&` `||` `??` `*` `%` `?` — **all PUNCT, and that is the invariant.** **`/` is excluded and that exclusion is load-bearing:** a braceless `while` body may START WITH A REGEX LITERAL (`while (h) /a\sb/.test(c)`, pinned by `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`), and reading that `/` as division swallows the regex. `+` and `-` are excluded because they are also unary prefixes; `.`, `(` and `[` because each can also begin a statement; `:` because of labels and ternary alternates. ⚑ **`is` IS EXCLUDED TOO, AND A CUT THAT INCLUDED IT WAS A FALSE REJECTION.** The §11 type-test operator is the only continuation candidate that is WORD-shaped, so it is also a legal ordinary identifier — and the lexer classifies `is` context-free as KEYWORD (`tokenizer.ts` KEYWORDS) with a demotion pass for `match` ONLY. Nothing at this site can therefore distinguish `(x) is Foo` from a user's `function f(is) { if (n < 3) is(n) }`; MEASURED, both an IDENT-or-KEYWORD arm and a KEYWORD-only arm reject that program (which compiles on base) and DELETE the `is(n)` call. A set member that cannot fire correctly is worse than an absent one, so `is` is absent. Every excluded token keeps the pre-S414 behaviour exactly. **Does NOT fire:** `while (n + 1 < 4)` / `if (n + 1 < 4)` (condition fully inside the parens); `while ((n + 1) < 4)` (redundant inner parens, the outermost closes at the end of the head); the §50.2.3 double-parens assignment form `while ((x = expr))` / `if ((x = expr))`; the unparenthesized `while cond { ... }` form (it never reaches this branch — `collectIfCondition` falls back to `collectExpr("{")`); any braceless body (#933), **including one that starts with a regex literal**. ⚑ **Population at landing: ZERO of 2,553 tracked corpus `.scrml` files**, so this newly-rejecting change migrates nothing. Emitted in `collectIfCondition()` at `compiler/src/ast-builder.js`, which serves `parseOneIfStmt` and all three `while` parse sites. Partitions into `result.errors`. ⚑ **THE `export` SWALLOW IS CLOSED (S430).** Until S430 this code — like every ast-builder parse-path diagnostic — reached neither stream inside an `export`-ed declaration: the export synth re-parse (`ast-builder.js`, the `_subErrors` site) surfaced only `E-FN-EQUALS-BODY` and discarded the rest, and an exported GENERATOR (`export function *k`, `export function* k`, `export server function* k`) was not re-parsed at all, because the export-decl name matcher required `function <name>` and missed the `*`. Both are closed: the code now fires inside `export function` / `export function*` (every spelling) / `export fn` / `export server function` / `export pure fn`, and inside any `function` nested in one, exactly as it fires on the un-exported declaration. ⚑ **ONE REGION IS STILL NOT COVERED, AND IT IS NOT AN `export` ISSUE:** the body of a block-bodied arrow or function EXPRESSION (`const g = () => { … }`, `const g = function() { … }`, exported or not) is never statement-parsed by the ast-builder — it is carried as an escape-hatch expression — so no parse-path diagnostic fires inside it. For this head shape a WRITING build (`write: true`, the CLI) fails later as `E-CODEGEN-INVALID-LOGIC`; a non-writing compile (`write: false`) reports NOTHING and exits clean. (The S414 measurement listed `export const g = () => …` as a swallow case; it is this gap instead.) Closing the swallow newly failed 6 of 2,577 tracked corpus files (13 changed) — `docs/changes/s430-p2-export-swallow/`. Tests: `compiler/tests/unit/loop-head-truncated-at-first-close-paren.test.js`. | Error |
 | E-CONTROL-FLOW-IN-MARKUP | §17.4, §7 | (S203 — bare-control-flow-in-markup-diagnostic-2026-06-17.) A bare control-flow STATEMENT — `for (...) { ... }`, `if (...) { ... }`, or `while (...) { ... }` — appears directly in a **markup body** without being wrapped in a `${ ... }` logic block. Per §17.4 (Tier-0 iteration is `${ for/lift }`) and §7 (control flow lives in a logic context), control flow in a markup body MUST be inside a `${ ... }` logic block. A bare `for`/`if`/`while` directly in a markup body is NOT recognised as logic (the §40.8 default-logic auto-lift fires only at `<program>`/`<page>`/`<channel>` direct-child roots, never nested markup; `BARE_DECL_RE` matches declaration keywords only) — pre-fix the whole construct, INCLUDING its inner `${...}` interpolations, was classified as inert `[text]` and SHIPPED RAW into the DOM (a silent-accept). **Reject + recover** (user ruling (a), S203): fires this code ONCE per offending construct and RECOVERS by dropping the raw-text emission — the construct ships NEITHER `for(){}` NOR `${...}` into the DOM. **Does NOT fire:** the canonical `${ for (...) { lift ... } }` form (a `${ }` logic block, not a markup text run); a `<program>`/`<page>`/`<channel>` direct-child default-logic root — ⚑ **NOT because that locus is safe, but because this diagnostic does not reach it: see the S378 correction at the end of this row. Do not read this entry as coverage**; an `if=`/`show=`/`else-if=` attribute condition (§17.0 — an attribute, not a body construct); the `<each>`/`<match>` structural elements; or control flow already inside a `${ }` / logic block. The diagnostic suggests the canonical `<ul>${ for (x of @items) { lift <li>${x}</> } }</>` (Tier-0, §17.4) and names the Tier-1 `<each in=@items>` alternative (§17.7). Sibling of E-UNQUOTED-DISPLAY-TEXT (§4.18.7, S111) — a "bare X in a body that needs a specific wrapping" diagnostic. Emitted by `liftBareDeclarations` at `compiler/src/ast-builder.js` (the markup-text recognition site, gated `parentType === "markup"`; see `BARE_CONTROL_FLOW_IN_MARKUP_RE`). Partitions into `result.errors`. ⚑ **S378 CORRECTION (Rule 4), AND THE HOLE IT EXPOSES IS OPEN.** This row previously listed the default-logic root under **Does NOT fire** giving as its reason that *"the §40.8 auto-lift handles it."* **It does not** — `parentType === "markup"` is the COMPLEMENT of the §40.8 locus, and the auto-lift covers DECLARATIONS only (§40.8, S123 amendment), so that locus is covered by **NEITHER** the lift nor this code: `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into `<body>` as page text, taking with it every diagnostic its contents would have raised. Ruling 3 (user-voice **S375**) directed BOTH halves — correct the claim, and extend the diagnostic to this locus. ⚑ **THE CORRECTION IS LANDED HERE; THE EXTENSION IS HELD** (bryan, **S383**: *"land the stable half"*), so **this row describes ONE locus — a markup body — and that is the current, complete truth of what fires.** The extension was held because extending the LOCUS does not extend the COVERAGE: the recognizer requires a `{`, and at the pre-existing markup locus `if (@a) log(1)`, `switch (@a) { }`, `outer: for (…) { … }` and `do { … } while (@a)` all ship raw source into the DOM today. A braceless control-flow statement cannot be separated from prose by any text-level recognizer — `if (@a) log(1)` vs `if (you ask) we deliver` differ only in whether the tail is code or prose — and prose at a default-logic body-top renders and is a working shape (S368 refused *"diagnose every non-declaration run"* on exactly that ground). **Closing the class is a grammar-derived arc over the parsed tree, and a wider regex is not it.** Problem statement + fixture corpus + the recognizer post-conditions earned across five review rounds: `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. Direction of change when it lands: **newly-rejecting**, owing its own measured migration. ⛑ **S441 — the default-logic half of this hole is CLOSED at the root, not by this code.** A `<program>` / `<page>` / `<channel>` body is code (§40.8 S441 bullet): a bare control-flow statement at its body-top — braced or braceless, `switch`, labelled, `do`/`while` — is parsed as a statement, so it is checked exactly as inside `${ … }` and never ships as page text. `E-CONTROL-FLOW-IN-MARKUP` still names ONE locus, a plain markup body, and its braceless gap there is unchanged. | Error |
 | E-EACH-BODY-DECL-UNSUPPORTED | §17.7.3, §17.7.2 | A `let` / `const` / `function` DECLARATION appears in an `<each>` body interpolation (`${ let nm = @.name }`). The each-body scope (§17.7.3) is the `@.` contextual sigil plus an optional `as` alias — NOT author-declared locals. The decl has no `exprNode`/`raw`, so codegen dropped it silently, while a later `${nm}` still lowered to a bare `String(nm)`: a dangling reference that throws inside the per-item render factory and renders the WHOLE list empty, at exit-0 with no diagnostic (a silent-broken bundle). **Reject (fail-closed), user ruling S339:** fires once per offending decl and returns, so no broken render is emitted. **Does NOT fire:** a bare field-read interpolation (`${@.field}`, or `${x.field}` with `as x`); a declaration OUTSIDE the `<each>` (the ordinary lift); a non-declaration `${expr}`. Supporting author locals in an each body (replay the binding into the per-item factory closure, like the for-lift path) is a separate §17.7.3 language-surface ruling — this row REJECTS until such a ruling lands; it does not forbid the feature. (Catalog addition S339 (peter); emitted at `compiler/src/codegen/emit-each.ts` in the logic-child handler; partitions into `result.errors`.) | Error |
@@ -27917,7 +27991,7 @@ for (const item of items) {
 
 **Normative statements:**
 
-- A `lin` variable from an outer scope consumed inside any loop body (`for`, `while`, `do...while`) SHALL be a compile error (E-LIN-002).
+- A `lin` variable from an outer scope consumed inside any loop body (a `for` with any head, §49) SHALL be a compile error (E-LIN-002). *(Amendment S469 — supersedes "(`for`, `while`, `do...while`)"; `while` and `do...while` retired, ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*.)*
 - A `lin` variable declared inside a loop body and consumed within the **same iteration** SHALL be valid (loop-body carve-out, §34.4.4.1).
 - A `lin` variable declared inside a loop body that is NOT consumed before the iteration scope ends SHALL be a compile error (E-LIN-001).
 - The compiler SHALL verify, for each loop-local `lin` variable, that exactly one consumption appears on every path before the iteration scope exits.
@@ -33756,9 +33830,13 @@ fn-prefix       ::= 'fn' | 'export fn' | 'pure fn' | 'server fn'
 fn-params       ::= '(' param-list ')'
 fn-body         ::= '{' fn-statement* '}'
 fn-statement    ::= let-decl | const-decl | lin-decl | if-stmt | match-expr
-                  | for-stmt | while-stmt | do-while-stmt | return-stmt
+                  | for-stmt | return-stmt                  (* for-stmt: §49.2.1 *)
                   | local-fn-decl | lift-stmt | expression-stmt
 ```
+
+> **Amendment S469 — `while-stmt` and `do-while-stmt` leave `fn-statement`; `for-stmt` is defined at §49.2.1.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F1 *"One `for` (Recommended)"*; defect 1 of the loops deep-dive §4.2.
+> **supersedes:** *"| for-stmt | while-stmt | do-while-stmt | return-stmt"*.
 
 `fn` declarations are valid:
 - Inside any logic context `${ }` body.
@@ -35261,20 +35339,20 @@ for (i of 0..1.5) { log(i); }     // Error E-RANGE-BOUND-NOT-INT
 
 ## 49.10 Error Code Summary
 
-| Code | Condition | Severity |
-|---|---|---|
-| E-LOOP-001 | `break` appears outside any loop | Error |
-| E-LOOP-002 | `continue` appears outside any loop | Error |
-| E-LOOP-003 | `break label` — label not found or not a loop | Error |
-| E-LOOP-004 | `continue label` — label not found or not a loop | Error |
-| E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error |
-| E-LOOP-006 | Duplicate label identifier within the same function scope | Error |
-| E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error |
-| E-LOOP-WHILE-RETIRED | A `while` statement (retired S469) | Error |
-| E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error |
-| E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error |
-| E-RANGE-BOUND-NOT-INT | A range bound that is not an `int` | Error |
-| E-INDEX-OUT-OF-RANGE-RT | An index read out of range, at run time (§49.13, §19.17) | Runtime |
+| Code | Condition | Severity | Status |
+|---|---|---|---|
+| E-LOOP-001 | `break` appears outside any loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
+| E-LOOP-002 | `continue` appears outside any loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
+| E-LOOP-003 | `break label` — label not found or not a loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
+| E-LOOP-004 | `continue label` — label not found or not a loop | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
+| E-LOOP-005 | `break`/`continue` crosses a function boundary, or leaves a bound loop for a loop outside it | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-LOOP-006 | Duplicate label identifier within the same function scope | Error | rule unchanged; for the S469 heads Nominal / spec-ahead |
+| E-LOOP-007 | A loop bound as a value lifts nothing on any path (rewritten S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-LOOP-WHILE-RETIRED | A `while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-RANGE-BOUND-NOT-INT | A range bound that is not an `int` | Error | S469 — Nominal / spec-ahead, not yet emitted |
+| E-INDEX-OUT-OF-RANGE-RT | An index read out of range, at run time (§49.13, §19.17) | Runtime | S469 — Nominal / spec-ahead, not yet emitted |
 
 All compile-time codes above are reported after AST construction and scope resolution, in the loop control-flow
 validation pass. The rows new or changed in S469 are **Nominal / spec-ahead** (§49.8).
@@ -35530,6 +35608,12 @@ read today.
 **Added:** 2026-04-07. Motivated by self-hosting the compiler's `ast-builder.js`, which uses the `while ((m = re.exec(str)) is given)` regex iteration pattern throughout (scrml form; the underlying JS API returns `null`/match-array and the JS-interop boundary per §42.9 surfaces the `null` outcome as `not`). Without assignment-as-expression, these patterns require a rewrite into a less natural two-statement form that diverges from idiomatic algorithmic code.
 
 **S89 normative refresh (2026-05-13):** The original §50 (2026-04-07) presented this pattern using `!== null` literals. Per the §42 canonical rule (`null` is NOT a valid scrml token in any source position), the canonical scrml form is `is given` (presence check; written `is some` until S462, which soft-deprecated that spelling — §42.2.2a) — both forms compile to equivalent JavaScript after the §42.9 interop boundary normalises `null` ⇒ `not`.
+
+> **Amendment S469 — this section's `while` examples are read as `for (cond)`.** `while` retired (§49.1); a
+> `while (c) { … }` below is the condition-head loop `for (c) { … }`, so the canonical regex idiom is
+> `for ((m = re.exec(str)) is given) { … }`. The assignment-as-expression rules are unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" — F1 *"One `for` (Recommended)"*. **supersedes:** nothing in §50's rules; the
+> `while` spelling of its examples only.
 
 ### 50.1 Overview
 
@@ -48215,7 +48299,7 @@ using only non-mutating operations). Permissions are therefore **axes**, checkab
 
 | Axis | Values |
 |---|---|
-| **length** | fixed · bounded (e.g. `1..10`) · free |
+| **length** | fixed · bounded (e.g. `1..=10`) · free |
 | **where it changes** | grow and shrink, granted SEPARATELY at each place: end (`append` · `pop`) · front (`prepend` · `shift`) · anywhere (`insert` · `remove`) — `anywhere` covers end and front |
 | **positions** | read-only · writable |
 | **position types** | uniform (an array) · per-position (a tuple) |
@@ -48248,6 +48332,12 @@ A stack grants both halves at the end — `Frame[free, append, pop]`. An append-
 `Entry[free, append]` (§66.19.5). A splice changes anywhere: its removals are a shrink-anywhere (`remove`), its
 insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in is still ⚑ O10; the six
 tokens are ruled.)
+
+> **Amendment S469 — the bounded-length token uses the range glyphs.** `a..b` is half-open and `a..=b` inclusive,
+> exactly as in a loop head (§49.2.5), so a length of up to 10 is `1..=10`. **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3
+> *"`..` and `..=` (Recommended)"* (*"Ruled together with the O10 bounded-length token (`1..10` → `1..=10` where it
+> means "up to 10")"*). **supersedes:** *"bounded (e.g. `1..10`)"*. The rest of O10 — the bracket form itself,
+> `free` / `writable` / `replace` — stays open.
 
 #### 66.12.3 Permissions live on the TYPE
 
@@ -49414,7 +49504,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
-| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens, the bounded-length token (`1..10`). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
+| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens. The bounded-length token's glyphs are RULED S469 (`1..=10`, §66.12.2; ruling:user-voice-scrml.md S469 F3 *"`..` and `..=` (Recommended)"*). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
 | O12 (MOOT for tapes, S469) | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). S469: a legacy tape cell is an error with no window, so O12 no longer concerns tapes; it remains for impl#1's legacy path and for scalar / struct legacy cells. |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
 | O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). **Record lag:** ruled S440 in user-voice (*"take it, next Q"* — value contracts govern LOCAL values); that text has not landed at §66.11.7. §66.12.6 (S469) states it for tapes. |
