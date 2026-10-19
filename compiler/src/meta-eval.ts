@@ -59,7 +59,7 @@ import { CUSTOM_ELEMENT_NAME_PATTERN } from "./html-elements.js";
 import { scanRawContentForRefusedTags } from "./element-refusal.ts";
 // The ONE reader of `match` arm syntax (§18) — shared with the runtime lowering, so a compile-time
 // `match` is read exactly as the same arms are read everywhere else.
-import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockBinding, type MatchArm } from "./codegen/emit-control-flow.ts";
+import { matchArmInlineToMatchArm, parseMatchArm, splitMultiArmString, armCondition, matchArmBlockToMatchArm, type MatchArm } from "./codegen/emit-control-flow.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -373,13 +373,9 @@ function readMetaMatchArms(node: Record<string, unknown>): Array<MatchArm & { ex
     const child = c0 as Record<string, unknown>;
     if (child.kind === "comment") continue;
     if (child.kind === "match-arm-block") {
-      arms.push({
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: (child.variant as string | null) ?? null,
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : [],
-      });
+      // The shared block-arm reader (literal / alternation heads included, S468).
+      const arm = matchArmBlockToMatchArm(child);
+      arms.push({ ...arm, structuredBody: arm.structuredBody ?? [] });
       continue;
     }
     if (child.kind === "match-arm-inline") {
@@ -389,8 +385,11 @@ function readMetaMatchArms(node: Record<string, unknown>): Array<MatchArm & { ex
       arms.push(exprText !== undefined ? { ...arm, exprText } : arm);
       continue;
     }
-    // A literal block arm (`"a" :> { … }`) and a literal alternation (`"b" | "c" :> …`) reach
-    // here as raw arm text — the same text the runtime lowering reads with the same reader.
+    // An arm the AST builder keeps as raw arm text (since S468 only a head it does not read
+    // structurally — literal and variant alternates mixed, or an alternate with a payload
+    // binding) is read with the same reader the runtime lowering uses. Literal / alternation
+    // arms are `match-arm-block` / `match-arm-inline` nodes (ast-builder.js Form 4 / Inline
+    // Form 6) and take the branches above.
     if (child.kind === "bare-expr" && typeof child.expr === "string" && child.expr.trim()) {
       for (const armText of splitMultiArmString(child.expr.trim().replace(/-\s*>/g, "->"))) {
         const arm = parseMatchArm(armText);

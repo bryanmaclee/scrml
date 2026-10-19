@@ -1,0 +1,759 @@
+/**
+ * s468-literal-arm-block-parsed.test.js — S468 P0 (gap g-literal-arm-block-body-unparsed-s468).
+ *
+ * A `match` arm whose head is not a single `.Variant` / `else` / `not` — a §18.16
+ * literal arm (`1 :>`, `-1 :>`, `"bob" :>`, `true :>`), an alternation (`1 | 2 :>`,
+ * `.A | .B :>`), the `_` wildcard alias with a block body, the `::V` alias with a
+ * block body — used to be kept by the AST builder as ONE `bare-expr` holding the
+ * whole arm TEXT, whose exprNode was the leading literal alone. No stage after the
+ * parser saw the statements in its body, so `1 :> { const g = check … g(pass, hash) }`
+ * (a waiting function aliased, §13.9.6) was neither refused nor awaited (§13.2): the
+ * server tested a Promise and accepted a wrong password.
+ *
+ * The fix is in the parser (ast-builder.js Form 4 / Inline Form 6): the body is
+ * parsed into statements like every other arm kind, and the head is recorded from
+ * its tokens (`literals` / `alternates` / `isWildcard` / `variant`). Every match
+ * lowering reads the head through one reader (`matchArmBlockToMatchArm`,
+ * `matchArmInlineToMatchArm`).
+ *
+ * This file pins (A) the AST shape per head form, (B) runtime dispatch of every
+ * head form in a library module, executed, (C) the analyses now reading the body
+ * (§13.9.6 refusal, §42.2.3 E-SYNTAX-043 after a literal arm, §18.8 coverage of a
+ * variant alternation block arm). The wrong-password probes themselves live in
+ * the security-await-pack family `la1`.
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { splitBlocks } from "../../src/block-splitter.js";
+import { buildAST } from "../../src/ast-builder.js";
+import { compileScrml } from "../../src/api.js";
+
+let TMP;
+beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s468-litarm-")); });
+afterAll(() => { if (TMP) rmSync(TMP, { recursive: true, force: true }); });
+
+/** The arms of every `match` in `src`, in source order. */
+function matchArms(src) {
+  const r = buildAST(splitBlocks("t.scrml", src));
+  const out = [];
+  const seen = new Set();
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if ((n.kind === "match-stmt" || n.kind === "match-expr") && Array.isArray(n.body)) out.push(n.body);
+    for (const k of Object.keys(n)) visit(n[k]);
+  };
+  visit(r.ast ?? r);
+  return out;
+}
+
+/** The parser's error codes for `src`. */
+function parseErrorCodes(src) {
+  const r = buildAST(splitBlocks("t.scrml", src));
+  return (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error").map((e) => e.code);
+}
+
+const inFn = (matchSrc) => `<program>\n\${\n  type K:enum = { A, B, C }\n  function f(n, s, b, k) {\n${matchSrc}\n    return 0\n  }\n}\n</program>\n`;
+
+describe("(A) AST: every arm head with a `{ … }` body is a match-arm-block with a parsed body", () => {
+  const cases = [
+    ["number", `1 :> { const g = 1\n        return g }`, { literals: ["1"], isWildcard: false, variant: null }, ["const-decl", "return-stmt"]],
+    ["negative number", `-2 :> { return 2 }`, { literals: ["-2"] }, ["return-stmt"]],
+    ["hex number", `0x1F -> { return 4 }`, { literals: ["0x1F"], armArrow: "->" }, ["return-stmt"]],
+    ["double-quoted string", `"bob" => { return 1 }`, { literals: ['"bob"'], armArrow: "=>" }, ["return-stmt"]],
+    ["single-quoted string", `'al' :> { return 2 }`, { literals: ["'al'"] }, ["return-stmt"]],
+    ["boolean", `true :> { return 1 }`, { literals: ["true"] }, ["return-stmt"]],
+    ["number alternation", `3 | 4 :> { return 3 }`, { literals: ["3", "4"], pattern: "3 | 4" }, ["return-stmt"]],
+    ["string alternation", `"a" | "b" :> { return 3 }`, { literals: ['"a"', '"b"'] }, ["return-stmt"]],
+    ["variant alternation", `.A | .B :> { return 1 }`, { alternates: ["A", "B"], variant: null }, ["return-stmt"]],
+    ["variant alternation with discards", `.A(_) | .B :> { return 1 }`, { alternates: ["A", "B"] }, ["return-stmt"]],
+    ["`_` wildcard", `_ :> { return 5 }`, { isWildcard: true }, ["return-stmt"]],
+    ["alternation holding `_`", `_ | .A :> { return 5 }`, { isWildcard: true }, ["return-stmt"]],
+    ["`::V` alias", `::C :> { return 2 }`, { variant: "C", isWildcard: false }, ["return-stmt"]],
+  ];
+  for (const [name, arm, fields, bodyKinds] of cases) {
+    test(name, () => {
+      const [arms] = matchArms(inFn(`    match n {\n      ${arm}\n      else :> { return 9 }\n    }`));
+      const a = arms[0];
+      expect(a.kind).toBe("match-arm-block");
+      for (const [k, v] of Object.entries(fields)) expect(a[k]).toEqual(v);
+      expect(a.body.map((s) => s.kind)).toEqual(bodyKinds);
+    });
+  }
+
+  test("`::V(binding) :> { … }` takes Form 1b (the payload binding is scoped into the body)", () => {
+    const [arms] = matchArms(inFn(`    match k {\n      ::A(x) :> { return x }\n      else :> { return 9 }\n    }`));
+    expect(arms[0].kind).toBe("match-arm-block");
+    expect(arms[0].variant).toBe("A");
+    expect(arms[0].payloadBindings).toEqual(["x"]);
+  });
+
+  test("a value-position `match` reads the same way", () => {
+    const [arms] = matchArms(inFn(`    const v = match n {\n      1 :> { const q = 2\n        q }\n      else :> 0\n    }`));
+    expect(arms[0].kind).toBe("match-arm-block");
+    expect(arms[0].literals).toEqual(["1"]);
+    expect(arms[0].body.map((s) => s.kind)).toEqual(["const-decl", "bare-expr"]);
+  });
+
+  test("outside a match body, `_ => { … }` is still an arrow function (no arm form there)", () => {
+    const r = buildAST(splitBlocks("t.scrml", `<program>\n\${\n  function f() {\n    const h = _ => { return 1 }\n    return h(0)\n  }\n}\n</program>\n`));
+    const json = JSON.stringify(r.ast ?? r);
+    expect(json.includes('"match-arm-block"')).toBe(false);
+  });
+
+  // S468 r1 (F4/F5) — a head the compiler cannot classify is REFUSED (it used to be
+  // kept as text that codegen silently dropped, failing open).
+  for (const [name, head] of [
+    ["literal and variant alternates mixed", ".A | 1 :>"],
+    ["string and variant alternates mixed", `"bob" | .A :>`],
+    ["a template literal", "`bob` :>"],
+    ["a template literal with an interpolation", "`${s}` :>"],
+    ["`not` inside an alternation", "1 | not :>"],
+    ["a parenthesized single pattern", "(1) :>"],
+  ]) {
+    test(`unclassifiable head is E-PARSE-001: ${name} (block and single-expression body)`, () => {
+      expect(parseErrorCodes(inFn(`    match n {\n      ${head} { return 1 }\n      else :> { return 9 }\n    }`))).toContain("E-PARSE-001");
+      expect(parseErrorCodes(inFn(`    const v = match n {\n      ${head} 1\n      else :> 9\n    }`))).toContain("E-PARSE-001");
+    });
+  }
+
+  test("an alternation holding `_` stays the wildcard arm (not refused) even when mixed", () => {
+    const src = inFn(`    match n {\n      1 | .A | _ :> { return 1 }\n    }`);
+    expect(parseErrorCodes(src)).not.toContain("E-PARSE-001");
+    expect(matchArms(src)[0][0].isWildcard).toBe(true);
+  });
+
+  // S468 r1 (F3) — a comment in an arm head is trivia: the arm is read as without it.
+  for (const [name, head, field, value] of [
+    ["block comment before the arrow", "1 /* c */ :>", "literals", ["1"]],
+    ["block comment after the arrow", "1 :> /* c */", "literals", ["1"]],
+    ["line comment before the arrow", "1 // c\n      :>", "literals", ["1"]],
+    ["comment between alternates", "1 | /* c */ 2 :>", "literals", ["1", "2"]],
+    ["comment after a string head", `"bob" /* c */ :>`, "literals", ['"bob"']],
+    ["comment after a variant", ".A /* c */ :>", "variant", "A"],
+    ["comment after `else`", "else /* c */ :>", "isWildcard", true],
+    ["comment after `_`", "_ /* c */ :>", "isWildcard", true],
+  ]) {
+    test(`comment in an arm head: ${name}`, () => {
+      const src = inFn(`    match n {\n      2 :> { return 2 }\n      ${head} { const g = 1\n        return g }\n    }`);
+      expect(parseErrorCodes(src)).toEqual([]);
+      const arm = matchArms(src)[0][1];
+      expect(arm.kind).toBe("match-arm-block");
+      expect(arm[field]).toEqual(value);
+      expect(arm.body.map((s) => s.kind)).toEqual(["const-decl", "return-stmt"]);
+    });
+  }
+
+  // S468 r1 (F1) — an object-literal block arm carries the OBJECT tree on its body, read by
+  // the one reader shared with the type checker and codegen.
+  test("an object-literal block arm's body holds the object tree (every analysis sees its values)", () => {
+    const [arms] = matchArms(inFn(`    const v = match n {\n      1 :> { g: k, h: [b] }\n      .A :> { g: k }\n      else :> { z: 0 }\n    }`));
+    for (const arm of arms) {
+      expect(arm.kind).toBe("match-arm-block");
+      expect(arm.body).toHaveLength(1);
+      expect(arm.body[0].objectLiteralArm).toBe(true);
+      expect(arm.body[0].exprNode.kind).toBe("object");
+    }
+  });
+});
+
+describe("(A) AST: a single-expression literal / alternation arm is a match-arm-inline with a parsed result", () => {
+  const cases = [
+    ["number", `1 :> drive(n)`, { test: "1", literals: ["1"] }],
+    ["negative number", `-1 :> drive(n)`, { literals: ["-1"] }],
+    ["boolean", `false :> drive(n)`, { literals: ["false"] }],
+    ["number alternation", `1 | 2 :> drive(n)`, { test: "1 | 2", literals: ["1", "2"] }],
+    ["string alternation", `"a" | "b" :> drive(n)`, { literals: ['"a"', '"b"'] }],
+    ["variant alternation", `.A | .B :> drive(n)`, { test: ".A | .B", alternates: ["A", "B"] }],
+    ["alternation holding `_`", `.A | _ :> drive(n)`, { test: "else" }],
+  ];
+  for (const [name, arm, fields] of cases) {
+    test(name, () => {
+      const [arms] = matchArms(inFn(`    const v = match n {\n      ${arm}\n      else :> 0\n    }`));
+      const a = arms[0];
+      expect(a.kind).toBe("match-arm-inline");
+      for (const [k, v] of Object.entries(fields)) expect(a[k]).toEqual(v);
+      expect(a.result.replace(/\s+/g, "")).toBe("drive(n)");
+      expect(a.resultExpr?.kind).toBe("call");
+    });
+  }
+});
+
+function compileLib(name, source) {
+  const filePath = join(TMP, `${name}.scrml`);
+  writeFileSync(filePath, source.endsWith("\n") ? source : source + "\n");
+  const outDir = join(TMP, `${name}.dist`);
+  const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, mode: "library", write: true, validateEmit: true, log: () => {} });
+  const errors = (result.errors || []).filter((e) => e.severity == null || e.severity === "error");
+  const libPath = join(outDir, `${name}.js`);
+  return { errorCodes: errors.map((e) => e.code), libPath, libraryJs: existsSync(libPath) ? readFileSync(libPath, "utf8") : "" };
+}
+const loadLib = (p) => import(`${pathToFileURL(p).href}?t=${Date.now()}`);
+
+describe("(B) runtime: every head form dispatches correctly (library module, executed)", () => {
+  test("statement-position block arms: literal, negative, hex, string, boolean, alternations, `_`", async () => {
+    const r = compileLib("stmt", `export fn num(n: int) {
+  let r = "none"
+  match n {
+    1 :> { const t = "one"
+      r = t }
+    -1 :> { r = "minus one" }
+    0x1F :> { r = "thirty-one" }
+    2 | 3 :> { r = "two-or-three" }
+    _ :> { r = "other" }
+  }
+  return r
+}
+export fn str(s: string) {
+  let r = "none"
+  match s {
+    "bob" :> { r = "B" }
+    'al' | "cy" :> { r = "AC" }
+    else :> { r = "?" }
+  }
+  return r
+}
+export fn bool(b: boolean) {
+  let r = "none"
+  match b {
+    true :> { r = "T" }
+    false :> { r = "F" }
+  }
+  return r
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect([m.num(1), m.num(-1), m.num(31), m.num(2), m.num(3), m.num(7)]).toEqual(["one", "minus one", "thirty-one", "two-or-three", "two-or-three", "other"]);
+    expect([m.str("bob"), m.str("al"), m.str("cy"), m.str("zed")]).toEqual(["B", "AC", "AC", "?"]);
+    expect([m.bool(true), m.bool(false)]).toEqual(["T", "F"]);
+  });
+
+  test("value-position block arms lift their tail; object-literal arms are values", async () => {
+    const r = compileLib("value", `export fn pick(n: int) {
+  const v = match n {
+    1 :> { const base = "gr"
+      base + "een" }
+    2 | 3 :> { "few" }
+    else :> "many"
+  }
+  return v
+}
+export const OBJ = match 1 { 1 :> { x: 1 } _ :> { y: 2 } }
+export fn ret(n: int) { return match n { 1 :> { const q = 10
+      q + 1 } _ :> 0 } }`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect([m.pick(1), m.pick(2), m.pick(3), m.pick(4)]).toEqual(["green", "few", "few", "many"]);
+    expect(m.OBJ).toEqual({ x: 1 });
+    expect([m.ret(1), m.ret(5)]).toEqual([11, 0]);
+  });
+
+  test("variant alternation and `::V` block arms over an enum (previously `::V :> { … }` never matched)", async () => {
+    const r = compileLib("variant", `export type K:enum = { A, B, C }
+export fn k(x: K) {
+  let r = "none"
+  match x {
+    .A | .B :> { r = "AB" }
+    ::C :> { r = "C" }
+  }
+  return r
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    // An enum value in a library module is its variant tag (unit variants).
+    expect([m.k("A"), m.k("B"), m.k("C")]).toEqual(["AB", "AB", "C"]);
+  });
+
+  test("single-expression literal / alternation arms (Inline Form 6)", async () => {
+    const r = compileLib("inline", `export fn lab(n: int) {
+  const v = match n {
+    1 :> "one"
+    -1 :> "minus"
+    2 | 3 :> "few"
+    else :> "many"
+  }
+  return v
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect([m.lab(1), m.lab(-1), m.lab(2), m.lab(3), m.lab(9)]).toEqual(["one", "minus", "few", "few", "many"]);
+  });
+
+  test("S468 r1 (F2): a multi-scrutinee `_` / `else` BLOCK arm runs its body (it was dropped)", async () => {
+    const r = compileLib("multiwild", `export fn stmt(a: int, b: int) {
+  let r = "none"
+  match (a, b) {
+    (1, 2) :> { r = "one-two" }
+    _ :> { const t = "wild"
+      r = t }
+  }
+  return r
+}
+export fn decl(a: int, b: int) {
+  const v = match (a, b) {
+    (1, 2) :> "one-two"
+    else :> { const t = a + b
+      t }
+  }
+  return v
+}
+export fn ret(a: int, b: int) {
+  return match (a, b) {
+    (1, 2) :> "one-two"
+    _ :> { const t = "w"
+      t + "ild" }
+  }
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect([m.stmt(1, 2), m.stmt(3, 4)]).toEqual(["one-two", "wild"]);
+    expect([m.decl(1, 2), m.decl(3, 4)]).toEqual(["one-two", 7]);
+    expect([m.ret(1, 2), m.ret(3, 4)]).toEqual(["one-two", "wild"]);
+  });
+});
+
+function compileApp(name, source) {
+  const filePath = join(TMP, `${name}.scrml`);
+  writeFileSync(filePath, source);
+  const result = compileScrml({ inputFiles: [filePath], outputDir: join(TMP, `${name}.dist`), write: false, log: () => {} });
+  return (result.errors || []).filter((e) => e.severity == null || e.severity === "error").map((e) => e.code);
+}
+
+describe("(C) the analyses read a literal arm's body", () => {
+  test("§13.9.6: a waiting function aliased inside a literal block arm is refused", () => {
+    const codes = compileApp("f4", `<program>
+\${
+  import { verifyPassword } from "scrml:auth"
+  function run(p: string, h: string) {
+    const n = 1
+    match n {
+      1 :> { const g = verifyPassword
+        return g(p, h) }
+      else :> { return false }
+    }
+    return false
+  }
+}
+<button onclick={ run("a", "b") }>go</button>
+</program>
+`);
+    expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  });
+
+  test("§13.2: a waiting function passed from a single-expression literal arm is refused", () => {
+    const codes = compileApp("f4inline", `<program>
+\${
+  import { verifyPassword } from "scrml:auth"
+  function drive(cb, p, h) { if (cb(p, h)) { return true }
+    return false }
+  function run(p: string, h: string) {
+    const n = 1
+    const ok = match n {
+      1 | 2 :> drive(verifyPassword, p, h)
+      else :> false
+    }
+    return ok
+  }
+}
+<button onclick={ run("a", "b") }>go</button>
+</program>
+`);
+    expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+  });
+
+  test("§4: a forbidden statement inside a client literal arm is refused as at top level (was shipped verbatim)", () => {
+    const codes = compileApp("sw", `<program>
+\${
+  <msg> = ""
+  function cl(k: string) {
+    let r = "n"
+    match (k) {
+      "a" :> { switch (k) { case "a": r = "sw" } }
+      else :> { r = "n" }
+    }
+    @msg = r
+  }
+}
+<button onclick={ cl("a") }>go</button>
+<p>\${@msg}</p>
+</program>
+`);
+    expect(codes).toContain("E-SWITCH-FORBIDDEN");
+  });
+
+  test("a nested match inside a string arm's block lowers on the client (was E-CODEGEN-INVALID-LOGIC)", () => {
+    const codes = compileApp("nested", `<program>
+\${
+  <ok>: boolean = false
+  <msg> = ""
+  function post(name: string, pass: string) {
+    @ok = pass == "x"
+    const k: string = name
+    match (k) {
+      "bob" :> { const b: boolean = @ok
+        match (b) { true :> { @msg = "ok" } else :> { @msg = "no" } } }
+      else :> { @msg = "x" }
+    }
+  }
+}
+<button onclick={ post("bob", "x") }>go</button>
+<p>\${@msg}</p>
+</program>
+`);
+    expect(codes).toEqual([]);
+  });
+
+  test("a function called only from a top-level single-expression arm is not W-DEAD-FUNCTION (literal, `_`)", () => {
+    const filePath = join(TMP, "dead.scrml");
+    writeFileSync(filePath, `\${
+    let n = 3
+    match n {
+        0 :> handleZero()
+        1 | 2 :> handleOne()
+        _ :> handleOther()
+    }
+    function handleZero()  { let _ = 1 }
+    function handleOne()   { let _ = 1 }
+    function handleOther() { let _ = 1 }
+}
+<program>
+    <p>ok</>
+</>
+`);
+    const result = compileScrml({ inputFiles: [filePath], outputDir: join(TMP, "dead.dist"), write: false, log: () => {} });
+    const all = [...(result.errors ?? []), ...(result.warnings ?? [])];
+    expect(all.filter((e) => e.code === "W-DEAD-FUNCTION").map((e) => e.message)).toEqual([]);
+  });
+
+  for (const [name, arms] of [
+    ["literal", `1 :> { g: verifyPassword }\n      else :> { g: verifyPassword }`],
+    ["variant", `.A :> { g: verifyPassword }\n      else :> { g: verifyPassword }`],
+    ["nested array", `1 :> { g: [verifyPassword] }\n      else :> { g: [verifyPassword] }`],
+  ]) {
+    test(`§13.2: an async function stored in an object-literal block arm (${name}) is refused`, () => {
+      const subj = name === "variant" ? "const n: K = .A" : "const n = 1";
+      const codes = compileApp(`objarm-${name.replace(/\s+/g, "-")}`, `<program>
+\${
+  import { verifyPassword } from "scrml:auth"
+  type K:enum = { A, B }
+  function run(p: string, h: string) {
+    ${subj}
+    const o = match n {
+      ${arms}
+    }
+    return o
+  }
+}
+<button onclick={ run("a", "b") }>go</button>
+</program>
+`);
+      expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    });
+  }
+
+  test("§18.8: a variant alternation block arm covers every alternate (no false E-TYPE-020)", () => {
+    const ok = compileApp("cover", `<program>
+\${
+  type K:enum = { A, B, C }
+  <msg> = ""
+  function g(x: K) {
+    match x {
+      .A | .B :> { @msg = "ab" }
+      .C :> { @msg = "c" }
+    }
+  }
+}
+<button onclick={ g(.A) }>go</button>
+<p>\${@msg}</p>
+</program>
+`);
+    expect(ok).not.toContain("E-TYPE-020");
+    const missing = compileApp("cover-missing", `<program>
+\${
+  type K:enum = { A, B, C }
+  <msg> = ""
+  function g(x: K) {
+    match x {
+      .A | .B :> { @msg = "ab" }
+    }
+  }
+}
+<button onclick={ g(.A) }>go</button>
+<p>\${@msg}</p>
+</program>
+`);
+    expect(missing).toContain("E-TYPE-020");
+  });
+});
+
+// S469 (#1450 F6; ruling S469 "Compile error", superseding S468 item 5) — §18.5: a brace arm
+// body that is exactly ONE bare shorthand name, `{ foo }` (no `;`), is
+// E-MATCH-ARM-SHORTHAND-AMBIGUOUS in every position (declaration, `let`, `return`, argument,
+// statement, multi-scrutinee, a lambda body); the message names `{ foo: foo }` and the bare
+// `foo`. Keyed objects and multi-property shorthand stay objects.
+function compileLibAll(name, source) {
+  const filePath = join(TMP, `${name}.scrml`);
+  writeFileSync(filePath, source.endsWith("\n") ? source : source + "\n");
+  const outDir = join(TMP, `${name}.dist`);
+  const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, mode: "library", write: true, validateEmit: true, log: () => {} });
+  const all = [...(result.errors || []), ...(result.warnings || [])];
+  return {
+    errorCodes: all.filter((e) => e.severity == null || e.severity === "error").map((e) => e.code),
+    ambiguous: all.filter((e) => e.code === "E-MATCH-ARM-SHORTHAND-AMBIGUOUS"),
+    libPath: join(outDir, `${name}.js`),
+  };
+}
+
+describe("(D) §18.5: a `{ foo }` arm body is E-MATCH-ARM-SHORTHAND-AMBIGUOUS", () => {
+  const SITES = {
+    decl: `export fn decl(n: int) {\n  const foo = 7\n  const v = match n {\n    1 :> { foo }\n    else :> 0\n  }\n  return v\n}`,
+    letV: `type K:enum = { A, B }\nexport fn letV(k: K) {\n  const foo = 7\n  let v = match k {\n    .A :> { foo }\n    else :> 0\n  }\n  return v\n}`,
+    ret: `type K:enum = { A, B }\nexport fn ret(k: K) {\n  const foo = 8\n  return match k {\n    ::A :> { foo }\n    else :> 0\n  }\n}`,
+    arg: `export fn arg(n: int) {\n  const foo = 9\n  return JSON.stringify(match n {\n    1 :> 0\n    _ :> { foo }\n  })\n}`,
+    multi: `export fn multi(a: int, b: int) {\n  const foo = 9\n  return match (a, b) {\n    (2, 2) :> 0\n    _ :> { foo }\n  }\n}`,
+    stmt: `export fn stmt(n: int) {\n  const foo = 9\n  let r = 0\n  match n {\n    1 | 2 :> { foo }\n    else :> { r = 1 }\n  }\n  return r\n}`,
+    lambda: `export fn lambda(n: int) {\n  const foo = 9\n  const g = (x) => match x {\n    "a" :> { foo }\n    else :> 0\n  }\n  return 0\n}`,
+  };
+  for (const [name, src] of Object.entries(SITES)) {
+    test(`refused, once, in position \`${name}\``, () => {
+      const r = compileLibAll(`amb-${name}`, src);
+      expect(r.errorCodes).toContain("E-MATCH-ARM-SHORTHAND-AMBIGUOUS");
+      expect(r.ambiguous.length).toBe(1);
+      expect(r.ambiguous[0].message).toContain("`{ foo: foo }`");
+      expect(r.ambiguous[0].message).toContain("bare `foo`");
+      expect(existsSync(r.libPath)).toBe(false);
+    });
+  }
+
+  test("the explicit spellings, multi-property shorthand and `{ foo; }` compile and run", async () => {
+    const r = compileLibAll("shorthand-explicit", `export fn obj(n: int) {
+  const foo = 7
+  const bar = 1
+  const v = match n {
+    1 :> { foo: foo }
+    2 :> foo
+    3 :> { foo, bar }
+    4 :> { foo; }
+    else :> { const t = foo
+      t }
+  }
+  return v
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    expect(m.obj(1)).toEqual({ foo: 7 });
+    expect(m.obj(2)).toBe(7);
+    expect(m.obj(3)).toEqual({ foo: 7, bar: 1 });
+    expect(m.obj(4)).toBe(7);
+    expect(m.obj(5)).toBe(7);
+  });
+});
+
+// S469 r2 (#1450 re-review of 435d55cd4) — object-vs-block is decided by the PARSER from
+// the arm's TOKENS. A `;` at the body's top level makes it a statement list (a block): the
+// r1 reader rebuilt `{ <expr> }` from statement text that had lost the `;`, so `1 :> { ok; }`
+// read as the object `{ ok: ok }` (truthy — a wrong password accepted; security-await-pack
+// family `la3`). Nothing after the parser re-reads arm text.
+describe("(E) object-vs-block from the arm's tokens", () => {
+  const armBody = (src) => {
+    const arms = matchArms(inFn(src))[0];
+    return arms.find((a) => a.kind === "match-arm-block").body;
+  };
+  test("`{ ok; }` / `{⏎ ok;⏎ }` are BLOCKS (one statement, no object mark)", () => {
+    for (const src of [
+      `    const v = match n {\n      1 :> { ok; }\n      else :> false\n    }`,
+      `    const v = match k {\n      .A :> {\n        ok;\n      }\n      else :> false\n    }`,
+      `    const v = match k {\n      ::A :> { ok; }\n      else :> false\n    }`,
+    ]) {
+      const body = armBody(src);
+      expect(body.length).toBe(1);
+      expect(body[0].objectLiteralArm).toBeUndefined();
+      expect(body[0].exprNode?.kind).not.toBe("object");
+    }
+  });
+  test("keyed, spread, computed and shorthand bodies are OBJECTS; only `{ name }` is singleShorthand", () => {
+    const cases = [
+      [`{ x: 1, y: 2 }`, null], [`{ x: 1, }`, null], [`{ ...o }`, null], [`{ [key]: 1 }`, null],
+      [`{ "a b": 1 }`, null], [`{ a, b }`, null], [`{ foo }`, "foo"],
+    ];
+    for (const [b, single] of cases) {
+      const body = armBody(`    const v = match n {\n      1 :> ${b}\n      else :> false\n    }`);
+      expect(body.length).toBe(1);
+      expect(body[0].objectLiteralArm).toBe(true);
+      expect(body[0].exprNode.kind).toBe("object");
+      expect(body[0].singleShorthand ?? null).toBe(single);
+    }
+  });
+  test("a word JS reads as a shorthand name is refused even when scrml lexes it as a keyword; ES reserved words are blocks", () => {
+    // S469 r4: `{ type }`, `{ from }`, `{ undefined }`, `{ get }`, `{ async }`, … are JS
+    // shorthand (`{ type: type }`) — the same two-readings form as `{ foo }`.
+    for (const w of ["type", "from", "is", "as", "get", "set", "server", "fn", "async", "undefined", "when", "partial"]) {
+      const codes = parseErrorCodes(inFn(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`));
+      expect([w, codes.includes("E-MATCH-ARM-SHORTHAND-AMBIGUOUS")]).toEqual([w, true]);
+    }
+    // A strict-mode reserved word is never a shorthand property: `{ return }` / `{ null }` /
+    // `{ this }` are blocks.
+    for (const w of ["return", "null", "this", "true"]) {
+      const src = inFn(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`);
+      expect([w, parseErrorCodes(src).includes("E-MATCH-ARM-SHORTHAND-AMBIGUOUS")]).toEqual([w, false]);
+      expect(armBody(`    const v = match n {\n      1 :> { ${w} }\n      else :> false\n    }`)[0]?.objectLiteralArm).toBeUndefined();
+    }
+  });
+  test("executed: `{ ok; }` yields ok's VALUE in decl, let, return and multi-scrutinee positions", async () => {
+    const r = compileLibAll("semi-block", `type K:enum = { A, B }
+export fn lit(ok: boolean) {
+  const n = 1
+  const v = match n {
+    1 :> { ok; }
+    else :> true
+  }
+  return v
+}
+export fn colonV(ok: boolean) {
+  const k: K = .A
+  return match k {
+    ::A :> { ok; }
+    else :> true
+  }
+}
+export fn letAlt(ok: boolean) {
+  const n = 2
+  let v = match n {
+    1 | 2 :> {
+      ok;
+    }
+    else :> true
+  }
+  return v
+}
+export fn ms(ok: boolean) {
+  const a = 1
+  const b = 2
+  return match (a, b) {
+    (2, 2) :> true
+    _ :> { ok; }
+  }
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    for (const f of ["lit", "colonV", "letAlt", "ms"]) {
+      expect(m[f](false)).toBe(false);
+      expect(m[f](true)).toBe(true);
+    }
+  });
+});
+
+// S469 r4 (#1450 delta re-review) — a §18.19 PRODUCT arm `(p1, …, pN) :> { … }` kept its body
+// as TEXT, so `(1, 2) :> { ok }` was neither refused nor read by the token classifier (a wrong
+// password accepted, on main too). Its `{ … }` body now goes through the same arm-body reader
+// (`parseArmBraceBody`): `{ ok }` is refused, `{ ok; }` is a block (`structuredBody`), a keyed
+// object is the arm's value.
+describe("(F) §18.19 product arms read their brace body like every other arm", () => {
+  test("`{ ok }` / `{ ok, }` product-arm bodies are refused in decl, return and argument position", () => {
+    for (const [name, src] of Object.entries({
+      decl: `export fn a(ok: boolean) {\n  const x = 1\n  const y = 2\n  const allowed = match (x, y) {\n    (1, 2) :> { ok }\n    (_, _) :> false\n  }\n  return allowed\n}`,
+      ret: `export fn b(ok: boolean) {\n  const x = 1\n  const y = 2\n  return match (x, y) {\n    (1, 2) :> false\n    (_, _) :> { ok, }\n  }\n}`,
+      arg: `export fn c(ok: boolean) {\n  const x = "bob"\n  const y = 1\n  return Boolean(match (x, y) {\n    ("bob", 1) :> { ok }\n    (_, _) :> false\n  })\n}`,
+    })) {
+      const r = compileLibAll(`prod-amb-${name}`, src);
+      expect([name, r.ambiguous.length]).toEqual([name, 1]);
+    }
+  });
+  test("executed: product-arm blocks yield their tail, keyed objects their value, payload bindings resolve", async () => {
+    const r = compileLibAll("prod-exec", `type K:enum = { A, B(n: number) }
+export fn semi(ok: boolean) {
+  const a = 1
+  const b = 2
+  const allowed = match (a, b) {
+    (1, 2) :> { ok; }
+    (_, _) :> true
+  }
+  return allowed
+}
+export fn letTail(ok: boolean) {
+  const a = 1
+  const b = 2
+  let allowed = match (a, b) {
+    (1, _) :> {
+      const t = ok
+      t
+    }
+    (_, _) :> true
+  }
+  return allowed
+}
+export fn ret(ok: boolean) {
+  const a = "bob"
+  const b = 1
+  return match (a, b) {
+    ("bob", 1) :> { ok; }
+    (_, _) :> true
+  }
+}
+export fn obj(ok: boolean) {
+  const a = 1
+  const b = 2
+  const o = match (a, b) {
+    (1, 2) :> { v: ok }
+    (_, _) :> { v: true }
+  }
+  return o.v
+}
+export fn stmt(ok: boolean) {
+  const a = 1
+  const b = 2
+  let allowed = true
+  match (a, b) {
+    (1, 2) :> { allowed = ok }
+    (_, _) :> { allowed = true }
+  }
+  return allowed
+}
+export fn bind(ok: boolean) {
+  const k: K = K.B(3)
+  const b = 2
+  const r = match (k, b) {
+    (.B(n), 2) :> { const q = n + 1
+      q }
+    (_, _) :> 0
+  }
+  return ok ? r : r
+}`);
+    expect(r.errorCodes).toEqual([]);
+    const m = await loadLib(r.libPath);
+    for (const f of ["semi", "letTail", "ret", "obj", "stmt"]) {
+      expect([f, m[f](false)]).toEqual([f, false]);
+      expect([f, m[f](true)]).toEqual([f, true]);
+    }
+    expect(m.bind(true)).toBe(4);
+  });
+
+  // S469 r5 — one body, one reader: a product BLOCK arm is a `match-arm-block` whose `body`
+  // every analysis walks (r4's `structuredBody` on a `match-arm-inline` was invisible to the
+  // E-ERROR-002 walk — a wrong password accepted, security-await-pack `la5/prodBlkFailable*`).
+  test("a product block arm is a match-arm-block with its statements as `body` and its bindings", () => {
+    const arms = matchArms(`<program>\n\${\n  type K:enum = { A, B(n: number) }\n  function f(k, b) {\n    const r = match (k, b) {\n      (.B(n), 2) :> { const q = n + 1\n        q }\n      (_, _) :> 0\n    }\n    return r\n  }\n}\n</program>\n`)[0];
+    const prod = arms.find((a) => Array.isArray(a.productPatterns) && a.kind === "match-arm-block");
+    expect(prod).toBeDefined();
+    expect(Array.isArray(prod.body)).toBe(true);
+    expect(prod.body.length).toBe(2);
+    expect(prod.payloadBindings).toEqual(["n"]);
+    expect(prod.structuredBody).toBeUndefined();
+  });
+  test("a `!` call in a product block is E-ERROR-002 (decl, let, statement, `(_, _)` last)", () => {
+    const AUTH = `type AuthErr:enum = { Bad }\nexport fn chk(p: string)! -> AuthErr {\n  if (p == "") { fail .Bad }\n  return true\n}\n`;
+    for (const [name, body] of Object.entries({
+      decl: `  const v = match (a, b) {\n    (1, 2) :> { chk(p) }\n    (_, _) :> false\n  }\n  return v`,
+      letTail: `  let v = match (a, b) {\n    (1, 2) :> { const t = chk(p)\n      t }\n    (_, _) :> false\n  }\n  return v`,
+      stmt: `  let v = false\n  match (a, b) {\n    (1, 2) :> { v = chk(p) }\n    (_, _) :> { v = false }\n  }\n  return v`,
+      wildLast: `  const v = match (a, b) {\n    (2, 2) :> false\n    (_, _) :> { chk(p) }\n  }\n  return v`,
+    })) {
+      const r = compileLibAll(`prod-err002-${name}`, AUTH + `export fn g(a: int, b: int, p: string) {\n${body}\n}`);
+      expect([name, r.errorCodes.includes("E-ERROR-002")]).toEqual([name, true]);
+    }
+  });
+});

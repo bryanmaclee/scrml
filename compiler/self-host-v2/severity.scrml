@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 133 codes with a §34 severity; 69 without one (FAIL-CLOSED Error):
+// 134 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -38,7 +38,6 @@
 //   E-HANDLE-REDECLARE — no §34 row
 //   E-IMPORT-NOT-EXPORTED — no §34 row
 //   E-INT-DIVISION — no §34 row
-//   E-MATCH-ARM-SHORTHAND-AMBIGUOUS — no §34 row
 //   E-OPERAND-NOT-NARROWED — no §34 row
 //   E-OPERATOR-OPERAND-TYPE — no §34 row
 //   E-PARSE-ARM — no §34 row
@@ -167,6 +166,7 @@ ${
             "E-LIFECYCLE-016" :> Severity.Error
             "E-MATCH-012" :> Severity.Error
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
+            "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
             "E-MW-002" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error

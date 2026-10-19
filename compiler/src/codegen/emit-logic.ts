@@ -11,7 +11,7 @@ import { REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { bareBlockText, bareBlockSequenceTexts, PROBE_BODY_OFFSET } from "../validators/defer-structure.ts";
 import { armBlockStatementsDetailed } from "../arm-body-statements.ts";
 import { isWholeBraceBlock } from "../brace-pair.ts";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitMatchStmt, emitMultiScrutineeMatchInline, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockToMatchArm, collectIfChainCond, isFailableOkMatch, isSqlFailableMatch, matchScrutineeHandlesSql, enterSqlErrorSchema, exitSqlErrorSchema, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, givenGuardToMatchArm, stampPropagateOperand, leaveStmtFromArmText, nestedMatchFromArmText, propagateOperandOfArmText, structureServerArm, emitArmValue, emitObjectLiteralArm, hostAsyncFacts, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import type { DefaultLowerer } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
@@ -6761,59 +6761,6 @@ export function _matchArmResultIsBlockBody(result: string): boolean {
   return true;
 }
 
-/**
- * §18 object-literal arm parity (g-library-fn-match-else-arm-object-literal-...).
- *
- * A BLOCK-FORM match arm — `else :> { x: 0 }`, `.V :> { x: 0 }`, `not :> { x: 0 }` —
- * is parsed by the AST builder into a `structuredBody` (statement nodes), whereas
- * the INLINE-form sibling `1 :> { x: 0 }` keeps a `result` STRING that #664 already
- * lowers correctly as a value (emitIifeBlockArmBody's object branch). So an
- * OBJECT-LITERAL body reaching the structuredBody path mis-lowers: `{ x: 0 }` is
- * read as a labeled-statement block whose "tail" is the bare ident `x`, emitting
- * `return x` (silent-wrong when `x` is in scope) — or, in decl position, the
- * malformed `_scrml_tilde = x : 0` (E-CODEGEN-INVALID-LOGIC).
- *
- * This recovers the brace-body source from the structuredBody and runs the SAME
- * object-vs-block classifier the inline path uses (`_matchArmResultIsBlockBody`) —
- * there is NO second predicate, so the two arm forms stay in lockstep by
- * construction. Returns the object-literal source string when (and only when) the
- * body resolves to an `object` node; otherwise null, so the caller keeps the
- * genuine-block structuredBody path (which threads tildeContext / engineCtx /
- * declaredNames that a string re-lowering would drop). The single-`bare-expr`
- * reconstruction relies on the node's retained raw `expr` text (`"x : 0"`), the
- * same field the §18.5 tail derivation already reads.
- */
-export function _objectLiteralArmFromStructuredBody(structuredBody: any): string | null {
-  if (!Array.isArray(structuredBody)) return null;
-  let candidate: string | null = null;
-  if (structuredBody.length === 0) {
-    // `else :> {}` — an empty OBJECT (parity with the inline `1 :> {}` → `return {}`),
-    // not a void block: the classifier below resolves `{}` to an object node.
-    candidate = "{}";
-  } else if (
-    structuredBody.length === 1 &&
-    structuredBody[0] &&
-    structuredBody[0].kind === "bare-expr" &&
-    typeof structuredBody[0].expr === "string"
-  ) {
-    // Reconstruct from the node's retained raw `expr` text ONLY. The node's
-    // `exprNode` is NOT a usable fallback here: for a `{ a: 1, b: {...} }` body the
-    // parser captured only the FIRST key as `exprNode` (an `ident`), so
-    // emitStringFromTree(exprNode) would yield `{ a }` and silently drop the rest.
-    // `expr` is the sole faithful source; when it is absent the arm is left on the
-    // structuredBody path below (it cannot be an object we can reconstruct).
-    candidate = `{ ${structuredBody[0].expr} }`;
-  }
-  if (candidate === null) return null;
-  // Divert ONLY when the classifier resolves the candidate to an object node. This
-  // is the SAME `_matchArmResultIsBlockBody` the inline path (#664) runs, so the two
-  // arm forms stay in lockstep by construction — including the object-SHORTHAND case
-  // `{ x }`, which the parser resolves to an object, exactly as the inline arm
-  // `1 :> { x }` does (both emit `return { x }`). A candidate the classifier calls a
-  // genuine BLOCK returns null and keeps the §18.5 structuredBody tail lowering
-  // (tildeContext / engineCtx / declaredNames a string re-lowering would drop).
-  return _matchArmResultIsBlockBody(candidate) ? null : candidate;
-}
 
 /**
  * §18.5 — is a block's trailing segment a value EXPRESSION (its result) rather
@@ -7008,7 +6955,15 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // which swallowed an arm's `return` / `fail` and broke `break` / `continue`).
   if (Array.isArray(matchExpr.scrutineeExprs) && matchExpr.scrutineeExprs.length >= 2) {
     const resultVar = genVar("tilde");
-    const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string): string[] => {
+    const dispatch = emitMultiScrutineeMatchInline(matchExpr, opts, (resultStr: string, structuredBody?: any[] | null): string[] => {
+      // S468 r1 (F2) — a `_ :> { … }` / `else :> { … }` block arm: its parsed statements,
+      // lowered as the single-scrutinee decl path lowers a structured arm (an object-literal
+      // body is the value; otherwise statements with the §18.5 tail assigned).
+      if (structuredBody) {
+        const objArm = emitObjectLiteralArm(structuredBody, _makeExprCtx(opts));
+        if (objArm !== null) return [`${resultVar} = ${_awaitMatchArmServerCalls(objArm, opts)};`];
+        return _emitStructuredArmToVar(structuredBody, resultVar, opts, opts).map((l) => l.replace(/^  /, "")).filter((l) => l.trim() !== "");
+      }
       const t = resultStr.trim();
       if (!t) return [];
       // §18.2 `leave-stmt` (S462 W1): the arm leaves; it assigns nothing.
@@ -7066,16 +7021,10 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // local list) exactly as the sibling emitter in emit-control-flow.ts does —
       // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
       // so a block arm of `const r = match …` referenced an unbound name.
-
-      arms.push({
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: child.variant ?? null,
-        // F17 — a block arm's payload binding (was `null`: every binding of a
-        // block-bodied arm in a `const x = match …` was dropped).
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : null,
-      });
+      // (F17 — a block arm's payload binding was `null`: every binding of a
+      // block-bodied arm in a `const x = match …` was dropped.) S468 — one reader
+      // for every block-arm head, literal / alternation arms included.
+      arms.push(matchArmBlockToMatchArm(child));
       continue;
     }
     // Structured match-arm-inline nodes (from `. Variant => result` arms)
@@ -7174,7 +7123,17 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // and is PER-ARM (so a name declared in one arm does not leak into a sibling
       // arm, which would turn that sibling's fresh declaration into an assignment
       // to an unbound name).
-      bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
+      //
+      // S468 — an OBJECT-LITERAL arm body (`.A :> { x: 1 }`, `1 :> { x: 1 }`) is a
+      // VALUE, as the statement and IIFE lowerings already read it
+      // (`emitObjectLiteralArm`); emitted as statements it was
+      // `tilde = x : 1;` → E-CODEGEN-INVALID-LOGIC.
+      const _objArm = emitObjectLiteralArm(_body, _makeExprCtx(opts));
+      if (_objArm !== null) {
+        bodyCode.push(`  ${tildeVar} = ${_awaitMatchArmServerCalls(_objArm, opts)};`);
+      } else {
+        bodyCode.push(..._emitStructuredArmToVar(_body, tildeVar, opts, bodyOpts));
+      }
       if (arm.kind === "wildcard") {
         lines.push(`else {`);
       } else if (arm.kind === "not") {
