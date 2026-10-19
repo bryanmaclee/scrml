@@ -402,3 +402,26 @@ describe("round 2 — always explicit; a no-value result is never read", () => {
     expect(codes(prog(N + `\n    function go() {\n        nothing(2)\n    }`, `        <button onclick=nothing(1)>b</button>\n        <button onclick=go()>g</button>`))).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1471 round 3 — "no value" is a TYPE: a function with no value-returning path is `void`;
+// a call of it is `void`, refused in every value position (E-TYPE-001) — one reader.
+describe("round 3 — `void` is a type", () => {
+  const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x\n        }\n    }`;
+  test("a void pass-through wrapper is itself void: as a statement it is fine, read as a value it is E-TYPE-001", () => {
+    const W = N + `\n    function w(x: int) {\n        return nothing(x)\n    }`;
+    expect(codes(prog(W + `\n    function go() {\n        w(1)\n    }`, `        <button onclick=go()>g</button>`))).toEqual([]);
+    expect(codes(prog(W + `\n    function a() -> string {\n        const s: string = w(1)\n        return s\n    }`, `        <p>\${a()}</p>`))).toEqual(["E-TYPE-001"]);
+  });
+  test("`return <void call>` in a typed, a `!` or a value-returning unannotated function is E-TYPE-001", () => {
+    const D = `    type Denied:enum = { Bad }`;
+    expect(codes(prog(N + `\n    function r(x: int) -> string {\n        if (x == 1) return "a"\n        return nothing(x)\n    }`, `        <p>\${r(1)}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(D + "\n" + N + `\n    function r(x: int)! Denied {\n        if (x == 1) return "a"\n        return nothing(x)\n    }\n    function a() -> string {\n        return match r(1) {\n            .Ok(v) :> v\n            .Bad :> "b"\n        }\n    }`, `        <p>\${a()}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(N + `\n    function r(x: int) {\n        if (x == 1) return "a"\n        return nothing(x)\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-001"]);
+  });
+  test("a void call as an argument, an operand or a condition is E-TYPE-001", () => {
+    expect(codes(prog(N + `\n    function id(s: string) -> string {\n        return s\n    }`, `        <p>\${id(nothing(1))}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(N, `        <p>\${"x" + nothing(1)}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(N, `        <p if=(nothing(1) is given)>x</p>`))).toEqual(["E-TYPE-001"]);
+  });
+});

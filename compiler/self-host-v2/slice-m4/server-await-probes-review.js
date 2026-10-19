@@ -143,6 +143,11 @@ return {
   noValueOk: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad\n    }`, body: `        return match chk(pass, row.pw) {\n            .Ok(v) :> "WELCOME" + v\n            _ :> "REJECTED"\n        }` },
   noValueOkUnbound: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad\n    }`, body: `        let v: string = "REJECTED"\n        match chk(pass, row.pw) {\n            .Ok(_) :> v = "WELCOME"\n            _ :> v = "REJECTED"\n        }\n        return v` },
   noValuePlain: { top: `    function nothing(p: string, h: string) {\n        if (p == h) {\n            const z: int = 1\n        }\n    }`, body: `        const s: string = nothing(pass, row.pw)\n        if (s is not) return "REJECTED"\n        return "WELCOME"` },
+  // #1471 round 3: `void` is a TYPE — a wrapper that `return`s a void call is not a value
+  wrapFailable: { top: `    function audit(p: string) {\n        if (p == "") return\n    }\n    function role(p: string, h: string)! Denied {\n        if (p == h) return "user"\n        return audit(p)\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME"\n            _ :> "REJECTED"\n        }` },
+  wrapTyped: { top: `    function audit(p: string) {\n        if (p == "") return\n    }\n    function role(p: string, h: string) -> string {\n        if (p == h) return "user"\n        return audit(p)\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME"\n        return "REJECTED"` },
+  wrapUnannotated: { top: `    function audit(p: string) {\n        if (p == "") return\n    }\n    function role(p: string, h: string) {\n        if (p == h) return "user"\n        return audit(p)\n    }`, body: `        if (role(pass, row.pw) is not) return "REJECTED"\n        return "WELCOME"` },
+  wrapVoid: { top: `    function nothing(p: string) {\n        if (p == "") return\n    }\n    function w(p: string) {\n        return nothing(p)\n    }`, body: `        const s: string = w(pass)\n        if (s is not) return "REJECTED"\n        return "WELCOME"` },
   bareReturn: { top: `    function role(p: string, h: string) -> string {\n        if (p == h) return "user"\n        return\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME"\n        return "REJECTED"` },
 };
 })();

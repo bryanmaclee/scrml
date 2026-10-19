@@ -153,3 +153,36 @@ any path returns a value every path must.
   `defer/propagate-path` read the success value of a `!` function that only fails (now E-TYPE-001);
   the implicit-tail-return cases moved UNSUPPORTED → FAIL because E-TYPE-043 is a language code.
   **The corpus cases need updating to the ruling (PA).**
+
+## #1471 round 3 — "no value" is a TYPE (`void`)
+
+- [x] The leak: `return f()` was exempted everywhere, and `hasValueReturn` counted `return <void call>`
+  as a value — a wrapper laundered a no-value result (server 200 WELCOME on a wrong password).
+- [x] `Globals.voids` (`voidFns`, a fixpoint over the program's functions): a function is VOID when
+  it is declared `-> void`, or has no declared return type (unannotated, or `!` — its success) and no
+  path returns a value; `return f()` of a void `f` is not a value return (so an unannotated function
+  whose every return is a void pass-through is void). A declared `-> T` function is never void.
+- [x] ONE reader: a call of a void function is `void`, refused in every value position (E-TYPE-001)
+  by `resolveCall` — assignment, initializer, argument, operand, condition, markup, a `return`
+  operand in any function that is not itself void; a handled `!` call's success value (`?`, a value
+  `!{}`, a bound `.Ok(v)`) by `noSuccessUse`, which reads the same set. Not value positions: a
+  statement call (and an event-handler call), an arm value (E-ERROR-012, the §19.4.3 arm rule, owns
+  it), a `return` in a void function (it passes `void` on). `hasValueReturn` / E-RETURN-INCOMPLETE
+  read the same set. Subsumed and removed: `mixedReturns`, the summary-based `IfNoValue` E-TYPE-001.
+- [x] Tests: `security/wrap-{failable,typed,unannotated,void}` (refused), s5 `wrap{Failable,Typed,
+  Unannotated,Void}` (REFUSED on the server), a round-3 describe in match-s469 (3 tests). Re-pinned:
+  typer-s440 r7 A twin (`-> string { return u() }` with a void `u` is E-TYPE-001); effects-summary
+  G7 (`-> string { return nothing() }` adds E-TYPE-001; a dead `return nothing()` in a
+  value-returning function is still `void` — E-TYPE-001).
+- Conformance PASS 205 (unchanged).
+
+### The corpus rewrite this PR OWES (not done here — the cases are shared with impl#1)
+
+12 conformance cases contradict bryan's "Always explicit" ruling:
+- 5 use `function g() { }` (void) as a value: `condition/unresolved-call-neg`,
+  `condition/unresolved-call-markup-neg`, `condition/unresolved-operand-markup-neg`,
+  `condition/unresolved-operand-not-neg`, `condition/unresolved-ternary-arm-neg`;
+- 7 read the success value of a `!` function that never returns one: `defer/propagate-path`,
+  `error/arm-pipe-legacy-handler`, `error/handler-pipeless-arms-rt`, `error/handler-recovery-into-cell`,
+  `error/propagate-in-non-failable-fn-neg`, `error/propagate-in-non-failable-fn-pos`,
+  `error/propagate-non-failable-callee-neg`.

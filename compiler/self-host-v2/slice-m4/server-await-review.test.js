@@ -111,6 +111,11 @@ const REVIEW_EXPECT = {
   "s5/noValueOk": ["REFUSED", ["E-TYPE-001"]],
   "s5/noValueOkUnbound": ["PASS"],
   "s5/noValuePlain": ["REFUSED", ["E-TYPE-001"]],
+  // #1471 round 3: a wrapper's `return <void call>` (typed / failable / unannotated), and a void pass-through read as a value
+  "s5/wrapFailable": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapTyped": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapUnannotated": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapVoid": ["REFUSED", ["E-TYPE-001"]],
 };
 
 async function classify(s) {

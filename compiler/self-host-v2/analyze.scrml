@@ -709,6 +709,7 @@ ${
         errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
         sceSym: Sym,            // s454 (U1b): the built-in `ServerCallError` enum (§19.9.10)
+        voids: int[],           // s469 (#1471 r3): the VOID functions (voidFns) — a call of one has type `void`
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -4268,7 +4269,7 @@ ${
         decls = rc.decls
         const g: Globals = { program: program, entry: entry, te: te0, types: allTypes, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError"),
-                             sceSym: builtinSym(rs.stubs, serverCallErrorName()) }
+                             sceSym: builtinSym(rs.stubs, serverCallErrorName()), voids: voidFns(rf.fs) }
         return { g: g, st: st }
     }
 
@@ -5162,10 +5163,11 @@ ${
             if (cf.failable && env.fx.subject != e.nid) return plain(not, bySite(env, siteOf(env), conflictDiags(env, cf, e), [], unhandledCall(env, e, cf.name, sp)))
             // s454 (U1b): a server function's call made on the client is failable (§19.9.10)
             if (cf.serverOwn && env.fx.subject != e.nid) return plain(not, remoteUnhandled(env, e, cf, sp))
-            // s469 (#1471 round-2 MED-2): a call of a function that yields no value (the effect
-            // summary's `noValue`, §19.4.3 ruling 1a) read as a VALUE would be `undefined`:
-            // §18.3's "void not assignable" — E-TYPE-001. A statement call is not a value use.
-            if (env.fx.stmtCall != e.nid && env.fx.subject != e.nid && !mixedReturns(env, cf)) return plain(not, addPending(sp, PendRule.IfNoValue(cf.sym.id, newDiag("E-TYPE-001", "`" + cf.name + "(…)` yields no value (no path of it returns one) — it cannot be used as a value (§18.3: void is not assignable); call it as a statement, or make it `return` a value on every path", env.file, e.span))))
+            // s469 (#1471 r3): a call of a VOID function has type `void` (voidFns) — refused in
+            // every value position (§18.3, E-TYPE-001). Not a value position: a statement call
+            // (and an arm's value, whose E-ERROR-012 is reported by the arm rule), or the
+            // operand of a `return` in a function that is itself void (it passes `void` on).
+            if (isVoidFn(env.g, cf.sym.id) && env.fx.stmtCall != e.nid && env.fx.subject != e.nid) return plain(not, addDiag(sp, env.file, e.span, "E-TYPE-001", "`" + cf.name + "(…)` is `void` (no path of it returns a value) — it cannot be used as a value (§18.3); call it as a statement, or make it `return` a value on every path"))
             return plain(not, sp)
         }
         return plain(not, st)
@@ -5273,7 +5275,7 @@ ${
         let out: Diag[] = []
         for (const fs of g.fns) {
             // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
-            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span)) out = out.concat(fallOffDiags(t, fs))
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span)) out = out.concat(fallOffDiags(g, t, fs))
         }
         return out
     }
@@ -5282,7 +5284,7 @@ ${
     // a declared-return function (`-> T | not` included) `return`s on every path — `return not;`
     // written out; a function with no return type returns nothing, and if any path of it returns
     // a value, every path must.
-    fn fallOffDiags(t: Tables, fs: FnSrc) -> Diag[] {
+    fn fallOffDiags(g: Globals, t: Tables, fs: FnSrc) -> Diag[] {
         const b: ABlock = fs.f.body
         const r: AType | not = fs.f.ret
         const file: string = fs.info.file
@@ -5291,7 +5293,7 @@ ${
         // returns a value, every path returns one (or fails) — a bare `return` included
         // (in a `!` function it is a SUCCESS carrying nothing: `.Ok(v)` would take it)
         if (fs.info.failable || r is not) {
-            if (hasValueReturn(b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
+            if (hasValueReturn(g, b) && (blockHasBareReturn(b) || !fallsNever(t, b, false))) return [newDiag("E-RETURN-INCOMPLETE", "`" + n + "` returns a value on some path, so it must return one on every path — a path here " + incompleteWhat(b) + " (no implicit return in scrml); end every path with `return <value>;`" + incompleteFix(fs.info.failable), file, fs.f.span)]
             return []
         }
         if (fs.info.ret is not || declaresVoid(r)) return []
@@ -5331,33 +5333,102 @@ ${
         }
     }
 
-    // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included)?
-    fn hasValueReturn(b: ABlock) -> boolean {
+    // =========================================================================
+    // s469 (#1471 round 3) — "NO VALUE" IS A TYPE: `void` (§18.3: "A void match may not appear
+    // on the right-hand side of an assignment"; bryan's ruling "Always explicit": a function
+    // with no return type returns nothing). A function's result is VOID when it is declared
+    // `-> void`, or it has no declared return type (unannotated, or `!` — whose SUCCESS has no
+    // type slot, §19.4.1) and no path returns a value. `return f()` of a void `f` is not a value:
+    // it passes `void` on (so an unannotated function whose every return is such a pass-through
+    // is void too) — computed to a fixpoint over the program's functions, once (Globals.voids).
+    // A call of a void function has type `void`, and ONE reader refuses `void` in every value
+    // position (resolveCall for a call; noSuccessUse for a handled `!` call's success value):
+    // E-TYPE-001. A declared `-> T` function is never void.
+    // =========================================================================
+    fn voidFns(fs: FnSrc[]) -> int[] {
+        let v: int[] = []
+        for (const f of fs) {
+            const r: AType | not = f.f.ret
+            if (r is not) {
+                v = v.concat([f.info.sym.id])
+            } else if (declaresVoid(r)) {
+                v = v.concat([f.info.sym.id])
+            }
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            let next: int[] = []
+            for (const f of fs) {
+                if (v.indexOf(f.info.sym.id) >= 0) {
+                    if (fnDeclaredVoid(f) || !valueReturnIn(fs, v, f.f.body)) {
+                        next = next.concat([f.info.sym.id])
+                    } else {
+                        changed = true
+                    }
+                }
+            }
+            v = next
+        }
+        return v
+    }
+
+    fn fnDeclaredVoid(f: FnSrc) -> boolean {
+        const r: AType | not = f.f.ret
+        if (r is not) return false
+        return declaresVoid(r)
+    }
+
+    // Is a function's result `void` (a call of it has type `void`)?
+    fn isVoidFn(g: Globals, sym: int) -> boolean {
+        return g.voids.indexOf(sym) >= 0
+    }
+
+    // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included) — a `return`
+    // whose operand is not `void` (`return f()` of a void `f` passes `void` on)?
+    fn hasValueReturn(g: Globals, b: ABlock) -> boolean {
+        return valueReturnIn(g.fns, g.voids, b)
+    }
+
+    fn valueReturnIn(fs: FnSrc[], v: int[], b: ABlock) -> boolean {
         for (const s of b.stmts) {
-            if (stmtValueReturn(s)) return true
+            if (stmtValueReturn(fs, v, s)) return true
         }
         return false
     }
 
-    fn stmtValueReturn(s: AStmt) -> boolean {
+    fn stmtValueReturn(fs: FnSrc[], v: int[], s: AStmt) -> boolean {
         const k: AStmtK = s.k
         return match k {
-            .Return(e: x) :> x is given
-            .If(cond: c, thenB: tb, elseB: el) :> blocksValueReturn(allExprBlocks(c)) || hasValueReturn(tb) || blocksValueReturn(thenElse(tb, el))
-            .Given(name: n, subject: x, body: gb) :> blocksValueReturn(allExprBlocks(x)) || hasValueReturn(gb)
-            .Eval(e: x) :> blocksValueReturn(allExprBlocks(x))
-            .Local(name: n, init: x) :> blocksValueReturn(allExprBlocks(x))
+            .Return(e: x) :> retIsValue(fs, v, x)
+            .If(cond: c, thenB: tb, elseB: el) :> blocksValueReturn(fs, v, allExprBlocks(c)) || blocksValueReturn(fs, v, thenElse(tb, el))
+            .Given(name: n, subject: x, body: gb) :> blocksValueReturn(fs, v, allExprBlocks(x)) || valueReturnIn(fs, v, gb)
+            .Eval(e: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
+            .Local(name: n, init: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
             .Fail(f: x) :> false
         }
     }
 
-    fn blocksValueReturn(bs: ABlock[]) -> boolean {
+    fn blocksValueReturn(fs: FnSrc[], v: int[], bs: ABlock[]) -> boolean {
         for (const b of bs) {
-            if (hasValueReturn(b)) return true
+            if (valueReturnIn(fs, v, b)) return true
         }
         return false
+    }
+
+    // A `return` operand that is a value: present, and not a call of a void function.
+    fn retIsValue(fs: FnSrc[], v: int[], x: AExpr | not) -> boolean {
+        if (x is not) return false
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return true
+        const n: string = exprName(c)
+        if (n == "") return true
+        for (const f of fs) {
+            if (f.info.name == n) return v.indexOf(f.info.sym.id) < 0
+        }
+        return true
     }
 
     // Does `b` end in a value expression (not a write) — a §48.11 tail return?
@@ -7651,9 +7722,7 @@ ${
 
     fn noSuccessUse(env: Env, e: AExpr, h: AHandled, f: FnInfo, stmt: boolean, st: AS) -> AS {
         if (!f.failable) return st
-        const fs: FnSrc | not = fnSrcOf(env.g, f.sym.id)
-        if (fs is not) return st
-        if (hasValueReturn(fs.f.body)) return st
+        if (!isVoidFn(env.g, f.sym.id)) return st
         // `?` / `!{}` in a value position yield the success value; a `match`'s value is its arms'
         // (it reads the success value only through a bound `.Ok(v)`)
         let reads: boolean = !stmt
@@ -7675,13 +7744,6 @@ ${
         return addDiag(st, env.file, e.span, "E-TYPE-001", "`" + f.name + "(…)` succeeds with no value (no path of it returns one) — its success value cannot be read here (§18.3: void is not assignable); handle it as a statement (`" + f.name + "(…) !{ … }` alone), or bind `.Ok` with `_`")
     }
 
-    // A function some path of which returns a value: if it yields none on another path, its own
-    // E-RETURN-INCOMPLETE owns that (no second report at each use).
-    fn mixedReturns(env: Env, fi: FnInfo) -> boolean {
-        const src: FnSrc | not = fnSrcOf(env.g, fi.sym.id)
-        if (src is not) return false
-        return hasValueReturn(src.f.body)
-    }
 
 
     // `!{ arms }` / `match subject { arms }`.
@@ -9081,9 +9143,11 @@ ${
 
     fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
         if (e is not) return st
-        // s469: `return f()` passes f's value on — not a use of it (the G7 closure makes this
-        // function no-value too, and ITS value uses are judged)
-        return resolveExpr(withStmtCall(withWholeAt(env, e.nid, "a `return` operand"), e.nid), e, not, st).st
+        // s469 (#1471 r3): in a VOID function, `return f()` passes `void` on (not a value use);
+        // anywhere else a `return` operand is a value position
+        let renv: Env = withWholeAt(env, e.nid, "a `return` operand")
+        if (env.fx.fnSym >= 0 && isVoidFn(env.g, env.fx.fnSym)) renv = withStmtCall(renv, e.nid)
+        return resolveExpr(renv, e, not, st).st
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the

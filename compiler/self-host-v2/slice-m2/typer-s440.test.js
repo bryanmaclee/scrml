@@ -757,7 +757,9 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   test("r7 A twins — matching types; an int into a `number` parameter / return; an unknown value is never checked", () => {
     const P = "    type P:struct = { x: int }\n    let <pp:P=({ x: 1 })/>\n";
     expect(inApp(O + P + "    function g(z: string, b: bool, p: P, o: Openness, n: number) { }\n    function f() { g(\"s\", true, @pp, .Closed, 1) }")).toEqual([]);
-    expect(inApp(O + P + "    function h() -> number { return 1 }\n    function k() -> P { return @pp }\n    function u() { }\n    function w() -> string { return u() }")).toEqual([]);
+    expect(inApp(O + P + "    function h() -> number { return 1 }\n    function k() -> P { return @pp }")).toEqual([]);
+    // s469 (#1471 r3): `u() { }` is VOID (it returns nothing), so `return u()` in a `-> string` function is E-TYPE-001
+    expect(inApp(O + P + "    function u() { }\n    function w() -> string { return u() }")).toEqual(["E-TYPE-001"]);
   });
   test("r7 A guard (i) — a return type that did not resolve (E-TYPE-UNKNOWN) is never checked or trusted", () => {
     expect(inApp("    function h() -> Nope { return 1 }\n    let <s:string=\"\"/>\n    function f() { @s = h() }")).toEqual(["E-TYPE-UNKNOWN"]);

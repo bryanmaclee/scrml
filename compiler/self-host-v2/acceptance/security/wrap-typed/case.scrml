@@ -1,0 +1,25 @@
+// a `-> string` finder whose wrong-password path returns a `void` call: refused (E-TYPE-001 — `void` is not a value).
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    function audit(pw: string) {
+        if (pw == "") return
+    }
+    function role(pw: string) -> string {
+        if (pw == "hunter2") return "user"
+        return audit(pw)
+    }
+    function attempt(pw: string) -> string {
+        if (role(pw) == "user") return "welcome"
+        return "denied"
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

@@ -71,6 +71,11 @@ const STATUS = {
   "security/novalue-guard": ["PASS", ["E-TYPE-001"]],
   "security/novalue-ok": ["PASS", ["E-TYPE-001"]],
   "security/novalue-plain": ["PASS", ["E-TYPE-001"]],
+  // #1471 round 3: `void` is a type — a wrapper's `return <void call>`
+  "security/wrap-failable": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-typed": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-unannotated": ["PASS", ["E-TYPE-001"]],
+  "security/wrap-void": ["PASS", ["E-TYPE-001"]],
   "security/eq-not": ["PASS", ["E-EQ-002"]],
   "security/bare-return": ["PASS", ["E-TYPE-043"]],
   "security/failable-fails": ["PASS", []],
