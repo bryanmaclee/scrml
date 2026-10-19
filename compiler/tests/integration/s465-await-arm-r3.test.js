@@ -101,9 +101,13 @@ const SHAPES = {
     for (let i = 0; i < 10; i++) { i = i + 4
       if (i == 4 && ${H}(pass, row.pw)) { r = "WELCOME" } }
     return r`,
+  // S468: the arm body is now read by the statement checks, so `{ i = 5 }` (a
+  // write never read) is E-MU-001 here exactly as at function top level; the
+  // loop variable is read in the body instead. The shape still asks the same
+  // question: is the call in the C-style `for` UPDATE clause awaited?
   armForUpdateCall: (H) => `
     let r = "REJECTED"${inArm(`{ let ok = false
-        for (let i = 0; i < 1; ok = ${H}(pass, row.pw)) { i = 5 }
+        for (let i = 0; i < 1; ok = ${H}(pass, row.pw)) { i = i + 5 }
         if (ok) { r = "WELCOME" } }`)}
     return r`,
 };

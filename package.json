@@ -48,7 +48,7 @@
   ],
   "scripts": {
     "compile": "bun run compiler/src/cli.js compile",
-    "pretest": "bash scripts/compile-test-samples.sh",
+    "pretest": "bash scripts/install-merge-driver.sh --quiet || true; bash scripts/compile-test-samples.sh",
     "test": "bun test compiler/tests/",
     "test:coverage": "bun test compiler/tests/ --coverage",
     "watch": "bun --watch compiler/src/cli.js compile",

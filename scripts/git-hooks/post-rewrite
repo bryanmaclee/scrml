@@ -1,0 +1,21 @@
+#!/bin/bash
+# post-rewrite — phase 2 of the scrml-generated merge driver after a REBASE (change-id
+# s468-generated-merge-driver). Same job as post-merge (see that hook): a rebase replays commits
+# through the same merge machinery, so the driver may have left cross-file generated content
+# PROVISIONAL; regenerate it from the rebased tree. `git commit --amend` also fires this hook — it
+# is ignored ($1 = "amend").
+
+[ "$1" = "rebase" ] || exit 0
+
+pending=$(git rev-parse --path-format=absolute --git-path scrml-generated-pending 2>/dev/null)
+[ -n "$pending" ] && [ -s "$pending" ] || exit 0
+
+if [ ! -f scripts/git-merge-generated.ts ]; then
+  echo "post-rewrite: generated content is pending regeneration ($pending), but this checkout has no"
+  echo "              scripts/git-merge-generated.ts — run each producer's --write by hand."
+  exit 0
+fi
+
+echo "post-rewrite: regenerating generated content the merge driver left provisional…"
+bun scripts/git-merge-generated.ts --regen || echo "post-rewrite: --regen FAILED — run \`bun scripts/git-merge-generated.ts --regen\` by hand."
+exit 0
