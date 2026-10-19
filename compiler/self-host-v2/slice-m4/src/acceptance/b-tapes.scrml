@@ -14,14 +14,14 @@
 
     function record(action: string) {
         @tick = @tick + 1;
-        @audit.push({ at: @tick, actor: @actor, action: action });            // end-append: granted
+        @audit.append({ at: @tick, actor: @actor, action: action });            // end-append: granted
     }
     function recordBySpread(action: string) {
         @tick = @tick + 1;
         @audit = [...@audit, { at: @tick, actor: @actor, action: action }];   // recognized end-append shape (§66.11.2)
     }
     function enter(name: string) {
-        @stack.push({ name: name });
+        @stack.append({ name: name });
         record("enter " + name);
     }
     function leave() {

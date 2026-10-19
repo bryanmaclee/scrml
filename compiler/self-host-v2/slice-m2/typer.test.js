@@ -41,8 +41,8 @@ describe("writes are type-checked against the target (§66.1 rule 5)", () => {
     { name: "`not` into an `int` cell → E-TYPE-041 (§42.3.1)", want: ["E-TYPE-041"],
       bad: ["    let <x:int=0/>\n    function f() { @x = not }"], ok: ["    let <x:int=0/>\n    function f() { @x = 1 }"] },
     { name: "an end-append of the wrong element type", want: ["E-TYPE-031"],
-      bad: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.push(5) }"],
-      ok: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.push(\"x\") }"] },
+      bad: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(5) }"],
+      ok: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.append(\"x\") }"] },
     { name: "a spread override of a struct cell (O58 (b) field edit)", want: ["E-TYPE-031"],
       bad: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: \"s\" } }"],
       ok: ["    type P:struct = { let x: int, let y: int }\n    let <p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: 5 } }"] },
@@ -205,7 +205,7 @@ describe("adversarial controls — adjacent shapes stay silent", () => {
     // error for all types (user-voice S442 "`T | not` into `T` is an error for all types"); now a positive test in typer-s440.test.js)
     ["an enum variant into an enum cell", "    let <o:Openness=.Closed/>\n    function f() { @o = .Opened }"],
     ["a seeded `let` (reactive initializer) and a use-site live value", "    let <src:string=\"a\"/>\n    let <draft:string=@src/>", "<dropdown label=(@src) options=([\"a\"]) value=(@draft)/>"],
-    ["a sequence's `.length` into an int cell", "    <audit:string[free, append]=([])/>\n    let <n:int=0/>\n    function f() { @audit.push(\"x\")\n @n = @audit.length }"],
+    ["a sequence's `.length` into an int cell", "    <audit:string[free, append]=([])/>\n    let <n:int=0/>\n    function f() { @audit.append(\"x\")\n @n = @audit.length }"],
     ["a read through a `given` narrowing", "    let <show:bool=false/>\n    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
     ["a row alias and `@.` inside `<each>`", "    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>", "<each in=@lines key=@.id as line><p>${line.name} ${@.id}</p><dropdown label=line.name options=([\"a\"])/></each>"],
     ["`reset(@x)` of a `let` cell", "    let <x:int=0/>\n    function f() { reset(@x) }"],
@@ -311,7 +311,8 @@ const BASE_66_19 = [
   // s469-tape-followups (#1472): the SPEC log now appends with `@audit.append(…)` (S469 "tape methods are named
   // after their grants", §66.12.6 rule 3). The bootstrap's method allowlist still knows only `push`/`unshift`, so
   // the call is E-BOOTSTRAP-UNSUPPORTED. Owed follow-up: rename the allowlist (analyze.scrml) — then back to [].
-  ["E-BOOTSTRAP-UNSUPPORTED"],
+  // s469-boot-strings-1: the allowlist is renamed (`append` / `prepend`; JS names are E-TAPE-JS-METHOD): clean again.
+  [],
   // §66.19.6 Before (the retired `<engine>`): s444 (PA) — `<engine>` is a scrml structural element and is refused
   // WHOLE (it used to fall through as an HTML element, its state-children then failing one by one).
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
@@ -346,8 +347,8 @@ describe("A — a local's type: its annotation, else the join of everything it i
     expect(inApp("    let <s:string=\"\"/>\n    function f() { let a: string | not = not\n @s = a }")).toEqual(["E-TYPE-031"]);
   });
   test("legal — the same shape in an inline handler block, and through `.push`", () => {
-    expect(inApp("    <audit:string[free, append]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.push(a) }",
-      "<button onclick={ let b = not; b = \"y\"; @audit.push(b) }>x</button>")).toEqual([]);
+    expect(inApp("    <audit:string[free, append]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.append(a) }",
+      "<button onclick={ let b = not; b = \"y\"; @audit.append(b) }>x</button>")).toEqual([]);
   });
   test("silent — `let a = \"s\"; a = 1` then `@x = a` into int: the join is unprovable (was a false E-TYPE-031)", () => {
     expect(inApp("    let <x:int=0/>\n    function f() { let a = \"s\"\n a = 1\n @x = a }")).toEqual([]);
@@ -380,8 +381,8 @@ describe("B — a whole-struct replace by a literal checks every field (spelling
   });
   test("E-TYPE-031 — a struct literal inside an appended element", () => {
     const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, append]=([])/>\n";
-    expect(inApp(L + "    function f() { @ls.push({ id: 1, name: 5 }) }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(L + "    function f() { @ls.push({ id: 1, name: \"a\" }) }")).toEqual([]);
+    expect(inApp(L + "    function f() { @ls.append({ id: 1, name: 5 }) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(L + "    function f() { @ls.append({ id: 1, name: \"a\" }) }")).toEqual([]);
   });
 });
 

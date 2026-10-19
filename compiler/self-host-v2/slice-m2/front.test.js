@@ -591,7 +591,7 @@ renders <p class="box">\${a},\${b},\${c}</p>
     let <n:int=0/>
     <log:int[free, append]=([])/>
     function stamp() -> int {
-        @log.push(1)
+        @log.append(1)
         return 1
     }
     function e1${twin ? "W" : ""}() -> int {

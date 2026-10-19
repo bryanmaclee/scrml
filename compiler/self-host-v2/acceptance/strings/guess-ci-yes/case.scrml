@@ -1,0 +1,13 @@
+// bryan's guess program, case-insensitive: the first letter upper-cased, the rest lower-cased, then toEnum.
+<program>
+    type Guess:enum = { Yes, No }
+
+    let <inputVal:string=""/>
+    <g:Guess | not=(Guess.toEnum(@inputVal.charAt(0).toUpperCase() + @inputVal.slice(1).toLowerCase()))/>
+
+    <main>
+        <form><input type="text" placeholder="answer here" bind:value=@inputVal/></form>
+        <p id="say">${match @g { .Yes :> "yeppers", .No :> "nope", not :> "not a guess", }}</p>
+        <p id="len">length ${@inputVal.length}</p>
+    </main>
+</program>

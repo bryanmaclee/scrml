@@ -1,0 +1,7 @@
+// an attribute EXPRESSION is logic: its string literal is plain text.
+<program>
+    let <s:string="ab"/>
+    <main>
+        <p id="t" title=("len ${@s}")>x</p>
+    </main>
+</program>

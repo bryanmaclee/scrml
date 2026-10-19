@@ -5158,7 +5158,7 @@ ${
                 // JavaScript's tape method names, refused (E-TAPE-JS-METHOD)
                 if (isBuiltinMethodName(m.method)) return resolveMethod(env, e, m, args, st0)
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
@@ -5652,6 +5652,13 @@ ${
     // the ONE table `methodSig`.
     // =========================================================================
 
+    // A refused call names its method (fail closed BY NAME), when it has one.
+    fn callText(callee: AExpr) -> string {
+        const m: MethodCall | not = memberCall(callee)
+        if (m is not) return ""
+        return "`." + m.method + "(…)` is not in the bootstrap — "
+    }
+
     fn isBuiltinMethodName(n: string) -> boolean {
         return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || tapeJsFix(n) != ""
     }
@@ -5687,7 +5694,7 @@ ${
         const el: Type | not = seqElem(t)
         if (el is not) return not
         if (n == "reverse") return PrimOp.Reverse
-        if (n == "join") return PrimOp.Join
+        if (n == "join" && el == Type.Str) return PrimOp.Join
         if (n == "sort") {
             if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
             if (el == Type.Str) return PrimOp.SortStr
@@ -5749,10 +5756,18 @@ ${
         return "sort"
     }
 
-    // A refused method call: its arguments are still resolved (their names
-    // and facts), the call gets no fact and no type.
+    // A refused method call: ONE report, on the call; it gets no fact and no
+    // type, and its arguments are not judged (as the general refusal in
+    // resolveCall — an argument has no expected type to be judged against).
     fn refuseMethod(env: Env, e: AExpr, code: string, msg: string, args: AExpr[], st: AS) -> RX {
-        return plain(not, addDiag(resolveExprs(env, args, not, st), env.file, e.span, code, msg))
+        return plain(not, addDiag(st, env.file, e.span, code, msg))
+    }
+
+    // What a refused copy-returning JS name still answers (the receiver's type,
+    // as a refused filter does), so a `.length` after it is not a second report.
+    fn tapeGuess(n: string, ot: Type) -> Type | not {
+        if (n == "toSorted" || n == "toReversed" || n == "with") return ot
+        return not
     }
 
     fn resolveMethod(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX {
@@ -5765,7 +5780,7 @@ ${
         }
         const fix: string = tapeJsFix(m.method)
         if (fix != "") {
-            if (seqElem(ot) is given) return refuseMethod(env, e, "E-TAPE-JS-METHOD", call + " is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants, and `sort` / `reverse` return a new tape)", args, st)
+            if (seqElem(ot) is given) return plain(tapeGuess(m.method, ot), refuseMethod(env, e, "E-TAPE-JS-METHOD", call + " is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants, and `sort` / `reverse` return a new tape)", args, st).st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap", args, st)
         }
         if (maybeInner(ot) is given) {
@@ -5775,7 +5790,7 @@ ${
         if (op is not) {
             const el: Type | not = seqElem(ot)
             if (m.method == "sort" && el is given) {
-                return refuseMethod(env, e, "E-TYPE-031", "`.sort()` with no comparator needs elements with a natural order — ints and numbers (numerically) or strings (by code point) — and these are `" + typeName(el) + "` (S469); pass a comparator, `.sort((a, b) => …)` returning a number", args, st)
+                return plain(ot, refuseMethod(env, e, "E-TYPE-031", "`.sort()` with no comparator needs elements with a natural order — ints and numbers (numerically) or strings (by code point) — and these are `" + typeName(el) + "` (S469); pass a comparator, `.sort((a, b) => …)` returning a number", args, st).st)
             }
             if (m.method == "join" && el is given) {
                 return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
@@ -5812,7 +5827,7 @@ ${
         const lam: AExpr = args[0]
         const ps: string[] = lambdaParams(lam)
         if (!isLambda(lam) || ps.length != 2) {
-            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `.sort(…)` must be a comparator, an arrow function of two parameters `(a, b) => …` returning a number (the bootstrap has no other function value)", args, st)
+            return plain(ot, refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `.sort(…)` must be a comparator, an arrow function of two parameters `(a, b) => …` returning a number (the bootstrap has no other function value)", args, st).st)
         }
         const rl: RX = resolveLambda(env, lam, ps, elem, not, st)
         return plain(ot, addValue(rl.st, e.nid, ValueFact.VSeqCall(SeqFn.SortBy)))
@@ -6937,7 +6952,7 @@ ${
         if (m is given) {
             if (samePlaceSyntax(target, m.obj)) {
                 if (m.method == "filter") return 3
-                if (m.method == "map") return 4
+                if (m.method == "map" || m.method == "sort" || m.method == "reverse") return 4      // s469: sort / reverse keep the length and move positions (§66.12.6 rule 3)
             }
         }
         return 0
@@ -7077,7 +7092,7 @@ ${
         if (shape == 1) return "an end-append (§66.11.2: `@x = [...@x, e]` is the same edit as `@x.push(e)`)"
         if (shape == 2) return "a front-prepend (`@x = [e, ...@x]`)"
         if (shape == 3) return "a shrink-anywhere (§66.11.2: `@x = @x.filter(…)`; the `remove` grant)"
-        return "a position-write (§66.11.2: `@x = @x.map(…)`)"
+        return "a position-write (§66.11.2: `@x = @x.map(…)`, `.sort(…)`, `.reverse()`)"
     }
 
     fn resolveSeqShape(env: Env, e: AExpr, target: AExpr, value: AExpr, shape: int, st0: AS) -> AS {

@@ -5,7 +5,7 @@
     let <actor:string="ops"/>
 
     function record(action: string) {
-        @audit.push({ at: Date.now(), actor: @actor, action: action });           // end-append: granted
+        @audit.append({ at: Date.now(), actor: @actor, action: action });           // end-append: granted
     }
     function recordBySpread(action: string) {
         @audit = [...@audit, { at: Date.now(), actor: @actor, action: action }];  // a recognized end-append shape: granted

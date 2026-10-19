@@ -1127,11 +1127,46 @@ ${
         return { es: out, tp: expectP(t, close) }
     }
 
+    // s469 — W-STRING-INTERP-LITERAL (PROVISIONAL: no §34 row yet; bryan
+    // approved provisional codes, S469; scripts/gen-bootstrap-severity.ts
+    // PROVISIONAL gives it its severity until the SPEC adds the row). A quoted
+    // string in LOGIC is plain text: `${…}` interpolates only in markup text
+    // and quoted attribute values (SPEC §5.5.3, §4.18), so `"typed ${n}
+    // chars"` is those characters — a trap for a JavaScript reader. A WARNING
+    // (the program means what it says), read from the token's RAW text: an
+    // escaped `\${` was written on purpose and is not reported. A code-default
+    // body's display-text literal (§4.18.4), which DOES interpolate, takes the
+    // diagnostic back (displayNodes → dropInterpLint).
+    fn interpLiteralLint(tp: TP, t: PTok) -> TP {
+        const q: string = t.text.substring(0, 1)
+        if (q != "\"" && q != "'") return tp
+        if (!liveInterpRaw(t.text)) return tp
+        const open: string = interpOpen()
+        return diagAt(tp, "W-STRING-INTERP-LITERAL", "this string is plain text: `" + open + "…}` inside a string in logic is not interpolated — it prints as written. Interpolate in markup instead (`<p>typed " + open + "n} chars</p>`, or a quoted attribute) (§5.5.3, §4.18) [provisional code]", t)
+    }
+
+    // An unescaped `${…}` in a quoted token's raw text (a `\` escapes the next
+    // character). A `${` with no `}` after it is not an interpolation attempt:
+    // `${"${"}` is the SPEC's own spelling of a literal `${` in markup (§4.18.1b).
+    fn liveInterpRaw(raw: string) -> boolean {
+        let i: int = 1
+        while (i < raw.length - 1) {
+            if (raw.substring(i, i + 1) == "\\") {
+                i = i + 2
+            } else if (raw.substring(i, i + 2) == interpOpen()) {
+                return raw.indexOf("}", i + 2) > 0
+            } else {
+                i = i + 1
+            }
+        }
+        return false
+    }
+
     fn parsePrimary(tp: TP) -> RExpr {
         const t: PTok = cur(tp)
         const start: int = t.start
         if (t.cls == TC.Num) return mkE(adv(tp), start, AExprK.Num(t.v))
-        if (t.cls == TC.Str) return mkE(adv(tp), start, AExprK.Str(t.v))
+        if (t.cls == TC.Str) return mkE(interpLiteralLint(adv(tp), t), start, AExprK.Str(t.v))
         if (t.cls == TC.Variant) return mkE(adv(tp), start, AExprK.Variant(t.v))
         if (t.cls == TC.At) return parseAt(tp)
         if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
@@ -2846,7 +2881,10 @@ ${
     // (§4.18.4), its literal segments (Text) and interpolations (Interp), in
     // order. A `${`-carrying display-text literal nested inside a larger
     // expression is not built (reported).
-    fn displayNodes(m: MP, e: AExpr, start: int, tp: TP) -> RNodes {
+    fn displayNodes(m0: MP, e: AExpr, start: int, tp: TP) -> RNodes {
+        // s469: a `"…"` in a code-default body is display text — interpolated
+        // (standalone) or reported below (nested) — never the logic-string trap
+        const m: MP = dropInterpLint(m0, e.span.start, e.span.end)
         if (isStandaloneDisplay(tp) && isDisplayTemplate(m.src, e)) {
             const split: RNodes = splitDisplay(m, e.span.start, e.span.end)
             return { nodes: split.nodes, mp: mAt(split.mp, m.pos) }
@@ -2859,6 +2897,27 @@ ${
         }
         const n: ANode = { nid: mm.nid, span: mkSpan(start, mm.pos), k: ANodeK.Interp(e) }
         return { nodes: [n], mp: mBump(mm) }
+    }
+
+    // How many diagnostics are not W-STRING-INTERP-LITERAL (a code-default
+    // run's "did parsing add a report?" test must not count the lint, which
+    // displayNodes takes back).
+    fn diagsBesideLint(ds: Diag[]) -> int {
+        let n = 0
+        for (const d of ds) {
+            if (d.code != "W-STRING-INTERP-LITERAL") n = n + 1
+        }
+        return n
+    }
+
+    // The W-STRING-INTERP-LITERAL diagnostics inside [start, end), removed.
+    fn dropInterpLint(mp: MP, start: int, end: int) -> MP {
+        let keep: Diag[] = []
+        for (const d of mp.diags) {
+            const inside: boolean = d.span.start >= start && d.span.end <= end
+            if (d.code != "W-STRING-INTERP-LITERAL" || !inside) keep = keep.concat([d])
+        }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: keep, file: mp.file }
     }
 
     // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
@@ -3132,7 +3191,7 @@ ${
                     // newline- or comma-separated) — refused by name, never read
                     // as display text
                     m = mDiag(mAt(m, runEnd), "E-BOOTSTRAP-UNSUPPORTED", "engine message arms (`.Msg :> …` in a `<" + tag + ">` state-child body, §51.0.S.2.3) are not in the bootstrap", before, runEnd)
-                } else if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
+                } else if (atEnd(r.tp) && diagsBesideLint(r.tp.diags) == diagsBesideLint(m.diags)) {
                     const back: MP = backToMarkup(m, r.tp)
                     // §4.18.4: a `${`-carrying display-text literal renders as its segments
                     const dn: RNodes = displayNodes(back, r.e, before, tp)

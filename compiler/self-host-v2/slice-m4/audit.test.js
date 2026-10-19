@@ -170,6 +170,8 @@ const NEGATIVE = [
   { marker: "@audit = @audit.filter(", body: "@audit = @audit.filter(e => e.actor != \"x\")" },
   { marker: "@audit[0].action = \"edited\"", body: "@audit[0].action = \"edited\"" },
   { marker: "@audit.pop()", body: "@audit.pop()" }, // S442: `[free, append]` grants no shrink
+  // s469-boot-strings-1: `.reverse()` returns a new tape; written back it is a position write (§66.12.6 rule 3)
+  { marker: "@audit = @audit.reverse()", body: "@audit = @audit.reverse()" },
 ];
 
 // s469-tape-followups (#1472): the S469 §66.19.5 rewrite added negative lines the bootstrap cannot check yet
@@ -177,12 +179,12 @@ const NEGATIVE = [
 // does TODAY; owed follow-up: the allowlist rename (analyze.scrml) + E-TAPE-JS-METHOD, then move each into
 // NEGATIVE with its SPEC code.
 const PENDING = [
-  // SPEC: E-TAPE-JS-METHOD. Today: accepted (the allowlist still knows `push`).
-  { marker: "@audit.push(e);", body: "@audit.push({ at: 1, actor: \"a\", action: \"b\" })", today: [] },
   // SPEC: E-WRITE-NOT-GRANTED (shrink anywhere). Today: `.remove` is not in the allowlist.
   { marker: "@audit.remove(0)", body: "@audit.remove(0)", today: ["E-BOOTSTRAP-UNSUPPORTED"] },
-  // SPEC: E-WRITE-NOT-GRANTED (a position write). Today: `.reverse` is unsupported, and the write-back reads as a replace.
-  { marker: "@audit = @audit.reverse()", body: "@audit = @audit.reverse()", today: ["E-BOOTSTRAP-UNSUPPORTED", "E-WRITE-NOT-GRANTED"] },
+];
+// s469-boot-strings-1: the allowlist rename landed (`append` / `prepend`); JavaScript's names are refused.
+const TAPE_JS = [
+  { marker: "@audit.push(e);", body: "@audit.push({ at: 1, actor: \"a\", action: \"b\" })" },
 ];
 // The second line of the `appended` comment (its `→ E-WRITE-NOT-GRANTED` is about an uncertifiable helper).
 const PROSE = ["an uncertifiable helper's result is a replace"];
@@ -190,8 +192,8 @@ const PROSE = ["an uncertifiable helper's result is a replace"];
 describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
   test("the table covers every `→ E-…` line, and each names E-WRITE-NOT-GRANTED", () => {
     const lines = negativeLines(SRC());
-    expect(lines.length).toBe(NEGATIVE.length + PENDING.length + PROSE.length);
-    for (const n of [...PENDING, ...PROSE.map((marker) => ({ marker }))]) {
+    expect(lines.length).toBe(NEGATIVE.length + PENDING.length + TAPE_JS.length + PROSE.length);
+    for (const n of [...PENDING, ...TAPE_JS, ...PROSE.map((marker) => ({ marker }))]) {
       expect(lines.filter((l) => l.includes(n.marker)).length).toBe(1);
     }
     for (const n of NEGATIVE) {
@@ -205,6 +207,14 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
     test(`${n.body} → E-WRITE-NOT-GRANTED`, () => {
       const src = replaceLine(SRC(), n.marker, `function neg${i}() { ${n.body} }`);
       expect(codes(src)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    });
+  });
+
+  TAPE_JS.forEach((n, i) => {
+    test(`${n.body} → E-TAPE-JS-METHOD (§66.12.6 rule 3), naming the fix`, () => {
+      const r = run(replaceLine(SRC(), n.marker, `function js${i}() { ${n.body} }`));
+      expect(r.diags.map((d) => d.code)).toEqual(["E-TAPE-JS-METHOD"]);
+      expect(r.diags[0].message).toContain(".append(x)");
     });
   });
 
@@ -222,6 +232,7 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
     expect(msg(3)).toContain("shrink-anywhere");
     expect(msg(4)).toContain("fixed");
     expect(msg(5)).toContain("removal at the end");
+    expect(msg(6)).toContain("position-write");
   });
 
   test("a wrong-typed element in the spread shape is E-TYPE-031 (§66.1 rule 5 — the element is the written value)", () => {

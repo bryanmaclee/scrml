@@ -52,12 +52,12 @@ describe("item 2 — shrinking a FIXED-length sequence is E-WRITE-INVARIANT (F7'
 
 describe("item 3 — a duplicate grant token is refused (E-GRANT-UNKNOWN)", () => {
   test("`[free, append, append]` → E-GRANT-UNKNOWN naming the token", () => {
-    const d = run(seq("string[free, append, append]", `@xs.push("a")`)).diags;
+    const d = run(seq("string[free, append, append]", `@xs.append("a")`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-GRANT-UNKNOWN"]);
     expect(d[0].message).toContain("`append` is granted twice");
   });
   test("twin: `[free, append]` is fine", () => {
-    expect(codes(seq("string[free, append]", `@xs.push("a")`))).toEqual([]);
+    expect(codes(seq("string[free, append]", `@xs.append("a")`))).toEqual([]);
   });
 });
 
@@ -66,7 +66,7 @@ describe("item 4 — a sequence spread reads ONE snapshot (RULED S442)", () => {
   beforeAll(async () => {
     let src = auditFixture().replace("<li>${e.actor}: ${e.action}</li>", "<li>${e.actor}: ${e.action} @${e.at}</li>");
     src = src.replace("function record(action: string) {", `function mk2() -> Entry {
-        @audit.push({ at: 99, actor: "in", action: "inner" })
+        @audit.append({ at: 99, actor: "in", action: "inner" })
         const e: Entry = { at: 0, actor: "out", action: "outer" }
         return e
     }

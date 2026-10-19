@@ -58,7 +58,7 @@ const EVERY_FACT = {
     "        a = a * 2",
     "        @n = a",
     "        @p = { ...@p, x: a }",
-    "        @lines.push({ id: a, name: \"x\" })",
+    "        @lines.append({ id: a, name: \"x\" })",
     "        @lines = [...@lines, { id: a, name: \"y\" }]",
     "        reset(@n)",
     "        return @lines.length",

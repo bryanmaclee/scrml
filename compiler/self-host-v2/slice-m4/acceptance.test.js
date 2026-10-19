@@ -81,6 +81,34 @@ const STATUS = {
   "security/failable-fails": ["PASS", []],
   "toenum/neg-arg-type": ["PASS", ["E-TYPE-031"]],
   "toenum/prototype-keys": ["PASS", []],
+  // s469-boot-strings-1 — the typed string methods (positions are code points), bryan's guess made
+  // case-insensitive (the `"typed " + …` half skipped: no int→string conversion is ruled)
+  "strings/guess-ci-yes": ["PASS", []],
+  "strings/guess-ci-upper": ["PASS", []],
+  "strings/guess-ci-mixed-no": ["PASS", []],
+  "strings/guess-ci-maybe": ["PASS", []],
+  "strings/guess-ci-empty": ["PASS", []],
+  "strings/methods": ["PASS", []],
+  "strings/neg-unknown-method": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "strings/neg-int-receiver": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "strings/neg-maybe-receiver": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "strings/neg-arg-type": ["PASS", ["E-TYPE-031"]],
+  "strings/neg-arity": ["PASS", ["E-CALL-ARITY"]],
+  // tape sort / reverse / join (new tapes), append / prepend, JavaScript's names refused
+  "tapes/sort-reverse-join": ["PASS", []],
+  "tapes/append-prepend": ["PASS", []],
+  "tapes/neg-sort-bool": ["PASS", ["E-TYPE-031"]],
+  "tapes/neg-join-int": ["PASS", ["E-TYPE-031"]],
+  "tapes/neg-comparator-bool": ["PASS", ["E-TYPE-031"]],
+  "tapes/neg-push": ["PASS", ["E-TAPE-JS-METHOD"]],
+  "tapes/neg-unshift": ["PASS", ["E-TAPE-JS-METHOD"]],
+  "tapes/neg-tosorted": ["PASS", ["E-TAPE-JS-METHOD"]],
+  "tapes/neg-sort-discarded": ["PASS", ["E-TAPE-JS-METHOD"]],
+  // the PROVISIONAL W-STRING-INTERP-LITERAL lint (no §34 row yet)
+  "interp/logic-literal-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
+  "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
+  "interp/markup-does-not-warn": ["PASS", []],
+  "interp/quoted-attr-no-warn": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;
@@ -116,6 +144,13 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   test("program (a) compiles and RUNS on the bootstrap — the first human-written program to (s469)", () => {
     for (const rel of ["guess/a-guess", "guess/a-guess-no", "guess/a-guess-other"]) {
       expect([rel, verdicts[rel].bucket, verdicts[rel].emitted, verdicts[rel].runtimeExecuted]).toEqual([rel, "PASS", [], true]);
+    }
+  });
+  test("s469 strings / tapes / interp: every positive case RAN on the bootstrap (output checked, not merely compiled)", () => {
+    for (const rel of ["strings/guess-ci-yes", "strings/guess-ci-upper", "strings/guess-ci-mixed-no", "strings/guess-ci-maybe",
+                       "strings/guess-ci-empty", "strings/methods", "tapes/sort-reverse-join", "tapes/append-prepend",
+                       "interp/logic-literal-warns", "interp/attr-expression-warns", "interp/markup-does-not-warn"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });
   test("the security cases ran their runtime half (the deny arm was taken, not merely compiled)", () => {
