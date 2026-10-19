@@ -31,10 +31,28 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 663 | 6 |
-| LOW | 441 | 0 |
+| MED | 665 | 6 |
+| LOW | 442 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469 — in the BOOTSTRAP, a `let` struct field of tape type (`type Box:struct = { let xs: int[] }`) gets no E-GRANT-LET-ON-SEQUENCE and is writable: `let <b:Box=({ xs: [] })/>` + `@b.xs = [1]` compiles clean (setIn) — `NEW S469; MED; open`
+
+<!-- @gap id=g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(fieldOf has the cell-only `isLet && seqElem(unMaybe(ty))` E-GRANT-LET-ON-SEQUENCE check; fieldDefsOf (struct fields) takes `f.isLet` as the `replace` grant with no such check) prov=review:#1468-r2(s469-bootstrap-parse-arms-union);empirical:S469(re-executed on 8ca23db90 — 0 diagnostics, Core produced) -->
+
+Found in the #1468 r2 review. `let` on a sequence is E-GRANT-LET-ON-SEQUENCE: a tape's `replace` lives in its type's grants (§66.12.3, §66.12.6 rule 1: "a struct field whose type is a tape"). The bootstrap checks this for cells (`analyze.scrml` `fieldOf`, which sees through `| not` since #1468) but not for struct field declarations: `fieldDefsOf` turns `let xs: int[]` into `replace: true`, so the field is writable. Owed: the same `seqElem(unMaybe(ty))` check in `fieldDefsOf`. Measure first: existing slice-m2 tests write `let xs: int[] | not` struct fields (`typer-s440.test.js` `O`), so the check will move them.
+
+### g-bootstrap-callsite-grant-subset-unchecked-s469 — in the BOOTSTRAP, the §66.12.3 call-site subset is not checked: an UNGRANTED `Entry[]` passed to a parameter typed `Entry[free, append]` gets no diagnostic — `NEW S469; LOW; open (latent)`
+
+<!-- @gap id=g-bootstrap-callsite-grant-subset-unchecked-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(call-argument checks compare element types, not the argument tape's grants against the parameter's) prov=review:#1468-r2(s469-bootstrap-parse-arms-union);empirical:S469(re-executed on 8ca23db90 — `function take(xs: Entry[free, append])` + `<src:Entry[]=[]/>` + `take(@src)`: 0 diagnostics) -->
+
+§66.12.3 / §66.12.6 rule 1 ("a function parameter: the callee can do only what its parameter type grants"): an argument may carry no more grants than the tape it comes from has. This is masked today, because Core has no edit of a local or a parameter (every such edit is E-BOOTSTRAP-UNSUPPORTED), so the callee cannot use the grants it was promised. It becomes an ESCAPE the day local and parameter edits land: an immutable tape would be appended to through the parameter. Owed with (or before) local edits: refuse an argument whose tape grants are not a superset of the parameter's (E-WRITE-NOT-GRANTED or a dedicated code — ruling owed on the code).
+
+### g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469 — in the BOOTSTRAP, a whole-struct write on a `let` struct replaces its tape fields without checking their grants: with `xs: Entry[free, append]`, `@b = { xs: [] }` is ACCEPTED while `@b.xs = []` is refused ("no replace") — `NEW S469; MED; open`
+
+<!-- @gap id=g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(wholeFieldWrite: the owner's `let` grants `replace` of the whole value; a struct-typed value's tape fields are not judged — fieldAtWrite judges only `@b.xs = …`) prov=review:#1468-r2(s469-bootstrap-parse-arms-union);ruling:user-voice-scrml.md(S469 "NO unconstrained sequence behaviour anywhere in the language", point (4), PA reading);empirical:S469(re-executed on 8ca23db90 — `whole()` clean, `part()` E-WRITE-NOT-GRANTED) -->
+
+SPEC §66.12.6 rule 4 (S469, point (4)): *"Spread-rebuild and other whole-value writes are classified as edits or a `replace` (§66.11.2, O37 = certify). They never get around the grants."* A whole-struct write that changes a tape field IS a `replace` of that field, so it must be judged against the field's own grants. Today the owner's `let` alone admits it, and the field-level refusal is bypassed by writing the whole struct. The PA reads the S469 ruling this way and has told bryan. Owed: in `wholeFieldWrite` (and the spread-override path), for a struct-typed target, classify each tape-typed field of the new value. An unchanged field (`xs: @b.xs`) or a spread that keeps it is no write; any other value is a `replace` of the field, refused unless the field's type grants `replace`.
 
 ### g-value-form-if-for-failable-call-unchecked-s469 — (security) a `!` call reached through a VALUE-FORM `if` / `for` was never E-ERROR-002: `const ok = if (check(p)) { lift true } else { lift false }`, `… { lift check(p) } …`, `const vs = for (x of [p]) { lift check(x) }`, a failable fn LIFTED as a value (`const g = if (c) { lift check } else { lift plain }; g(p)`) compiled, and a WRONG PASSWORD LOGGED IN — `NEW S469 (#1444 re-review); HIGH; RESOLVED S469`
 
