@@ -3,11 +3,11 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, emitExprFromText, emitConditionField, type EmitExprContext } from "./emit-expr.ts";
 import { cStyleInitDeclaration } from "../validators/defer-structure.ts";
-import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
+import { emitLogicNode, emitSqlQueryShape, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, emitPropagateArm, givenGuardCondition } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames, liftInitialRenderCall } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree, parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
-import { armBodyStatementsFromText, leaveInStatements } from "../arm-body-statements.ts";
+import { armBodyStatementsFromText, leaveInStatements, objectLiteralArmValue } from "../arm-body-statements.ts";
 import { serverArmBlockStatements, serverArmExprNode } from "./arm-structure.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
@@ -1838,6 +1838,48 @@ export function matchArmBlockBinding(child: any): string | null {
   return payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
 }
 
+/**
+ * The ONE reading of a block-bodied arm node (`match-arm-block`) as a `MatchArm`,
+ * shared by every match lowering (statement, value IIFE, declaration, compile-time
+ * `^{}` evaluation). The node's head (ast-builder.js Forms 1–4):
+ *   - `isWildcard` / `isNotArm`        → the wildcard / absence arm;
+ *   - `literals` (S468, Form 4)        → a §18.16 literal arm or literal
+ *     alternation: `"string"` when every alternate is a string, else `"literal"`;
+ *     the alternates are JS source (`1`, `-1`, `"bob"`, `true`), compared directly;
+ *   - `alternates` (S468, Form 4)      → a variant alternation (`.A | .B :> { … }`);
+ *   - `variant`                        → a single variant (`.V` / `::V`, with its
+ *     payload binding).
+ * The body is always the parsed statements (`structuredBody`).
+ */
+export function matchArmBlockToMatchArm(child: any): MatchArm {
+  const structuredBody = Array.isArray(child?.body) ? child.body : null;
+  if (child?.isWildcard) return { kind: "wildcard", test: child.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+  if (child?.isNotArm) return { kind: "not", test: child.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+  const head = armHeadFromTokens(child);
+  if (head) return { ...head, binding: null, result: "", structuredBody };
+  return { kind: "variant", test: child?.variant ?? null, binding: matchArmBlockBinding(child), result: "", structuredBody };
+}
+
+/**
+ * S468 — the arm head the AST builder recorded from its TOKENS on a Form 4 block
+ * arm or an Inline Form 6 arm (ast-builder.js `readArmHead`): `literals` (each a
+ * literal's JS source, `1` / `-1` / `"bob"` / `true`) or `alternates` (variant
+ * names). Null when the node carries neither. A literal arm is `"string"` when
+ * every alternate is a string literal (its recorded source starts with its own
+ * delimiter — this reads the token text the parser stored, not program source),
+ * else `"literal"`; `armCondition` compares either directly.
+ */
+function armHeadFromTokens(node: any): Pick<MatchArm, "kind" | "test" | "tests"> | null {
+  const literals: string[] | null = Array.isArray(node?.literals) && node.literals.length > 0 ? node.literals : null;
+  if (literals) {
+    const allStrings = literals.every((t: string) => t.startsWith('"') || t.startsWith("'"));
+    return { kind: allStrings ? "string" : "literal", test: literals[0], tests: literals.length > 1 ? literals : null };
+  }
+  const alternates: string[] | null = Array.isArray(node?.alternates) && node.alternates.length > 0 ? node.alternates : null;
+  if (alternates) return { kind: "variant", test: alternates[0], tests: alternates.length > 1 ? alternates : null };
+  return null;
+}
+
 export function parseBindingList(raw: string): PayloadBinding[] {
   if (!raw) return [];
   const result: PayloadBinding[] = [];
@@ -2204,6 +2246,10 @@ function _matchArmInlineToMatchArm(node: any): MatchArm | null {
   if (test === "else") {
     return { kind: "wildcard", test: null, binding: null, result, failExpr };
   }
+  // S468 — a literal / alternation head the AST builder recorded from its tokens
+  // (ast-builder.js Inline Form 6): read the structure, not the `test` text.
+  const tokenHead = armHeadFromTokens(node);
+  if (tokenHead) return { ...tokenHead, binding: null, result, failExpr };
   if (test === "not") {
     return { kind: "not", test: null, binding: null, result, failExpr };
   }
@@ -2887,10 +2933,36 @@ function emitMultiScrutineeMatch(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       const prelude = preludes.join("");
-      const bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
+      // S469 r4/r5 — a `{ … }` product-arm BLOCK body arrives parsed (a `match-arm-block`
+      // whose `body` is the parser's `parseArmBraceBody` statements): emitted as a
+      // structured arm, with the same leave rule as the whole-product wildcard block below.
+      let bodyEmit: string;
+      const productBlock: any[] | null = child.kind === "match-arm-block" && Array.isArray(child.body) ? child.body : null;
+      if (productBlock) {
+        const leaves = armLeaves({ kind: "wildcard", test: null, binding: null, result: "", structuredBody: productBlock });
+        if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+          refuseLeavingValueArm(node, leaves, opts);
+        }
+        const inner = structuredIifeArmInner(productBlock, opts, matchCtx);
+        bodyEmit = `{ ${prelude}${inner} }`;
+      } else {
+        bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
+      }
       const prefix = conditionIndex === 0 ? "if" : "else if";
       lines.push(`  ${prefix} (${condition}) ${bodyEmit}`);
       conditionIndex++;
+    } else if (isWholeWildcard && child.kind === "match-arm-block") {
+      // S468 r1 (F2) — a whole-product wildcard with a `{ … }` BLOCK body (`_ :> { … }`,
+      // `else :> { … }`) is a `match-arm-block`: its body is its statements, not a
+      // `result` string. It used to be emitted from the (absent) result — the block
+      // was DROPPED, so the arm did nothing (a rejecting branch never ran). Emitted as
+      // the single-scrutinee IIFE emits a structured arm, with the same leave rule.
+      const leaves = armLeaves(matchArmBlockToMatchArm(child));
+      if (leaves && !(opts?.matchValueIsReturned === true && leaves !== "break" && leaves !== "continue")) {
+        refuseLeavingValueArm(node, leaves, opts);
+      }
+      const inner = structuredIifeArmInner(Array.isArray(child.body) ? child.body : [], opts, matchCtx);
+      lines.push(`  else ${inner ? `{ ${inner} }` : `{}`}`);
     } else if (isWholeWildcard) {
       const bodyEmit = emitMultiArmBody(resultStr, "", matchCtx, opts);
       lines.push(`  else ${bodyEmit}`);
@@ -2960,9 +3032,9 @@ function structuredIifeArmInner(structuredBody: any[], opts: any, _matchCtx: Emi
   // work, and no genVar side effects that would perturb the emitted differential).
   // Returns null for a genuine statement block, which then takes the §18.5 tail
   // path below unchanged.
-  const _objArm = _objectLiteralArmFromStructuredBody(structuredBody);
+  const _objArm = emitObjectLiteralArm(structuredBody, _matchCtx);
   if (_objArm !== null) {
-    structuredInner = `return ${_awaitMatchArmServerCalls(emitArmValue(_objArm, _matchCtx), opts ?? {})};`;
+    structuredInner = `return ${_awaitMatchArmServerCalls(_objArm, opts ?? {})};`;
   } else {
     const bodyLines = emitLogicBody(structuredBody, opts).filter(Boolean);
     // §18.5 — a block arm is `{ statement* expression? }` whose result is its
@@ -3427,11 +3499,11 @@ export function emitMatchStmt(node: any, opts?: any): string {
  * the function kept going (the decl-position sibling of
  * g-stmt-match-block-return-falls-through, measured S462 against bun:sqlite).
  */
-export function emitMultiScrutineeMatchInline(node: any, opts: any, armBody: (resultStr: string) => string[]): string {
+export function emitMultiScrutineeMatchInline(node: any, opts: any, armBody: (resultStr: string, structuredBody?: any[] | null) => string[]): string {
   return emitMatchInline(node, opts, armBody);
 }
 
-function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: string) => string[]): string {
+function emitMatchInline(node: any, opts?: any, multiArmBody?: (resultStr: string, structuredBody?: any[] | null) => string[]): string {
   const engineBindings: Map<string, import("./emit-engine.ts").EngineBindingInfo> | null =
     opts?.engineBindings ?? null;
   const engineCtx: EngineRewriteCtx | null = (engineBindings || opts?.engineVarNames) ? {
@@ -3544,9 +3616,9 @@ function stmtArmBodyLines(
 ): string[] {
   if (arm.structuredBody) {
     // An object-literal block-form arm (`else :> { x: 0 }`) is a VALUE: evaluate it.
-    const objArm = _objectLiteralArmFromStructuredBody(arm.structuredBody);
+    const objArm = emitObjectLiteralArm(arm.structuredBody, matchCtx);
     if (objArm !== null) {
-      const s = asExpressionStatement(_awaitMatchArmServerCalls(emitArmValue(objArm, matchCtx), opts ?? {}));
+      const s = asExpressionStatement(_awaitMatchArmServerCalls(objArm, opts ?? {}));
       return s ? [s] : [];
     }
     // The arm is a JS block: a name it declares is scoped to it, so it gets its own
@@ -3607,7 +3679,7 @@ function emitMultiScrutineeMatchStmt(
   engineCtx: EngineRewriteCtx | null,
   matchMode: "client" | "server",
   opts?: any,
-  armBodyOverride?: (resultStr: string) => string[],
+  armBodyOverride?: (resultStr: string, structuredBody?: any[] | null) => string[],
 ): string {
   const N = scrutineeExprs.length;
   const rawScrutinees: string[] = Array.isArray(node.scrutinees) ? node.scrutinees : [];
@@ -3626,8 +3698,15 @@ function emitMultiScrutineeMatchStmt(
   const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
     ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
     : [];
-  const armBody = armBodyOverride ?? ((resultStr: string): string[] =>
-    stmtArmBodyLines(structureServerArm({ kind: "wildcard", test: null, binding: null, result: resultStr }, matchMode), node, engineCtx, null, matchMode, matchCtx, opts));
+  // S468 r1 (F2) — `structuredBody`: a whole-product wildcard with a `{ … }` block
+  // body (`_ :> { … }`, a `match-arm-block`) hands its parsed statements, not a
+  // `result` string (it has none — its block used to be DROPPED).
+  const armBody = armBodyOverride ?? ((resultStr: string, structuredBody?: any[] | null): string[] =>
+    stmtArmBodyLines(
+      structuredBody
+        ? { kind: "wildcard", test: null, binding: null, result: "", structuredBody }
+        : structureServerArm({ kind: "wildcard", test: null, binding: null, result: resultStr }, matchMode),
+      node, engineCtx, null, matchMode, matchCtx, opts));
 
   let conditionIndex = 0;
   for (const child of (node.body ?? []) as any[]) {
@@ -3652,12 +3731,13 @@ function emitMultiScrutineeMatchStmt(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       lines.push(`${conditionIndex === 0 ? "if" : "else if"} (${condition}) {`);
-      for (const l of [...preludes, ...armBody(resultStr)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      for (const l of [...preludes, ...armBody(resultStr, child.kind === "match-arm-block" && Array.isArray(child.body) ? child.body : null)]) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
       lines.push(`}`);
       conditionIndex++;
     } else if (isWholeWildcard) {
       lines.push(conditionIndex === 0 ? `{` : `else {`);
-      for (const l of armBody(resultStr)) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
+      const _block = child.kind === "match-arm-block" ? (Array.isArray(child.body) ? child.body : []) : null;
+      for (const l of armBody(resultStr, _block)) for (const sub of l.split("\n")) lines.push(`  ${sub}`);
       lines.push(`}`);
     } else {
       // Fail closed exactly as emitMultiScrutineeMatch does (g-match-lowering-arm-drop F3).
@@ -3761,15 +3841,10 @@ function collectMatchArms(body: any[], opts?: any): MatchArm[] {
     // statements before the arm body. Without this, references like `n` inside
     // the body emit as unbound JS identifiers → ReferenceError at runtime.
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
+    // S468 — literal / alternation / `_` block arms are `match-arm-block` nodes
+    // too (ast-builder.js Form 4); `matchArmBlockToMatchArm` reads every head.
     if (child.kind === "match-arm-block") {
-      const arm: MatchArm = {
-        kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
-        test: child.variant ?? null,
-        binding: matchArmBlockBinding(child),
-        result: "",
-        structuredBody: Array.isArray(child.body) ? child.body : null,
-      };
-      arms.push(arm);
+      arms.push(matchArmBlockToMatchArm(child));
       continue;
     }
     // Handle structured match-arm-inline nodes (from AST builder inline arm parsing).
@@ -3840,6 +3915,21 @@ export function structureServerArm(arm: MatchArm, mode: "client" | "server"): Ma
  */
 export function emitArmValue(text: string, ctx: EmitExprContext, node?: any): string {
   return emitExprField(serverArmExprNode(text, ctx.mode, node), text, ctx);
+}
+
+/**
+ * S469 (#1450 r1, F1 / F6) — an OBJECT-LITERAL block arm (`1 :> { g: check }`,
+ * `.A :> { foo }` — §18.5 shorthand, `{ foo: foo }`) emitted from the ONE reading
+ * of it: the object tree `objectLiteralArmValue` (arm-body-statements.ts) gives the
+ * AST builder, the type checker and codegen alike. The tree is emitted in BOTH
+ * modes (the client used to re-lower the brace TEXT through the token rewriter —
+ * a second reader of the same arm). Returns null for a genuine statement block.
+ */
+export function emitObjectLiteralArm(structuredBody: unknown, ctx: EmitExprContext): string | null {
+  const v = objectLiteralArmValue(structuredBody);
+  if (!v) return null;
+  const node = ctx.mode === "server" ? serverArmExprNode(v.text, ctx.mode, v.node) : v.node;
+  return emitExprField(node, v.text, ctx);
 }
 
 /**

@@ -485,6 +485,8 @@ describe("D — DECL_KEY_CLASSES covers every key ast-builder.js writes on a dec
     "dependencies", "bodyRaw", "bodyExpr", "openerHadSpaceAfterLt",
     "typeAnnotation", "isAwait", "letBinder", "constBinder", "isAsync", "hasReturnType",
     "returnTypeAnnotation", "isPure", "isPinned", "idempotentModifier",
+    "objectLiteralArm", // a flag (#1473 / arm-body-statements.ts): the arm's value is its `exprNode`
+
     // `{ kind: "if-expr", ...ifNode }` / `{ kind: "for-expr", ...forNode }`: the spread is an
     // `if-stmt` / `for-stmt` node, whose own literal keys are checked by this same scan.
     "<spread ifNode>", "<spread forNode>",

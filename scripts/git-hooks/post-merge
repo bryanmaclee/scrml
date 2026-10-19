@@ -1,0 +1,26 @@
+#!/bin/bash
+# post-merge — phase 2 of the scrml-generated merge driver (change-id s468-generated-merge-driver).
+#
+# The driver (scripts/git-merge-generated.ts) resolves conflicts in GENERATED content inside the
+# merge, but content derived from OTHER files (docs/FACTS.md from compiler/src + SPEC.md,
+# compiler/SPEC-INDEX.md from SPEC.md, master-list.md recent-sessions from git history, the
+# bootstrap-conformance report) cannot be derived there: git runs a driver while the working tree
+# still holds the pre-merge files. The driver gives such content a PROVISIONAL value and records the
+# path as pending. Now the merge is complete, so regenerate it from the merged tree.
+#
+# Does nothing unless a pending record exists — i.e. it is inert on every merge/pull where the
+# driver did not run. Never fails the merge (a post-merge hook cannot); it leaves the regenerated
+# files modified in the working tree and says to commit them.
+
+pending=$(git rev-parse --path-format=absolute --git-path scrml-generated-pending 2>/dev/null)
+[ -n "$pending" ] && [ -s "$pending" ] || exit 0
+
+if [ ! -f scripts/git-merge-generated.ts ]; then
+  echo "post-merge: generated content is pending regeneration ($pending), but this checkout has no"
+  echo "            scripts/git-merge-generated.ts — run each producer's --write by hand."
+  exit 0
+fi
+
+echo "post-merge: regenerating generated content the merge driver left provisional…"
+bun scripts/git-merge-generated.ts --regen || echo "post-merge: --regen FAILED — run \`bun scripts/git-merge-generated.ts --regen\` by hand."
+exit 0

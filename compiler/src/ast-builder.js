@@ -103,6 +103,7 @@ function escapeRawHasEffect(raw) {
   return walk(node);
 }
 import { parseThemeBody } from "./theme-body-parser.ts";
+import { MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { collectRefusedElements, refusedElementCode, refusedElementMessage } from "./element-refusal.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { OBJECT_SHORTHAND_CELL, destructureCellMessage } from "./object-shorthand-cell.ts";
@@ -677,6 +678,62 @@ function attachStructuredExpressionMatches(nodes, errors, filePath) {
     }
   };
   walk(nodes, null, false, false);
+}
+
+/**
+ * S469 (§18.5, E-MATCH-ARM-SHORTHAND-AMBIGUOUS in EVERY position) — a `match` inside a
+ * larger expression (`f(match n { … })`, `return String(match …)`, a lambda body) is
+ * carried by the expression parser as raw arm TEXT, which the statement parser's
+ * arm-body reader (`parseArmBraceBody`, where the error is raised) never sees. Such a
+ * match whose arms hold a `{` is re-read with the STATEMENT parser — the same reader the
+ * `given` pass above uses — and only that re-read's E-MATCH-ARM-SHORTHAND-AMBIGUOUS is
+ * reported (every other diagnostic was already produced on the primary path). Unlike the
+ * `given` pass this is parse-only (no scope), so a match inside a lambda and a
+ * multi-scrutinee match are re-read too. A match the owning statement already carries
+ * structured (`matchExpr`) was read by `parseArmBraceBody` there and is skipped.
+ */
+const _exprArmCheckIds = { next: 1_000_000_000 + 950_000_000 };
+function checkExpressionMatchArmBodies(nodes, errors, filePath) {
+  const seen = new WeakSet();
+  const reported = new Set();
+  const check = (m, owner) => {
+    if (!Array.isArray(m.rawArms) || !m.rawArms.some((a) => typeof a === "string" && a.includes("{"))) return;
+    if (owner && owner.matchExpr && (owner.initExpr === m || owner.exprNode === m)) return;
+    let head = "";
+    try {
+      head = Array.isArray(m.subjects) && m.subjects.length >= 2
+        ? "(" + m.subjects.map((s) => _emitStringFromTreeForMatch(s)).join(", ") + ")"
+        : _emitStringFromTreeForMatch(m.subject);
+    } catch { return; }
+    const sp = owner && owner.span ? owner.span : (m.span ?? { start: 0, line: 1, col: 1 });
+    const text = "match " + head + " {\n" + m.rawArms.join("\n") + "\n}";
+    let res = null;
+    try {
+      res = parseHandlerStatementListCore({ kind: "expr", raw: text, span: sp }, filePath, _exprArmCheckIds, null,
+        typeof sp.start === "number" ? sp.start : 0, typeof sp.line === "number" ? sp.line : 1, typeof sp.col === "number" ? sp.col : 1);
+    } catch { res = null; }
+    for (const e of (res && res.parseErrors) || []) {
+      if (!e || e.code !== MATCH_ARM_SHORTHAND_AMBIGUOUS) continue;
+      const key = `${e.message}@${sp.start ?? 0}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      errors.push(e);
+    }
+  };
+  const walk = (n, owner, inExpr) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) walk(c, owner, inExpr); return; }
+    if (inExpr && n.kind === "match-expr") check(n, owner);
+    const nextOwner = !inExpr && typeof n.kind === "string" && n.span ? n : owner;
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (!v || typeof v !== "object") continue;
+      walk(v, nextOwner, inExpr || _EXPR_KEY_RE.test(k));
+    }
+  };
+  walk(nodes, null, false);
 }
 
 /**
@@ -4083,6 +4140,135 @@ function armPatternChainReachesArrow(peek, k) {
   return armPatternChainArrowOffset(peek, k) >= 0;
 }
 
+/**
+ * S468 r1 (F4/F5) — an arm HEAD the compiler cannot classify, read at a match body's
+ * arm level: a `|`-chain (or a single alternate) of arm-pattern alternates ending at an
+ * arm arrow, in which some alternate is outside §18.2 / §18.16 or the alternates mix
+ * kinds. Returns `{ arrowK, why }` (arrowK = peek-offset of the arrow) or null. Such an
+ * arm used to fall to the text path, where codegen's `parseMatchArm` read no form for
+ * it and DROPPED the arm silently — its body never ran, failing open when that body was
+ * the one that rejected (`1 | .A :> { if (!check(…)) return "REJECTED" }`). Refused:
+ *   - a template literal (`` `bob` :> ``) — §18.16 admits a string LITERAL; a template
+ *     is an expression (with `${…}` it is not even constant);
+ *   - `not` inside an alternation (`1 | not :>`) — `not` is a whole arm of its own;
+ *   - a parenthesized single pattern (`(1) :>`) — not an arm-pattern (a product arm
+ *     needs a multi-scrutinee head, §18.19);
+ *   - literal and variant alternates mixed (`1 | .A :>`, `"bob" | .A :>`) with no
+ *     wildcard — no single scrutinee comparison covers both.
+ */
+function unclassifiableArmHead(peek) {
+  let k = 0;
+  let why = null;
+  let lits = 0;
+  let vars = 0;
+  let wild = false;
+  let count = 0;
+  for (;;) {
+    const t = peek(k);
+    if (!t || t.kind === "EOF") return null;
+    let end;
+    if (t.kind === "STRING" && t.isTemplate) {
+      why = why ?? "a template literal is not a match arm pattern; §18.16 admits a string literal (`\"…\"`)";
+      end = k + 1;
+      lits++;
+    } else if (t.kind === "KEYWORD" && t.text === "not") {
+      end = k + 1;
+    } else if (t.kind === "PUNCT" && t.text === "(") {
+      end = scanPastBalancedParens(peek, k);
+      if (end < 0) return null;
+      why = why ?? "a parenthesized pattern is not a match arm pattern (a product arm `(p1, …, pN)` needs a multi-scrutinee head, §18.19)";
+    } else {
+      end = scanArmPatternAlternate(peek, k);
+      if (end < 0) return null;
+      if ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::")) vars++;
+      else if ((t.kind === "IDENT" && t.text === "_") || (t.kind === "KEYWORD" && t.text === "else")) wild = true;
+      else lits++;
+    }
+    if (t.kind === "KEYWORD" && t.text === "not") why = why ?? "`not` is an arm of its own (`not :> …`), not an alternate of an alternation";
+    count++;
+    k = end;
+    if (matchArrowGlyphAt(peek, k)) break;
+    const bar = peek(k);
+    if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return null;
+    k++;
+  }
+  if (count === 1 && why && peek(0).kind === "KEYWORD" && peek(0).text === "not") return null; // `not :>` itself
+  if (!why && !wild && lits > 0 && vars > 0) why = "an alternation mixes literal and variant alternates; write each as its own arm";
+  return why ? { arrowK: k, why } : null;
+}
+
+
+/**
+ * S468 (§18.2 / §18.16) — the head of a match arm that the single-alternate
+ * arm forms (`.V :>`, `.V(…) :>`, `else :>`, `not :>`, and inline `_ :>` /
+ * `"s" :>`) do not own: a literal arm (`1 :>`, `-1 :>`, `"bob" :> {`,
+ * `true :>`), an alternation (`1 | 2 :>`, `.A | .B :>`, `.P(_) | .Q(_) :>`)
+ * or the `_` wildcard alias with a block body (`_ :> {`). `arrowK` is the
+ * peek-offset of the arm arrow (armPatternChainArrowOffset). Reads each
+ * alternate from its TOKEN (scanArmPatternAlternate's grammar) and returns
+ *   { literals, variants, wildcard, pattern }
+ * — `literals` as JS source (`1`, `-1`, `0x1F`, `"bob"`, `'al'`, `true`),
+ * `variants` the variant names, `wildcard` when an alternate is `_` / `else`
+ * (an alternation holding one IS the wildcard arm, §18.2), `pattern` the head
+ * as written (for diagnostics). Returns null for a head this form does not
+ * take: one mixing literal and variant alternates, or a single variant
+ * alternate carrying a payload binding (Form 1b's).
+ */
+function readArmHead(peek, arrowK) {
+  const literals = [];
+  const variants = [];
+  const texts = [];
+  let wildcard = false;
+  let k = 0;
+  while (k < arrowK) {
+    const end = scanArmPatternAlternate(peek, k);
+    if (end < 0 || end > arrowK) return null;
+    const t = peek(k);
+    if ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::")) {
+      const name = peek(k + 1).text;
+      variants.push(name);
+      let txt = t.text + name;
+      if (end > k + 2) {
+        // A payload `( … )`: only positional `_` discards are this form's (an
+        // alternation's binding is E-MATCH-ALT-BINDING, armChainBindingAlternate;
+        // a single variant's binding is Form 1b's).
+        const discards = [];
+        for (let j = k + 3; j < end - 1; j++) {
+          const tk = peek(j);
+          if (tk && tk.kind === "IDENT" && tk.text === "_") discards.push("_");
+          else if (!(tk && tk.kind === "PUNCT" && tk.text === ",")) return null;
+        }
+        txt += "(" + discards.join(", ") + ")";
+      }
+      texts.push(txt);
+    } else if ((t.kind === "IDENT" && t.text === "_") || (t.kind === "KEYWORD" && t.text === "else")) {
+      wildcard = true;
+      texts.push(t.text);
+    } else if (t.kind === "STRING") {
+      const d = t.delim === "'" ? "'" : t.delim === '"' ? '"'
+        : (t.text.includes('"') && !t.text.includes("'") ? "'" : '"');
+      literals.push(d + t.text + d);
+      texts.push(d + t.text + d);
+    } else if (t.kind === "PUNCT" && t.text === "-") {
+      literals.push("-" + peek(k + 1).text);
+      texts.push("-" + peek(k + 1).text);
+    } else {
+      // NUMBER, `true`, `false`
+      literals.push(t.text);
+      texts.push(t.text);
+    }
+    k = end;
+    if (k < arrowK) {
+      const bar = peek(k);
+      if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return null;
+      k++;
+    }
+  }
+  if (texts.length === 0) return null;
+  if (!wildcard && literals.length > 0 && variants.length > 0) return null;
+  return { literals, variants, wildcard, pattern: texts.join(" | ") };
+}
+
 // ---------------------------------------------------------------------------
 // §18.19 Multi-Scrutinee Match — shared parse helpers.
 //
@@ -4161,6 +4347,43 @@ function matchPositionIsPatternShaped(toks) {
 }
 
 /** §18.19 — reconstruct a per-position arm-pattern's source text from tokens. */
+/**
+ * S469 r5 — the names a §18.19 product position BINDS, read from its tokens: a variant
+ * position `.V(a, b)` / `::V(a)` / `T.V(f: x)` binds `a`, `b` / `a` / `x` (a `_` discard
+ * binds nothing; a literal / wildcard / `is` position binds nothing). The scope the arm's
+ * block body is checked in (type-system `match-arm-block` → `payloadBindings`).
+ */
+function productPositionBindings(toks) {
+  const out = [];
+  let k = 0;
+  if (toks[k] && toks[k].kind === "IDENT" && toks[k + 1] && (toks[k + 1].text === "." || toks[k + 1].text === "::")) k += 1;
+  if (!(toks[k] && (toks[k].text === "." || toks[k].text === "::"))) return out;
+  k++;
+  if (!(toks[k] && toks[k].kind === "IDENT")) return out;
+  k++;
+  if (!(toks[k] && toks[k].kind === "PUNCT" && toks[k].text === "(")) return out;
+  k++;
+  let entry = [];
+  let depth = 0;
+  const flush = () => {
+    const e = entry.filter((t) => t.kind !== "COMMENT");
+    entry = [];
+    if (e.length === 1 && e[0].kind === "IDENT" && e[0].text !== "_") out.push(e[0].text);
+    else if (e.length === 3 && e[1].text === ":" && e[2].kind === "IDENT" && e[2].text !== "_") out.push(e[2].text);
+  };
+  for (; k < toks.length; k++) {
+    const t = toks[k];
+    if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) depth++;
+    if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) {
+      if (depth === 0) { flush(); break; }
+      depth--;
+    }
+    if (depth === 0 && t.kind === "PUNCT" && t.text === ",") { flush(); continue; }
+    entry.push(t);
+  }
+  return out;
+}
+
 function joinPatternTokens(toks) {
   let out = "";
   let prevWord = false;
@@ -5515,6 +5738,16 @@ function sqlOperandPositionAfter(lastTok, refTok, ternaryColonTok) {
   if (lastTok.kind === "KEYWORD") return ["in", "of", "instanceof", "typeof", "await"].includes(tx);
   return false;
 }
+
+// ECMAScript reserved words in strict-mode / module code — never an IdentifierReference,
+// so never a shorthand property name (S469 r4, §18.5 E-MATCH-ARM-SHORTHAND-AMBIGUOUS).
+const ES_STRICT_RESERVED_WORDS = new Set([
+  "await", "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete",
+  "do", "else", "enum", "export", "extends", "false", "finally", "for", "function", "if",
+  "implements", "import", "in", "instanceof", "interface", "let", "new", "null", "package",
+  "private", "protected", "public", "return", "static", "super", "switch", "this", "throw",
+  "true", "try", "typeof", "var", "void", "while", "with", "yield",
+]);
 
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
@@ -9485,6 +9718,103 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   let _matchArmBodyDepth = 0;
 
   /**
+   * S469 r2 (#1450) — is the match-arm brace body that starts at `tokens[i]` (the `{`
+   * already consumed) an OBJECT LITERAL? Decided from the TOKENS, at parse time — never
+   * from text rebuilt later (the r1 reader rebuilt `{ <expr> }` from the statement's
+   * `expr`, which had lost a `;`, so the block `1 :> { ok; }` read as the object
+   * `{ ok: ok }` and a wrong password got in).
+   *
+   * Object iff the body, up to its matching `}`, is a non-empty comma-separated list in
+   * which every entry is `key: value` (key an identifier / keyword / string / number, or
+   * a `[computed]` key), `...spread`, or a lone identifier (shorthand) — and NO `;` at
+   * the body's top level (a `;` makes it a statement list: a block). Returns
+   * `{ singleShorthand }` (the name when the body is exactly one shorthand entry — §18.5
+   * `{ foo }`, refused as E-MATCH-ARM-SHORTHAND-AMBIGUOUS by `parseArmBraceBody`) or null for a block.
+   */
+  // S469 r4 — a word JS reads as a shorthand property name: an identifier, or a scrml
+  // KEYWORD token that is not an ECMAScript strict-mode reserved word (`{ type }`,
+  // `{ from }`, `{ get }`, `{ async }`, `{ undefined }` are JS shorthand; `{ return }`,
+  // `{ break }`, `{ null }`, `{ this }` cannot be). Scrml's contextual words that lex as
+  // identifiers (`when`, `partial`, `given`, `not`, …) are IDENT tokens already.
+  function isShorthandNameTok(t) {
+    if (!t) return false;
+    if (t.kind === "IDENT") return true;
+    return t.kind === "KEYWORD" && !ES_STRICT_RESERVED_WORDS.has(t.text);
+  }
+
+  function armBraceBodyObjectShape() {
+    const entries = [[]];
+    let depth = 0;
+    for (let k = i; k < tokens.length; k++) {
+      const t = tokens[k];
+      if (t.kind === "EOF") return null;
+      if (t.kind === "COMMENT") continue;
+      const isP = t.kind === "PUNCT";
+      if (isP && (t.text === "}" || t.text === ")" || t.text === "]")) {
+        if (depth === 0) {
+          if (t.text !== "}") return null;
+          break;
+        }
+        depth--;
+        if (depth === 0) entries[entries.length - 1].push(t);
+        continue;
+      }
+      if (depth === 0) {
+        if (isP && t.text === ";") return null; // a statement list — a block
+        if (isP && t.text === ",") { entries.push([]); continue; }
+        entries[entries.length - 1].push(t);
+      }
+      if (isP && (t.text === "{" || t.text === "(" || t.text === "[")) depth++;
+    }
+    if (entries.length && entries[entries.length - 1].length === 0 && entries.length > 1) entries.pop(); // trailing `,`
+    if (entries.length === 0 || entries.some((e) => e.length === 0)) return null; // `{}` keeps its own (structural) rule
+    const isColon = (t) => t && t.kind === "PUNCT" && t.text === ":";
+    for (const e of entries) {
+      const a = e[0];
+      if ((a.kind === "OPERATOR" || a.kind === "PUNCT") && a.text === "...") continue;
+      if (e.length === 1 && isShorthandNameTok(a)) continue; // shorthand
+      if ((a.kind === "IDENT" || a.kind === "KEYWORD" || a.kind === "STRING" || a.kind === "NUMBER") && isColon(e[1])) continue;
+      if (a.kind === "PUNCT" && a.text === "[" && e[1] && e[1].kind === "PUNCT" && e[1].text === "]" && isColon(e[2])) continue;
+      return null;
+    }
+    const single = entries.length === 1 && entries[0].length === 1 && isShorthandNameTok(entries[0][0]);
+    return { singleShorthand: single ? entries[0][0].text : null };
+  }
+
+  /**
+   * S469 r2 (#1450) — the body of a match block arm (`<head> :> {` already consumed):
+   * an OBJECT LITERAL arm (`armBraceBodyObjectShape`) is collected by the parser's own
+   * brace-body collector and parsed as ONE expression — its value, stored as the body's
+   * single `bare-expr` with `objectLiteralArm: true` (the one reading every later stage
+   * uses, arm-body-statements.ts `objectLiteralArmValue`); anything else is a block of
+   * statements (`parseRecursiveBody`). An object-shaped body that does not parse as an
+   * object (`{ a: 1⏎ b: 2 }`) is a block, as before.
+   */
+  function parseArmBraceBody() {
+    const shape = armBraceBodyObjectShape();
+    if (shape) {
+      const saved = i;
+      const firstTok = peek();
+      if (shape.singleShorthand) {
+        // §18.5 (ruling S469): a body that is exactly ONE bare shorthand name is refused —
+        // it reads both as the object `{ foo: foo }` and as a block whose result is `foo`.
+        // Raised from the tokens, whatever the expression parser makes of the word.
+        errors.push(new TABError(MATCH_ARM_SHORTHAND_AMBIGUOUS, matchArmShorthandAmbiguousMessage(shape.singleShorthand), tokenSpan(tokens[saved - 1] ?? firstTok, filePath)));
+      }
+      const { body } = collectBracedBody(); // consumes through the matching `}`
+      const text = `{ ${body} }`;
+      const node = safeParseExprToNode(text, firstTok.span?.start ?? 0);
+      if (node && node.kind === "object") {
+        const stmt = { id: ++counter.next, kind: "bare-expr", expr: text, exprNode: node, objectLiteralArm: true, span: spanOf(firstTok, peek()) };
+        if (shape.singleShorthand) stmt.singleShorthand = shape.singleShorthand;
+        return [stmt];
+      }
+      i = saved;
+    }
+    return parseRecursiveBody();
+  }
+
+  /**
    * Parse a braced body `{ ... }` into a structured LogicNode[] tree.
    * Caller should have already consumed the opening `{`.
    * Consumes up to and including the closing `}`.
@@ -9512,6 +9842,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * only the `else`; the body that follows parses normally (the build fails).
    */
   function rejectDanglingElse(prevNode) {
+    // S468 r1 (F3): `else /* c */ :> { … }` is the wildcard arm — drop a comment in
+    // an arm head before asking whether an arm arrow follows the `else`.
+    dropArmHeadComments();
     const t = peek();
     if (!(t.kind === "KEYWORD" && t.text === "else")) return false;
     // S462 — widened from "directly after an if-stmt" to "any statement-leading
@@ -11783,7 +12116,41 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Parse a single statement and return an AST node.
    * Handles: let, const, @reactive, lift, for, if, while, return, bare-expr.
    */
+  /**
+   * S468 r1 (F3) — a COMMENT inside a match-arm HEAD (`1 /* c *\/ :> {`,
+   * `.A /* c *\/ :>`, `1 | /* c *\/ 2 :>`, `1 // c⏎ :> {`, `else /* c *\/ :>`) is
+   * trivia: it must not change which arm form reads the arm. Every arm form reads
+   * its head token by token at fixed peek offsets, so a comment token between two
+   * head tokens made each form decline and the arm fell to the TEXT path — where no
+   * analysis read its body (a wrong password accepted, §13.2 / §13.9.6). At a match
+   * body's arm level, when the tokens up to the arm arrow — comments skipped — form
+   * an arm head (`armPatternChainArrowOffset`, or `not`), the comment tokens from
+   * the head through the arrow (and up to the body's first token) are removed from
+   * the stream, so the arm is read exactly as if they were absent.
+   */
+  function dropArmHeadComments() {
+    if (!(_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth)) return;
+    const phys = [];
+    let sawComment = false;
+    for (let p = i; p < tokens.length && phys.length < 256; p++) {
+      if (tokens[p].kind === "COMMENT") { sawComment = true; continue; }
+      phys.push(p);
+      if (tokens[p].kind === "PUNCT" && (tokens[p].text === "{" || tokens[p].text === "}" || tokens[p].text === ";")) break;
+    }
+    if (!sawComment || phys.length === 0) return;
+    const peekNC = (k) => (k >= 0 && k < phys.length ? tokens[phys[k]] : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } });
+    let arrowK = armPatternChainArrowOffset(peekNC, 0);
+    if (arrowK < 0 && peekNC(0).kind === "KEYWORD" && peekNC(0).text === "not" && matchArrowGlyphAt(peekNC, 1)) arrowK = 1;
+    if (arrowK < 0) return;
+    const arrow = matchArrowGlyphAt(peekNC, arrowK);
+    if (!arrow) return;
+    // Up to (not including) the first token of the arm body.
+    const end = arrowK + arrow.len < phys.length ? phys[arrowK + arrow.len] : (phys[phys.length - 1] + 1);
+    for (let p = end - 1; p >= i; p--) if (tokens[p].kind === "COMMENT") tokens.splice(p, 1);
+  }
+
   function parseOneStatement() {
+    dropArmHeadComments();
     const tok = peek();
 
     // BLOCK_REF — embedded child block
@@ -13733,6 +14100,45 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Consume `(` … `)` (parenCloseK is the peek-offset of the `)`).
         for (let k = 0; k <= prod.parenCloseK; k++) consume();
         for (let _a = 0; _a < prod.arrow.len; _a++) consume(); // arm arrow
+        // S469 r4 — a `{ … }` product-arm body is read by the SAME arm-body reader as
+        // every other arm form (`parseArmBraceBody`: object-vs-block from the tokens,
+        // E-MATCH-ARM-SHORTHAND-AMBIGUOUS for `{ ok }`). An object body is the arm's
+        // VALUE (`result` / `resultExpr` = the parser's object); a block is a
+        // `match-arm-block` (S469 r5) whose `body` every multi-scrutinee lowering emits.
+        if (peek().kind === "PUNCT" && peek().text === "{") {
+          consume(); // `{`
+          const armBodyNodes = parseArmBraceBody();
+          const objArm = objectLiteralArmValue(armBodyNodes);
+          if (objArm) {
+            return {
+              id: ++counter.next,
+              kind: "match-arm-inline",
+              test: "__product__",
+              productPatterns,
+              armArrow: prod.arrow.glyph,
+              result: objArm.text,
+              resultExpr: objArm.node,
+              objectLiteralArm: true,
+              span: spanOf(startTok, peek()),
+            };
+          }
+          // S469 r5 — a product BLOCK arm is a `match-arm-block` whose statements are its
+          // `body`: the one shape every analysis already walks (E-ERROR-002, F4 / async,
+          // E-VALUE-FUNCTION-STORED, scope, route / server reach, DG, lints) and the one
+          // codegen emits. (r4 carried them on a `match-arm-inline` as `structuredBody`, a
+          // field the E-ERROR-002 walk never visited — a wrong password accepted.)
+          return {
+            id: ++counter.next,
+            kind: "match-arm-block",
+            test: "__product__",
+            productPatterns,
+            isWildcard: false,
+            payloadBindings: prod.positions.flatMap(productPositionBindings),
+            armArrow: prod.arrow.glyph,
+            body: armBodyNodes,
+            span: spanOf(startTok, peek()),
+          };
+        }
         const { expr: result } = collectExpr(null, { armBody: true });
         const trimmedResult = result.trim();
         return {
@@ -13755,17 +14161,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     //
     // Form 1: `. VariantName :> {` — enum variant arm with block body
     // (`:>` canonical; `=>`/`->` deprecated aliases — §18.2.)
+    // S468 — the `::VariantName` alias prefix (§18.2 `variant-pattern ::= ('.' |
+    // '::') VariantName …`) takes the same form; before, a `::V :> { … }` arm was
+    // kept as text and no lowering read it (the arm never matched).
+    const _isVariantPrefix = (tok.kind === 'PUNCT' && tok.text === '.') || (tok.kind === 'OPERATOR' && tok.text === '::');
     {
-      const _arrow1 = (tok.kind === 'PUNCT' && tok.text === '.' &&
+      const _arrow1 = (_isVariantPrefix &&
         peek(1) && peek(1).kind === 'IDENT' && /^[A-Z]/.test(peek(1).text))
         ? matchArrowGlyphAt(peek, 2) : null;
       if (_arrow1 && peek(2 + _arrow1.len) && peek(2 + _arrow1.len).kind === 'PUNCT' && peek(2 + _arrow1.len).text === '{') {
         const startTok = tok;
-        consume(); // '.'
+        consume(); // '.' / '::'
         const variantNameTok = consume(); // IDENT (PascalCase variant name)
         for (let _a = 0; _a < _arrow1.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody(); // parse until matching '}'
+        const blockBody = parseArmBraceBody(); // parse until matching '}'
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13783,7 +14193,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // with block body. Captures comma-separated binding names so the type-
     // system can bind them into the arm body's scope (otherwise references
     // like `n` inside the body fire E-SCOPE-001).
-    if (tok.kind === 'PUNCT' && tok.text === '.' &&
+    if (_isVariantPrefix &&
         peek(1) && peek(1).kind === 'IDENT' && /^[A-Z]/.test(peek(1).text) &&
         peek(2) && peek(2).kind === 'PUNCT' && peek(2).text === '(') {
       // Lookahead to find the matching `)` then check for `=> {`.
@@ -13889,7 +14299,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `parseBindingList` (in emit-control-flow.ts) can resolve named
         // bindings (`field: local` → `const local = subject.data.field`).
         const bindingText = allBindingTokens.map(t => t.text).join(' ').replace(/\s+/g, ' ').trim();
-        const blockBody = parseRecursiveBody();
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13916,7 +14326,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'else'
         for (let _a = 0; _a < _arrow2.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody();
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13938,7 +14348,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // 'not'
         for (let _a = 0; _a < _arrow3.len; _a++) consume(); // arm arrow
         consume(); // '{'
-        const blockBody = parseRecursiveBody();
+        const blockBody = parseArmBraceBody();
         return {
           id: ++counter.next,
           kind: 'match-arm-block',
@@ -13949,6 +14359,81 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           body: blockBody,
           span: spanOf(startTok, peek()),
         };
+      }
+    }
+
+    // S468 r1 (F4/F5) — an arm head the compiler cannot classify is REFUSED here, at
+    // the parser, rather than kept as text that codegen silently drops (see
+    // `unclassifiableArmHead`). The arm's body is consumed so the rest of the match
+    // still parses; the compile fails.
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth && !isOldPresenceGuardPattern()) {
+      const _bad = unclassifiableArmHead(peek);
+      if (_bad) {
+        const startTok = tok;
+        const headText = [];
+        for (let _h = 0; _h < _bad.arrowK; _h++) headText.push(consume().text);
+        const _arrowB = matchArrowGlyphAt(peek, 0);
+        for (let _a = 0; _a < (_arrowB ? _arrowB.len : 0); _a++) consume();
+        if (peek().kind === "PUNCT" && peek().text === "{") { consume(); collectBracedBody(); }
+        else collectExpr(null, { armBody: true });
+        errors.push(new TABError(
+          "E-PARSE-001",
+          `E-PARSE-001: \`${headText.join(" ").slice(0, 60)}\` is not a match arm pattern the compiler can read: ${_bad.why}. ` +
+          "An arm pattern is a variant (`.V`, `.V(…)`), a §18.16 literal (a string, a number, `true` / `false`), " +
+          "`else` / `_`, `not`, or a `|` alternation of variants or of literals (§18.2, §18.16).",
+          tokenSpan(startTok, filePath),
+        ));
+        return null;
+      }
+    }
+
+    // Form 4 (S468 — §18.2, §18.16): EVERY other arm head whose body is a `{ … }`
+    // block — a literal arm (`1 :> {`, `-1 :> {`, `0x1F :> {`, `"bob" :> {`,
+    // `true :> {`), an alternation (`1 | 2 :> {`, `"a" | "b" :> {`, `.A | .B :> {`,
+    // `.P(_) | .Q(_) :> {`) and the `_` wildcard alias (`_ :> {`). These arms used
+    // to fall through to the default statement path and be kept as ONE `bare-expr`
+    // holding the whole arm TEXT, whose exprNode was the leading literal alone — so
+    // no stage after the parser saw the statements in the body. A waiting function
+    // aliased there (`1 :> { const g = check … g(pass, hash) }`) was neither refused
+    // (§13.9.6) nor awaited (§13.2): the server tested a Promise and accepted a wrong
+    // password. The body is now parsed by the same `parseRecursiveBody` every other
+    // block arm uses, so every analysis reads it by construction, and the head is
+    // recorded from its tokens:
+    //   `literals`   the literal alternates as JS source (`1`, `-1`, `"bob"`, `true`)
+    //   `alternates` the variant names of a variant alternation (`["A", "B"]`)
+    //   `variant`    a single variant (`::V(_)`), as Forms 1 / 1b record it
+    //   `isWildcard` an alternation holding `_` / `else` IS the wildcard arm (§18.2)
+    //   `pattern`    the head as written, for diagnostics
+    // Arm level only: anywhere else `_ => { … }` is an arrow function. Not taken (the
+    // head stays on the text path, as before): a head mixing literal and variant
+    // alternates, and an alternation alternate carrying a payload pattern (that is
+    // E-MATCH-ALT-BINDING, raised by collectExpr).
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth) {
+      const _arrowK4 = armPatternChainArrowOffset(peek, 0);
+      const _arrow4 = _arrowK4 >= 0 ? matchArrowGlyphAt(peek, _arrowK4) : null;
+      const _open4 = _arrow4 ? peek(_arrowK4 + _arrow4.len) : null;
+      const _head4 = _open4 && _open4.kind === 'PUNCT' && _open4.text === '{' && armChainBindingAlternate(peek, 0) === null
+        ? readArmHead(peek, _arrowK4) : null;
+      if (_head4) {
+        const startTok = tok;
+        for (let _h = 0; _h < _arrowK4; _h++) consume(); // arm head
+        for (let _a = 0; _a < _arrow4.len; _a++) consume(); // arm arrow
+        consume(); // '{'
+        const blockBody = parseArmBraceBody();
+        const armNode = {
+          id: ++counter.next,
+          kind: 'match-arm-block',
+          variant: !_head4.wildcard && _head4.variants.length === 1 ? _head4.variants[0] : null,
+          payloadBindings: [],
+          isWildcard: _head4.wildcard,
+          armArrow: _arrow4.glyph,
+          pattern: _head4.pattern,
+          body: blockBody,
+          span: spanOf(startTok, peek()),
+        };
+        if (!_head4.wildcard && _head4.literals.length > 0) armNode.literals = _head4.literals;
+        if (!_head4.wildcard && _head4.variants.length > 1) armNode.alternates = _head4.variants;
+        return armNode;
       }
     }
 
@@ -14113,6 +14598,48 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span: spanOf(startTok, peek()),
           };
         }
+      }
+    }
+
+    // Inline Form 6 (S468 — §18.2, §18.16): every other single-expression arm —
+    // a number / boolean literal arm (`1 :> r`, `-1 :> r`, `true :> r`) and an
+    // alternation (`1 | 2 :> r`, `"a" | "b" :> r`, `.A | .B :> r`,
+    // `.P(_) | .Q(_) :> r`, `_ | .A :> r`). These used to be kept as a `bare-expr`
+    // holding the arm TEXT whose exprNode was the leading literal alone, so the
+    // result expression was never read by a stage after the parser: an async
+    // function passed from it to a higher-order function (`1 :> drive(check, …)`)
+    // was not refused (§13.2 E-ASYNC-FN-ESCAPES-AS-VALUE) and the wrong password
+    // was accepted. Now a structured `match-arm-inline` like Inline Forms 1–5, with
+    // the head recorded from its tokens (`literals` / `alternates`, see Form 4) and
+    // `test` the head as written. An alternation holding `_` / `else` is the
+    // wildcard arm (`test: 'else'`, §18.2). Arm level only; the heads Form 4 does
+    // not take (mixed literal + variant alternates, an alternate's payload
+    // binding) stay on the text path.
+    if (_matchArmBodyDepth > 0 && _nestedBlockDepth === _matchArmBodyDepth) {
+      const _arrowK6 = armPatternChainArrowOffset(peek, 0);
+      const _arrow6 = _arrowK6 >= 0 ? matchArrowGlyphAt(peek, _arrowK6) : null;
+      const _after6 = _arrow6 ? peek(_arrowK6 + _arrow6.len) : null;
+      const _head6 = _arrow6 && !(_after6 && _after6.kind === 'PUNCT' && _after6.text === '{') &&
+        armChainBindingAlternate(peek, 0) === null
+        ? readArmHead(peek, _arrowK6) : null;
+      if (_head6) {
+        const startTok = tok;
+        for (let _h = 0; _h < _arrowK6; _h++) consume(); // arm head
+        for (let _a = 0; _a < _arrow6.len; _a++) consume(); // arm arrow
+        const { expr: result } = collectExpr(null, { armBody: true });
+        const trimmedResult = result.trim();
+        const armNode = {
+          id: ++counter.next,
+          kind: 'match-arm-inline',
+          test: _head6.wildcard ? 'else' : _head6.pattern,
+          armArrow: _arrow6.glyph,
+          result: trimmedResult,
+          resultExpr: safeParseExprToNode(trimmedResult, spanOf(startTok, peek())?.start ?? 0),
+          span: spanOf(startTok, peek()),
+        };
+        if (!_head6.wildcard && _head6.literals.length > 0) armNode.literals = _head6.literals;
+        if (!_head6.wildcard && _head6.variants.length > 0) armNode.alternates = _head6.variants;
+        return armNode;
       }
     }
 
@@ -25670,6 +26197,8 @@ function _buildASTImpl(bsOutput, tokenizerOverrides) {
   // argument, `x = match …`) is carried by the expression parser as raw arm text,
   // which reads no `given` arm. Those matches get the statement parser's arms.
   attachStructuredExpressionMatches(nodes, errors, filePath);
+  // S469 — §18.5 E-MATCH-ARM-SHORTHAND-AMBIGUOUS for a `match` inside an expression.
+  checkExpressionMatchArmBodies(nodes, errors, filePath);
 
   // Hoist imports, exports, type decls, components, machine decls, channel decls
   // from logic blocks + top-level markup.
