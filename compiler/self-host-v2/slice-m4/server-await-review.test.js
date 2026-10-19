@@ -31,8 +31,9 @@ const REVIEW_EXPECT = {
   // a scrml string literal is not interpolated in the bootstrap: `"${check(…)}"` is the text itself, so nothing waits
   "s1/template": ["DENY"],
   "s1/concat": ["REFUSED", ["E-OPERATOR-OPERAND-TYPE"]],
-  "s1/matchScrut": ["REFUSED", ["E-ERROR-013", "E-PARSE-ARM", "E-SYNTAX-010"]],
-  "s1/matchArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-ARM"]],
+  // s469: literal arms (`true :>`, `"bob" :>`) parse now (§18.16) — E-PARSE-ARM gone; over a failable (a server call) a literal arm is E-TYPE-VARIANT, never a wildcard
+  "s1/matchScrut": ["REFUSED", ["E-ERROR-013", "E-TYPE-VARIANT"]],
+  "s1/matchArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/structField": ["PASS"],
   "s1/arrayLit": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/indexWrite": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -40,7 +41,8 @@ const REVIEW_EXPECT = {
   "s1/queryParamDup": ["PASS"],
   "s1/hostMethod": ["REFUSED", ["E-SCOPE-001"]],
   "s1/methodOnResult": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-COND-NOT-BOOLEAN", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
+  // s469 round 2: the recovered (unparsed) default leaves a no-value call read as a value — E-TYPE-001 replaces E-COND-NOT-BOOLEAN
+  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-TYPE-001", "E-TYPE-STRUCT-CONTEXT"]],
   "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TYPE", "E-ROUTE-001", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
   "s1/mapLambda": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/hostArgCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -56,12 +58,14 @@ const REVIEW_EXPECT = {
   "s1/arithmetic": ["PASS"],
   "s1/unusedResult": ["PASS"],
   "s1/returnCheckDirect": ["PASS"],
-  "s2/matchEnumScrut": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469: the §18 plain-value match — compiles, and RUNS on the server: wrong → REJECTED, right → WELCOME
+  "s2/matchEnumScrut": ["PASS"],
   "s2/matchEnumArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/matchStmtArmCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/givenSubj": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/givenBodyWait": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s2/failPayload": ["PASS"],
+  // s469 round 2 (MED-2): `g` never returns a value, so its success value cannot be read (`const v: string = g() !{…}`)
+  "s2/failPayload": ["REFUSED", ["E-TYPE-001"]],
   "s2/argOfHandled": ["PASS"],
   "s2/ternaryInArg": ["PASS"],
   "s2/negUnary": ["PASS"],
@@ -85,6 +89,33 @@ const REVIEW_EXPECT = {
   "s4/implicitRunStmt": ["PASS"],
   "s4/matchFailable": ["REFUSED", ["E-COND-NOT-BOOLEAN"]],
   "s4/queryMatch": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469 #1471 review HIGH-1: a `-> T | not` function that falls off the end is refused;
+  // with `return not` the `not` arm is taken (`== null`) — wrong → REJECTED
+  "s5/fallOffValue": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffStmt": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffString": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffEnum": ["REFUSED", ["E-TYPE-043"]],
+  "s5/retValue": ["PASS"],
+  "s5/retStmt": ["PASS"],
+  "s5/retString": ["PASS"],
+  "s5/retEnum": ["PASS"],
+  // #1471 delta review: every fall-off shape refused; `fail` on the wrong path PASSes
+  "s5/failableFallOff": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
+  "s5/failableFails": ["PASS"],
+  "s5/unannotatedFallOff": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
+  "s5/eqNot": ["REFUSED", ["E-EQ-002"]],
+  "s5/bareReturn": ["REFUSED", ["E-TYPE-043"]],
+  "s5/bareReturnFailable": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
+  "s5/bareReturnMaybe": ["REFUSED", ["E-TYPE-043"]],
+  "s5/noValueGuard": ["REFUSED", ["E-TYPE-001"]],
+  "s5/noValueOk": ["REFUSED", ["E-TYPE-001"]],
+  "s5/noValueOkUnbound": ["PASS"],
+  "s5/noValuePlain": ["REFUSED", ["E-TYPE-001"]],
+  // #1471 round 3: a wrapper's `return <void call>` (typed / failable / unannotated), and a void pass-through read as a value
+  "s5/wrapFailable": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapTyped": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapUnannotated": ["REFUSED", ["E-TYPE-001"]],
+  "s5/wrapVoid": ["REFUSED", ["E-TYPE-001"]],
 };
 
 async function classify(s) {

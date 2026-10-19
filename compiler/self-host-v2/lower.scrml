@@ -41,7 +41,7 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
-             SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK,
+             SqlInfo, HandledFact, FailFact, Retag, RemoteFact, SuspendPlan, SuspendAt, SuspendK, PlainMatch, PlainArm, plainFactOf,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
              failFact, builtinFile, blockReference, suspendAtOf, tempOf, joinOf, retOf, remoteCaller, serverCallErrorName,
              sqlParamRep, distinctSqlParams } from "./analyze.scrml"
@@ -371,7 +371,7 @@ ${
             .NotLit :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Recovered :> Expr.Lit(Literal.Absent)
             .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
-            .Member(obj: o, name: n) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .Member(obj: o, name: n) :> memberOrVariant(c, e, o)
 
             .Call(callee: cal, args: args) :> callOrBuiltin(c, e, cal, args)
             .Unary(op: o, e: x) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, x)])
@@ -400,6 +400,7 @@ ${
             .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
         }
     }
@@ -441,6 +442,7 @@ ${
     fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
         return match f {
             .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VToEnum(enumSym: x) :> missing()
             .VLit(lit: l) :> missing()
             .VVariant(enumSym: x) :> missing()
             .VStructOf(ty: x) :> missing()
@@ -477,6 +479,7 @@ ${
             .VHost(call: h) :> missing()
             .VSeqCall(op: x) :> missing()
             .VLambda(params: x) :> missing()
+            .VToEnum(enumSym: x) :> missing()
             not :> missing()
         }
     }
@@ -490,7 +493,24 @@ ${
             .VHost(call: h) :> PrimOp.Not
             .VSeqCall(op: x) :> PrimOp.Not
             .VLambda(params: x) :> PrimOp.Not
+            .VToEnum(enumSym: x) :> PrimOp.Not
             not :> PrimOp.Not
+        }
+    }
+
+    // s469: `E.V` — a qualified unit variant (the binder's VVariant on the member node).
+    fn memberOrVariant(c: LC, e: AExpr, o: AExpr) -> Expr {
+        const f: ValueFact | not = valueFact(c.t.values, e.nid)
+        return match f {
+            .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
+            .VLit(lit: l) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VStructOf(ty: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VOp(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VHost(call: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
         }
     }
 
@@ -1711,6 +1731,8 @@ ${
     // =========================================================================
     // A handled value, read where it stands: its Attempt's result.
     fn handledRead(c: LC, e: AExpr) -> Expr {
+        const pm: PlainMatch | not = plainFactIn(c.t, e.nid)
+        if (pm is given) return plainMatchExpr(c, e, pm)       // s469: the plain-value `match`
         const h: HandledFact | not = handledFactOf(c.t, e.nid)
         if (h is not) return missing()
         return Expr.Local(h.result)
@@ -1722,8 +1744,231 @@ ${
             .FHandled(h: h) :> h
             .FArm(idx: x) :> not
             .FFail(err: x) :> not
+            .FPlain(m: pm) :> not
             not :> not
         }
+    }
+
+    // =========================================================================
+    // s469 — THE §18 PLAIN-VALUE `match` (analyze's FPlain / FArm facts).
+    // VALUE form → Expr.Match(subject, arms). STATEMENT form → the subject
+    // evaluated once into `scrut`, one Match that yields the index of the arm
+    // it takes into `pick` (each payload re-read through the arm's inner
+    // binders), then an `if` chain on that index. Either way every arm is
+    // chosen by its OWN test (the printer makes a Match's last arm
+    // unconditional, so a trailing `_ :> not` / `_ :> -1` arm is always added
+    // after a last arm that is not the wildcard — a value no arm names takes
+    // no source arm, and the deny arm of a login `match` is never reached by
+    // falling through). Over an enum the ABSENCE arm comes first (its `not`
+    // body, the wildcard's, or `not`): a payload-variant test reads
+    // `.variant`, which `null` does not have.
+    // =========================================================================
+    fn plainFactIn(t: Tables, nid: int) -> PlainMatch | not {
+        return plainFactOf(failFact(t.fails, nid))
+    }
+
+    fn plainArmsOf(e: AExpr) -> AArm[] {
+        const hd: AHandled | not = handledOfK(e.k)
+        if (hd is not) return []
+        const how: AHow = hd.how
+        return match how {
+            .MatchOn(arms: a) :> a
+            .Propagate :> []
+            .Guard(arms: x) :> []
+        }
+    }
+
+    fn plainSubjectOf(e: AExpr) -> AExpr | not {
+        const hd: AHandled | not = handledOfK(e.k)
+        if (hd is not) return not
+        return hd.subject
+    }
+
+    // An arm's pattern (binders `binds`), else not (an arm analyze did not resolve).
+    fn plainPat(c: LC, m: PlainMatch, a: AArm, binds: Sym[]) -> Pattern | not {
+        const idx: int = armIdxOf(c.t, a)
+        const es: Sym | not = m.es
+        if (idx >= 0 && es is given) return Pattern.PVariant(es, idx, binds)
+        if (idx == -1) return Pattern.PWild
+        if (idx == -5) return Pattern.PLit(Literal.Absent)
+        if (idx == -6) {
+            const lit: Literal | not = plainLit(c, a.pat)
+            if (lit is given) return Pattern.PLit(lit)
+        }
+        return not
+    }
+
+    fn plainLit(c: LC, p: APat) -> Literal | not {
+        const x: AExpr | not = match p {
+            .PLit(e: e) :> e
+            .PNot :> not
+            .PName(name: n) :> not
+            .PWild :> not
+            .PWhole(bind: b) :> not
+            .PBare(bind: b) :> not
+        }
+        if (x is not) return not
+        const f: ValueFact | not = valueFact(c.t.values, x.nid)
+        return match f {
+            .VLit(lit: l) :> l
+            .VVariant(enumSym: s) :> not
+            .VStructOf(ty: s) :> not
+            .VOp(op: o) :> not
+            .VHost(call: h) :> not
+            .VSeqCall(op: o) :> not
+            .VLambda(params: ps) :> not
+            .VToEnum(enumSym: s) :> not
+            not :> not
+        }
+    }
+
+    fn plainArmValue(c: LC, a: AArm) -> Expr {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmExpr(e: x) :> lowerExpr(c, x)
+            .ArmBlock(b: b) :> plainBlockValue(c, b)
+        }
+    }
+
+    fn plainBlockValue(c: LC, b: ABlock) -> Expr {
+        if (b.stmts.length != 1) return missing()
+        const k: AStmtK = b.stmts[0].k
+        return match k {
+            .Eval(e: x) :> lowerExpr(c, x)
+            .Local(name: n) :> missing()
+            .Return(e: x) :> missing()
+            .If(cond: x) :> missing()
+            .Given(name: n) :> missing()
+            .EffectStmt(w: w) :> missing()
+            .Defer(body: d) :> missing()
+            .Fail(f: x) :> missing()
+        }
+    }
+
+    fn isWildPat(p: Pattern) -> boolean {
+        return match p {
+            .PWild :> true
+            .PVariant(enumSym: x) :> false
+            .PLit(lit: l) :> false
+        }
+    }
+
+    // The absence arm's position among the source arms (`not :>`, else the
+    // wildcard), -1 none.
+    fn absentArmAt(c: LC, arms: AArm[]) -> int {
+        let i = 0
+        for (const a of arms) {
+            if (armIdxOf(c.t, a) == -5) return i
+            i = i + 1
+        }
+        let j = 0
+        for (const a2 of arms) {
+            if (armIdxOf(c.t, a2) == -1) return j
+            j = j + 1
+        }
+        return -1
+    }
+
+    fn plainMatchExpr(c: LC, e: AExpr, m: PlainMatch) -> Expr {
+        const subj: AExpr | not = plainSubjectOf(e)
+        if (subj is not) return missing()
+        const arms: AArm[] = plainArmsOf(e)
+        let out: MatchArm[] = []
+        const ab: int = absentArmAt(c, arms)
+        if (m.kind == 0 || m.maybe) {
+            let absentBody: Expr = Expr.Lit(Literal.Absent)
+            if (ab >= 0) absentBody = plainArmValue(c, arms[ab])
+            out = [{ pat: Pattern.PLit(Literal.Absent), body: absentBody }]
+        }
+        for (const a of arms) {
+            const p: Pattern | not = plainPat(c, m, a, armBindSyms(c, a))
+            if (p is given && armIdxOf(c.t, a) != -5) out = out.concat([{ pat: p, body: plainArmValue(c, a) }])
+        }
+        if (out.length == 0 || !isWildPat(out[out.length - 1].pat)) out = out.concat([{ pat: Pattern.PWild, body: Expr.Lit(Literal.Absent) }])
+        return Expr.Match(lowerExpr(c, subj), out)
+    }
+
+    fn plainInner(m: PlainMatch, a: AArm) -> Sym[] {
+        for (const pa of m.arms) {
+            if (pa.nid == a.nid) return pa.inner
+        }
+        return []
+    }
+
+    fn plainMatchStmts(c: LC, e: AExpr, m: PlainMatch) -> Stmt[] {
+        const subj: AExpr | not = plainSubjectOf(e)
+        if (subj is not) return []
+        const arms: AArm[] = plainArmsOf(e)
+        let picks: MatchArm[] = []
+        const ab: int = absentArmAt(c, arms)
+        if (m.kind == 0 || m.maybe) picks = [{ pat: Pattern.PLit(Literal.Absent), body: Expr.Lit(Literal.Int(ab)) }]
+        let i = 0
+        for (const a of arms) {
+            const p: Pattern | not = plainPat(c, m, a, [])
+            if (p is given && armIdxOf(c.t, a) != -5) picks = picks.concat([{ pat: p, body: Expr.Lit(Literal.Int(i)) }])
+            i = i + 1
+        }
+        if (picks.length == 0 || !isWildPat(picks[picks.length - 1].pat)) picks = picks.concat([{ pat: Pattern.PWild, body: Expr.Lit(Literal.Int(-1)) }])
+        // the if chain, built from the last arm up
+        let chain: Block | not = not
+        let k: int = arms.length - 1
+        while (k >= 0) {
+            const a: AArm = arms[k]
+            const test: Expr = Expr.Prim(PrimOp.EqPrim, [Expr.Local(m.pick), Expr.Lit(Literal.Int(k))])
+            chain = block([Stmt.If(test, plainArmBlock(c, m, a), chain)])
+            k = k - 1
+        }
+        let out: Stmt[] = [Stmt.Let(m.scrut, lowerExpr(c, subj)), Stmt.Let(m.pick, Expr.Match(Expr.Local(m.scrut), picks))]
+        if (chain is given) out = out.concat(chain.stmts)
+        return out
+    }
+
+    // A statement arm: its payload binders (each re-read through the arm's
+    // inner binders), then its statements.
+    fn plainArmBlock(c: LC, m: PlainMatch, a: AArm) -> Block {
+        let pre: Stmt[] = []
+        const idx: int = armIdxOf(c.t, a)
+        const es: Sym | not = m.es
+        const binds: Sym[] = armBindSyms(c, a)
+        const inner: Sym[] = plainInner(m, a)
+        if (idx >= 0 && es is given && inner.length == binds.length) {
+            let j = 0
+            for (const b of binds) {
+                const take: MatchArm = { pat: Pattern.PVariant(es, idx, inner), body: Expr.Local(inner[j]) }
+                const none: MatchArm = { pat: Pattern.PWild, body: Expr.Lit(Literal.Absent) }
+                pre = pre.concat([Stmt.Let(b, Expr.Match(Expr.Local(m.scrut), [take, none]))])
+                j = j + 1
+            }
+        }
+        const body: AArmBody = a.body
+        const rest: Stmt[] = match body {
+            .ArmExpr(e: x) :> evalStmt(c, x)
+            .ArmBlock(b: b) :> lowerBlock(c, b).stmts
+        }
+        return block(pre.concat(rest))
+    }
+
+    // s469 — `E.toEnum(s)` (§14.4.1): a `match` on the string with one `===`
+    // arm per declared variant name (case-sensitive), `not` for any other
+    // string. No property lookup is emitted, so a JS prototype key
+    // (`"constructor"`, `"__proto__"`, `"toString"`) is just a string no arm
+    // names. (§14.4.1 says "a lookup table"; a chain of strict compares is the
+    // same function with no prototype to reach.)
+    fn toEnumExpr(c: LC, es: Sym, args: AExpr[]) -> Expr {
+        if (args.length != 1) return missing()
+        let arms: MatchArm[] = []
+        let i = 0
+        for (const ti of c.t.types) {
+            const ts: Sym = typeDefSym(ti.def)
+            if (ts.id == es.id) {
+                for (const v of enumVariantsOfDef(ti.def)) {
+                    arms = arms.concat([{ pat: Pattern.PLit(Literal.Str(v.sym.hint)), body: Expr.Lit(Literal.Variant(es, i)) }])
+                    i = i + 1
+                }
+            }
+        }
+        arms = arms.concat([{ pat: Pattern.PWild, body: Expr.Lit(Literal.Absent) }])
+        return Expr.Match(lowerExpr(c, args[0]), arms)
     }
 
     // The Attempt a whole value needs (none when it is not a handled one).
@@ -1907,6 +2152,7 @@ ${
             .FArm(idx: i) :> i
             .FHandled(h: x) :> -3
             .FFail(err: x) :> -3
+            .FPlain(m: pm) :> -3
             not :> -3
         }
     }
@@ -1919,6 +2165,8 @@ ${
             .PWild :> []
             .PWhole(bind: b) :> [b]
             .PBare(bind: b) :> [b]
+            .PNot :> []
+            .PLit(e: x) :> []
         }
         let out: Sym[] = []
         for (const b of bs) {
@@ -1996,6 +2244,7 @@ ${
             .FFail(err: e, idx: i) :> [Stmt.Fail(e, i, lowerExprs(c, f.args))]
             .FHandled(h: x) :> []
             .FArm(idx: x) :> []
+            .FPlain(m: pm) :> []
             not :> []
         }
     }
@@ -2004,6 +2253,10 @@ ${
     // assigned value — needs before it.
     fn evalStmt(c: LC, e: AExpr) -> Stmt[] {
         if (suspendAtOf(c.t.server.plan, e.nid) is given) return []    // s454: the whole statement was its hoisted Suspend
+        const pm: PlainMatch | not = plainFactIn(c.t, e.nid)
+        if (pm is given) {
+            if (pm.stmt) return plainMatchStmts(c, e, pm)              // s469: a statement `match`
+        }
         const pre: Stmt[] = attemptsFor(c, e)
         if (pre.length > 0) {
             const h: HandledFact | not = handledFactOf(c.t, e.nid)
@@ -2115,6 +2368,7 @@ ${
             .FHandled(h: h) :> [h.err.id].concat(maybeId(h.into))
             .FFail(err: e) :> [e.id]
             .FArm(idx: x) :> []
+            .FPlain(m: pm) :> []
         }
     }
 

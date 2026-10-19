@@ -1,0 +1,11 @@
+// §18.16: literal arms over a string, a number and a bool.
+<program>
+    let <role:string="editor"/>
+    let <n:int=2/>
+    let <flag:bool=true/>
+    <main>
+        <p id="s">${match @role { "admin" :> "all", "editor" :> "some", else :> "none", }}</p>
+        <p id="n">${match @n { 1 :> "one", 2 :> "two", else :> "many", }}</p>
+        <p id="b">${match @flag { true :> "yes", false :> "no", }}</p>
+    </main>
+</program>

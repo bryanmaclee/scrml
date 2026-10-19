@@ -3048,6 +3048,8 @@ There is no syntax to override a cell's render-spec at a particular render site.
 > ⚑ **Superseded by §66.11 / §66.12 (S435)** — a sequence is immutable unless its TYPE grants edits along axes; reactive notify is permission-driven; granted in-place edits notify like any write (the DQ-2 'not guaranteed in production' posture is withdrawn for granted operations); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 >
 > ⚑ **S469:** the freely mutable `<items> = []` cell below is NOT scrml semantics. A legacy right-hand-side tape cell is `E-DECL-LEGACY-RHS`, with no transitional all-grant, and every in-place method below is a write checked against a tape's grants in every position (§66.12.4, §66.12.6). What follows describes impl#1's carried legacy divergence.
+>
+> ⚑ **S469 pointer (method names):** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
 
 
 
@@ -4337,6 +4339,7 @@ ${ function addItem(x) {
 - **Reads** of any kind: `@derivedArr.length`, `@derivedArr[0]`, `@derivedObj.foo`, destructuring (`const [first] = @derivedArr`).
 - **Method calls that don't mutate** (`@derivedArr.join(",")`, `@derivedObj.toString()`).
 - **Local copies** are mutable: `${ let local = [...@filteredItems]; local.push(x) }` is fine; `local` is a plain non-reactive `let`.
+  ⚑ **S469 pointer:** in the language a local tape is immutable unless its type grants the write, and `push` is refused: write `let local: Item[free, append] = [...@filteredItems]; local.append(x);` (§66.12.6 rules 1 and 3, O63).
 
 **Distinction from sibling errors:**
 
@@ -10666,6 +10669,8 @@ Per §13.3, the compiler detects that `fetchUsers()` and `fetchMetrics()` are in
 - Future compiler sugar (e.g., a `loading` keyword) MAY desugar to this enum pattern. Any such sugar MUST preserve the enum's impossible-state guarantee and variant payload capability. **(Deep-dived S197 → DON'T-BUILD: a sugar that generates the per-screen enum FAILS the §53.14.4 synonym-detection gate — it produces the same first-class artifact this section already mandates. This MAY-door remains permissive future-work, NOT a roadmap commitment; re-open ONLY if a fresh gauntlet-fluency measurement confirms a standing gap the shipped surfaces don't fill AND variant-name canonicalization ratifies — then only a no-new-keyword transparent form with the desugared enum visible in compiler errors. The per-screen enum is the RATIFIED canonical async-loading model. See `scrml-support/docs/deep-dives/remotedata-loading-sugar-2026-06-15.md`.)**
 
 ### 13.6 Generators — Full Language Vocabulary
+
+> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
 
 **Added 2026-05-25 (S131 HU-4 Q-W3-3 ratification).** Defines the canonical policy for `function*` / `yield` / `yield*` in scrml source.
 
@@ -35785,6 +35790,8 @@ Assignment expressions are typed values and MAY appear wherever a value of their
 
 #### 50.5.1 Assignment to fn-Local Variables
 
+> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
+
 Assignment to variables declared inside a `fn` body is valid as an expression. The fn body's constraints (§48.3) are not relaxed; the expression form of assignment is purely a parsing/evaluation concern, not a permissions concern.
 
 ```scrml
@@ -36014,6 +36021,8 @@ ${
 ### 50.10 Worked Examples
 
 #### 50.10.1 Valid — Regex Iteration (Primary Use Case)
+
+> ⚑ **S469 pointer:** the examples here use JavaScript's `push` / `unshift` / `splice` on a tape, which the language refuses (`E-TAPE-JS-METHOD`); tape methods are named after their grants (`.append` / `.pop`, `.prepend` / `.shift`, `.insert` / `.remove`), and a local tape needs a typed grant (§66.12.6, O63).
 
 ```scrml
 ${
@@ -46974,7 +46983,7 @@ contracts**, and the engine is re-expressed as a `single` declaration whose fiel
 | 66.9 | `let`, locked, derived, seeded; `const` retires | §6.6 / §6.6.1 / §6.6.8 / §6.6.16 / §6.6.17 / §6.6.18 (the `const <x>` form) |
 | 66.10 | Value semantics | — (new axiom; impl#1 leaks reference semantics) |
 | 66.11 | Write contracts — the one transition axis | §6.5.1 (DQ-2 notify), §6.5.5; §14.12.1 (lifecycle as a read check only) |
-| 66.12 | Sequences à la carte — arrays and tuples (the tape) | §6.5 (unconstrained arrays — and, S469, no transitional all-grant for a legacy tape cell, §66.12.4); §50.9's `const`-property-write sentence for tapes (§66.12.6); the S222 no-tuple sentences (§14.11, §18.19, §59.7/§59.8) |
+| 66.12 | Sequences à la carte — arrays and tuples (the tape) | §6.5 (unconstrained arrays — and, S469, no transitional all-grant for a legacy tape cell, §66.12.4); §50.9's `const`-property-write sentence for tapes (§66.12.6); §6.5.1's JavaScript method names on a tape (S469: tape methods are named after their grants, §66.12.6 rule 3); the S222 no-tuple sentences (§14.11, §18.19, §59.7/§59.8) |
 | 66.13 | Field contracts; `single`; engines | §15.13.5, §51.0.A traits 1 + 4, §51.0.K (Move 20). (§51.0.A's S178 amendment is NOT superseded — it is OPEN, O45.) |
 | 66.14 | Encapsulation (E2) | §15.11.1 `bind` props |
 | 66.15 | Components retire into declarations | §15 (component definition), §16 (slot surface, partially) |
@@ -47149,9 +47158,8 @@ the "unparenthesized `>` or `/`" error above applies only at the opener's top le
 <p:(.Draft to .Sent)=.Draft/>              // a lifecycle type, bare (its own parentheses)
 ```
 
-This amendment covers refinement and lifecycle types only. A type with whitespace at its top level outside any
-bracket — a union `string | not` — is not covered by it: whether such a type may stand in an opener, and how it
-is spelled there, is not ruled.
+This amendment covers refinement and lifecycle types only. A union type (`string | not`) in an opener is ruled
+separately, S451, below.
 
 > ⚑ **OPEN (not ruled) — O32: which literals count as "literal".** Scalar literals and a bare enum variant
 > (`.Light`) plainly are. Whether compound literals — array (`[1, 2, 3]`), struct (`{ … }`), map (`[k: v]`), and
@@ -47171,8 +47179,11 @@ A front end that rejects a union type in an opener has a parser bug, not a langu
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs" (the three S449 `scrml fix` forks, (a): *"a union
 > type in an opener (`let <email:string | not=""/>`) is legal with `|`; a bootstrap rejection of it is a parser
-> bug."*) · supersedes: nothing written — §66.2 was silent on union types in the opener · direction of change:
-> inert (states what the grammar already admits; no program's acceptance changes under the SPEC).
+> bug."*) · supersedes: the S449 amendment's closing sentence *"A type with whitespace at its top level outside
+> any bracket — a union `string | not` — is not covered by it: whether such a type may stand in an opener, and how
+> it is spelled there, is not ruled."* (removed S469 as contradicted by this ruling; it was left standing when this
+> paragraph landed) · direction of change: inert (states what the grammar already admits; no program's acceptance
+> changes under the SPEC).
 
 #### 66.2.5 Keywords go outside the opener (S447)
 
@@ -48057,7 +48068,8 @@ library is therefore **declarations + named instances — no new construct** (§
 > (item 1: *value semantics — `let b = @a` is a snapshot*).
 
 1. **AXIOM: scrml has value semantics.** A binding, argument or field initialized from a cell (or from any value)
-   holds a **snapshot** of that value. `let b = @a` followed by `@a.push(3)` leaves `b` unchanged.
+   holds a **snapshot** of that value. `let b = @a` followed by `@a.append(3)` leaves `b` unchanged (S469: tape
+   methods are named after their grants, §66.12.6 rule 3).
 2. No write to a source is observable through a value taken from it earlier; no write through such a value is
    observable in its source — except item 4.
 3. This is consistent with §45.1 (structural `==` is well-defined because values are immutable and acyclic;
@@ -48122,7 +48134,7 @@ of check:
 2. **Edits** — grow / shrink at the end / front / anywhere (each a separate grant, S442 — §66.12.2) and
    positions-writable — are **classified at compile time**, from mutating method calls AND from **recognized
    reassignment shapes**:
-   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`; granted by `append`);
+   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.append(e)`, §66.12.6 rule 3; granted by `append`);
    - `@x = @x.filter(…)` is a **shrink-anywhere** (granted by `remove`);
    - `@x = @x.map(…)` is a **position-write**.
 3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
@@ -48190,6 +48202,9 @@ does not let a write to a struct skip the contract a SUB-FIELD carries by spelli
    needs the struct's own `replace` grant, and the invariants apply to it as to every write (§66.11.2). Rejected:
    (a) always checked (a reload errors, a legitimate server move is rejected, `reset` fails without an edge back to
    the default); (c) `reset` exempt, reload checked.
+   **S469 limit:** a genuine replace is authoritative over sub-field transition graphs and lifecycles, NOT over a
+   tape field's grants. A whole-struct write that changes a tape field is a `replace` of that field, checked
+   against the field's grants (§66.12.6 rule 4).
 3. **A contract-free sub-field does not bound a replace (O57 = no).** A fixed / locked sub-field (no contract) is
    written along with its struct under the struct's `replace` grant — otherwise O3's struct-level `let` (§66.9)
    would be a dead grant.
@@ -48433,9 +48448,22 @@ it (§6.5). An implementation MAY accept legacy tape cells only as such a **labe
 legacy divergence** — never as scrml semantics, and never by extending it to a new-form declaration. `scrml fix`
 is the way off it: it rewrites each such cell to its minimal grant.
 
-**Scope.** S469 reaches tapes. A legacy right-hand-side cell holding a scalar or a struct keeps its §66.21 Stage-1
-treatment (`W-DECL-LEGACY-RHS`, writable, until `scrml fix` rewrites it); whether "not allowed at all" also
-retires the writable treatment of legacy STRUCT cells is ⚑ O62 (§66.22).
+**Scope.** S469 reaches tapes now. A legacy right-hand-side cell holding a scalar or a struct keeps its §66.21
+Stage-1 treatment for now (`W-DECL-LEGACY-RHS`, writable, until `scrml fix` rewrites it). **Direction (O62 RULED
+S469):** "not allowed at all" also ends the writable deprecation window for legacy STRUCT cells, eventually. That
+change lands with the struct-contract work, not now; until it lands, legacy struct and scalar cells keep
+`W-DECL-LEGACY-RHS`.
+
+> ✅ **RULED S469 — O62: "not allowed at all" also ends the writable window for legacy STRUCT cells,
+> eventually** (bryan: *"Yes, eventually (Recommended)"*). When the struct-contract work lands, a legacy
+> right-hand-side struct cell (its fields writable without contracts) loses its Stage-1 window as a tape cell
+> already has. The timing is "eventually", with that work, and is not scheduled here. Until then legacy struct and
+> scalar cells keep `W-DECL-LEGACY-RHS` (§66.21). Scalar cells are not named by the ruling.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O62 / O63 / O64" — *"O62: "Yes, eventually
+> (Recommended)""* (the entry's text: *"O62: "not allowed at all" also ends the writable deprecation window for
+> legacy STRUCT cells. It lands with the struct-contract work, not now; until then legacy struct and scalar cells
+> keep `W-DECL-LEGACY-RHS`."*) · **supersedes:** this paragraph's *"whether "not allowed at all" also retires the
+> writable treatment of legacy STRUCT cells is ⚑ O62 (§66.22)"*.
 
 > ⚑ **OPEN (not ruled; MOOT for tapes since S469) — O12: "hard deprecation … clear dep terms" vs §63.** Since
 > S469 there is no deprecation window for a legacy tape cell in the language — it is an error — so O12 no longer
@@ -48497,6 +48525,23 @@ sequence whose positions carry `:Type` and an optional default, **in the Q3 `:Ty
 > E-ASSIGN-004. `const` freezes the binding, not the value."* as it applies to a tape. The S440 O14 ruling already
 > superseded it, but that ruling's SPEC text has not landed: the ⚑ O14 block at §66.11.7 still reads OPEN.
 
+> **Amendment S469 (follow-up) — tape methods are named after their grants; O63 and O64 ruled; the host
+> boundary.**
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants; JS array
+> method names are refused" — *"Names match the grants (Recommended)"* (the option text it picks: *"Tape methods
+> are named for the grant they use: `.append(x)` / `.pop()` (end), `.prepend(x)` / `.shift()` (front),
+> `.insert(i, x)` / `.remove(i)` (anywhere) … JS's `push` / `unshift` / `splice` are refused with a fix-it naming
+> the scrml method. `sort` / `reverse` / `fill` / `copyWithin` become NON-mutating functions that return a new
+> tape."*). Rejected there: keep the JS names mapped by this section's table; bank a dPA. ·
+> ruling:user-voice-scrml.md S469 "⭐ RULED — O62 / O63 / O64" — O63: *"No, locals need grants (Recommended)"*;
+> O64: *"Copy or freeze (Recommended)"*; O62: *"Yes, eventually (Recommended)"* (O62 is at §66.12.4 and §66.21). ·
+> Context: S469 *"I do not want JS style arrays in scrml at all"*.
+> **supersedes:** this section's rule-3 table as landed in #1466 (the rows `xs.push(…)`, `xs.unshift(…)`,
+> `xs.splice(i, n, …items)`, and `xs.sort(…)` / `xs.reverse()` / `xs.fill(…)` / `xs.copyWithin(…)` as position
+> writes); the ⚑ OPEN O63 and O64 blocks below (now RULED blocks); the §66.11.2 and §66.10 example spellings
+> `@x.push(e)` / `@a.push(3)`; the §66.19.5 `@audit.push(…)`. Not superseded: the six grant tokens (S442) and the
+> ⚑ O10 bracket form, which stays open.
+
 The rules of §66.12.1–§66.12.4 are not a property of cells. **A tape is immutable unless its TYPE grants the
 write, wherever the tape is held, wherever it came from, and however the write is spelled.**
 
@@ -48505,7 +48550,8 @@ write, wherever the tape is held, wherever it came from, and however the write i
    - a **struct field** whose type is a tape (§66.11.4: the field's tape type carries its grants);
    - a **tuple position** whose type is a tape (the position's lifecycle, §66.12.5, governs replacing that
      position; the tape's own grants govern edits of the tape in it);
-   - a **local binding**: `let`, `const`, or the keywordless binding (§50.8.5) (ruled S440, O14);
+   - a **local binding**: `let`, `const`, or the keywordless binding (§50.8.5) (ruled S440, O14). On a local,
+     `let` makes only the NAME rebindable; it grants the tape nothing, not even `replace` (O63 RULED, below);
    - a **function parameter**: the callee can do only what its parameter type grants (§66.12.3);
    - a **return value**: what the caller holds carries the return type's grants. A return type that names no
      grant returns an immutable tape.
@@ -48519,30 +48565,73 @@ write, wherever the tape is held, wherever it came from, and however the write i
    that names its grants**: a typed binding, a parameter, a cell, or the narrowing of an `asIs` value that §14.7
    already requires. Until then it is **immutable**, and a mutating operation on it (rule 3) is
    `E-WRITE-NOT-GRANTED`. An `asIs` value does not become mutable by having no type. The compiler cannot show
-   that an un-narrowed `asIs` value is not a tape, so the rule-3 operations on one are refused *(derived: the
-   conservative reading of point (3); not separately ruled)*. Code INSIDE a `_{ }` slice is host code and is not
-   checked. A tape handed OUT to host code is ⚑ O64 (§66.22).
+   that an un-narrowed `asIs` value is not a tape, so the host's in-place sequence mutations on one (`push`,
+   `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, `fill`, `copyWithin`, an index write, `length =`: the
+   host's mutating set, which mutates a host array) are refused *(derived: the conservative reading of point (3); not
+   separately ruled)*. The rule-3 tape method names are not tape methods on an un-narrowed `asIs` value: there
+   they are host calls (a DOM `el.remove()` is not a tape edit) *(derived, S469 follow-up)*. Code INSIDE a `_{ }` slice is host code and is not
+   checked. A tape handed OUT to host code crosses as a frozen view or a copy (§66.12.7, O64 RULED).
 
-3. **Mutating host methods are writes.** Every in-place mutation is classified onto the §66.12.2 axes and checked
-   against the target's grants, exactly as a whole-value write is (§66.11.2). An ungranted one is
-   **`E-WRITE-NOT-GRANTED`** (§66.20). One that would break a length bound or a per-position type is
-   `E-WRITE-INVARIANT` (§66.20).
+3. **Tape methods are named after their grants (S469).** A tape is edited in place only by the methods named for
+   the grant each one uses, so reading a tape's type (`Entry[free, append]`) tells you exactly which methods work
+   on it. Each method is a write: it is checked against the target's grants exactly as a whole-value write is
+   (§66.11.2). An ungranted one is **`E-WRITE-NOT-GRANTED`** (§66.20). One that would break a length bound or a
+   per-position type is `E-WRITE-INVARIANT` (§66.20).
 
    | In-place operation | Classified as | Granted by |
    |---|---|---|
-   | `xs.push(…)` | grow at the end | `append` (or `insert`) |
+   | `xs.append(x)` | grow at the end | `append` (or `insert`) |
    | `xs.pop()` | shrink at the end | `pop` (or `remove`) |
-   | `xs.unshift(…)` | grow at the front | `prepend` (or `insert`) |
+   | `xs.prepend(x)` | grow at the front | `prepend` (or `insert`) |
    | `xs.shift()` | shrink at the front | `shift` (or `remove`) |
-   | `xs.splice(i, n, …items)` | its removals a shrink-anywhere, its insertions a grow-anywhere (§66.12.2) | `remove` and/or `insert`, as it uses them |
-   | `xs[i] = v`, `xs.sort(…)`, `xs.reverse()`, `xs.fill(…)`, `xs.copyWithin(…)` | position writes | `writable` |
+   | `xs.insert(i, x)` | grow anywhere: `x` becomes position `i` | `insert` |
+   | `xs.remove(i)` | shrink anywhere: position `i` is removed | `remove` |
+   | `xs[i] = v` | a position write | `writable` |
    | `xs.length = n` | a shrink at the end | `pop` (or `remove`) |
 
-   An index write at or past the end, and a `length =` write that lengthens, would create a position that holds
-   no value. scrml has no `undefined` (§42.1), so such a write breaks the per-position type:
-   `E-WRITE-INVARIANT`. Any other in-place mutation the compiler cannot classify is a `replace` (§66.11.2). (The
-   rows apply the §66.12.2 axes to the host's mutating set. The grant tokens are ruled S442; the bracket form is
-   still ⚑ O10.)
+   Each grow method adds ONE value; to add several, call it once per value or write the recognized shape
+   (`xs = [...xs, a, b];`). `pop`, `shift` and `remove` return the removed value, typed `T | not`: on an empty
+   tape, or a `remove(i)` with no position `i`, nothing is removed and the result is `not` *(derived from §42:
+   scrml has no `undefined`; not separately ruled)*. The grow methods return no value.
+
+   An index write at or past the end, an `insert(i, x)` with `i` greater than the length, and a `length =` write
+   that lengthens would each create a position that holds no value. scrml has no `undefined` (§42.1), so such a
+   write breaks the per-position type: `E-WRITE-INVARIANT` (where the compiler cannot prove the index in range,
+   enforcement is ⚑ O36). Any other in-place mutation the compiler cannot classify is a `replace` (§66.11.2). (The
+   grant tokens are ruled S442; the bracket form is still ⚑ O10.)
+
+   **JS mutating names are refused.** JavaScript's `push`, `unshift` and `splice` are not tape methods. A call of
+   one on a tape, in any rule-1 position, is **`E-TAPE-JS-METHOD`** (§66.20), whatever the tape grants: the name
+   is refused before any grant is checked. The fix-it names the scrml method:
+
+   | JS name | Fix-it |
+   |---|---|
+   | `xs.push(x)` | `xs.append(x)` (one call per value) |
+   | `xs.unshift(x)` | `xs.prepend(x)` |
+   | `xs.splice(i, n, …items)` | `xs.remove(i)` for each removed position and `xs.insert(i, x)` for each inserted value (grants `remove` and `insert`, as the rewrite uses them) |
+
+   **`sort`, `reverse`, `fill` and `copyWithin` do not mutate.** On a tape they are non-mutating functions, like
+   `map` and `filter` (§66.12.1): each returns a NEW tape and leaves `xs` unchanged, so each is always allowed.
+
+   | Form | Returns |
+   |---|---|
+   | `xs.sort(cmp)`, `xs.sort()` | a new tape holding `xs`'s values ordered by `cmp` (the order with no `cmp`: ⚑ O65) |
+   | `xs.reverse()` | a new tape holding `xs`'s values in reverse order |
+   | `xs.fill(v)`, `xs.fill(v, start)`, `xs.fill(v, start, end)` | a new tape, with positions `start` up to `end` holding `v` |
+   | `xs.copyWithin(target, start)`, `xs.copyWithin(target, start, end)` | a new tape, with positions `start` up to `end` copied to `target` |
+
+   The arguments and position ranges are JavaScript's; only the mutation is gone. The returned tape is a value,
+   so a binding of it carries the grants of its own type, and inference never invents one (rule 1). Writing the
+   result back, `xs = xs.sort();`, is a whole-value write (rule 4). It keeps the length and changes positions, so
+   it is classified as a position write, granted by `writable`, like `xs = xs.map(…)` *(derived: the §66.11.2
+   classifier applied to these forms)*.
+
+   A call of one of these four whose result is DISCARDED (`xs.sort();` as a statement) is the JavaScript in-place
+   idiom. Under these rules it would do nothing, and `E-STMT-NO-EFFECT` does not catch it, because a call counts as
+   an effect (§7.2.2 rule 9). It is therefore `E-TAPE-JS-METHOD` as well, with the fix-it `xs = xs.sort();` (needs
+   `writable`) or a binding of the result *(derived: the refusal that keeps "non-mutating" from being a silent
+   no-op; not separately ruled)*. JavaScript's copy-returning twins of these (`toSorted`, `toReversed`, `with`)
+   are ⚑ O65 (§66.22).
 
 4. **Whole-value writes never bypass the grants.** A whole-value write to a tape, at ANY of the rule-1
    positions, is classified by the §66.11.2 edit classifier. It is a recognized reassignment shape
@@ -48552,42 +48641,125 @@ write, wherever the tape is held, wherever it came from, and however the write i
    Spread-rebuild, a non-mutating chain written back, a helper's result and a round trip through the host all land
    on the same check. For a local, rebinding a tape-typed name IS such a write. §66.11.5 still decides whether the
    name may be rebound (§50, `E-ASSIGN-*`); this rule decides whether the tape write it performs is granted.
-   Whether a local `let` gives a tape `replace` is ⚑ O63 (§66.22).
+   A local `let` gives a tape nothing, not even `replace` (O63 RULED, below), so a rebinding is granted only
+   when the tape's TYPE grants the edit it is classified as.
+
+   **A whole-struct write that changes a tape field is a `replace` of that field.** Writing a struct as a whole
+   value, at any rule-1 position, writes each of its tape-typed fields: a field the new value leaves as it was
+   (`xs: @b.xs`, or a spread that keeps it, §66.11.3 rule 1) is not written, and any other value for the field is
+   a `replace` of that field, checked against the FIELD's grants, not the struct's. The struct's own `replace`
+   grant (`let` on a struct, O3) admits replacing the struct; it never admits replacing a tape field whose type
+   grants no `replace`. This holds for a genuine replace too, `reset(@b)` and a server reload included: O58 = (b)
+   makes a genuine replace authoritative over its sub-fields' transition graphs and lifecycles (§66.11.3 rule 2),
+   but it does not waive a tape field's grants, because no spelling gets around them (S469 point (4)) *(derived:
+   the PA's reading of point (4) for struct fields; not separately ruled)*. The bootstrap does not check this yet:
+   known gap `g-bootstrap-whole-struct-write-bypasses-tape-field-grants-s469` (`docs/known-gaps.md`) is the owed
+   implementation.
+
+```scrml
+type Entry:struct = { at: number, actor: string, action: string }
+type Box:struct = { title: string, xs: Entry[free, append] }    // ⚑ O10: bracket form
+
+let <b:Box=({ title: "log", xs: [] })/>          // `let` on the struct: it grants replacing the struct (O3)
+
+function rename(t: string) {
+    @b = { ...@b, title: t };                    // the spread shape: an edit of `title` only; `xs` is kept
+}
+function rebuild(t: string) {
+    @b = { title: t, xs: @b.xs };                // a genuine replace that leaves `xs` as it was: granted
+}
+// @b = { title: "new", xs: [] };                → E-WRITE-NOT-GRANTED (a replace of `xs`; `Entry[free, append]` grants none)
+// @b.xs = [];                                   → E-WRITE-NOT-GRANTED (the same write, spelled on the field)
+// reset(@b);                                    → E-WRITE-NOT-GRANTED (once `xs` has entries, the reset replaces it)
+```
 
 ```scrml
 type Entry:struct = { at: number, actor: string, action: string }
 
 function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {   // ⚑ O10: bracket form
-    log.push(e)                                    // end-append: granted by the parameter type
-    // log.pop()                                   → E-WRITE-NOT-GRANTED (shrink at the end; only `append`)
-    // log.shift()                                 → E-WRITE-NOT-GRANTED (shrink at the front)
-    return log
+    log.append(e);                                 // end-append: granted by the parameter type
+    // log.push(e);                                → E-TAPE-JS-METHOD (fix-it: `log.append(e)`)
+    // log.pop();                                  → E-WRITE-NOT-GRANTED (shrink at the end; only `append`)
+    // log.shift();                                → E-WRITE-NOT-GRANTED (shrink at the front)
+    return log;
 }
 
 function names(o: asIs) -> string[] {
-    const keys = Object.keys(o)                    // from the host: no grants, so immutable
-    // keys.sort()                                 → E-WRITE-NOT-GRANTED (position writes; nothing granted)
-    return keys.toSorted()                         // non-mutating: always allowed (§66.12.1)
+    const keys = Object.keys(o);                   // from the host: no grants, so immutable
+    // keys.sort();                                → E-TAPE-JS-METHOD (the result is discarded; `keys` is unchanged)
+    return keys.sort();                            // non-mutating: a new tape, always allowed (§66.12.1)
 }
 
 function one(n: int) -> int[] {
-    let out = []                                   // inferred: no grants, so immutable
-    // out.push(n)                                 → E-WRITE-NOT-GRANTED (write `out: int[free, append]`)
-    return [n]
+    let out: int[free, append] = [];               // a local tape needs a typed grant (O63)
+    out.append(n);                                 // end-append: granted by the type
+    // let bare = [];  bare.append(n);             → E-WRITE-NOT-GRANTED (inferred: no grants)
+    // out = [];                                   → E-WRITE-NOT-GRANTED (a replace; `let` grants none)
+    return out;
 }
 ```
 
-> ⚑ **OPEN (not ruled) — O63: does a local `let` give a tape `replace`?** Rule 4 makes rebinding a tape-typed
-> local a whole-value write. If `let` on a local conferred `replace`, every `let` local tape could reach every
-> edit through a replace (§66.11.3): a broad grant by keyword. For cells, O3 = (c) already says `let` on a
-> sequence is an error (`E-GRANT-LET-ON-SEQUENCE`: write `replace` in the type's grants). Whether that rule
-> reaches locals is not ruled. Under it, a local tape's grants live only in its type, and `let` only makes the
-> NAME rebindable. Lean (not a ruling): yes, O3's rule reaches locals, so one spelling governs every position.
+> ✅ **RULED S469 — O63: a local `let` does NOT give a tape `replace`** (bryan: *"No, locals need grants
+> (Recommended)"*). A local tape is immutable unless its TYPE grants the write: `let out: Item[free, append] = [];`.
+> There is no edit by whole-tape replace. On a local, `let` makes only the NAME rebindable (§50); every write the
+> rebinding performs is classified by rule 4 and checked against the type's grants, and a `replace` needs
+> `replace` in the type. Unlike a cell (O3 = (c), `E-GRANT-LET-ON-SEQUENCE`), `let` on a local tape is not an
+> error: it is how the name is made rebindable, and the grants still live only in the type, so one spelling
+> governs every position. Owed: the stdlib migrates first (the md stdlib 112 sites, transform 12).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O62 / O63 / O64" — *"O63: "No, locals need grants
+> (Recommended)""* · **supersedes:** the ⚑ OPEN O63 text that stood here: *"Whether that rule reaches locals is not
+> ruled. … Lean (not a ruling): yes, O3's rule reaches locals, so one spelling governs every position."* (The
+> lean's direction is kept; its reading that O3's ERROR reaches locals is not: the ruled example spells a local
+> `let out: Item[free, append] = []`.)
 
-> ⚑ **OPEN (not ruled) — O64: a tape handed OUT to host code.** A tape passed to a host function, or read inside
-> a `_{ }` foreign slice, can be mutated there, and no grant check reaches it. Value semantics (§66.10) makes the
-> host's copy a snapshot only if the implementation copies at the boundary. Whether the boundary copies (or
-> freezes) a tape whose type does not grant the host's writes, or whether such a call is refused, is not ruled.
+> ✅ **RULED S469 — O64: a tape handed OUT to host code crosses as a frozen view or a copy** (bryan: *"Copy or
+> freeze (Recommended)"*). Stated at §66.12.7. **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O62 /
+> O63 / O64" — *"O64: "Copy or freeze (Recommended)""* · **supersedes:** the ⚑ OPEN O64 text that stood here:
+> *"Whether the boundary copies (or freezes) a tape whose type does not grant the host's writes, or whether such a
+> call is refused, is not ruled."* (Refusing the call is the rejected option.)
+
+#### 66.12.7 The host boundary (S469)
+
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — O62 / O63 / O64" — *"O64: "Copy or freeze
+> (Recommended)""* (the option text: *"a tape handed to host JS (a callback argument, `_{}`) crosses as a frozen
+> view or a copy, so host code cannot mutate a scrml tape behind its grants. There is a small runtime cost at the
+> boundary."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — NO unconstrained sequence behaviour" point (3)
+> (*"values arriving from host JS"*) · §42.5, §42.8, §42.9 (the absence representation and the interop rule).
+> Rule 2 below is a **PA default derived from §42.9 and these rulings**, not a separate ruling by bryan.
+
+Two rules govern a value crossing between scrml and host JavaScript. §66.12.6 rule 2 governs a sequence coming IN
+(it carries no grants until it is given a tape type).
+
+1. **A tape going OUT crosses as a frozen view or a copy (O64).** A tape handed to host code (an argument to a
+   host function or method, an argument a scrml value passes to a host callback, a value returned to host code,
+   or a value named in a `_{ }` foreign slice's `in:` header, §23.2.4a) reaches the host as a **frozen view** or as a **copy**. Host
+   code therefore cannot mutate a scrml tape behind its grants: a host write to a frozen view fails in the host,
+   and a host write to a copy changes only the copy. Either way the scrml tape is unchanged, as value semantics
+   requires (§66.10). The rule covers every tape reachable from the value handed out, including a tape held in a
+   struct field or a tuple position *(derived: the reach of "no position escapes", §66.12.6 rule 1)*. Which of the
+   two an implementation uses at a given boundary is its choice; a program SHALL NOT depend on a host write to a
+   tape it handed out (the two differ only in what the host sees). The boundary has a small runtime cost; a tape
+   the compiler can show the host never writes MAY cross without it.
+
+2. **JS `undefined` arriving from the host is `not`** *(derived — a PA default, not a new ruling)*. A value that
+   arrives from host JavaScript (a host function or method result, a value out of a `_{ }` slice, an `asIs`
+   value, a host callback's argument, §42.9's `^{}` / server boundaries) and is JS `undefined` is **normalised to
+   `not` on entry**. This extends §42.9's assignment rule to every entry point. Absence tests the compiler emits
+   (`is not`, `is given`, `given`, a `not` match arm, optional chaining) SHALL test for both JS `null` and JS
+   `undefined` (§42.5, §42.8), so an `undefined` the entry normalisation does not reach (for example, inside a
+   host object read field by field) still reads as `not`. No scrml program emits `undefined` (§42.8).
+
+```scrml
+type Item:struct = { id: int, name: string }
+
+server function find(items: Item[free, append], key: string) {
+    const hit = _={ in: { items, key }
+        items.find((i) => i.name === key)       // `items` arrived frozen or copied: a host write cannot reach it
+    }=;
+    if (hit is not) { return "none"; }         // `find`'s JS `undefined` arrived as `not`; the test covers both
+    return "found";
+}
+```
 
 ### 66.13 Field contracts, `single`, and engines (Q6 = (a))
 
@@ -49231,6 +49403,16 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 > **supersedes:** `<audit:Entry[free, end]=[]/>` and its *"changes at the end"* comment; the two-reason
 > `@audit[0].action` comment.
 
+> **Amendment S469 — the log appends with `.append`, the method named after its grant.** JavaScript's `push` is not
+> a tape method (§66.12.6 rule 3): `@audit.push(…)` is `E-TAPE-JS-METHOD`, whatever the log grants. Statements end
+> with `;` (dpa-073 F1). The `appended` comment now states the ruled outcome (O37 = (c)).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" — *"Names
+> match the grants (Recommended)"* (its "Owed" list: *"§66.19.5 examples rewritten"*); ruling:user-voice-scrml.md
+> S469 dpa-073 F1 — *"`;` terminates (Recommended)"*.
+> **supersedes:** `@audit.push({ at: Date.now(), actor: @actor, action: action })` and the
+> *"a `replace` under the later one-axis rule — with bryan"* half of the `appended` comment (O37 was ruled (c) at
+> S435).
+
 ```scrml
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
@@ -49239,20 +49421,23 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
     let <actor:string="ops"/>
 
     function record(action: string) {
-        @audit.push({ at: Date.now(), actor: @actor, action: action })            // end-append: granted
+        @audit.append({ at: Date.now(), actor: @actor, action: action });           // end-append: granted
     }
     function recordBySpread(action: string) {
-        @audit = [...@audit, { at: Date.now(), actor: @actor, action: action }]   // a recognized end-append shape: granted
+        @audit = [...@audit, { at: Date.now(), actor: @actor, action: action }];  // a recognized end-append shape: granted
     }
-    // @audit = []                                   → E-WRITE-NOT-GRANTED (a replace; the type grants none)
-    // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
-    // @audit = appended(@audit, e)                  → legal IF `appended` is certified an end-append (O37 RULED (c)): "fine" in the answered "type" text; a
-    //                                                 `replace` under the later one-axis rule — with bryan
-    // @audit.pop()                                  → E-WRITE-NOT-GRANTED (shrinks at the end; only `append` is granted)
-    // @audit.shift()                                → E-WRITE-NOT-GRANTED (shrinks at the front)
-    // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
-    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (a FIELD edit of `action`, and Entry.action is fixed)
-    // let snapshot = @audit                         → a SNAPSHOT (§66.10): a later record() does not change it
+    // @audit.push(e);                               → E-TAPE-JS-METHOD (fix-it: `@audit.append(e)`)
+    // @audit = [];                                  → E-WRITE-NOT-GRANTED (a replace; the type grants none)
+    // reset(@audit);                                → E-WRITE-NOT-GRANTED (reset is a replace)
+    // @audit = appended(@audit, e);                 → legal when `appended` is certified an end-append (O37 = (c));
+    //                                                 an uncertifiable helper's result is a replace → E-WRITE-NOT-GRANTED
+    // @audit.pop();                                 → E-WRITE-NOT-GRANTED (shrinks at the end; only `append` is granted)
+    // @audit.shift();                               → E-WRITE-NOT-GRANTED (shrinks at the front)
+    // @audit.remove(0);                             → E-WRITE-NOT-GRANTED (shrinks anywhere)
+    // @audit = @audit.filter(e => e.actor != "x");  → E-WRITE-NOT-GRANTED (shrink-anywhere)
+    // @audit = @audit.reverse();                    → E-WRITE-NOT-GRANTED (a position write; positions are read-only)
+    // @audit[0].action = "edited";                  → E-WRITE-NOT-GRANTED (a FIELD edit of `action`, and Entry.action is fixed)
+    // let snapshot = @audit;                        → a SNAPSHOT (§66.10): a later record() does not change it
 
     <main>
         <input bind:value=@actor/>
@@ -49270,7 +49455,8 @@ The log's type grants one edit — grow at the end (`append`) — and no `replac
 shrink (`pop`, `shift`, `remove`) is granted, so no statement in the program can remove an entry; no `prepend` or
 `insert`, so entries arrive only at the end; positions are read-only, so no entry can be replaced; and the element
 type's fields are locked by omission (S440 dpa-052 Q3), so no entry can be rewritten. The compiler checks that on
-every write however it is spelled (§66.11.2, §66.11.3).
+every write however it is spelled (§66.11.2, §66.11.3). The method names read off the type: `.append` is the one
+tape method the log accepts (§66.12.6 rule 3).
 
 #### 66.19.6 An engine re-expressed as a `single` declaration
 
@@ -49344,6 +49530,13 @@ emitter). Every code below is Nominal on impl#1.
 > text named it (dpa-069 D-9 — the house rule broken the other way round); its §34 row lands with this row.
 > **Provenance:** ruling:user-voice-scrml.md S462 "ratified path to X" (dpa-069 item 1).
 
+> **Amendment S469 — one row added:** `E-TAPE-JS-METHOD` (§66.12.6 rule 3), the refusal of JavaScript's mutating
+> array method names on a tape. Its §34 row lands with its emitter, per the house rule above. The
+> `E-WRITE-NOT-GRANTED` row's method list is renamed to the tape methods.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" —
+> *"Names match the grants (Recommended)"* (*"JS's `push` / `unshift` / `splice` are refused with a fix-it naming
+> the scrml method."*). The code name is the PA's (provisional until confirmed, as the S469 codes were).
+
 **New codes**
 
 | Code | Severity | Fires when |
@@ -49358,10 +49551,11 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place host-method mutation — `push`, `splice`, `sort`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit (including an in-place tape method — `.append`, `.pop`, `.prepend`, `.shift`, `.insert`, `.remove`, an index or `length =` write — on a tape in ANY position: a local, a parameter, a return value, a struct field, a tuple position, or a host / `asIs` value given no granting tape type; §66.12.6, S469), or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript mutating array method name — `push`, `unshift` or `splice` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `writable`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap's method allowlist still uses the JS names and is owed the rename). |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
@@ -49454,13 +49648,15 @@ props); `E-ENGINE-VAR-DUPLICATE` and the §51.0.C auto-naming surface (the `<eng
 Every retired form below goes through the §63 stage machine — Stage 1 (SOFT-DEPRECATED): the form **parses
 identically**, a `W-` lint fires at every site naming the canonical form + `scrml fix` + this section, and a
 **reserved `E-`** is named — **except** the render-by-tag rewrite, which was ruled SAME-ARC, and a right-hand-side
-cell holding a tape, which is `E-DECL-LEGACY-RHS` with no window (S469, §66.12.4). No removal version is
+cell holding a tape, which is `E-DECL-LEGACY-RHS` with no window (S469, §66.12.4). A cell holding a struct keeps
+its window until the struct-contract work lands, and then loses it as well (O62 RULED S469, "eventually",
+§66.12.4). No removal version is
 named (§63.2); scheduling is a later §62 version event (§63.3), gated on a verified-landed `scrml fix` rule
 (§63.4).
 
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
-| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12), **for a cell holding a scalar or a struct only**. **A cell holding a tape has NO Stage-1 window (S469, §66.12.4):** there is no transitional all-permissions grant, and the cell is `E-DECL-LEGACY-RHS` at once (impl#1 accepts it as a carried, labelled legacy divergence, §66.12.4) | `E-DECL-LEGACY-RHS` (reserved for scalar / struct cells; **in force now** for a tape cell) | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written **and its initializer reads no cell** → locked `<x:T=v/>`; a written scalar, **or a never-written scalar whose initializer reads a cell** → `let <x:T=v/>` (S447 position, §66.2.5; amended S449 — below); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
+| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12), **for a cell holding a scalar or a struct only**. **A struct cell loses this window too, eventually (O62 RULED S469, §66.12.4):** with the struct-contract work, not now. **A cell holding a tape has NO Stage-1 window (S469, §66.12.4):** there is no transitional all-permissions grant, and the cell is `E-DECL-LEGACY-RHS` at once (impl#1 accepts it as a carried, labelled legacy divergence, §66.12.4) | `E-DECL-LEGACY-RHS` (reserved for scalar / struct cells; **in force now** for a tape cell) | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written **and its initializer reads no cell** → locked `<x:T=v/>`; a written scalar, **or a never-written scalar whose initializer reads a cell** → `let <x:T=v/>` (S447 position, §66.2.5; amended S449 — below); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
 | `const <x> = expr` (top level and in-compound) | `W-CONST-CELL-DEPRECATED` | `E-CONST-CELL-DEPRECATED` | `<x:T=(expr)/>` — the locked declaration; derived exactly when `expr` reads cells (§66.9). (`W-CONST-AT-DEPRECATED` for `const @name` is unchanged.) |
 | Component `const X = <root props={…}>…</>` | `W-COMPONENT-CONST-DEPRECATED` | `E-COMPONENT-CONST-DEPRECATED` | `props={a: T, b?: T, c: T = d}` → typed attributes with inline defaults; the root element → the `renders` clause; `${...}` children → `<slot/>`; `bind` props → `export let <f:T=v/>` CHILD fields (§66.4 rule 6, S447). **Owed (S435):** count the component files the codemod cannot rewrite mechanically (snippet slots, lambda slot-fill — ⚑ O9); those stay soft until a rule or a designer-card waiver covers them (§63.4). |
 | `<engine for=T initial=.X …>` | `W-ENGINE-ELEMENT-DEPRECATED` | `E-ENGINE-ELEMENT-DEPRECATED` | `<engine for=T initial=.X>` → `<t:T=.X single>` with state-children carried verbatim (⚑ O52: how state-children fit the marker, and whether their `:`-shorthand bodies survive). The rule covers only what §66.13 rules; the rest of the §51.0 surface waits on ⚑ O5, so the rule is partial and the form cannot be scheduled (§63.4) until it is complete. |
@@ -49540,9 +49736,10 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 | O61 (S447) | §66.2.5 | Which bodies besides a program body and a declaration body are ITEM positions for `let <x/>` / `export <x/>` — a `<page>` body (same §40.8 default-logic mode as `<program>`), a `<theme>` body (token declarations only, §66.17). |
-| O62 (S469) | §66.12.4, §66.21 | Whether S469's "not allowed at all" also retires the writable Stage-1 treatment of a legacy right-hand-side STRUCT cell (its fields writable without contracts), or reaches tapes only. |
-| O63 (S469) | §66.12.6 | Whether a local `let` gives a tape `replace`, or O3's rule (`let` on a sequence is an error; write `replace` in the type) reaches locals (lean: it reaches locals). |
-| O64 (S469) | §66.12.6 | A tape handed OUT to host code (a host call, a `_{ }` slice): copy or freeze at the boundary, or refuse the call. |
+| ~~O62~~ RULED S469 = yes, eventually | §66.12.4, §66.21 | Whether S469's "not allowed at all" also retires the writable Stage-1 treatment of a legacy right-hand-side STRUCT cell (its fields writable without contracts), or reaches tapes only. RULED: yes, eventually — it lands with the struct-contract work; until then legacy struct and scalar cells keep `W-DECL-LEGACY-RHS`. Provenance: ruling:user-voice-scrml.md S469 — *"Yes, eventually (Recommended)"*. |
+| ~~O63~~ RULED S469 = no | §66.12.6 | Whether a local `let` gives a tape `replace`. RULED no: a local tape needs a typed grant (`let out: Item[free, append] = [];`); `let` makes only the name rebindable, and is not an error on a local (unlike O3's cell rule). Provenance: ruling:user-voice-scrml.md S469 — *"No, locals need grants (Recommended)"*. |
+| ~~O64~~ RULED S469 = copy or freeze | §66.12.6, §66.12.7 | A tape handed OUT to host code (a host call, a callback argument, a `_{ }` slice): copy or freeze at the boundary, or refuse the call. RULED: it crosses as a frozen view or a copy (§66.12.7 rule 1). Provenance: ruling:user-voice-scrml.md S469 — *"Copy or freeze (Recommended)"*. |
+| O65 (S469) | §66.12.6 rule 3 | Two residues of the S469 method-name ruling: (a) whether JavaScript's copy-returning twins `toSorted` / `toReversed` / `with` are refused like `push` (`sort` and `reverse` already return a new tape) or kept as synonyms; (b) the order `xs.sort()` uses with no comparator (JavaScript compares by string conversion, so `[10, 9, 1].sort()` is `[1, 10, 9]`). |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O58~~ RULED S437 = (b) | §66.11.3 | How sub-field contracts bind a GENUINE replace (a non-spread value, `reset`, a server reload). RULED (b): a genuine replace is AUTHORITATIVE and does not have to satisfy sub-field contracts (`reset` = the declared initial state; a reload = the server's state); the spread shape `@x = { ...@x, f: v }` stays a checked field edit. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O59~~ RULED S437 = PA lean | §66.7.6 | When conditional and `<each>`-row instances get their records, and how construction is ordered. RULED: at mount, fresh on each remount; construction in document order after the cells it reads; use-site initializers are the one sanctioned user code at construction. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -49557,6 +49754,8 @@ O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of 
 Ruled S462: O18 (*"I really like X so I accept your rec as a ratified path to X"* — undeclared use-site
 attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open). Ruled S462: O46 (*"go on the package"*, Q14 — `${...}` retires as the children spread; X spelled
 `...attrs:button`, applied bare).
+Ruled S469 (*"Yes, eventually (Recommended)"*, *"No, locals need grants (Recommended)"*, *"Copy or freeze
+(Recommended)"*): O62, O63, O64. Opened S469: O65.
 
 ### 66.23 Cross-references
 
@@ -49566,7 +49765,8 @@ carried over) · §6.8 (`reset` — a replace, §66.11.2) · §6.10 / §52 (`pin
 §14.3.1 (structs; `<Token>` in logic — O35) · §14.11 (positional binding — retired, §66.18) · §14.12 (lifecycles —
 write contracts, §66.11.6) · §15 / §16 (components and slots — retired into declarations, §66.15) · §17.7 (`<each>`
 and `key=` — instance keying, §66.7.3) · §18.19 (multi-scrutinee match — its parentheses remain non-tuples) ·
-§19.2 (`renders` — the second contextual position, §66.5.1) · §42 (`not`; `T | not` handles, §66.7.5) · §45
+§19.2 (`renders` — the second contextual position, §66.5.1) · §42 (`not`; `T | not` handles, §66.7.5; §42.5 / §42.9 — absence at the host boundary, §66.12.7) · §23 (`_{ }` — a
+tape crossing out, §66.12.7) · §45
 (equality over values — §66.10) · §50 (assignment; local `let` rebinding, §66.11.5; §50.9 — O14) · §51.0 (engines
 — re-expressed, §66.13) · §59 (maps and sets — O44; no-tuple sentences superseded, §66.12) · §63 (the deprecation
 lifecycle, §66.21) · §65.3.2 / §65.6 (`<theme>` — T3, §66.17). dpa-053 (block expressions) is banked, not ruled,

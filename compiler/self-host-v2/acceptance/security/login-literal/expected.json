@@ -1,0 +1,29 @@
+{
+  "id": "acceptance-security-login-literal",
+  "description": "login by a string literal arm: wrong and empty passwords → `denied`, the right one → `welcome`.",
+  "language-version": "1.0",
+  "spec": "§18.16",
+  "rationale": "Security lens: the literal arm is chosen by `===` on the string; every other string takes `else`.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      },
+      {
+        "selector": "#right",
+        "text": "welcome"
+      },
+      {
+        "selector": "#empty",
+        "text": "denied"
+      }
+    ]
+  }
+}

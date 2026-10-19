@@ -155,9 +155,9 @@ describe("§18.2 / §18.6.1 — E-MATCH-BARE-BINDER", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            else err :> @n = 1\n        }\n    }`))).toEqual(["E-MATCH-BARE-BINDER"]);
   });
 
-  test("`_ <name>` on a `match` whose subject is NOT a failable result (the §18 match unit stays refused beside it)", () => {
+  test("`_ <name>` on a `match` whose subject is NOT a failable result (s469: the §18 plain-value match — only the binder is refused)", () => {
     const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            _ rest :> 2\n        }\n    }`);
-    expect(codes(src).slice().sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-MATCH-BARE-BINDER"]);
+    expect(codes(src).slice().sort()).toEqual(["E-MATCH-BARE-BINDER"]);
     expect(msg(src, "E-MATCH-BARE-BINDER")).toContain("only where that value is an error");
   });
 
@@ -261,8 +261,8 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
 
   // r2 MED-2 — a value on EVERY path; falling off the end of the body is no value
   test("r2 MED-2: a callee that returns a value on only SOME paths yields nothing there — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469 (bryan: Always explicit): h's incomplete returns are refused too
   });
 
   test("r2 MED-2 near-miss: every path returns a value (a final `return`, or an if / else both returning)", () => {
@@ -320,9 +320,9 @@ describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fa
     expect(codes(src)).toEqual([]);
   });
 
-  test("a `match` on a non-failable value is not affected (the §18 `match` unit — refused as before)", () => {
+  test("a `match` on a non-failable value is not affected — no E-ERROR-013 (s469: the §18 plain-value match, admitted)", () => {
     const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            .B :> 2\n        }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(src)).toEqual([]);
   });
 
   test("near-miss: a `!{}` on a `!` call and on a `?{}` compile", () => {
@@ -681,8 +681,8 @@ describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed conn
   });
 
   test("r3 MED-B: a bare `return` at ANY depth means the callee may yield no value — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 1) { return }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return } }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function h() {\n        if (@n == 1) { return }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
+    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return } }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-ERROR-012", "E-RETURN-INCOMPLETE"]);   // s469: a bare `return` beside a value return
   });
 
   test("r3 LOW-C: the first unconditional `return <value>` decides (what follows is dead)", () => {

@@ -1,0 +1,8 @@
+// §18.16.2: a literal arm over an enum is E-TYPE-028.
+<program>
+    type Color:enum = { Red, Green }
+    let <c:Color=.Red/>
+    <main>
+        <p>${match @c { "Red" :> "r", else :> "x", }}</p>
+    </main>
+</program>

@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 124 codes with a §34 severity; 67 without one (FAIL-CLOSED Error):
+// 134 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -73,6 +73,7 @@
 //   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
+//   E-RETURN-INCOMPLETE — no §34 row
 //   E-TYPE-STRUCT-CONTEXT — no §34 row
 //   E-TYPE-STRUCT-FIELD — no §34 row
 //   E-TYPE-UNKNOWN — no §34 row
@@ -91,6 +92,8 @@ ${
             "W-ATTR-001" :> Severity.Warning
             "W-DEPRECATED-SERVER-MODIFIER" :> Severity.Warning
             "W-LIFECYCLE-010" :> Severity.Warning
+            "W-MATCH-001" :> Severity.Warning
+            "W-MATCH-002" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
@@ -138,6 +141,7 @@ ${
             "E-EFFECT-NO-DEPS" :> Severity.Error
             "E-EFFECT-WRITE-UNPROVEN" :> Severity.Error
             "E-EFFECT-WRITES-STATE" :> Severity.Error
+            "E-EQ-002" :> Severity.Error
             "E-ERROR-001" :> Severity.Error
             "E-ERROR-002" :> Severity.Error
             "E-ERROR-003" :> Severity.Error
@@ -160,7 +164,9 @@ ${
             "E-HOLD-WITHOUT-PERSIST" :> Severity.Error
             "E-LIFECYCLE-007" :> Severity.Error
             "E-LIFECYCLE-016" :> Severity.Error
+            "E-MATCH-012" :> Severity.Error
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
+            "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
             "E-MATCH-BARE-BINDER" :> Severity.Error
             "E-MW-002" :> Severity.Error
             "E-OUTLET-OUTSIDE-SHELL" :> Severity.Error
@@ -199,11 +205,16 @@ ${
             "E-SYNTAX-044" :> Severity.Error
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
+            "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
             "E-TYPE-021" :> Severity.Error
             "E-TYPE-023" :> Severity.Error
+            "E-TYPE-024" :> Severity.Error
+            "E-TYPE-028" :> Severity.Error
             "E-TYPE-031" :> Severity.Error
             "E-TYPE-041" :> Severity.Error
+            "E-TYPE-043" :> Severity.Error
+            "E-TYPE-044" :> Severity.Error
             "E-TYPE-080" :> Severity.Error
             "E-TYPE-082" :> Severity.Error
             "E-UNQUOTED-DISPLAY-TEXT" :> Severity.Error

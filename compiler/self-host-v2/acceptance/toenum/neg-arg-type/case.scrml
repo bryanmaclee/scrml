@@ -1,0 +1,7 @@
+// §14.4.1: toEnum takes a string.
+<program>
+    type Guess:enum = { Yes, No }
+    let <n:int=1/>
+    <g:Guess | not=(Guess.toEnum(@n))/>
+    <main><p>${match @g { .Yes :> "y", .No :> "n", not :> "-", }}</p></main>
+</program>

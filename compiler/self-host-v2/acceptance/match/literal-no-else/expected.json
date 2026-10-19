@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-match-literal-no-else",
+  "description": "a non-exhaustive string match: W-MATCH-002, and `guest` takes no arm (renders nothing).",
+  "language-version": "1.0",
+  "spec": "§18.16.2 · §18.16.3",
+  "rationale": "§18.16.3: \"a role value other than \\\"admin\\\" or \\\"editor\\\" will produce `not`\".",
+  "expect": {
+    "codes": [
+      "W-MATCH-002"
+    ],
+    "severity": {
+      "W-MATCH-002": "warning"
+    },
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "[]"
+      }
+    ]
+  }
+}

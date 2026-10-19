@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-match-enum-value",
+  "description": "an enum `match` in `${}` (every variant) and as the right operand of `+`.",
+  "language-version": "1.0",
+  "spec": "§18.2 · §18.3 · §18.6 · §18.9",
+  "rationale": "§18.3: \"A `match` expression is valid in any expression position\"; §18.9: valid inside `${ }`.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#b"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "b"
+      },
+      {
+        "selector": "#op",
+        "text": "is blue"
+      }
+    ]
+  }
+}

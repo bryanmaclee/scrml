@@ -374,12 +374,12 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
     });
   });
 
-  test("`<g:Guess | not=Guess.Yes/>` — the union parses; the qualified value is an opener expression to parenthesize (§66.2.4), and `(Guess.Yes)` is a member access the bootstrap does not have yet", () => {
+  test("`<g:Guess | not=Guess.Yes/>` — the union parses; the qualified value is an opener expression to parenthesize (§66.2.4), and `(Guess.Yes)` is a qualified variant (s469: admitted)", () => {
     const bare = codes(prog(`    <g:Guess | not=Guess.Yes/>`));
     expect(bare).not.toContain("E-PARSE-TAG");
     expect(bare).toContain("E-DECL-OPENER-EXPR-UNPARENTHESIZED");
     const paren = codes(prog(`    <g:Guess | not=(Guess.Yes)/>`));
     expect(paren).not.toContain("E-PARSE-TAG");
-    expect(paren).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(paren).toEqual([]);
   });
 });

@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
-| MED | 668 | 6 |
+| MED | 667 | 6 |
 | LOW | 445 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -24790,9 +24790,11 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 <!-- @gap id=g-bootstrap-opener-refinement-lifecycle-type-rejected sev=MED status=open locus=compiler/self-host-v2/parse.scrml(opener type after `:`) prov=empirical:S449-scrml-fix-s66-twins -->
 **Agent-executed (S449).** `<hp:number(>0)=5/>` → E-PARSE-TAG `(` + E-PARSE-DECL-BODY + E-PARSE-UNCLOSED; `<p:(.A to .B)=.A/>` → E-PARSE-TYPE "expected a type after `:`". The S449 §66.2.4 amendment makes both legal bare. Twins hitting it: `forms/derived-refinement-type-accepted`, `refinement/external-ref-pos`, `type-state-codes/e-type-lifecycle-*` (UNSUPPORTED, parse-reject). Also measured: `<n:integer=5/>` → E-TYPE-UNKNOWN `integer`, though §6.2's table lists `int` / `integer` (the fix keeps the author's `integer`; it is not a retired form).
 
-### g-spec-66-union-type-in-opener-unruled — SPEC: how a type with a top-level space (`string | not`, a union) stands in a declaration opener is not ruled
-<!-- @gap id=g-spec-66-union-type-in-opener-unruled sev=MED status=open locus=compiler/SPEC.md(§66.2.4 — the S449 amendment covers refinement / lifecycle types only) prov=empirical:S449-scrml-fix-s66-twins -->
+### g-spec-66-union-type-in-opener-unruled — SPEC: how a type with a top-level space (`string | not`, a union) stands in a declaration opener is not ruled — `S449; MED; RESOLVED S469 (ruled S451)`
+<!-- @gap id=g-spec-66-union-type-in-opener-unruled sev=MED status=resolved locus=compiler/SPEC.md(§66.2.4 — the S449 amendment covers refinement / lifecycle types only) prov=empirical:S449-scrml-fix-s66-twins;ruling:user-voice-scrml.md(S451 "your recs", the three S449 `scrml fix` forks, (a)) -->
 **Agent-executed (S449).** Legacy `<u>: string | not = not` has no ruled §66 spelling: a space inside an opener separates attributes, and the bootstrap rejects every spelling tried — `<x:string|not=not/>` (E-PARSE-TAG `|`), `<x:string?=not/>` (E-PARSE-TAG `?`), `<x:(string | not)=not/>` (E-PARSE-TYPE). `scrml fix` therefore leaves such a declaration untouched and reports it (blocker "has a space at its top level"). The §66.2.4 amendment says explicitly that it does not cover this. Needs a ruling (grouping parens, `T?` sugar, or no-space `T|not`).
+
+**Resolved S469 (SPEC only, s469-tape-followups).** Ruled S451 (*"a union type in an opener (`let <email:string | not=""/>`) is legal with `|`; a bootstrap rejection of it is a parser bug."*), and §66.2.4 already carried that paragraph. The S449 amendment's closing sentence (*"… whether such a type may stand in an opener, and how it is spelled there, is not ruled."*) contradicted it and is removed. The bootstrap parser half is PR #1468 (union types in declaration openers).
 
 ### g-impl1-implicit-program-omits-reset-layer — impl#1: a file with no `<program>` root gets no §65.3.4 reset layer; the same file wrapped in `<program>` does
 <!-- @gap id=g-impl1-implicit-program-omits-reset-layer sev=LOW status=open locus=compiler/src/codegen/emit-theme-reset.ts(emitResetLayer — "Emitted only when the file declares a `<program>`") prov=empirical:S449-scrml-fix-s66-twins -->

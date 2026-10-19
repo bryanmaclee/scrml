@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-match-eq-maybe-struct",
+  "description": "`(User | not) == (User | not)` compares structurally.",
+  "language-version": "1.0",
+  "spec": "§45",
+  "rationale": "§45: `==` on structs is structural. Before s469 the `| not` hid the struct and the bootstrap emitted `===`.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#set"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#eq",
+        "text": "true"
+      }
+    ]
+  }
+}

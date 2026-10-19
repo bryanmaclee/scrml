@@ -1,0 +1,10 @@
+// A tape is never a match subject (fail closed) — a `T[g] | not` included: the tape keeps its grants.
+<program>
+    function f(xs: int[append] | not) -> string {
+        return match xs {
+            not :> "none"
+            else :> "some"
+        }
+    }
+    <main><p>${f(not)}</p></main>
+</program>

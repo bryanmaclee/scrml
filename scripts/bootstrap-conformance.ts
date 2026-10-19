@@ -619,6 +619,7 @@ async function runBootstrapArtifact(html: string, js: string, input: InputStep[]
     clock.install();
     const rt = await import(join(dir, "scrml-runtime.js"));
     await import(join(dir, "program.client.js"));
+    const UNDEFINED_CELL = "<undefined — no scrml value is undefined (§42.5)>";
     const program = () => [...rt.devtools.instances.values()].find((i: any) => i.id === 0 && i.decl.name === "program");
     const hook: ConformanceHook = {
       snapshot() {
@@ -626,7 +627,10 @@ async function runBootstrapArtifact(html: string, js: string, input: InputStep[]
         const cells: Record<string, unknown> = {};
         if (inst) {
           const snap = rt.snapshot(inst);
-          for (const k of Object.keys(snap)) cells[k] = snap[k] === undefined ? null : snap[k];
+          // s469 (#1471 delta review LOW): `undefined` is NOT `not` here — no scrml value is
+          // `undefined` (§42.5), so a cell holding it is a defect a case must fail on, never a
+          // `null` an assertion could accept. It is kept as a distinct sentinel.
+          for (const k of Object.keys(snap)) cells[k] = snap[k] === undefined ? UNDEFINED_CELL : snap[k];
         }
         return { cells, derived: {} };
       },

@@ -1,0 +1,25 @@
+// a bare `return` (a success with no value) in a `!` finder: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    type Denied:enum = { Bad }
+    function role(pw: string)! Denied {
+        if (pw != "hunter2") return
+        return "user"
+    }
+    function attempt(pw: string) -> string {
+        return match role(pw) {
+            .Ok(v) :> "welcome"
+            .Bad :> "denied"
+        }
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

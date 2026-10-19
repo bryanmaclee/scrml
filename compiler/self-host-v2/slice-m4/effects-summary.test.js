@@ -118,7 +118,8 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
   });
 
   test("`function g() -> string { return nothing() }` — a declared type does not launder it either", () => {
-    expect(codes(prog("function g() -> string { return nothing() }"))).toEqual(["E-ERROR-012"]);
+    // s469 (#1471 r3): and `return nothing()` in a `-> string` function returns a `void` — E-TYPE-001 where it stands
+    expect(codes(prog("function g() -> string { return nothing() }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
   });
 
   test("two wrappers deep, and through recursion", () => {
@@ -128,11 +129,13 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
 
   // r2 LOW-1: the s452 r3 rule — an earlier unconditional return decides; a
   // `return <call>` in the dead code after it is not a return path.
-  test("a `return nothing()` after an unconditional return is dead code — clean", () => {
-    expect(codes(prog("function g() {\n            return \"x\"\n            return nothing()\n        }"))).toEqual([]);
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing()\n        }"))).toEqual([]);
+  test("a `return nothing()` after an unconditional return is dead code for the arm rule (clean there) — but it is still `void` (E-TYPE-001)", () => {
+    // s469 (#1471 r3): the dead `return nothing()` is still type-checked — `g` returns values, so
+    // returning a `void` there is E-TYPE-001 (the arm rule stays clean: the live return decides)
+    expect(codes(prog("function g() {\n            return \"x\"\n            return nothing()\n        }"))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing()\n        }"))).toEqual(["E-TYPE-001"]);
     // twin: reachable, it still counts
-    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing()\n        }"))).toEqual(["E-ERROR-012"]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing()\n        }")).slice().sort()).toEqual(["E-ERROR-012", "E-TYPE-001"]);
   });
 
   test("negative twins: a wrapper that returns a value is clean", () => {
