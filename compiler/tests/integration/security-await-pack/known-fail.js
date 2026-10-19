@@ -35,5 +35,6 @@ export const UNJUDGED = {
   // client). Each ACCEPTS a wrong password in the client today (emit inspected, S469):
   "la5/rawClientSrvCall": "KNOWN HOLE g-match-value-position-server-call-no-autoawait: client `Boolean(match n { 1 :> inner(…) … })` returns an unawaited Promise from the value IIFE — always truthy",
   "la5/rawClientSrvCallObj": "KNOWN HOLE g-match-value-position-server-call-no-autoawait: client raw object arm `{ v: inner(…) }` stores an unawaited Promise",
-  "la5/rawClientObjFailable": "KNOWN HOLE g-raw-match-arm-object-failable-call-unhandled-s469: client raw object arm `{ ok: chkC(p) }` — a `!` call with no E-ERROR-002; a failure object is truthy",
+  // (S469 #1470: "la5/rawClientObjFailable" removed — the raw object arm's text, which the
+  // statement reader refuses, is now read to refuse, so the shape is E-ERROR-002: PASS-REFUSED.)
 };

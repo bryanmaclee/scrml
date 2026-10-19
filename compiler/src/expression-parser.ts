@@ -4748,6 +4748,16 @@ export function templateInterpolationNodes(lit: { raw: string; span: ExprSpan } 
   );
 }
 
+/**
+ * S469 follow-up — `templateInterpolationNodes` WITH the interpolations the parser could not
+ * read, each as a `TemplateInterpFallback` escape hatch carrying its text. The unhandled-
+ * failable-call check reads every interpolation: one it cannot structure is read as text to
+ * REFUSE (fails closed), never dropped.
+ */
+export function templateInterpolationNodesAll(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
+  return templateInterpolationNodesCached(lit);
+}
+
 function templateInterpolationNodesCached(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
   let cached = TEMPLATE_INTERP_CACHE.get(lit as unknown as LitExpr);
   if (!cached) {

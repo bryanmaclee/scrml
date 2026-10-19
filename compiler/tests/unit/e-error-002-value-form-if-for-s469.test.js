@@ -7,7 +7,8 @@
  * (`const ok = if (c) { lift a } else { lift b }`) is carried as `ifExpr` / `forExpr` with
  * `init: ""`, and the E-ERROR-002 walk (`failable-value-calls.ts`) read neither key: the
  * condition, the body statements and the `lift` operands went unchecked, and on origin/main
- * a74a32eca every shape in A below compiled, so a WRONG PASSWORD LOGGED IN.
+ * a74a32eca every shape in A below but one compiled, so a WRONG PASSWORD LOGGED IN (the value-form
+ * `if` inside a value-form `for` is refused there by codegen, E-CODEGEN-INVALID-LOGIC — see A).
  *
  * The fix: the walk reads a value-form `if` / `for` as statements (condition / iterable as values,
  * bodies as statements), a `lift` operand as a value position (a `!{}` on it still handles it),
@@ -24,7 +25,7 @@ import * as acorn from "acorn";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
-import { DECL_KEY_CLASSES, forEachCallInStatement } from "../../src/failable-value-calls.ts";
+import { DECL_KEY_CLASSES, STATEMENT_CHILD_KEYS, STMT_KEY_CLASSES, VALUE_POSITION_STMT_KINDS, forEachCallInStatement } from "../../src/failable-value-calls.ts";
 
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -92,7 +93,9 @@ async function boot(source) {
 const e002 = (src) => compileSource(src).codes.filter((c) => c === "E-ERROR-002").length;
 
 // ---------------------------------------------------------------------------
-// A — the wrong-password shapes (each compiled on a74a32eca and logged in)
+// A — the wrong-password shapes (each compiled on a74a32eca and logged in — except "a
+// value-form `if` inside a value-form `for`", which main refuses with E-CODEGEN-INVALID-LOGIC
+// (codegen cannot lower a `lift if`); it is here because the type system must not rely on that)
 // ---------------------------------------------------------------------------
 
 describe("A — an unhandled failable call through a value-form if/for is E-ERROR-002", () => {
@@ -406,5 +409,124 @@ describe("D — DECL_KEY_CLASSES covers every key ast-builder.js writes on a dec
   test("every key is classified", () => {
     const missing = [...keys].filter((k) => !k.startsWith("__") && !DECL_KEY_CLASSES.has(k));
     expect(missing).toEqual([]);
+  });
+
+  // S469 follow-up (F7) — a key can also be written through a LOOP VARIABLE over a statement
+  // list (`for (const st of prelude) st._handlerParamPrelude = true` — each prelude statement
+  // is a `const-decl`), which the literal-bound scan above cannot see. Every such key is either
+  // classified, a child-statement key the walk recurses into, or listed here with the reason it
+  // never lands on a declaration (each assignment is guarded by a non-declaration kind / shape).
+  const NOT_ON_A_DECLARATION = new Map([
+    ["_bodyTopBareRun", "guarded: st.kind === \"bare-expr\""],
+    ["_bodyTop", "guarded: b.type === \"logic\" (a block, not a statement)"],
+    ["leaveStmt", "guarded: child.kind === \"match-arm-inline\""],
+    ["propagateOperand", "guarded: child.kind === \"match-arm-inline\""],
+    ["propagateOperandExpr", "guarded: child.kind === \"match-arm-inline\""],
+    ["expr", "a reactive-ref record of an attribute value, not a statement"],
+    ["tabSpan", "a diagnostic object"],
+    ["fromHandlerStatementList", "a diagnostic object"],
+  ]);
+  const loopKeys = new Map();
+  const visitLoops = (n, loopVars) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { n.forEach((x) => visitLoops(x, loopVars)); return; }
+    let lv = loopVars;
+    if ((n.type === "ForOfStatement" || n.type === "ForInStatement") && n.left.type === "VariableDeclaration"
+        && n.left.declarations[0].id.type === "Identifier") {
+      lv = new Set(loopVars);
+      lv.add(n.left.declarations[0].id.name);
+    }
+    if (n.type === "AssignmentExpression" && n.left.type === "MemberExpression" && !n.left.computed
+        && n.left.object.type === "Identifier" && lv.has(n.left.object.name)) {
+      const line = src.slice(0, n.start).split("\n").length;
+      loopKeys.set(n.left.property.name, [...(loopKeys.get(n.left.property.name) ?? []), line]);
+    }
+    children(n, (c) => visitLoops(c, lv));
+  };
+  visitLoops(tree, new Set());
+
+  test("the loop-variable scan finds the parameter-prelude flag (sanity)", () => {
+    expect(loopKeys.has("_handlerParamPrelude")).toBe(true);
+  });
+
+  test("every key written through a loop variable is classified, a child key, or not on a declaration", () => {
+    const missing = [...loopKeys.keys()].filter((k) => !k.startsWith("__") && !DECL_KEY_CLASSES.has(k)
+      && !STATEMENT_CHILD_KEYS.has(k) && !NOT_ON_A_DECLARATION.has(k));
+    expect(missing.map((k) => `${k} (ast-builder.js:${loopKeys.get(k).join(",")})`)).toEqual([]);
+  });
+
+  // The declarations codegen synthesizes (`<formFor>` cells) are built after the walk, but are
+  // classified too, so moving one into the builder stays covered.
+  test("the keys of the declarations codegen synthesizes are classified", () => {
+    const tsSrc = new Bun.Transpiler({ loader: "ts" }).transformSync(
+      readFileSync(resolve(import.meta.dir, "../../src/codegen/emit-form-for.ts"), "utf8"));
+    const synth = new Set();
+    const go = (n) => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { n.forEach(go); return; }
+      if (isDeclLiteral(n)) objectKeys(n, synth);
+      children(n, go);
+    };
+    go(acorn.parse(tsSrc, { ecmaVersion: "latest", sourceType: "module" }));
+    expect(synth.has("_formForSynth")).toBe(true);
+    expect([...synth].filter((k) => !k.startsWith("__") && !DECL_KEY_CLASSES.has(k))).toEqual([]);
+  });
+
+  // S469 follow-up r2 (F2) — NON-declaration statements. The walk reads an expression tree under
+  // any key; an object-valued key that is not one is classified (STMT_KEY_CLASSES) or read
+  // conservatively. `return <markup>` (`markupNode`) and a `for` head pattern (`variable`) went
+  // unread before r2. Every key the builder writes on a statement literal is either a child-
+  // statement key, classified, or listed here as an expression tree / scalar (reviewed).
+  const EXPR_OR_SCALAR_STMT_KEYS = new Set([
+    "expr", "exprNode", "binding", "target", "method", "args", "argExprs", "path", "value", "valueExpr",
+    "iterable", "iterExpr", "condition", "condExpr", "header", "partial", "headerExpr", "name", "fnKind",
+    "isServer", "isGenerator", "canFail", "errorType", "test", "armArrow", "result", "resultExpr",
+    "_onMountEffect", "raw", "exported", "fromExport", "route", "isHandleEscapeHatch", "label",
+    "dependencies", "bodyRaw", "bodyExpr", "openerHadSpaceAfterLt",
+    "typeAnnotation", "isAwait", "letBinder", "constBinder", "isAsync", "hasReturnType",
+    "returnTypeAnnotation", "isPure", "isPinned", "idempotentModifier",
+    "objectLiteralArm", // a flag (#1473 / arm-body-statements.ts): the arm's value is its `exprNode`
+
+    // `{ kind: "if-expr", ...ifNode }` / `{ kind: "for-expr", ...forNode }`: the spread is an
+    // `if-stmt` / `for-stmt` node, whose own literal keys are checked by this same scan.
+    "<spread ifNode>", "<spread forNode>",
+  ]);
+  const NON_DECL_STMT_KINDS = new Set([...VALUE_POSITION_STMT_KINDS, "if-expr", "for-expr"].filter((k) => !DECL_KINDS.has(k)));
+  const stmtKeys = new Map();
+  const visitStmtLits = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { n.forEach(visitStmtLits); return; }
+    if (n.type === "ObjectExpression") {
+      const kp = n.properties.find((p) => p.type === "Property" && !p.computed && p.key.name === "kind"
+        && p.value.type === "Literal" && NON_DECL_STMT_KINDS.has(p.value.value));
+      if (kp) {
+        const ks = new Set();
+        objectKeys(n, ks);
+        for (const k of ks) stmtKeys.set(k, [...(stmtKeys.get(k) ?? []), kp.value.value]);
+      }
+    }
+    children(n, visitStmtLits);
+  };
+  visitStmtLits(tree);
+
+  test("the statement-literal scan finds `return-stmt.markupNode` (sanity)", () => {
+    expect(stmtKeys.get("markupNode") ?? []).toContain("return-stmt");
+  });
+
+  test("every key ast-builder.js writes on a non-declaration statement is accounted for", () => {
+    const missing = [...stmtKeys.keys()].filter((k) => !k.startsWith("__") && !["kind", "span", "id", "params", "cStyleParts"].includes(k)
+      && !STATEMENT_CHILD_KEYS.has(k) && !STMT_KEY_CLASSES.has(k) && !EXPR_OR_SCALAR_STMT_KEYS.has(k));
+    expect(missing.map((k) => `${k} (${[...new Set(stmtKeys.get(k))].join(",")})`)).toEqual([]);
+  });
+
+  test("an unclassified object-valued statement key is read (fails closed)", () => {
+    const env = {
+      resolveOuter: (n) => (n === "check" ? "check" : null),
+      parseStatements: () => null, parseExpr: () => null, parseGuardArms: () => null, matchArmBodyText: () => null,
+    };
+    const call = { kind: "call", callee: { kind: "ident", name: "check" }, args: [], optional: false };
+    const out = [];
+    forEachCallInStatement({ kind: "return-stmt", futureNode: { wrap: { value: call } } }, "none", env, (c) => out.push(c));
+    expect(out.length).toBe(1);
   });
 });

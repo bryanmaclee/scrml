@@ -16196,7 +16196,7 @@ function annotateNodes(
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
       // S469 — a failable function read as a VALUE is not a call any boundary can test.
-      if (renderTimeInBoundary && !c.inFunction && c.refKind !== "fn-value" && c.refKind !== "lift-guard") { boundaryHandlesCall(c, span); return; }
+      if (renderTimeInBoundary && !c.inFunction && boundaryMayHandle(c)) { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
@@ -16249,7 +16249,7 @@ function annotateNodes(
       }
       const span = (attr.span ?? value.span ?? n.span) as Span;
       const onCall = (c: FailableCallCandidate): void => {
-        if (renderTimeInBoundary && !c.inFunction) { boundaryHandlesCall(c, span); return; }
+        if (renderTimeInBoundary && !c.inFunction && boundaryMayHandle(c)) { boundaryHandlesCall(c, span); return; }
         reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, false);
       };
       if (value.kind === "call-ref" && typeof value.name === "string") {
@@ -16281,6 +16281,11 @@ function annotateNodes(
    * accepted unhandled (fails closed). The boundary's E-ERROR-005 coverage check applies to every
    * call it handles (§19.6.6), not only to a whole-statement call.
    */
+  /** S469 — only a CALL can be tested by a boundary (not a function value, a lift guard, unread text). */
+  function boundaryMayHandle(c: FailableCallCandidate): boolean {
+    return c.refKind === undefined || c.refKind === "call";
+  }
+
   function boundaryHandlesCall(c: FailableCallCandidate, span: Span): void {
     // S468 fix round 1 (F1) — §19.6.6: "A server call SHALL NOT occur at render time: in the
     // boundary's content, as in any value position, it is E-VALUE-SERVER-CALL (§13.7), and the
@@ -16297,12 +16302,12 @@ function annotateNodes(
       ));
       return;
     }
-    if (c.call === null || c.fromText || c.inValueForm) {
+    if (c.call === null || c.fromText || c.inValueForm || c.inLiftedMarkup) {
       const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
       errors.push(new TSError(
         "E-ERROR-002",
         `E-ERROR-002: Result of failable function ${shown} is not handled. The call is made while ` +
-        `rendering inside an '<errorBoundary>', but at this position (${c.call === null ? "a markup attribute value" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : "a handler arm, match arm, template literal or loop initializer"}) ` +
+        `rendering inside an '<errorBoundary>', but at this position (${c.inLiftedMarkup ? "markup produced by 'lift' or held by an expression" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : c.call === null ? "a markup attribute value, or text impl#1 does not read structurally" : "a handler arm, match arm, template literal or loop initializer"}) ` +
         `impl#1 cannot route its error to the boundary, so the boundary does not handle it. Handle it in place with ` +
         `'${c.calleeName}(…) !{ | .Variant :> … }' or 'match', or bind it in a statement of the boundary's content ` +
         `('\${ const v = ${c.calleeName}(…) }') and use 'v'.`,
@@ -16346,6 +16351,21 @@ function annotateNodes(
   ): void {
     const calleeName = c.calleeName;
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "unreadable") {
+      // S469 follow-up (§19.4.3) — a `lift` operand neither parser reads (a value form nested
+      // two deep). The failable-call check cannot prove it free of an unhandled call, so it is
+      // refused (fails closed) with the code codegen gives the same construct.
+      const t = (c.text ?? "").replace(/\s+/g, " ");
+      errors.push(new TSError(
+        "E-CODEGEN-INVALID-LOGIC",
+        `E-CODEGEN-INVALID-LOGIC: this 'lift' operand could not be read ('lift ${t.length > 80 ? t.slice(0, 77) + "..." : t}'), ` +
+        `so impl#1 cannot check it for an unhandled failable call (§19.4.3). A value-form 'if' / 'for' ` +
+        `nested inside another one's 'lift' is not supported: bind the inner value first ` +
+        `('const v = if (…) { lift … } else { lift … }') and 'lift v'.`,
+        span,
+      ));
+      return;
+    }
     if (c.refKind === "fn-value") {
       // S469 (§19.4.3) — `lift check` (or any operand reading `check` as a value) hands the
       // failable function to a binding whose calls impl#1 does not follow, so a call through it
