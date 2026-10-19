@@ -72,6 +72,22 @@ export interface FailableCallCandidate {
    * `{ … }` block): `call` is not a node codegen will see, since codegen lowers that text itself.
    */
   fromText: boolean;
+  /**
+   * S469 — what was found (absent = "call"):
+   *   - "call": a call to the failable function;
+   *   - "fn-value": the failable function itself read as a VALUE where its binding escapes the
+   *     walk (a `lift` operand — `const g = if (c) { lift check } else { lift plain }`). Calls
+   *     through such a binding are not tracked, so the read is refused (fails closed);
+   *   - "lift-guard": a call that is the operand of a `!{}` on a `lift` (`lift check(p) !{ … }`).
+   *     impl#1 lowers that guard against the LIFT's result, not the call's (the error object is
+   *     lifted unchecked; executed S469), so the `!{}` does not handle it.
+   */
+  refKind?: "call" | "fn-value" | "lift-guard";
+  /**
+   * S469 — the call is inside the body of a value-form `if` / `for` (see FnCtx.inValueForm): an
+   * `<errorBoundary>` cannot be trusted to test it there (refused, like `fromText`).
+   */
+  inValueForm?: boolean;
 }
 
 export type RootHandling =
@@ -96,11 +112,22 @@ class LocalScope {
   child(): LocalScope { return new LocalScope(this); }
 }
 
-interface FnCtx { inFunction: boolean; inFailableFn: boolean; fromText?: boolean; }
+/**
+ * `inValueForm` (S469) — inside the body of a value-form `if` / `for`. The type system's main
+ * walk never visits those bodies, so nothing there carries the stamps codegen's handling forms
+ * read (`__matchSubjectFailable`): a `match` on a failable call there compares the error object
+ * as a plain value and its arms never see the failure (executed: a wrong password logged in).
+ * Within one, only a statement `!{}` is a handling form (it lowers from the tree alone).
+ */
+interface FnCtx { inFunction: boolean; inFailableFn: boolean; fromText?: boolean; inValueForm?: boolean; liftGuard?: boolean; }
 const TOP: FnCtx = { inFunction: false, inFailableFn: false };
 const PLAIN_FN: FnCtx = { inFunction: true, inFailableFn: false };
 /** The same context, for nodes this walk parsed out of text (see FailableCallCandidate.fromText). */
 function textCtx(fn: FnCtx): FnCtx { return fn.fromText ? fn : { ...fn, fromText: true }; }
+/** A function body written inside `fn` (a value-form body stays one: see FnCtx). */
+function fnBodyCtx(fn: FnCtx, canFail: boolean): FnCtx {
+  return fn.inValueForm ? { inFunction: true, inFailableFn: canFail, inValueForm: true } : { inFunction: true, inFailableFn: canFail };
+}
 
 function resolveName(name: string, scope: LocalScope | null, env: FailableEnv): string | null {
   for (let s = scope; s !== null; s = s.parent) {
@@ -114,7 +141,7 @@ export const VALUE_POSITION_STMT_KINDS: ReadonlySet<string> = new Set([
   "bare-expr", "let-decl", "const-decl", "state-decl", "lin-decl", "tilde-decl",
   "return-stmt", "propagate-expr", "if-stmt", "while-stmt", "while-loop", "do-while-stmt",
   "for-stmt", "for-loop", "match-stmt", "match-expr", "match-arm-inline",
-  "reactive-nested-assign", "reactive-array-mutation", "guarded-expr", "function-decl",
+  "reactive-nested-assign", "reactive-array-mutation", "guarded-expr", "function-decl", "lift-expr",
   ...["when-effect", "when-message", "when-worker-message", "when-worker-error", "onchange-decl"],
 ]);
 
@@ -149,6 +176,45 @@ const HANDLED_OPERAND_KEYS = new Map<string, RootHandling>([
 const SPECIAL_KEYS = new Set(["span", "id", "params", "cStyleParts"]);
 
 const DECL_KINDS = new Set(["let-decl", "const-decl", "tilde-decl", "lin-decl", "state-decl"]);
+
+/**
+ * S469 (§19.4.3) — EVERY key a declaration statement can carry, classified. A declaration's value
+ * is not always `initExpr`: a value-form `if` / `for` (`const ok = if (c) { lift check(p) } …`)
+ * is carried as `ifExpr` / `forExpr` with `init: ""`, and before S469 neither was read, so a wrong
+ * password logged in. The walk reads a declaration key by key and FAILS CLOSED on a key it has no
+ * class for: such a key's value is read as a value position in full (every failable call in it
+ * is unhandled). `compiler/tests/unit/e-error-002-value-form-if-for-s469.test.js` enumerates
+ * the keys the AST builder writes on a declaration and fails when one is missing here.
+ *
+ *   - "expr":       an expression tree (or a list of them), read by the generic root loop.
+ *   - "value-form": a value-form `if` / `for`, read as a statement — condition / iterable as
+ *                   values, bodies as statements, each `lift` operand as a value.
+ *   - "statements": child statements (`matchExpr`, a structural state's `children`): visited by
+ *                   the main walk itself, and by this walk when it recurses (STATEMENT_CHILD_KEYS).
+ *   - "pattern":    the bound name, or a destructuring pattern whose defaults are values.
+ *   - "text":       the source text of a value carried structurally under another key (`init`;
+ *                   read only when no structured value is carried — see ownExpressions).
+ *   - "inert":      flags, names and type text: no expression.
+ *   - "opaque":     a structure (SQL, a foreign block, a render spec, validators) whose
+ *                   expressions are read conservatively: every expression tree in it is a value
+ *                   position, every statement in it is walked as a statement.
+ */
+export const DECL_KEY_CLASSES: ReadonlyMap<string, "expr" | "value-form" | "statements" | "pattern" | "text" | "inert" | "opaque"> = new Map([
+  ["initExpr", "expr"], ["defaultExpr", "expr"],
+  ["ifExpr", "value-form"], ["forExpr", "value-form"],
+  ["matchExpr", "statements"], ["children", "statements"],
+  ["name", "pattern"],
+  ["init", "text"],
+  ["id", "inert"], ["kind", "inert"], ["span", "inert"], ["typeAnnotation", "inert"], ["isConst", "inert"],
+  ["isServer", "inert"], ["isShared", "inert"], ["pinned", "inert"], ["shape", "inert"],
+  ["structuralForm", "inert"], ["stateType", "inert"], ["auth", "inert"], ["reactivity", "inert"],
+  ["implicitNotLifecycle", "inert"], ["_isReactiveAssign", "inert"], ["_bareAssign", "inert"],
+  ["refinementNoRhsBase", "inert"], ["serverAuthorityTable", "inert"], ["boundNames", "inert"],
+  ["sqlNode", "opaque"], ["foreignNode", "opaque"], ["renderSpec", "opaque"], ["validators", "opaque"],
+] as const);
+
+/** Statement kinds a conservative ("opaque") read walks as statements rather than field by field. */
+const OPAQUE_STATEMENT_KINDS = new Set([...VALUE_POSITION_STMT_KINDS, "if-expr", "for-expr"]);
 
 export function isExprNodeValue(v: unknown): v is ExprNode {
   if (!v || typeof v !== "object") return false;
@@ -192,7 +258,8 @@ class Walker {
     const target = resolveName(written, scope, this.env);
     if (target === null) return;
     this.cb({ call, calleeName: target, via: target === written ? null : written,
-      inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fromText: fn.fromText === true });
+      inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fromText: fn.fromText === true,
+      ...(fn.inValueForm ? { inValueForm: true } : {}), ...(fn.liftGuard ? { refKind: "lift-guard" as const } : {}) });
   }
 
   // ---- expressions --------------------------------------------------------
@@ -308,6 +375,8 @@ class Walker {
    */
   matchSubject(node: ExprNode | null | undefined, scope: LocalScope | null, fn: FnCtx): void {
     if (!node || typeof node !== "object") return;
+    // S469 — no `match` inside a value-form body is lowered as a failable match (see FnCtx).
+    if (fn.inValueForm) { this.expr(node, scope, fn); return; }
     if (node.kind === "call" && guardCallArmsRaw(node) === null && node.callee && node.callee.kind === "ident") {
       for (const a of node.args ?? []) this.expr(a as ExprNode, scope, fn);
       return;
@@ -353,11 +422,12 @@ class Walker {
     go(pat);
   }
 
-  lambda(node: LambdaExpr, scope: LocalScope | null, _fn: FnCtx): void {
+  lambda(node: LambdaExpr, scope: LocalScope | null, fn: FnCtx): void {
     const inner = new LocalScope(scope);
-    this.params(node.params, inner, PLAIN_FN);
-    if (node.body && node.body.kind === "expr") this.expr(node.body.value, inner, PLAIN_FN);
-    else if (node.body && node.body.kind === "block") this.statements(node.body.stmts as unknown[], inner, PLAIN_FN);
+    const body = fnBodyCtx(fn, false);
+    this.params(node.params, inner, body);
+    if (node.body && node.body.kind === "expr") this.expr(node.body.value, inner, body);
+    else if (node.body && node.body.kind === "block") this.statements(node.body.stmts as unknown[], inner, body);
   }
 
   escapeHatch(node: Record<string, unknown>, scope: LocalScope | null, fn: FnCtx): void {
@@ -371,9 +441,10 @@ class Walker {
     // block-bodied arrow): its body is a function body like any other — parse it and walk it.
     if (typeof node.bodyRaw === "string") {
       const inner = new LocalScope(scope);
-      this.params(node.params, inner, PLAIN_FN);
+      const body = fnBodyCtx(fn, false);
+      this.params(node.params, inner, body);
       const stmts = this.env.parseStatements(node.bodyRaw);
-      if (stmts) this.statements(stmts, inner, PLAIN_FN);
+      if (stmts) this.statements(stmts, inner, body);
       return;
     }
     // Any other hatch carries no structure to read (it is not re-scanned).
@@ -404,7 +475,7 @@ class Walker {
     const kind = st.kind as string;
     if (kind === "function-decl") {
       const inner = scope.child();
-      const fnCtx: FnCtx = { inFunction: true, inFailableFn: st.canFail === true };
+      const fnCtx: FnCtx = fnBodyCtx(fn, st.canFail === true);
       this.params(st.params, inner, fnCtx);
       if (Array.isArray(st.body)) this.statements(st.body as unknown[], inner, fnCtx);
       return;
@@ -420,7 +491,7 @@ class Walker {
     // A local alias: `const g = check` / `g = check` binds `g` to the failable function.
     this.recordAlias(st, scope);
     // Child statements, each in its own block.
-    if (kind === "for-stmt" || kind === "for-loop") {
+    if (kind === "for-stmt" || kind === "for-loop" || kind === "for-expr") {
       const loop = scope.child();
       for (const n of paramNames(Array.isArray(st.variable) ? st.variable : st.variable ? [st.variable] : [])) loop.names.set(n, null);
       this.cStyleParts(st, loop, fn);
@@ -524,21 +595,160 @@ class Walker {
   }
 
   /**
+   * S469 — one key of a declaration, by its class (DECL_KEY_CLASSES). True when the key was read
+   * here (the generic root loop skips it); false for an "expr" key, which that loop reads.
+   */
+  declKey(st: Record<string, unknown>, key: string, scope: LocalScope | null, fn: FnCtx, handling: RootHandling): boolean {
+    const cls = DECL_KEY_CLASSES.get(key);
+    const v = st[key];
+    switch (cls) {
+      case "expr": return false;
+      case "statements": case "inert": return true;
+      case "value-form":
+        // `const ok = if (c) { lift a } else { lift b }` / `const vs = for (x of xs) { lift f(x) }`:
+        // nothing handles the value the form produces, so its condition / iterable, its body
+        // statements and its `lift` operands are all value positions. The main walk never visits
+        // these bodies (it descends only array-valued keys), so this walk reads them in full.
+        if (v && typeof v === "object" && !Array.isArray(v)) {
+          this.statement(v as Record<string, unknown>, new LocalScope(scope), { ...fn, inValueForm: true }, "none");
+        } else if (v !== undefined && v !== null) {
+          this.opaque(v, scope, fn);
+        }
+        return true;
+      case "pattern":
+        if (v && typeof v === "object") this.opaque(v, scope, fn);
+        return true;
+      case "text": {
+        // The source text of the value. Read only when no structured value is carried — a
+        // declaration whose initializer did not parse to a tree still emits that text.
+        const structured = isExprNodeValue(st.initExpr) && !isParseErrorHatch(st.initExpr);
+        const other = ["ifExpr", "forExpr", "matchExpr", "sqlNode", "foreignNode", "renderSpec"].some((k) => st[k] != null);
+        if (typeof v === "string" && v.trim() !== "" && !structured && !other) {
+          const parsed = this.env.parseExpr(v);
+          if (parsed && !isParseErrorHatch(parsed)) this.root(parsed, handling, scope, textCtx(fn));
+        }
+        return true;
+      }
+      case "opaque":
+        this.opaque(v, scope, fn);
+        return true;
+      default:
+        // A key with no class — written by a builder change this walk has not been taught.
+        // Fails closed: read as a value position in full.
+        if (isExprNodeValue(v) || (Array.isArray(v) && v.every((x) => isExprNodeValue(x)))) return false;
+        this.opaque(v, scope, fn);
+        return true;
+    }
+  }
+
+  /**
+   * S469 — a conservative read of a structure this walk has no specific reader for: every
+   * expression tree in it is a value position, every statement in it is walked as a statement
+   * (so a `!{}` / `match` / `?` inside still handles what it handles). Nothing is skipped.
+   */
+  opaque(v: unknown, scope: LocalScope | null, fn: FnCtx): void {
+    const seen = new WeakSet<object>();
+    const go = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const y of x) go(y); return; }
+      if (isExprNodeValue(x)) { this.expr(x, scope, fn); return; }
+      const k = (x as { kind?: unknown }).kind;
+      if (typeof k === "string" && OPAQUE_STATEMENT_KINDS.has(k)) {
+        this.statement(x as Record<string, unknown>, new LocalScope(scope), fn, "none");
+        return;
+      }
+      for (const key of Object.keys(x as object)) if (key !== "span") go((x as Record<string, unknown>)[key]);
+    };
+    go(v);
+  }
+
+  /**
+   * S469 — `lift <operand>`: the operand is the value the enclosing form produces (a value-form
+   * `if` / `for`, or a rendered `for` body), so it is a VALUE position; and a failable function
+   * read as a value there (`lift check`, `lift c ? check : plain`, `lift (x) => check`) escapes
+   * into a binding whose calls this walk cannot follow — refused (`refKind: "fn-value"`). Lifted
+   * markup / SQL are not read here (`g-lift-markup-failable-call-unchecked-s468`).
+   */
+  liftOperand(st: Record<string, unknown>, scope: LocalScope | null, fn: FnCtx, handling: RootHandling): void {
+    const e = st.expr as { kind?: unknown; expr?: unknown; exprNode?: unknown } | undefined;
+    if (!e || typeof e !== "object" || e.kind !== "expr") return;
+    let node: ExprNode | null = isExprNodeValue(e.exprNode) && !isParseErrorHatch(e.exprNode) ? e.exprNode : null;
+    let lfn = fn;
+    if (node === null && typeof e.expr === "string" && e.expr.trim() !== "") {
+      const parsed = this.env.parseExpr(e.expr);
+      if (parsed && !isParseErrorHatch(parsed)) { node = parsed; lfn = textCtx(fn); }
+    }
+    if (node === null) {
+      // An operand that is not an expression (`lift if (c) { … } else { … }` — a nested value
+      // form carried as text): read it as statements. A value-form body (see FnCtx).
+      const stmts = typeof e.expr === "string" && e.expr.trim() !== "" ? this.env.parseStatements(e.expr) : null;
+      if (stmts) this.statements(stmts, scope, { ...textCtx(fn), inValueForm: true });
+      return;
+    }
+    // A whole-statement `lift f()` is NOT a statement call: its value is lifted, so it is read.
+    // `lift check(p) !{ … }` (the guarded node of a `!{}`) is NOT handled either: see refKind
+    // "lift-guard". Every failable call in the operand is reported.
+    this.root(node, "none", scope, handling === "operand" ? { ...lfn, liftGuard: true } : lfn);
+    this.fnValueRefs(node, scope, lfn);
+  }
+
+  /**
+   * Every read of a failable function AS A VALUE in `node` — an identifier that is not the callee
+   * of a call. Conservative: a name bound inside the tree (a lambda parameter) is still resolved
+   * against the enclosing scope, so shadowing can only over-refuse, never miss.
+   */
+  fnValueRefs(node: ExprNode, scope: LocalScope | null, fn: FnCtx): void {
+    const seen = new WeakSet<object>();
+    const callees = new WeakSet<object>();
+    const go = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const y of x) go(y); return; }
+      const r = x as Record<string, unknown>;
+      if (r.kind === "call" && r.callee && typeof r.callee === "object" && (r.callee as { kind?: unknown }).kind === "ident") {
+        callees.add(r.callee as object);
+      }
+      if (r.kind === "ident" && typeof r.name === "string" && !callees.has(r)) {
+        const target = resolveName(r.name, scope, this.env);
+        if (target !== null) {
+          this.cb({ call: null, calleeName: target, via: target === r.name ? null : r.name,
+            inFunction: fn.inFunction, inFailableFn: fn.inFunction && fn.inFailableFn, fromText: fn.fromText === true,
+            refKind: "fn-value", ...(fn.inValueForm ? { inValueForm: true } : {}) });
+        }
+        return;
+      }
+      // A function written as a value and carried with its body TEXT: its body is read too.
+      if (r.kind === "escape-hatch" && typeof r.bodyRaw === "string") {
+        const stmts = this.env.parseStatements(r.bodyRaw);
+        if (stmts) go(stmts);
+      }
+      for (const key of Object.keys(r)) if (key !== "span") go(r[key]);
+    };
+    go(node);
+  }
+
+  /**
    * This statement's OWN expressions (not its child statements), plus the bodies it carries as
    * text: a C-style `for` (its parts), a `function-decl`'s parameter defaults, an `on mount` body
    * or a bare `{ … }` block kept as text.
    */
   ownExpressions(st: Record<string, unknown>, scope: LocalScope | null, fn: FnCtx, handling: RootHandling): void {
     const kind = st.kind as string;
+    if (kind === "lift-expr") { this.liftOperand(st, scope, fn, handling); return; }
+    const isDecl = DECL_KINDS.has(kind);
     const seen = new Set<object>();
     for (const key of Object.keys(st)) {
       if (STATEMENT_CHILD_KEYS.has(key) || SPECIAL_KEYS.has(key) || key.startsWith("__")) continue;
+      if (isDecl && this.declKey(st, key, scope, fn, handling)) continue;
       const v = st[key];
       const roots = Array.isArray(v) ? v : [v];
       for (const root of roots) {
         if (!isExprNodeValue(root) || seen.has(root)) continue;
         seen.add(root);
-        const h: RootHandling = HANDLED_OPERAND_KEYS.has(key) && handling === "none" ? HANDLED_OPERAND_KEYS.get(key)! : handling;
+        // S469 — inside a value-form body a `match` head / arm `?` is not lowered as a handler (see FnCtx).
+        const h: RootHandling = HANDLED_OPERAND_KEYS.has(key) && handling === "none"
+          ? (fn.inValueForm ? "none" : HANDLED_OPERAND_KEYS.get(key)!) : handling;
         // A bare-expr kept only as text (an `on mount { }` body, a bare `{ … }` block): its
         // statements are read below.
         if (kind === "bare-expr" && isParseErrorHatch(root) && typeof st.expr === "string") continue;
