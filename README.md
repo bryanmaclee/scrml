@@ -323,11 +323,12 @@ Specified:
 <audit:Entry[free, append]=[]/>                  // free length, grows at the end only, no replace
 
 function record(action: string) {
-    @audit.push({ at: Date.now(), actor: @actor, action: action });   // end-append: granted
+    @audit.append({ at: Date.now(), actor: @actor, action: action }); // end-append: granted
 }
 ```
 
 ```scrml
+// @audit.push(e);                               → E-TAPE-JS-METHOD (JS names are refused; write `@audit.append(e)`)
 // @audit = [];                                  → E-WRITE-NOT-GRANTED (a replace; the type grants none)
 // @audit.shift();                               → E-WRITE-NOT-GRANTED (shrinks at the front)
 // @audit[0].action = "edited";                  → E-WRITE-NOT-GRANTED (a field edit of `action`, and Entry.action is fixed)
@@ -335,7 +336,9 @@ function record(action: string) {
 
 The type grants the log free length and growth at the end, and nothing else. `wipe()` stops compiling, and no statement anywhere in the program can remove or rewrite an entry. An entry can't be rewritten because `Entry`'s fields carry no contract, so they are fixed (S440 dpa-052 Q3). A stack grants both halves at the end: `Frame[free, append, pop]`.
 
-**No position escapes the grants** (SPEC §66.12.6, S469). A tape is immutable unless its type grants the write, wherever it is held: a cell, a struct field, a tuple position, a local, a parameter or a return value. Inference never invents a grant, so `let xs = []` is immutable. To mutate a local, write its grants in its type: `let out: Item[free, append] = [];`. A tape that arrives from host JS carries no grants until you give it a tape type. Spread-rebuild (`@audit = [...@audit, e];`), a `filter` written back and the host's mutating methods (`push`, `splice`, `sort`, `length =`, …) are all classified as edits and checked against the same grants. No spelling gets a write the type refuses.
+**Tape methods are named after their grants** (SPEC §66.12.6, S469). `.append(x)` / `.pop()` work at the end, `.prepend(x)` / `.shift()` at the front, and `.insert(i, x)` / `.remove(i)` anywhere, each only when the type grants it. Reading `Entry[free, append]` tells you that `.append` is the one method that works. JavaScript's `push`, `unshift` and `splice` are refused, with a fix-it naming the scrml method. `sort`, `reverse`, `fill` and `copyWithin` don't mutate: each returns a new tape, so `@xs = @xs.sort();` is a position write, granted by `writable`.
+
+**No position escapes the grants** (SPEC §66.12.6, S469). A tape is immutable unless its type grants the write, wherever it is held: a cell, a struct field, a tuple position, a local, a parameter or a return value. Inference never invents a grant, so `let xs = []` is immutable. To mutate a local, write its grants in its type: `let out: Item[free, append] = [];`. `let` on a local only makes the name rebindable and grants the tape nothing, not even a replace. A tape that arrives from host JS carries no grants until you give it a tape type, and a tape you hand to host JS crosses as a frozen view or a copy, so host code can't write it behind its grants. Spread-rebuild (`@audit = [...@audit, e];`), a `filter` written back, a whole-struct write that replaces a tape field, index writes and `length =` are all classified as edits and checked against the same grants. No spelling gets a write the type refuses.
 
 **5. Operators take numbers, conditions take booleans** (S440 / S442 rulings)
 

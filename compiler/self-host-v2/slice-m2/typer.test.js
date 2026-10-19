@@ -308,7 +308,10 @@ const BASE_66_19 = [
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
   ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
   // §66.19.5: s444 Phase A — the host call and the bind are Core now: the program compiles clean.
-  [],
+  // s469-tape-followups (#1472): the SPEC log now appends with `@audit.append(…)` (S469 "tape methods are named
+  // after their grants", §66.12.6 rule 3). The bootstrap's method allowlist still knows only `push`/`unshift`, so
+  // the call is E-BOOTSTRAP-UNSUPPORTED. Owed follow-up: rename the allowlist (analyze.scrml) — then back to [].
+  ["E-BOOTSTRAP-UNSUPPORTED"],
   // §66.19.6 Before (the retired `<engine>`): s444 (PA) — `<engine>` is a scrml structural element and is refused
   // WHOLE (it used to fall through as an HTML element, its state-children then failing one by one).
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
