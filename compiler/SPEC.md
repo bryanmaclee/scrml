@@ -48268,8 +48268,8 @@ write, wherever the tape is held, wherever it came from, and however the write i
    implementation.
 
 ```scrml
-type Entry:struct = { at: number, actor: string, action: string };
-type Box:struct = { title: string, xs: Entry[free, append] };   // ⚑ O10: bracket form
+type Entry:struct = { at: number, actor: string, action: string }
+type Box:struct = { title: string, xs: Entry[free, append] }    // ⚑ O10: bracket form
 
 let <b:Box=({ title: "log", xs: [] })/>          // `let` on the struct: it grants replacing the struct (O3)
 
@@ -48285,7 +48285,7 @@ function rebuild(t: string) {
 ```
 
 ```scrml
-type Entry:struct = { at: number, actor: string, action: string };
+type Entry:struct = { at: number, actor: string, action: string }
 
 function record(log: Entry[free, append], e: Entry) -> Entry[free, append] {   // ⚑ O10: bracket form
     log.append(e);                                 // end-append: granted by the parameter type
@@ -48361,7 +48361,7 @@ Two rules govern a value crossing between scrml and host JavaScript. §66.12.6 r
    host object read field by field) still reads as `not`. No scrml program emits `undefined` (§42.8).
 
 ```scrml
-type Item:struct = { id: int, name: string };
+type Item:struct = { id: int, name: string }
 
 server function find(items: Item[free, append], key: string) {
     const hit = _={ in: { items, key }
@@ -49026,7 +49026,7 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 
 ```scrml
 <program>
-    type Entry:struct = { at: number, actor: string, action: string };  // fields carry no contract → fixed
+    type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
     <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — ⚑ O10: bracket form (tokens ruled S442)
     let <actor:string="ops"/>
