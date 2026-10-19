@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
 | MED | 668 | 6 |
-| LOW | 444 | 0 |
+| LOW | 445 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -120,6 +120,12 @@ Executed on the follow-up branch: in a `server function`, `const row = ?{`SELECT
 <!-- @gap id=g-mentioned-names-comment-tokens-false-refusal-s469 sev=LOW status=open locus=compiler/src/failable-value-calls.ts(mentionedNames — a COMMENT token falls to identifierRuns) prov=review:S469-1470-review(F6);dispatch:s469-value-form-followups -->
 
 `mentionedNames` reads every token kind it has no class for as identifier runs, and the logic tokenizer emits comments as their own token, so `// check(p) is handled above` inside an unparseable body counts `check`. This only ever over-refuses (E-ERROR-002 on a body that may be correct), and only for text the walk could not parse at all. Fix direction: skip COMMENT tokens in `mentionedNames`.
+
+### g-lifted-braced-handler-inline-guard-false-refusal-s469 — a braced handler with an inline handled guard inside LIFTED markup (`lift <button onclick={ @msg = (check(x) !{ .Denied :> false }) ? "LOGGED IN" : "rejected" }>`) is refused with E-ERROR-002 although the call is handled — `NEW S469 (#1470 round-3 review); LOW; open (fails closed)`
+
+<!-- @gap id=g-lifted-braced-handler-inline-guard-false-refusal-s469 sev=LOW status=open locus=compiler/src/failable-value-calls.ts(Walker.liftedMarkup — a braced handler value the statement reader does not read structurally falls to the refuse-only text read) prov=review:S469-1470-round3;dispatch:s469-value-form-followups -->
+
+A false refusal: it fails closed, so no wrong password gets in. The same braced handler outside lifted markup does not compile either: it is E-CODEGEN-INVALID-LOGIC on #1464's head (the lowering does not exist). So the refusal costs a shape that cannot ship today anyway. The working shape is a handler that calls a function which handles the call (`onclick=login(x)`, where `login` does `const ok = check(p) !{ … }`). Fix direction: once codegen lowers an inline guard in a braced handler, read that handler's statements structurally in the lifted-markup reader (the r3 statement read), so the guard is recognised as handled.
 
 ### g-value-form-body-not-visited-by-type-system-s469 — the type system's main walk never visits the body of a value-form `if` / `for` (`const a = if (c) { … }`): no scope, type or codegen-stamp check runs there — `lift nosuchname` and `const q: number = "str"` in one compile clean — `NEW S469 (filed; pre-existing); HIGH; open`
 
