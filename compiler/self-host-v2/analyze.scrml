@@ -247,6 +247,7 @@ ${
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
         VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
         VToEnum(enumSym: Sym),                            // s469: `E.toEnum(s)` (§14.4.1) — a call node: `string -> E | not`
+        VMethod(op: PrimOp),                              // s469: a typed built-in method (`s.slice(1)`, `xs.sort()`) — a call node; Core Prim(op, [receiver, …args])
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -5146,13 +5147,18 @@ ${
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
+                // s469 — `xs.sort((a, b) => …)`: a comparator (a SeqCall, like filter / map)
+                if (m.method == "sort" && args.length == 1) return resolveSortBy(env, e, m, args, st0)
                 // s469 — `E.toEnum(s)` (§14.4.1): a typed built-in, `string -> E | not`
                 if (m.method == "toEnum") {
                     const te: RX | not = resolveToEnum(env, e, m, args, st0)
                     if (te is given) return te
                 }
+                // s469 — the typed built-in methods of a string and a tape, and
+                // JavaScript's tape method names, refused (E-TAPE-JS-METHOD)
+                if (isBuiltinMethodName(m.method)) return resolveMethod(env, e, m, args, st0)
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function, " + dateNowText() + ", and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
@@ -5616,6 +5622,220 @@ ${
             if (v.fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".toEnum(…)` on an enum with a payload variant (`." + v.sym.hint + "`) — a name alone cannot build its payload, and §14.4.1 does not say what it gives; the bootstrap admits `toEnum` on an enum of unit variants only", st)
         }
         return plain(Type.Maybe(Type.Named(es)), addValue(st, e.nid, ValueFact.VToEnum(es)))
+    }
+
+    // =========================================================================
+    // s469 — THE TYPED BUILT-IN METHODS (strings + tapes). A method call is
+    // admitted only when its RECEIVER's type is known here and the method is in
+    // that type's table below; anything else is refused BY NAME (fail closed) —
+    // never passed through to the host as a generic JS member call.
+    //   string (SPEC Appendix D sanctions the host string methods; S469: string
+    //   positions are CODE POINTS — `slice` / `charAt` / `split("")` count them):
+    //     toUpperCase() toLowerCase() trim()             -> string
+    //     slice(from: int) slice(from: int, to: int)     -> string
+    //     charAt(i: int)                                 -> string ("" past the end)
+    //     includes(s) startsWith(s) endsWith(s)          -> bool    (s: string)
+    //     split(sep: string)                             -> string[] (no grants: a value)
+    //   tape (§66.12.6 rule 3: these never mutate; each returns a NEW tape):
+    //     sort()   — natural order (S469: ints / numbers numerically, strings by
+    //                code point); any other element type is refused
+    //     sort((a, b) => n)  — a comparator returning a number (resolveSortBy)
+    //     reverse()          — the receiver's type
+    //     join(sep: string)  — a tape of strings only (an int→string conversion
+    //                          is not ruled yet, so nothing else converts)
+    //   JavaScript's names on a tape are E-TAPE-JS-METHOD (§66.12.6 rule 3):
+    //     push / unshift / splice (mutating: the scrml method is named after its
+    //     grant), toSorted / toReversed / with (S469: "Refuse, one name each").
+    // The binder decides the receiver (ONE reader: the type `resolveExpr` gives
+    // the receiver, as `.length` does); the typer types each argument against
+    // the method's signature (methodArgCheck) and the result (methodType), from
+    // the ONE table `methodSig`.
+    // =========================================================================
+
+    fn isBuiltinMethodName(n: string) -> boolean {
+        return isStrMethodName(n) || n == "sort" || n == "reverse" || n == "join" || tapeJsFix(n) != ""
+    }
+
+    fn isStrMethodName(n: string) -> boolean {
+        return n == "toUpperCase" || n == "toLowerCase" || n == "trim" || n == "slice" || n == "charAt" ||
+            n == "includes" || n == "startsWith" || n == "endsWith" || n == "split"
+    }
+
+    fn strMethodList() -> string {
+        return "`toUpperCase` / `toLowerCase` / `trim` / `slice` / `charAt` / `includes` / `startsWith` / `endsWith` / `split`"
+    }
+
+    // The fix-it for a JavaScript tape method name (E-TAPE-JS-METHOD), "" for
+    // any other name.
+    fn tapeJsFix(n: string) -> string {
+        return match n {
+            "push" :> "`.append(x)` (one call per value)"
+            "unshift" :> "`.prepend(x)` (one call per value)"
+            "splice" :> "`.remove(i)` for each removed position and `.insert(i, x)` for each inserted value"
+            "toSorted" :> "`.sort()` — a scrml `sort` already returns a new tape"
+            "toReversed" :> "`.reverse()` — a scrml `reverse` already returns a new tape"
+            "with" :> "a position write, `xs[i] = v` (granted by `writable`)"
+            _ :> ""
+        }
+    }
+
+    // The built-in a method name is on a receiver of type `t`; `not` when the
+    // type has no such method in the bootstrap (or, for `sort()`, when the
+    // element type has no natural order — the caller says which).
+    fn methodOp(n: string, t: Type) -> PrimOp | not {
+        if (t == Type.Str) return strMethodOp(n)
+        const el: Type | not = seqElem(t)
+        if (el is not) return not
+        if (n == "reverse") return PrimOp.Reverse
+        if (n == "join") return PrimOp.Join
+        if (n == "sort") {
+            if (el == Type.Int || el == Type.Num) return PrimOp.SortNum
+            if (el == Type.Str) return PrimOp.SortStr
+        }
+        return not
+    }
+
+    fn strMethodOp(n: string) -> PrimOp | not {
+        return match n {
+            "toUpperCase" :> PrimOp.StrUpper
+            "toLowerCase" :> PrimOp.StrLower
+            "trim" :> PrimOp.StrTrim
+            "slice" :> PrimOp.StrSlice
+            "charAt" :> PrimOp.StrCharAt
+            "includes" :> PrimOp.StrIncludes
+            "startsWith" :> PrimOp.StrStartsWith
+            "endsWith" :> PrimOp.StrEndsWith
+            "split" :> PrimOp.StrSplit
+            _ :> not
+        }
+    }
+
+    // The ONE signature table: a built-in's argument types, in order. `slice`'s
+    // second argument is optional (methodArity's minimum).
+    fn methodSig(op: PrimOp) -> Type[] {
+        if (op == PrimOp.StrSlice) return [Type.Int, Type.Int]
+        if (op == PrimOp.StrCharAt) return [Type.Int]
+        if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return [Type.Str]
+        if (op == PrimOp.StrSplit || op == PrimOp.Join) return [Type.Str]
+        return []
+    }
+
+    fn methodMinArity(op: PrimOp) -> int {
+        if (op == PrimOp.StrSlice) return 1
+        return methodSig(op).length
+    }
+
+    // The result type of a built-in on a receiver of type `recv`.
+    fn methodResult(op: PrimOp, recv: Type) -> Type {
+        if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return Type.Bool
+        if (op == PrimOp.StrSplit) return Type.Seq(Type.Str, anySeqGrants())
+        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return recv
+        return Type.Str
+    }
+
+    // A built-in's name as written (for messages).
+    fn methodName(op: PrimOp) -> string {
+        if (op == PrimOp.StrUpper) return "toUpperCase"
+        if (op == PrimOp.StrLower) return "toLowerCase"
+        if (op == PrimOp.StrTrim) return "trim"
+        if (op == PrimOp.StrSlice) return "slice"
+        if (op == PrimOp.StrCharAt) return "charAt"
+        if (op == PrimOp.StrIncludes) return "includes"
+        if (op == PrimOp.StrStartsWith) return "startsWith"
+        if (op == PrimOp.StrEndsWith) return "endsWith"
+        if (op == PrimOp.StrSplit) return "split"
+        if (op == PrimOp.Reverse) return "reverse"
+        if (op == PrimOp.Join) return "join"
+        return "sort"
+    }
+
+    // A refused method call: its arguments are still resolved (their names
+    // and facts), the call gets no fact and no type.
+    fn refuseMethod(env: Env, e: AExpr, code: string, msg: string, args: AExpr[], st: AS) -> RX {
+        return plain(not, addDiag(resolveExprs(env, args, not, st), env.file, e.span, code, msg))
+    }
+
+    fn resolveMethod(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX {
+        const ro: RX = resolveExpr(env, m.obj, not, st0)
+        const st: AS = ro.st
+        const ot: Type | not = ro.x.ty
+        const call: string = "`." + m.method + "(…)`"
+        if (ot is not) {
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
+        }
+        const fix: string = tapeJsFix(m.method)
+        if (fix != "") {
+            if (seqElem(ot) is given) return refuseMethod(env, e, "E-TAPE-JS-METHOD", call + " is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants, and `sort` / `reverse` return a new tape)", args, st)
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap", args, st)
+        }
+        if (maybeInner(ot) is given) {
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` — the value may be `not`, and the bootstrap does not read a narrowing at a method's receiver; pass the narrowed value to a function that takes the plain type", args, st)
+        }
+        const op: PrimOp | not = methodOp(m.method, ot)
+        if (op is not) {
+            const el: Type | not = seqElem(ot)
+            if (m.method == "sort" && el is given) {
+                return refuseMethod(env, e, "E-TYPE-031", "`.sort()` with no comparator needs elements with a natural order — ints and numbers (numerically) or strings (by code point) — and these are `" + typeName(el) + "` (S469); pass a comparator, `.sort((a, b) => …)` returning a number", args, st)
+            }
+            if (m.method == "join" && el is given) {
+                return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
+            }
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.filter(x => …)`, `.map(x => …)`", args, st)
+        }
+        const lo: int = methodMinArity(op)
+        const hi: int = methodSig(op).length
+        if (args.length < lo || args.length > hi) {
+            let want: string = "" + hi
+            if (lo != hi) want = lo + " or " + hi
+            return refuseMethod(env, e, "E-CALL-ARITY", "`." + m.method + "(…)` takes " + want + " argument(s); " + args.length + " given", args, st)
+        }
+        const sig: Type[] = methodSig(op)
+        let st2: AS = st
+        let i = 0
+        for (const a of args) {
+            st2 = resolveExpr(env, a, sig[i], st2).st
+            i = i + 1
+        }
+        return plain(methodResult(op, ot), addValue(st2, e.nid, ValueFact.VMethod(op)))
+    }
+
+    // s469 — `xs.sort((a, b) => n)`: a NEW tape ordered by the comparator, an
+    // arrow function of TWO parameters (both the element type) whose body is a
+    // number (S440 #10: "a comparator must return a number"; the typer checks it).
+    fn resolveSortBy(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX {
+        const ro: RX = resolveExpr(env, m.obj, not, st0)
+        let st: AS = ro.st
+        const ot: Type | not = ro.x.ty
+        if (ot is not) return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`.sort(…)` on a value whose type the compiler cannot resolve — give it a tape type", args, st)
+        const elem: Type | not = seqElem(ot)
+        if (elem is not) return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`.sort(…)` on a value that is not a tape (it is `" + typeName(ot) + "`)", args, st)
+        const lam: AExpr = args[0]
+        const ps: string[] = lambdaParams(lam)
+        if (!isLambda(lam) || ps.length != 2) {
+            return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `.sort(…)` must be a comparator, an arrow function of two parameters `(a, b) => …` returning a number (the bootstrap has no other function value)", args, st)
+        }
+        const rl: RX = resolveLambda(env, lam, ps, elem, not, st)
+        return plain(ot, addValue(rl.st, e.nid, ValueFact.VSeqCall(SeqFn.SortBy)))
+    }
+
+    // s469 — a statement whose call is a JavaScript tape method name, or a
+    // `sort` / `reverse` / `fill` / `copyWithin` whose result is DISCARDED (the
+    // in-place idiom, which does nothing here: they return a new tape,
+    // §66.12.6 rule 3, trigger (b)). Answered only for a tape receiver; `not`
+    // otherwise, and the statement is resolved as before.
+    fn tapeMethodStmt(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS | not {
+        const fix: string = tapeJsFix(m.method)
+        const discarded: boolean = m.method == "sort" || m.method == "reverse" || m.method == "fill" || m.method == "copyWithin"
+        if (fix == "" && !discarded) return not
+        const ro: RX = resolveExpr(env, m.obj, not, st0)
+        const ot: Type | not = ro.x.ty
+        if (ot is not) return not
+        if (seqElem(ot) is not) return not
+        const at: string = placeKey(m.obj)
+        let recv: string = "xs"
+        if (at != "") recv = at
+        if (fix != "") return refuseMethod(env, e, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants)", args, ro.st).st
+        return refuseMethod(env, e, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` returns a NEW tape and leaves `" + recv + "` unchanged, so as a statement it does nothing (§66.12.6 rule 3) — write `" + recv + " = " + recv + "." + m.method + "(…);` (needs `writable`), or bind the result", args, ro.st).st
     }
 
     fn oneArg(args: AExpr[]) -> AExpr | not {
@@ -6590,6 +6810,12 @@ ${
 
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
+        // s469: a JavaScript tape method name, or a discarded `sort` / `reverse` (E-TAPE-JS-METHOD)
+        const jm: MethodCall | not = memberCall(callee)
+        if (jm is given) {
+            const tj: AS | not = tapeMethodStmt(env, e, jm, args, st)
+            if (tj is given) return tj
+        }
         const rmv: MethodCall | not = removeCall(callee)
         if (rmv is given) {
             if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
@@ -6604,8 +6830,10 @@ ${
         return resolveExpr(withStmtCall(env, e.nid), e, not, st).st
     }
 
-    // `@x.push(v)` / `@x.unshift(v)` — a sequence EDIT named by its method
+    // `@x.append(v)` / `@x.prepend(v)` — a sequence EDIT named by its method
     // (§66.11.2 classifies mutating method calls): end-append / front-prepend.
+    // s469: tape methods are named after their grants (§66.12.6 rule 3);
+    // JavaScript's `push` / `unshift` are E-TAPE-JS-METHOD (tapeMethodStmt).
     type MethodCall:struct = { obj: AExpr, method: string }
 
     fn methodCall(callee: AExpr) -> MethodCall | not {
@@ -6637,7 +6865,7 @@ ${
     }
 
     fn methodOf(o: AExpr, n: string) -> MethodCall | not {
-        if (n == "push" || n == "unshift") return { obj: o, method: n }
+        if (n == "append" || n == "prepend") return { obj: o, method: n }
         return not
     }
 
@@ -6656,7 +6884,7 @@ ${
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
         let edit: EditKind = EditKind.Append
         let what: string = "an end-append"
-        if (m.method == "unshift") {
+        if (m.method == "prepend") {
             edit = EditKind.Prepend
             what = "a front-prepend"
         }
@@ -12293,6 +12521,7 @@ ${
             .VSeqCall(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VToEnum(enumSym: s) :> VType.Unknown
+            .VMethod(op: o) :> VType.Unknown
             not :> VType.Unknown
         }
     }
@@ -12307,6 +12536,7 @@ ${
             .VSeqCall(op: x) :> not
             .VLambda(params: ps) :> not
             .VToEnum(enumSym: s) :> not
+            .VMethod(op: o) :> not
             not :> not
         }
     }
@@ -12708,6 +12938,7 @@ ${
         return match f {
             .VLambda(params: ps) :> ps
             .VToEnum(enumSym: s) :> []
+            .VMethod(op: o) :> []
             .VLit(lit: l) :> []
             .VVariant(enumSym: s) :> []
             .VStructOf(ty: s) :> []
@@ -12731,7 +12962,94 @@ ${
             .VOp(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
             .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
+            .VMethod(op: o) :> methodType(ts, o, callee)
             not :> VType.Unknown
+        }
+    }
+
+    // s469 — a typed built-in method's value: methodResult over the receiver's
+    // type (the binder admitted the call only for a receiver of a known type).
+    fn methodType(ts: TypeState, op: PrimOp, callee: AExpr) -> VType {
+        const obj: AExpr | not = memberObj(callee)
+        if (obj is not) return VType.Unknown
+        const rt: Type | not = knownOf(exprType0(ts, obj.nid))
+        if (rt is not) return VType.Unknown
+        return known(methodResult(op, rt))
+    }
+
+    // s469 — a typed built-in method's ARGUMENTS against its signature
+    // (methodSig, the one table): a value of another type is E-TYPE-031; one
+    // whose type is not known is refused (a built-in's argument is never
+    // handed to the host unchecked — fail closed). Also a comparator's body
+    // (`xs.sort((a, b) => n)`) is a number (S440 #10).
+    fn methodArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts0: TypeState) -> TypeState {
+        const f: ValueFact | not = valueFact(env.t.values, e.nid)
+        const op: PrimOp | not = methodOfFact(f)
+        if (op is not) return comparatorCheck(env, f, args, ts0)
+        const sig: Type[] = methodSig(op)
+        let ts: TypeState = ts0
+        let i = 0
+        for (const a of args) {
+            if (i < sig.length) {
+                const vt: VType = exprType0(ts, a.nid)
+                const what: string = "argument " + (i + 1) + " of `." + methodName(op) + "(…)`"
+                if (knownOf(vt) is not && !isAbsentVT(vt)) {
+                    if (!hasErrIn(env.errs, a.span)) ts = report(ts, env, a.span, "E-BOOTSTRAP-UNSUPPORTED", what + " has a type the compiler cannot resolve — a built-in method's argument must be a `" + typeName(sig[i]) + "` the compiler can see; annotate it")
+                } else {
+                    ts = checkValue(env, vt, sig[i], a.span, what + " (a `" + typeName(sig[i]) + "`)", ts)
+                }
+            }
+            i = i + 1
+        }
+        return ts
+    }
+
+    fn comparatorCheck(env: TEnv, f: ValueFact | not, args: AExpr[], ts: TypeState) -> TypeState {
+        if (!isSortByFact(f) || args.length != 1) return ts
+        const body: AExpr | not = lambdaBody(args[0])
+        if (body is not) return ts
+        const bt: Type | not = knownOf(exprType0(ts, body.nid))
+        if (bt == Type.Int || bt == Type.Num) return ts
+        if (hasErrIn(env.errs, body.span)) return ts
+        if (bt is not) return report(ts, env, body.span, "E-BOOTSTRAP-UNSUPPORTED", "the comparator of `.sort(…)` returns a value whose type the compiler cannot resolve — it must return a number (negative: `a` first; positive: `b` first; zero: keep their order)")
+        return report(ts, env, body.span, "E-TYPE-031", "the comparator of `.sort(…)` must return a number (negative: `a` first; positive: `b` first; zero: keep their order), and this one returns `" + typeName(bt) + "` (S440 #10)")
+    }
+
+    fn isSortByFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VSeqCall(op: o) :> o == SeqFn.SortBy
+            .VMethod(op: o) :> false
+            .VToEnum(enumSym: s) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
+    }
+
+    fn methodOfFact(f: ValueFact | not) -> PrimOp | not {
+        return match f {
+            .VMethod(op: o) :> o
+            .VToEnum(enumSym: s) :> not
+            .VLit(lit: l) :> not
+            .VVariant(enumSym: s) :> not
+            .VStructOf(ty: s) :> not
+            .VOp(op: o) :> not
+            .VHost(call: c) :> not
+            .VSeqCall(op: o) :> not
+            .VLambda(params: ps) :> not
+            not :> not
+        }
+    }
+
+    fn isAbsentVT(v: VType) -> boolean {
+        return match v {
+            .Absent :> true
+            .Known(t: x) :> false
+            .Unknown :> false
         }
     }
 
@@ -12746,6 +13064,7 @@ ${
         return match f {
             .VVariant(enumSym: s) :> true
             .VToEnum(enumSym: s) :> false
+            .VMethod(op: o) :> false
             .VLit(lit: l) :> false
             .VStructOf(ty: s) :> false
             .VOp(op: o) :> false
@@ -12759,6 +13078,7 @@ ${
     fn isToEnumFact(f: ValueFact | not) -> boolean {
         return match f {
             .VToEnum(enumSym: s) :> true
+            .VMethod(op: o) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -12771,7 +13091,7 @@ ${
     }
 
     fn seqCallType(ts: TypeState, o: SeqFn, callee: AExpr) -> VType {
-        const isFilter: boolean = o == SeqFn.Filter
+        const isFilter: boolean = o == SeqFn.Filter || o == SeqFn.SortBy
         if (!isFilter) return VType.Unknown
         const obj: AExpr | not = memberObj(callee)
         if (obj is not) return VType.Unknown
@@ -12874,6 +13194,19 @@ ${
             .Not :> ts
             .Neg :> ts
             .Length :> ts
+            .StrUpper :> ts
+            .StrLower :> ts
+            .StrTrim :> ts
+            .StrSlice :> ts
+            .StrCharAt :> ts
+            .StrIncludes :> ts
+            .StrStartsWith :> ts
+            .StrEndsWith :> ts
+            .StrSplit :> ts
+            .SortNum :> ts
+            .SortStr :> ts
+            .Reverse :> ts
+            .Join :> ts
         }
     }
 
@@ -13339,6 +13672,19 @@ ${
             .Div :> divType(a, b)
             .Neg :> numJoin(a, a)
             .Length :> known(Type.Int)
+            .StrUpper :> VType.Unknown            // s469: a method call, typed by methodType
+            .StrLower :> VType.Unknown
+            .StrTrim :> VType.Unknown
+            .StrSlice :> VType.Unknown
+            .StrCharAt :> VType.Unknown
+            .StrIncludes :> VType.Unknown
+            .StrStartsWith :> VType.Unknown
+            .StrEndsWith :> VType.Unknown
+            .StrSplit :> VType.Unknown
+            .SortNum :> VType.Unknown
+            .SortStr :> VType.Unknown
+            .Reverse :> VType.Unknown
+            .Join :> VType.Unknown
         }
     }
 
@@ -13395,7 +13741,7 @@ ${
         let ts: TypeState = typeExprs(env, args, ts0)
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
-        if (s is not) return rvt(builtinCallType(env, e, callee, ts), toEnumArgCheck(env, e, args, ts))
+        if (s is not) return rvt(builtinCallType(env, e, callee, ts), methodArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts)))
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity
@@ -15111,6 +15457,7 @@ ${
             .VStructOf(ty: t) :> false
             .VLambda(params: ps) :> false
             .VToEnum(enumSym: s) :> true
+            .VMethod(op: o) :> true
             not :> false
         }
     }
@@ -15120,7 +15467,7 @@ ${
     fn isEditCallee(callee: AExpr) -> boolean {
         const k: AExprK = callee.k
         const n: string = memberName(k)
-        if (n != "push" && n != "unshift" && n != "pop" && n != "shift") return false
+        if (n != "append" && n != "prepend" && n != "push" && n != "unshift" && n != "pop" && n != "shift") return false
         const r: AExpr[] = receiverOf(callee)
         if (r.length == 0) return false
         return isReactiveRoot(placeRoot(r[0]))

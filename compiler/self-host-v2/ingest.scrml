@@ -1369,6 +1369,19 @@ ${
             .IsNot :> "IsNot"
             .Concat :> "Concat"
             .Length :> "Length"
+            .StrUpper :> "StrUpper"
+            .StrLower :> "StrLower"
+            .StrTrim :> "StrTrim"
+            .StrSlice :> "StrSlice"
+            .StrCharAt :> "StrCharAt"
+            .StrIncludes :> "StrIncludes"
+            .StrStartsWith :> "StrStartsWith"
+            .StrEndsWith :> "StrEndsWith"
+            .StrSplit :> "StrSplit"
+            .SortNum :> "SortNum"
+            .SortStr :> "SortStr"
+            .Reverse :> "Reverse"
+            .Join :> "Join"
         }
     }
 }

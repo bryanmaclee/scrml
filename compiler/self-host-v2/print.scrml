@@ -307,7 +307,7 @@ ${
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
             .Host(call: c) :> hostJs(c)
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
-            .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
+            .SeqCall(op: o, seq: sq, f: f) :> seqCallJs(ctx, o, exprJs(ctx, sq), exprJs(ctx, f))
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
             .ServerCall(fn: f, args: args) :> rtCall(ctx, "call", [jid(routeName(f)), JsExpr.JArray(exprsJs(ctx, args)), jid("task$")])
             .Query(q: q) :> queryJs(ctx, q)
@@ -390,10 +390,18 @@ ${
         }
     }
 
+    // `filter` / `map` are the host's (they never mutate); `sortBy` is the
+    // runtime's (the host `sort` sorts in place — a scrml sort returns a new tape).
+    fn seqCallJs(ctx: Ctx, o: SeqFn, sq: JsExpr, f: JsExpr) -> JsExpr {
+        if (o == SeqFn.SortBy) return rtCall(ctx, "sortBy", [sq, f])
+        return jmcall(sq, seqFnName(o), [f])
+    }
+
     fn seqFnName(o: SeqFn) -> string {
         return match o {
             .Filter :> "filter"
             .Map :> "map"
+            .SortBy :> "sortBy"
         }
     }
 
@@ -439,6 +447,23 @@ ${
             .IsNot :> JsExpr.JBin(JsOp.LooseEq, a[0], JsExpr.JNull)
             .Concat :> bin(JsOp.Plus, a)
             .Length :> jmember(a[0], "length")
+            // s469 — the typed built-in methods. Case and whitespace are the
+            // host's own (they change no position); a position — `slice`,
+            // `charAt`, `split("")` — counts code points, so those are runtime
+            // helpers, as are the tape functions (each returns a NEW tape)
+            .StrUpper :> jmcall(a[0], "toUpperCase", [])
+            .StrLower :> jmcall(a[0], "toLowerCase", [])
+            .StrTrim :> jmcall(a[0], "trim", [])
+            .StrIncludes :> jmcall(a[0], "includes", [a[1]])
+            .StrStartsWith :> jmcall(a[0], "startsWith", [a[1]])
+            .StrEndsWith :> jmcall(a[0], "endsWith", [a[1]])
+            .StrSlice :> rtCall(ctx, "strSlice", a)
+            .StrCharAt :> rtCall(ctx, "strCharAt", a)
+            .StrSplit :> rtCall(ctx, "strSplit", a)
+            .SortNum :> rtCall(ctx, "sortNum", a)
+            .SortStr :> rtCall(ctx, "sortStr", a)
+            .Reverse :> rtCall(ctx, "reversed", a)
+            .Join :> rtCall(ctx, "joinStr", a)
         }
     }
 

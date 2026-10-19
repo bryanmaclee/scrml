@@ -401,6 +401,7 @@ ${
             .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
+            .VMethod(op: o) :> methodExpr(c, o, cal, args)
             not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
         }
     }
@@ -409,6 +410,14 @@ ${
         const obj: AExpr | not = calleeObj(cal)
         if (obj is not || args.length != 1) return missing()
         return Expr.SeqCall(o, lowerExpr(c, obj), lowerExpr(c, args[0]))
+    }
+
+    // s469 — a typed built-in method (the binder's VMethod): Core Prim(op,
+    // [receiver, …arguments]).
+    fn methodExpr(c: LC, o: PrimOp, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not) return missing()
+        return Expr.Prim(o, [lowerExpr(c, obj)].concat(lowerExprs(c, args)))
     }
 
     fn calleeObj(cal: AExpr) -> AExpr | not {
@@ -443,6 +452,7 @@ ${
         return match f {
             .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
             .VToEnum(enumSym: x) :> missing()
+            .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
             .VVariant(enumSym: x) :> missing()
             .VStructOf(ty: x) :> missing()
@@ -480,6 +490,7 @@ ${
             .VSeqCall(op: x) :> missing()
             .VLambda(params: x) :> missing()
             .VToEnum(enumSym: x) :> missing()
+            .VMethod(op: x) :> missing()
             not :> missing()
         }
     }
@@ -494,6 +505,7 @@ ${
             .VSeqCall(op: x) :> PrimOp.Not
             .VLambda(params: x) :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
+            .VMethod(op: x) :> PrimOp.Not
             not :> PrimOp.Not
         }
     }
@@ -510,6 +522,7 @@ ${
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VMethod(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
         }
     }
@@ -1818,6 +1831,7 @@ ${
             .VSeqCall(op: o) :> not
             .VLambda(params: ps) :> not
             .VToEnum(enumSym: s) :> not
+            .VMethod(op: o) :> not
             not :> not
         }
     }

@@ -129,6 +129,16 @@ ${
         EqPrim, NeqPrim, EqStruct, NeqStruct,
         IsSome, IsNot,
         Concat, Length,
+        // s469 (strings + tape methods) — typed built-in method calls; `args[0]`
+        // is the receiver. Each makes a NEW value (R3). String positions count
+        // CODE POINTS (S469: string iteration and `s[i]` are by code point):
+        // StrSlice(s, from[, to]), StrCharAt(s, i), StrSplit(s, sep) with `""`
+        // splitting into code points. SortNum / SortStr are a tape's natural
+        // order (S469: numbers numerically, strings by code point); Reverse a
+        // reversed copy; Join(xs, sep) a string tape joined.
+        StrUpper, StrLower, StrTrim, StrSlice, StrCharAt,
+        StrIncludes, StrStartsWith, StrEndsWith, StrSplit,
+        SortNum, SortStr, Reverse, Join,
     }
 
     export type Pattern:enum = {
@@ -142,7 +152,9 @@ ${
     export type HostCall:enum = { DateNow }
     // s444 — the sequence functions a lambda is admitted as the argument of.
     // Each makes a NEW sequence value (R3: values are immutable).
-    export type SeqFn:enum = { Filter, Map }
+    // s469: SortBy — `xs.sort((a, b) => n)`, a new tape ordered by the
+    // comparator (its two parameters are the element type; it returns a number).
+    export type SeqFn:enum = { Filter, Map, SortBy }
 
     // s449 — the §55 validity surface. A surface is the reactive validity
     // state the compiler synthesizes for a value that carries validators

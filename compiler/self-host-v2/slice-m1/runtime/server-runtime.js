@@ -33,12 +33,14 @@
 // never decides what to await (S467 §13 gate item 1).
 // =============================================================================
 
-import { encode, decode, failure, failed, runDefers, eq, CodecDefect, CSRF_COOKIE, CSRF_HEADER } from "./runtime.js";
+import { encode, decode, failure, failed, runDefers, eq, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
+  strSlice, strCharAt, strSplit, sortNum, sortStr, sortBy, reversed, joinStr } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
-// both artifacts): a failure value, the test for one, the `defer` stack, and
-// structural equality (§45).
+// both artifacts): a failure value, the test for one, the `defer` stack,
+// structural equality (§45), and (s469) the typed string / tape built-ins.
 export { failure, failed, runDefers, eq };
+export { strSlice, strCharAt, strSplit, sortNum, sortStr, sortBy, reversed, joinStr };
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the

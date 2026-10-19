@@ -1005,6 +1005,119 @@ export function eq(a, b) {
 }
 
 // ---------------------------------------------------------------------------
+// s469 — the typed built-in string and tape methods (print.scrml `primJs`).
+// A string POSITION counts code points (S469: string iteration and `s[i]` are
+// by code point), never UTF-16 units, so `strSlice`, `strCharAt` and
+// `strSplit(s, "")` read the string as its code points. (`.length` still counts
+// UTF-16 units — the S469 ruling documents that difference.) The tape
+// functions never mutate: each returns a NEW array and leaves its argument
+// unchanged (§66.12.6 rule 3). Copies are plain index loops.
+// ---------------------------------------------------------------------------
+
+/** The code points of `s`, one string each, in order. */
+function codePoints(s) {
+  const out = [];
+  for (const c of s) out.push(c);
+  return out;
+}
+
+/** A position `i` against a length `n`: a negative position counts from the end; the result is clamped to [0, n]. */
+function clampPosition(i, n) {
+  if (i < 0) return Math.max(0, n + i);
+  return Math.min(i, n);
+}
+
+/** `s.slice(from)` / `s.slice(from, to)`, positions in code points. */
+export function strSlice(s, from, to) {
+  const cps = codePoints(s);
+  const a = clampPosition(from, cps.length);
+  const b = to === undefined ? cps.length : clampPosition(to, cps.length);
+  let out = "";
+  for (let i = a; i < b; i++) out += cps[i];
+  return out;
+}
+
+/** `s.charAt(i)`: the code point at position `i`, or `""` when there is none. */
+export function strCharAt(s, i) {
+  const cps = codePoints(s);
+  if (i < 0 || i >= cps.length) return "";
+  return cps[i];
+}
+
+/** `s.split(sep)`: `""` splits into code points (never into halves of one). */
+export function strSplit(s, sep) {
+  if (sep === "") return codePoints(s);
+  return s.split(sep);
+}
+
+function copyOf(xs) {
+  const out = new Array(xs.length);
+  for (let i = 0; i < xs.length; i++) out[i] = xs[i];
+  return out;
+}
+
+/** The order of two strings by code point (not by UTF-16 unit, which puts U+10000.. before U+E000..U+FFFF). */
+function compareCodePoints(a, b) {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i);
+    const y = b.codePointAt(j);
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
+}
+
+/** The natural order of numbers: numerically; `NaN` (a defined value, dpa-037) sorts last. */
+function compareNumbers(a, b) {
+  const an = Number.isNaN(a);
+  const bn = Number.isNaN(b);
+  if (an || bn) return an === bn ? 0 : an ? 1 : -1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/** `xs.sort()` on a tape of numbers: a new tape. */
+export function sortNum(xs) {
+  const out = copyOf(xs);
+  out.sort(compareNumbers);
+  return out;
+}
+
+/** `xs.sort()` on a tape of strings: a new tape, by code point. */
+export function sortStr(xs) {
+  const out = copyOf(xs);
+  out.sort(compareCodePoints);
+  return out;
+}
+
+/** `xs.sort(cmp)`: a new tape ordered by the comparator (a stable sort). */
+export function sortBy(xs, cmp) {
+  const out = copyOf(xs);
+  out.sort((a, b) => cmp(a, b));
+  return out;
+}
+
+/** `xs.reverse()`: a new tape. */
+export function reversed(xs) {
+  const out = new Array(xs.length);
+  for (let i = 0; i < xs.length; i++) out[i] = xs[xs.length - 1 - i];
+  return out;
+}
+
+/** `xs.join(sep)` on a tape of strings. */
+export function joinStr(xs, sep) {
+  let out = "";
+  for (let i = 0; i < xs.length; i++) out += (i > 0 ? sep : "") + xs[i];
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // SPEC §5.2 rule 3 (S457) — the URL-attribute scheme guard, judged on every
 // bound write (`attr` below). The reader, the URL-valued attribute table, the
 // safe-scheme sets and `_scrml_safe_url` are impl#1's
