@@ -72,7 +72,7 @@ ${
                   .Plus | .Minus | .Star | .Slash | .Percent |
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
-                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr :> TC.Punct
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq :> TC.Punct
             .TemplateInterpStart :> TC.TIStart
             .TemplateInterpEnd :> TC.TIEnd
             .Eof :> TC.End
@@ -100,7 +100,7 @@ ${
                   .Plus | .Minus | .Star | .Slash | .Percent |
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
-                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
                   .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
             .NumberLit(raw: r) :> r
             .StringLit(cooked: c) :> c
