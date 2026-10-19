@@ -110,7 +110,7 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
   // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
   // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
   test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
-    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
   });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);

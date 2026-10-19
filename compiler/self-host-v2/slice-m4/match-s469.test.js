@@ -298,14 +298,14 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
     for (const a of [VAL, STMT]) {
       const r = run(P2(FIND("") + "\n" + a));
       expect(r.core == null).toBe(true);
-      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(r.diags[0].message).toContain("return not");
+      expect(r.diags.map((d) => d.code)).toEqual(["E-TYPE-043"]);   // bryan's ruling "Always explicit": a language error
+      expect(r.diags[0].message).toContain("return not;");
     }
   });
-  test("`-> string` falling off the end is E-TYPE-043 (§17.6); `string | not` and an enum `| not` are refused too", () => {
+  test("`-> string` falling off the end is E-TYPE-043 (§17.6); `string | not` and an enum `| not` too (bryan: Always explicit)", () => {
     expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) return "one"\n    }`, `        <p>\${f(1)}</p>`))).toEqual(["E-TYPE-043"]);
-    expect(codes(prog(`    function f(a: int) -> string | not {\n        if (a == 1) return "one"\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(prog(`    type R:enum = { A, B }\n    function f(a: int) -> R | not {\n        if (a == 1) return .A\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(`    function f(a: int) -> string | not {\n        if (a == 1) return "one"\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    type R:enum = { A, B }\n    function f(a: int) -> R | not {\n        if (a == 1) return .A\n    }`, `        <p>x</p>`))).toEqual(["E-TYPE-043"]);
   });
   test("every path returning — if / else, an exhaustive statement match whose arms all return — is not refused; a non-exhaustive one is", () => {
     expect(codes(prog(`    function f(a: int) -> string {\n        if (a == 1) {\n            return "one"\n        } else {\n            return "other"\n        }\n    }`, `        <p>\${f(1)}</p>`))).toEqual([]);
@@ -316,9 +316,9 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
     const out = js(P2(FIND("\n        return not") + "\n" + VAL));
     expect(out).not.toMatch(/\bundefined\b/);
   });
-  test("a return-typed function ending in an unreturned expression (the §48.11 tail return the bootstrap lacks) is refused by name", () => {
-    const d = diag(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> "r"\n            else :> "o"\n        }\n    }`, `        <p>\${f(@c)}</p>`), "E-BOOTSTRAP-UNSUPPORTED");
-    expect(d?.message).toContain("§48.11");
+  test("a return-typed function ending in an unreturned expression is E-TYPE-043 — scrml has no implicit tail return (bryan: Always explicit)", () => {
+    const d = diag(prog(COLOR + `\n    function f(x: Color) -> string {\n        match x {\n            .Red :> "r"\n            else :> "o"\n        }\n    }`, `        <p>\${f(@c)}</p>`), "E-TYPE-043");
+    expect(d?.message).toContain("no implicit tail return");
   });
   test("(review L1) a `not` arm on a subject that cannot be `not` is dead — E-TYPE-044 (binder-known and typer-known)", () => {
     expect(codes(prog(COLOR, `        <p>\${match @c { .Red :> 1, .Green :> 2, .Blue :> 3, not :> 0, }}</p>`))).toEqual(["E-TYPE-044"]);
@@ -344,8 +344,8 @@ describe("delta review — no path yields `undefined`", () => {
     for (const a of [VAL, GUARD]) {
       const r = run(LOGIN(ROLE(""), a));
       expect(r.core == null).toBe(true);
-      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-      expect(r.diags[0].message).toContain("success path");
+      expect(r.diags.map((d) => d.code)).toEqual(["E-RETURN-INCOMPLETE"]);
+      expect(r.diags[0].message).toContain("every path");
     }
   });
   test("HIGH-A: with `fail` on the wrong path, the deny arm runs (runtime, both callers)", async () => {
@@ -362,8 +362,8 @@ describe("delta review — no path yields `undefined`", () => {
   test("HIGH-B: an unannotated function that returns a value on one path and falls off (or bare-returns) on another is refused", () => {
     const LOOK = (tail) => `    function look(pw: string) {\n        if (pw == "hunter2") return "user"${tail}\n    }`;
     const A = `    function attempt(pw: string) -> string {\n        if (look(pw) is not) return "denied"\n        return "welcome"\n    }`;
-    expect(codes(LOGIN(LOOK(""), A))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(LOGIN(LOOK("\n        return"), A))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(LOGIN(LOOK(""), A))).toEqual(["E-RETURN-INCOMPLETE"]);
+    expect(codes(LOGIN(LOOK("\n        return"), A))).toEqual(["E-RETURN-INCOMPLETE"]);
     // an unannotated function with no value return is a procedure: not judged
     expect(codes(prog(`    let <n:int=0/>\n    function bump(x: int) {\n        if (x > 0) @n = x\n    }`, `        <button onclick=bump(1)>b</button>`))).toEqual([]);
   });
@@ -373,8 +373,32 @@ describe("delta review — no path yields `undefined`", () => {
     expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (not != look(pw)) return "welcome"\n        return "denied"\n    }`))).toEqual(["E-EQ-002"]);
     expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (look(pw) === not) return "denied"\n        return "welcome"\n    }`))).toContain("E-PARSE-STRICT-EQ");
   });
-  test("MED-C: a bare `return` in a `-> T` function is E-TYPE-043; in a `-> T | not` one it is `not` (accepted)", () => {
+  test("MED-C: a bare `return` in a declared-return function is E-TYPE-043 — `-> T | not` included: write `return not;` (bryan)", () => {
     expect(codes(prog(`    function role(pw: string) -> string {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${role("x")}</p>`))).toEqual(["E-TYPE-043"]);
-    expect(codes(prog(`    function role(pw: string) -> string | not {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${match role("x") { not :> "-", else :> "u", }}</p>`))).toEqual([]);
+    expect(codes(prog(`    function role(pw: string) -> string | not {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${match role("x") { not :> "-", else :> "u", }}</p>`))).toEqual(["E-TYPE-043"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1471 round 2 — bryan's ruling "Always explicit": no implicit return anywhere.
+describe("round 2 — always explicit; a no-value result is never read", () => {
+  const D = `    type Denied:enum = { Bad }`;
+  const ROLE = `${D}\n    function role(pw: string)! Denied {\n        if (pw != "hunter2") return\n        return "user"\n    }`;
+  const CHK = `${D}\n    function chk(pw: string)! Denied {\n        if (pw != "hunter2") fail .Bad\n    }`;
+  test("HIGH-1: a bare `return` in a `!` function beside a value return is E-RETURN-INCOMPLETE", () => {
+    expect(codes(prog(ROLE + `\n    function a(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> v\n            .Bad :> "denied"\n        }\n    }`, `        <p>\${a("x")}</p>`))).toEqual(["E-RETURN-INCOMPLETE"]);
+  });
+  test("MED-2: a no-value `!` callee's success value read — by `!{}` or a bound `.Ok(v)` — is E-TYPE-001; `.Ok(_)` / a statement is fine", () => {
+    expect(codes(prog(CHK + `\n    function a(pw: string) -> string {\n        const r: string = chk(pw) !{ _ :> "denied" }\n        return r\n    }`, `        <p>\${a("x")}</p>`))).toEqual(["E-TYPE-001"]);
+    const M = (ok) => `\n    function a(pw: string) -> string {\n        return match chk(pw) {\n            ${ok}\n            .Bad :> "denied"\n        }\n    }`;
+    expect(codes(prog(CHK + M('.Ok(v) :> "w" + v'), `        <p>\${a("x")}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(CHK + M('.Ok(_) :> "welcome"'), `        <p>\${a("x")}</p>`))).toEqual([]);
+    expect(codes(prog(CHK + `\n    let <m:string=""/>\n    function go() { chk("x") !{ _ :> @m = "denied" } }`, `        <button onclick=go()>g</button>`))).toEqual([]);
+  });
+  test("MED-2: a function with no value used as one — initializer, markup — is E-TYPE-001; as a statement or handler it is fine", () => {
+    const N = `    function nothing(x: int) {\n        if (x > 0) {\n            const z: int = x\n        }\n    }`;
+    expect(codes(prog(N + `\n    function a() -> string {\n        const s: string = nothing(1)\n        return s\n    }`, `        <p>\${a()}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(N, `        <p>\${nothing(1)}</p>`))).toEqual(["E-TYPE-001"]);
+    expect(codes(prog(N + `\n    function go() {\n        nothing(2)\n    }`, `        <button onclick=nothing(1)>b</button>\n        <button onclick=go()>g</button>`))).toEqual([]);
   });
 });

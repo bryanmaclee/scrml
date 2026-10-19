@@ -41,7 +41,8 @@ const REVIEW_EXPECT = {
   "s1/queryParamDup": ["PASS"],
   "s1/hostMethod": ["REFUSED", ["E-SCOPE-001"]],
   "s1/methodOnResult": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-COND-NOT-BOOLEAN", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
+  // s469 round 2: the recovered (unparsed) default leaves a no-value call read as a value — E-TYPE-001 replaces E-COND-NOT-BOOLEAN
+  "s1/defaultParam": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-SCOPE-001", "E-TYPE-001", "E-TYPE-STRUCT-CONTEXT"]],
   "s1/fnArg": ["REFUSED", ["E-BOOTSTRAP-REDECLARE", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-TYPE", "E-ROUTE-001", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
   "s1/mapLambda": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/hostArgCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -63,7 +64,8 @@ const REVIEW_EXPECT = {
   "s2/matchStmtArmCall": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/givenSubj": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s2/givenBodyWait": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s2/failPayload": ["PASS"],
+  // s469 round 2 (MED-2): `g` never returns a value, so its success value cannot be read (`const v: string = g() !{…}`)
+  "s2/failPayload": ["REFUSED", ["E-TYPE-001"]],
   "s2/argOfHandled": ["PASS"],
   "s2/ternaryInArg": ["PASS"],
   "s2/negUnary": ["PASS"],
@@ -89,20 +91,26 @@ const REVIEW_EXPECT = {
   "s4/queryMatch": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   // s469 #1471 review HIGH-1: a `-> T | not` function that falls off the end is refused;
   // with `return not` the `not` arm is taken (`== null`) — wrong → REJECTED
-  "s5/fallOffValue": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s5/fallOffStmt": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s5/fallOffString": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
-  "s5/fallOffEnum": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/fallOffValue": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffStmt": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffString": ["REFUSED", ["E-TYPE-043"]],
+  "s5/fallOffEnum": ["REFUSED", ["E-TYPE-043"]],
   "s5/retValue": ["PASS"],
   "s5/retStmt": ["PASS"],
   "s5/retString": ["PASS"],
   "s5/retEnum": ["PASS"],
   // #1471 delta review: every fall-off shape refused; `fail` on the wrong path PASSes
-  "s5/failableFallOff": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/failableFallOff": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
   "s5/failableFails": ["PASS"],
-  "s5/unannotatedFallOff": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/unannotatedFallOff": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
   "s5/eqNot": ["REFUSED", ["E-EQ-002"]],
   "s5/bareReturn": ["REFUSED", ["E-TYPE-043"]],
+  "s5/bareReturnFailable": ["REFUSED", ["E-RETURN-INCOMPLETE"]],
+  "s5/bareReturnMaybe": ["REFUSED", ["E-TYPE-043"]],
+  "s5/noValueGuard": ["REFUSED", ["E-TYPE-001"]],
+  "s5/noValueOk": ["REFUSED", ["E-TYPE-001"]],
+  "s5/noValueOkUnbound": ["PASS"],
+  "s5/noValuePlain": ["REFUSED", ["E-TYPE-001"]],
 };
 
 async function classify(s) {

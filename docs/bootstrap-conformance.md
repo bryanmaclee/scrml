@@ -11,26 +11,26 @@ Scope: **1806 of 1806 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 217 | 12.0% |
+| PASS | 205 | 11.4% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 63 | 3.5% |
+| FAIL | 81 | 4.5% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 675 | 37.4% |
-| UNSUPPORTED | 851 | 47.1% |
+| UNSUPPORTED | 845 | 46.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 280; of those, 217 hold (77.5%). Runtime half executed on the bootstrap for 89 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 286; of those, 205 hold (71.7%). Runtime half executed on the bootstrap for 85 case(s).
 
-- **Vacuous** passes: 14 of 217 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **203**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 63; the other 30 are implemented checks that answered wrong.
+- **Vacuous** passes: 14 of 205 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **191**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 81; the other 48 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 575 · parse-reject 276.
+UNSUPPORTED by reason: bootstrap-unsupported 560 · parse-reject 285.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **796** — PASS 113 · FAIL 55 · UNSUPPORTED 628. Twin holds 113 (non-vacuous 102). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **796** — PASS 106 · FAIL 68 · UNSUPPORTED 622. Twin holds 106 (non-vacuous 95). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -107,9 +107,9 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | channel | 49 | · | · | · | · | 37 | 12 | · | · |
 | codegen | 4 | · | · | · | · | 3 | 1 | · | · |
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
-| condition | 36 | 23 | · | · | · | 8 | 5 | · | · |
+| condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 75 | 15 | · | 3 | · | 20 | 37 | · | · |
-| defer | 51 | 9 | · | 2 | · | 4 | 36 | · | · |
+| defer | 51 | 8 | · | 5 | · | 4 | 34 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 71 | 23 | · | 5 | · | 4 | 39 | · | · |
+| error | 71 | 17 | · | 11 | · | 4 | 39 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | · | · | 1 | · | 1 | 17 | · | · |
@@ -132,7 +132,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | maps | 13 | · | · | · | · | 13 | · | · | · |
 | markup-handler | 89 | 7 | · | 4 | · | 36 | 42 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
-| match-codes | 25 | 1 | · | 1 | · | · | 23 | · | · |
+| match-codes | 25 | 1 | · | 5 | · | · | 19 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 45 | 15 | · | · | · | 9 | 21 | · | · |
 | md | 18 | · | · | 7 | · | 3 | 8 | · | · |
@@ -163,10 +163,25 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (63)
+### FAIL (81)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
+- `condition/unresolved-call-markup-neg` (codes)
+  - missing E-COND-NOT-BOOLEAN
+  - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 1
+- `condition/unresolved-call-neg` (codes)
+  - missing E-COND-NOT-BOOLEAN
+  - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 1
+- `condition/unresolved-operand-markup-neg` (codes)
+  - missing E-COND-NOT-BOOLEAN
+  - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 1
+- `condition/unresolved-operand-not-neg` (codes)
+  - missing E-COND-NOT-BOOLEAN
+  - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 2
+- `condition/unresolved-ternary-arm-neg` (codes)
+  - missing E-COND-NOT-BOOLEAN
+  - count: E-COND-NOT-BOOLEAN fired 0 time(s), expected exactly 3
 - `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
   - missing E-CTRL-004
   - severity: E-CTRL-004 did not fire (expected error)
@@ -179,6 +194,12 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
 - `defer/fail-path` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
+- `defer/fn-prohibition-applies-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-043
+- `defer/fn-pure-local` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-043)
+- `defer/propagate-path` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `engine/initial-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-INITIAL-INVALID-VARIANT)
   - missing E-ENGINE-INITIAL-INVALID-VARIANT
   - severity: E-ENGINE-INITIAL-INVALID-VARIANT did not fire (expected error)
@@ -197,6 +218,9 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 - `enum/variant-name-lowercase-reject` (twin · codes; not in the bootstrap: E-ENUM-VARIANT-CASE)
   - missing E-ENUM-VARIANT-CASE
   - severity: E-ENUM-VARIANT-CASE did not fire (expected error)
+- `error/arm-pipe-legacy-handler` (twin · codes+runtime)
+  - forbidden family E-* fired: E-TYPE-001
+  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `error/await-not-in-scrml` (twin · codes; not in the bootstrap: E-AWAIT-NOT-IN-SCRML)
   - missing E-AWAIT-NOT-IN-SCRML
   - forbidden E-SCOPE-001 fired
@@ -205,8 +229,18 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-SCOPE-001
 - `error/handler-non-exhaustive` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
+- `error/handler-pipeless-arms-rt` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-001)
+- `error/handler-recovery-into-cell` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `error/handler-wildcard-escape` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
+- `error/propagate-in-non-failable-fn-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-001
+- `error/propagate-in-non-failable-fn-pos` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-001
+- `error/propagate-non-failable-callee-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-001
 - `error/throw-not-in-scrml` (twin · codes; not in the bootstrap: E-THROW-NOT-IN-SCRML)
   - missing E-THROW-NOT-IN-SCRML
   - severity: E-THROW-NOT-IN-SCRML did not fire (expected error)
@@ -220,13 +254,21 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
 - `markup-handler/multi-stmt-handler-colon-shorthand-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-VALUE-WRITES-STATE
+  - twin emitted unasserted error(s): E-TYPE-001, E-VALUE-WRITES-STATE
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s462-handler-while-body-if-else` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `match-codes/e-match-012-tnot-else-exhaustive-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-043
+- `match-codes/e-match-012-tnot-missing-not-arm-pos` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-043
+- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-043
+- `match-codes/e-type-025-enum-subject-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-043
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
 - `md/heading-ids-page-wide` (runtime)
@@ -335,7 +377,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (217)
+### PASS / CODES-ONLY (205)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -380,14 +422,9 @@ none
 - `condition/known-string-ternary-neg` — PASS
 - `condition/presence-bare-optional-if-ternary-pos` — PASS
 - `condition/presence-bare-optional-markup-pos` — PASS
-- `condition/unresolved-call-markup-neg` — PASS
-- `condition/unresolved-call-neg` — PASS
-- `condition/unresolved-explicit-fix-pos` — PASS
-- `condition/unresolved-operand-markup-neg` — PASS
-- `condition/unresolved-operand-not-neg` — PASS
-- `condition/unresolved-operand-outside-condition-pos` — PASS
+- `condition/unresolved-explicit-fix-pos` — PASS (also emitted, unasserted: E-TYPE-001)
+- `condition/unresolved-operand-outside-condition-pos` — PASS (also emitted, unasserted: E-TYPE-001)
 - `condition/unresolved-sql-row-neg` — PASS
-- `condition/unresolved-ternary-arm-neg` — PASS
 - `control-flow/ctrl-001-orphan-else-pos` — PASS · TWIN
 - `control-flow/ctrl-001-orphan-else-program-pos` — PASS
 - `control-flow/ctrl-002-orphan-else-if-pos` — PASS · TWIN
@@ -409,7 +446,6 @@ none
 - `defer/match-stmt-braced-arm` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
-- `defer/propagate-path` — PASS · TWIN
 - `defer/return-value-before-deferred` — PASS · TWIN
 - `defer/unhandled-failable-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
@@ -425,7 +461,6 @@ none
 - `engine/rule-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
-- `error/arm-pipe-legacy-handler` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
 - `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
@@ -439,14 +474,9 @@ none
 - `error/failable-match-nonexhaustive-err` — PASS · TWIN
 - `error/failable-match-nonexhaustive-ok` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
-- `error/handler-pipeless-arms-rt` — PASS · TWIN
-- `error/handler-recovery-into-cell` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
-- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
-- `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
 - `error/propagate-incompat-variants` — PASS · TWIN
-- `error/propagate-non-failable-callee-neg` — PASS · TWIN
 - `error/propagate-non-failable-callee-pos` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `forms/bind-value-input` — PASS · TWIN
@@ -555,7 +585,7 @@ none
 - `type-state-codes/e-type-081-partial-match-render-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (851)
+### UNSUPPORTED (845)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -729,8 +759,6 @@ none
 - `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: an unannotated parameter `o` — bootstrap slice M2 needs `o: Type` (Core parameters are typed)
 - `defer/duplicate-function-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
 - `defer/duplicate-function-no-defer-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
-- `defer/fn-prohibition-applies-neg` — twin · bootstrap-unsupported: `bad` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `defer/fn-pure-local` — twin · bootstrap-unsupported: `settle` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
 - `defer/function-hoist-across-defer` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `"H"`
 - `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -993,17 +1021,14 @@ none
 - `markup-handler/s462-handler-if-else-template-cell-true` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `x `
 - `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/inline-markup-match` — twin · bootstrap-unsupported: member access `.Grid` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `match-block/member-access-complete-clean` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-block/member-access-nonexhaustive` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-block/member-access-subset-dead-arm` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
+- `match-block/member-access-complete-clean` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-block/member-access-nonexhaustive` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-block/member-access-subset-dead-arm` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
 - `match-block/payload-bind` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/phase-arm-swap` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/round-trip` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-block/wildcard` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-codes/e-match-012-tnot-else-exhaustive-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-codes/e-match-012-tnot-missing-not-arm-pos` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-codes/e-match-arm-markup-in-value-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
+- `match-codes/e-match-arm-markup-in-value-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-match-arm-markup-in-value-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `match-codes/e-match-block-in-lift-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `s`
@@ -1013,16 +1038,15 @@ none
 - `match-codes/e-match-on-required-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-ontransition-forbidden-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
-- `match-codes/e-syntax-010-else-last-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-codes/e-syntax-010-else-not-last-pos` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
+- `match-codes/e-syntax-010-else-last-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-codes/e-syntax-010-else-not-last-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-syntax-011-guard-clause-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
-- `match-codes/e-syntax-011-plain-pattern-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
+- `match-codes/e-syntax-011-plain-pattern-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
 - `match-codes/e-type-006-multi-scrutinee-exhaustive-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
 - `match-codes/e-type-006-multi-scrutinee-union-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `,`
-- `match-codes/e-type-024-enum-subject-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
-- `match-codes/e-type-024-struct-subject-pos` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
+- `match-codes/e-type-024-enum-subject-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-codes/e-type-024-struct-subject-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
-- `match-codes/e-type-025-enum-subject-neg` — twin · bootstrap-unsupported: `label` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it
 - `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
 - `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `match-leave/arm-body-ends-at-line-break-neg` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `"orphan"`

@@ -115,7 +115,7 @@ describe("#3 — `<each in=>` over a non-sequence (E-EACH-NOT-SEQUENCE)", () => 
     expect(inApp("", "<each in=([1, 2]) as c><p>${c}</p></each>")).toEqual([]);
   });
   test("provable-or-silent — a call with no declared return type (Unknown) is silent", () => {
-    expect(inApp("    function g() { }", "<each in=g() as c><p>x</p></each>")).toEqual([]);
+    expect(inApp("    function g() { return 1 }", "<each in=g() as c><p>x</p></each>")).toEqual([]);
   });
   test("provable-or-silent — a call DECLARED to return a non-sequence fires", () => {
     expect(inApp("    function g() -> int { return 1 }", "<each in=g() as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
@@ -199,7 +199,7 @@ describe("#6 — a duplicate top-level `function` (E-SCOPE-010)", () => {
     expect(codes([lib, main])).toEqual(["E-SCOPE-010"]);
   });
   test("twins silent — two distinct names; one name as a function and as a LOCAL in another function", () => {
-    expect(inApp("    function f() { }\n    function g() { }")).toEqual([]);
+    expect(inApp("    function f() { }\n    function g() { return 1 }")).toEqual([]);
     expect(inApp("    function f() { }\n    function g() { let f = 1 }")).toEqual([]);
   });
 });
@@ -298,7 +298,7 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   test("r4 (a) — a bare `bool | not` condition is E-COND-NOT-BOOLEAN naming both fixes (ruled S442)", () => {
     const d = run([LIB(), app(O, "<p if=@o.f>x</p>")]).diags;
     expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
-    expect(d[0].message).toContain("x is given");   // s460: the SPEC spelling (§42.2.4), no longer `x is given`
+    expect(d[0].message).toContain("x is given");   // s460: the SPEC spelling (§42.2.4); the old `x != not` advice is gone (E-EQ-002, §45)
     expect(d[0].message).toContain("x == true");
     expect(inApp(O + "    function f() { if (@o.f) { @m = 1 } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
@@ -350,7 +350,7 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   });
   test("S460 (supersedes Q2 for conditions) — a call with no declared return type (Unknown) as a condition FIRES", () => {
     // ruled S460 "a′, go": "a bare `x` whose type the compiler CANNOT resolve is an ERROR naming the fixes"
-    expect(inApp("    function g() { }", "<p if=g()>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(inApp("    function g() { return 1 }", "<p if=g()>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
   test("Q2 provable-or-silent — a call DECLARED `-> int` as a condition fires", () => {
     expect(inApp("    function g() -> int { return 1 }", "<p if=g()>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
@@ -447,11 +447,11 @@ describe("#7 / #8 — `!` / `&&` / `||` take booleans only (Gotcha Q2)", () => {
     expect(inApp(O + "    function f() { if (!@o.f) { @m = 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("a legal `&&` / `||` is a `bool` (Q2 supersedes §45.9's JS operand semantics): into an int cell is E-TYPE-031", () => {
-    expect(inApp(CELLS + "    function g() { }\n    function f() { @n = @b || g() }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(CELLS + "    function g() { }\n    function f() { @b = @b || g() }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return 1 }\n    function f() { @n = @b || g() }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g() { return 1 }\n    function f() { @b = @b || g() }")).toEqual([]);
     // r1 F1: the `&&` arm pinned the same way
-    expect(inApp(CELLS + "    function g() { }\n    function f() { @n = @b && g() }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(CELLS + "    function g() { }\n    function f() { @b = @b && g() }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return 1 }\n    function f() { @n = @b && g() }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g() { return 1 }\n    function f() { @b = @b && g() }")).toEqual([]);
   });
   test("twins silent — bools; a narrowed `bool | not`; a presence comparison", () => {
     expect(inApp(CELLS + "    function f() { @b = !@b && (@n > 0 || @s == \"\") }")).toEqual([]);
@@ -504,7 +504,7 @@ describe("#8 — arithmetic / relational / `+` operands (Gotcha Q1)", () => {
     expect(inApp(CELLS + G + "    function f() { if (g(1)) { @b = true } }")).toEqual(["E-COND-NOT-BOOLEAN"]);   // twin: no parse error → judged
   });
   test("provable-or-silent — an operand of unknown type (a call with no return type) is silent", () => {
-    expect(inApp(CELLS + "    function g() { }\n    function f() { @s = @s + g()\n @b = g() < 1 }")).toEqual([]);
+    expect(inApp(CELLS + "    function g() { return 1 }\n    function f() { @s = @s + g()\n @b = g() < 1 }")).toEqual([]);
   });
 });
 
@@ -523,7 +523,6 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
   });
   test("narrowed — `if (x is given)`, `x is given && …`, a ternary arm, `if (x)` (a presence test)", () => {
     expect(inApp(O + "    function f() { if (@o.n is given) { @m = @o.n + 1 } }")).toEqual([]);
-    expect(inApp(O + "    function f() { if (@o.n is given && @o.n is given) { @m = @o.n + 1 } }")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.n is given && @o.n > 0) { @m = 1 } }")).toEqual([]);
     expect(inApp(O + "    function f() { @m = @o.n is given ? @o.n + 1 : 0 }")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.n) { @m = @o.n + 1 } }")).toEqual([]);

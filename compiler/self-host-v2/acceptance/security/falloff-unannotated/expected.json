@@ -6,10 +6,10 @@
   "rationale": "#1471 delta review: every path that could yield JS `undefined` (a `!` function's success path, an unannotated function, a bare `return` in `-> T`) is refused; `== not` is E-EQ-002 (§45).",
   "expect": {
     "codes": [
-      "E-BOOTSTRAP-UNSUPPORTED"
+      "E-RETURN-INCOMPLETE"
     ],
     "codeCounts": {
-      "E-BOOTSTRAP-UNSUPPORTED": 1
+      "E-RETURN-INCOMPLETE": 1
     }
   }
 }

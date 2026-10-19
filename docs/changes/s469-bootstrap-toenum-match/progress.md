@@ -119,3 +119,37 @@ Branch `s469-bootstrap-toenum-match` from `origin/s469-bootstrap-parse-arms-unio
   Old pins: typer-s462 rule-7 "does not return on every path" and error-rulings r2 MED-2 now also
   carry the callee's fall-off refusal.
 - Conformance unchanged: PASS 217 (14 vacuous).
+
+## #1471 round 2 (bryan RULED fall-off "Always explicit")
+
+Ruling: no implicit tail return anywhere; a declared-return function (`-> T | not` included) returns
+on every path, `return not;` written out; a function with no return type returns nothing, and if
+any path returns a value every path must.
+
+- [x] HIGH-1 — a bare `return` in a `!` function beside a value return (a success carrying nothing,
+  `.Ok(v)` took it) is refused; the `!` and unannotated branches now refuse
+  `hasValueReturn && (blockHasBareReturn || !fallsNever)`.
+- [x] A bare `return` in `-> T | not` is NOT `not`: E-TYPE-043.
+- [x] Codes per the ruling: every declared-return fall-off / bare `return` / unreturned tail is
+  **E-TYPE-043** (§17.6; its §34 row text — "non-optional declared return type" — needs widening to
+  `-> T | not` by the PA); the tail message now says "scrml has no implicit tail return; write
+  `return <expr>;`". The `!` / unannotated mixed-return case uses the **PROVISIONAL code
+  `E-RETURN-INCOMPLETE`** (no §34 row yet → fail-closed Error in severity.scrml).
+- [x] MED-2 — a no-value callee's result read as a value is **E-TYPE-001** (§18.3 "void is not
+  assignable"): a call of a summary-`noValue` function anywhere but a statement / `return f()` (the
+  G7 closure judges the wrapper's uses) / an arm value (E-ERROR-012 owns it); and a `!` function
+  that never returns a value, read through `?` / a value-position `!{}` / a bound `.Ok(v)`
+  (`.Ok(_)` and statement forms are fine). Server-placed callees too.
+- [x] LOW cleanup: the typer-s440 comment; the duplicated `@o.n is given && @o.n is given` line
+  removed; the stale `x != not` comments in analyze.scrml rewritten.
+- [x] Tests: `security/{bare-return-failable,bare-return-maybe,novalue-guard,novalue-ok,novalue-plain}`
+  (refused), s5 +6 server shapes (`noValueOkUnbound` PASS: wrong → REJECTED), a round-2 describe in
+  match-s469 (3 tests). Re-pinned: `s2/failPayload` PASS → REFUSED (E-TYPE-001: its `g` never
+  returns a value, so `const v = g() !{…}` reads nothing); `s1/defaultParam` (cascade code moved).
+  Test stand-ins `function g() { }` used as "an unresolved value" (typer-s440 / typer-s460) are now
+  `function g() { return 1 }` — under the ruling `g() { }` returns nothing.
+- Conformance PASS 217 → **205**. The 12 lost are corpus cases whose programs the ruling makes
+  wrong: 7 `condition/unresolved-*` use `function g() { }` as a value (now E-TYPE-001); 6 `error/*` /
+  `defer/propagate-path` read the success value of a `!` function that only fails (now E-TYPE-001);
+  the implicit-tail-return cases moved UNSUPPORTED → FAIL because E-TYPE-043 is a language code.
+  **The corpus cases need updating to the ruling (PA).**

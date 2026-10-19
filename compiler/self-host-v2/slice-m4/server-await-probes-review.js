@@ -134,6 +134,15 @@ return {
   failableFails: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user"\n        fail .Bad\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME"\n            _ :> "REJECTED"\n        }` },
   unannotatedFallOff: { top: `    function look(p: string, h: string) {\n        if (p == h) return "user"\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED"\n        return "WELCOME"` },
   eqNot: { top: `    function look(p: string, h: string) -> string | not {\n        if (p == h) return "user"\n        return not\n    }`, body: `        if (look(pass, row.pw) == not) return "REJECTED"\n        return "WELCOME"` },
+  // #1471 round 2 (bryan: "Always explicit"): HIGH-1 a bare `return` in a `!` function is a
+  // success with no value; a bare `return` in `-> T | not` is not `not`; MED-2 a no-value
+  // callee's result read as a value (`!{}` initializer, `.Ok(v)`, a plain initializer)
+  bareReturnFailable: { top: `    function role(p: string, h: string)! Denied {\n        if (p != h) return\n        return "user"\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME"\n            _ :> "REJECTED"\n        }` },
+  bareReturnMaybe: { top: `    function look(p: string, h: string) -> string | not {\n        if (p != h) return\n        return "user"\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED"\n        return "WELCOME"` },
+  noValueGuard: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad\n    }`, body: `        const r: string = chk(pass, row.pw) !{ _ :> "REJECTED" }\n        if (r == "REJECTED") return "REJECTED"\n        return "WELCOME"` },
+  noValueOk: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad\n    }`, body: `        return match chk(pass, row.pw) {\n            .Ok(v) :> "WELCOME" + v\n            _ :> "REJECTED"\n        }` },
+  noValueOkUnbound: { top: `    function chk(p: string, h: string)! Denied {\n        if (p != h) fail .Bad\n    }`, body: `        let v: string = "REJECTED"\n        match chk(pass, row.pw) {\n            .Ok(_) :> v = "WELCOME"\n            _ :> v = "REJECTED"\n        }\n        return v` },
+  noValuePlain: { top: `    function nothing(p: string, h: string) {\n        if (p == h) {\n            const z: int = 1\n        }\n    }`, body: `        const s: string = nothing(pass, row.pw)\n        if (s is not) return "REJECTED"\n        return "WELCOME"` },
   bareReturn: { top: `    function role(p: string, h: string) -> string {\n        if (p == h) return "user"\n        return\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME"\n        return "REJECTED"` },
 };
 })();
