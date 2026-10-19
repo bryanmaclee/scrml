@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-arms-newline-still-read",
+  "description": "dpa-073 F5: the newline-separated arm list is still read (enforcement follows the codemod). When the bootstrap starts enforcing commas, this case is the one to flip.",
+  "language-version": "1.0",
+  "spec": "dpa-073 F5 (S469)",
+  "rationale": "user-voice-scrml.md S469 dpa-073 F5: \"(2) a `scrml fix` rule inserts `;` and arm `,` … (3) codemod over scrml … (4) the BOOTSTRAP enforces `;` + commas by construction\" — enforcement is the last step.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ARM-SEPARATOR"],
+    "input": [
+      { "click": "#go" }
+    ],
+    "domAnchored": [
+      { "selector": "#out", "text": "nf:x" }
+    ]
+  }
+}

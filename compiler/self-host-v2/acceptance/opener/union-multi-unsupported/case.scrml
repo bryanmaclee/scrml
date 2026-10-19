@@ -1,0 +1,5 @@
+// §66.2.4 (S451) — `T | U` is legal in an opener; the bootstrap reads it whole, then refuses it (its type system has `T | not` only).
+<program>
+    <id:int | string=0/>
+    <main><p>${@id}</p></main>
+</program>
