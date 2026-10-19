@@ -1,0 +1,17 @@
+{
+  "id": "acceptance-arms-comma-match",
+  "description": "dpa-073 F2: `match f() { .Ok(v) :> …, .NotFound(m) :> join2(\"nf\", m), .Timeout :> \"to\", }` parses and runs; the `,` between `join2`'s arguments is the body's.",
+  "language-version": "1.0",
+  "spec": "dpa-073 F2 (S469)",
+  "rationale": "user-voice-scrml.md S469 dpa-073 F2 (iii): \"the arm list is a comma list (`match x { .A :> 1, .B :> 2, }`), one spelling, trailing comma optional\"; F2 (i): \"a `,` between every pair of arms, block arms included, trailing `,` optional\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PARSE-ARM", "E-MATCH-ARM-SEPARATOR"],
+    "input": [
+      { "click": "#nf" }
+    ],
+    "domAnchored": [
+      { "selector": "#out", "text": "nf:x" }
+    ]
+  }
+}

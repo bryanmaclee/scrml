@@ -1,0 +1,18 @@
+{
+  "id": "acceptance-a-guess",
+  "description": "bryan's guess program, as he meant it (today-scrml-distance-2026-10-18 §3 (a)): a `Guess | not` derived from the input by `toEnum`, a comma-armed value `match` with a `not` arm, an `is given` condition.",
+  "language-version": "1.0",
+  "spec": "§66.2.4 (S451) · dpa-073 F2 (S469) · §14.4.1 · §18 · §42.2.3",
+  "rationale": "Typing `Yes` shows \"yeppers\" and the second line; typing `maybe` shows \"length 5\" and hides it. The source is the report's §3 (a) verbatim (plus two `id`s for the selectors).",
+  "expect": {
+    "codes": [],
+    "input": [
+      { "input": "input", "value": "Yes" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "#say", "text": "yeppers" },
+      { "selector": "#real", "count": 1 }
+    ]
+  }
+}

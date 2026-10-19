@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-opener-union-maybe",
+  "description": "§66.2.4 (S451): `<g:Guess | not=.Yes/>`, `let <h:Guess|not=.No/>`, `let <name:string | not=not/>` parse; the cells hold a value or `not` and `is given` follows their writes.",
+  "language-version": "1.0",
+  "spec": "§66.2.4",
+  "rationale": "§66.2.4 (S451): \"The type after `:` in an opener is any type expression, including a union: `T | not` and `T | U` are written with `|`, bare … A front end that rejects a union type in an opener has a parser bug, not a language rule.\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PARSE-TAG", "E-PARSE-TYPE"],
+    "input": [
+      { "click": "#set" },
+      { "click": "#clear" }
+    ],
+    "domAnchored": [
+      { "selector": "#a", "count": 1 },
+      { "selector": "#b", "count": 0 },
+      { "selector": "#c", "count": 1 }
+    ]
+  }
+}

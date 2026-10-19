@@ -189,8 +189,8 @@ describe("calls and `<each in=…>`", () => {
 // ---------------------------------------------------------------------------
 // The adversarial self-probe: shapes adjacent to the checks that must NOT
 // fire. (Function-typed attributes, O8, are not parseable by the slice's front
-// end — `<cb:fn()…>` is E-PARSE-TAG — so they have no control yet; neither has a
-// `T | not` cell opener, `<x:string|not=…/>`, same reason.)
+// end — `<cb:fn()…>` is E-PARSE-TAG — so they have no control yet. s469: a
+// `T | not` cell opener, `<x:string|not=…/>`, parses now — arms-union-s469.test.js.)
 // S442: three S439 controls moved OUT of this list because S440 RULED them
 // errors — `@s || "x"` on strings (Gotcha Q2), a truthy `if=@label` on a string
 // (truthiness (c)), a `number` into an `int` cell (JS-WAT 7(a)); each is now a
@@ -389,11 +389,12 @@ describe("C — no check against what failed to parse", () => {
   test("a back-tick template — only the parse error", () => {
     expect(inApp("    let <s:string=\"\"/>\n    function f() { @s = `t` }")).toEqual(["E-PARSE-EXPR"]);
   });
-  test("`let <x:int|not=0/>` then `@x = not` — only the parse error (the cell's type did not parse)", () => {
-    expect(inApp("    let <x:int|not=0/>\n    function f() { @x = not }")).toEqual(["E-PARSE-TAG"]);
+  // s469: `T | not` in an opener parses now (S451) — an unreadable continuation (`int&not`) is the opener type the slice cannot read
+  test("`let <x:int&not=0/>` then `@x = not` — only the parse error (the cell's type did not parse)", () => {
+    expect(inApp("    let <x:int&not=0/>\n    function f() { @x = not }")).toEqual(["E-PARSE-TAG"]);
   });
-  test("`<box n:string|not=\"\"/>` used as `<box n=(not)/>` — only the parse error", () => {
-    expect(codes([boxLib("export <box n:string|not=\"\"/>\nrenders <p>x</p>\n"), boxApp("<box n=(not)/>")])).toEqual(["E-PARSE-TAG"]);
+  test("`<box n:string&not=\"\"/>` used as `<box n=(not)/>` — only the parse error", () => {
+    expect(codes([boxLib("export <box n:string&not=\"\"/>\nrenders <p>x</p>\n"), boxApp("<box n=(not)/>")])).toEqual(["E-PARSE-TAG"]);
   });
   test("no arity check against an untyped / malformed parameter list (default value, `b?:`)", () => {
     const g = inApp("    function g(a: int, b: int = 1) { }\n    function f() { g(1) }");
@@ -583,7 +584,7 @@ describe("R2-5 — Rule C: only a component's OWN type expression failing to par
     expect(box("export <box a:string=5 n:int = 0/>", "<box/>")).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-TYPE-031"]);
   });
   test("E-TYPE-031 kept — a sibling attribute's type failing to parse does not untrust `a`", () => {
-    expect(box("export <box a:string=\"\" n:string|not=\"\"/>", "<box a=(5)/>")).toEqual(["E-PARSE-TAG", "E-TYPE-031"]);
+    expect(box("export <box a:string=\"\" n:string&not=\"\"/>", "<box a=(5)/>")).toEqual(["E-PARSE-TAG", "E-TYPE-031"]);
   });
   test("E-TYPE-031 kept — a cell's own spaced `=` does not untrust its type", () => {
     expect(inApp("    let <z:int = 0/>\n    function g() { @z = \"s\" }")).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-TYPE-031"]);
@@ -591,8 +592,8 @@ describe("R2-5 — Rule C: only a component's OWN type expression failing to par
   test("E-TYPE-031 kept — `-> string` stays trusted when a PARAMETER's type fails to parse", () => {
     expect(inApp("    let <x:int=0/>\n    function h(a: [int]) -> string { return \"a\" }\n    function g() { @x = h(1) }")).toContain("E-TYPE-031");
   });
-  test("still untrusted — the component whose own type failed (`n:string|not` given `(not)`)", () => {
-    expect(box("export <box n:string|not=\"\"/>", "<box n=(not)/>")).toEqual(["E-PARSE-TAG"]);
+  test("still untrusted — the component whose own type failed (`n:string&not` given `(not)`)", () => {
+    expect(box("export <box n:string&not=\"\"/>", "<box n=(not)/>")).toEqual(["E-PARSE-TAG"]);
   });
   test("an untyped parameter is unproven, never a placeholder type (`function h(a) { @x = a }`)", () => {
     expect(inApp("    let <x:int=0/>\n    function h(a) { @x = a }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
