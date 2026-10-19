@@ -62,6 +62,12 @@ const STATUS = {
   "security/return-not-stmt": ["PASS", []],
   "security/return-not-string": ["PASS", []],
   "security/return-not-enum": ["PASS", []],
+  // #1471 delta review: the rest of the fall-off class, and `== not`
+  "security/falloff-failable": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/falloff-unannotated": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "security/eq-not": ["PASS", ["E-EQ-002"]],
+  "security/bare-return": ["PASS", ["E-TYPE-043"]],
+  "security/failable-fails": ["PASS", []],
   "toenum/neg-arg-type": ["PASS", ["E-TYPE-031"]],
   "toenum/prototype-keys": ["PASS", []],
 };
@@ -103,7 +109,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   });
   test("the security cases ran their runtime half (the deny arm was taken, not merely compiled)", () => {
     for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys",
-                       "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum"]) {
+                       "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
+                       "security/failable-fails"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

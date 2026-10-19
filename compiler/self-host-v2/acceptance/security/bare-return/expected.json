@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-security-bare-return",
+  "description": "a bare `return` in a `-> string` finder is refused.",
+  "language-version": "1.0",
+  "spec": "§42.5 · §45 · §17.6 · S467 §13 floor",
+  "rationale": "#1471 delta review: every path that could yield JS `undefined` (a `!` function's success path, an unannotated function, a bare `return` in `-> T`) is refused; `== not` is E-EQ-002 (§45).",
+  "expect": {
+    "codes": [
+      "E-TYPE-043"
+    ],
+    "codeCounts": {
+      "E-TYPE-043": 1
+    }
+  }
+}

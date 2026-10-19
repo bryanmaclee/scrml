@@ -261,8 +261,8 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
 
   // r2 MED-2 — a value on EVERY path; falling off the end of the body is no value
   test("r2 MED-2: a callee that returns a value on only SOME paths yields nothing there — E-ERROR-012", () => {
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
-    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-012"]);   // s469: h's fall-off is refused too
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`)).slice().sort()).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-ERROR-012"]);   // s469: h's fall-off is refused too
   });
 
   test("r2 MED-2 near-miss: every path returns a value (a final `return`, or an if / else both returning)", () => {

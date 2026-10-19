@@ -128,6 +128,13 @@ return {
   retStmt: { top: FIND(RN), body: STMT },
   retString: { top: SFIND(RN), body: STMT },
   retEnum: { top: EFIND(RN), body: ENUM },
+  // #1471 delta review: HIGH-A a `!` function's success path falling off; HIGH-B an unannotated
+  // function falling off, and `== not` (E-EQ-002); MED-C a bare `return` in a `-> T` function
+  failableFallOff: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user"\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME"\n            _ :> "REJECTED"\n        }` },
+  failableFails: { top: `    function role(p: string, h: string)! Denied {\n        if (p == h) return "user"\n        fail .Bad\n    }`, body: `        return match role(pass, row.pw) {\n            .Ok(v) :> "WELCOME"\n            _ :> "REJECTED"\n        }` },
+  unannotatedFallOff: { top: `    function look(p: string, h: string) {\n        if (p == h) return "user"\n    }`, body: `        if (look(pass, row.pw) is not) return "REJECTED"\n        return "WELCOME"` },
+  eqNot: { top: `    function look(p: string, h: string) -> string | not {\n        if (p == h) return "user"\n        return not\n    }`, body: `        if (look(pass, row.pw) == not) return "REJECTED"\n        return "WELCOME"` },
+  bareReturn: { top: `    function role(p: string, h: string) -> string {\n        if (p == h) return "user"\n        return\n    }`, body: `        if (role(pass, row.pw) == "user") return "WELCOME"\n        return "REJECTED"` },
 };
 })();
 

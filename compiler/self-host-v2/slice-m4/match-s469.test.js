@@ -331,3 +331,50 @@ describe("review HIGH-1 — absence is `null` and `undefined`; no function falls
     expect(codes(prog(`    function f(x: asIs) -> int { return 1 }`, `        <p>x</p>`))).not.toContain("E-TYPE-UNKNOWN");
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1471 delta review: the rest of the fall-off class — a `!` function's success path (HIGH-A),
+// an unannotated function (HIGH-B), `== not` (HIGH-B 2, E-EQ-002), a bare `return` in `-> T` (MED-C).
+describe("delta review — no path yields `undefined`", () => {
+  const LOGIN = (decls, attempt) => `<program>\n    type Denied:enum = { Bad }\n    let <wrong:string=""/>\n    let <right:string=""/>\n${decls}\n${attempt}\n    function login() {\n        @wrong = attempt("hunter3")\n        @right = attempt("hunter2")\n    }\n    <main>\n        <button onclick=login()>go</button>\n        <p id="wrong">\${@wrong}</p>\n        <p id="right">\${@right}</p>\n    </main>\n</program>\n`;
+  const ROLE = (tail) => `    function role(pw: string)! Denied {\n        if (pw == "hunter2") return "user"${tail}\n    }`;
+  const VAL = `    function attempt(pw: string) -> string {\n        return match role(pw) {\n            .Ok(v) :> "welcome"\n            _ :> "denied"\n        }\n    }`;
+  const GUARD = `    function attempt(pw: string) -> string {\n        const r: string = role(pw) !{ _ :> "denied" }\n        if (r == "user") return "welcome"\n        return "denied"\n    }`;
+  test("HIGH-A: a `!` function whose success path can fall off is refused — `match` and `!{}` callers", () => {
+    for (const a of [VAL, GUARD]) {
+      const r = run(LOGIN(ROLE(""), a));
+      expect(r.core == null).toBe(true);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags[0].message).toContain("success path");
+    }
+  });
+  test("HIGH-A: with `fail` on the wrong path, the deny arm runs (runtime, both callers)", async () => {
+    for (const a of [VAL, GUARD]) {
+      await load(LOGIN(ROLE("\n        fail .Bad"), a));
+      click(btn("go"));
+      expect($("#wrong").textContent).toBe("denied");
+      expect($("#right").textContent).toBe("welcome");
+    }
+  });
+  test("HIGH-A: a `!` function that never returns a value is not judged (no success value)", () => {
+    expect(codes(`<program>\n    type E:enum = { Bad }\n    let <n:int=0/>\n    function f(x: int)! E {\n        if (x == 0) fail .Bad\n        @n = x\n    }\n    function go() { f(1) !{ _ :> @n = 2 } }\n    <main><button onclick=go()>g</button></main>\n</program>\n`)).toEqual([]);
+  });
+  test("HIGH-B: an unannotated function that returns a value on one path and falls off (or bare-returns) on another is refused", () => {
+    const LOOK = (tail) => `    function look(pw: string) {\n        if (pw == "hunter2") return "user"${tail}\n    }`;
+    const A = `    function attempt(pw: string) -> string {\n        if (look(pw) is not) return "denied"\n        return "welcome"\n    }`;
+    expect(codes(LOGIN(LOOK(""), A))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(LOGIN(LOOK("\n        return"), A))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // an unannotated function with no value return is a procedure: not judged
+    expect(codes(prog(`    let <n:int=0/>\n    function bump(x: int) {\n        if (x > 0) @n = x\n    }`, `        <button onclick=bump(1)>b</button>`))).toEqual([]);
+  });
+  test("HIGH-B (2): `== not` / `!= not` is E-EQ-002 (§45; E-TYPE-042 retired S305); `===` is refused at parse", () => {
+    const F = `    function look(pw: string) -> string | not {\n        if (pw == "hunter2") return "user"\n        return not\n    }`;
+    expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (look(pw) == not) return "denied"\n        return "welcome"\n    }`))).toEqual(["E-EQ-002"]);
+    expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (not != look(pw)) return "welcome"\n        return "denied"\n    }`))).toEqual(["E-EQ-002"]);
+    expect(codes(LOGIN(F, `    function attempt(pw: string) -> string {\n        if (look(pw) === not) return "denied"\n        return "welcome"\n    }`))).toContain("E-PARSE-STRICT-EQ");
+  });
+  test("MED-C: a bare `return` in a `-> T` function is E-TYPE-043; in a `-> T | not` one it is `not` (accepted)", () => {
+    expect(codes(prog(`    function role(pw: string) -> string {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${role("x")}</p>`))).toEqual(["E-TYPE-043"]);
+    expect(codes(prog(`    function role(pw: string) -> string | not {\n        if (pw == "hunter2") return "user"\n        return\n    }`, `        <p>\${match role("x") { not :> "-", else :> "u", }}</p>`))).toEqual([]);
+  });
+});

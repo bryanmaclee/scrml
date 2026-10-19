@@ -5259,27 +5259,89 @@ ${
     fn fallOffPass(g: Globals, t: Tables) -> Diag[] {
         let out: Diag[] = []
         for (const fs of g.fns) {
-            const r: AType | not = fs.f.ret
             // a function with a parse error inside it is not judged (Rule C: its body is not what was written)
-            if (r is given && fs.info.ret is given && !fs.info.failable && !declaresVoid(r) && !hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span) && !fallsNever(t, fs.f.body)) {
-                const k: ATypeK = r.k
-                const opt: boolean = match k {
-                    .TMaybe(inner: i) :> true
-                    .TName(name: n) :> false
-                    .TSeq(elem: e) :> false
-                }
-                if (tailValue(fs.f.body)) {
-                    // §48.11: a return-typed function returns its tail expression — the bootstrap does not
-                    // (it would discard the value and yield `undefined`), so the form is refused by name
-                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it", fs.info.file, fs.f.span)])
-                } else if (opt) {
-                    out = out.concat([newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + fs.info.name + "` is declared to return a `T | not` but can reach the end of its body without a `return` — whether falling off the end means `not` is not settled in the bootstrap (JS would yield `undefined`, which no scrml value is, §42.5); end every path with a `return`, e.g. `return not`", fs.info.file, fs.f.span)])
-                } else {
-                    out = out.concat([newDiag("E-TYPE-043", "`" + fs.info.name + "` has a declared return type but can reach the end of its body without returning a value — falling off the end returns `not`, which its type does not include (§17.6, §34 E-TYPE-043); end every path with a `return`", fs.info.file, fs.f.span)])
-                }
-            }
+            if (!hasErrIn(fileErrs(g.files, fs.info.file), fs.f.span)) out = out.concat(fallOffDiags(t, fs))
         }
         return out
+    }
+
+    fn fallOffDiags(t: Tables, fs: FnSrc) -> Diag[] {
+        const b: ABlock = fs.f.body
+        const r: AType | not = fs.f.ret
+        const file: string = fs.info.file
+        const n: string = fs.info.name
+        // s469 #1471 delta review HIGH-A — a `!` function has no success-type slot (§19.4.1), but
+        // its SUCCESS value is what `.Ok(v)` / `!{}` / `?` take: when some path returns a value
+        // and another reaches the end, that path's success is JS `undefined`. Refused (fail closed).
+        // One that never returns a value has no success value: its end is not judged.
+        if (fs.info.failable) {
+            if (hasValueReturn(b) && !fallsNever(t, b, false)) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` returns a value on some path but its success path can also reach the end of the body — that success value would be `undefined`, which no scrml value is (§42.5); end every path with `return …` or `fail …`", file, fs.f.span)]
+            return []
+        }
+        // HIGH-B — an UNANNOTATED function that returns a value on some path and can reach the end
+        // on another (a bare `return` there included): the same `undefined`. Refused (fail closed,
+        // newly-rejecting; whether falling off means `not` is pending a ruling).
+        if (r is not) {
+            if (hasValueReturn(b) && !fallsNever(t, b, false)) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` returns a value on some path but can also reach the end of its body (or a bare `return`) — that path's value would be `undefined`, which no scrml value is (§42.5); end every path with `return …` (e.g. `return not`, with the type `-> T | not`)", file, fs.f.span)]
+            return []
+        }
+        if (fs.info.ret is not || declaresVoid(r)) return []
+        const k: ATypeK = r.k
+        const opt: boolean = match k {
+            .TMaybe(inner: i) :> true
+            .TName(name: x) :> false
+            .TSeq(elem: e) :> false
+        }
+        // MED-C — a bare `return` in a `-> T` function returns `not` (it lowers to `null`), which
+        // `T` does not include: §17.6 E-TYPE-043
+        if (!opt && blockHasBareReturn(b)) return [newDiag("E-TYPE-043", "`" + n + "` is declared `-> " + typeText(r) + "` but has a bare `return` — it returns `not`, which `" + typeText(r) + "` does not include (§17.6, §34 E-TYPE-043); return a value, or declare `-> " + typeText(r) + " | not`", file, fs.f.span)]
+        // a bare `return` in a `-> T | not` function is an explicit `not` (it lowers to `null`)
+        if (fallsNever(t, b, opt)) return []
+        if (tailValue(b)) {
+            // §48.11: a return-typed function returns its tail expression — the bootstrap does not
+            // (it would discard the value and yield `undefined`), so the form is refused by name
+            return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` ends in an expression it does not `return` — the implicit tail return (§48.11) is not in the bootstrap; write `return …` before it", file, fs.f.span)]
+        }
+        if (opt) return [newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + n + "` is declared to return a `T | not` but can reach the end of its body without a `return` — whether falling off the end means `not` is not settled in the bootstrap (JS would yield `undefined`, which no scrml value is, §42.5); end every path with a `return`, e.g. `return not`", file, fs.f.span)]
+        return [newDiag("E-TYPE-043", "`" + n + "` has a declared return type but can reach the end of its body without returning a value — falling off the end returns `not`, which its type does not include (§17.6, §34 E-TYPE-043); end every path with a `return`", file, fs.f.span)]
+    }
+
+    fn typeText(r: AType) -> string {
+        const k: ATypeK = r.k
+        return match k {
+            .TName(name: x) :> x
+            .TSeq(elem: e) :> typeText(e) + "[…]"
+            .TMaybe(inner: i) :> typeText(i) + " | not"
+        }
+    }
+
+    // Does `b` hold a `return <value>` anywhere (any depth, arm blocks included)?
+    fn hasValueReturn(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtValueReturn(s)) return true
+        }
+        return false
+    }
+
+    fn stmtValueReturn(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x is given
+            .If(cond: c, thenB: tb, elseB: el) :> blocksValueReturn(allExprBlocks(c)) || hasValueReturn(tb) || blocksValueReturn(thenElse(tb, el))
+            .Given(name: n, subject: x, body: gb) :> blocksValueReturn(allExprBlocks(x)) || hasValueReturn(gb)
+            .Eval(e: x) :> blocksValueReturn(allExprBlocks(x))
+            .Local(name: n, init: x) :> blocksValueReturn(allExprBlocks(x))
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksValueReturn(bs: ABlock[]) -> boolean {
+        for (const b of bs) {
+            if (hasValueReturn(b)) return true
+        }
+        return false
     }
 
     // Does `b` end in a value expression (not a write) — a §48.11 tail return?
@@ -5309,20 +5371,20 @@ ${
     }
 
     // Does every path through `b` leave with a value (or fail)?
-    fn fallsNever(t: Tables, b: ABlock) -> boolean {
+    fn fallsNever(t: Tables, b: ABlock, bareOk: boolean) -> boolean {
         for (const s of b.stmts) {
-            if (stmtLeavesAll(t, s)) return true
+            if (stmtLeavesAll(t, s, bareOk)) return true
         }
         return false
     }
 
-    fn stmtLeavesAll(t: Tables, s: AStmt) -> boolean {
+    fn stmtLeavesAll(t: Tables, s: AStmt, bareOk: boolean) -> boolean {
         const k: AStmtK = s.k
         return match k {
-            .Return(e: x) :> x is given
+            .Return(e: x) :> x is given || bareOk
             .Fail(f: x) :> true
-            .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb) && elseLeavesAll(t, el)
-            .Eval(e: x) :> matchLeavesAll(t, x)
+            .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb, bareOk) && elseLeavesAll(t, el, bareOk)
+            .Eval(e: x) :> matchLeavesAll(t, x, bareOk)
             .Given(name: n) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -5330,13 +5392,13 @@ ${
         }
     }
 
-    fn elseLeavesAll(t: Tables, el: ABlock | not) -> boolean {
+    fn elseLeavesAll(t: Tables, el: ABlock | not, bareOk: boolean) -> boolean {
         if (el is not) return false
-        return fallsNever(t, el)
+        return fallsNever(t, el, bareOk)
     }
 
     // A statement `match` every arm of which leaves, and which takes every value.
-    fn matchLeavesAll(t: Tables, e: AExpr) -> boolean {
+    fn matchLeavesAll(t: Tables, e: AExpr, bareOk: boolean) -> boolean {
         const h: AHandled | not = handledOf(e.k)
         if (h is not) return false
         const arms: AArm[] | not = matchArmsOf(h.how)
@@ -5348,7 +5410,7 @@ ${
         for (const a of arms) {
             const body: AArmBody = a.body
             const leaves: boolean = match body {
-                .ArmBlock(b: b) :> fallsNever(t, b)
+                .ArmBlock(b: b) :> fallsNever(t, b, bareOk)
                 .ArmExpr(e: x) :> false
             }
             if (!leaves) return false
@@ -5656,7 +5718,14 @@ ${
             rl = resolveExpr(env, l, not, st0)
             rr = resolveExpr(env, r, rl.x.ty, rl.st)
         }
-        const st: AS = rr.st
+        let st: AS = rr.st
+        // s469 #1471 delta review: `x == not` / `x != not` is §45 E-EQ-002 (E-TYPE-042 retired
+        // S305 into it) — absence is `x is not` / `x is given`, which test `null` AND `undefined`
+        if ((op == BinOp.Eq || op == BinOp.Ne) && (isNotLit(l) || isNotLit(r))) {
+            let fix: string = "x is not"
+            if (op == BinOp.Ne) fix = "x is given"
+            st = addDiag(st, env.file, e.span, "E-EQ-002", "absence is tested with `is not` / `is given`, not equality against `not` — write `" + fix + "` (§45, §42.2)")
+        }
         const lt: Type | not = rl.x.ty
         let et: Type | not = lt
         if (et is not) et = rr.x.ty

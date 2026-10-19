@@ -95,3 +95,27 @@ Branch `s469-bootstrap-toenum-match` from `origin/s469-bootstrap-parse-arms-unio
   the reviewer's 4th vacuous one, was among them) — they are now UNSUPPORTED, which is the honest
   bucket. Of the report's 32: 6 PASS, 26 UNSUPPORTED (no FAIL).
 - **Next wall added:** §48.11 implicit tail return (a return-typed function's tail expression).
+
+## #1471 delta review (verdict FIX) — the rest of the fall-off class
+
+- [x] **HIGH-A** — `fallOffPass` now judges a `!` function: one that returns a value on some path
+  and can reach the end on another (its success value would be `undefined`) is
+  E-BOOTSTRAP-UNSUPPORTED. One that never returns a value has no success value — not judged.
+- [x] **HIGH-B (1)** — an UNANNOTATED function that returns a value on some path and can reach the
+  end (or a bare `return`) on another: E-BOOTSTRAP-UNSUPPORTED (newly-rejecting; the fall-off ruling
+  is still pending with bryan). One with no value return (a procedure) is not judged.
+- [x] **HIGH-B (2)** — `x == not` / `x != not` (either side) is **E-EQ-002** (§45). E-TYPE-042 is the
+  code §42.6/§42.7 still name, but the §34 catalogue RETIRED it (S305) into E-EQ-002 (`== not`) and
+  E-EQ-004 (`=== not`); the bootstrap already refuses `===` at parse (E-PARSE-STRICT-EQ), so `=== not`
+  is covered there. The bootstrap's own tests used `x != not` as a presence test (S440-era); they now
+  say `x is given` / `x is not` (typer-s440, typer-s462-narrowing, defer, error-model).
+- [x] **MED-C** — a bare `return` in a `-> T` function (T not `| not`) is E-TYPE-043 (§17.6). In a
+  `-> T | not` function a bare `return` is an explicit `not` and closes the path.
+- [x] **LOW (runner)** — `scripts/bootstrap-conformance.ts` keeps an `undefined` cell as a distinct
+  sentinel string instead of mapping it to `null`.
+- [x] Tests: `match-s469.test.js` (delta describe, 6 tests, runtime for the `fail` fixes);
+  `security/{falloff-failable,falloff-unannotated,eq-not,bare-return}` refused,
+  `security/failable-fails` runtime; server family `s5` +5 shapes (4 REFUSED, `failableFails` PASS).
+  Old pins: typer-s462 rule-7 "does not return on every path" and error-rulings r2 MED-2 now also
+  carry the callee's fall-off refusal.
+- Conformance unchanged: PASS 217 (14 vacuous).

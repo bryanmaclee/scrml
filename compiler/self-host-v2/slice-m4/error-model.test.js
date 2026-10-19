@@ -349,7 +349,7 @@ describe("§19.8 — `SqlError` and the R11 rule (codes + Core; the printer refu
     expect(msg(src, "E-ERROR-010")).toContain("QueryFailed");
   });
   test("handled at the site, a query needs no compatible enum", () => {
-    expect(codes(PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q} !{ _ :> not }\n        if (r == not) fail .NotFound("x")\n        return r\n    }`))).toEqual([]);
+    expect(codes(PDB(`    type UserError:enum = { NotFound(id: string) }\n    function f()! UserError {\n        const r = ${Q} !{ _ :> not }\n        if (r is not) fail .NotFound("x")\n        return r\n    }`))).toEqual([]);
   });
   test("the lowered implicit propagation: an Attempt over the query, one re-fail arm per SqlError variant", () => {
     const r = run(PDB(`    function f()! SqlError {\n        ${SQ}\`DELETE FROM t\`}.run()\n    }`));

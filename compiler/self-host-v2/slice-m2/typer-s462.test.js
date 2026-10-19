@@ -103,11 +103,15 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
     ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1 } else { return \"x\" } }\n    <r=(k(true))/>"],
     ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\"\n return x } else { return 1 } }\n    <r=(g(1))/>"],
     ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1) } else { return 0 } }\n    <r=(rec(2))/>"],
-    ["a call that does not return on every path", "function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>"],
     ["a ternary with arms of two kinds", "<r=(@f ? 1 : \"x\")/>"],
   ]) {
     test(label, () => { expect(codes(S + "    " + decl)).toContain("E-DECL-TYPE-NOT-INFERABLE"); });
   }
+  // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
+  // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
+  test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
     expect(typeOf("    <r=(!0)/>", "r").trusted).toBe(false);

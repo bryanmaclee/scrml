@@ -97,6 +97,12 @@ const REVIEW_EXPECT = {
   "s5/retStmt": ["PASS"],
   "s5/retString": ["PASS"],
   "s5/retEnum": ["PASS"],
+  // #1471 delta review: every fall-off shape refused; `fail` on the wrong path PASSes
+  "s5/failableFallOff": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/failableFails": ["PASS"],
+  "s5/unannotatedFallOff": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "s5/eqNot": ["REFUSED", ["E-EQ-002"]],
+  "s5/bareReturn": ["REFUSED", ["E-TYPE-043"]],
 };
 
 async function classify(s) {
