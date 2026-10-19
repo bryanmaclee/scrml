@@ -18,6 +18,8 @@ Every scrml block in this README (except the one section marked otherwise) is a 
 
 Here is a small app you can actually run: a task list that saves to SQLite, stays in sync across every open browser tab, and drives its status line with a state machine. It is one file, [`docs/readme-snippets/tasks.scrml`](./docs/readme-snippets/tasks.scrml). Below it comes in four pieces. After each piece: **what the compiler did that you never wrote.**
 
+> **This app is written in the shipping compiler's spelling, not the language's.** The shipping compiler (impl#1) is frozen, and the language has moved on. The cell declarations here (`<tasks>: Task[] = []`, `<filter>: Filter = .All`, `const <visible> = …`), the `<engine>` element and the newline-ended statements are all retired forms. Read this section for what the compiler writes for you. Learn the spelling from [Where the language is going](#where-the-language-is-going).
+
 ### 1 — the data and the server
 
 <!-- snippet: docs/readme-snippets/tasks.scrml#L10-L48 -->
@@ -94,6 +96,8 @@ const <left> = @tasks.filter(isActive).length
 ```
 
 `<tasks>: Task[] = []` declares a reactive cell, and `@tasks` reads or writes it. Because it sits inside `<channel>`, every write reaches every open tab. The compiler emitted the WebSocket route and the client that keeps the copies in step; you wrote a list.
+
+> **Before-picture: this tape cell is not scrml.** `<tasks>: Task[] = []` is a legacy tape cell with no grants, and the shipping compiler lets anything write it: a spread-rebuild, a `map` written back, a wipe. scrml has no unconstrained tapes, so in the language this line is an error, `E-DECL-LEGACY-RHS`, with no deprecation window (SPEC §66.12.4, S469). The ruled spelling names every write the app makes in the tape's type. Appending a row is `append`, replacing a row by `map` writes a position (`writable`), and `load()` replaces the whole tape (`replace`): `<tasks:Task[free, append, writable, replace]=[]/>`. `append` is one of the six grow/shrink tokens ruled at S442; `free`, `writable`, `replace` and the bracket-list form are still ⚑ O10. The bootstrap compiles that declaration with those three writes at program level. It does not have `<channel>` yet.
 
 `<newTask req length(>=1)> = <input …/>` is a cell bound to an input. The validators become `required minlength="1"` on the emitted `<input>`, so the browser won't submit an empty task.
 
@@ -193,7 +197,7 @@ You wrote a schema, three database functions, some state, three handlers and a s
 
 ## Why scrml
 
-**State is the declaration primitive.** `<count> = 0` declares a reactive cell; `@count` reads or writes it. Compound, derived (`const <total> = expr`), input-bound and validated cells are the same primitive with different attributes. The compiler tracks the dependency graph and updates the DOM on change.
+**State is the declaration primitive.** `let <count:int=0/>` declares a writable reactive cell; `@count` reads or writes it. (The shipping compiler spells it `<count> = 0`, a retired form; see [item 1 below](#where-the-language-is-going).) Compound, derived (`<total:int=(@a + @b)/>`, a locked declaration whose initializer reads cells), input-bound and validated cells are the same primitive with different attributes. The compiler tracks the dependency graph and updates the DOM on change.
 
 **Engines are the centerpiece.** When state goes from "a few booleans" to "this app has phases," you promote it up a [tier ladder](docs/readme/tier-ladder.md) without rewriting the markup tree: `if=` chains, then `<match for=Type>`, then `<engine for=Type>`. The engine declares the legal transitions, runs effects, and refuses to compile while any variant lacks a UI block.
 
@@ -209,7 +213,7 @@ You wrote a schema, three database functions, some state, three handlers and a s
 
 ## Where the language is going
 
-> **Specified, not yet in the shipping compiler.** Everything on the *specified* side below is normative in [`compiler/SPEC.md` §66](compiler/SPEC.md) or in a recorded design ruling, and **none of it compiles today.** It is being built in the bootstrap compiler, [`compiler/self-host-v2/`](compiler/self-host-v2/), which is written in scrml and is still early. The *today* side of each pair is a gated file that compiles now. When the bootstrap is done, the *today* forms go through a deprecation window: they keep compiling, with a warning that names the new form (SPEC §66.21).
+> **Specified, not yet in the shipping compiler.** Everything on the *specified* side below is normative in [`compiler/SPEC.md` §66](compiler/SPEC.md) or in a recorded design ruling, and **none of it compiles on the shipping compiler.** It is being built in the bootstrap compiler, [`compiler/self-host-v2/`](compiler/self-host-v2/), which is written in scrml and is still early; part of it already compiles there ([try it](#write-it-today-the-bootstrap-compiler)). The *today* side of each pair is a gated file that compiles now. When the bootstrap is done, most *today* forms go through a deprecation window: they keep compiling, with a warning that names the new form (SPEC §66.21). **A cell holding a tape gets no window.** No tape in scrml is unconstrained, so `<audit>: Entry[] = []` and every other legacy tape cell is an error, `E-DECL-LEGACY-RHS`, at once (SPEC §66.12.4, §66.21, S469). Legacy cells holding a scalar or a struct keep the window, with the warning `W-DECL-LEGACY-RHS`. They stay writable until the struct-contract work lands; then the struct cells lose the window too (⚑ O62, ruled "yes, eventually").
 
 The upgrade in one sentence: a declaration becomes a thing in the tree with typed attributes, a `renders` and instances, and **data is locked unless its type grants the write.**
 
@@ -227,12 +231,14 @@ const <doubled> = @count * 2
 Specified:
 
 ```scrml
-<let count:int=0/>                          // writable: `let` is the replace grant on a scalar (§66.9)
+let <count:int=0/>                          // writable: `let`, before the `<`, is the replace grant on a scalar (§66.9, §66.2.5)
 <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
 <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
+
+function bump() { @count = @count + @step; }   // `;` ends every statement (dpa-073, S469)
 ```
 
-`let` is the only thing that makes a cell writable. A write to `@step` becomes `E-WRITE-NOT-GRANTED`, and `const <x>` retires: a derived cell is just a locked declaration whose initializer reads other cells.
+On a scalar cell, `let` is the only thing that makes it writable. (A tape's writes are granted by its type instead; see item 4.) A write to `@step` becomes `E-WRITE-NOT-GRANTED`, and `const <x>` retires: a derived cell is just a locked declaration whose initializer reads other cells. Words that say what kind of thing a declaration is, `let` and `export`, go before the `<`, in JavaScript's order (`export let <mode:Mode=.Light/>`). Inside the opener stand only the name, the type, the value, typed attributes and flags (SPEC §66.2.5, S447). The earlier spelling `<let count:int=0/>` is refused with `E-DECL-LET-IN-OPENER`. Declarations end at their own `/>` or `</>` and take no `;` (§66.2.1). Statements inside a function body take one.
 
 **2. Engines become `single` declarations** (SPEC §66.19.6)
 
@@ -282,18 +288,21 @@ const Swatch = <span class="chip" props={ label: string, hex: string }>
 Specified:
 
 ```scrml
-export <swatch let label:string="Brand" let hex:string=@brand/>   // `let` + reactive initializer = SEEDED (§66.9)
+export <swatch:struct>                                         // writable fields are CHILD declarations (§66.4 rule 6, S447)
+    let <label:string="Brand"/>
+    let <hex:string=@brand/>                                   // `let` + reactive initializer = SEEDED (§66.9)
+</>
 renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
 
 export <accent:swatch label="Accent" hex=@brand/>              // named shared instances (§66.8.2) (a declaration per the #16 ruling, §66.2.2)
 export <warn:swatch label="Warn" hex="#FF6600"/>
 ```
 
-A component is a declaration with typed attributes and a `renders`. A plain `<swatch label="Danger" hex=@danger/>` makes a fresh instance; `<*accent/>` renders the one named shared instance, wherever it is used.
+A component is a declaration with typed attributes and a `renders`. An attribute is always locked data, so a field the component writes is a child declaration with `let` before its `<`. The opener then says `:struct`, because no typed attribute is left in it (SPEC §66.19.4, S447). The earlier one-line spelling `<swatch let label:… let hex:…/>` is refused with `E-DECL-LET-IN-OPENER`. A plain `<swatch label="Danger" hex=@danger/>` makes a fresh instance; `<*accent/>` renders the one named shared instance, wherever it is used.
 
-**4. Sequences carry their permissions** (SPEC §66.19.5, §66.12; grant spelling ruled at S442)
+**4. Tapes carry their permissions** (SPEC §66.19.5, §66.12; grant tokens ruled at S442, bracket form ⚑ O10)
 
-Today ([file](./docs/readme-snippets/today-log.scrml)), nothing stops an audit log from being wiped:
+scrml has one sequence kind, the **tape**, and no JavaScript-style arrays. Today ([file](./docs/readme-snippets/today-log.scrml)), the shipping compiler treats `<audit>: Entry[] = []` as an unconstrained legacy cell, so nothing stops the audit log from being wiped. In the language that line is `E-DECL-LEGACY-RHS` (§66.12.4):
 
 <!-- snippet: docs/readme-snippets/today-log.scrml#L6-L14 -->
 ```scrml
@@ -311,16 +320,25 @@ function wipe() { @audit = [] }
 Specified:
 
 ```scrml
-<audit:Entry[free, append]=[]/>
+<audit:Entry[free, append]=[]/>                  // free length, grows at the end only, no replace
+
+function record(action: string) {
+    @audit.append({ at: Date.now(), actor: @actor, action: action }); // end-append: granted
+}
 ```
 
 ```scrml
-// @audit = []                                   → E-WRITE-NOT-GRANTED (a replace; the type grants none)
-// @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
-// @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (positions read-only; Entry.action is fixed)
+// @audit.push(e);                               → E-TAPE-JS-METHOD (JS names are refused; write `@audit.append(e)`)
+// @audit = [];                                  → E-WRITE-NOT-GRANTED (a replace; the type grants none)
+// @audit.shift();                               → E-WRITE-NOT-GRANTED (shrinks at the front)
+// @audit[0].action = "edited";                  → E-WRITE-NOT-GRANTED (a field edit of `action`, and Entry.action is fixed)
 ```
 
-The type grants the log free length and growth at the end, and nothing else. `wipe()` stops compiling, and no statement anywhere in the program can remove or rewrite an entry. (SPEC §66.19.5 spells the grant `[free, end]`; the S442 ruling split growing from shrinking, so an append-only log is `Entry[free, append]` and a stack is `Frame[free, append, pop]`. The one sequence kind has been named `tape`.)
+The type grants the log free length and growth at the end, and nothing else. `wipe()` stops compiling, and no statement anywhere in the program can remove or rewrite an entry. An entry can't be rewritten because `Entry`'s fields carry no contract, so they are fixed (S440 dpa-052 Q3). A stack grants both halves at the end: `Frame[free, append, pop]`.
+
+**Tape methods are named after their grants** (SPEC §66.12.6, S469). `.append(x)` / `.pop()` work at the end, `.prepend(x)` / `.shift()` at the front, and `.insert(i, x)` / `.remove(i)` anywhere, each only when the type grants it. Reading `Entry[free, append]` tells you that `.append` is the one method that works. JavaScript's `push`, `unshift` and `splice` are refused, with a fix-it naming the scrml method. `sort`, `reverse`, `fill` and `copyWithin` don't mutate: each returns a new tape, so `@xs = @xs.sort();` is a position write, granted by `writable`.
+
+**No position escapes the grants** (SPEC §66.12.6, S469). A tape is immutable unless its type grants the write, wherever it is held: a cell, a struct field, a tuple position, a local, a parameter or a return value. Inference never invents a grant, so `let xs = []` is immutable. To mutate a local, write its grants in its type: `let out: Item[free, append] = [];`. `let` on a local only makes the name rebindable and grants the tape nothing, not even a replace. A tape that arrives from host JS carries no grants until you give it a tape type, and a tape you hand to host JS crosses as a frozen view or a copy, so host code can't write it behind its grants. Spread-rebuild (`@audit = [...@audit, e];`), a `filter` written back, a whole-struct write that replaces a tape field, index writes and `length =` are all classified as edits and checked against the same grants. No spelling gets a write the type refuses.
 
 **5. Operators take numbers, conditions take booleans** (S440 / S442 rulings)
 
@@ -338,6 +356,19 @@ const <total> = @count + "1"
 ```
 
 Ruled: *"arithmetic and relational operators take NUMBERS only; `+` takes two numbers or two strings"*, *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*, and *"a `T | not` operand must be narrowed before `+`, arithmetic, comparison, or use in a template."* A `T | not` value is not a `T` until it has been narrowed, for every type. Both `+` lines above become errors wherever the types are provable. `if=@count` on a number goes the same way: a condition takes a boolean or a presence test.
+
+### Write it today: the bootstrap compiler
+
+The bootstrap compiler speaks the **ruled** language above, not the shipping compiler's. It compiles §66 declarations (`let` / locked / derived), tapes with explicit grants, `single` engines, components with `renders`, and the operator and condition rules. It refuses an ungranted tape write with `E-WRITE-NOT-GRANTED`. A form it does not build yet is refused with `E-BOOTSTRAP-UNSUPPORTED`; it is never silently accepted. Not in yet: `match` on a plain value, comma arm lists, loops, editing a local tape, `<channel>`, a `${…}` inside a quoted attribute (item 3's `style="…"`; write `style=(…)`), rendering a named shared instance (`<*accent/>`), and most method calls. Run it from a clone:
+
+```bash
+bun run boot:compile app.scrml              # → dist/app/ : index.html, program.client.js, scrml-runtime.js
+bun run boot:compile app.scrml -o out/      # choose the output directory
+bun run boot:dev app.scrml                  # compile, serve on http://127.0.0.1:3000/, recompile + reload on save
+bun scripts/scrml-boot.ts --help            # the same commands, called directly (scrml-boot)
+```
+
+Diagnostics print as `error [CODE]: message` with `--> file:line:col`, and the exit status is 1 on any error. `--format line` prints `file:line:col: error [CODE]: message`, one line each, for an editor's quickfix list. The page loads ES modules, so open it over http (`boot:dev`), not as a `file://`. The first run builds the bootstrap with the shipping compiler (~10 s), and later runs load it from a cache in `~/.cache/scrml/boot-bundle/` (~0.2 s). The cache rebuilds whenever `compiler/self-host-v2/` or `compiler/src/` changes. The first acceptance programs are in [`compiler/self-host-v2/slice-m4/src/acceptance/`](compiler/self-host-v2/slice-m4/src/acceptance/).
 
 ---
 

@@ -1,0 +1,29 @@
+{
+  "id": "acceptance-guess-a-guess-no",
+  "description": "program (a) — typing `No` shows \"nope\" and the second line.",
+  "language-version": "1.0",
+  "spec": "§14.4.1 · §18",
+  "rationale": "today-scrml-distance-2026-10-18 §3 (a), with the `not` arm's value `\"length \" + @inputVal.length` replaced: under the S440 operator rule (Gotcha Q1) `string + int` is E-OPERATOR-OPERAND-TYPE (see guess/a-guess-verbatim), and the bootstrap has no explicit int→string conversion yet, so the length is shown on its own line.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "input": "input",
+        "value": "No"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#say",
+        "text": "nope"
+      },
+      {
+        "selector": "#real",
+        "count": 1
+      }
+    ]
+  }
+}

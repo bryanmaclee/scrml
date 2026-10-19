@@ -95,11 +95,18 @@ ${
     // E-MATCH-BARE-BINDER); `PBare` — a bare identifier as the WHOLE pattern
     // (`err :>`, §18.2 E-MATCH-BARE-BINDER). Both are syntax: whether the arm is
     // legal (a failable site or not) is analyze's.
+    // s469 — the §18 plain-value `match` patterns: `PNot`, the absence arm
+    // `not :>` (§18.2 "`not` is the absence arm (§42)", §42.2.3); `PLit`, a
+    // literal arm (§18.16) — `e` is the literal as written (a Str, a Num —
+    // `-1` folded into its raw text — or a Bool). Whether either is legal for
+    // the subject's type is analyze's.
     export type APat:enum = {
-        PName(name: string, binds: ABind[], parens: boolean),
+        PName(name: string, binds: ABind[], parens: boolean, qual: string),   // s469: `qual` — the `E` of a qualified `E.V` / `E::V` (§18.13), "" bare
         PWild,
         PWhole(bind: ABind, viaElse: boolean),
         PBare(bind: ABind),
+        PNot,
+        PLit(e: AExpr),
     }
     // A binder: a name, or `_` (binds nothing).
     export type ABind:struct = { nid: int, span: ASpan, name: string }

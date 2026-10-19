@@ -859,6 +859,7 @@ export const DEFER_BINDER_FIELDS: readonly BinderField[] = [
   { kind: "match-arm-block", path: "payloadBindings", scope: "subtree" },
   { kind: "match-arm-inline", path: "binding", scope: "subtree" },
   { kind: "match-arm-inline", path: "productPatterns", scope: "subtree", text: true },
+  { kind: "match-arm-block", path: "productPatterns", scope: "subtree", text: true }, // S469 r5: a §18.19 product BLOCK arm
   { kind: "guarded-expr", path: "arms[].binding", scope: "subtree" },
   { kind: "error-effect", path: "arms[].binding", scope: "subtree" },
   { kind: "endpoint-decl", path: "arms[].payloadBindingsRaw", scope: "subtree", text: true },

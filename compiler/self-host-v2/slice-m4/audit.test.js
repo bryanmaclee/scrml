@@ -164,7 +164,7 @@ describe("§66.19.5 — behaviour: the recognized shapes keep element order", ()
 // the VERBATIM program.
 // ---------------------------------------------------------------------------
 const NEGATIVE = [
-  { marker: "@audit = []  ", body: "@audit = []" },
+  { marker: "@audit = [];", body: "@audit = []" },
   { marker: "reset(@audit)", body: "reset(@audit)" },
   { marker: "@audit.shift()", body: "@audit.shift()" },
   { marker: "@audit = @audit.filter(", body: "@audit = @audit.filter(e => e.actor != \"x\")" },
@@ -172,10 +172,28 @@ const NEGATIVE = [
   { marker: "@audit.pop()", body: "@audit.pop()" }, // S442: `[free, append]` grants no shrink
 ];
 
+// s469-tape-followups (#1472): the S469 §66.19.5 rewrite added negative lines the bootstrap cannot check yet
+// (S469 "tape methods are named after their grants", §66.12.6 rule 3). Each is pinned at what the bootstrap
+// does TODAY; owed follow-up: the allowlist rename (analyze.scrml) + E-TAPE-JS-METHOD, then move each into
+// NEGATIVE with its SPEC code.
+const PENDING = [
+  // SPEC: E-TAPE-JS-METHOD. Today: accepted (the allowlist still knows `push`).
+  { marker: "@audit.push(e);", body: "@audit.push({ at: 1, actor: \"a\", action: \"b\" })", today: [] },
+  // SPEC: E-WRITE-NOT-GRANTED (shrink anywhere). Today: `.remove` is not in the allowlist.
+  { marker: "@audit.remove(0)", body: "@audit.remove(0)", today: ["E-BOOTSTRAP-UNSUPPORTED"] },
+  // SPEC: E-WRITE-NOT-GRANTED (a position write). Today: `.reverse` is unsupported, and the write-back reads as a replace.
+  { marker: "@audit = @audit.reverse()", body: "@audit = @audit.reverse()", today: ["E-BOOTSTRAP-UNSUPPORTED", "E-WRITE-NOT-GRANTED"] },
+];
+// The second line of the `appended` comment (its `→ E-WRITE-NOT-GRANTED` is about an uncertifiable helper).
+const PROSE = ["an uncertifiable helper's result is a replace"];
+
 describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
   test("the table covers every `→ E-…` line, and each names E-WRITE-NOT-GRANTED", () => {
     const lines = negativeLines(SRC());
-    expect(lines.length).toBe(NEGATIVE.length);
+    expect(lines.length).toBe(NEGATIVE.length + PENDING.length + PROSE.length);
+    for (const n of [...PENDING, ...PROSE.map((marker) => ({ marker }))]) {
+      expect(lines.filter((l) => l.includes(n.marker)).length).toBe(1);
+    }
     for (const n of NEGATIVE) {
       const hit = lines.filter((l) => l.includes(n.marker));
       expect(hit.length).toBe(1);
@@ -187,6 +205,13 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
     test(`${n.body} → E-WRITE-NOT-GRANTED`, () => {
       const src = replaceLine(SRC(), n.marker, `function neg${i}() { ${n.body} }`);
       expect(codes(src)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    });
+  });
+
+  PENDING.forEach((n, i) => {
+    test(`pending the allowlist rename — ${n.body} → today ${JSON.stringify(n.today)}`, () => {
+      const src = replaceLine(SRC(), n.marker, `function pend${i}() { ${n.body} }`);
+      expect(codes(src)).toEqual(n.today);
     });
   });
 

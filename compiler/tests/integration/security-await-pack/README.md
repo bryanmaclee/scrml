@@ -11,7 +11,7 @@ server does not await it, `if (!check(pass, hash))` tests a Promise and the wron
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8; `x1` the S239 review of r8; `r9` written by fix round 9; `y1`–`y3` the S467 review of r9; `z1`–`z4` the S467 review of r10). 640 shapes. Data only. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewers' scratch dirs (`s1`–`s14`, `pa-verify` from r5; `n1`–`n8` r6; `m1`–`m4` r7; `m5`–`m7` r8; `x1` the S239 review of r8; `r9` written by fix round 9; `y1`–`y3` the S467 review of r9; `z1`–`z4` the S467 review of r10; `la1`–`la5` the S468 literal-arm families — the S468 review of #1446 plus the shapes the fix swept, the S239 review of the fix, `la3` its re-review, `la4` the S469 ruling on `{ ok }`, `la5` filed raw-match holes). 904 shapes. Data only. |
 | `pack.js` | compile → load `app.server.js` → POST the `f` route with the wrong and the right password → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that accept a wrong password on main, each naming its gap) and `UNJUDGED` (shapes this instrument cannot judge) |
 | `await-probe-pack.test.js` | the gate: one test per shape |
@@ -30,7 +30,7 @@ defects that happen to refuse (`E-CODEGEN-INVALID-LOGIC`, …); the detail colum
 - a shape not in `KNOWN_FAIL` answers a wrong password WELCOME;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 640 shapes; a list entry names no shape;
+- the corpus stops holding exactly 904 shapes; a list entry names no shape;
 - the pinned hash stops verifying under `scrml:auth`'s `verifyPassword`.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
@@ -40,6 +40,38 @@ S467 round 10 (dpa-023 F4, SPEC §13.9.6): a waiting function may be bound only 
 declaration, so every shape that binds one with `const` / `let` / `export const` — accepted and
 run by rounds 6–9, which coloured the binding — is now `PASS-REFUSED`
 (`E-ASYNC-FN-ESCAPES-AS-VALUE`). That is the ruled migration, not a regression; the shapes stay.
+
+S468 (family `la1`, gap `g-literal-arm-block-body-unparsed-s468`): a `match` arm with a literal /
+alternation / `_` / `::V` head used to be kept by the parser as arm TEXT, so no analysis read its
+body — `1 :> { const g = check … }` and `1 :> drive(check, …)` went unrefused and a wrong password got
+in (29 of the 55 shapes FAIL on bbddfd7b9). The parser now reads those arms like every other arm kind;
+on the fix every `la1` shape is `PASS` or `PASS-REFUSED`. Family `la2` is the S239 review of that fix
+(101 shapes): object-literal block arms storing an async function, multi-scrutinee `_ :> { … }` block
+arms whose body was dropped, comments inside arm heads, and heads the compiler cannot classify (now
+E-PARSE-001). On fix round 1: 0 `la2` shapes FAIL (one `PASS-DENY`, `cpsMsWild`, whose CPS response this
+instrument cannot read as WELCOME/REJECTED — the wrong password returns REJECTED).
+Family `la3` (27 shapes) is the S469 re-review of fix round 1: a one-statement BLOCK arm `{ ok; }`
+read as the shorthand OBJECT `{ ok: ok }` (truthy), so `if (!allowed)` never fired — 21 FAIL on
+435d55cd4, 3 FAIL on main (`return` position, the text-carried arm). On fix round 2 (object-vs-block
+decided from the arm's tokens; a top-level `;` = a block): 26 PASS, 1 PASS-REFUSED (`semiWild`, a
+wildcard-only declaration match, refused on main too — gap `g-expr-position-wildcard-only-match-malformed-s469`).
+Family `la4` (50 shapes) pins the S469 ruling: a brace arm body that is exactly one bare shorthand
+name, `{ ok }` (no `;`), is E-MATCH-ARM-SHORTHAND-AMBIGUOUS (§18.5) — read as the object `{ ok: ok }`
+it is truthy and let a wrong password in. Twelve head forms in `const` / `let` / `return` / argument
+position, plus a statement match and a lambda-body match: every shape is `PASS-REFUSED`. S469 r4 adds
+nine §18.19 PRODUCT-arm shapes (`(1, 2) :> { ok }` kept its body as text and let a wrong password in,
+on main too): seven refused, `{ ok; }` and a keyed object REJECT.
+Family `la5` (4 shapes) records holes FILED, not fixed, in #1450 — a `match` inside a larger expression
+lowers to a synchronous value IIFE: a client server-call arm is not awaited
+(`g-match-value-position-server-call-no-autoawait`) and a `!` call in a raw object arm gets no
+E-ERROR-002 (`g-raw-match-arm-object-failable-call-unhandled-s469`). The three client shapes are listed
+in `UNJUDGED` (known holes the server-route instrument cannot judge); the server one is refused, as
+E-CODEGEN-INVALID-LOGIC. S469 r5 adds 18 §18.19 product-BLOCK shapes (`prodBlk*`): a `!` call in a
+product block was not E-ERROR-002 on r4 (the block rode a field the walk never visited) — all nine
+`prodBlkFailable*` are now refused with E-ERROR-002; alias / object-store / HOF are refused
+(E-ASYNC-FN-ESCAPES-AS-VALUE), a cell read is E-REACTIVE-003, a server call REJECTS; the
+same-file failable-peer helper shapes are PASS-500 (gap `g-server-match-arm-same-file-peer-call-not-defined-s465`,
+residual) and the nested-match tail is PASS-DENY (gap `g-match-as-block-tail-yields-undefined-s469`).
 
 ## Running
 

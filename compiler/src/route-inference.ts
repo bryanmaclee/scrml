@@ -95,6 +95,7 @@ import { rewriteCodeSegments } from "./codegen/code-segments.ts";
 import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDeep, type IdentityNameResolution } from "./free-name.ts";
 import { bindingsOfFile, bindingsOfName, type Binding } from "./binding-provenance.ts";
+import { buildIdentityFlow, type IdentityFlow } from "./identity-flow.ts";
 import { toPosix } from "./path-canonical.js";
 import { handledSqlGuardInner } from "./codegen/sql-attempt.ts";
 import { planBatchCellReturn, splitBatchesWithReturnCells, statementCanEndFunction } from "./codegen/cps-cell-writes.ts";
@@ -4382,10 +4383,20 @@ const MUTATING_OBJECT_STATICS = new Set(["assign", "defineProperty", "defineProp
  * `if (!@ok) { alert("wrong"); blk = true }`: `blk` was never marked server-derived,
  * so a later batch read it from the request (`_scrml_body["blk"]`) and trusted it.
  */
-function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
+function localsWrittenBy(
+  stmt: unknown,
+  mutations = true,
+  cells = false,
+  callArgWritten: ((call: unknown, index: number) => boolean | null) | null = null,
+): Set<string> {
   const out = new Set<string>();
   const seen = new WeakSet<object>();
-  const add = (n: unknown) => { if (typeof n === "string" && n && !n.startsWith("@") && !RAW_NON_NAMES.has(n)) out.add(n); };
+  // s468 — `cells`: report the cells (`@x`) the same routes write too — the identity
+  // follower's writers (identity-flow.ts): `Object.assign(@o, …)`, `f(@o)`, `@o.k = v`.
+  const add = (n: unknown) => { if (typeof n === "string" && n && n !== "@" && (cells || !n.startsWith("@")) && !RAW_NON_NAMES.has(n)) out.add(n); };
+  // A name in raw text; with `cells`, an `@x` too (the `@` is part of the match, so the
+  // look-behind that keeps `x` of `@x` out of a plain-name match still holds).
+  const NM = cells ? "@?[A-Za-z_$][\\w$]*" : "[A-Za-z_$][\\w$]*";
   const rootOf = (t: any): string | null => {
     let cur = t;
     while (cur && (cur.kind === "member" || cur.kind === "index") && cur.object) cur = cur.object;
@@ -4407,17 +4418,17 @@ function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
   };
   const addIdsInText = (raw: string): void => {
     const t = blankLiteralTextInSource(raw) ?? raw;
-    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?![\w$])(?!\s*:(?!:))/g)) add(m[1]);
+    for (const m of t.matchAll(new RegExp(`(?<![\\w$.@#])(${NM})(?![\\w$])(?!\\s*:(?!:))`, "g"))) add(m[1]);
   };
   const scanText = (raw: string): void => {
     const t = blankLiteralTextInSource(raw) ?? raw;
-    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*(?:\.\s*[\w$]+|\[[^\]]*\]))*\s*(?:\*\*|<<|>>>?|\?\?|&&|\|\||[-+*/%&|^])?=(?![=>])/g)) add(m[1]);
-    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)\s*(?:\+\+|--)/g)) add(m[1]);
-    for (const m of t.matchAll(/(?:\+\+|--)\s*([A-Za-z_$][\w$]*)/g)) add(m[1]);
+    for (const m of t.matchAll(new RegExp(`(?<![\\w$.@#])(${NM})(?:\\s*(?:\\.\\s*[\\w$]+|\\[[^\\]]*\\]))*\\s*(?:\\*\\*|<<|>>>?|\\?\\?|&&|\\|\\||[-+*/%&|^])?=(?![=>])`, "g"))) add(m[1]);
+    for (const m of t.matchAll(new RegExp(`(?<![\\w$.@#])(${NM})\\s*(?:\\+\\+|--)`, "g"))) add(m[1]);
+    for (const m of t.matchAll(new RegExp(`(?:\\+\\+|--)\\s*(${NM})`, "g"))) add(m[1]);
     for (const m of t.matchAll(/([[{][^=;]*[\]}])\s*=(?![=>])/g)) addIdsInText(m[1]);
     for (const m of t.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
     if (!mutations) return;
-    for (const m of t.matchAll(/(?<![\w$.@#])([A-Za-z_$][\w$]*)(?:\s*\.\s*[\w$]+)*\s*\.\s*([\w$]+)\s*\(/g)) {
+    for (const m of t.matchAll(new RegExp(`(?<![\\w$.@#])(${NM})(?:\\s*\\.\\s*[\\w$]+)*\\s*\\.\\s*([\\w$]+)\\s*\\(`, "g"))) {
       if (!NON_MUTATING_METHODS.has(m[2]) && !NON_MUTATING_CALLEE_ROOTS.has(m[1])) add(m[1]);
     }
     // a call to anything but a known non-mutating global may mutate what it is passed
@@ -4464,7 +4475,14 @@ function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
           addIdsIn(args);
         }
       } else if (c.kind === "ident") {
-        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) addIdsIn(args);
+        if (!NON_MUTATING_CALLEE_ROOTS.has(c.name)) {
+          // s468 fix round 1 (F2) — with a per-argument answer, a call of a function
+          // of this compilation writes an argument only when the callee mutates
+          // that parameter; `null` (an unknown callee) keeps "may write".
+          args.forEach((a: unknown, i: number) => {
+            if (!callArgWritten || callArgWritten(o, i) !== false) addIdsIn(a);
+          });
+        }
       } else {
         addIdsIn(args);
       }
@@ -4484,6 +4502,43 @@ function localsWrittenBy(stmt: unknown, mutations = true): Set<string> {
   };
   walk(stmt);
   return out;
+}
+
+/** s468 (E-ARG-SERVER-IDENTITY) — the parameters of a block-bodied arrow the parser keeps as raw text. */
+function rawArrowParamNames(node: unknown): string[] {
+  const n = node as any;
+  if (!n || n.kind !== "escape-hatch" || !Array.isArray(n.params)) return [];
+  return n.params
+    .map((p: any) => (typeof p === "string" ? p : p?.name))
+    .filter((s: unknown): s is string => typeof s === "string" && /^[A-Za-z_$][\w$]*$/.test(s));
+}
+
+/** s468 — the nearest node (from `node`, else `fallback`) whose span carries a real line/col. */
+function identityArgAnchor(flow: IdentityFlow, node: unknown, fallback: unknown): Span | null {
+  const real = (sp: any): boolean => !!sp && typeof sp.line === "number" && typeof sp.col === "number" && !(sp.line === 1 && sp.col === 1);
+  for (const start of [node, fallback]) {
+    for (let n = start as any; n && typeof n === "object"; n = flow.parentOf(n)) if (real(n.span)) return n.span as Span;
+  }
+  return null;
+}
+
+/** s468 — a parameter's name for a diagnostic (`uid` of `uid: string`), or null. */
+function identityParamLabel(p: unknown): string | null {
+  const raw = typeof p === "string" ? p : (p && typeof p === "object" ? (p as any).name : null);
+  if (typeof raw !== "string") return null;
+  const m = raw.trim().replace(/^\.\.\.\s*/, "").match(/^[A-Za-z_$][\w$]*/);
+  return m && m[0] !== "__destructured__" ? m[0] : null;
+}
+
+/**
+ * s468 — what the server reads instead of a browser identity read: the server's own
+ * session object for an `@session` projection read (§20.5), the server-resolved
+ * `@currentUser` read itself (§52.15.1), or null.
+ */
+function identityServerRead(read: string): string | null {
+  if (read.startsWith("@session")) return `session${read.slice("@session".length) || ".userId"}`;
+  if (read.startsWith("@currentUser") || read.startsWith("session")) return read;
+  return null;
 }
 
 /** S467 (fix round 5) — every name a destructuring pattern binds (nested patterns included). */
@@ -7973,8 +8028,14 @@ export function runRI(input: RIInput): RIOutput {
       // ExprNode sister fields — emitStringFromTree + collectIdentsFromText
       // catches identifiers regardless of whether the AST builder produced
       // a string or an ExprNode for the same logical expression.
+      // `resultExpr` (S468) — a single-expression `match` arm's value
+      // (`match-arm-inline`). A literal / alternation arm (`0 -> handleZero()`)
+      // used to reach here as a `bare-expr` whose `expr` text the string scan
+      // above read; since S468 it is a `match-arm-inline` like `.V :> f()` and
+      // `_ :> f()`, whose value only this field carries (those two false-fired
+      // W-DEAD-FUNCTION before S468 too).
       const EXPR_NODE_FIELDS = [
-        "condExpr", "valueExpr", "exprNode", "testExpr", "headerExpr",
+        "condExpr", "valueExpr", "exprNode", "testExpr", "headerExpr", "resultExpr",
       ] as const;
       for (const field of EXPR_NODE_FIELDS) {
         const v = node[field];
@@ -8793,6 +8854,29 @@ export function runRI(input: RIInput): RIOutput {
     if (!any) return null;
     return { owners, serverCell, unresolved };
   };
+  /**
+   * s468 — the location-aware value-source resolver + the compilation's call index
+   * (identity-flow.ts), built once, on first use. Its writers are the names (and
+   * cells) a node may write by any route `localsWrittenBy` / `cellsWrittenBy` know.
+   */
+  let _identityFlow: IdentityFlow | null = null;
+  const identityFlow = (): IdentityFlow => {
+    if (_identityFlow) return _identityFlow;
+    _identityFlow = buildIdentityFlow({
+      files: files.map((f) => ({
+        filePath: f.filePath,
+        nodes: fileNodesOf(f),
+        imports: (f as any).ast?.imports ?? (f as any).imports ?? [],
+      })),
+      resolveImport: input.resolveImport ?? null,
+      writesOf: (node, callArgWritten) => {
+        const out = localsWrittenBy(node, true, true, callArgWritten ?? null);
+        for (const c of cellsWrittenBy(node)) out.add("@" + c);
+        return out;
+      },
+    });
+    return _identityFlow;
+  };
   const reportServerDefaultIdentityReads = (record: AnalysisRecord, clientEvaluated: boolean): void => {
     const params: unknown[] = Array.isArray((record.fnNode as any).params) ? (record.fnNode as any).params : [];
     const _fnName = record.fnNode.name ?? "<anonymous>";
@@ -8825,11 +8909,18 @@ export function runRI(input: RIInput): RIOutput {
           ));
         }
       }
+      // s468 — the location-aware resolver (identity-flow.ts): a name read in the
+      // default resolves where the function is declared; a PARAMETER of an enclosing
+      // client function is followed into every call's argument, and a value is
+      // followed through every MUTATING write (`o.push(v)`, `Object.assign(o, v)`,
+      // `setIt(@session)` writing a cell) — the routes
+      // g-param-default-identity-via-param-or-mutation-s467 left open.
       const _deep = identityReadInDefaultDeep(d, params, {
         currentUserAmbient,
         sessionProjection: clientEvaluated && !sessionCellOwnsName,
         helperSessionProjection: !sessionCellOwnsName,
-        resolveName: identityNameResolver(record.filePath),
+        resolveName: identityFlow().resolver(record.filePath, { serverCellIsIdentity: true, followRawAssigned: false }),
+        rootAt: identityFlow().parentOf(record.fnNode) ?? record.fnNode,
       });
       if (_deep !== null && _deep.unresolved) {
         errors.push(new RIError(
@@ -9626,6 +9717,200 @@ export function runRI(input: RIInput): RIOutput {
               queue.push({ id: cid, path: chain });
             }
           }
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 6c: s468 (ruling S468 (2)(b)) — E-ARG-SERVER-IDENTITY: an identity
+  // passed as an ARGUMENT to a server-placed function.
+  //
+  // A server function's arguments are computed by its caller. When the caller is
+  // the browser — a client function, an event handler, markup, the browser
+  // statements of a CPS-split function — they arrive in the request body, and any
+  // HTTP client can send any value: `<button onclick=add("hi", @session.userId)>`
+  // with `function add(name, uid) { ?{INSERT … ${uid} …}.run() }` writes the row as
+  // whoever the request names (executed s468 on origin/main bbddfd7b9: a request
+  // carrying the attacker's session cookie and `uid: "victim"` wrote author
+  // `victim`). §6.6.9: "`@session` is server-only identity and SHALL NEVER be
+  // marshalled from the client". A value derived from `@session` / the ambient
+  // `@currentUser` that reaches an argument of a server-placed function from the
+  // browser is refused, by whatever route it gets there: directly; through a local,
+  // an alias, a derived cell, a helper's result, a template, an object / array that
+  // wraps it, a spread; through a mutating call (`o.push(v)`, `Object.assign(o, v)`);
+  // through a parameter of a client function its caller passed it to; across a
+  // `.scrml` import. The fix: read the identity on the server, inside the function.
+  //
+  // ONE follower: free-name.ts `identityReadInDefaultDeep` (the §7.3.2 default
+  // check's) over identity-flow.ts's location-aware resolver and call index. A
+  // value computed ON THE SERVER (a server function's body, a CPS server statement,
+  // a `?{}`) is not followed: a server result travelling back through the browser
+  // is the banked S468 (2)(d) question ("a server-only value kind"), not this rule.
+  // ------------------------------------------------------------------
+  {
+    const flow = identityFlow();
+    const routeOfFn = new Map<object, FunctionRoute>();
+    for (const [id, rec] of analysisMap) {
+      const r = functions.get(id);
+      if (r) routeOfFn.set(rec.fnNode as unknown as object, r);
+    }
+    // Server contexts: a wholly-server function (an SSE generator, a `handle()`
+    // middleware, a channel `onserver:*` handler included), a CPS-split function's
+    // server statements, `?{}` text, an `<endpoint>` arm, a `^{}` meta body.
+    const serverRoots = new WeakSet<object>();
+    for (const [id, rec] of analysisMap) {
+      const r = functions.get(id);
+      if (!r || r.boundary === "client") continue;
+      if (r.cpsSplit) {
+        const body: unknown[] = Array.isArray(rec.fnNode.body) ? rec.fnNode.body : [];
+        for (const i of r.cpsSplit.serverStmtIndices) {
+          const s = body[i];
+          if (s && typeof s === "object") serverRoots.add(s as object);
+        }
+      } else {
+        serverRoots.add(rec.fnNode as unknown as object);
+      }
+    }
+    const SERVER_CONTEXT_KINDS = new Set(["sql", "endpoint-decl", "meta"]);
+    const inServerContext = (node: unknown): boolean => {
+      for (let n = node as any; n && typeof n === "object"; n = flow.parentOf(n)) {
+        if (serverRoots.has(n)) return true;
+        if (typeof n.kind === "string" && SERVER_CONTEXT_KINDS.has(n.kind)) return true;
+      }
+      return false;
+    };
+    // The callee is reached over HTTP: a server-placed function with a route (a
+    // channel `onserver:*` handler is invoked from the WebSocket path, not called).
+    const serverCallee = (fn: object): boolean => {
+      const r = routeOfFn.get(fn);
+      return !!r && r.boundary === "server" && r.isChannelWsHandler !== true;
+    };
+    // A value source computed on the server is left out (see the header): a node in
+    // a server context, and a CALL of a WHOLLY-server function — its result is a
+    // server result, and it does not write the browser values it is passed (its
+    // arguments are serialized), so it is not a mutating writer of them either.
+    // s468 fix round 1 (H2): a call of a CPS-SPLIT function is NOT a server result
+    // as a whole — its `return` may run in the browser half
+    // (`function who() { ?{…}.run(); @last = "x"; return @session.userId }`). It
+    // is followed like any helper, with its SERVER statements pruned (`pruneServer`
+    // below): what the server batches compute comes back as a server result.
+    const whollyServer = (fn: object): boolean => {
+      const r = routeOfFn.get(fn);
+      return !!r && r.boundary !== "client" && !r.cpsSplit;
+    };
+    const serverComputed = (node: unknown): boolean => {
+      if (inServerContext(node)) return true;
+      const n = node as any;
+      if (n && n.kind === "call" && n.callee && n.callee.kind === "ident" && typeof n.callee.name === "string") {
+        const fns = flow.calleeFnsAt(n.callee.name, n);
+        return fns.length > 0 && fns.every((f) => whollyServer(f));
+      }
+      return false;
+    };
+    // Subtrees of a scanned owner that are server statements (a CPS-split helper's
+    // server batches) give no browser value.
+    const pruneServer = (node: unknown): boolean => {
+      const n = node as any;
+      return !!n && typeof n === "object" && (serverRoots.has(n) || (typeof n.kind === "string" && SERVER_CONTEXT_KINDS.has(n.kind)));
+    };
+    const reported = new Set<string>();
+    for (const [fn, sites] of flow.allCallSites()) {
+      if (!serverCallee(fn)) continue;
+      const fnName = typeof (fn as any).name === "string" && (fn as any).name ? (fn as any).name : "<anonymous>";
+      const fnParams: unknown[] = Array.isArray((fn as any).params) ? (fn as any).params : [];
+      for (const site of sites) {
+        if (inServerContext(site.node)) continue;
+        const fp = site.filePath;
+        const sessionCellOwns = _fileScopeSessionCell.get(fp) === true;
+        const resolveName = flow.resolver(fp, { serverCellIsIdentity: false, followRawAssigned: true, skip: serverComputed });
+        const check = (node: unknown) => identityReadInDefaultDeep(node, [], {
+          currentUserAmbient: _fileScopeCurrentUserCell.get(fp) !== true,
+          sessionProjection: !sessionCellOwns,
+          helperSessionProjection: !sessionCellOwns,
+          resolveName,
+          rootAt: node,
+          prune: pruneServer,
+          ignorePredicates: true,
+        });
+        // What reaches the callee: each argument; for a function passed by
+        // reference (`xs.forEach(add)`), what the receiver and the other arguments
+        // hold; for raw text the parser keeps unparsed, the whole text — and the
+        // parameters of the block-bodied arrow it is (`(u) => { add(u) }`).
+        const targets: Array<{ node: unknown; index: number | null }> = [];
+        if (site.byRef) {
+          const p = flow.parentOf(site.node) as any;
+          // an event handler receives the event; a component prop's calls are sites of their own
+          if (flow.isAttributeValueUse(site.node)) continue;
+          if (p && p.kind === "call" && Array.isArray(p.args) && p.args.includes(site.node)) {
+            for (const a of p.args) if (a !== site.node) targets.push({ node: a, index: null });
+            const c = p.callee;
+            if (c && (c.kind === "member" || c.kind === "index") && c.object) targets.push({ node: c.object, index: null });
+          }
+        } else if (site.args === null) {
+          targets.push({ node: site.node, index: null });
+          for (const pn of rawArrowParamNames(site.node)) targets.push({ node: { kind: "ident", name: pn, _identityRawParamOf: site.node }, index: null });
+        } else {
+          site.args.forEach((a, i) => targets.push({ node: a, index: site.wholeFrom !== null && i >= site.wholeFrom ? null : i }));
+        }
+        for (const t of targets) {
+          const tnode = t.node as any;
+          // a raw arrow's parameter resolves at the arrow (its scope owner)
+          const hit = tnode && tnode._identityRawParamOf
+            ? identityReadInDefaultDeep(tnode, [], {
+                currentUserAmbient: _fileScopeCurrentUserCell.get(fp) !== true,
+                sessionProjection: !sessionCellOwns,
+                helperSessionProjection: !sessionCellOwns,
+                resolveName,
+                rootAt: tnode._identityRawParamOf,
+                prune: pruneServer,
+                ignorePredicates: true,
+              })
+            : check(tnode);
+          if (hit === null) continue;
+          const anchor = identityArgAnchor(flow, tnode && tnode._identityRawParamOf ? site.node : tnode, site.node);
+          const sp = sessionSpanWithLine(tnode?.span, anchor ?? undefined, fp, (anchor ?? (fn as any).span) as Span);
+          const key = `${fp}:${(sp as any)?.start ?? -1}:${(sp as any)?.line ?? -1}:${(sp as any)?.col ?? -1}:${fnName}:${t.index ?? "x"}`;
+          if (reported.has(key)) continue;
+          reported.add(key);
+          const pName = t.index !== null ? identityParamLabel(fnParams[t.index]) : null;
+          const argWhat = t.index !== null
+            ? `argument ${t.index + 1}${pName ? ` (\`${pName}\`)` : ""} of this call of server function \`${fnName}\``
+            : `a value this call of server function \`${fnName}\` receives`;
+          // S469 re-review: say only what the compiler knows. A read in the argument
+          // itself CARRIES the identity; a binding the follower reaches it through MAY
+          // (the follower is flow- and field-insensitive, §12.4 "Known limits"); an
+          // unfollowable binding may carry one too.
+          const through = !hit.unresolved && hit.via && hit.via !== hit.read ? hit.via : null;
+          const what = hit.unresolved || through !== null ? "may carry an identity" : "carries an identity";
+          const why = hit.unresolved
+            ? `its value comes from \`${hit.read}\`, which the compiler cannot follow (${hit.why ?? "its provenance is not readable"}), so it cannot rule out an identity`
+            : through !== null
+              ? `it reads \`${through}\`, which can hold a value computed in the browser from \`${hit.read}\`, and the compiler cannot rule that out`
+              : `it is computed in the browser from \`${hit.read}\``;
+          const serverRead = hit.unresolved ? null : identityServerRead(hit.read);
+          // S469 re-review (v05): `const uid = session.userId` is the fix only when the
+          // argument IS the identity read (`add("hi", @session.userId)`). For a value that
+          // wraps or derives from it (`{ u: @session.userId }`, a template, a binding) the
+          // parameter holds something else, so name the server read, not a replacement.
+          const argIsTheRead = through === null && !hit.unresolved && !!tnode && !tnode._identityRawParamOf &&
+            (tnode.kind === "member" || tnode.kind === "index" || tnode.kind === "ident");
+          const fix = argIsTheRead
+            ? `Fix: remove the ${pName ? `\`${pName}\` ` : ""}parameter and read the identity on the server, inside ` +
+              `\`${fnName}\`` + (serverRead ? ` — \`${pName ? `const ${pName} = ` : ""}${serverRead}\`` : " (`session.<field>`, §20.5)") + `.`
+            : `Fix: stop sending the identity and read the identity on the server, inside \`${fnName}\`` +
+              (serverRead ? ` (\`${serverRead}\`)` : " (`session.<field>`, §20.5)") +
+              `; give ${pName ? `\`${pName}\` ` : "the argument "}only data that is not the identity.`;
+          const err = new RIError(
+            "E-ARG-SERVER-IDENTITY",
+            `E-ARG-SERVER-IDENTITY: ${argWhat} ${what} — ${why}. The arguments of a server ` +
+            `function are sent by the browser, and any HTTP request can send a different value, so \`${fnName}\` ` +
+            `would act as whoever the request names (§6.6.9: server-only identity SHALL NEVER be marshalled from the ` +
+            `client; §12.4). ${fix}`,
+            sp,
+          );
+          err.severity = "error";
+          errors.push(err);
         }
       }
     }

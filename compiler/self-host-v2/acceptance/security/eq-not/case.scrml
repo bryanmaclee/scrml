@@ -1,0 +1,22 @@
+// `== not` as the absence test: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    function look(pw: string) -> string | not {
+        if (pw == "hunter2") return "user"
+        return not
+    }
+    function attempt(pw: string) -> string {
+        if (look(pw) == not) return "denied"
+        return "welcome"
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

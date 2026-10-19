@@ -455,3 +455,44 @@ describe("F2 — accepted: a call, a `const` alias, a shadowing name, a plain fu
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// G — S469 #1444 fix round 3 (merge of main's unreadText / fnBodyCtx): an UNREADABLE body still
+// makes the exact ("provable") judgement fail closed. The Walker's provability flag is
+// `unreadable` (renamed from `opaque`: main's Walker has an `opaque(…)` METHOD); both this
+// branch's `parseBody` and main's refuse-by-name `unreadText` set it.
+// ---------------------------------------------------------------------------
+
+describe("G — an unreadable body is never provable (fail closed)", () => {
+  const env = {
+    resolveOuter: (n) => (n === "check" ? "check" : null),
+    resolveOuterReturns: () => null,
+    resolveOuterExact: (n) => (n === "check" ? ["check"] : null),
+    resolveOuterReturnsExact: () => null,
+    parseStatements: () => null,
+    parseExpr: () => null,
+    parseGuardArms: () => null,
+    matchArmBodyText: () => null,
+  };
+  const RET = { kind: "return-stmt", exprNode: { kind: "ident", name: "check" } };
+  const arrow = (stmts) => ({ kind: "lambda", params: [], body: { kind: "block", stmts } });
+
+  test("control: a readable block arrow returning check provably returns it", async () => {
+    const { failableBindingFacts } = await import("../../src/failable-value-calls.ts");
+    expect(failableBindingFacts(arrow([RET]), env).returnsExact).toEqual(["check"]);
+  });
+  test("a body statement only text holds, which does not parse (parseBody): not provable", async () => {
+    const { failableBindingFacts } = await import("../../src/failable-value-calls.ts");
+    const textOnly = { kind: "bare-expr", expr: "{ @@ }", exprNode: { kind: "escape-hatch", nativeKind: "ParseError", raw: "{ @@ }" } };
+    const f = failableBindingFacts(arrow([textOnly, RET]), env);
+    expect(f.returns).toBe("check");
+    expect(f.returnsExact).toBeNull();
+  });
+  test("an expression the tree does not model (main's unreadText): not provable", async () => {
+    const { failableBindingFacts } = await import("../../src/failable-value-calls.ts");
+    const seq = { kind: "bare-expr", expr: "a, b", exprNode: { kind: "escape-hatch", nativeKind: "SequenceExpression", raw: "a, b" } };
+    const f = failableBindingFacts(arrow([seq, RET]), env);
+    expect(f.returns).toBe("check");
+    expect(f.returnsExact).toBeNull();
+  });
+});

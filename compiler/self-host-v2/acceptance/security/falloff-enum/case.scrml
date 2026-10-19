@@ -1,0 +1,25 @@
+// a login whose finder (an enum `| not`) falls off the end on a wrong password: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    type Auth:enum = { Granted, Locked }
+    function find(pw: string) -> Auth | not {
+        if (pw == "hunter2") return .Granted
+    }
+    function attempt(pw: string) -> string {
+        return match find(pw) {
+            .Granted :> "welcome"
+            .Locked :> "denied"
+            not :> "denied"
+        }
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

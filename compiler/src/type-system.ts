@@ -72,7 +72,7 @@
  * Performance budget: <= 20 ms per file.
  */
 
-import { armStatements } from "./arm-body-statements.ts";
+import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
@@ -14621,7 +14621,7 @@ function annotateNodes(
           // E-SCOPE-001 — or, when a same-named binding was in scope, nothing,
           // and the value expressions went unchecked). Codegen already lowers
           // this body as the object value (emit-logic
-          // `_objectLiteralArmFromStructuredBody`, from the node's raw `expr`
+          // `emitObjectLiteralArm`, from the node's raw `expr`
           // text); check the SAME object expression here instead.
           const objectBody = objectLiteralArmBodyNode(armBody, filePath);
           if (objectBody) visitNode(objectBody);
@@ -16474,9 +16474,8 @@ function annotateNodes(
     // the parsers that build it (a re-parsed interpolation starts at 1:1).
     const span = n.span as Span;
     forEachCallInStatement(rec, handling, failableEnv, (c) => {
-      // A boundary contains render-time CALLS (§19.6.6); a failable function read as a value is
-      // not a call it can contain (S469 F4).
-      if (renderTimeInBoundary && !c.inFunction && c.fnValueRead !== true) { boundaryHandlesCall(c, span); return; }
+      // S469 — a failable function read as a VALUE is not a call any boundary can test.
+      if (renderTimeInBoundary && !c.inFunction && boundaryMayHandle(c)) { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
     // A binding that may hold a failable function — `const g = check`, `p ? check : id`,
@@ -16601,7 +16600,7 @@ function annotateNodes(
       }
       const span = (attr.span ?? value.span ?? n.span) as Span;
       const onCall = (c: FailableCallCandidate): void => {
-        if (renderTimeInBoundary && !c.inFunction && c.fnValueRead !== true) { boundaryHandlesCall(c, span); return; }
+        if (renderTimeInBoundary && !c.inFunction && boundaryMayHandle(c)) { boundaryHandlesCall(c, span); return; }
         reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, false);
       };
       if (value.kind === "call-ref" && typeof value.name === "string") {
@@ -16633,6 +16632,11 @@ function annotateNodes(
    * accepted unhandled (fails closed). The boundary's E-ERROR-005 coverage check applies to every
    * call it handles (§19.6.6), not only to a whole-statement call.
    */
+  /** S469 — only a CALL can be tested by a boundary (not a function value, a lift guard, unread text). */
+  function boundaryMayHandle(c: FailableCallCandidate): boolean {
+    return c.refKind === undefined || c.refKind === "call";
+  }
+
   function boundaryHandlesCall(c: FailableCallCandidate, span: Span): void {
     // S468 fix round 1 (F1) — §19.6.6: "A server call SHALL NOT occur at render time: in the
     // boundary's content, as in any value position, it is E-VALUE-SERVER-CALL (§13.7), and the
@@ -16649,12 +16653,12 @@ function annotateNodes(
       ));
       return;
     }
-    if (c.call === null || c.fromText) {
+    if (c.call === null || c.fromText || c.inValueForm || c.inLiftedMarkup) {
       const shown = c.via ? `'${c.calleeName}' (called through '${c.via}')` : `'${c.calleeName}'`;
       errors.push(new TSError(
         "E-ERROR-002",
         `E-ERROR-002: Result of failable function ${shown} is not handled. The call is made while ` +
-        `rendering inside an '<errorBoundary>', but at this position (${c.call === null ? "a markup attribute value" : "a handler arm, match arm, template literal or loop initializer"}) ` +
+        `rendering inside an '<errorBoundary>', but at this position (${c.inLiftedMarkup ? "markup produced by 'lift' or held by an expression" : c.inValueForm ? "the body of a value-form 'if' / 'for'" : c.call === null ? "a markup attribute value, or text impl#1 does not read structurally" : "a handler arm, match arm, template literal or loop initializer"}) ` +
         `impl#1 cannot route its error to the boundary, so the boundary does not handle it. Handle it in place with ` +
         `'${c.calleeName}(…) !{ | .Variant :> … }' or 'match', or bind it in a statement of the boundary's content ` +
         `('\${ const v = ${c.calleeName}(…) }') and use 'v'.`,
@@ -16697,23 +16701,53 @@ function annotateNodes(
     c: FailableCallCandidate, span: Span, enclosingFnCanFail: boolean, inDefer: boolean,
   ): void {
     const calleeName = c.calleeName;
-    if (c.fnValueRead === true) {
-      // S469 fix round 2 (F4) — ruling:user-voice-scrml.md S469 "Split + audit": the LANGUAGE
-      // lets a failable function be used as a value (§19.4.3 — its failability travels with its
-      // type, so every eventual call is checked); impl#1 cannot follow such a value to its call,
-      // so it refuses the read. An impl#1 limitation, said so plainly; not the language rule.
+    const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "unreadable") {
+      // S469 follow-up (§19.4.3) — a `lift` operand neither parser reads (a value form nested
+      // two deep). The failable-call check cannot prove it free of an unhandled call, so it is
+      // refused (fails closed) with the code codegen gives the same construct.
+      const t = (c.text ?? "").replace(/\s+/g, " ");
+      errors.push(new TSError(
+        "E-CODEGEN-INVALID-LOGIC",
+        `E-CODEGEN-INVALID-LOGIC: this 'lift' operand could not be read ('lift ${t.length > 80 ? t.slice(0, 77) + "..." : t}'), ` +
+        `so impl#1 cannot check it for an unhandled failable call (§19.4.3). A value-form 'if' / 'for' ` +
+        `nested inside another one's 'lift' is not supported: bind the inner value first ` +
+        `('const v = if (…) { lift … } else { lift … }') and 'lift v'.`,
+        span,
+      ));
+      return;
+    }
+    if (c.refKind === "fn-value") {
+      // S469 F4 — ruling:user-voice-scrml.md S469 "Split + audit": the LANGUAGE lets a failable
+      // function be used as a value (§19.4.3 — its failability travels with its type, so every
+      // eventual call is checked); impl#1 does not follow a failable function through a value (an
+      // argument, a return, an operator alias, the binding a value-form `if` / `for` produces from
+      // `lift check`), so it refuses the read, whatever the callee class. An impl#1 limitation,
+      // said so plainly — not the language rule.
       const named = c.via ? `'${calleeName}' (through '${c.via}')` : `'${calleeName}'`;
       errors.push(new TSError(
         "E-IMPL1-FAILABLE-FN-VALUE",
         `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function used as a value: ${named} ` +
         `is read here other than as a call. This is a limitation of this compiler (impl#1), not a ` +
         `language rule — scrml allows it. Call it directly, alias it with 'const' ` +
-        `('const g = ${calleeName}'), or handle it at the call with '!{}'.`,
+        `('const g = ${calleeName}'), or handle it at the call with '!{}' (for a 'lift', lift the ` +
+        `handled result: 'lift ${calleeName}(…) !{ | .Variant :> … }').`,
         span,
       ));
       return;
     }
-    const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "lift-guard") {
+      // S469 (§19.4.3) — impl#1 applies a `!{}` on a `lift` to the lift's result, never to the
+      // call's: the error object is lifted unchecked. Refused (fails closed), whatever the class.
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled: impl#1 does not apply a ` +
+        `'!{}' written on a 'lift' to the call (the error would be lifted as the value). Handle it ` +
+        `first and lift the result: 'const v = ${calleeName}(…) !{ | .Variant :> … }' then 'lift v'.`,
+        span,
+      ));
+      return;
+    }
     if (inDefer) {
       errors.push(new TSError(
         "E-DEFER-UNHANDLED-FAILABLE",
@@ -17846,8 +17880,14 @@ function annotateNodes(
           const body = Array.isArray(o.body) ? o.body as Array<Record<string, unknown>> : [];
           for (const arm of body) {
             if (!arm) continue;
-            if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
-            else if (arm.kind === "match-arm-block") heads.push(arm.isWildcard ? "_" : String(arm.variant ?? ""));
+            // S468 — a variant alternation arm (block or inline) names every alternate.
+            if (arm.kind === "match-arm-inline" && Array.isArray(arm.alternates)) for (const v of arm.alternates as unknown[]) heads.push(String(v));
+            else if (arm.kind === "match-arm-inline") heads.push(_armVariant(String(arm.test ?? "")));
+            else if (arm.kind === "match-arm-block") {
+              if (arm.isWildcard) heads.push("_");
+              else if (Array.isArray(arm.alternates)) for (const v of arm.alternates as unknown[]) heads.push(String(v));
+              else heads.push(String(arm.variant ?? ""));
+            }
             else if (typeof arm.expr === "string") heads.push(_armVariant(String(arm.expr).split(/:>|=>|->/)[0] ?? ""));
           }
           for (const r of (Array.isArray(o.rawArms) ? o.rawArms as string[] : [])) heads.push(_armVariant(String(r).split(/:>|=>|->/)[0] ?? ""));
@@ -21170,17 +21210,37 @@ function extractArmsFromMatchNode(node: ASTNodeLike): ExtractedArms {
       continue;
     }
     if (arm.kind === "match-arm-block") {
+      const alternates = (arm as { alternates?: unknown }).alternates;
+      const literals = (arm as { literals?: unknown }).literals;
       if (arm.isWildcard) pushWildcard(false);
       else if (arm.isNotArm) pushWildcard(true);
+      // S468 — a variant alternation block arm (`.A | .B :> { … }`, ast-builder
+      // Form 4): EVERY alternate counts toward coverage, as for the text form.
+      else if (Array.isArray(alternates) && alternates.length > 0) {
+        for (const v of alternates) if (typeof v === "string") pushVariant(v);
+      }
+      // S468 — a §18.16 literal block arm (`1 :> { … }`, `"a" | "b" :> { … }`):
+      // no variant coverage, recorded as the inline string arm is.
+      else if (Array.isArray(literals) && literals.length > 0) {
+        armPatterns.push({ kind: "unknown", armText: String((arm as { pattern?: unknown }).pattern ?? literals.join(" | ")) } as ParsedArmPattern);
+      }
       else if (arm.variant) pushVariant(arm.variant as string);
       continue;
     }
     // Structured match-arm-inline nodes from the AST builder.
     if (arm.kind === "match-arm-inline") {
       const test: string = (arm as { test?: string }).test ?? "";
+      const alternates = (arm as { alternates?: unknown }).alternates;
+      const literals = (arm as { literals?: unknown }).literals;
       if (test === "else") pushWildcard(false);
       else if (test === "not") pushWildcard(true);
-      else {
+      // S468 — a head the AST builder recorded from its tokens (Inline Form 6):
+      // a variant alternation counts every alternate; a literal arm counts none.
+      else if (Array.isArray(alternates) && alternates.length > 0) {
+        for (const v of alternates) if (typeof v === "string") pushVariant(v);
+      } else if (Array.isArray(literals) && literals.length > 0) {
+        armPatterns.push({ kind: "unknown", armText: test } as ParsedArmPattern);
+      } else {
         // Extract variant name from test pattern: ".VariantName" or ".Variant(binding)"
         const vMatch = test.match(/^(?:\.|::)\s*([A-Z][A-Za-z0-9_]*)/);
         if (vMatch) pushVariant(vMatch[1]);
@@ -21792,7 +21852,10 @@ function checkMatchDiagnostics(
       const glyph = (arm as { armArrow?: string }).armArrow;
       if (glyph !== "=>" && glyph !== "->") continue;
       const armSpan = ((arm as { span?: Span }).span ?? span) as Span;
+      // `pattern` — the head as written, on a Form 4 block arm (S468: a literal /
+      // alternation / `_` head).
       const test = String((arm as { test?: unknown }).test
+        ?? (arm as { pattern?: unknown }).pattern
         ?? ((arm as { isWildcard?: boolean }).isWildcard ? "else"
           : (arm as { variant?: unknown }).variant
             ? "." + String((arm as { variant?: unknown }).variant)
@@ -22274,21 +22337,15 @@ function stampArmResultVariants(matchNode: ASTNodeLike, positionType: ResolvedTy
  * parsed by the AST builder as ONE `bare-expr` whose raw `expr` is the brace
  * interior), return a synthetic `bare-expr` carrying the whole object as its
  * exprNode, so scope/type checks see the object's VALUES and never its keys.
- * Mirrors codegen's `_objectLiteralArmFromStructuredBody` + the
- * `_matchArmResultIsBlockBody` classifier (emit-logic.ts): reconstruct
- * `{ <expr> }` and treat it as a value iff it parses to an `object` node.
- * `null` for every genuine statement block.
+ * The reading is the ONE shared reader (`objectLiteralArmValue`,
+ * arm-body-statements.ts — codegen's and the AST builder's too, S468 r1).
+ * `null` for every genuine statement block (and for an empty body: nothing to check).
  */
-function objectLiteralArmBodyNode(armBody: ASTNodeLike[], filePath: string): ASTNodeLike | null {
+function objectLiteralArmBodyNode(armBody: ASTNodeLike[], _filePath: string): ASTNodeLike | null {
   if (armBody.length !== 1) return null;
-  const only = armBody[0] as { kind?: string; expr?: unknown; span?: Span } | undefined;
-  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
-  const candidate = `{ ${only.expr} }`;
-  let parsed: { kind?: string } | null = null;
-  try { parsed = parseExprToNode(candidate, filePath, only.span?.start ?? 0) as { kind?: string } | null; }
-  catch { parsed = null; }
-  if (!parsed || parsed.kind !== "object") return null;
-  return { ...(only as object), expr: candidate, exprNode: parsed } as unknown as ASTNodeLike;
+  const v = objectLiteralArmValue(armBody);
+  if (!v) return null;
+  return { ...(armBody[0] as object), expr: v.text, exprNode: v.node } as unknown as ASTNodeLike;
 }
 
 /**

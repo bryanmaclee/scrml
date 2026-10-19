@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-shorthand-arm",
+  "description": "E-MATCH-ARM-SHORTHAND-AMBIGUOUS: `{ ok }` reads as an object and as a block.",
+  "language-version": "1.0",
+  "spec": "§18.5 (S469)",
+  "rationale": "S469 \"Compile error (Recommended)\": `{ ok }` read as a truthy object let a wrong password in.",
+  "expect": {
+    "codes": [
+      "E-MATCH-ARM-SHORTHAND-AMBIGUOUS"
+    ],
+    "codeCounts": {
+      "E-MATCH-ARM-SHORTHAND-AMBIGUOUS": 1
+    }
+  }
+}

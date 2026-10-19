@@ -1,0 +1,33 @@
+{
+  "id": "acceptance-guess-a-guess-other",
+  "description": "program (a) — typing `yes` (lower case) is no guess: the `not` arm, and the second line hidden.",
+  "language-version": "1.0",
+  "spec": "§14.4.1 (case-sensitive) · §18 · §42",
+  "rationale": "today-scrml-distance-2026-10-18 §3 (a), with the `not` arm's value `\"length \" + @inputVal.length` replaced: under the S440 operator rule (Gotcha Q1) `string + int` is E-OPERATOR-OPERAND-TYPE (see guess/a-guess-verbatim), and the bootstrap has no explicit int→string conversion yet, so the length is shown on its own line.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "input": "input",
+        "value": "yes"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#say",
+        "text": "not a guess"
+      },
+      {
+        "selector": "#real",
+        "count": 0
+      },
+      {
+        "selector": "#len",
+        "text": "length 3"
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-security-failable-fails",
+  "description": "a `!` finder that fails on a wrong password: wrong → `denied`, right → `welcome`.",
+  "language-version": "1.0",
+  "spec": "§19 · §18",
+  "rationale": "#1471 delta review: every path that could yield JS `undefined` (a `!` function's success path, an unannotated function, a bare `return` in `-> T`) is refused; `== not` is E-EQ-002 (§45).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      },
+      {
+        "selector": "#right",
+        "text": "welcome"
+      }
+    ]
+  }
+}

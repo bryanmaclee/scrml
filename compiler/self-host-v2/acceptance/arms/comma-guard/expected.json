@@ -1,0 +1,19 @@
+{
+  "id": "acceptance-arms-comma-guard",
+  "description": "dpa-073 F2 + S452: `!{}` handler arms are a comma list, block arms included, the trailing `,` optional.",
+  "language-version": "1.0",
+  "spec": "dpa-073 F2 (S469) · §19.4.5 (S452)",
+  "rationale": "user-voice-scrml.md S469 dpa-073 F2: \"under S452 one arm grammar for match arms, `!{}` handler arms and engine message arms\"; F2 (i): \"a `,` between every pair of arms, block arms included\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PARSE-ARM", "E-MATCH-ARM-SEPARATOR"],
+    "input": [
+      { "click": "#v" },
+      { "click": "#blk" }
+    ],
+    "domAnchored": [
+      { "selector": "#out", "text": "to" },
+      { "selector": "#n", "text": "1" }
+    ]
+  }
+}

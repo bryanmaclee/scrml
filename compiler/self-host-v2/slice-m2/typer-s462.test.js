@@ -58,12 +58,12 @@ describe("rule 5 — every member of the set infers, unannotated, with no diagno
     expect(tag(seq)).toBe("Seq");
     expect(tag(typeOf("    <r=(1 + 2.5)/>", "r").ty)).toBe("Num");
   });
-  test("a QUALIFIED variant `E.V` is a literal of `E` (rule 5 (a)) — typed, though the binder still refuses the form (dd D5)", () => {
+  test("a QUALIFIED variant `E.V` is a literal of `E` (rule 5 (a)) — typed, and (s469) the binder admits it", () => {
     const t = typeOf("    type Phase:enum = { Idle, Serving }\n    <m=(Phase.Serving)/>", "m");
     expect(tag(t.ty)).toBe("Named");
     expect(t.trusted).toBe(true);
-    // D5 (pre-existing, not this change): the binder reports `Phase` undeclared; no own-value code piles on
-    expect(codes("    type Phase:enum = { Idle, Serving }\n    <m=(Phase.Serving)/>")).not.toContain("E-DECL-TYPE-NOT-INFERABLE");
+    // D5 closed by s469: a qualified unit variant is a value (§18.13), so nothing is reported
+    expect(codes("    type Phase:enum = { Idle, Serving }\n    <m=(Phase.Serving)/>")).toEqual([]);
   });
   test("the origin: Literal for a literal, Inferred for a non-literal member", () => {
     expect(tag(typeOf("    <r=1/>", "r").origin)).toBe("Literal");
@@ -103,11 +103,15 @@ describe("rule 7 — outside the set is E-DECL-TYPE-NOT-INFERABLE", () => {
     ["a call whose returns differ in type", "function k(b: bool) { if (b) { return 1 } else { return \"x\" } }\n    <r=(k(true))/>"],
     ["a call returning a shadowed local of another type (fix round 1, F1)", "function g(x: int) { if (@f) { const x: string = \"a\"\n return x } else { return 1 } }\n    <r=(g(1))/>"],
     ["a call that is recursive", "function rec(x: int) { if (x > 0) { return rec(x - 1) } else { return 0 } }\n    <r=(rec(2))/>"],
-    ["a call that does not return on every path", "function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>"],
     ["a ternary with arms of two kinds", "<r=(@f ? 1 : \"x\")/>"],
   ]) {
     test(label, () => { expect(codes(S + "    " + decl)).toContain("E-DECL-TYPE-NOT-INFERABLE"); });
   }
+  // s469 #1471 delta review HIGH-B: a function that returns on some paths and falls off on another is
+  // refused where it is declared (E-BOOTSTRAP-UNSUPPORTED) — that report owns it
+  test("a call that does not return on every path — the callee is refused (its fall-off would be `undefined`)", () => {
+    expect(codes(S + "    function half(x: int) { if (x > 0) { return 1 } }\n    <r=(half(2))/>")).toContain("E-RETURN-INCOMPLETE");
+  });
   test("`(!0)` is no longer an `int` literal (dd D3) — the typer refuses the `!`, and that report owns it (no cascade)", () => {
     expect(codes("    <r=(!0)/>")).toEqual(["E-OPERATOR-OPERAND-TYPE"]);
     expect(typeOf("    <r=(!0)/>", "r").trusted).toBe(false);

@@ -1,0 +1,14 @@
+{
+  "id": "acceptance-opener-union-multi",
+  "description": "§66.2.4 (S451): `<id:int | string=0/>` is legal; the target is that it compiles and shows 0. Today the bootstrap parses it and refuses the type (E-BOOTSTRAP-UNSUPPORTED) — no general union type yet.",
+  "language-version": "1.0",
+  "spec": "§66.2.4",
+  "rationale": "§66.2.4 (S451): \"`<id:int | string=0/>` // `T | U` — legal\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PARSE-TAG"],
+    "domAnchored": [
+      { "selector": "p", "text": "0" }
+    ]
+  }
+}

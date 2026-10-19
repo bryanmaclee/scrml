@@ -1,0 +1,16 @@
+// §66.2.4 (S451) — a union type in a declaration opener, spaced or not, before a value or the closer.
+<program>
+    type Guess:enum = { Yes, No }
+    <g:Guess | not=.Yes/>
+    let <h:Guess|not=.No/>
+    let <name:string | not=not/>
+    function setIt() { @name = "bryan" }
+    function clear() { @h = not }
+    <main>
+        <p id="a" if=(@name is given)>given</p>
+        <p id="b" if=(@h is given)>h</p>
+        <p id="c" if=(@g is given)>g</p>
+        <button id="set" onclick=setIt()>set</button>
+        <button id="clear" onclick=clear()>clear</button>
+    </main>
+</program>

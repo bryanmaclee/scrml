@@ -1,0 +1,8 @@
+// §18.8.2: a match over a struct is E-TYPE-024.
+<program>
+    type P:struct = { x: int }
+    let <p:P=({ x: 1 })/>
+    <main>
+        <p>${match @p { else :> "x", }}</p>
+    </main>
+</program>

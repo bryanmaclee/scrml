@@ -1,0 +1,24 @@
+// the value of a function that returns none: refused.
+<program>
+    let <wrong:string=""/>
+    let <right:string=""/>
+    function nothing(pw: string) {
+        if (pw == "hunter2") {
+            const z: int = 1
+        }
+    }
+    function attempt(pw: string) -> string {
+        const s: string = nothing(pw)
+        if (s == "") return "denied"
+        return "welcome"
+    }
+    function login() {
+        @wrong = attempt("hunter3")
+        @right = attempt("hunter2")
+    }
+    <main>
+        <button id="go" onclick=login()>go</button>
+        <p id="wrong">${@wrong}</p>
+        <p id="right">${@right}</p>
+    </main>
+</program>

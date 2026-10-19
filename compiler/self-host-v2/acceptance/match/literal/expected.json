@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-match-literal",
+  "description": "string, number and bool literal arms.",
+  "language-version": "1.0",
+  "spec": "§18.16.1 · §18.16.2",
+  "rationale": "§18.16: \"`match` SHALL accept values of type `string`, `number`, and `boolean`. Arms for these types use literal values directly\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "some"
+      },
+      {
+        "selector": "#n",
+        "text": "two"
+      },
+      {
+        "selector": "#b",
+        "text": "yes"
+      }
+    ]
+  }
+}

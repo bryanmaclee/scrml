@@ -1,0 +1,19 @@
+// §14.4.1: toEnum matches a declared variant name exactly; a JS prototype key is just a string no variant has.
+<program>
+    type Guess:enum = { Yes, No }
+    function show(s: string) -> string {
+        return match Guess.toEnum(s) {
+            .Yes :> "Yes"
+            .No :> "No"
+            not :> "not"
+        }
+    }
+    <main>
+        <p id="a">${show("constructor")}</p>
+        <p id="b">${show("__proto__")}</p>
+        <p id="c">${show("toString")}</p>
+        <p id="d">${show("No")}</p>
+        <p id="e">${show("no")}</p>
+        <p id="f">${show("")}</p>
+    </main>
+</program>

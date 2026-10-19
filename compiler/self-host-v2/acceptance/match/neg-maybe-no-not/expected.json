@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-maybe-no-not",
+  "description": "E-MATCH-012: no `not` arm.",
+  "language-version": "1.0",
+  "spec": "§42.7",
+  "rationale": "§42.7: \"A `match` on `T | not` without a `not` arm or `else` arm SHALL be compile error E-MATCH-012.\"",
+  "expect": {
+    "codes": [
+      "E-MATCH-012"
+    ],
+    "codeCounts": {
+      "E-MATCH-012": 1
+    }
+  }
+}

@@ -51,6 +51,7 @@ import { CGError } from "./errors.ts";
 import { refuseServerTextCall, REFUSED_SERVER_TEXT } from "./server-text-guard.ts";
 import { splitTemplateLiteral, lexicalCallInText } from "../brace-pair.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
+import { OBJECT_SHORTHAND_CELL, isCellShorthandName, objectShorthandCellMessage } from "../object-shorthand-cell.ts";
 import { PH_EB_CHECK } from "../placeholder-nonce.ts";
 
 // ---------------------------------------------------------------------------
@@ -1924,8 +1925,25 @@ function emitProp(prop: ObjectProp, ctx: EmitExprContext): string {
       const val = emitExpr(prop.value, ctx);
       return `${key}: ${val}`;
     }
-    case "shorthand":
-      return prop.name;
+    case "shorthand": {
+      // `{ x }` is `{ x: x }` — the value is an identifier READ and lowers through
+      // emitIdent like any other (S469 re-review of #1451: the bare-name return
+      // skipped emitIdent, so a server `{ session }` slipped past E-SESSION-VALUE and
+      // emitted a bare `session` → ReferenceError at request time; the longhand was
+      // refused). A name emitIdent leaves unchanged keeps the shorthand.
+      // `{ @x }` has no meaning (§6.1.2 — `@x` is an access, not a name): refused at
+      // the front end (E-OBJECT-SHORTHAND-CELL, gauntlet-phase1-checks.js); this is
+      // the backstop for a tree that reaches codegen anyway — never lowered.
+      if (isCellShorthandName(prop.name)) {
+        const cgErr = new CGError(OBJECT_SHORTHAND_CELL, objectShorthandCellMessage(prop.name), prop.span as never, "error");
+        // api.js drops this backstop report when the front end refused the same `{ @x }` in the file
+        (cgErr as unknown as { cellName: string }).cellName = prop.name;
+        recordRefusedLowering(cgErr, prop as never);
+        return `${JSON.stringify(prop.name)}: undefined /* E-OBJECT-SHORTHAND-CELL */`;
+      }
+      const val = emitIdent({ kind: "ident", name: prop.name, span: prop.span } as IdentExpr, ctx);
+      return val === prop.name ? prop.name : `${emitObjectKey(prop.name)}: ${val}`;
+    }
     case "spread":
       return `...${emitExpr(prop.argument, ctx)}`;
   }

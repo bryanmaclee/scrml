@@ -308,21 +308,20 @@ describe("⛔ the BRACKET form on an unbound receiver must REFUSE, not escape (S
     expect(artifact).toBeNull();
   });
 
-  test("⚠ an ALIASED bracket read inside a MATCH arm escapes BOTH limbs (base parity)", async () => {
-    // The intersection of the two limbs' blind spots, and it is pre-existing:
-    // measured at `9eb9eb24`, this also ran `undefined`. Limb 1 cannot see it (the
-    // arm is carried as a STRING, so there is no `index` node) and limb 2 will not
-    // (the alias is not bound to a map constructor). Pinned as a characterization
-    // rather than asserted as a refusal — closing it would need a THIRD policy over
-    // the same surface, and each previous attempt to widen one policy produced a new
-    // defect in the opposite direction.
+  test("an ALIASED bracket read inside a literal MATCH arm is REFUSED too (S468; was silent `undefined`)", () => {
+    // Until S468 this was the intersection of the two limbs' blind spots (measured
+    // at `9eb9eb24`, it ran `undefined` where §59.6 requires 7): limb 1 could not
+    // see it because a literal arm (`1 -> …`) was carried as a STRING, so there was
+    // no `index` node. Since S468 the AST builder reads a literal arm's value as an
+    // expression tree (ast-builder.js Inline Form 6), so limb 1 sees the `index`
+    // node and the arm gets the SAME refusal as `let n = m; return n["k"]` above —
+    // no third policy needed.
     const { codes, artifact } = emit(
       `export fn probe(n: int) -> int { let m = ["k": 7]; let a = m; return match n { 1 -> a["k"] else -> 0 } }`,
       "alias-bracket-arm",
     );
-    expect(codes).toEqual([]);
-    const mod = await import(pathToFileURL(artifact).href);
-    expect(mod.probe(1)).toBeUndefined();
+    expect(codes).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(artifact).toBeNull();
   });
 });
 

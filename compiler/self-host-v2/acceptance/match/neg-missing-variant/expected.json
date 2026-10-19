@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-match-neg-missing-variant",
+  "description": "E-TYPE-020: `.Blue` is not covered.",
+  "language-version": "1.0",
+  "spec": "§18.8.1",
+  "rationale": "§18.8.1: \"A `match` that is not exhaustive SHALL be a compile error (E-TYPE-020). The error message SHALL list the missing variant names.\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-020"
+    ],
+    "codeCounts": {
+      "E-TYPE-020": 1
+    }
+  }
+}

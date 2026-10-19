@@ -1,0 +1,26 @@
+{
+  "id": "acceptance-security-login-literal-no-else",
+  "description": "a non-exhaustive literal login: a wrong password gives `not`, not the last arm's `admin-view`.",
+  "language-version": "1.0",
+  "spec": "§18.16.2 · §18.16.3",
+  "rationale": "The printer makes a Match's last arm unconditional; the plain match always ends in its own `_ :> not` so no source arm is reached by falling through.",
+  "expect": {
+    "codes": [
+      "W-MATCH-002"
+    ],
+    "severity": {
+      "W-MATCH-002": "warning"
+    },
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#wrong",
+        "text": "denied"
+      }
+    ]
+  }
+}

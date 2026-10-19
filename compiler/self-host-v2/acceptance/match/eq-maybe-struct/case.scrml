@@ -1,0 +1,10 @@
+// §45: `==` on `User | not` is structural — two equal users built apart are equal (not a reference compare).
+<program>
+    type User:struct = { name: string }
+    let <a:User | not=not/>
+    let <b:User | not=not/>
+    <main>
+        <button id="set" onclick={ @a = { name: "x" }; @b = { name: "x" } }>set</button>
+        <p id="eq">${@a == @b}</p>
+    </main>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-guess-a-guess-verbatim",
+  "description": "program (a) verbatim: everything compiles but the `not` arm's `\"length \" + @inputVal.length`, which the S440 operator rule refuses.",
+  "language-version": "1.0",
+  "spec": "S440 Gotcha Q1 (E-OPERATOR-OPERAND-TYPE)",
+  "rationale": "`+` takes two numbers or two strings (ruled S440, Gotcha Q1). The fix is an explicit conversion, which the bootstrap does not have yet (no method calls, no template literals): the next wall for program (a)-like code.",
+  "expect": {
+    "codes": [
+      "E-OPERATOR-OPERAND-TYPE"
+    ],
+    "codeCounts": {
+      "E-OPERATOR-OPERAND-TYPE": 1
+    }
+  }
+}

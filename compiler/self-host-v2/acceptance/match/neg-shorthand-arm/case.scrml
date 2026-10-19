@@ -1,0 +1,12 @@
+// §18.5 (S469): a brace arm body that is one bare name, `{ ok }`, is E-MATCH-ARM-SHORTHAND-AMBIGUOUS.
+<program>
+    type Color:enum = { Red, Green }
+    let <c:Color=.Red/>
+    function pick(ok: string) -> string {
+        return match @c {
+            .Red :> { ok }
+            .Green :> "g"
+        }
+    }
+    <main><p>${pick("y")}</p></main>
+</program>

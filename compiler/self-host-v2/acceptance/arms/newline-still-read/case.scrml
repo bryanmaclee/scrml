@@ -1,0 +1,19 @@
+// dpa-073 F5 — until the `scrml fix` codemod migrates the corpus, a newline-separated arm list is still read.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        return id
+    }
+    function go() {
+        @out = load("x") !{
+            .NotFound(m) :> "nf:" + m
+            .Timeout :> "to"
+        }
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>
