@@ -993,6 +993,16 @@ class Walker {
         continue;
       }
       if (Array.isArray(value.handlerBlock)) { this.statements(value.handlerBlock as unknown[], scope, vfn); continue; }
+      // An event handler's value is a STATEMENT LIST (`onclick=${ @x = f() !{ … }; @y = @x + 1 }`):
+      // its `exprNode` reads only the first statement. When the text is not one whole expression,
+      // it is read as what it is — statements, by the compiler's statement reader — so a handled
+      // `!{}` there is handled and every later statement is read. Text that does not parse as
+      // statements either falls through to the refuse-only read below. (S469 r3: before, such a
+      // value was read refuse-only, so a correctly handled `!{}` in a lifted handler was refused.)
+      if (handler && value.kind === "expr" && typeof value.raw === "string" && !this.readsWhole(value.raw)) {
+        const stmts = this.env.parseStatements(value.raw);
+        if (stmts) { this.statements(stmts, scope, textCtx(vfn)); continue; }
+      }
       if (value.kind === "expr" && isExprNodeValue(value.exprNode) && !isParseErrorHatch(value.exprNode)) {
         this.expr(value.exprNode, scope, vfn);
         // `onclick=check`: the function read as a value — the dispatcher calls it, unhandled.

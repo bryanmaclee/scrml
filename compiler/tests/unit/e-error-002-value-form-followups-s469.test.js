@@ -406,6 +406,36 @@ describe("r2 F1 — a lifted attribute value that swallowed later attributes is 
   });
 });
 
+// S469 r3 — the #1470 merge-queue failure (`handler-server-assign-order-s446.browser.test.js`): a
+// lifted handler is a STATEMENT LIST; r2 read any multi-statement handler text refuse-only, so a
+// correctly handled `!{}` there was a false E-ERROR-002. These pin the handled shapes in the
+// pre-commit gate (the browser dir is not in it), and the unhandled ones stay refused.
+describe("r3 — a lifted event handler is read as statements", () => {
+  const H_OK = "@msg = check(x) !{ | e :> { @s = \"err\" } }; @y = @msg == true ? 1 : 2";
+  const LIFT = (h) => `<ul>\${ for (x of [@pw]) { lift <li><button id="go" onclick=\${${h}}>b</button></li>; } }</ul>`;
+  const ARM = (inner) => `<div><match for=Doc on=@cur><Empty><p>none</p></><Note(note)>${inner}</></match></div>`;
+  const PAGE = (body) => MSG("", body)
+    .replace("<msg> = \"init\"", "<msg> = \"init\"\n<s> = \"\"\n<y> = 0\ntype Doc:enum = { Empty, Note(note: string) }\n<cur> = Doc.Note(\"hi\")")
+    .replace("<p id=\"out\">${@msg}</p>", "<p id=\"out\">${@s}/${@y}</p>");
+  for (const [pos, wrap] of [["for … lift", LIFT], ["for … lift in a match arm", (h) => ARM(LIFT(h))]]) {
+    test(`right password: ${pos} > \`!{}\` error arm, then a later statement`, async () => {
+      const page = await boot(PAGE(wrap(H_OK)));
+      await page.click("#wrong");
+      await page.click("#go");
+      expect(page.text("#out")).toBe("err/2");
+      await page.click("#right");
+      await page.click("#go");
+      expect(page.text("#out")).toBe("err/1");
+    });
+    test(`wrong password: ${pos} > an unhandled call in a LATER statement of the handler`, () => {
+      expect(codesOf(PAGE(wrap("@s = \"a\"; @msg = check(x) ? \"LOGGED IN\" : \"rejected\"")))).toContain("E-ERROR-002");
+    });
+    test(`wrong password: ${pos} > an unhandled call in the first statement`, () => {
+      expect(codesOf(PAGE(wrap("@msg = check(x) ? \"LOGGED IN\" : \"rejected\"; @s = \"a\"")))).toContain("E-ERROR-002");
+    });
+  }
+});
+
 /** RENDER with a top-level helper function `mk`. */
 const RENDER_MK = (fn) => RENDER("${mk(@pw)}").replace("    function plain(p)", `    ${fn}\n    function plain(p)`);
 
