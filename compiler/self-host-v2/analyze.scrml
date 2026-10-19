@@ -354,7 +354,7 @@ ${
     //     once, and the index of the arm it takes; `arms` — per arm, the inner
     //     binders the statement form reads a payload through.
     export type PlainArm:struct = { nid: int, inner: Sym[] }
-    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean,
+    export type PlainMatch:struct = { es: Sym | not, kind: int, maybe: boolean, known: boolean, wild: boolean, exhaustive: boolean, notArm: boolean,
                                       stmt: boolean, scrut: Sym, pick: Sym, arms: PlainArm[] }
     export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
 
@@ -3012,7 +3012,8 @@ ${
             origin = ot.origin
             if (bnd != "" && role == FieldRole.Child && !literalInit(ix, init)) origin = TypeOrigin.Boundary(bnd)
         }
-        if (isLet && seqElem(ty) is given) {
+        // s469 review r2: through `| not` too — `let <xs:int[] | not=…/>` is `let` on a sequence
+        if (isLet && seqElem(unMaybe(ty)) is given) {
             st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
         }
         const rg: RGraph = graphOf(te, g, ty, body, st)
@@ -5929,6 +5930,8 @@ ${
 
     fn derivedMessage(p: WPlace, f: FieldInfo) -> string {
         const deps: string = f.reads.join(", ")
+        // s469 review r2: `let` on a sequence is E-GRANT-LET-ON-SEQUENCE — a tape is never seeded by `let`
+        if (seqElem(unMaybe(f.ty)) is given) return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. A sequence is not made writable by `let` (`let` on a sequence is E-GRANT-LET-ON-SEQUENCE): its grants live on the type (`T[replace]`, §66.12.2, §66.12.3)."
         return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. If you want a value that STARTS from that expression and is then written independently, declare it `let` — it becomes SEEDED: computed once, and it no longer follows " + deps + " (§66.9)."
     }
 
@@ -6076,7 +6079,7 @@ ${
         if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
         // s469 review: a SEQUENCE is never made writable by `let` (E-GRANT-LET-ON-SEQUENCE,
         // §66.12.3) — its whole-value write is the `replace` grant in its type
-        if (seqElem(f.ty) is given) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a sequence whose type grants nothing — this whole-value write needs `replace` in the type's grants (`T[replace]`, §66.12.2); its grants live on the type, and `let` on a sequence is E-GRANT-LET-ON-SEQUENCE (§66.12.3)") }
+        if (seqElem(unMaybe(f.ty)) is given) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is a sequence whose type grants nothing — this whole-value write needs `replace` in the type's grants (`T[replace]`, §66.12.2); its grants live on the type, and `let` on a sequence is E-GRANT-LET-ON-SEQUENCE (§66.12.3)") }
         return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let <" + f.sym.hint + "…/>` (`let` before the `<`, §66.2.5) to make it writable (§66.9, §66.11).") }
     }
 
@@ -7817,7 +7820,7 @@ ${
         if (isNotPat(p)) {
             // s469 (review L1): a `not` arm on a subject that can never be `not` is dead
             // — the E-TYPE-044 rule (§17.6: a presence test on a type without `| not`)
-            if (sk.code == "" && sk.known && !sk.maybe) st = addDiag(st, env.file, a.span, "E-TYPE-044", "a `not` arm on a subject whose type does not include `| not` (it is " + kindLabel(sk.kind) + ") — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
+            // (review L1: a dead `not` arm is the typer's — plainSubjectCheck — which sees a refused type as Unknown, Rule C)
             return rparm(-5, "", armEnv, st)
         }
         const wb: WholePat | not = wholePatOf(p)
@@ -7937,7 +7940,7 @@ ${
         }
         const r1: RSym = mint(st, "subject")
         const r2: RSym = mint(r1.st, "arm")
-        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh,
+        st = addFail(r2.st, e.nid, FailFact.FPlain({ es: sk.es, kind: sk.kind, maybe: maybe, known: sk.known, wild: wild, exhaustive: exh, notArm: notSeen,
                                                       stmt: stmt, scrut: r1.s, pick: r2.s, arms: parms }))
         if (!exh && result is given) result = Type.Maybe(unMaybe(result))
         return plain(result, st)
@@ -13532,12 +13535,15 @@ ${
     // subject's (E-TYPE-001), and a `T | not` subject owes a `not` arm or a
     // wildcard (E-MATCH-012).
     fn plainSubjectCheck(env: TEnv, e: AExpr, subj: AExpr, m: PlainMatch, v: VType, ts: TypeState) -> TypeState {
-        if (m.known) return ts
         const t: Type | not = knownOf(v)
         if (t is not) return ts
         const inner: Type = unMaybe(t)
         const k: int = kindOf(inner)
         let out: TypeState = ts
+        // s469 (review L1): a `not` arm on a subject that cannot be `not` is dead — the
+        // E-TYPE-044 rule (§17.6: a presence test on a type without `| not`)
+        if (m.notArm && maybeInner(t) is not && k != 5) out = report(out, env, e.span, "E-TYPE-044", "a `not` arm on a subject whose type (`" + typeName(t) + "`) does not include `| not` — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
+        if (m.known) return out
         const es: Sym | not = m.es
         if (m.kind == 0 && es is given) {
             const ns: Sym | not = namedOf(inner)
@@ -13549,8 +13555,6 @@ ${
         if (m.kind == 2 && k != 0 && k != 1) out = report(out, env, subj.span, "E-TYPE-001", "the arms are number literals, but the subject is `" + typeName(t) + "` (§18.16)")
         if (m.kind == 3 && k != 3) out = report(out, env, subj.span, "E-TYPE-001", "the arms are bool literals, but the subject is `" + typeName(t) + "` (§18.16)")
         if (k == 5) out = report(out, env, subj.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over a tape (`" + typeName(t) + "`) — §18 matches an enum, a `T | not`, or a string, number or bool")
-        // s469 (review L1): the binder took `maybe` from the `not` arm alone — dead on a type without `| not`
-        if (maybeInner(t) is not && m.maybe && k != 5) out = report(out, env, e.span, "E-TYPE-044", "a `not` arm on a subject whose type (`" + typeName(t) + "`) does not include `| not` — the arm can never run; drop it, or widen the subject's type (§17.6, §42.7)")
         if (maybeInner(t) is given && !m.maybe && !m.wild) out = report(out, env, e.span, "E-MATCH-012", "this `match` is over a `T | not` value (`" + typeName(t) + "`) but has no `not` arm and no `else` arm — add `not :> …` so the absent case is handled (§42.7)")
         return out
     }

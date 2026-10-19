@@ -1894,9 +1894,49 @@ ${
             r = mkT(g, start, ATypeK.TSeq(r.t, grants))
         }
         if (isP(r.tp, "|") && isWord(adv(r.tp), "not")) {
-            r = mkT(adv(adv(r.tp)), start, ATypeK.TMaybe(r.t))
+            r = maybeType(adv(adv(r.tp)), start, tp.i, r.t)
+        } else if (nameTok.v == "not" && isP(r.tp, "|")) {
+            // s469 review r2: `not | T`, the same union written the other way round
+            const rest: RType = parseType(adv(r.tp))
+            r = maybeType(rest.tp, start, tp.i, rest.t)
         }
         return r
+    }
+
+    // `T | not` in a CODE position (a return type, a parameter, a local's
+    // annotation, a struct field), at the token after it. A TAPE member is
+    // refused here exactly as in an opener (seqUnionCheck — the one check every
+    // type position uses): the grant checks do not see through `| not`.
+    fn maybeType(tp: TP, start: int, from: int, inner: AType) -> RType {
+        if (seqUnionCheck(inner)) {
+            const d: Diag = newDiag("E-BOOTSTRAP-UNSUPPORTED", seqUnionReason(tokText(tp, from, tp.i)), tp.file, spanFrom(tp, start))
+            const t: TP = { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+            return mkT(t, start, inner.k)
+        }
+        return mkT(tp, start, ATypeK.TMaybe(inner))
+    }
+
+    // s469 review — THE check for a union with a sequence member, shared by the
+    // opener type parser and the code-position type parser: is `member` (one
+    // member of a `T | not` union) a tape that carries a GRANT? Such a tape is
+    // refused: the bootstrap's grant model does not see through `| not`, so its
+    // grants would be lost or bypassed. An UNGRANTED `S | not` (`int[] | not`)
+    // stays — §17.7.2 admits it, and it is judged as the ungranted tape `S`
+    // itself is (analyze sees through `| not` for `let`: E-GRANT-LET-ON-SEQUENCE).
+    fn seqUnionCheck(member: AType) -> boolean {
+        return grantedSeq(member)
+    }
+
+    fn grantedSeq(t: AType) -> boolean {
+        return match t.k {
+            .TName(name: n) :> false
+            .TSeq(elem: e, grants: gs) :> gs.length > 0 || grantedSeq(e)
+            .TMaybe(inner: i) :> grantedSeq(i)
+        }
+    }
+
+    fn seqUnionReason(text: string) -> string {
+        return "a granted sequence in a union type (`" + text + "`) is not in the bootstrap — its grants are not checked through the union; declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)"
     }
 
     // =========================================================================
@@ -2372,7 +2412,7 @@ ${
         // let every write through. A member that failed to parse (`Guess |=`)
         // has its own E-PARSE-TYPE; no second report.
         let seqs: int = 0
-        if (isSeqAType(first.t)) seqs = 1
+        if (seqUnionCheck(first.t)) seqs = 1
         let blank = isBlankAType(first.t)
         let going = true
         while (going) {
@@ -2381,7 +2421,7 @@ ${
                 const rm: RMType = openerTypeMember(skipSpace(mAdv(after, 1)), "`|`")
                 m = rm.mp
                 members = members + 1
-                if (isSeqAType(rm.t)) seqs = seqs + 1
+                if (seqUnionCheck(rm.t)) seqs = seqs + 1
                 if (isBlankAType(rm.t)) blank = true
                 if (isNotType(rm.t)) {
                     nots = nots + 1
@@ -2395,7 +2435,7 @@ ${
         const text: string = mp.src.substring(start, m.pos)
         // (a blank member was reported by openerTypeMember: E-PARSE-TYPE)
         if (!blank && members > 1 && seqs > 0) {
-            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a sequence in a union type (`" + text + "`) is not in the bootstrap — its grants are not checked through the union; declare the tape on its own (`<xs:T[grants]=[]/>`, §66.12)", start, m.pos)
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", seqUnionReason(text), start, m.pos)
         } else if (!blank && members == 2 && nots == 1) {
             ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TMaybe(inner) }
             m = mBump(m)
