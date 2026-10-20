@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 /**
  * emit-predicates.ts — §53 Inline Type Predicate Codegen Utilities
  *
@@ -275,7 +276,7 @@ function fieldAccess(obj: string, field: string): string {
 }
 
 function judgeComment(j: JudgeType): string {
-  return `// §53 judge — ${describeJudge(j, (p) => predicateToDisplayString(p as PredicateExpr), false, true).replace(/[\n\r]/g, " ")}`;
+  return `// §53 judge — ${commentText(describeJudge(j, (p) => predicateToDisplayString(p as PredicateExpr), false, true).replace(/[\n\r]/g, " "))}`;
 }
 
 /** The hoisted judge function of struct judge `j` (registered on first use). */
@@ -370,7 +371,7 @@ function structPartsName(j: Extract<JudgeType, { k: "struct" }>): string {
   const fields = structJudgeDef(j.id).fields.map(([field, f]) =>
     `    ${/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(field) ? field : JSON.stringify(field)}: ${judgeDescriptorExpr(f)},`);
   _judgeDefs.set(name, [
-    `// §53 the refined fields of ${String(j.name).replace(/[\n\r]/g, " ")}, each with its descriptor (judging one field write)`,
+    `// §53 the refined fields of ${commentText(String(j.name).replace(/[\n\r]/g, " "))}, each with its descriptor (judging one field write)`,
     `function ${name}() {`,
     `  return {`,
     ...fields,
@@ -486,7 +487,7 @@ export function emitParamGuardStatement(param: string, judge: JudgeType, fnName:
   }
   const check = judgeTypeExpr(judge, param);
   const lines: string[] = [];
-  lines.push(`// §53.9.1 E-CONTRACT-001-RT boundary check: parameter '${param}' of ${fnName}`);
+  lines.push(`// §53.9.1 E-CONTRACT-001-RT boundary check: parameter '${commentText(param)}' of ${commentText(fnName)}`);
   lines.push(`if (!${check}) {`);
   lines.push(`  throw new _scrml_g.Error(`);
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
@@ -676,7 +677,7 @@ export function emitRuntimeCheck(
   const locationPart = location ? ` (${location})` : "";
 
   const lines: string[] = [];
-  lines.push(`// §53.4.5 E-CONTRACT-001-RT boundary check for '${varName}'${labelPart}`);
+  lines.push(`// §53.4.5 E-CONTRACT-001-RT boundary check for '${commentText(varName)}'${commentText(labelPart)}`);
   lines.push(`if (!(${checkExpr})) {`);
   lines.push(`  throw new _scrml_g.Error(`);
   lines.push(`    "E-CONTRACT-001-RT: Value constraint violated at runtime.\\n" +`);
@@ -723,7 +724,7 @@ export function emitServerParamCheck(
   const labelPart = label ? ` [${label}]` : "";
 
   const lines: string[] = [];
-  lines.push(`${indent}// §53.9.4 E-CONTRACT-001-RT server-side boundary check: '${paramName}'${labelPart}`);
+  lines.push(`${indent}// §53.9.4 E-CONTRACT-001-RT server-side boundary check: '${commentText(paramName)}'${commentText(labelPart)}`);
   lines.push(`${indent}if (!(${checkExpr})) {`);
   lines.push(`${indent}  return new _scrml_g.Response(_scrml_g.JSON.stringify({`);
   lines.push(`${indent}    error: "E-CONTRACT-001-RT: Value constraint violated at runtime.",`);

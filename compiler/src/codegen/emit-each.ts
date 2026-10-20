@@ -36,6 +36,7 @@
  *   - `_scrml_reactive_get(name)` — read cell with auto-dep-tracking
  */
 
+import { commentText } from "./comment-text.ts";
 import type { CompileContext } from "./context.ts";
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 import { guardDetachedListener } from "./detached-listener.ts";
@@ -2841,7 +2842,7 @@ function renderTemplateAttrToJs(
       // Same attribute identity VP-3 stamps, so api.js reports the attribute once.
       (refusal as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(attr && attr.span, aName);
       recordRefusedLowering(refusal, attr);
-      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${aName}" attribute refused (executable sink) */`);
+      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${commentText(aName)}" attribute refused (executable sink) */`);
       return;
     }
     if (tpl !== null) {

@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 /**
  * §51.13 — Auto-Generated Machine Property Tests
  *
@@ -366,7 +367,7 @@ function emitMachineDescribe(m: MachineLike, initial: string | null): string[] {
       if (repV != null) break;
     }
     if (repV == null || repW == null) {
-      lines.push(`  // (skip) guard [${r.label}] on .${r.from} => .${r.to}: no reachable pair resolves to this rule.`);
+      lines.push(`  // (skip) guard [${commentText(r.label)}] on .${commentText(r.from)} => .${commentText(r.to)}: no reachable pair resolves to this rule.`);
       continue;
     }
     const wildcardNote = ruleKey !== `${repV}:${repW}` ? ` (via wildcard ${ruleKey})` : "";
@@ -564,7 +565,7 @@ export function generateMachineTestJs(
       }
     }
     if (!machine.rules || machine.rules.length === 0) {
-      skipNotes.push(`// Skipped ${name}: empty rule set.`);
+      skipNotes.push(`// Skipped ${commentText(name)}: empty rule set.`);
       continue;
     }
 
@@ -572,7 +573,7 @@ export function generateMachineTestJs(
     if (machine.isDerived) {
       const projCheck = projectionIsInScope(machine.rules);
       if (!projCheck.ok) {
-        skipNotes.push(`// Skipped ${name}: ${projCheck.reason}.`);
+        skipNotes.push(`// Skipped ${commentText(name)}: ${commentText(projCheck.reason)}.`);
         continue;
       }
       const block: string[] = [];
@@ -586,7 +587,7 @@ export function generateMachineTestJs(
 
     const scopeCheck = rulesAreInScope(machine.rules);
     if (!scopeCheck.ok) {
-      skipNotes.push(`// Skipped ${name}: ${scopeCheck.reason} — see §51.13 phased implementation.`);
+      skipNotes.push(`// Skipped ${commentText(name)}: ${commentText(scopeCheck.reason)} — see §51.13 phased implementation.`);
       continue;
     }
 
@@ -619,7 +620,7 @@ export function generateMachineTestJs(
   );
 
   lines.push(`// §51.13 auto-generated machine property tests — do not edit.`);
-  lines.push(`// Source: ${fileName}`);
+  lines.push(`// Source: ${commentText(fileName)}`);
   if (anyTemporal) {
     lines.push(`// Note: temporal rules (.From after Ns => .To) contribute exclusivity`);
     lines.push(`// and guard-coverage tests only. Timer lifecycle (arm on entry, clear`);

@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 /**
  * @module codegen/emit-worker
  *
@@ -70,7 +71,7 @@ export function generateWorkerJs(
 ): string {
   const workerName = name;
   const lines: string[] = [];
-  lines.push(`// Generated worker: ${name}`);
+  lines.push(`// Generated worker: ${commentText(name)}`);
 
   // Emit function declarations from the worker's children
   for (const child of children) {
