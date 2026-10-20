@@ -22373,7 +22373,7 @@ always rule out before the program runs, and that is **not a value of any `!` er
 
 | Code | Raised by | Section |
 |---|---|---|
-| `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length` (Nominal / spec-ahead — not yet emitted) | §49.13 |
+| `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length` (Nominal / spec-ahead — not yet emitted) | §66.12.8 (moved from §49.13) |
 
 (`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
 S440, are earlier runtime errors at a value boundary. They keep their own sections.)
@@ -22384,7 +22384,7 @@ S440, are earlier runtime errors at a value boundary. They keep their own sectio
   handler, render, reactive effect, server request or top-level logic block that raised it runs.
 - A trap SHALL NOT be a `!` error. `!{}`, `?` and `match` do not see it, and a function is not failable because
   it contains an expression that may trap (§19.4). There is no way to catch a trap in scrml source. To avoid one,
-  test first, or use the non-trapping form (`xs.at(i)`, §49.13).
+  test first, or use the non-trapping form (`xs.at(i)`, §66.12.8).
 - For §19.6.8 and §19.16 a trap is a **non-`!` runtime error**. Raised during a render or a reactive effect inside
   an `<errorBoundary>`, it is caught by the boundary's backstop (§19.6.8 B2, B3); raised in an event handler, it
   is reported as §19.6.8 B7 requires; a `defer` registered in a block it passes through runs (§19.16.2).
@@ -27076,7 +27076,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
 | E-RANGE-BOUND-NOT-INT | §49.2.5, §49.9 | A range bound whose type is not `int`. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"*. | Error |
-| E-INDEX-OUT-OF-RANGE-RT | §49.13, §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
+| E-INDEX-OUT-OF-RANGE-RT | §66.12.8 (was §49.13), §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
+| E-TAPE-JS-METHOD | §66.12.6, §66.20 | (a) A JavaScript array method name called on a tape, in any position, whatever the tape grants — the mutating `push` / `unshift` / `splice` (S469 "tape methods are named after their grants") or the copy-returning `toSorted` / `toReversed` / `with` (S469, O65 (a)); the fix-it names the scrml form (`.append(x)`, `.prepend(x)`, `.remove(i)` / `.insert(i, x)`, `.sort(…)`, `.reverse()`, a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement) — these return a new tape, so the JavaScript in-place idiom would do nothing (derived, §66.12.6 rule 3). Code inside a `_{ }` slice is not checked. **Nominal on impl#1** (impl#1 does not implement §66; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`tapeJsFix`, `tapeMethodStmt`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" — *"Names match the grants (Recommended)"*; ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" — *"Refuse, one name each (Recommended)"*, *"E-TAPE-JS-METHOD (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | W-ASSIGN-001 | §50.4 | `=` in condition position without double parentheses | Warning |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
@@ -34704,7 +34705,7 @@ const ids = for (o of orders) { if (o.paid) { lift o.id; } };   // the value for
 - **Markup iteration is separate.** `<each>` (§17.7) is the canonical markup list element. `${ for (…) { lift
   <li/>; } }` (Tier 0, §17.4) is this section's value form written inside an interpolation; it is not a second
   loop construct.
-- Reading a tape by position is defined by §49.13: `xs[i]` has type `T`, and an out-of-range read is a defined
+- Reading a tape by position is defined by §66.12.8 (moved from §49.13): `xs[i]` has type `T`, and an out-of-range read is a defined
   runtime error (§19.17).
 
 > **impl#1 implementation note — not language.** The 2026-04-07 text said these constructs *"compile directly
@@ -34943,9 +34944,22 @@ the next one:
 3. The loop ends after the last element, or on `break`.
 
 **What may be iterated:** a tape (in position order); a map's `.keys()` / `.values()` / `.entries()` view and a
-set's view (§59.8, which governs their order); `Enum.variants` (§14); a generator (§13); a range (§49.2.5).
-⚑ **OPEN (not ruled):** whether `for (ch of s)` over a `string` iterates code points (JavaScript's `for…of`
-behaviour) or UTF-16 units, and the type of `ch`.
+set's view (§59.8, which governs their order); `Enum.variants` (§14); a generator (§13); a range (§49.2.5);
+a `string`.
+~~⚑ **OPEN (not ruled):** whether `for (ch of s)` over a `string` iterates code points (JavaScript's `for…of`
+behaviour) or UTF-16 units, and the type of `ch`.~~ *(RULED S469 — below.)*
+
+**Iterating a string (S469).** `for (ch of s)` over a `string` binds `ch` to each **Unicode code point** of `s`,
+in order, as a `string` holding that one code point (JavaScript's `for…of` behaviour: a surrogate pair is one
+step; a lone surrogate is a step of its own). `s[i]` follows: it is the code point at position `i` (§66.12.8).
+Note: `s.length` counts UTF-16 units, so it can differ from the number of steps the loop takes.
+
+> **Amendment S469 — string iteration is by code point.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
+> RULED — open items from the loops + tapes SPEC PRs (#1473, #1472)" — String iteration: *"Code points
+> (Recommended)"* (*"`for (c of s)` over a string yields Unicode code points (JS `for…of` semantics); `s[i]`
+> follows. Document that `s.length` counts UTF-16 units, so it can differ from the loop count."*).
+> **supersedes:** the struck ⚑ OPEN line. **Direction of change:** semantics-defined (previously unspecified).
+> Nominal on impl#1 (which emits JavaScript's `for…of`, the same steps); the bootstrap has no string loop yet.
 
 **The binder.** A keywordless binder — `x` in `for (x of xs)` — is `const` (§50.8.5); a write to it is
 E-ASSIGN-004 (ruling:user-voice-scrml.md S439 #8 "all recs"; §17.4a). `const x` is the same binder written
@@ -35208,7 +35222,7 @@ NOT E-SYNTAX-002. E-SYNTAX-002 is scoped to bare `function` bodies (§10.4, §48
 > constructs compile directly to their JavaScript equivalents. They are not desugared into any other scrml
 > form."*
 
-The language rules of §49 are §49.2–§49.7 and §49.13. How an implementation lowers a loop is not one of them.
+The language rules of §49 are §49.2–§49.7 (and the index reads, moved from §49.13 to §66.12.8). How an implementation lowers a loop is not one of them.
 
 **impl#1 (frozen, legacy).** impl#1 lowers loops to JavaScript passthrough: `while`, `do...while`, `break`,
 `continue`, labels, `for (… of …)` and C-style `for` are emitted as the same JavaScript construct, with names
@@ -35218,7 +35232,7 @@ semantics:
 - it accepts `while` and `do...while` and does not emit `E-LOOP-WHILE-RETIRED` / `E-LOOP-DO-WHILE-RETIRED`;
 - it accepts the braceless `for x in xs` form;
 - it has no condition head `for (cond)`, no `for { … }` head and no range head;
-- an index read `xs[i]` is JavaScript's (an out-of-range read gives `undefined`), not §49.13's trap;
+- an index read `xs[i]` is JavaScript's (an out-of-range read gives `undefined`), not §66.12.8's trap;
 - it has an unspecified for-as-value node, not §49.6's value form from every head.
 
 **The bootstrap** has no loop node yet (S469). Its lexer reserves `for`, `while`, `do`, `break`, `continue` and
@@ -35438,7 +35452,7 @@ for (i of 0..1.5) { log(i); }     // Error E-RANGE-BOUND-NOT-INT
 | E-LOOP-DO-WHILE-RETIRED | A `do...while` statement (retired S469) | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-RANGE-OUTSIDE-LOOP-HEAD | A range outside a loop head or a tape type's length token | Error | S469 — Nominal / spec-ahead, not yet emitted |
 | E-RANGE-BOUND-NOT-INT | A range bound that is not an `int` | Error | S469 — Nominal / spec-ahead, not yet emitted |
-| E-INDEX-OUT-OF-RANGE-RT | An index read out of range, at run time (§49.13, §19.17) | Runtime | S469 — Nominal / spec-ahead, not yet emitted |
+| E-INDEX-OUT-OF-RANGE-RT | An index read out of range, at run time (§66.12.8, §19.17) | Runtime | S469 — Nominal / spec-ahead, not yet emitted |
 
 All compile-time codes above are reported after AST construction and scope resolution, in the loop control-flow
 validation pass. The rows new or changed in S469 are **Nominal / spec-ahead** (§49.8).
@@ -35504,7 +35518,7 @@ fn findZero(matrix: int[][]) -> [:int, :int] | not {
 ```
 
 Expected: compiles without error. `break outer` exits both loops. Every index read is in range by construction
-(§49.13).
+(§66.12.8).
 
 ---
 
@@ -35658,36 +35672,12 @@ binding (§49.3.7) holds across every suspension.
 
 ## 49.13 Index reads — `xs[i]` and `xs.at(i)`
 
-> **Amendment S469 — what an index read is.** **Provenance:** ruling:user-voice-scrml.md S469 — F4 *"Trap +
-> `.at()` (Recommended)"* (*"`xs[i]` has type `T`. An out-of-range read is a DEFINED RUNTIME ERROR, scrml's first
-> general runtime trap; a §19 error kind is owed. `xs.at(i)` has type `T | not`."*). **supersedes:** nothing
-> struck — no rule existed; §66.12.6 covers index WRITES only.
-> **Placement.** This rule governs every tape read by position, in or out of a loop. It is written here, beside
-> the loop rules that need it, because §66.12 (the tape) was being amended in parallel; consolidating it into
-> §66.12 is owed.
+**Moved S469 to §66.12.8.** The index-read rules this section held (an index read `xs[i]` has type `T` and traps
+out of range, `E-INDEX-OUT-OF-RANGE-RT`; `xs.at(i)` has type `T | not`; the index is an `int`) now live in §66.12,
+the tape's own section, as this section's amendment said was owed (*"consolidating it into §66.12 is owed"*). The
+text moved unchanged, apart from the string index rule added there. *(Provenance: dispatch:s469-spec-followup —
+the PA's brief, "Move §49.13 into §66.12". Direction of change: inert.)*
 
-For a tape `xs` whose element type is `T`, and an `int` index `i`:
-
-1. **`xs[i]` has type `T`.** When `0 <= i < xs.length` it is the element at position `i`.
-2. **Otherwise it is a trap.** When `i < 0` or `i >= xs.length`, the read raises
-   **`E-INDEX-OUT-OF-RANGE-RT`** (§19.17), naming the index and the length. It never evaluates to `undefined`,
-   to `not` or to any other value. A negative index is out of range: there is no counting from the end.
-3. **`xs.at(i)` has type `T | not`.** It is the element when `0 <= i < xs.length`, and `not` otherwise
-   (including any negative `i`). It never traps. *(The negative-index reading is the deep-dive's
-   recommendation, §12 Fork 4 residue; it departs from JavaScript's `.at(-1)`.)*
-4. **The index is an `int`.** An index of another type is a type error (E-TYPE-031).
-5. **A compiler MAY omit the run-time check where it proves the index in range.** The behaviour is the same
-   either way. The canonical provable shapes are an iterate head over `0..xs.length` and a counted head
-   `for (let i = 0; i < xs.length; i += 1)`, in each case where the body writes neither `i` nor the binding
-   `xs`, and `xs`'s length cannot change in the body (its type grants no length change, or no write to it is in
-   the body's write set).
-
-Index writes are §66.12.6's (an index write at or past the end is `E-WRITE-INVARIANT`). Per-position reads of a
-tuple (§66.12.5) are typed per position and are not governed by this subsection. ⚑ **OPEN (not ruled):**
-`s[i]` on a `string`.
-
-**Status:** Nominal / spec-ahead. impl#1 emits JavaScript's `xs[i]` (§49.8); the bootstrap refuses an index
-read today.
 
 ## 50. Assignment as Expression
 
@@ -48696,7 +48686,7 @@ write, wherever the tape is held, wherever it came from, and however the write i
 
    | Form | Returns |
    |---|---|
-   | `xs.sort(cmp)`, `xs.sort()` | a new tape holding `xs`'s values ordered by `cmp` (the order with no `cmp`: ⚑ O65) |
+   | `xs.sort(cmp)`, `xs.sort()` | a new tape holding `xs`'s values ordered by `cmp`; with no `cmp`, in the element type's natural order (below; O65 RULED) |
    | `xs.reverse()` | a new tape holding `xs`'s values in reverse order |
    | `xs.fill(v)`, `xs.fill(v, start)`, `xs.fill(v, start, end)` | a new tape, with positions `start` up to `end` holding `v` |
    | `xs.copyWithin(target, start)`, `xs.copyWithin(target, start, end)` | a new tape, with positions `start` up to `end` copied to `target` |
@@ -48711,8 +48701,37 @@ write, wherever the tape is held, wherever it came from, and however the write i
    idiom. Under these rules it would do nothing, and `E-STMT-NO-EFFECT` does not catch it, because a call counts as
    an effect (§7.2.2 rule 9). It is therefore `E-TAPE-JS-METHOD` as well, with the fix-it `xs = xs.sort();` (needs
    `writable`) or a binding of the result *(derived: the refusal that keeps "non-mutating" from being a silent
-   no-op; not separately ruled)*. JavaScript's copy-returning twins of these (`toSorted`, `toReversed`, `with`)
-   are ⚑ O65 (§66.22).
+   no-op; not separately ruled)*. ~~JavaScript's copy-returning twins of these (`toSorted`, `toReversed`, `with`)
+   are ⚑ O65 (§66.22).~~ *(RULED S469 — the two paragraphs below.)*
+
+   **`sort()` with no comparator uses the natural order of the element type (S469, O65 (b)).** `int` and `number`
+   elements sort numerically (ascending); `string` elements sort by code point (ascending, comparing code point by
+   code point; a prefix sorts first). JavaScript's default, which compares every element as a string
+   (`[10, 9, 1].sort()` is `[1, 10, 9]`), is not scrml's. A `sort()` with no comparator on a tape of ANY other
+   element type (a struct, an enum, a `bool`, a tape, a `T | not` element, an unresolved type) is a compile error:
+   it has no natural order, so the comparator SHALL be written. The error is `E-TYPE-031` (the call does not fit
+   the method's signature for that receiver) *(the code is the PA's choice: the ruling says "compile error" and
+   names none; the bootstrap emits `E-TYPE-031` for it, `compiler/self-host-v2/analyze.scrml`)*. *(Where `number` elements include
+   NaN, the order of NaN is not defined by this ruling; PA reading: NaN sorts last, as in a numeric comparator that
+   orders NaN after every number. Not separately ruled.)*
+
+   **JavaScript's copy-returning twins are refused, one name each (S469, O65 (a)).** `toSorted`, `toReversed` and
+   `with` are not tape methods: a call of one on a tape is **`E-TAPE-JS-METHOD`**, whatever the tape grants, with a
+   fix-it naming the scrml form — `xs.toSorted(…)` → `xs.sort(…)` (a scrml `sort` already returns a new tape),
+   `xs.toReversed()` → `xs.reverse()`, `xs.with(i, v)` → a position write `xs[i] = v` (granted by `writable`).
+   There is one name for each operation.
+
+   > **Amendment S469 — O65 ruled.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — open items from
+   > the loops + tapes SPEC PRs (#1473, #1472)" — sort(): *"Natural order by type (Recommended)"* (*"`xs.sort()`
+   > with no comparator uses natural order by element type: ints/numbers numerically, strings by code point. Any
+   > other element type without a comparator is a compile error. JS's string-order default is rejected."*) ·
+   > toSorted etc.: *"Refuse, one name each (Recommended)"* (*"JS `toSorted` / `toReversed` / `with` are refused
+   > with a fix-it naming the scrml form (`sort`, `reverse`, a position write), the same as `push`. One name
+   > each."*) · code name: *"E-TAPE-JS-METHOD (Recommended)"* (*"`E-TAPE-JS-METHOD` is confirmed as the code
+   > name."*). **supersedes:** the ⚑ O65 text struck above and the O65 row of §66.22. **Direction of change:**
+   > newly-rejecting (`toSorted` / `toReversed` / `with`, and a comparator-less `sort()` on an element type with no
+   > natural order); semantics-defined for the comparator-less order (previously JavaScript's). The bootstrap
+   > emits both (`compiler/self-host-v2/analyze.scrml`, `tapeJsFix`, `methodOp`); impl#1 carries them (§34.0).
 
 4. **Whole-value writes never bypass the grants.** A whole-value write to a tape, at ANY of the rule-1
    positions, is classified by the §66.11.2 edit classifier. It is a recognized reassignment shape
@@ -48841,6 +48860,47 @@ server function find(items: Item[free, append], key: string) {
     return "found";
 }
 ```
+
+#### 66.12.8 Index reads — `xs[i]` and `xs.at(i)` (S469; moved from §49.13)
+
+> **Amendment S469 — what an index read is.** **Provenance:** ruling:user-voice-scrml.md S469 — F4 *"Trap +
+> `.at()` (Recommended)"* (*"`xs[i]` has type `T`. An out-of-range read is a DEFINED RUNTIME ERROR, scrml's first
+> general runtime trap; a §19 error kind is owed. `xs.at(i)` has type `T | not`."*). **supersedes:** nothing
+> struck — no rule existed; §66.12.6 covers index WRITES only.
+> **Placement.** This rule governs every tape read by position, in or out of a loop. It was written at §49.13,
+> beside the loop rules that need it, because §66.12 (the tape) was being amended in parallel; it moved here S469
+> (§49.13 keeps a pointer).
+
+For a tape `xs` whose element type is `T`, and an `int` index `i`:
+
+1. **`xs[i]` has type `T`.** When `0 <= i < xs.length` it is the element at position `i`.
+2. **Otherwise it is a trap.** When `i < 0` or `i >= xs.length`, the read raises
+   **`E-INDEX-OUT-OF-RANGE-RT`** (§19.17), naming the index and the length. It never evaluates to `undefined`,
+   to `not` or to any other value. A negative index is out of range: there is no counting from the end.
+3. **`xs.at(i)` has type `T | not`.** It is the element when `0 <= i < xs.length`, and `not` otherwise
+   (including any negative `i`). It never traps. *(The negative-index reading is the deep-dive's
+   recommendation, §12 Fork 4 residue; it departs from JavaScript's `.at(-1)`.)*
+4. **The index is an `int`.** An index of another type is a type error (E-TYPE-031).
+5. **A compiler MAY omit the run-time check where it proves the index in range.** The behaviour is the same
+   either way. The canonical provable shapes are an iterate head over `0..xs.length` and a counted head
+   `for (let i = 0; i < xs.length; i += 1)`, in each case where the body writes neither `i` nor the binding
+   `xs`, and `xs`'s length cannot change in the body (its type grants no length change, or no write to it is in
+   the body's write set).
+
+Index writes are §66.12.6's (an index write at or past the end is `E-WRITE-INVARIANT`). Per-position reads of a
+tuple (§66.12.5) are typed per position and are not governed by this subsection. ~~⚑ **OPEN (not ruled):**
+`s[i]` on a `string`.~~ *(RULED S469 — rule 6.)*
+
+6. **`s[i]` on a `string` is the code point at position `i` (S469).** Its type is `string` (one code point).
+   Positions count code points, as iteration does (§49.3.5). Out of range (`i < 0`, or `i` at or past the last
+   code point) it traps with `E-INDEX-OUT-OF-RANGE-RT`, exactly as rule 2 *(derived: rule 2 applied to a string;
+   not separately ruled)*. `s.charAt(i)` is the non-trapping form (Appendix D).
+   **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" —
+   *"Code points (Recommended)"* (*"`for (c of s)` over a string yields Unicode code points … `s[i]` follows."*).
+   **Direction of change:** semantics-defined (impl#1 emits JavaScript's `s[i]`, a UTF-16 unit, and carries it).
+
+**Status:** Nominal / spec-ahead. impl#1 emits JavaScript's `xs[i]` (§49.8); the bootstrap refuses an index
+read today.
 
 ### 66.13 Field contracts, `single`, and engines (Q6 = (a))
 
@@ -49618,6 +49678,13 @@ emitter). Every code below is Nominal on impl#1.
 > *"Names match the grants (Recommended)"* (*"JS's `push` / `unshift` / `splice` are refused with a fix-it naming
 > the scrml method."*). The code name is the PA's (provisional until confirmed, as the S469 codes were).
 
+> **Amendment S469 (follow-up) — `E-TAPE-JS-METHOD`: name confirmed, trigger widened, §34 row landed.** The
+> bootstrap's emitter landed (s469-boot-strings-1), so the §34 row lands with it. Trigger (a) now also covers
+> `toSorted` / `toReversed` / `with` (O65 (a)).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs (#1473,
+> #1472)" — *"E-TAPE-JS-METHOD (Recommended)"* · *"Refuse, one name each (Recommended)"*. **Direction of change:**
+> newly-rejecting (the three copy-returning names).
+
 **New codes**
 
 | Code | Severity | Fires when |
@@ -49636,7 +49703,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript mutating array method name — `push`, `unshift` or `splice` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `writable`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap's method allowlist still uses the JS names and is owed the rename). |
+| **`E-TAPE-JS-METHOD`** | Error | (a) A JavaScript array method name — the mutating `push`, `unshift` or `splice`, or (S469, O65 (a)) the copy-returning `toSorted`, `toReversed` or `with` — called on a tape, in any position (§66.12.6 rule 1), whatever the tape grants; the fix-it names the scrml method (`push` → `.append(x)`, `unshift` → `.prepend(x)`, `splice` → `.remove(i)` / `.insert(i, x)`, `toSorted` → `.sort(…)`, `toReversed` → `.reverse()`, `with` → a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement): these return a new tape and do not mutate, so the JavaScript in-place idiom would do nothing; fix-it `xs = xs.sort();` (needs `writable`) or a binding of the result. Trigger (b) is derived, not separately ruled (§66.12.6 rule 3). Code inside a `_{ }` slice is host code and is not checked. **Nominal on impl#1** (impl#1 does not implement §66); **the bootstrap emits it** (`compiler/self-host-v2/analyze.scrml` — `tapeJsFix`, `tapeMethodStmt`; S469 s469-boot-strings-1). Code name confirmed S469 (*"E-TAPE-JS-METHOD (Recommended)"*). Full row §34. |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
@@ -49820,7 +49887,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O62~~ RULED S469 = yes, eventually | §66.12.4, §66.21 | Whether S469's "not allowed at all" also retires the writable Stage-1 treatment of a legacy right-hand-side STRUCT cell (its fields writable without contracts), or reaches tapes only. RULED: yes, eventually — it lands with the struct-contract work; until then legacy struct and scalar cells keep `W-DECL-LEGACY-RHS`. Provenance: ruling:user-voice-scrml.md S469 — *"Yes, eventually (Recommended)"*. |
 | ~~O63~~ RULED S469 = no | §66.12.6 | Whether a local `let` gives a tape `replace`. RULED no: a local tape needs a typed grant (`let out: Item[free, append] = [];`); `let` makes only the name rebindable, and is not an error on a local (unlike O3's cell rule). Provenance: ruling:user-voice-scrml.md S469 — *"No, locals need grants (Recommended)"*. |
 | ~~O64~~ RULED S469 = copy or freeze | §66.12.6, §66.12.7 | A tape handed OUT to host code (a host call, a callback argument, a `_{ }` slice): copy or freeze at the boundary, or refuse the call. RULED: it crosses as a frozen view or a copy (§66.12.7 rule 1). Provenance: ruling:user-voice-scrml.md S469 — *"Copy or freeze (Recommended)"*. |
-| O65 (S469) | §66.12.6 rule 3 | Two residues of the S469 method-name ruling: (a) whether JavaScript's copy-returning twins `toSorted` / `toReversed` / `with` are refused like `push` (`sort` and `reverse` already return a new tape) or kept as synonyms; (b) the order `xs.sort()` uses with no comparator (JavaScript compares by string conversion, so `[10, 9, 1].sort()` is `[1, 10, 9]`). |
+| ~~O65~~ RULED S469 | §66.12.6 rule 3 | RULED: (a) refused, one name each — `toSorted` / `toReversed` / `with` are `E-TAPE-JS-METHOD`; (b) natural order by element type (numbers numerically, strings by code point; no natural order → a compile error). Provenance: ruling:user-voice-scrml.md S469 — *"Natural order by type (Recommended)"*, *"Refuse, one name each (Recommended)"*, *"E-TAPE-JS-METHOD (Recommended)"*. Was: two residues of the S469 method-name ruling: (a) whether JavaScript's copy-returning twins `toSorted` / `toReversed` / `with` are refused like `push` (`sort` and `reverse` already return a new tape) or kept as synonyms; (b) the order `xs.sort()` uses with no comparator (JavaScript compares by string conversion, so `[10, 9, 1].sort()` is `[1, 10, 9]`). |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O58~~ RULED S437 = (b) | §66.11.3 | How sub-field contracts bind a GENUINE replace (a non-spread value, `reset`, a server reload). RULED (b): a genuine replace is AUTHORITATIVE and does not have to satisfy sub-field contracts (`reset` = the declared initial state; a reload = the server's state); the spread shape `@x = { ...@x, f: v }` stays a checked field edit. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | ~~O59~~ RULED S437 = PA lean | §66.7.6 | When conditional and `<each>`-row instances get their records, and how construction is ordered. RULED: at mount, fresh on each remount; construction in document order after the cells it reads; use-site initializers are the one sanctioned user code at construction. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -49836,7 +49903,8 @@ Ruled S462: O18 (*"I really like X so I accept your rec as a ratified path to X"
 attributes are refused; explicit forwarding is the ratified destination; residue O18-r stays open). Ruled S462: O46 (*"go on the package"*, Q14 — `${...}` retires as the children spread; X spelled
 `...attrs:button`, applied bare).
 Ruled S469 (*"Yes, eventually (Recommended)"*, *"No, locals need grants (Recommended)"*, *"Copy or freeze
-(Recommended)"*): O62, O63, O64. Opened S469: O65.
+(Recommended)"*): O62, O63, O64. Opened S469: O65. Ruled S469 (*"Natural order by type (Recommended)"*, *"Refuse,
+one name each (Recommended)"*): O65.
 
 ### 66.23 Cross-references
 
