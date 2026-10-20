@@ -132,10 +132,13 @@ async function expectRejectsWrong(body, extra = "") {
 }
 
 /** The arm is refused: exactly one E-STMT-UNEXPECTED-TOKEN naming the arm and the unreadable text. */
-function expectRefused(body, { arm = ".Denied", at = null, extra = "" } = {}) {
+function expectRefused(body, { arm = ".Denied", at = null, extra = "", alsoFailable = false } = {}) {
   const out = compileSource(LOGIN(body, extra), "refused");
-  expect(out.codes).toEqual(["E-STMT-UNEXPECTED-TOKEN"]);
-  const msg = out.errors[0].message;
+  // `alsoFailable`: the failable-call walk cannot read the same text either (S469 — its strict
+  // statement reader refuses a body read only by dropping content) and refuses the failable
+  // function it names, E-ERROR-002. Both diagnose the one unreadable body.
+  expect(out.codes).toEqual(alsoFailable ? ["E-ERROR-002", "E-STMT-UNEXPECTED-TOKEN"] : ["E-STMT-UNEXPECTED-TOKEN"]);
+  const msg = out.errors.find((e) => e.code === "E-STMT-UNEXPECTED-TOKEN").message;
   expect(msg).toContain(`the \`${arm}\` arm of a \`!{ }\` handler whose result is used`);
   expect(msg).toContain("§19.4.3");
   if (at !== null) expect(msg).toContain(`no statement begins at \`${at}\``);
@@ -237,7 +240,7 @@ describe("A2 — a block-armed handler nested in the arm is read and yields its 
     expectRefused(`const ok = check(p) !{ .Denied :> { const y = check2(p) !{ .Locked :> { @note = "l"
                 0 }
                 .Denied :> false }
-            y } }`, { at: "0" });
+            y } }`, { at: "0", alsoFailable: true });
   });
 
   test("server: the nested form compiles (it was refused) and its tail is assigned", () => {

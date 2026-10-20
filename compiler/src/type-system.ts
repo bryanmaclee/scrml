@@ -78,7 +78,7 @@ import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprN
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
-import { parseStatementText, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
+import { parseStatementTextDetailed, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
@@ -16399,7 +16399,12 @@ function annotateNodes(
       stampFailableMatchSubject(node as unknown as ASTNodeLike, callees, fnErrorTypes, typeRegistry);
     },
     parseStatements: (text) => {
-      const r = parseStatementText(text, filePath);
+      // S469 (review of 834e41cba, F1) — the STRICT reader: a body the parser reads only by
+      // dropping trailing content is refused. The lenient `parseStatementText` read
+      // `a: { return check(p) }` (a labeled block) as the bare expression `a`, dropped the block
+      // and reported the body readable, so the call inside was never seen. A refused body falls
+      // to `unreadText` (refuse-by-name).
+      const r = parseStatementTextDetailed(text, filePath, {});
       return r.ok ? r.stmts : null;
     },
     parseExpr: (text) => {

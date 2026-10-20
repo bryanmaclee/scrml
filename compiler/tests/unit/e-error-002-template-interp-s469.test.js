@@ -357,3 +357,24 @@ describe("an exported `const` alias of a failable function is refused (E-IMPL1-F
     expect(compileProject({ "app.scrml": APP("check", HANDLED), "lib.scrml": LIB("const g = check\n    export const n = 1") })).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review of 834e41cba, F1: a labeled block in a function-expression body
+// ---------------------------------------------------------------------------
+
+describe("F1 — a labeled block in a function-expression body does not hide a `!` call", () => {
+  // The walk's statement reader was the LENIENT one: `a: { return check(p) }` read as the bare
+  // expression `a`, the block dropped, the body reported readable. The strict reader refuses
+  // such a body, and the walk then reads its text to refuse by name.
+  const refused = [
+    ["in a template IIFE", 'const s = `${(() => { a: { return check(p) } })() ? "Y" : "N"}`'],
+    ["in an arrow, no template", 'const h = (q) => { a: { return check(q) } }\n        const s = h(p) ? "Y" : "N"'],
+    ["in a function expression", 'const h = function (q) { a: { return check(q) } }\n        const s = h(p) ? "Y" : "N"'],
+    ["through an alias", 'const h = (q) => { a: { return g(q) } }\n        const s = h(p) ? "Y" : "N"'],
+  ];
+  for (const [what, decl] of refused) {
+    test(what, () => {
+      expect(compileSource(LOGIN(decl), "f1").codes).toContain("E-ERROR-002");
+    });
+  }
+});
