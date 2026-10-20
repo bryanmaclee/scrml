@@ -16702,6 +16702,19 @@ function annotateNodes(
   ): void {
     const calleeName = c.calleeName;
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "unreadable-expr") {
+      // S469 (§19.4.3) — an expression the failable-call check can read neither as structure nor
+      // as text (an escape hatch with no source text). Refused (fails closed): before, it was
+      // skipped, and a `!` call inside it went unchecked (a wrong password logged in).
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: impl#1 cannot read this expression (a ${c.text ?? "expression"} with no source text), ` +
+        `so it cannot check it for an unhandled failable call (§19.4.3). Bind its parts to names in ` +
+        `their own statements first (handling any '!' call there with '!{}' or 'match').`,
+        span,
+      ));
+      return;
+    }
     if (c.refKind === "unreadable") {
       // S469 follow-up (§19.4.3) — a `lift` operand neither parser reads (a value form nested
       // two deep). The failable-call check cannot prove it free of an unhandled call, so it is

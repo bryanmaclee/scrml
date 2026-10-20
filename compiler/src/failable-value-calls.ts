@@ -135,13 +135,18 @@ export interface FailableCallCandidate {
    *     impl#1 lowers that guard against the LIFT's result, not the call's (the error object is
    *     lifted unchecked; executed S469), so the `!{}` does not handle it.
    */
-  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable";
+  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable" | "unreadable-expr";
   /**
    * S469 follow-up — `refKind: "unreadable"`: a `lift` operand this walk could not read — the
    * operand text (`lift if (c) { lift if … }`, a value form nested two deep) parses neither as
    * an expression nor as statements, and names no failable function in scope. Nothing proves it
    * free of an unhandled failable call through a path the text scan cannot see, so it is
    * refused (fails closed). `calleeName` is "" and `text` is the operand text.
+   *
+   * S469 (template interpolation) — `refKind: "unreadable-expr"`: an escape hatch that carries
+   * NO source text (`raw` empty or missing) and is not a literal: the walk can read neither its
+   * structure nor its text, so nothing proves it free of an unhandled failable call. Refused
+   * (E-ERROR-002, fails closed). `calleeName` is "" and `text` is the hatch's ESTree kind.
    */
   text?: string;
   /**
@@ -646,7 +651,9 @@ class Walker {
    * template's tag IS called; any other mention may be). True when something was reported.
    */
   unreadText(text: unknown, scope: LocalScope | null, fn: FnCtx): boolean {
-    if (typeof text !== "string" || text.trim() === "") return false;
+    // S469 — text that is missing is not text that holds nothing: nothing about it is provable.
+    // (A caller holding an escape hatch with no text refuses it: see escapeHatch.)
+    if (typeof text !== "string" || text.trim() === "") { this.unreadable = true; return false; }
     // Text this walk could not read structurally: nothing in it is PROVABLE (S469 fix round 3 —
     // the exact-returns judgement reads `unreadable`; main's refuse-by-name read keeps it closed).
     this.unreadable = true;
@@ -945,7 +952,21 @@ class Walker {
     if (nk === "Literal") return;
     // A statement's text the expression parser could not read: its reader is the statement's
     // (ownExpressions — the statement usually carries the structured form under another key).
-    if (nk === "ParseError") return;
+    // Nothing in it is PROVABLE from here (the exact-returns judgement reads `unreadable`).
+    if (nk === "ParseError") { this.unreadable = true; return; }
+    // S469 (§19.4.3) — FAIL CLOSED: a hatch with no source text can be read neither as structure
+    // nor as text. Before, `unreadText("")` returned false — nothing refused, `unreadable` not
+    // set — so `${(check(p), 1) ? "Y" : "N"}` (a sequence hatch the template-interpolation reader
+    // built with `raw: ""`) compiled and a wrong password logged in. The reader now carries the
+    // text (expression-parser.ts `readTemplateInterpolations`); a hatch that still has none is
+    // refused, never skipped.
+    if (typeof raw !== "string" || raw.trim() === "") {
+      this.unreadable = true;
+      this.cb({ call: null, calleeName: "", via: null, inFunction: fn.inFunction,
+        inFailableFn: fn.inFunction && fn.inFailableFn, fromText: true, refKind: "unreadable-expr",
+        text: typeof nk === "string" ? nk : "expression" });
+      return;
+    }
     // S469 follow-up (§19.4.3) — `check\`${p}\``: a tagged template CALLS its tag (with the
     // template's strings and interpolated values). Before, the hatch was not read and
     // `const ok = check\`${p}\`` compiled: a wrong password logged in. A tag that is a name is

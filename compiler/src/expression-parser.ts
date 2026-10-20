@@ -3308,7 +3308,10 @@ export function esTreeToExprNode(
 
       if (bodyNode.type !== "BlockStatement") {
         // Expression body: `x => expr`
-        const value = esTreeToExprNode(bodyNode, filePath, baseOffset);
+        // S469 — rawSource threaded: a hatch in the body (a sequence, a block-bodied
+        // arrow) carries its own source text, never raw "" (the failable-call walk
+        // reads hatch text to refuse; an empty one hid an unhandled `!` call).
+        const value = esTreeToExprNode(bodyNode, filePath, baseOffset, rawSource);
         return {
           kind: "lambda", span, params, isAsync, fnStyle,
           body: { kind: "expr", value },
@@ -3388,7 +3391,7 @@ export function esTreeToExprNode(
 
     // ---- Spread (in spread position, handled by parent; standalone is escape hatch) ----
     case "SpreadElement": {
-      const argument = esTreeToExprNode((node as { argument: ESNode }).argument, filePath, baseOffset);
+      const argument = esTreeToExprNode((node as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
       return { kind: "spread", span, argument } satisfies SpreadExpr;
     }
 
@@ -3439,7 +3442,7 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number, r
     if (p.type === "AssignmentPattern" && (p.left as ESNode | undefined)?.type === "Identifier") {
       const left = (p as { left: ESNode }).left;
       const right = (p as { right: ESNode }).right;
-      const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
+      const defaultValue = esTreeToExprNode(right, filePath, baseOffset, rawSource);
       return { name: left.name as string ?? "", defaultValue };
     }
     // Destructured patterns (a defaulted / rest one included). S458: the names the
@@ -4761,38 +4764,72 @@ export function templateInterpolationNodesAll(lit: { raw: string; span: ExprSpan
 function templateInterpolationNodesCached(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
   let cached = TEMPLATE_INTERP_CACHE.get(lit as unknown as LitExpr);
   if (!cached) {
-    cached = [];
-    const segments = tokenizeTemplateInterpolations(lit.raw);
-    for (const seg of segments) {
-      if (seg.kind !== "expr") continue;
-      const exprText = seg.text.trim();
-      if (!exprText) continue;
-      // Try to parse as a full expression.
-      const { ast, error } = parseExpression(exprText, { tolerant: true });
-      if (ast && !error) {
-        try {
-          const baseOffset = (lit.span?.start ?? 0) + seg.offset;
-          const node = esTreeToExprNode(ast, lit.span?.file ?? "", baseOffset);
-          cached.push(node);
-          continue;
-        } catch (_e) {
-          // Conversion error — fall through to regex fallback below.
-        }
-      }
-      // Fallback: synthesize an EscapeHatchExpr-ish marker carrying a regex
-      // pre-scan. We store a sentinel so future walks know to use the regex
-      // path. To keep this simple we cache nothing for the sentinel and
-      // re-run the regex each walk (fallback path is cold).
-      cached.push({
-        kind: "escape-hatch",
-        span: lit.span,
-        nativeKind: "TemplateInterpFallback",
-        raw: exprText,
-      } as EscapeHatchExpr);
-    }
+    cached = readTemplateInterpolations(lit);
     TEMPLATE_INTERP_CACHE.set(lit as unknown as LitExpr, cached);
   }
   return cached;
+}
+
+/** A node `parseExprToNode` returned for text it could not read whole. */
+function isUnreadExprNode(node: ExprNode): boolean {
+  if (hasLostTrailingContent(node)) return true;
+  if ((node as EscapeHatchExpr).kind !== "escape-hatch") return false;
+  const nk = (node as EscapeHatchExpr).nativeKind;
+  return nk === "ParseError" || nk === "ConversionError" || nk === "SqlPlaceholderError";
+}
+
+/**
+ * S469 (§19.4.3) — ONE reader of a template literal's interpolations: the interpolations are the
+ * ExprNodes the expression reader (`parseExprToNode` → `esTreeToExprNode`) built — the SAME nodes
+ * the structural template emitter writes out (emit-expr.ts `emitTemplateLitStructured`).
+ *
+ * Before, this re-parsed each `${…}` with bare `parseExpression` (no `!{}` / scrml-operator
+ * preprocessing) and converted it with NO source text: every escape hatch inside an interpolation
+ * (a sequence, a block-bodied arrow or function expression, a tagged template) carried `raw: ""`,
+ * so the failable-call walk read nothing in it and `${(check(p), 1) ? "Y" : "N"}` compiled — a
+ * wrong password logged in. Order:
+ *   1. the literal's own structure (`_tplExprs`, stamped by the parse that built it);
+ *   2. the literal's text re-read whole by `parseExprToNode` (a node that lost its structure — a
+ *      structuredClone — or a `TemplateLiteral` escape hatch / a quasi carried as text);
+ *   3. each interpolation read by `parseExprToNode`; one it cannot read whole is a
+ *      `TemplateInterpFallback` hatch carrying its text (read to refuse, never dropped).
+ */
+function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
+  const own = (lit as { _tplExprs?: unknown })._tplExprs;
+  if (Array.isArray(own)) return own.slice() as ExprNode[];
+  if ((lit as { hasInterpolation?: unknown }).hasInterpolation === false) return [];
+  const raw = lit.raw;
+  if (typeof raw !== "string") return [];
+  const file = lit.span?.file ?? "";
+  const start = lit.span?.start ?? 0;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    try {
+      const re = parseExprToNode(trimmed, file, start) as unknown as LitExpr & { _tplExprs?: unknown };
+      if (re && re.kind === "lit" && re.litType === "template" && !isUnreadExprNode(re as unknown as ExprNode)) {
+        if (Array.isArray(re._tplExprs)) return (re._tplExprs as ExprNode[]).slice();
+        if (re.hasInterpolation === false) return [];
+      }
+    } catch { /* read segment by segment below */ }
+  }
+  const out: ExprNode[] = [];
+  for (const seg of tokenizeTemplateInterpolations(raw)) {
+    if (seg.kind !== "expr") continue;
+    const exprText = seg.text.trim();
+    if (!exprText) continue;
+    let node: ExprNode | null = null;
+    try { node = parseExprToNode(exprText, file, start + seg.offset); } catch { node = null; }
+    if (node && !isUnreadExprNode(node)) { out.push(node); continue; }
+    // Text the reader cannot read whole: a sentinel carrying it (the identifier walker
+    // regex-scans it; the failable-call walk reads it to refuse).
+    out.push({
+      kind: "escape-hatch",
+      span: lit.span,
+      nativeKind: "TemplateInterpFallback",
+      raw: exprText,
+    } as EscapeHatchExpr);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
