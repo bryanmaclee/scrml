@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-continue-outside",
+  "description": "E-LOOP-002: `continue` with no loop.",
+  "language-version": "1.0",
+  "spec": "§49.4.1 · §49.9",
+  "rationale": "§49.4.1: \"The compiler SHALL reject `continue` that appears outside any enclosing loop with E-LOOP-002.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-002"
+    ],
+    "codeCounts": {
+      "E-LOOP-002": 1
+    }
+  }
+}

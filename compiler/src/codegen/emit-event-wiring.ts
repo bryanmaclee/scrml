@@ -1,7 +1,7 @@
 import { guardDetachedListener } from "./detached-listener.ts";
 import { rewriteReactiveRefs, rewriteExprArrowBody } from "./rewrite.js";
 import { wrapUrlGuard } from "./url-attr-guard.ts";
-import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
+import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, hasFailableMatchStamp, type EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitHandlerStatementList } from "./emit-logic.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix, withBoundaryCatchSite, boundaryChecksEmittedCount } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -1181,7 +1181,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           typeof exprNode.target.name === "string" &&
           exprNode.target.name.startsWith("@") &&
           mapVarNames.has(exprNode.target.name.slice(1));
-        if (exprNode && ((exprNode.kind !== "assign" && exprNode.kind !== "lambda" && exprNode.kind !== "unary") || isMapVarAssign)) {
+        // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — an
+        // assign whose value holds a `match` TS stamped as a match on a FAILABLE result
+        // (`onclick=${ @msg = match check(p) { .Denied :> … _ :> … } }`) must take the
+        // structured path too: the string path re-reads the text, never sees the stamp, and
+        // compared the error object as a plain value — a wrong password logged in. emitAssign
+        // routes engine targets itself (§51.0.F, `engineBindings` in the ctx extras).
+        const carriesFailableMatch = !!exprNode && exprNode.kind === "assign" && hasFailableMatchStamp(exprNode);
+        if (exprNode && ((exprNode.kind !== "assign" && exprNode.kind !== "lambda" && exprNode.kind !== "unary") || isMapVarAssign || carriesFailableMatch)) {
           // Single structured expression — use emitExprField so engine
           // `.advance(.X)` (and any other structured-only detection in
           // emit-expr.ts) routes correctly. Map-var assigns also take this path

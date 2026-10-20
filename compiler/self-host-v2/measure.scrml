@@ -69,6 +69,9 @@ ${
             .Fail(err: x) :> "Fail"
             .Join(k: x) :> "Join"
             .Jump(k: x) :> "Jump"
+            .Loop(label: x) :> "Loop"
+            .Break(target: x) :> "Break"
+            .Continue(target: x) :> "Continue"
         }
     }
 

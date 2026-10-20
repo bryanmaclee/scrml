@@ -172,6 +172,43 @@ describe("B — string methods are typed member calls", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Cross-lane (strings × loops, merged after #1474): ONE unit for every string position.
+describe("strings × loops — a range over `s.length`, `for (ch of s)` and `charAt` agree (code points)", () => {
+  const FNS = `    let <s:string="a😀b"/>
+    function viaRange(t: string) -> string {
+        let out: string = ""
+        for (i of 0..t.length) { out = out + "[" + t.charAt(i) + "]" }
+        return out
+    }
+    function viaOf(t: string) -> string {
+        let out: string = ""
+        for (ch of t) { out = out + "[" + ch + "]" }
+        return out
+    }
+    function countRange(t: string) -> int {
+        let n: int = 0
+        for (i of 0..t.length) { n = n + 1 }
+        return n
+    }
+    function countOf(t: string) -> int {
+        let n: int = 0
+        for (ch of t) { n = n + 1 }
+        return n
+    }`;
+  test("on \"a😀b\": `0..s.length` runs 3 times, as `for (ch of s)` does, and `charAt(i)` is each code point (runtime)", async () => {
+    await load(prog(FNS, `        <p id="r">\${viaRange(@s)}</p>\n        <p id="o">\${viaOf(@s)}</p>\n        <p id="cr">\${countRange(@s)}</p>\n        <p id="co">\${countOf(@s)}</p>`));
+    expect($("#r").textContent).toBe("[a][😀][b]");
+    expect($("#o").textContent).toBe("[a][😀][b]");
+    expect($("#cr").textContent).toBe("3");
+    expect($("#co").textContent).toBe("3");
+  });
+  test("the loops lane's `s[i]` refusal on a string still stands", () => {
+    const d = diag(prog(`    let <s:string="ab"/>`, `        <p>\${@s[0]}</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(d?.message).toContain("`s[i]` on a `string`");
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe("A — int→string is NOT built (no ruled spelling)", () => {
   test("string + int stays E-OPERATOR-OPERAND-TYPE; `String(n)` / `n.toString()` are refused", () => {
     expect(codes(prog(S, `        <p>\${"typed " + @s.length}</p>`))).toEqual(["E-OPERATOR-OPERAND-TYPE"]);

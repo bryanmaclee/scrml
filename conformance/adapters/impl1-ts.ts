@@ -517,6 +517,16 @@ function installNoopWebSocket(): () => void {
   };
 }
 
+// A register() hands out a FRESH happy-dom window, with none of the listeners
+// a test host attached to the old one. Hosts that listen on `window` (the
+// bootstrap's slice-m1/load-program.js page-error capture) register a hook in
+// `globalThis.__scrmlDomSwapHooks`; every swap here runs them, right after the
+// register, so no error dispatched after a swap goes uncaptured.
+function afterDomSwap(): void {
+  const hooks = (globalThis as any).__scrmlDomSwapHooks as Array<() => void> | undefined;
+  for (const h of hooks ?? []) h();
+}
+
 function ensureFreshDom(): void {
   // A fresh window per run isolates DOMContentLoaded listeners + state from the
   // prior run (verified: re-register drops old listeners). unregister() is async.
@@ -525,6 +535,7 @@ function ensureFreshDom(): void {
     // awaited by the caller (run) before re-register.
   }
   GlobalRegistrator.register();
+  afterDomSwap();
 }
 
 /**
@@ -540,6 +551,7 @@ export async function run(
 ): Promise<RunResult> {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   GlobalRegistrator.register();
+  afterDomSwap();
 
   // §52 server-fn boundary: when a case declares server-fn responses, install a
   // deterministic mock fetch over the compiler-emitted server routes for this
@@ -1051,6 +1063,7 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
   // A real document URL is required for happy-dom's cookie jar (the baseline CSRF
   // double-submit reads/writes `document.cookie`); about:blank rejects cookies.
   GlobalRegistrator.register({ url: "http://localhost/" } as any);
+  afterDomSwap();
 
   const clock = new FakeClock();
   const dir = mkdtempSync(join(tmpdir(), "scrml-conf-server-"));

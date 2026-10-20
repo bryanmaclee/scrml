@@ -1,0 +1,15 @@
+// §49.3.6: `for { … }` runs until a `break`.
+<program>
+
+    function f() -> int {
+        let n = 0
+        for {
+            n = n + 1
+            if (n == 4) { break }
+        }
+        return n
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

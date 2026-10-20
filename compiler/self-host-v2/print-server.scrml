@@ -249,6 +249,9 @@ ${
             .Fail(err: x) :> not
             .Join(k: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 

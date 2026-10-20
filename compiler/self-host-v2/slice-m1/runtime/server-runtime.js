@@ -33,14 +33,15 @@
 // never decides what to await (S467 §13 gate item 1).
 // =============================================================================
 
-import { encode, decode, failure, failed, runDefers, eq, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
+import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   sortNum, sortStr, sortBy, reversed, joinStr } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
 // both artifacts): a failure value, the test for one, the `defer` stack,
-// structural equality (§45), and (s469) the typed string / tape built-ins.
-export { failure, failed, runDefers, eq };
+// structural equality (§45), (s469) the tape index reads (§49.13), and (s469)
+// the typed string / tape built-ins.
+export { failure, failed, runDefers, eq, indexRead, atRead };
 export { strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith, sortNum, sortStr, sortBy, reversed, joinStr };
 
 // ---------------------------------------------------------------------------

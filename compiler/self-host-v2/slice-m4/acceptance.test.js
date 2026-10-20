@@ -109,6 +109,27 @@ const STATUS = {
   "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/markup-does-not-warn": ["PASS", []],
   "interp/quoted-attr-no-warn": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469 — the first loop slice (§49 "one `for`"): the four heads, labels, ranges, index reads, and the refusals
+  "loop/cond-head": ["PASS", []],
+  "loop/counted-continue": ["PASS", []],
+  "loop/forever-break": ["PASS", []],
+  "loop/index-at": ["PASS", []],
+  "loop/labels": ["PASS", []],
+  "loop/neg-break-label": ["PASS", ["E-LOOP-003"]],
+  "loop/neg-break-outside": ["PASS", ["E-LOOP-001"]],
+  "loop/neg-continue-label": ["PASS", ["E-LOOP-004"]],
+  "loop/neg-continue-outside": ["PASS", ["E-LOOP-002"]],
+  "loop/neg-do-while": ["PASS", ["E-LOOP-DO-WHILE-RETIRED"]],
+  "loop/neg-dup-label": ["PASS", ["E-LOOP-006"]],
+  "loop/neg-for-in-braceless": ["PASS", ["E-FOR-UNPARENTHESIZED-HEAD"]],
+  "loop/neg-for-in-paren": ["PASS", ["E-CTRL-011"]],
+  "loop/neg-grant-in-loop": ["PASS", ["E-WRITE-NOT-GRANTED"]],
+  "loop/neg-range-bound": ["PASS", ["E-RANGE-BOUND-NOT-INT"]],
+  "loop/neg-range-paren": ["PASS", ["E-RANGE-OUTSIDE-LOOP-HEAD"]],
+  "loop/neg-range-value": ["PASS", ["E-RANGE-OUTSIDE-LOOP-HEAD"]],
+  "loop/neg-while": ["PASS", ["E-LOOP-WHILE-RETIRED"]],
+  "loop/range": ["PASS", []],
+  "loop/sum-tape": ["PASS", []],
 };
 
 let verdicts;
@@ -156,7 +177,8 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   test("the security cases ran their runtime half (the deny arm was taken, not merely compiled)", () => {
     for (const rel of ["security/login-enum", "security/login-literal", "security/login-literal-no-else", "security/login-maybe", "toenum/prototype-keys",
                        "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
-                       "security/failable-fails"]) {
+                       "security/failable-fails",
+                       "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });

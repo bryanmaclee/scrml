@@ -30,10 +30,10 @@ ${
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
-             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param,
+             Failable, OkArm, ErrArm, ServerFn, SqlQuery, SqlMode, Param, LoopHead, RangeHead,
              findDecl, findTypeDef, typeDefSym, capOwner, findFn, findServerFn } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
-    import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
+    import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt, JsLoopHead, JsForInit,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
     import { HAttr, HNode, Page, printPage } from "./html.scrml"
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
@@ -467,6 +467,8 @@ ${
             .SortStr :> rtCall(ctx, "sortStr", a)
             .Reverse :> rtCall(ctx, "reversed", a)
             .Join :> rtCall(ctx, "joinStr", a)
+            .IndexRead :> rtCall(ctx, "indexRead", a)  // s469 (§49.13): the element, or the E-INDEX-OUT-OF-RANGE-RT trap
+            .AtRead :> rtCall(ctx, "atRead", a)        // s469 (§49.13): the element, or `not`
         }
     }
 
@@ -656,6 +658,9 @@ ${
             .Fail(err: x) :> not
             .Join(k: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 
@@ -676,12 +681,18 @@ ${
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 
     fn isJump(s: Stmt) -> boolean {
         return match s {
             .Jump(k: x) :> true
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
             .Join(k: x) :> false
             .Suspend(bind: x) :> false
             .Let(sym: x) :> false
@@ -733,6 +744,9 @@ ${
             .Fail(err: x) :> false
             .Join(k: x) :> false
             .Jump(k: x) :> false
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
         }
     }
 
@@ -764,6 +778,171 @@ ${
             .Fail(err: e, idx: i, args: args) :> [returnJs(ctx, rtCall(ctx, "failure", [variantValueJs(ctx, e, i, args)]))]
             .Join(k: k, body: b) :> [JsStmt.SConst(symName(ctx, k), JsExpr.JArrow([], blockJs(ctx, b)))]
             .Jump(k: k) :> [sexpr(jcall(jid(symName(ctx, k)), []))]
+            .Loop(label: l, head: h, body: lb) :> loopJs(ctx, l, h, lb, assigned)   // s469 (§49)
+            .Break(target: t) :> [JsStmt.SBreak(symName(ctx, t))]
+            .Continue(target: t) :> [JsStmt.SContinue(symName(ctx, t))]
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // s469 — a loop (§49). Every Break / Continue names its loop, and a loop
+    // prints its label exactly when a jump in its body names it — so a jump
+    // always leaves the loop Core says, nested or not (check.scrml C19: the
+    // loop encloses it). The heads print as the JavaScript loop of the same
+    // meaning: `for (;;)`, `while (c)`, `for (init; c; step)`, and
+    // `for (const x of xs)` — each binds per iteration (§49.3.7) as JavaScript's
+    // `let` / `const` loop bindings do. A range evaluates both bounds once, in
+    // order, into its counter and `end` (§49.2.5); a `let` binder is a copy of
+    // the loop's own counter, so writing it never moves the loop.
+    // -------------------------------------------------------------------------
+    fn loopJs(ctx: Ctx, label: Sym, h: LoopHead, body: Block, assigned: int[]) -> JsStmt[] {
+        let ln: string = ""
+        if (loopIsJumped(label, body)) ln = symName(ctx, label)
+        return match h {
+            .Forever :> [JsStmt.SLoop(ln, JsLoopHead.JForever, blockJs(ctx, body))]
+            .While(cond: c) :> [JsStmt.SLoop(ln, JsLoopHead.JWhile(exprJs(ctx, c)), blockJs(ctx, body))]
+            .Counted(init: i, cond: c, step: sp) :> [JsStmt.SLoop(ln, JsLoopHead.JForC(forInitJs(ctx, i), maybeExprJs(ctx, c), assignItems(ctx, sp)), blockJs(ctx, body))]
+            .Each(h: eh) :> [JsStmt.SLoop(ln, JsLoopHead.JForOf(symName(ctx, eh.bind), hasInt(assigned, eh.bind.id), exprJs(ctx, eh.src)), blockJs(ctx, body))]
+            .Range(h: rh) :> [rangeJs(ctx, ln, rh, body)]
+        }
+    }
+
+    fn maybeExprJs(ctx: Ctx, e: Expr | not) -> JsExpr | not {
+        if (e is not) return not
+        return exprJs(ctx, e)
+    }
+
+    fn jsProp(k: string, v: JsExpr) -> JsProp { return { key: k, value: v } }
+
+    fn forInit(isLet: boolean, items: JsProp[]) -> JsForInit { return { isLet: isLet, items: items } }
+
+    // A Counted head's `init`: its Lets (`let a = v, …`) or its Assigns (`a = v, …`) — C19.
+    fn forInitJs(ctx: Ctx, ss: Stmt[]) -> JsForInit {
+        let isLet = false
+        for (const s of ss) {
+            if (stmtIsLet(s)) isLet = true
+        }
+        return forInit(isLet, assignItems(ctx, ss))
+    }
+
+    fn assignItems(ctx: Ctx, ss: Stmt[]) -> JsProp[] {
+        let out: JsProp[] = []
+        for (const s of ss) { out = out.concat(assignItem(ctx, s)) }
+        return out
+    }
+
+    fn assignItem(ctx: Ctx, s: Stmt) -> JsProp[] {
+        return match s {
+            .Let(sym: sym, init: init) :> [jsProp(symName(ctx, sym), exprJs(ctx, init))]
+            .Assign(local: l, value: v) :> [jsProp(symName(ctx, l), exprJs(ctx, v))]
+            .Write(cap: x) :> []
+            .Commit(writes: x) :> []
+            .If(cond: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .Suspend(bind: x) :> []
+            .ResetSurface(of: x) :> []
+            .Defer(body: x) :> []
+            .Unpersist(decl: x) :> []
+            .Attempt(result: x) :> []
+            .Fail(err: x) :> []
+            .Join(k: x) :> []
+            .Jump(k: x) :> []
+            .Loop(label: x) :> []
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
+        }
+    }
+
+    fn stmtIsLet(s: Stmt) -> boolean {
+        return match s {
+            .Let(sym: x) :> true
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
+            .Join(k: x) :> false
+            .Jump(k: x) :> false
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
+        }
+    }
+
+    // `for (let i = lo, end = hi; i < end; i = i + 1)` (`<=` when inclusive);
+    // with a `let` binder the counter is the loop's own and the binder a copy.
+    fn rangeJs(ctx: Ctx, ln: string, rh: RangeHead, body: Block) -> JsStmt {
+        let iv: Sym = rh.bind
+        let pre: JsStmt[] = []
+        const counter: Sym | not = rh.counter
+        if (counter is given) {
+            iv = counter
+            pre = [JsStmt.SLet(symName(ctx, rh.bind), jid(symName(ctx, counter)))]
+        }
+        const i: string = symName(ctx, iv)
+        const e: string = symName(ctx, rh.end)
+        let op: JsOp = JsOp.Lt
+        if (rh.inclusive) op = JsOp.Le
+        const init: JsForInit = forInit(true, [jsProp(i, exprJs(ctx, rh.lo)), jsProp(e, exprJs(ctx, rh.hi))])
+        const step: JsProp[] = [jsProp(i, JsExpr.JBin(JsOp.Plus, jid(i), jnum(1)))]
+        return JsStmt.SLoop(ln, JsLoopHead.JForC(init, JsExpr.JBin(op, jid(i), jid(e)), step), pre.concat(blockJs(ctx, body)))
+    }
+
+    // Does a Break / Continue in `body` name the loop `label`?
+    fn loopIsJumped(label: Sym, body: Block) -> boolean {
+        for (const n of allNodes(Node.NBlock(body))) {
+            if (jumpTargetOf(n) == label.id) return true
+        }
+        return false
+    }
+
+    fn jumpTargetOf(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> stmtJumpTarget(s)
+            .NProgram(p: x) :> -1
+            .NDecl(d: x) :> -1
+            .NField(f: x) :> -1
+            .NFn(f: x) :> -1
+            .NServerFn(f: x) :> -1
+            .NBlock(b: x) :> -1
+            .NExpr(e: x) :> -1
+            .NPlace(pl: x) :> -1
+            .NInst(i: x) :> -1
+            .NPattern(pat: x) :> -1
+            .NEdit(k: x) :> -1
+            .NView(v: x) :> -1
+            .NAttr(a: x) :> -1
+        }
+    }
+
+    fn stmtJumpTarget(s: Stmt) -> int {
+        return match s {
+            .Break(target: t) :> t.id
+            .Continue(target: t) :> t.id
+            .Loop(label: x) :> -1
+            .Let(sym: x) :> -1
+            .Assign(local: x) :> -1
+            .Write(cap: x) :> -1
+            .Commit(writes: x) :> -1
+            .If(cond: x) :> -1
+            .Return(e: x) :> -1
+            .Eval(e: x) :> -1
+            .Suspend(bind: x) :> -1
+            .ResetSurface(of: x) :> -1
+            .Defer(body: x) :> -1
+            .Unpersist(decl: x) :> -1
+            .Attempt(result: x) :> -1
+            .Fail(err: x) :> -1
+            .Join(k: x) :> -1
+            .Jump(k: x) :> -1
         }
     }
 
@@ -921,6 +1100,9 @@ ${
             .Fail :> []
             .Join :> []
             .Jump :> []
+            .Loop :> []
+            .Break :> []
+            .Continue :> []
         }
     }
 
@@ -941,6 +1123,9 @@ ${
             .Fail :> []
             .Join :> []
             .Jump :> []
+            .Loop :> []
+            .Break :> []
+            .Continue :> []
         }
     }
 
@@ -1301,6 +1486,9 @@ ${
             .Fail(err: x) :> false
             .Join(k: x) :> false
             .Jump(k: x) :> false
+            .Loop(label: x) :> false
+            .Break(target: x) :> false
+            .Continue(target: x) :> false
         }
     }
 
@@ -2361,6 +2549,9 @@ ${
             .Fail(err: x) :> not
             .Join(k: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 

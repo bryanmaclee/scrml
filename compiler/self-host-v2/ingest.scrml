@@ -1385,6 +1385,8 @@ ${
             .SortStr :> "SortStr"
             .Reverse :> "Reverse"
             .Join :> "Join"
+            .IndexRead :> "IndexRead"
+            .AtRead :> "AtRead"
         }
     }
 }

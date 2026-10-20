@@ -1,0 +1,12 @@
+// §49.3.1: the condition head runs while the condition is true.
+<program>
+
+    function f() -> int {
+        let n = 0
+        for (n < 5) { n = n + 1 }
+        return n
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

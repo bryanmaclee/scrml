@@ -67,6 +67,9 @@ ${
         LessThan, LessEqual, GreaterThan, GreaterEqual,
         Increment, Decrement, NullishCoalesce, OptionalChain, Bang,
         LogicalAnd, LogicalOr, BitAnd, BitOr,
+        // s469 (§49.2.5) — the range glyphs `..` (half-open) and `..=` (inclusive),
+        // each ONE token. `...` (spread) is still three Dots (munchDot).
+        DotDot, DotDotEq,
         // literals + identifiers (payload-carrying)
         NumberLit(raw: string),
         StringLit(cooked: string, raw: string, quote: QuoteKind),
@@ -336,7 +339,7 @@ ${
                   .Plus | .Minus | .Star | .Slash | .Percent |
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
-                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
                   .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
             .Keyword(name: name) :> name
             .NumberLit           :> ""
@@ -407,7 +410,9 @@ ${
             while (isDigit(peekCode(c, 0))) {
                 c = advance(c, 1)
             }
-            if (peekCode(c, 0) == 46) {      // '.'
+            // '.' — a fraction, unless it begins the range glyph `..` (§49.2.5:
+            // "`0..n` is `0`, `..`, `n`, never `0.` followed by `.n`")
+            if (peekCode(c, 0) == 46 && peekCode(c, 1) != 46) {
                 c = advance(c, 1)
                 while (isDigit(peekCode(c, 0))) {
                     c = advance(c, 1)
@@ -452,7 +457,7 @@ ${
             "]" :> op(cur, 1, TokenKind.RBracket)
             ";" :> op(cur, 1, TokenKind.Semicolon)
             "," :> op(cur, 1, TokenKind.Comma)
-            "." :> op(cur, 1, TokenKind.Dot)
+            "." :> munchDot(cur)
             ":" :> op(cur, 1, TokenKind.Colon)
             "*" :> op(cur, 1, TokenKind.Star)
             "/" :> op(cur, 1, TokenKind.Slash)
@@ -508,6 +513,18 @@ ${
     fn munchAmp(cur: Cursor) -> Scan {
         if (peekCode(cur, 1) == 38) return op(cur, 2, TokenKind.LogicalAnd)  // &&
         return op(cur, 1, TokenKind.BitAnd)                                 // &
+    }
+
+    // s469 (§49.2.5): `..` and `..=` are single tokens. `...` (spread) stays
+    // three Dots, as before: a `.` that begins `...`, or follows a `.`, is a Dot.
+    fn munchDot(cur: Cursor) -> Scan {
+        const c1: int = peekCode(cur, 1)
+        const c2: int = peekCode(cur, 2)
+        let prev: int = -1
+        if (cur.pos > 0) prev = cur.source.charCodeAt(cur.pos - 1)
+        if (c1 != 46 || c2 == 46 || prev == 46) return op(cur, 1, TokenKind.Dot)
+        if (c2 == 61) return op(cur, 3, TokenKind.DotDotEq)                  // ..=
+        return op(cur, 2, TokenKind.DotDot)                                  // ..
     }
 
     fn munchPipe(cur: Cursor) -> Scan {
