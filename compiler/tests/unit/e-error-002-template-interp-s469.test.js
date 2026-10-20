@@ -437,3 +437,55 @@ ${markup}
     expect(rewriteTemplateAttrValue("`q` \\${x} ${a}").jsExpr).toBe("`\\`q\\` \\${x} ${a}`");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review of 834e41cba, F3: object-literal methods / getters inside an interpolation
+// ---------------------------------------------------------------------------
+
+describe("F3 — an object-literal method inside an interpolation is READ, not refused for lack of text", () => {
+  const interpOf = (src) => templateInterpolationNodesAll(parseExprToNode(src, "t.scrml", 0));
+  test("the method value carries its body text", () => {
+    const [n] = interpOf('`${({ m() { return check(p) } }).m()}`');
+    const fnv = n.callee.object.props[0].value;
+    expect(fnv.kind).toBe("escape-hatch");
+    expect(fnv.bodyRaw).toContain("return check(p)");
+  });
+  test("a method / getter with no `!` call compiles (as it does on main)", () => {
+    expect(compileSource(LOGIN('const s = `${({ m() { return p } }).m() == "secret" ? "Y" : "N"}`'), "f3").codes).toEqual([]);
+    expect(compileSource(LOGIN('const s = `${({ get v() { return p } }).v == "secret" ? "Y" : "N"}`'), "f3").codes).toEqual([]);
+  });
+  test("a method / getter calling a `!` function is E-ERROR-002 (read through its body)", () => {
+    expect(compileSource(LOGIN('const s = `${({ m() { return check(p) } }).m() ? "Y" : "N"}`'), "f3").codes).toContain("E-ERROR-002");
+    expect(compileSource(LOGIN('const s = `${({ get v() { return check(p) } }).v ? "Y" : "N"}`'), "f3").codes).toContain("E-ERROR-002");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review of 834e41cba, F4: a handled exported initializer is handled
+// ---------------------------------------------------------------------------
+
+describe("F4 — `export const hv = check(x) !{ … }` is not reported unhandled", () => {
+  const LIB = (tail) => `\${
+    export type AuthErr:enum = { Denied }
+    export function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    ${tail}
+}
+`;
+  const APP = `<msg> = "init"
+\${
+    import { n } from "./lib.scrml"
+    function go() { @msg = String(n) }
+}
+<button id="b" onclick=go()>go</button>
+<p id="out">\${@msg}</p>
+`;
+  test("handled: no E-ERROR-002", () => {
+    expect(compileProject({ "app.scrml": APP, "lib.scrml": LIB('export const hv = check("x") !{ _ :> false }\n    export const n = 1') })).not.toContain("E-ERROR-002");
+  });
+  test("unhandled: still E-ERROR-002", () => {
+    expect(compileProject({ "app.scrml": APP, "lib.scrml": LIB('export const hv = check("x")\n    export const n = 1') })).toContain("E-ERROR-002");
+  });
+});

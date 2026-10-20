@@ -1157,7 +1157,7 @@ class Walker {
       if (typeof a.binding === "string" && a.binding.trim() !== "") armScope.names.set(a.binding.trim(), null);
       // S468 fix round 2 — a BRACED arm body is a statement list (§7.2.2 "Terms": "a `{ … }`
       // match or `!{}` arm block"), read by the one statement-list reader every emitter uses
-      // (`env.parseStatements` = defer-structure `parseStatementText`). Its `handlerExpr` is the
+      // (`env.parseStatements` = defer-structure `parseStatementTextDetailed`, strict since S469). Its `handlerExpr` is the
       // builder's EXPRESSION reading of the block's inner text, which stops after the FIRST
       // statement: walking it let `{ note = "d"⏎ const q = check3(p)⏎ q }` — an unhandled
       // failable call after the first statement — escape E-ERROR-002, and a wrong password

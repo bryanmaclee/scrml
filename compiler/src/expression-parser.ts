@@ -3334,6 +3334,12 @@ export function esTreeToExprNode(
       const nodeStart = (node as { start?: number }).start;
       const nodeEnd = (node as { start?: number; end?: number }).end;
       let rawSlice = "";
+      // S469 (review of 834e41cba, F3) — an object-literal METHOD / getter / setter value
+      // (`{ m() { … } }`, `{ get v() { … } }`): acorn starts the FunctionExpression at its `(`,
+      // so the slice is not a function form and `raw` stays "" (codegen's behavior, unchanged).
+      // Its BODY is still real source: carried as `bodyRaw` / `params` below, so the failable
+      // walk reads it like any function body instead of refusing a hatch with no text.
+      let methodSlice = "";
       if (
         rawSource != null &&
         typeof nodeStart === "number" &&
@@ -3354,6 +3360,8 @@ export function esTreeToExprNode(
         const looksLikeFn = /^(async\s+)?function\b/.test(c);
         if (looksLikeArrow || looksLikeFn) {
           rawSlice = candidate;
+        } else if (node.type === "FunctionExpression" && c.startsWith("(")) {
+          methodSlice = candidate;
         }
         // If validation fails, rawSlice stays "" — same as pre-fix behavior.
       }
@@ -3366,7 +3374,7 @@ export function esTreeToExprNode(
       const bodyStart = (bodyNode as { start?: number }).start;
       const bodyEnd = (bodyNode as { end?: number }).end;
       if (
-        rawSlice !== "" && rawSource != null &&
+        (rawSlice !== "" || methodSlice !== "") && rawSource != null &&
         typeof nodeStart === "number" && typeof nodeEnd === "number" &&
         typeof bodyStart === "number" && typeof bodyEnd === "number" &&
         bodyStart >= nodeStart && bodyEnd <= nodeEnd && bodyEnd > bodyStart

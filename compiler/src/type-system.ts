@@ -16491,7 +16491,12 @@ function annotateNodes(
         const target = fnFactsIs(iv.name);
         if (target !== null) { exportedFailableAliasError(local || iv.name, target, span); return; }
       }
-      forEachCallInValuePosition(init as ExprNode, "none", failableEnv, (c) =>
+      // S469 (review of 834e41cba, F4) — `export const hv = check(x) !{ … }`: the export is the
+      // guarded node of a `!{}` (`__inGuardedContext`), so its initializer's root is that
+      // handler's operand, exactly as for a `const-decl` (it was walked as "none" and a handled
+      // call was reported "not handled").
+      const handling: RootHandling = rec.__inGuardedContext === true ? "operand" : "none";
+      forEachCallInValuePosition(init as ExprNode, handling, failableEnv, (c) =>
         reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : false, false));
     }
     if (Array.isArray(rec.renames) && rec.renames.length > 0) {
