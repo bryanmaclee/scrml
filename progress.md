@@ -11,4 +11,9 @@ Base: origin/s468-failable-alias-and-match 71c4aa4c0 (#1444 was OPEN, in the mer
 - [x] LOW: object shorthand `{ check }` as fn-value (walker object case + fnValueRefs).
 - [x] MEDIUM: exported const alias refused (type-system checkFailableExport; export-decl init now walked). n15 family (7).
 - [x] known-gaps: 2 new resolved entries + exported-alias gap resolved; state.ts --write.
-- [ ] gate + browser JUnit comparison vs main.
+- [x] gate: 38659 pass / 0 fail (f9968e978).
+- [x] browser JUnit vs origin/main (both run from scratch-dir archives): 1679 pass / 48 fail / 47 skip on
+      both, zero per-test differences. In THIS worktree one test (`<match> arm, ;-sequence`) fails
+      after browser-gated-handler-narrowing (stale document listener, colliding `_scrml_attr_onclick_4`
+      key) — it fails identically with the BASE sources checked out here, so it is path/environment
+      dependent, not this change.
