@@ -82,7 +82,7 @@
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
+    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, PrimOp, Attr, Block,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
              Pattern, Failable, OkArm, ErrArm,
@@ -2313,7 +2313,7 @@ ${
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
-            .PositionWrite :> ""
+            .PositionWrite :> positionProblem(d, idx, value)
             .FieldAt(path: x) :> ""
             .Transition :> ""
             .ElemAt(index: x) :> ""
@@ -2366,6 +2366,54 @@ ${
         const pre: string = "<" + d.hint + "#" + d.id + ">@"
         const tail: string = "." + d.id + ":" + idx
         if (k.indexOf(pre) != 0 || k.substring(k.length - tail.length) != tail) return "a shrink-anywhere filters " + k + ", not the field it writes"
+        return ""
+    }
+
+    // C9 (s469 F/U-6) — a whole-value PositionWrite keeps the length and moves
+    // or rewrites positions; its value must be a length-preserving function OF
+    // THE FIELD ITSELF: `SeqCall(Map | SortBy, <this field>, f)` or
+    // `Prim(SortNum | SortStr | Reverse, [<this field>])`. So a `writable`
+    // grant can never carry an arbitrary replace (any other value, a grow or a
+    // shrink, another field's tape).
+    fn positionProblem(d: Sym, idx: int, v: Expr) -> string {
+        const bad: string = "a position write's value is not a map / sort / reverse of the field"
+        return match v {
+            .SeqCall(op: op, seq: sq) :> seqPositionOf(d, idx, op, sq)
+            .Prim(op: op, args: xs) :> primPositionOf(d, idx, op, xs)
+            .Lit(lit: x) :> bad
+            .Local(sym: x) :> bad
+            .Read(place: x) :> bad
+            .Call(callee: x) :> bad
+            .Match(scrut: x) :> bad
+            .ArrayOf(elems: x) :> bad
+            .StructOf(ty: x) :> bad
+            .Handle(inst: x) :> bad
+            .InitOf(decl: x) :> bad
+            .Host(call: x) :> bad
+            .Lambda(params: x) :> bad
+            .Validity(of: x) :> bad
+            .ServerCall(fn: x) :> bad
+            .Query(q: x) :> bad
+        }
+    }
+
+    fn seqPositionOf(d: Sym, idx: int, op: SeqFn, sq: Expr) -> string {
+        if (op == SeqFn.Filter) return "a position write's value is a filter (a shrink), not a map / sort of the field"
+        return fieldItself(d, idx, sq, "a position write")
+    }
+
+    fn primPositionOf(d: Sym, idx: int, op: PrimOp, xs: Expr[]) -> string {
+        if (op != PrimOp.SortNum && op != PrimOp.SortStr && op != PrimOp.Reverse) return "a position write's value is not a map / sort / reverse of the field"
+        if (xs.length != 1) return "a position write's sort / reverse has " + xs.length + " operands"
+        return fieldItself(d, idx, xs[0], "a position write")
+    }
+
+    // "" when `sq` reads field `idx` of `d` itself (filterOf's rule).
+    fn fieldItself(d: Sym, idx: int, sq: Expr, what: string) -> string {
+        const k: string = readKey(sq)
+        const pre: string = "<" + d.hint + "#" + d.id + ">@"
+        const tail: string = "." + d.id + ":" + idx
+        if (k.indexOf(pre) != 0 || k.substring(k.length - tail.length) != tail) return what + " reads " + k + ", not the field it writes"
         return ""
     }
 

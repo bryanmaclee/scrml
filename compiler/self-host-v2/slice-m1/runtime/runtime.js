@@ -752,7 +752,7 @@ function lengthHolds(len, op, n) {
 export const check = {
   req: () => ({ shortCircuit: true, test: (v) => (absent(v) || v === "" ? "Required" : null) }),
   length: (op, n) => ({
-    test: (v) => (absent(v) || lengthHolds(v.length, op, n) ? null : { tag: "LengthFailed", predicate: `(${op}${n})` }),
+    test: (v) => (absent(v) || lengthHolds(typeof v === "string" ? strLength(v) : v.length, op, n) ? null : { tag: "LengthFailed", predicate: `(${op}${n})` }),
   }),
   min: (n) => ({ test: (v) => (absent(v) || v >= n ? null : { tag: "MinFailed", threshold: n }) }),
   max: (n) => ({ test: (v) => (absent(v) || v <= n ? null : { tag: "MaxFailed", threshold: n }) }),
@@ -1006,19 +1006,33 @@ export function eq(a, b) {
 
 // ---------------------------------------------------------------------------
 // s469 — the typed built-in string and tape methods (print.scrml `primJs`).
-// A string POSITION counts code points (S469: string iteration and `s[i]` are
-// by code point), never UTF-16 units, so `strSlice`, `strCharAt` and
-// `strSplit(s, "")` read the string as its code points. (`.length` still counts
-// UTF-16 units — the S469 ruling documents that difference.) The tape
-// functions never mutate: each returns a NEW array and leaves its argument
-// unchanged (§66.12.6 rule 3). Copies are plain index loops.
+// CODE POINTS EVERYWHERE (bryan, S469 — `.length` included): a string's
+// length, a position (`strSlice`, `strCharAt`) and a match (`strIncludes`,
+// `strStartsWith`, `strEndsWith`, `strSplit`) are all by code point, never by
+// UTF-16 unit. A match counts only where it starts AND ends on a code-point
+// boundary, so an argument holding a lone surrogate can never match, or cut,
+// half of an astral character. The tape functions never mutate: each returns
+// a NEW array and leaves its argument unchanged (§66.12.6 rule 3). Copies are
+// plain index loops.
 // ---------------------------------------------------------------------------
 
-/** The code points of `s`, one string each, in order. */
+/** The code points of `s`, one string each, in order (the string's `for…of`). */
 function codePoints(s) {
   const out = [];
   for (const c of s) out.push(c);
   return out;
+}
+
+/** A string's `.length`: its number of code points. */
+export function strLength(s) {
+  let n = 0;
+  for (const _ of s) n++;
+  return n;
+}
+
+/** A position must be an int (the typer guarantees it; this keeps a defect loud, never a wrong slice). */
+function requireInt(i, what) {
+  if (!Number.isInteger(i)) throw new Error(`${what}: position ${JSON.stringify(i)} is not an int`);
 }
 
 /** A position `i` against a length `n`: a negative position counts from the end; the result is clamped to [0, n]. */
@@ -1029,6 +1043,8 @@ function clampPosition(i, n) {
 
 /** `s.slice(from)` / `s.slice(from, to)`, positions in code points. */
 export function strSlice(s, from, to) {
+  requireInt(from, "slice");
+  if (to !== undefined) requireInt(to, "slice");
   const cps = codePoints(s);
   const a = clampPosition(from, cps.length);
   const b = to === undefined ? cps.length : clampPosition(to, cps.length);
@@ -1039,15 +1055,58 @@ export function strSlice(s, from, to) {
 
 /** `s.charAt(i)`: the code point at position `i`, or `""` when there is none. */
 export function strCharAt(s, i) {
+  requireInt(i, "charAt");
   const cps = codePoints(s);
   if (i < 0 || i >= cps.length) return "";
   return cps[i];
 }
 
-/** `s.split(sep)`: `""` splits into code points (never into halves of one). */
+/** Is UTF-16 index `i` of `s` a code-point boundary (not between the two halves of a surrogate pair)? */
+function atBoundary(s, i) {
+  if (i <= 0 || i >= s.length) return true;
+  const hi = s.charCodeAt(i - 1);
+  const lo = s.charCodeAt(i);
+  return !(hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff);
+}
+
+/** The first UTF-16 index at or after `from` where `t` occurs in `s` on code-point boundaries, or -1. */
+function boundaryIndexOf(s, t, from) {
+  let i = s.indexOf(t, from);
+  while (i >= 0) {
+    if (atBoundary(s, i) && atBoundary(s, i + t.length)) return i;
+    i = s.indexOf(t, i + 1);
+  }
+  return -1;
+}
+
+/** `s.includes(t)`, on code-point boundaries. */
+export function strIncludes(s, t) {
+  return boundaryIndexOf(s, t, 0) >= 0;
+}
+
+/** `s.startsWith(t)`, on code-point boundaries. */
+export function strStartsWith(s, t) {
+  return s.startsWith(t) && atBoundary(s, t.length);
+}
+
+/** `s.endsWith(t)`, on code-point boundaries. */
+export function strEndsWith(s, t) {
+  return s.endsWith(t) && atBoundary(s, s.length - t.length);
+}
+
+/** `s.split(sep)`: `""` splits into code points; any other separator splits only on code-point boundaries. */
 export function strSplit(s, sep) {
   if (sep === "") return codePoints(s);
-  return s.split(sep);
+  const out = [];
+  let start = 0;
+  let i = boundaryIndexOf(s, sep, 0);
+  while (i >= 0) {
+    out.push(s.slice(start, i));
+    start = i + sep.length;
+    i = boundaryIndexOf(s, sep, start);
+  }
+  out.push(s.slice(start));
+  return out;
 }
 
 function copyOf(xs) {

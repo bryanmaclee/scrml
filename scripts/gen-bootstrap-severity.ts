@@ -64,36 +64,61 @@ export type SeverityEntry = { code: string; severity: CompileSeverity; line: num
 export type CatalogGap = { code: string; why: string };
 
 /** Resolve each code against §34. Throws when two live rows of one code disagree. */
-export function resolveSeverities(specText: string, codes: string[]): { entries: SeverityEntry[]; gaps: CatalogGap[] } {
+/**
+ * The PROVISIONAL table's own guards (s469 F/U-7) — each a THROW, never a silent fall-through:
+ *   - a provisional code the bootstrap no longer emits (a stale entry);
+ *   - a provisional `E-` code given Warning / Info (the table may not DOWNGRADE an error: a missing
+ *     row already resolves fail-closed to Error, so an `E-` entry could only ever weaken it);
+ *   - (in resolveSeverities) a provisional code that has a §34 row the generator cannot use (struck,
+ *     or a non-compile severity): the row exists, so the table no longer speaks for it.
+ */
+export function checkProvisional(codes: string[], provisional: Record<string, CompileSeverity>): void {
+  for (const [code, sev] of Object.entries(provisional)) {
+    if (!codes.includes(code)) throw new Error(`PROVISIONAL ${code}: the bootstrap's sources no longer name it — remove the entry`);
+    if (code.startsWith("E-") && sev !== "Error") throw new Error(`PROVISIONAL ${code}: an E- code may not be downgraded to ${sev} by the provisional table`);
+  }
+}
+
+export function resolveSeverities(
+  specText: string,
+  codes: string[],
+  provisional: Record<string, CompileSeverity> = PROVISIONAL,
+): { entries: SeverityEntry[]; gaps: CatalogGap[] } {
+  // the downgrade guard always; the stale-entry guard needs the bootstrap's WHOLE code set, so it
+  // is `render`'s (a subset query — `resolveSeverities(spec, ["E-DG-002", …])` — is not a census)
+  checkProvisional(Object.keys(provisional), provisional);
   const rows = parseS34Rows(specText.split("\n"));
   const entries: SeverityEntry[] = [];
   const gaps: CatalogGap[] = [];
   for (const code of codes) {
     const mine = rows.filter((r) => r.code === code);
     if (mine.length === 0) {
-      if (PROVISIONAL[code]) { entries.push({ code, severity: PROVISIONAL[code], line: 0, provisional: true }); continue; }
+      if (provisional[code]) { entries.push({ code, severity: provisional[code], line: 0, provisional: true }); continue; }
       gaps.push({ code, why: "no §34 row" });
       continue;
     }
     const live = mine.filter((r) => compileSeverityOf(r) !== null);
     if (live.length === 0) {
       const r = mine[0];
+      const why = r.struck ? "§34 row struck" : `§34 Severity "${r.severity}" is not a compile severity`;
+      if (provisional[code]) throw new Error(`PROVISIONAL ${code}: it has a §34 row the generator cannot use (${why}) — fix the row or remove the entry (no silent fall-through to Error)`);
       // No SPEC line numbers in the generated text: an edit above the row would make the file
       // stale for a reason that changes nothing (the cry-wolf shape).
-      gaps.push({ code, why: r.struck ? "§34 row struck" : `§34 Severity "${r.severity}" is not a compile severity` });
+      gaps.push({ code, why });
       continue;
     }
     const sevs = [...new Set(live.map((r) => compileSeverityOf(r)!))];
     if (sevs.length > 1) throw new Error(`§34 rows for ${code} disagree on severity: ${live.map((r) => `${compileSeverityOf(r)}@${r.line}`).join(", ")}`);
-    if (PROVISIONAL[code] && PROVISIONAL[code] !== sevs[0]) throw new Error(`${code}: its §34 row says ${sevs[0]}, the PROVISIONAL table ${PROVISIONAL[code]} — the row decides; remove the provisional entry`);
+    if (provisional[code] && provisional[code] !== sevs[0]) throw new Error(`${code}: its §34 row says ${sevs[0]}, the PROVISIONAL table ${provisional[code]} — the row decides; remove the provisional entry`);
     entries.push({ code, severity: sevs[0], line: live[0].line });
   }
   return { entries, gaps };
 }
 
 /** The generated module text. */
-export function render(specText: string, codes: string[]): string {
-  const { entries, gaps } = resolveSeverities(specText, codes);
+export function render(specText: string, codes: string[], table: Record<string, CompileSeverity> = PROVISIONAL): string {
+  checkProvisional(codes, table);       // every entry is a code the bootstrap still names
+  const { entries, gaps } = resolveSeverities(specText, codes, table);
   const arms = (sev: CompileSeverity) =>
     entries.filter((e) => e.severity === sev && !e.provisional).map((e) => `            "${e.code}" :> Severity.${sev}`);
   const provisional = entries.filter((e) => e.provisional);

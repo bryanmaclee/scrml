@@ -448,17 +448,20 @@ ${
             .Concat :> bin(JsOp.Plus, a)
             .Length :> jmember(a[0], "length")
             // s469 — the typed built-in methods. Case and whitespace are the
-            // host's own (they change no position); a position — `slice`,
-            // `charAt`, `split("")` — counts code points, so those are runtime
-            // helpers, as are the tape functions (each returns a NEW tape)
+            // host's own (they change no position). Everything that counts or
+            // matches positions — `.length`, `slice`, `charAt`, `includes`,
+            // `startsWith`, `endsWith`, `split` — is by CODE POINT (bryan,
+            // S469: "code points everywhere"), so those are runtime helpers,
+            // as are the tape functions (each returns a NEW tape)
             .StrUpper :> jmcall(a[0], "toUpperCase", [])
             .StrLower :> jmcall(a[0], "toLowerCase", [])
             .StrTrim :> jmcall(a[0], "trim", [])
-            .StrIncludes :> jmcall(a[0], "includes", [a[1]])
-            .StrStartsWith :> jmcall(a[0], "startsWith", [a[1]])
-            .StrEndsWith :> jmcall(a[0], "endsWith", [a[1]])
+            .StrIncludes :> rtCall(ctx, "strIncludes", a)
+            .StrStartsWith :> rtCall(ctx, "strStartsWith", a)
+            .StrEndsWith :> rtCall(ctx, "strEndsWith", a)
             .StrSlice :> rtCall(ctx, "strSlice", a)
             .StrCharAt :> rtCall(ctx, "strCharAt", a)
+            .StrLength :> rtCall(ctx, "strLength", a)
             .StrSplit :> rtCall(ctx, "strSplit", a)
             .SortNum :> rtCall(ctx, "sortNum", a)
             .SortStr :> rtCall(ctx, "sortStr", a)

@@ -77,7 +77,48 @@ describe("B — string methods are typed member calls", () => {
     expect($("#a").textContent).toBe("é");
     expect($("#b").textContent).toBe("😀");
     expect($("#c").textContent).toBe("3");
-    expect($("#d").textContent).toBe("5");   // `.length` counts UTF-16 units (S469 documents the difference)
+    expect($("#d").textContent).toBe("3");   // bryan, S469: code points everywhere, `.length` included
+  });
+  test("ONE unit for every string position (runtime): the idioms that broke when `.length` counted UTF-16 units", async () => {
+    await load(prog(`    let <e:string="a😀"/>`,
+      `        <p id="len">\${@e.length}</p>\n        <p id="init">[\${@e.slice(0, @e.length - 1)}]</p>\n        <p id="last">\${@e.charAt(@e.length - 1)}</p>\n        <p id="split">\${@e.split("").length}</p>\n        <p id="tail">[\${@e.slice(@e.length)}]</p>`));
+    expect($("#len").textContent).toBe("2");
+    expect($("#init").textContent).toBe("[a]");
+    expect($("#last").textContent).toBe("😀");
+    expect($("#split").textContent).toBe("2");   // the count `for (ch of s)` yields (the loop lane's iterate head)
+    expect($("#tail").textContent).toBe("[]");
+  });
+  test("a tape's `.length` is still its element count; a string's lowers to Core StrLength", () => {
+    const json = JSON.stringify(clean(prog(S + `\n    <xs:int[]=([1, 2])/>`, `        <p>\${@s.length}</p>\n        <p>\${@xs.length}</p>`)).core);
+    expect(json).toContain("StrLength");
+    expect(json).toContain('"Length"');
+  });
+  test("the runtime length agrees with `for (ch of s)` for every kind of string (BMP, astral, combining, lone surrogate)", async () => {
+    const rt = await import("../slice-m1/runtime/runtime.js");
+    for (const s of ["", "abc", "a😀", "😀😀", "é", "\uD83D", "x\uDE00y", "👍🏽"]) {
+      let n = 0;
+      for (const _ of s) n++;
+      expect([s, rt.strLength(s)]).toEqual([s, n]);
+      expect([s, rt.strSplit(s, "").length]).toEqual([s, n]);
+    }
+  });
+  test("F/U-2 (runtime): includes / startsWith / endsWith / split match only on code-point boundaries — a lone surrogate never matches half of an astral character", async () => {
+    const rt = await import("../slice-m1/runtime/runtime.js");
+    const hi = "\uD83D", lo = "\uDE00";            // the two halves of 😀
+    expect(rt.strIncludes("a😀b", hi)).toBe(false);
+    expect(rt.strIncludes("a😀b", lo)).toBe(false);
+    expect(rt.strIncludes("a😀b", "😀")).toBe(true);
+    expect(rt.strIncludes(hi + "x", hi)).toBe(true);   // a lone surrogate in the string itself is a whole code point
+    expect(rt.strStartsWith("😀a", hi)).toBe(false);
+    expect(rt.strEndsWith("a😀", lo)).toBe(false);
+    expect(rt.strStartsWith("😀a", "😀")).toBe(true);
+    expect(rt.strEndsWith("a😀", "😀")).toBe(true);
+    expect(rt.strSplit("a😀b😀c", lo)).toEqual(["a😀b😀c"]);
+    expect(rt.strSplit("a😀b😀c", "😀")).toEqual(["a", "b", "c"]);
+    expect(rt.strSplit("a,b,,c", ",")).toEqual(["a", "b", "", "c"]);
+    expect(rt.strIncludes("abc", "")).toBe(true);
+    expect(() => rt.strSlice("abc", 1.5)).toThrow("not an int");
+    expect(() => rt.strCharAt("abc", "1")).toThrow("not an int");
   });
   test("reactive: a method result re-renders when its receiver changes", async () => {
     await load(prog(S, `        <button onclick={ @s = "  yo  " }>set</button>\n        <p id="u">[\${@s.trim().toUpperCase()}]</p>`));
@@ -130,6 +171,45 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     expect(codes(fn(`@xs.reverse();`))).toEqual(["E-TAPE-JS-METHOD"]);
     expect(diag(fn(`@xs.sort();`), "E-TAPE-JS-METHOD")?.message).toContain("@xs = @xs.sort(…);");
     expect(codes(fn(`const t: int[] = @xs;\n        t.push(1);`))).toEqual(["E-TAPE-JS-METHOD"]);
+  });
+  test("F/U-4: a discarded sort / reverse inside a ternary or a `&&` / `||` statement is E-TAPE-JS-METHOD, once per branch", () => {
+    const fn = (body) => prog(T + `\n    let <n:int=0/>\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>`);
+    expect(codes(fn(`@n == 0 ? @xs.sort() : @xs.reverse();`))).toEqual(["E-TAPE-JS-METHOD", "E-TAPE-JS-METHOD"]);
+    expect(codes(fn(`@n == 0 ? @xs.sort() : @n;`))).toContain("E-TAPE-JS-METHOD");
+    expect(codes(fn(`(@n == 0) && @xs.reverse().length == 0;`)).filter((c) => c === "E-TAPE-JS-METHOD")).toEqual([]);   // the value is compared, not discarded
+  });
+  test("F/U-5: a sort / reverse / comparator-sort / filter / map result carries NO grants (its own type's), never the receiver's", () => {
+    const r = clean(prog(T, `        <p>\${@xs.sort().length}</p>\n        <p>\${@xs.reverse().length}</p>\n        <p>\${@xs.sort((a, b) => a - b).length}</p>\n        <p>\${@xs.filter(x => x > 1).length}</p>`));
+    const seqs = r.typed.tables.typing.exprs.map((x) => x.vt?.data?.t).filter((t) => t && t.variant === "Seq");
+    const granted = seqs.filter((t) => t.data.grants.positionsWritable || t.data.grants.at.length > 0);
+    const plain = seqs.filter((t) => t.data.grants.length === "Fixed" && !t.data.grants.positionsWritable && t.data.grants.at.length === 0);
+    expect(plain.length).toBe(4);                  // the four calls
+    expect(granted.length).toBe(4);                // the four receivers `@xs`
+  });
+  test("F/U-6: C9 — a PositionWrite's value must be a map / sort / reverse OF THE FIELD (checked in Core)", () => {
+    const src = prog(T + `\n    <ys:int[free, append, writable]=([9])/>\n    function go() {\n        @xs = @xs.sort();\n    }`, `        <button onclick=go()>go</button>`);
+    const r = clean(src);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    // graft: the same write with another field's tape as its value
+    const core = JSON.parse(JSON.stringify(r.core));
+    let grafted = 0;
+    const visit = (x) => {
+      if (Array.isArray(x)) { x.forEach(visit); return; }
+      if (!x || typeof x !== "object") return;
+      if (x.variant === "Prim" && x.data?.op === "SortNum") { x.data.op = "Neg"; grafted++; }
+      Object.values(x).forEach(visit);
+    };
+    visit(core);
+    expect(grafted).toBe(1);
+    expect(mods.check.checkCore(core).join("\n")).toContain("C9");
+  });
+  test("F/U-8: the arity message of `sort` names its two forms", () => {
+    expect(diag(prog(T, `        <p>\${@xs.sort((a, b) => a - b, 1).length}</p>`), "E-CALL-ARITY")?.message).toContain("no argument (the natural order) or one comparator");
+  });
+  test("F/U-8: a payload-variant construction is refused AS a construction", () => {
+    const src = `<program>\n    type E:enum = { Missing(id: string), Ok }\n    let <s:string=""/>\n    <main><p>\${match E.Missing("x") { .Missing(id) :> id, .Ok :> "ok", }}</p></main>\n</program>\n`;
+    const d = diag(src, "E-BOOTSTRAP-UNSUPPORTED");
+    expect(d?.message).toContain("constructing the payload variant `E.Missing(…)`");
   });
   test("a JavaScript name on a value that is not a tape is not E-TAPE-JS-METHOD (it is simply not in the bootstrap)", () => {
     // (a `push` on a reactive place is still read as a write by the value-position rule — pre-existing, by name)

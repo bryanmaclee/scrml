@@ -4963,7 +4963,13 @@ ${
         const st: AS = ro.st
         // `.length` of a sequence or a string is a primitive (a read, never a place).
         if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
-            return plain(Type.Int, addName(st, e.nid, NameFact.NLength))
+            // s469 (bryan: "code points everywhere, `.length` included"): a
+            // STRING's length counts code points — Core StrLength, recorded as
+            // the member node's value fact (lower reads it first); a tape's
+            // stays Length (its element count)
+            const lst: AS = addName(st, e.nid, NameFact.NLength)
+            if (ro.x.ty == Type.Str) return plain(Type.Int, addValue(lst, e.nid, ValueFact.VMethod(PrimOp.StrLength)))
+            return plain(Type.Int, lst)
         }
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
@@ -5158,7 +5164,7 @@ ${
                 // JavaScript's tape method names, refused (E-TAPE-JS-METHOD)
                 if (isBuiltinMethodName(m.method)) return resolveMethod(env, e, m, args, st0)
             }
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
+            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
         const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
@@ -5554,7 +5560,7 @@ ${
         // what a refusal still answers (a filter keeps the receiver's type), so
         // a `.length` after a refused call is not a second report
         let guess: Type | not = not
-        if (isFilter) guess = ot
+        if (isFilter && ot is given) guess = ungranted(ot)
         if (ot is given) {
             elem = seqElem(ot)
             if (elem is not) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)"))
@@ -5574,7 +5580,7 @@ ${
         const rl: RX = resolveLambda(env, lam, ps, elem, want, st)
         st = rl.st
         // a filter keeps the receiver's type; a map is a sequence of the body's
-        // type with the receiver's length (a value — its grants are the receiver's)
+        // type with the receiver's length (s469 F/U-5: a NEW tape — no grants, §66.12.6 rule 3)
         let result: Type | not = guess
         if (!isFilter) result = mappedType(ot, rl.x.ty)
         return plain(result, addValue(st, e.nid, ValueFact.VSeqCall(op)))
@@ -5653,9 +5659,18 @@ ${
     // =========================================================================
 
     // A refused call names its method (fail closed BY NAME), when it has one.
-    fn callText(callee: AExpr) -> string {
+    // s469 F/U-8: `E.V(…)` on an enum type is a payload-variant CONSTRUCTION,
+    // said as such (not as a "method").
+    fn callText(env: Env, callee: AExpr) -> string {
         const m: MethodCall | not = memberCall(callee)
         if (m is not) return ""
+        const n: string = exprName(m.obj)
+        if (n != "" && atName(m.obj) == "" && lookupLocal(env, n) is not) {
+            const ts: Sym | not = typeNamedHere(env, n)
+            if (ts is given) {
+                if (isEnumType(env.g.types, Type.Named(ts)) is given) return "constructing the payload variant `" + n + "." + m.method + "(…)` as a value is not in the bootstrap (only `fail` builds one) — "
+            }
+        }
         return "`." + m.method + "(…)` is not in the bootstrap — "
     }
 
@@ -5736,8 +5751,18 @@ ${
     fn methodResult(op: PrimOp, recv: Type) -> Type {
         if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return Type.Bool
         if (op == PrimOp.StrSplit) return Type.Seq(Type.Str, anySeqGrants())
-        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return recv
+        if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return ungranted(recv)
         return Type.Str
+    }
+
+    // s469 F/U-5 — a NEW tape (`sort`, `reverse`, `filter`, `map`, a comparator
+    // sort) is a value: it carries its own type's grants, and that type grants
+    // nothing (§66.12.6 rule 3: "a binding of it carries the grants of its own
+    // type, and inference never invents one") — never the receiver's.
+    fn ungranted(t: Type) -> Type {
+        const el: Type | not = seqElem(t)
+        if (el is not) return t
+        return Type.Seq(el, fixedSeq())
     }
 
     // A built-in's name as written (for messages).
@@ -5800,9 +5825,10 @@ ${
         const lo: int = methodMinArity(op)
         const hi: int = methodSig(op).length
         if (args.length < lo || args.length > hi) {
-            let want: string = "" + hi
-            if (lo != hi) want = lo + " or " + hi
-            return refuseMethod(env, e, "E-CALL-ARITY", "`." + m.method + "(…)` takes " + want + " argument(s); " + args.length + " given", args, st)
+            let want: string = hi + " argument(s)"
+            if (lo != hi) want = lo + " or " + hi + " arguments"
+            if (m.method == "sort") want = "no argument (the natural order) or one comparator `(a, b) => …`"
+            return refuseMethod(env, e, "E-CALL-ARITY", "`." + m.method + "(…)` takes " + want + "; " + args.length + " given", args, st)
         }
         const sig: Type[] = methodSig(op)
         let st2: AS = st
@@ -5830,7 +5856,7 @@ ${
             return plain(ot, refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `.sort(…)` must be a comparator, an arrow function of two parameters `(a, b) => …` returning a number (the bootstrap has no other function value)", args, st).st)
         }
         const rl: RX = resolveLambda(env, lam, ps, elem, not, st)
-        return plain(ot, addValue(rl.st, e.nid, ValueFact.VSeqCall(SeqFn.SortBy)))
+        return plain(ungranted(ot), addValue(rl.st, e.nid, ValueFact.VSeqCall(SeqFn.SortBy)))
     }
 
     // s469 — a statement whose call is a JavaScript tape method name, or a
@@ -5853,6 +5879,72 @@ ${
         return refuseMethod(env, e, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` returns a NEW tape and leaves `" + recv + "` unchanged, so as a statement it does nothing (§66.12.6 rule 3) — write `" + recv + " = " + recv + "." + m.method + "(…);` (needs `writable`), or bind the result", args, ro.st).st
     }
 
+    // s469 F/U-4 — a statement whose VALUE is discarded through a ternary or a
+    // `&&` / `||` (`@n == 0 ? @xs.sort() : @xs.reverse();`): each branch whose
+    // value is dropped is judged as a statement of its own, so a `sort` /
+    // `reverse` / `fill` / `copyWithin` there is the same do-nothing idiom
+    // (E-TAPE-JS-METHOD trigger (b)). Reports only; the expression is then
+    // resolved as before (the receiver peek's state is thrown away).
+    fn discardedTapeBranches(env: Env, e: AExpr, st0: AS) -> AS {
+        let st: AS = st0
+        for (const b of discardedArms(e)) {
+            const k: AExprK = b.k
+            const callee: AExpr | not = calleeOf(k)
+            if (callee is given) {
+                const m: MethodCall | not = memberCall(callee)
+                if (m is given) {
+                    if (m.method == "sort" || m.method == "reverse" || m.method == "fill" || m.method == "copyWithin") {
+                        const ot: Type | not = resolveExpr(env, m.obj, not, st).x.ty
+                        if (ot is given) {
+                            if (seqElem(ot) is given) {
+                                let recv: string = placeKey(m.obj)
+                                if (recv == "") recv = "xs"
+                                st = addDiag(st, env.file, b.span, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` returns a NEW tape and leaves `" + recv + "` unchanged, and this branch's value is discarded, so it does nothing (§66.12.6 rule 3) — write `" + recv + " = " + recv + "." + m.method + "(…);` (needs `writable`), or bind the result")
+                            }
+                        }
+                    }
+                }
+            }
+            st = discardedTapeBranches(env, b, st)
+        }
+        return st
+    }
+
+    // The sub-expressions whose value a discarded expression also discards:
+    // both arms of a ternary, the right operand of `&&` / `||`.
+    fn discardedArms(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Ternary(test: t, yes: y, no: n) :> [y, n]
+            .Binary(op: o, l: l, r: r) :> andOrRight(o, r)
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: x) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
+            .Handled(h: x) :> []
+        }
+    }
+
+    fn andOrRight(o: BinOp, r: AExpr) -> AExpr[] {
+        if (o == BinOp.And || o == BinOp.Or) return [r]
+        return []
+    }
+
     fn oneArg(args: AExpr[]) -> AExpr | not {
         if (args.length != 1) return not
         return args[0]
@@ -5865,7 +5957,7 @@ ${
 
     fn mappedOf(src: Type, body: Type) -> Type | not {
         return match src {
-            .Seq(elem: el, grants: g) :> Type.Seq(body, g)
+            .Seq(elem: el, grants: g) :> Type.Seq(body, fixedSeq())
             .Int :> not
             .Num :> not
             .Str :> not
@@ -6811,8 +6903,8 @@ ${
             .Variant(name: n) :> resolveExpr(env, e, not, st).st
             .Member(obj: o) :> resolveExpr(env, e, not, st).st
             .Unary(op: o) :> resolveExpr(env, e, not, st).st
-            .Binary(op: o) :> resolveExpr(env, e, not, st).st
-            .Ternary(test: t) :> resolveExpr(env, e, not, st).st
+            .Binary(op: o) :> resolveExpr(env, e, not, discardedTapeBranches(env, e, st)).st      // s469 F/U-4
+            .Ternary(test: t) :> resolveExpr(env, e, not, discardedTapeBranches(env, e, st)).st
             .ArrayLit(elems: es) :> resolveExpr(env, e, not, st).st
             .ObjectLit(props: ps) :> resolveExpr(env, e, not, st).st
             .Spread(e: x) :> resolveExpr(env, e, not, st).st
@@ -13110,7 +13202,9 @@ ${
         if (!isFilter) return VType.Unknown
         const obj: AExpr | not = memberObj(callee)
         if (obj is not) return VType.Unknown
-        return exprType0(ts, obj.nid)
+        const rt: Type | not = knownOf(exprType0(ts, obj.nid))
+        if (rt is not) return VType.Unknown
+        return known(ungranted(rt))      // s469 F/U-5: a new tape carries its own type's grants — none
     }
 
     fn typeMember(env: TEnv, e: AExpr, f: NameFact | not, obj: AExpr, ts: TypeState) -> RVT {
@@ -13214,6 +13308,7 @@ ${
             .StrTrim :> ts
             .StrSlice :> ts
             .StrCharAt :> ts
+            .StrLength :> ts
             .StrIncludes :> ts
             .StrStartsWith :> ts
             .StrEndsWith :> ts
@@ -13692,6 +13787,7 @@ ${
             .StrTrim :> VType.Unknown
             .StrSlice :> VType.Unknown
             .StrCharAt :> VType.Unknown
+            .StrLength :> known(Type.Int)
             .StrIncludes :> VType.Unknown
             .StrStartsWith :> VType.Unknown
             .StrEndsWith :> VType.Unknown

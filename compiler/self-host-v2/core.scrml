@@ -131,12 +131,14 @@ ${
         Concat, Length,
         // s469 (strings + tape methods) — typed built-in method calls; `args[0]`
         // is the receiver. Each makes a NEW value (R3). String positions count
-        // CODE POINTS (S469: string iteration and `s[i]` are by code point):
-        // StrSlice(s, from[, to]), StrCharAt(s, i), StrSplit(s, sep) with `""`
-        // splitting into code points. SortNum / SortStr are a tape's natural
+        // CODE POINTS — everywhere (S469, bryan: "code points everywhere,
+        // `.length` included"): StrLength(s) is a string's `.length` (a tape's
+        // stays Length), StrSlice(s, from[, to]), StrCharAt(s, i), StrSplit(s,
+        // sep) with `""` splitting into code points; StrIncludes / StrStartsWith
+        // / StrEndsWith / StrSplit match only on code-point boundaries. SortNum / SortStr are a tape's natural
         // order (S469: numbers numerically, strings by code point); Reverse a
         // reversed copy; Join(xs, sep) a string tape joined.
-        StrUpper, StrLower, StrTrim, StrSlice, StrCharAt,
+        StrUpper, StrLower, StrTrim, StrSlice, StrCharAt, StrLength,
         StrIncludes, StrStartsWith, StrEndsWith, StrSplit,
         SortNum, SortStr, Reverse, Join,
     }

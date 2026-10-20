@@ -522,7 +522,7 @@ ${
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
-            .VMethod(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VMethod(op: m) :> Expr.Prim(m, [lowerExpr(c, o)])        // s469: a string's `.length` (StrLength)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
         }
     }
