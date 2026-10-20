@@ -43,6 +43,17 @@ function ensureCapture() {
   window.addEventListener("error", listeners.error);
   window.addEventListener("unhandledrejection", listeners.rejection);
 }
+// The root cause (s469 review r2): conformance/adapters/impl1-ts.ts swaps in a
+// FRESH happy-dom window (unregister + register) for every conformance runtime
+// case — slice-m4/gate.test.js reaches it in-process — and a fresh window has
+// none of these listeners. The adapter runs every `__scrmlDomSwapHooks` entry
+// right after each swap; this one re-attaches the capture there.
+const swapHooks = (globalThis.__scrmlDomSwapHooks ??= []);
+// one hook per process (every instance of this module shares the listeners)
+if (!globalThis.__sliceM1SwapHooked) {
+  globalThis.__sliceM1SwapHooked = true;
+  swapHooks.push(() => ensureCapture());
+}
 ensureCapture();
 
 /** Drain the captured page errors. */
