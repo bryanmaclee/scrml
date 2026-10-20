@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-labels",
+  "description": "`break outer` at r = 2, c = 3: 13 iterations ran.",
+  "language-version": "1.0",
+  "spec": "§49.2.2 · §49.3.3",
+  "rationale": "§49.3.3: \"`break label` immediately exits the loop whose `label-prefix` matches\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "13"
+      }
+    ]
+  }
+}

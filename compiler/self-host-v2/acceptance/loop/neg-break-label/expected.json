@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-break-label",
+  "description": "E-LOOP-003: `break nope`.",
+  "language-version": "1.0",
+  "spec": "§49.4.2 · §49.9",
+  "rationale": "§49.4.2: \"The compiler SHALL reject `break label` where the label does not exist or does not annotate a loop with E-LOOP-003.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-003"
+    ],
+    "codeCounts": {
+      "E-LOOP-003": 1
+    }
+  }
+}

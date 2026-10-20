@@ -632,10 +632,12 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
 // ---------------------------------------------------------------------------
 // Final repair (round 3, H1): a FIELD write `a.n = v` on a local is a field
 // edit (§66.11.4: "a field is writable along its own contract"), not a write
-// of the local. The binder records it as a local rebinding of the ROOT local
-// and computes no field type for it, so it is left unchecked (provable-or-
-// silent) and does not widen the local's joined type. Only a BARE `a = v` is
-// checked against the local's annotation / joined into its type.
+// of the local. The typer leaves it unchecked and does not widen the local's
+// joined type — but Core has no field write of a local, and lower turned it
+// into a REBINDING of the whole local (`a.n = 2` emitted `a = 2`).
+// s469 (the loops review, HIGH 2): refused at the binder (E-BOOTSTRAP-UNSUPPORTED)
+// until Core has a local field edit — never compiled approximately. Only a
+// BARE `a = v` is a local write.
 // ---------------------------------------------------------------------------
 describe("R3-H1 — a field write through a local is not a write of the whole local", () => {
   const O = "    type O:struct = { let v: string | not, let n: int }\n    let <o:O=({ v: not, n: 0 })/>\n";
@@ -645,18 +647,18 @@ describe("R3-H1 — a field write through a local is not a write of the whole lo
     ["`a.v = \"q\"` on `let a: O = @o`", "    function f() { let a: O = @o\n a.v = \"q\" }"],
     ["the inline handler block form", "", "<button onclick={ let a: O = @o; a.n = 2; @o = a }>x</button>"],
   ]) {
-    test(`legal — ${name}`, () => { expect(inApp(O + body, markup ?? "<p>x</p>")).toEqual([]); });
+    test(`refused (s469) — ${name}`, () => { expect(inApp(O + body, markup ?? "<p>x</p>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]); });
   }
-  test("legal — `d.value = \"x\"` on `let d: dropdown = @dropdown`", () => {
-    expect(inApp("    function f() { let d: dropdown = @dropdown\n d.value = \"x\" }")).toEqual([]);
+  test("refused (s469) — `d.value = \"x\"` on `let d: dropdown = @dropdown`", () => {
+    expect(inApp("    function f() { let d: dropdown = @dropdown\n d.value = \"x\" }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("silent (this path computes no field type) — `a.n = \"s\"` on `let a: O`", () => {
-    expect(inApp(O + "    function f() { let a: O = @o\n a.n = \"s\" }")).toEqual([]);
+  test("refused (s469) — `a.n = \"s\"` on `let a: O`", () => {
+    expect(inApp(O + "    function f() { let a: O = @o\n a.n = \"s\" }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("still fires — a BARE `a = \"s\"` into `let a: O`", () => {
     expect(inApp(O + "    function f() { let a: O = @o\n a = \"s\" }")).toEqual(["E-TYPE-031"]);
   });
-  test("E-TYPE-031 — an unannotated `let a = @o` keeps type `O` after `a.n = 2` (the field write does not join `int` in)", () => {
-    expect(inApp(O + "    let <x:int=0/>\n    function f() { let a = @o\n a.n = 2\n @x = a }")).toEqual(["E-TYPE-031"]);
+  test("E-TYPE-031 — an unannotated `let a = @o` keeps type `O` after `a.n = 2` (the refused field write does not join `int` in)", () => {
+    expect(inApp(O + "    let <x:int=0/>\n    function f() { let a = @o\n a.n = 2\n @x = a }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-TYPE-031"]);
   });
 });

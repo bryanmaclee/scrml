@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-cond-head",
+  "description": "`for (n < 5)` counts to 5.",
+  "language-version": "1.0",
+  "spec": "§49.3.1",
+  "rationale": "§49.3.1: \"If it is true, the body executes from top to bottom.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "5"
+      }
+    ]
+  }
+}

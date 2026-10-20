@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-sum-tape",
+  "description": "`for (y of ys)` sums `[3, 4, 5]`: 12.",
+  "language-version": "1.0",
+  "spec": "§49.1 · §49.3.5",
+  "rationale": "§49.3.5: \"For each element, in the iterable's order, the binder is bound to the element and the body executes.\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#s",
+        "text": "12"
+      }
+    ]
+  }
+}

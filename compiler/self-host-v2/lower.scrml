@@ -32,10 +32,11 @@ ${
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm, VariantDef,
+             LoopHead, EachHead, RangeHead,
              block, litStr, mkSym, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc,
              mkSpan } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -381,7 +382,7 @@ ${
             .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
             .Spread(e: sx) :> missing()
-            .Index(obj: ix) :> missing()
+            .Index(obj: o, idx: ix) :> indexExpr(c, e, o, ix)    // s469 (§49.13)
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
             .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
             .Handled(h: h) :> handledRead(c, e)
@@ -400,6 +401,8 @@ ${
             .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VIndex(loc: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VAt :> atExpr(c, cal, args)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
             not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
         }
@@ -442,6 +445,8 @@ ${
     fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
         return match f {
             .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VIndex(loc: x) :> missing()
+            .VAt :> missing()
             .VToEnum(enumSym: x) :> missing()
             .VLit(lit: l) :> missing()
             .VVariant(enumSym: x) :> missing()
@@ -479,6 +484,8 @@ ${
             .VHost(call: h) :> missing()
             .VSeqCall(op: x) :> missing()
             .VLambda(params: x) :> missing()
+            .VIndex(loc: x) :> missing()
+            .VAt :> missing()
             .VToEnum(enumSym: x) :> missing()
             not :> missing()
         }
@@ -493,6 +500,8 @@ ${
             .VHost(call: h) :> PrimOp.Not
             .VSeqCall(op: x) :> PrimOp.Not
             .VLambda(params: x) :> PrimOp.Not
+            .VIndex(loc: x) :> PrimOp.Not
+            .VAt :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
             not :> PrimOp.Not
         }
@@ -509,6 +518,8 @@ ${
             .VHost(call: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VSeqCall(op: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VLambda(params: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VAt :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
         }
@@ -619,10 +630,137 @@ ${
             .Return(e: e) :> hoistMaybe(c, e).concat(attemptsFor(c, e)).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> hoistExpr(c, x).concat(joinMark(c, s)).concat([Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))])
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
+            .For(f: lf) :> loopStmts(c, lf)                 // s469 (§49)
+            .Break(label: x) :> jumpStmts(c, s, true)
+            .Continue(label: x) :> jumpStmts(c, s, false)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
             .Fail(f: f) :> hoistExprs(c, f.args).concat(failStmt(c, s, f))   // s451 (Ue, §19.3)
         }
+    }
+
+    // =========================================================================
+    // s469 — the ONE loop (SPEC §49). A `for` is ONE Core Loop named by the
+    // binder's label Sym (analyze BLoop); a `break` / `continue` names the loop
+    // the loop-control pass resolved (BJump). Nothing is decided here: a head's
+    // parts are lowered in place — the condition (a presence test lowers to
+    // IsSome, as an `if`'s does), the counted head's `init` statements and
+    // `step` rebindings, the iterable, the range bounds and the Syms the binder
+    // minted for them. A missing fact means analyze reported an error, and the
+    // compile has no Core (the gate above).
+    // =========================================================================
+    type LoopB:struct = { label: Sym, end: Sym | not, counter: Sym | not }
+
+    fn mkLoopB(l: Sym, e: Sym | not, k: Sym | not) -> LoopB { return { label: l, end: e, counter: k } }
+
+    fn loopBOf(f: BindFact | not) -> LoopB | not {
+        return match f {
+            .BLoop(label: l, end: e, counter: k) :> mkLoopB(l, e, k)
+            .BBind(sym: x) :> not
+            .BParam(sym: x) :> not
+            .BGiven(sym: x) :> not
+            .BJump(target: x) :> not
+            not :> not
+        }
+    }
+
+    fn jumpTarget(f: BindFact | not) -> Sym | not {
+        return match f {
+            .BJump(target: t) :> t
+            .BLoop(label: x) :> not
+            .BBind(sym: x) :> not
+            .BParam(sym: x) :> not
+            .BGiven(sym: x) :> not
+            not :> not
+        }
+    }
+
+    fn loopStmts(c: LC, f: AFor) -> Stmt[] {
+        const lb: LoopB | not = loopBOf(bindFact(c.t.binds, f.nid))
+        if (lb is not) return []
+        const body: Block = lowerBlock(c, f.body)
+        const h: AForHead = f.head
+        return match h {
+            .HForever :> [Stmt.Loop(lb.label, LoopHead.Forever, body)]
+            .HCond(cond: x) :> [Stmt.Loop(lb.label, LoopHead.While(lowerExpr(c, x)), body)]
+            .HCounted(init: i, cond: x, step: sp) :> [Stmt.Loop(lb.label, LoopHead.Counted(lowerInits(c, i), maybeLowered(c, x), lowerSteps(c, sp)), body)]
+            .HIter(bind: b, src: src) :> iterLoop(c, lb, b, src, body)
+        }
+    }
+
+    fn maybeLowered(c: LC, x: AExpr | not) -> Expr | not {
+        if (x is not) return not
+        return lowerExpr(c, x)
+    }
+
+    fn lowerInits(c: LC, ss: AStmt[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const s of ss) { out = out.concat(lowerStmt(c, s)) }
+        return out
+    }
+
+    fn lowerSteps(c: LC, es: AExpr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        for (const e of es) { out = out.concat(exprStmt(c, e)) }
+        return out
+    }
+
+    fn eachHead(bind: Sym, src: Expr) -> EachHead { return { bind: bind, src: src } }
+
+    fn rangeHead(bind: Sym, counter: Sym | not, end: Sym, lo: Expr, hi: Expr, inclusive: boolean) -> RangeHead {
+        return { bind: bind, counter: counter, end: end, lo: lo, hi: hi, inclusive: inclusive }
+    }
+
+    fn iterLoop(c: LC, lb: LoopB, b: ABind, src: AIterSrc, body: Block) -> Stmt[] {
+        const bs: Sym | not = letSym(bindFact(c.t.binds, b.nid))
+        if (bs is not) return []
+        return match src {
+            .IterOf(e: x) :> [Stmt.Loop(lb.label, LoopHead.Each(eachHead(bs, lowerExpr(c, x))), body)]
+            .IterRange(lo: lo, hi: hi, inclusive: inc) :> rangeLoop(c, lb, bs, lo, hi, inc, body)
+        }
+    }
+
+    fn rangeLoop(c: LC, lb: LoopB, bs: Sym, lo: AExpr, hi: AExpr, inclusive: boolean, body: Block) -> Stmt[] {
+        const end: Sym | not = lb.end
+        if (end is not) return []
+        return [Stmt.Loop(lb.label, LoopHead.Range(rangeHead(bs, lb.counter, end, lowerExpr(c, lo), lowerExpr(c, hi), inclusive)), body)]
+    }
+
+    fn jumpStmts(c: LC, s: AStmt, isBreak: boolean) -> Stmt[] {
+        const t: Sym | not = jumpTarget(bindFact(c.t.binds, s.nid))
+        if (t is not) return []
+        if (isBreak) return [Stmt.Break(t)]
+        return [Stmt.Continue(t)]
+    }
+
+    // s469 — `xs[i]` (§49.13): IndexRead, with the source location the trap
+    // names (§19.17); `xs.at(i)`: AtRead.
+    fn indexExpr(c: LC, e: AExpr, o: AExpr, ix: AExpr) -> Expr {
+        const loc: string = indexLocOf(valueFact(c.t.values, e.nid))
+        if (loc == "") return missing()
+        return Expr.Prim(PrimOp.IndexRead, [lowerExpr(c, o), lowerExpr(c, ix), litStr(loc)])
+    }
+
+    fn indexLocOf(f: ValueFact | not) -> string {
+        return match f {
+            .VIndex(loc: l) :> l
+            .VAt :> ""
+            .VLit(lit: x) :> ""
+            .VVariant(enumSym: x) :> ""
+            .VStructOf(ty: x) :> ""
+            .VOp(op: x) :> ""
+            .VHost(call: x) :> ""
+            .VSeqCall(op: x) :> ""
+            .VLambda(params: x) :> ""
+            .VToEnum(enumSym: x) :> ""
+            not :> ""
+        }
+    }
+
+    fn atExpr(c: LC, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not || args.length != 1) return missing()
+        return Expr.Prim(PrimOp.AtRead, [lowerExpr(c, obj), lowerExpr(c, args[0])])
     }
 
     fn returnValue(c: LC, e: AExpr | not) -> Expr {
@@ -645,6 +783,8 @@ ${
         return match f {
             .BBind(sym: s) :> s
             .BParam(sym: x) :> not
+            .BLoop(label: x) :> not
+            .BJump(target: x) :> not
             .BGiven(sym: x) :> not
             not :> not
         }
@@ -659,6 +799,8 @@ ${
             ])
             .BBind(sym: x) :> []
             .BParam(sym: x) :> []
+            .BLoop(label: x) :> []
+            .BJump(target: x) :> []
             not :> []
         }
     }
@@ -1675,6 +1817,8 @@ ${
     fn paramOf(f: BindFact | not) -> Param[] {
         return match f {
             .BParam(sym: s, ty: ty) :> [{ sym: s, ty: ty }]
+            .BLoop(label: x) :> []
+            .BJump(target: x) :> []
             .BBind(sym: s) :> []
             .BGiven(sym: s) :> []
             not :> []
@@ -1817,6 +1961,8 @@ ${
             .VHost(call: h) :> not
             .VSeqCall(op: o) :> not
             .VLambda(params: ps) :> not
+            .VIndex(loc: x) :> not
+            .VAt :> not
             .VToEnum(enumSym: s) :> not
             not :> not
         }
@@ -1839,6 +1985,9 @@ ${
             .Return(e: x) :> missing()
             .If(cond: x) :> missing()
             .Given(name: n) :> missing()
+            .For(f: x) :> missing()
+            .Break(label: x) :> missing()
+            .Continue(label: x) :> missing()
             .EffectStmt(w: w) :> missing()
             .Defer(body: d) :> missing()
             .Fail(f: x) :> missing()
@@ -2231,6 +2380,9 @@ ${
             .Return(e: x) :> not
             .If(cond: x) :> not
             .Given(name: n) :> not
+            .For(f: x) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -2695,6 +2847,9 @@ ${
             .Fail(err: x) :> not
             .Join(k: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 
@@ -2715,6 +2870,9 @@ ${
             .Fail(err: x) :> not
             .Join(k: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 
@@ -2735,6 +2893,9 @@ ${
             .Attempt(result: x) :> not
             .Fail(err: x) :> not
             .Jump(k: x) :> not
+            .Loop(label: x) :> not
+            .Break(target: x) :> not
+            .Continue(target: x) :> not
         }
     }
 
@@ -2744,6 +2905,9 @@ ${
             .Return(e: x) :> true
             .Fail(err: x) :> true
             .Jump(k: x) :> true
+            .Loop(label: x) :> false
+            .Break(target: x) :> true
+            .Continue(target: x) :> true
             .Suspend(bind: x) :> true
             .If(cond: x) :> false
             .Let(sym: x) :> false

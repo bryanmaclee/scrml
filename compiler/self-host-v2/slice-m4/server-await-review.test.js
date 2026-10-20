@@ -25,8 +25,10 @@ const REVIEW_EXPECT = {
   "s1/pureFnWrap": ["REFUSED", ["E-FN-003"]],
   "s1/chain3": ["PASS"],
   "s1/mutual": ["PASS"],
-  "s1/whileCond": ["REFUSED", ["E-PARSE-EXPECTED", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
-  "s1/forBody": ["REFUSED", ["E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-ITEM", "E-SCOPE-001", "E-TYPE-STRUCT-CONTEXT"]],
+  // s469 — `while` is retired (§49.4.1): refused with its own code
+  "s1/whileCond": ["REFUSED", ["E-LOOP-WHILE-RETIRED"]],
+  // s469 — the loop parses; a server wait in its body is refused (a loop cannot wait yet — check.scrml C19)
+  "s1/forBody": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/elseIf": ["PASS"],
   // a scrml string literal is not interpolated in the bootstrap: `"${check(…)}"` is the text itself, so nothing waits
   "s1/template": ["DENY"],
@@ -35,7 +37,8 @@ const REVIEW_EXPECT = {
   "s1/matchScrut": ["REFUSED", ["E-ERROR-013", "E-TYPE-VARIANT"]],
   "s1/matchArm": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/structField": ["PASS"],
-  "s1/arrayLit": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469 — an index read `a[0]` is §49.13's (the trap form): the wrong password takes the deny arm
+  "s1/arrayLit": ["PASS"],
   "s1/indexWrite": ["REFUSED", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "s1/queryParam": ["PASS"],
   "s1/queryParamDup": ["PASS"],

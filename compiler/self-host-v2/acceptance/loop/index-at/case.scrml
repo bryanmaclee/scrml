@@ -1,0 +1,14 @@
+// §49.13: `xs[i]` in range is the element; `xs.at(i)` is `not` out of range, a negative `i` included.
+<program>
+    function g(xs: int[]) -> int { return xs[1] }
+    function h(xs: int[], i: int) -> string {
+        return match xs.at(i) {
+            not :> "none"
+            else :> "some"
+        }
+    }
+    <main>
+        <p id="a">${g([5, 6, 7])}</p>
+        <p id="b">${h([5], 0)} ${h([5], 1)} ${h([5], -1)}</p>
+    </main>
+</program>

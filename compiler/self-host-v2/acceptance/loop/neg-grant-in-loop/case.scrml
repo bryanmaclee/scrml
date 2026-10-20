@@ -1,0 +1,7 @@
+// §49.3.5 / §66.12.6: a write in a loop body is checked against the grants as anywhere else.
+<program>
+    <xs:int[]=([])/>
+    <main>
+        <button onclick={ for (i of 0..3) { @xs.push(i) } }>b</button>
+    </main>
+</program>

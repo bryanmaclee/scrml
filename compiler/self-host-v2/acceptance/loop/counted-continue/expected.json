@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-counted-continue",
+  "description": "the step runs on `continue`: 0 + 1 + 3 + 4 = 8.",
+  "language-version": "1.0",
+  "spec": "§49.3.2 · §49.3.4",
+  "rationale": "§49.3.2: \"After the body completes, or after a `continue`, `step` is evaluated\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "8"
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+// §49.4.1: the braceless `for x in xs` form is removed.
+<program>
+
+    function f() -> int {
+        let n = 0
+        for x in [1, 2] { n = n + x }
+        return n
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>
