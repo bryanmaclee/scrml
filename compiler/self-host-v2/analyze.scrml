@@ -51,7 +51,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, mkSpan, newDiag } from "./ast.scrml"
     import { Severity } from "./severity.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, SlotQuote, sqlFacts, slotInLiteral, txControl, txControlAware } from "./sql.scrml"
@@ -247,6 +247,8 @@ ${
         VSeqCall(op: SeqFn),                              // s444: `seq.filter(λ)` / `seq.map(λ)` — a call node
         VLambda(params: Sym[]),                           // s444: `x => e` as a SeqCall's argument — its parameter locals
         VToEnum(enumSym: Sym),                            // s469: `E.toEnum(s)` (§14.4.1) — a call node: `string -> E | not`
+        VIndex(loc: string),                              // s469: `xs[i]` read (§49.13) — an index node; `loc` "file:line" for the trap (§19.17)
+        VAt,                                              // s469: `xs.at(i)` (§49.13) — a call node: `T | not`, never a trap
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -261,6 +263,8 @@ ${
         BBind(sym: Sym),                                  // a binder: a local statement, a function
         BParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
         BGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
+        BLoop(label: Sym, end: Sym | not, counter: Sym | not), // s469: a `for` (on the AFor) — its label; a range head's `end` / `counter` (§49.2.5)
+        BJump(target: Sym),                               // s469: a `break` / `continue` — the label Sym of the loop it leaves / re-enters
     }
     export type ElemFact:enum = {
         MHtml,
@@ -2744,6 +2748,9 @@ ${
                 .Return(e: x) :> retsInMaybe(cx, x, sc, stack, done)
                 .If(cond: c, thenB: tb, elseB: eb) :> retsIf(cx, c, tb, eb, sc, stack, done)
                 .Given(name: n, subject: x, body: gb) :> retsGiven(cx, n, x, gb, sc, stack, done)
+                .For(f: lf) :> retsFor(cx, lf, sc, stack, done)
+                .Break(label: x) :> noRets(done)
+                .Continue(label: x) :> noRets(done)
                 .Eval(e: x) :> retsInExpr(cx, x, sc, stack, done)
                 .Local(name: n, init: i) :> retsInExpr(cx, i, sc, stack, done)
                 .EffectStmt(w: w) :> noRets(done)
@@ -2772,6 +2779,9 @@ ${
             .Return(e: x) :> noBind(done)
             .If(cond: c) :> noBind(done)
             .Given(name: n) :> noBind(done)
+            .For(f: lf) :> noBind(done)
+            .Break(label: x) :> noBind(done)
+            .Continue(label: x) :> noBind(done)
             .Eval(e: x) :> noBind(done)
             .EffectStmt(w: w) :> noBind(done)
             .Defer(body: db) :> noBind(done)
@@ -2795,6 +2805,9 @@ ${
             .Return(e: x) :> true
             .If(cond: c) :> false
             .Given(name: n) :> false
+            .For(f: lf) :> false
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -2808,6 +2821,9 @@ ${
             .Return(e: x) :> x
             .If(cond: c) :> not
             .Given(name: n) :> not
+            .For(f: lf) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
             .Eval(e: x) :> not
             .Local(name: n) :> not
             .EffectStmt(w: w) :> not
@@ -4403,6 +4419,9 @@ ${
             .Return(e: e) :> maybeClock(e)
             .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
+            .For(f: lf) :> exprsClock(forExprs(lf)) || blockClock(lf.body)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .EffectStmt(w: w) :> blockClock(w.body)
             .Defer(body: b) :> blockClock(b)
             .Fail(f: f) :> exprsClock(failExprs(f))
@@ -4762,7 +4781,7 @@ ${
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
-            .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
+            .Index(obj: o, idx: ix) :> resolveIndexRead(env, e, o, ix, st)   // s469 (§49.13)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
@@ -4960,6 +4979,10 @@ ${
         if (qv is given) return qv
         const ro: RX = resolveExpr(env, obj, not, st0)
         const st: AS = ro.st
+        // s469: a field of an index read (`xs[i].f`) — Core reads a field through a
+        // place (a cell or a local), and an index read is a value: refused, never
+        // lowered to a placeholder.
+        if (isIndexExpr(obj) && name != "length") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "a field of an index read (`xs[i]." + name + "`) is not in the bootstrap yet — bind the element first: `const x = xs[i]`, then `x." + name + "`", st)
         // `.length` of a sequence or a string is a primitive (a read, never a place).
         if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
             return plain(Type.Int, addName(st, e.nid, NameFact.NLength))
@@ -5146,6 +5169,11 @@ ${
                 // sequence functions a lambda is admitted to (filter / map)
                 if (m.method == "now" && exprName(m.obj) == "Date" && lookupLocal(env, "Date") is not) return resolveHost(env, e, args, st0)
                 if (m.method == "filter" || m.method == "map") return resolveSeqCall(env, e, m, args, st0)
+                // s469 — `xs.at(i)` (§49.13): `T | not`, never a trap
+                if (m.method == "at") {
+                    const ra: RX | not = resolveAtCall(env, e, m, args, st0)
+                    if (ra is given) return ra
+                }
                 // s469 — `E.toEnum(s)` (§14.4.1): a typed built-in, `string -> E | not`
                 if (m.method == "toEnum") {
                     const te: RX | not = resolveToEnum(env, e, m, args, st0)
@@ -5403,6 +5431,9 @@ ${
             .Return(e: x) :> retIsValue(fs, v, x)
             .If(cond: c, thenB: tb, elseB: el) :> blocksValueReturn(fs, v, allExprBlocks(c)) || blocksValueReturn(fs, v, thenElse(tb, el))
             .Given(name: n, subject: x, body: gb) :> blocksValueReturn(fs, v, allExprBlocks(x)) || valueReturnIn(fs, v, gb)
+            .For(f: lf) :> blocksValueReturn(fs, v, forExprBlocks(lf)) || valueReturnIn(fs, v, lf.body)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Eval(e: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .Local(name: n, init: x) :> blocksValueReturn(fs, v, allExprBlocks(x))
             .EffectStmt(w: w) :> false
@@ -5473,6 +5504,9 @@ ${
             .If(cond: c, thenB: tb, elseB: el) :> fallsNever(t, tb, bareOk) && elseLeavesAll(t, el, bareOk)
             .Eval(e: x) :> matchLeavesAll(t, x, bareOk)
             .Given(name: n) :> false
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: d) :> false
@@ -7186,6 +7220,9 @@ ${
             .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
+            .For(f: lf) :> keepEnv(env, resolveFor(env, s, lf, st))
+            .Break(label: x) :> keepEnv(env, st)
+            .Continue(label: x) :> keepEnv(env, st)
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
             .Defer(body: b, arrayLead: a, bare: bare) :> keepEnv(env, resolveDefer(env, s, b, a, bare, st))
         }
@@ -7304,6 +7341,9 @@ ${
             .Defer(body: d) :> deferShadow(file, s, d, later, deferBodyRules(file, d, st))
             .If(cond: c, thenB: t, elseB: el) :> deferChecksElse(file, el, later, deferChecksIn(file, t, later, st))
             .Given(name: n, body: d) :> deferChecksIn(file, d, later, st)
+            .For(f: lf) :> deferChecksBlocks(file, forExprBlocks(lf), later, deferChecksIn(file, lf.body, later, st))
+            .Break(label: x) :> st
+            .Continue(label: x) :> st
             .Eval(e: e) :> deferChecksBlocks(file, allExprBlocks(e), later, st)        // s451 (Ue): a braced arm block is a defer site (§19.16.2)
             .Local(name: n, init: i) :> deferChecksBlocks(file, allExprBlocks(i), later, st)
             .Return(e: e) :> deferChecksBlocks(file, maybeExprBlocks(e), later, st)
@@ -7343,6 +7383,9 @@ ${
             .Defer(body: d) :> addDiag(st, file, s.span, "E-DEFER-NESTED", "a deferred statement cannot contain a `defer` — there is no block to attach it to that is not already exiting (§19.16.3 rule 2)")
             .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, deferBodyRules(file, t, st))
             .Given(name: n, body: d) :> deferBodyRules(file, d, st)
+            .For(f: lf) :> deferBodyRules(file, lf.body, st)
+            .Break(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `break` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
+            .Continue(label: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `continue` that leaves it — it runs while its block is already exiting (§19.16.3 rule 1)")
             .Eval(e: e) :> deferExprRules(file, e, st)
             .Local(name: n, init: i) :> deferExprRules(file, i, st)
             .EffectStmt(w: w) :> st
@@ -7410,6 +7453,9 @@ ${
             .Return(e: e) :> maybeNameRefs(e, bound)
             .If(cond: c, thenB: t, elseB: el) :> exprNameRefs(c, bound).concat(blockNameRefs(t, bound)).concat(elseNameRefs(el, bound))
             .Given(name: n, subject: sub, body: d) :> exprNameRefs(sub, bound).concat(blockNameRefs(d, bound.concat([n])))
+            .For(f: lf) :> forNameRefs(lf, bound)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: d) :> blockNameRefs(d, bound)
             .Fail(f: f) :> exprsNameRefs(failExprs(f), bound)
@@ -7511,7 +7557,7 @@ ${
     // `onclick=${risky}`, or `onclick={ risky }`").
     fn bracedHandler(env: Env, b: ABlock, st: AS) -> AS {
         const r: AExpr | not = blockReference(b)
-        if (r is not) return resolveBlock(env, b, st)
+        if (r is not) return loopChecks(env.file, b, resolveBlock(env, b, st))   // s469: a handler block is a loop-control boundary
         return handlerReference(env, r, resolveBlock(withFnRef(env, r.nid), b, st))
     }
 
@@ -7525,6 +7571,9 @@ ${
             .Return(e: x) :> not
             .If(cond: c) :> not
             .Given(name: n) :> not
+            .For(f: lf) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -8775,6 +8824,9 @@ ${
                 .Return(e: x) :> false
                 .If(cond: c) :> false
                 .Given(name: n) :> false
+                .For(f: lf) :> false
+                .Break(label: x) :> false
+                .Continue(label: x) :> false
                 .EffectStmt(w: w) :> false
                 .Fail(f: x) :> false
             }
@@ -8791,6 +8843,9 @@ ${
             .Return(e: x) :> not
             .If(cond: c) :> not
             .Given(name: n) :> not
+            .For(f: lf) :> not
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
             .EffectStmt(w: w) :> not
             .Defer(body: d) :> not
             .Fail(f: x) :> not
@@ -8837,6 +8892,9 @@ ${
             .Return(e: x) :> x is given
             .If(cond: c, thenB: t, elseB: el) :> blockYieldsOnAllPaths(t) && maybeBlockYields(el)
             .Given(name: n) :> false
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -8864,6 +8922,9 @@ ${
             .Return(e: x) :> returnIsBare(x)
             .If(cond: c, thenB: t, elseB: el) :> exprHasBareReturn(c) || blockHasBareReturn(t) || maybeBlockHasBareReturn(el)
             .Given(name: n, subject: x, body: b) :> exprHasBareReturn(x) || blockHasBareReturn(b)
+            .For(f: lf) :> forHasBareReturn(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Eval(e: x) :> exprHasBareReturn(x)
             .Local(name: n, init: i) :> exprHasBareReturn(i)
             .EffectStmt(w: w) :> false
@@ -8962,6 +9023,9 @@ ${
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .Given(name: n) :> false
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: x) :> false
         }
@@ -9065,6 +9129,7 @@ ${
             st = addDiag(st, env.file, w.span, "W-LIFECYCLE-010", "this effect has an empty body — its trigger fires and does nothing (§6.7.4); add a body or remove it")
         }
         st = resolveBlock(effectBodyEnv(env), w.body, st)
+        st = loopChecks(env.file, w.body, st)            // s469: an effect body is a loop-control boundary
         return addEffectSrc(st, w, env.file)
     }
 
@@ -9199,6 +9264,804 @@ ${
         const hn: string = atName(subject)
         if (hn != "") inner = withNarrow(inner, { name: hn, ty: rs0.x.ty, inst: narrowed, iDecl: iDecl })
         return resolveBlock(inner, body, st)
+    }
+
+    // =========================================================================
+    // s469 — THE ONE LOOP (SPEC §49 "one `for`").
+    //
+    // THE BINDER (resolveFor). A loop binds its label Sym (BLoop on the AFor —
+    // every Break / Continue names its loop by it), its head, and its body with
+    // the binder in scope. A loop widens nothing (§49.3.5: "Every write in a loop
+    // body — to the iterated tape, to an outer local, to a cell — is checked
+    // against the target's grants exactly as anywhere else (§66.12.6)"): the
+    // body is resolved by resolveBlock, the one statement path, so every write
+    // in it is classified — and refused or granted — exactly where it would be
+    // outside a loop. The heads:
+    //   for { … } / for (;;)   nothing to resolve
+    //   for (cond)              a condition (§49.2.3: the `if` rule — resolveCond,
+    //                           the typer's checkCond)
+    //   for (init; cond; step)  `init` once: `let` declarators (in scope for the
+    //                           head and the body) or assignments of outer locals;
+    //                           `step` assignments of locals ("A counted head's
+    //                           counters are local bindings rebound by `step` …
+    //                           They are not tape writes and need no grant",
+    //                           §49.3.2). A cell write, an edit, a call or a
+    //                           handled failable there is not in the bootstrap:
+    //                           refused (the body is where effects go).
+    //   for (x of xs)           the iterable once; `x` per element — a tape's
+    //                           element type, a string's code point (a string);
+    //                           `let x` is a mutable binder (§49.3.5)
+    //   for (i of a..b)         both bounds `int` (the typer: E-RANGE-BOUND-NOT-INT);
+    //   for (i of a..=b)        `i` an int. `end` (the once-evaluated upper bound,
+    //                           §49.2.5) and, for a `let` binder, the loop's own
+    //                           `counter` are minted HERE — lower names them,
+    //                           never mints (core.scrml, the binder's obligation).
+    // =========================================================================
+    fn resolveFor(env: Env, s: AStmt, f: AFor, st0: AS) -> AS {
+        let hint: string = f.label
+        if (hint == "") hint = "loop"
+        const rl: RSym = mint(st0, hint)
+        const plain0: AS = addBind(rl.st, f.nid, BindFact.BLoop(rl.s, not, not))
+        const h: AForHead = f.head
+        return match h {
+            .HForever :> resolveBlock(env, f.body, plain0)
+            .HCond(cond: c) :> resolveBlock(env, f.body, resolveCond(env, c, plain0))
+            .HCounted(init: i, cond: c, step: sp) :> resolveCounted(env, f, i, c, sp, plain0)
+            .HIter(bind: b, mutable: m, src: src) :> resolveIter(env, f, rl.s, b, m, src, rl.st)
+        }
+    }
+
+    fn resolveCounted(env0: Env, f: AFor, init: AStmt[], cond: AExpr | not, step: AExpr[], st0: AS) -> AS {
+        let env: Env = env0
+        let st: AS = st0
+        for (const s of init) {
+            const r: RB = resolveForInit(env, s, st)
+            env = r.env
+            st = r.st
+        }
+        if (cond is given) st = resolveCond(env, cond, st)
+        st = resolveBlock(env, f.body, st)
+        for (const x of step) { st = resolveForStep(env, x, "step", st) }
+        return st
+    }
+
+    // An `init` clause: a `let` declarator (a Local) or an assignment (an Eval).
+    fn resolveForInit(env: Env, s: AStmt, st: AS) -> RB {
+        const k: AStmtK = s.k
+        return match k {
+            .Local(name: n, mutable: m, ty: y, init: i) :> resolveForLocal(env, s, n, m, y, i, st)
+            .Eval(e: x) :> keepEnv(env, resolveForStep(env, x, "init", st))
+            .Return(e: x) :> keepEnv(env, st)
+            .If(cond: c) :> keepEnv(env, st)
+            .Given(name: n) :> keepEnv(env, st)
+            .EffectStmt(w: w) :> keepEnv(env, st)
+            .Defer(body: d) :> keepEnv(env, st)
+            .Fail(f: x) :> keepEnv(env, st)
+            .For(f: x) :> keepEnv(env, st)
+            .Break(label: x) :> keepEnv(env, st)
+            .Continue(label: x) :> keepEnv(env, st)
+        }
+    }
+
+    // `let i = 0` in a counted head — resolveLocal's rule, except that the
+    // initializer is NOT a statement's whole value: a handling form there would
+    // lower to an Attempt before the loop's `init`, which Core's Counted head
+    // cannot hold (check.scrml C19), so it is refused where it stands (ue2).
+    fn resolveForLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
+        let st: AS = st0
+        let annot: Type | not = not
+        if (aty is given && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
+            const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
+            const rt: RType = resolveType(te, aty, st)
+            if (!rt.unresolved) annot = rt.t
+            st = rt.st
+        }
+        const ri: RX = resolveExpr(env, init, annot, st)
+        const rs: RSym = mint(ri.st, name)
+        st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
+        let lty: Type | not = ri.x.ty
+        if (annot is given) {
+            lty = annot
+            st = addAnnot(st, rs.s, annot)
+        }
+        const l: LocalB = { name: name, s: rs.s, ty: lty, mutable: mutable, narrowed: not, nDecl: not }
+        return { env: withLocal(env, l), st: st }
+    }
+
+    // An `init` assignment / a `step`: a local rebinding (EAssignLocal), and
+    // nothing else (above).
+    fn resolveForStep(env: Env, x: AExpr, what: string, st0: AS) -> AS {
+        const v: AExpr | not = assignValue(x)
+        if (v is given) {
+            if (handledOf(v.k) is given) return addDiag(resolveExpr(env, v, not, st0), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable in a counted head's `" + what + "` is not in the bootstrap yet — handle it in the loop body")
+        }
+        const st: AS = resolveStmtExpr(env, x, st0)
+        if (st.diags.length > st0.diags.length) return st
+        if (isLocalRebind(effectFactIn(st, x.nid))) return st
+        return addDiag(st, env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a counted head's `" + what + "` rebinds its counters (`i = i + 1`, §49.3.2) — a cell write, an edit or a call there is not in the bootstrap yet; move it into the loop body")
+    }
+
+    fn effectFactIn(st: AS, nid: int) -> EffectFact | not {
+        const i: int = st.facts.effects.nids.indexOf(nid)
+        if (i < 0) return not
+        return st.facts.effects.facts[i]
+    }
+
+    fn isLocalRebind(f: EffectFact | not) -> boolean {
+        return match f {
+            .EAssignLocal(sym: s) :> true
+            .EWrite(w: w) :> false
+            .ESpread(ws: ws) :> false
+            .EReset(w: w) :> false
+            .EEdits(w: w) :> false
+            .ERemove(w: w) :> false
+            .EElemAt(cap: c) :> false
+            not :> false
+        }
+    }
+
+    fn resolveIter(env: Env, f: AFor, label: Sym, b: ABind, mutable: boolean, src: AIterSrc, st0: AS) -> AS {
+        const rx: RX = resolveIterSrc(env, src, st0)
+        let st: AS = rx.st
+        let end: Sym | not = not
+        let counter: Sym | not = not
+        if (isRangeSrc(src)) {
+            const re: RSym = mint(st, "end")
+            st = re.st
+            end = re.s
+            if (mutable) {
+                const rc: RSym = mint(st, b.name)
+                st = rc.st
+                counter = rc.s
+            }
+        }
+        const rb: RSym = mint(st, b.name)
+        st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+        st = addBind(st, f.nid, BindFact.BLoop(label, end, counter))
+        const l: LocalB = { name: b.name, s: rb.s, ty: rx.x.ty, mutable: mutable, narrowed: not, nDecl: not }
+        return resolveBlock(withLocal(env, l), f.body, st)
+    }
+
+    // The iterable, resolved; its type is the BINDER's: a tape's element, a
+    // string's code point (a string), a range's int. (Whether it is iterable at
+    // all is the typer's — iterElemOf — on the settled type.)
+    fn resolveIterSrc(env: Env, src: AIterSrc, st: AS) -> RX {
+        return match src {
+            .IterOf(e: x) :> iterElemType(resolveExpr(env, x, not, st))
+            .IterRange(lo: lo, hi: hi) :> plain(Type.Int, resolveExpr(env, hi, Type.Int, resolveExpr(env, lo, Type.Int, st).st).st)
+        }
+    }
+
+    fn iterElemType(r: RX) -> RX {
+        const t: Type | not = r.x.ty
+        if (t is not || r.x.inst is given) return plain(not, r.st)
+        const el: Type | not = seqElem(t)
+        if (el is given) return plain(el, r.st)
+        if (t == Type.Str) return plain(Type.Str, r.st)
+        return plain(not, r.st)
+    }
+
+    fn isRangeSrc(src: AIterSrc) -> boolean {
+        return match src {
+            .IterRange(lo: lo) :> true
+            .IterOf(e: x) :> false
+        }
+    }
+
+    // ---- s469 — a loop's parts, for every walk over statements ---------------
+    // The counted head's `init` statements (none for the other heads).
+    fn forInit(f: AFor) -> AStmt[] {
+        const h: AForHead = f.head
+        return match h {
+            .HCounted(init: i) :> i
+            .HForever :> []
+            .HCond(cond: c) :> []
+            .HIter(bind: b) :> []
+        }
+    }
+
+    fn forInitBlock(f: AFor) -> ABlock {
+        return { nid: -1, span: f.span, stmts: forInit(f) }
+    }
+
+    // The head's own expressions (not `init`'s): the condition, the steps, the
+    // iterable or the range's bounds.
+    fn forHeadExprs(f: AFor) -> AExpr[] {
+        const h: AForHead = f.head
+        return match h {
+            .HForever :> []
+            .HCond(cond: c) :> [c]
+            .HCounted(init: i, cond: c, step: sp) :> maybeExprList(c).concat(sp)
+            .HIter(bind: b, src: src) :> iterSrcExprs(src)
+        }
+    }
+
+    fn iterSrcExprs(src: AIterSrc) -> AExpr[] {
+        return match src {
+            .IterOf(e: x) :> [x]
+            .IterRange(lo: lo, hi: hi) :> [lo, hi]
+        }
+    }
+
+    // Every expression the head evaluates — `init`'s included.
+    fn forExprs(f: AFor) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const s of forInit(f)) { out = out.concat(stmtExprs(s)) }
+        return out.concat(forHeadExprs(f))
+    }
+
+    fn forExprBlocks(f: AFor) -> ABlock[] {
+        let out: ABlock[] = []
+        for (const x of forExprs(f)) { out = out.concat(allExprBlocks(x)) }
+        return out
+    }
+
+    // The blocks nested in a loop statement: `init` (its own block — a name it
+    // binds is the loop's), the head's arm blocks, and the body (a nested block:
+    // it may shadow a name the head binds, §7.3.3).
+    fn forNestedBlocks(f: AFor) -> ABlock[] {
+        let out: ABlock[] = [forInitBlock(f)]
+        for (const x of forHeadExprs(f)) { out = out.concat(allExprBlocks(x)) }
+        return out.concat([f.body])
+    }
+
+    // The names a loop binds for its head and body: the binder, the `init` locals.
+    fn forBoundNames(f: AFor) -> string[] {
+        let out: string[] = []
+        const h: AForHead = f.head
+        const b: ABind | not = match h {
+            .HIter(bind: bb) :> bb
+            .HForever :> not
+            .HCond(cond: c) :> not
+            .HCounted(init: i) :> not
+        }
+        if (b is given) out = [b.name]
+        for (const s of forInit(f)) {
+            const n: string = localNameOf(s)
+            if (n != "") out = out.concat([n])
+        }
+        return out
+    }
+
+    // The binder as the return-inference walk's scope entry (retsIn): a range's
+    // binder is an `int`; an element's type is not proven there.
+    fn forBinderParam(f: AFor) -> ParamT[] {
+        const h: AForHead = f.head
+        return match h {
+            .HIter(bind: b, src: src) :> [{ name: b.name, ty: rangeBinderType(src), param: false }]
+            .HForever :> []
+            .HCond(cond: c) :> []
+            .HCounted(init: i) :> []
+        }
+    }
+
+    fn rangeBinderType(src: AIterSrc) -> Type | not {
+        if (isRangeSrc(src)) return Type.Int
+        return not
+    }
+
+    fn retsFor(cx: InferCx, f: AFor, sc: ParamT[], stack: string[], done: OwnT[]) -> RRets {
+        let out: RetAt[] = []
+        let d: OwnT[] = done
+        for (const x of forHeadExprs(f)) {
+            const r: RRets = retsInExpr(cx, x, sc, stack, d)
+            out = out.concat(r.rs)
+            d = r.done
+        }
+        const scope: ABlock = { nid: -1, span: f.span, stmts: forInit(f).concat(f.body.stmts) }
+        const rb: RRets = retsIn(cx, scope, sc.concat(forBinderParam(f)), stack, d)
+        return { rs: out.concat(rb.rs), done: rb.done }
+    }
+
+    fn forNameRefs(f: AFor, bound: string[]) -> string[] {
+        const inner: string[] = bound.concat(forBoundNames(f))
+        return exprsNameRefs(forExprs(f), inner).concat(blockNameRefs(f.body, inner))
+    }
+
+    fn forHasBareReturn(f: AFor) -> boolean {
+        for (const x of forExprs(f)) {
+            if (exprHasBareReturn(x)) return true
+        }
+        return blockHasBareReturn(f.body)
+    }
+
+    fn forRetCalls(t: Tables, f: AFor) -> int[] {
+        let out: int[] = []
+        for (const x of forExprs(f)) { out = out.concat(retCallsExpr(t, x)) }
+        return out.concat(retCallsBlock(t, f.body))
+    }
+
+    fn forReturnSites(f: AFor) -> ReturnSite[] {
+        let out: ReturnSite[] = []
+        for (const x of forExprs(f)) { out = out.concat(returnSitesIn(x)) }
+        return out.concat(returnSites(f.body))
+    }
+
+    // Does the loop never complete normally — an infinite head (`for { … }`, or
+    // a counted head with no condition) whose body holds no `break` that leaves
+    // it? Then nothing after it runs: it ends every path through its block,
+    // exactly as a `return` does (the fall-off and divergence rules).
+    fn loopNeverCompletes(f: AFor) -> boolean {
+        if (!headAlwaysTrue(f.head)) return false
+        return !blockBreaksTo(f.body, f.label, true)
+    }
+
+    fn headAlwaysTrue(h: AForHead) -> boolean {
+        return match h {
+            .HForever :> true
+            .HCounted(init: i, cond: c) :> c is not
+            .HCond(cond: c) :> false
+            .HIter(bind: b) :> false
+        }
+    }
+
+    // Does `b` hold a `break` that leaves the loop labelled `label` — an
+    // unlabelled one not inside a nested loop (`direct`), or `break label`?
+    fn blockBreaksTo(b: ABlock, label: string, direct: boolean) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtBreaksTo(s, label, direct)) return true
+        }
+        return false
+    }
+
+    fn stmtBreaksTo(s: AStmt, label: string, direct: boolean) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Break(label: l) :> (l == "" && direct) || (l != "" && l == label)
+            .Continue(label: l) :> false
+            .For(f: lf) :> blockBreaksTo(lf.body, label, false)
+            .Eval(e: x) :> blocksBreakTo(nestedBlocks(s), label, direct)
+            .Local(name: n) :> blocksBreakTo(nestedBlocks(s), label, direct)
+            .Return(e: x) :> blocksBreakTo(nestedBlocks(s), label, direct)
+            .If(cond: c) :> blocksBreakTo(nestedBlocks(s), label, direct)
+            .Given(name: n) :> blocksBreakTo(nestedBlocks(s), label, direct)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> blockBreaksTo(d, label, direct)
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn blocksBreakTo(bs: ABlock[], label: string, direct: boolean) -> boolean {
+        for (const b of bs) {
+            if (blockBreaksTo(b, label, direct)) return true
+        }
+        return false
+    }
+
+    // =========================================================================
+    // s469 — THE LOOP-CONTROL PASS (§49.4; §49.10: "reported after AST
+    // construction and scope resolution, in the loop control-flow validation
+    // pass"). One walk per body ROOT — a function body, an event-handler
+    // block, an effect body; each is a boundary (§49.4.3). The bootstrap has no
+    // nested function declaration and no statement-bodied lambda, so nothing
+    // here can cross one: E-LOOP-005 has no source form yet.
+    //   E-LOOP-001 / -002   `break` / `continue` with no enclosing loop
+    //   E-LOOP-003 / -004   `break l` / `continue l` naming no enclosing loop
+    //                       ("any ancestor loop within the same function body",
+    //                       §49.3.3 — a sibling loop's label is not one)
+    //   E-LOOP-006          two loops of one body share a label (§49.2.2)
+    // Each accepted `break` / `continue` gets its target (BJump: the loop's
+    // label Sym), which lower turns into a Core Break / Continue.
+    // Refused (not in the bootstrap — fail closed): a `defer` inside a loop
+    // body, and a loop inside a deferred body. The deferred exit is a block's
+    // `try … finally`, which a `break` would run correctly in JS, but neither
+    // has been graded with loop control.
+    // =========================================================================
+    type LoopFrame:struct = { label: string, sym: Sym }
+    type LabelAt:struct = { name: string, span: ASpan }
+
+    fn loopChecks(file: string, b: ABlock, st0: AS) -> AS {
+        const st: AS = loopDupLabels(file, loopLabelsIn(b), st0)
+        return loopBlock(file, b, [], false, st)
+    }
+
+    fn loopLabelsIn(b: ABlock) -> LabelAt[] {
+        let out: LabelAt[] = []
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const f: AFor | not = forOf(k)
+            if (f is given) {
+                if (f.label != "") out = out.concat([{ name: f.label, span: f.span }])
+            }
+            for (const nb of nestedBlocks(s)) { out = out.concat(loopLabelsIn(nb)) }
+        }
+        return out
+    }
+
+    fn forOf(k: AStmtK) -> AFor | not {
+        return match k {
+            .For(f: lf) :> lf
+            .Break(label: x) :> not
+            .Continue(label: x) :> not
+            .Eval(e: x) :> not
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    fn loopDupLabels(file: string, ls: LabelAt[], st0: AS) -> AS {
+        let st: AS = st0
+        let j: int = 0
+        while (j < ls.length) {
+            let i: int = 0
+            let dup = false
+            while (i < j) {
+                if (!dup && ls[i].name == ls[j].name) {
+                    st = addDiag(st, file, ls[j].span, "E-LOOP-006", "the label `" + ls[j].name + "` is already used by the loop at " + offsetOf(ls[i].span) + " in this body — loop labels are unique within a function body (§49.2.2, §49.4.2); rename one")
+                    dup = true
+                }
+                i = i + 1
+            }
+            j = j + 1
+        }
+        return st
+    }
+
+    fn loopBlock(file: string, b: ABlock, stack: LoopFrame[], inDefer: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of b.stmts) { st = loopStmt(file, s, stack, inDefer, st) }
+        return st
+    }
+
+    fn loopBlocks(file: string, bs: ABlock[], stack: LoopFrame[], inDefer: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        for (const b of bs) { st = loopBlock(file, b, stack, inDefer, st) }
+        return st
+    }
+
+    fn loopStmt(file: string, s: AStmt, stack: LoopFrame[], inDefer: boolean, st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .For(f: lf) :> loopFor(file, lf, stack, inDefer, st)
+            .Break(label: l) :> loopJump(file, s, l, true, stack, inDefer, st)
+            .Continue(label: l) :> loopJump(file, s, l, false, stack, inDefer, st)
+            .Defer(body: d) :> loopDefer(file, s, d, stack, st)
+            .EffectStmt(w: w) :> loopBlock(file, w.body, [], inDefer, st)
+            .Eval(e: x) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
+            .Local(name: n) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
+            .Return(e: x) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
+            .If(cond: c) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
+            .Given(name: n) :> loopBlocks(file, nestedBlocks(s), stack, inDefer, st)
+            .Fail(f: x) :> st
+        }
+    }
+
+    fn loopFor(file: string, f: AFor, stack: LoopFrame[], inDefer: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        if (inDefer) st = addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "a loop inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`")
+        // the head runs around the body: a `break` in it names an enclosing loop
+        st = loopBlock(file, forInitBlock(f), stack, inDefer, st)
+        for (const x of forHeadExprs(f)) { st = loopBlocks(file, allExprBlocks(x), stack, inDefer, st) }
+        const sym: Sym | not = loopSymIn(st, f.nid)
+        if (sym is not) return loopBlock(file, f.body, [], inDefer, addDiag(st, file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: this loop was not bound (a bootstrap defect — please report it)"))
+        return loopBlock(file, f.body, stack.concat([{ label: f.label, sym: sym }]), inDefer, st)
+    }
+
+    fn loopJump(file: string, s: AStmt, label: string, isBreak: boolean, stack: LoopFrame[], inDefer: boolean, st: AS) -> AS {
+        let kw: string = "continue"
+        if (isBreak) kw = "break"
+        if (label == "") {
+            if (stack.length > 0) return addBind(st, s.nid, BindFact.BJump(stack[stack.length - 1].sym))
+            if (inDefer) return st          // E-DEFER-CONTROL-FLOW: the deferred-body rule's (deferBodyRule)
+            let code: string = "E-LOOP-002"
+            if (isBreak) code = "E-LOOP-001"
+            return addDiag(st, file, s.span, code, "`" + kw + "` is not inside any loop — `" + kw + "` may only appear inside a `for` loop body (§49.4.1)")
+        }
+        let i: int = stack.length - 1
+        while (i >= 0) {
+            if (stack[i].label == label) return addBind(st, s.nid, BindFact.BJump(stack[i].sym))
+            i = i - 1
+        }
+        if (inDefer && stack.length == 0) return st
+        let lcode: string = "E-LOOP-004"
+        if (isBreak) lcode = "E-LOOP-003"
+        return addDiag(st, file, s.span, lcode, "`" + kw + " " + label + "` names no enclosing loop — " + labelsHere(stack) + "; a label names a `for` that encloses the `" + kw + "` in the same body (§49.3.3, §49.4.2)")
+    }
+
+    fn labelsHere(stack: LoopFrame[]) -> string {
+        let names: string[] = []
+        for (const fr of stack) {
+            if (fr.label != "") names = names.concat(["`" + fr.label + "`"])
+        }
+        if (names.length == 0) return "no enclosing loop here has a label"
+        return "the labels of the loops enclosing it are " + names.join(", ")
+    }
+
+    fn loopDefer(file: string, s: AStmt, d: ABlock, stack: LoopFrame[], st0: AS) -> AS {
+        let st: AS = st0
+        if (stack.length > 0) st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls")
+        return loopBlock(file, d, [], true, st)
+    }
+
+    fn loopSymIn(st: AS, nid: int) -> Sym | not {
+        const i: int = st.facts.binds.nids.indexOf(nid)
+        if (i < 0) return not
+        return loopLabelOf(st.facts.binds.facts[i])
+    }
+
+    fn loopLabelOf(f: BindFact) -> Sym | not {
+        return match f {
+            .BLoop(label: l) :> l
+            .BBind(sym: x) :> not
+            .BParam(sym: x) :> not
+            .BGiven(sym: x) :> not
+            .BJump(target: x) :> not
+        }
+    }
+
+    // =========================================================================
+    // s469 — INDEX READS (§49.13). `xs[i]` has type `T`; out of range it is
+    // the E-INDEX-OUT-OF-RANGE-RT trap at run time (§19.17 — the printer's
+    // `rt.index`, which never yields `undefined`, naming the index and the
+    // length). `xs.at(i)` has type `T | not` and never traps (a negative `i`
+    // is out of range — not counted from the end). Only a provable tape is
+    // indexed: a `T[] | not` must be narrowed first, and `s[i]` on a string is
+    // OPEN in §49.13 — refused. (An index WRITE is §66.12.6's — unchanged.)
+    // =========================================================================
+    fn resolveIndexRead(env: Env, e: AExpr, o: AExpr, ix: AExpr, st0: AS) -> RX {
+        const ro: RX = resolveExpr(env, o, not, st0)
+        const st: AS = resolveExpr(env, ix, Type.Int, ro.st).st
+        const t: Type | not = ro.x.ty
+        if (t is not || ro.x.inst is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it", st)
+        const el: Type | not = seqElem(t)
+        if (el is given) return plain(el, addValue(st, e.nid, ValueFact.VIndex(env.file + ":" + lineOf(env.g, env.file, e.span.start))))
+        if (t == Type.Str) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`s[i]` on a `string` is not ruled (§49.13: ⚑ OPEN) — iterate the string (`for (ch of s)`) or use a string method", st)
+        if (maybeInner(t) is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "this value is `" + typeName(t) + "` — it may be `not`, so it cannot be indexed; narrow it first (`if (xs is given) { … xs[i] … }`)", st)
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`[i]` reads a tape by position (§49.13), and this value is `" + typeName(t) + "`", st)
+    }
+
+    fn resolveAtCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
+        const ro: RX = resolveExpr(env, m.obj, not, st0)
+        const t: Type | not = ro.x.ty
+        if (t is not || ro.x.inst is given) return not
+        const el: Type | not = seqElem(t)
+        if (el is not) return not
+        if (args.length != 1) return diagX(env, e, "E-CALL-ARITY", "`.at(…)` takes one argument, the index (§49.13); " + args.length + " given", resolveExprs(env, args, not, ro.st))
+        const st: AS = resolveExpr(env, args[0], Type.Int, ro.st).st
+        let rt: Type = Type.Maybe(el)
+        if (maybeInner(el) is given) rt = el
+        return plain(rt, addValue(st, e.nid, ValueFact.VAt))
+    }
+
+    fn isIndexExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Index(obj: o) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
+        }
+    }
+
+    // ---- the typer ------------------------------------------------------------
+    // The index is an `int` (§49.13 rule 4: E-TYPE-031); the read is the element.
+    // Only a READ the binder accepted (VIndex) is typed so — an index that is a
+    // write target (`@xs[i].f = v`) is judged by the write's own rule.
+    fn typeIndexRead(env: TEnv, vf: ValueFact | not, o: AExpr, i: AExpr, ts0: TypeState) -> RVT {
+        const ro: RVT = typeExpr(env, o, ts0)
+        const ri: RVT = typeExpr(env, i, ro.ts)
+        if (indexLocOfFact(vf) == "") return rvt(VType.Unknown, ri.ts)
+        const ts: TypeState = checkValue(env, ri.vt, Type.Int, i.span, "the index of `xs[i]` (an `int`, §49.13)", ri.ts)
+        const t: Type | not = knownOf(ro.vt)
+        if (t is not) return rvt(VType.Unknown, ts)
+        const el: Type | not = seqElem(t)
+        if (el is not) return rvt(VType.Unknown, ts)
+        return rvt(known(el), ts)
+    }
+
+    fn atCallType(ts: TypeState, callee: AExpr) -> VType {
+        const obj: AExpr | not = memberObj(callee)
+        if (obj is not) return VType.Unknown
+        const t: Type | not = knownOf(exprType0(ts, obj.nid))
+        if (t is not) return VType.Unknown
+        const el: Type | not = seqElem(t)
+        if (el is not) return VType.Unknown
+        if (maybeInner(el) is given) return known(el)
+        return known(Type.Maybe(el))
+    }
+
+    fn atArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
+        if (args.length != 1) return ts
+        if (!isAtFact(valueFact(env.t.values, e.nid))) return ts
+        return checkValue(env, exprType0(ts, args[0].nid), Type.Int, args[0].span, "the index of `xs.at(i)` (an `int`, §49.13)", ts)
+    }
+
+    fn indexLocOfFact(f: ValueFact | not) -> string {
+        return match f {
+            .VIndex(loc: l) :> l
+            .VAt :> ""
+            .VToEnum(enumSym: s) :> ""
+            .VLit(lit: l) :> ""
+            .VVariant(enumSym: s) :> ""
+            .VStructOf(ty: s) :> ""
+            .VOp(op: o) :> ""
+            .VHost(call: c) :> ""
+            .VSeqCall(op: o) :> ""
+            .VLambda(params: ps) :> ""
+            not :> ""
+        }
+    }
+
+    fn isAtFact(f: ValueFact | not) -> boolean {
+        return match f {
+            .VAt :> true
+            .VIndex(loc: x) :> false
+            .VToEnum(enumSym: s) :> false
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VStructOf(ty: s) :> false
+            .VOp(op: o) :> false
+            .VHost(call: c) :> false
+            .VSeqCall(op: o) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
+    }
+
+    // s469 — a loop. Its body runs again after its own writes, so no narrowing
+    // a write in the body could undo holds in the head or the body: only a
+    // never-rebound local's survives into the loop (tDeferEnv's rule — fail
+    // closed: a dropped narrowing makes a read unproven, never silently `T`),
+    // and the same holds after it (a `break` leaves from anywhere in the body).
+    fn typeFor(env: TEnv, s: AStmt, f: AFor, ts0: TypeState) -> RTEnv {
+        const entry: TEnv = tDeferEnv(env)
+        const h: AForHead = f.head
+        const ts: TypeState = match h {
+            .HForever :> typeBlock(entry, f.body, ts0)
+            .HCond(cond: c) :> typeLoopCond(entry, c, f.body, ts0)
+            .HCounted(init: i, cond: c, step: sp) :> typeCounted(entry, i, c, sp, f.body, ts0)
+            .HIter(bind: b, src: src) :> typeIter(entry, b, src, f.body, ts0)
+        }
+        return keepTEnv(tDeferEnv(env), ts)
+    }
+
+    fn typeLoopCond(env: TEnv, c: AExpr, body: ABlock, ts0: TypeState) -> TypeState {
+        const rc: RVT = typeExpr(env, c, ts0)
+        const ts: TypeState = checkCond(env, c, rc.vt, "a `for` condition", rc.ts)
+        const n: Narrowing = condNarrowing(env, c)
+        return typeBlock(tCallUnnarrow(tNarrow(env, n.yes), c), body, ts)
+    }
+
+    fn typeCounted(env0: TEnv, init: AStmt[], cond: AExpr | not, step: AExpr[], body: ABlock, ts0: TypeState) -> TypeState {
+        const ib: ABlock = { nid: -1, span: body.span, stmts: init }
+        const ri: RTEnv = typeBlockEnv(env0, ib, ts0)
+        const env: TEnv = tDeferEnv(ri.env)
+        let ts: TypeState = ri.ts
+        let benv: TEnv = env
+        if (cond is given) {
+            const rc: RVT = typeExpr(env, cond, ts)
+            ts = checkCond(env, cond, rc.vt, "a `for` condition", rc.ts)
+            benv = tCallUnnarrow(tNarrow(env, condNarrowing(env, cond).yes), cond)
+        }
+        ts = typeBlock(benv, body, ts)
+        for (const x of step) { ts = typeEvalStmt(env, x, ts).ts }
+        return ts
+    }
+
+    fn typeIter(env: TEnv, b: ABind, src: AIterSrc, body: ABlock, ts0: TypeState) -> TypeState {
+        const r: RVT = typeIterSrc(env, src, ts0)
+        let ts: TypeState = r.ts
+        const sym: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
+        if (sym is not) return typeBlock(env, body, ts)
+        // the binder's type is the element's — and an assignment to a `let`
+        // binder joins with it (contribute), never replaces it
+        ts = contribute(ts, sym, r.vt)
+        return typeBlock(tWithLocal(env, sym, r.vt), body, ts)
+    }
+
+    fn typeIterSrc(env: TEnv, src: AIterSrc, ts: TypeState) -> RVT {
+        return match src {
+            .IterOf(e: x) :> iterElemOf(env, x, typeExpr(env, x, ts))
+            .IterRange(lo: lo, hi: hi) :> rangeBounds(env, lo, hi, ts)
+        }
+    }
+
+    // The iterable's element: a tape's element; a string's code point (a
+    // string — §49.3.5 leaves it ⚑ OPEN; the S469 brief reads code points, as
+    // the printed `for…of` does). Anything not PROVABLY a tape or a string is
+    // refused — `not`, an instance, a number, a type the compiler cannot
+    // resolve: iterating it would be the host's `for…of`, not §49.3.5's.
+    fn iterElemOf(env: TEnv, x: AExpr, r: RVT) -> RVT {
+        if (hasErrIn(env.errs, x.span)) return rvt(VType.Unknown, r.ts)
+        const t: Type | not = knownOf(r.vt)
+        if (t is given) {
+            const el: Type | not = seqElem(t)
+            if (el is given) return rvt(known(el), r.ts)
+            if (kindOf(t) == 2) return rvt(known(Type.Str), r.ts)
+            let hint: string = ""
+            if (maybeInner(t) is given) hint = " — it may be `not`: narrow it first (`if (xs is given) { for (x of xs) { … } }`)"
+            return rvt(VType.Unknown, report(r.ts, env, x.span, "E-BOOTSTRAP-UNSUPPORTED", "a `for (x of …)` iterable is a tape or a string in the bootstrap (§49.3.5), and this value is `" + typeName(t) + "`" + hint))
+        }
+        if (condBlamed(env, x, r.ts)) return rvt(VType.Unknown, r.ts)
+        if (isAbsentVT(r.vt)) return rvt(VType.Unknown, report(r.ts, env, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`for (x of not)` — `not` is not a tape (§49.3.5)"))
+        return rvt(VType.Unknown, report(r.ts, env, x.span, "E-BOOTSTRAP-UNSUPPORTED", "the type of this `for (x of …)` iterable is not known — annotate it (a tape `T[]`, or a `string`); the bootstrap iterates only what it can prove is one (§49.3.5)"))
+    }
+
+    // §49.2.5: "Both bounds SHALL be `int`. A bound of any other type is
+    // E-RANGE-BOUND-NOT-INT" — a bound whose type does not resolve included
+    // (fail closed, as the S460 condition rule: provable or an error).
+    fn rangeBounds(env: TEnv, lo: AExpr, hi: AExpr, ts0: TypeState) -> RVT {
+        const rl: RVT = typeExpr(env, lo, ts0)
+        let ts: TypeState = rangeBound(env, lo, rl.vt, "lower", rl.ts)
+        const rh: RVT = typeExpr(env, hi, ts)
+        ts = rangeBound(env, hi, rh.vt, "upper", rh.ts)
+        return rvt(known(Type.Int), ts)
+    }
+
+    fn rangeBound(env: TEnv, x: AExpr, v: VType, which: string, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, x.span)) return ts
+        const t: Type | not = knownOf(v)
+        if (t is given) {
+            if (kindOf(t) == 0) return ts
+            return report(ts, env, x.span, "E-RANGE-BOUND-NOT-INT", "the " + which + " bound of this range has type `" + typeName(t) + "` — range bounds are `int` (§49.2.5)")
+        }
+        if (condBlamed(env, x, ts)) return ts
+        return report(ts, env, x.span, "E-RANGE-BOUND-NOT-INT", "the " + which + " bound of this range has a type the compiler cannot resolve — range bounds are `int`; annotate it (§49.2.5)")
+    }
+
+    // ---- the suspension plan -------------------------------------------------------
+    // s469 — no suspension point stands in a loop's head or body: the CPS split
+    // (a server call awaited per iteration) does not reach loops yet, and
+    // §49.3.7 requires each iteration's binding to survive the suspension,
+    // which no slice has built. Refused where it stands (check.scrml C19
+    // re-checks the Core: a Loop holds no Suspend).
+    fn planLoop(cx: PCx, f: AFor, ps0: PS) -> PS {
+        const pos: Pos = { refused: "a `for` loop — a loop cannot wait for the server yet (the suspension split does not reach loops; §49.3.7, §49.12.7). Make the call before the loop, or after it" }
+        let ps: PS = ps0
+        for (const e of forHeadExprs(f)) { ps = planExpr(cx, e, pos, ps).ps }
+        ps = planLoopBlock(cx, forInitBlock(f), pos, ps)
+        return planLoopBlock(cx, f.body, pos, ps)
+    }
+
+    fn planLoopBlock(cx: PCx, b: ABlock, pos: Pos, ps0: PS) -> PS {
+        let ps: PS = ps0
+        for (const s of b.stmts) {
+            for (const e of stmtExprs(s)) { ps = planExpr(cx, e, pos, ps).ps }
+            for (const nb of loopPlanBlocks(s)) { ps = planLoopBlock(cx, nb, pos, ps) }
+        }
+        return ps
+    }
+
+    // The statement blocks nested in `s` (not the arm blocks of its
+    // expressions — planExpr walks those with the expression).
+    fn loopPlanBlocks(s: AStmt) -> ABlock[] {
+        const k: AStmtK = s.k
+        return match k {
+            .If(cond: c, thenB: t, elseB: el) :> thenElse(t, el)
+            .Given(name: n, body: b) :> [b]
+            .For(f: lf) :> [forInitBlock(lf), lf.body]
+            .Defer(body: b) :> [b]
+            .EffectStmt(w: w) :> []
+            .Eval(e: x) :> []
+            .Local(name: n) :> []
+            .Return(e: x) :> []
+            .Fail(f: x) :> []
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
+        }
     }
 
     // =========================================================================
@@ -10712,6 +11575,7 @@ ${
                 env = withLocal(env, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not })
             }
             st = resolveBlock(env, fs.f.body, st)
+            st = loopChecks(fs.info.file, fs.f.body, st)     // s469: §49.4 loop control (a function body is a boundary)
             st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
         }
         return st
@@ -11055,6 +11919,9 @@ ${
             .Return(e: e) :> ""
             .If(cond: c) :> ""
             .Given(name: n) :> ""
+            .For(f: lf) :> ""
+            .Break(label: x) :> ""
+            .Continue(label: x) :> ""
             .EffectStmt(w: w) :> ""
             .Defer(body: b) :> ""
             .Fail(f: x) :> ""
@@ -11066,6 +11933,9 @@ ${
         return match k {
             .If(cond: c, thenB: t, elseB: el) :> thenElse(t, el)
             .Given(name: n, body: b) :> [b]
+            .For(f: lf) :> forNestedBlocks(lf)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []
             .Eval(e: e) :> allExprBlocks(e)                 // s451 (Ue): a handling form's arm blocks
             .Local(name: n, init: i) :> allExprBlocks(i)
@@ -11549,6 +12419,9 @@ ${
             .Eval(e: e) :> false
             .Local(name: n) :> false
             .Given(name: n) :> false
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: b) :> false
             .Fail(f: x) :> true                  // s451 (Ue): `fail` leaves the function (§19.3.2)
@@ -11720,6 +12593,9 @@ ${
             .Return(e: e) :> aliased(maybeEffects(e), al)
             .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
+            .For(f: lf) :> aliased(exprsEffects(forExprs(lf)), al).concat(blockEffects(lf.body, al))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
             .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
             .Fail(f: f) :> aliased(exprsEffects(failExprs(f)), al)
@@ -12292,6 +13168,8 @@ ${
             .VHost(call: c) :> known(Type.Num)
             .VSeqCall(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
+            .VIndex(loc: x) :> VType.Unknown
+            .VAt :> VType.Unknown
             .VToEnum(enumSym: s) :> VType.Unknown
             not :> VType.Unknown
         }
@@ -12306,6 +13184,8 @@ ${
             .VHost(call: c) :> not
             .VSeqCall(op: x) :> not
             .VLambda(params: ps) :> not
+            .VIndex(loc: x) :> not
+            .VAt :> not
             .VToEnum(enumSym: s) :> not
             not :> not
         }
@@ -12316,6 +13196,8 @@ ${
         return match f {
             .BBind(sym: s) :> s
             .BParam(sym: s) :> s
+            .BLoop(label: x) :> not
+            .BJump(target: x) :> not
             .BGiven(sym: s) :> s
             not :> not
         }
@@ -12325,6 +13207,8 @@ ${
     fn paramType(f: BindFact | not) -> VType {
         return match f {
             .BParam(sym: s, ty: y) :> known(y)
+            .BLoop(label: x) :> VType.Unknown
+            .BJump(target: x) :> VType.Unknown
             .BBind(sym: s) :> VType.Unknown
             .BGiven(sym: s) :> VType.Unknown
             not :> VType.Unknown
@@ -12684,7 +13568,7 @@ ${
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
-            .Index(obj: o, idx: i) :> rvt(VType.Unknown, typeExpr(env, i, typeExpr(env, o, ts).ts).ts)
+            .Index(obj: o, idx: i) :> typeIndexRead(env, vf, o, i, ts)   // s469 (§49.13)
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
             .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
             .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
@@ -12707,6 +13591,8 @@ ${
     fn lambdaSyms(f: ValueFact | not) -> Sym[] {
         return match f {
             .VLambda(params: ps) :> ps
+            .VIndex(loc: x) :> []
+            .VAt :> []
             .VToEnum(enumSym: s) :> []
             .VLit(lit: l) :> []
             .VVariant(enumSym: s) :> []
@@ -12730,6 +13616,8 @@ ${
             .VStructOf(ty: s) :> VType.Unknown
             .VOp(op: o) :> VType.Unknown
             .VLambda(params: ps) :> VType.Unknown
+            .VIndex(loc: x) :> VType.Unknown
+            .VAt :> atCallType(ts, callee)
             .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
             not :> VType.Unknown
         }
@@ -12752,6 +13640,8 @@ ${
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
             .VLambda(params: ps) :> false
+            .VIndex(loc: x) :> false
+            .VAt :> false
             not :> false
         }
     }
@@ -12766,6 +13656,8 @@ ${
             .VHost(call: c) :> false
             .VSeqCall(op: o) :> false
             .VLambda(params: ps) :> false
+            .VIndex(loc: x) :> false
+            .VAt :> false
             not :> false
         }
     }
@@ -12874,6 +13766,8 @@ ${
             .Not :> ts
             .Neg :> ts
             .Length :> ts
+            .IndexRead :> ts
+            .AtRead :> ts
         }
     }
 
@@ -13339,6 +14233,8 @@ ${
             .Div :> divType(a, b)
             .Neg :> numJoin(a, a)
             .Length :> known(Type.Int)
+            .IndexRead :> VType.Unknown
+            .AtRead :> VType.Unknown
         }
     }
 
@@ -13395,7 +14291,7 @@ ${
         let ts: TypeState = typeExprs(env, args, ts0)
         ts = typePlace(env, callee, VType.Unknown, ts)
         const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
-        if (s is not) return rvt(builtinCallType(env, e, callee, ts), toEnumArgCheck(env, e, args, ts))
+        if (s is not) return rvt(builtinCallType(env, e, callee, ts), atArgCheck(env, e, args, toEnumArgCheck(env, e, args, ts)))
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity
@@ -13830,6 +14726,9 @@ ${
             .Return(e: e) :> keepTEnv(env, typeReturn(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
+            .For(f: lf) :> typeFor(env, s, lf, ts)
+            .Break(label: x) :> keepTEnv(env, ts)
+            .Continue(label: x) :> keepTEnv(env, ts)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
             .Fail(f: f) :> keepTEnv(env, typeFail(env, s, f, ts))               // s451 (Ue)
@@ -14919,6 +15818,9 @@ ${
             .Return(e: e) :> scanMaybe(cx, e, acc)
             .If(cond: c, thenB: t, elseB: el) :> scanElse(cx, el, scanBlock(cx, t, scanExpr(cx, c, acc)))
             .Given(name: n, subject: sub, body: b) :> scanBlock(cx, b, scanExpr(cx, sub, acc))
+            .For(f: lf) :> scanBlock(cx, lf.body, scanExprs(cx, forExprs(lf), acc))
+            .Break(label: x) :> acc
+            .Continue(label: x) :> acc
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> scanBlock(cx, b, acc)
             .Fail(f: f) :> scanExprs(cx, failExprs(f), acc)
@@ -15110,6 +16012,8 @@ ${
             .VOp(op: o) :> false
             .VStructOf(ty: t) :> false
             .VLambda(params: ps) :> false
+            .VIndex(loc: x) :> false
+            .VAt :> true
             .VToEnum(enumSym: s) :> true
             not :> false
         }
@@ -16531,6 +17435,9 @@ ${
             .Return(e: e) :> sqlsInMaybe(e)
             .If(cond: c, thenB: tb, elseB: eb) :> sqlsInExpr(c).concat(sqlsInBlock(tb)).concat(sqlsInMaybeBlock(eb))
             .Given(name: n, subject: x, body: b) :> sqlsInExpr(x).concat(sqlsInBlock(b))
+            .For(f: lf) :> sqlsInExprs(forExprs(lf)).concat(sqlsInBlock(lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> sqlsInBlock(w.body)
             .Defer(body: b) :> sqlsInBlock(b)
             .Fail(f: f) :> sqlsInExprs(failExprs(f))
@@ -16644,6 +17551,9 @@ ${
             .Return(e: e) :> readsInMaybe(t, e)
             .If(cond: c, thenB: tb, elseB: eb) :> readsInExpr(t, c).concat(readsInBlock(t, tb)).concat(readsInMaybeBlock(t, eb))
             .Given(name: n, subject: x, body: b) :> readsInExpr(t, x).concat(readsInBlock(t, b))
+            .For(f: lf) :> readsInExprs(t, forExprs(lf)).concat(readsInBlock(t, lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> readsInBlock(t, b)
             .Fail(f: f) :> readsInExprs(t, failExprs(f))
@@ -16726,6 +17636,9 @@ ${
             .Return(e: e) :> domsInMaybe(t, e)
             .If(cond: c, thenB: tb, elseB: eb) :> domsInExpr(t, c).concat(domsInBlock(t, tb)).concat(domsInMaybeBlock(t, eb))
             .Given(name: n, subject: x, body: b) :> domsInExpr(t, x).concat(domsInBlock(t, b))
+            .For(f: lf) :> domsInExprs(t, forExprs(lf)).concat(domsInBlock(t, lf.body))
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> domsInBlock(t, b)
             .Fail(f: f) :> domsInExprs(t, failExprs(f))
@@ -17448,6 +18361,8 @@ ${
     fn boundParamType(f: BindFact | not) -> Type | not {
         return match f {
             .BParam(sym: s, ty: ty) :> ty
+            .BLoop(label: x) :> not
+            .BJump(target: x) :> not
             .BBind(sym: s) :> not
             .BGiven(sym: s) :> not
             not :> not
@@ -18110,6 +19025,9 @@ ${
             .Fail(f: x) :> true
             .If(cond: c, thenB: tb, elseB: eb) :> blockLeaves(tb) && maybeBlockLeaves(eb)
             .Given(name: n) :> false
+            .For(f: lf) :> loopNeverCompletes(lf)
+            .Break(label: x) :> false
+            .Continue(label: x) :> false
             .Eval(e: x) :> false
             .Local(name: n) :> false
             .EffectStmt(w: w) :> false
@@ -18135,6 +19053,9 @@ ${
             .Return(e: x) :> retCallsReturn(t, x)
             .If(cond: c, thenB: tb, elseB: eb) :> retCallsExpr(t, c).concat(retCallsBlock(t, tb)).concat(retCallsElse(t, eb))
             .Given(name: n, subject: x, body: b) :> retCallsExpr(t, x).concat(retCallsBlock(t, b))
+            .For(f: lf) :> forRetCalls(t, lf)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .Eval(e: x) :> retCallsExpr(t, x)
             .Local(name: n, init: i) :> retCallsExpr(t, i)
             .EffectStmt(w: w) :> []
@@ -18463,6 +19384,9 @@ ${
             .Return(e: e) :> planMaybe(cx, e, ps)
             .If(cond: c, thenB: tb, elseB: eb) :> planBranches(cx, s, [tb].concat(maybeBlockList(eb)), rest, planExpr(cx, c, okPos(), ps).ps)
             .Given(name: n, subject: x, body: b) :> planBranches(cx, s, [b], rest, planExpr(cx, x, okPos(), ps).ps)
+            .For(f: lf) :> planLoop(cx, lf, ps)
+            .Break(label: x) :> ps
+            .Continue(label: x) :> ps
             .EffectStmt(w: w) :> ps
             .Defer(body: b) :> planDeferBody(cx, b, ps)
             .Fail(f: f) :> planExprs(cx, failExprs(f), ps)
@@ -18586,6 +19510,9 @@ ${
             .Return(e: e) :> maybeExprList(e)
             .If(cond: c) :> [c]
             .Given(name: n, subject: x) :> [x]
+            .For(f: lf) :> forHeadExprs(lf)
+            .Break(label: x) :> []
+            .Continue(label: x) :> []
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> []
             .Fail(f: f) :> failExprs(f)
@@ -18606,6 +19533,9 @@ ${
                 .Defer(body: d) :> [s.span]
                 .If(cond: c, thenB: tb, elseB: eb) :> defersIn(tb).concat(defersInMaybe(eb))
                 .Given(name: n, body: gb) :> defersIn(gb)
+                .For(f: lf) :> defersIn(lf.body)
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
                 .Eval(e: x) :> []
                 .Local(name: n) :> []
                 .Return(e: x) :> []
@@ -19073,6 +20003,9 @@ ${
                 .Return(e: x) :> [{ e: x }].concat(returnSitesIn(x))
                 .If(cond: c, thenB: tb, elseB: eb) :> returnSitesIn(c).concat(returnSites(tb)).concat(returnSitesMaybe(eb))
                 .Given(name: n, subject: x, body: gb) :> returnSites(gb)
+                .For(f: lf) :> forReturnSites(lf)
+                .Break(label: x) :> []
+                .Continue(label: x) :> []
                 .Eval(e: x) :> returnSitesIn(x)
                 .Local(name: n, init: i) :> returnSitesIn(i)
                 .EffectStmt(w: w) :> []

@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 134 codes with a §34 severity; 68 without one (FAIL-CLOSED Error):
+// 146 codes with a §34 severity; 69 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -51,6 +51,7 @@
 //   E-PARSE-EXPORT — no §34 row
 //   E-PARSE-EXPR — no §34 row
 //   E-PARSE-FN — no §34 row
+//   E-PARSE-FOR-HEAD — no §34 row
 //   E-PARSE-GIVEN — no §34 row
 //   E-PARSE-IMPORT — no §34 row
 //   E-PARSE-ITEM — no §34 row
@@ -117,10 +118,12 @@ ${
             "E-COLON-SHORTHAND-ON-VOID" :> Severity.Error
             "E-COMPONENT-ENGINE-SCOPE" :> Severity.Error
             "E-COND-NOT-BOOLEAN" :> Severity.Error
+            "E-CONDITION-HEAD-UNPARENTHESIZED" :> Severity.Error
             "E-CTRL-001" :> Severity.Error
             "E-CTRL-002" :> Severity.Error
             "E-CTRL-003" :> Severity.Error
             "E-CTRL-005" :> Severity.Error
+            "E-CTRL-011" :> Severity.Error
             "E-CTX-001" :> Severity.Error
             "E-DECL-TYPE-NOT-INFERABLE" :> Severity.Error
             "E-DECL-TYPE-REQUIRED-AT-BOUNDARY" :> Severity.Error
@@ -157,6 +160,7 @@ ${
             "E-ERRORS-002" :> Severity.Error
             "E-FN-003" :> Severity.Error
             "E-FN-004" :> Severity.Error
+            "E-FOR-UNPARENTHESIZED-HEAD" :> Severity.Error
             "E-FOREIGN-002" :> Severity.Error
             "E-FOREIGN-004" :> Severity.Error
             "E-FOREIGN-CAPABILITY-UNKNOWN" :> Severity.Error
@@ -164,6 +168,13 @@ ${
             "E-HOLD-WITHOUT-PERSIST" :> Severity.Error
             "E-LIFECYCLE-007" :> Severity.Error
             "E-LIFECYCLE-016" :> Severity.Error
+            "E-LOOP-001" :> Severity.Error
+            "E-LOOP-002" :> Severity.Error
+            "E-LOOP-003" :> Severity.Error
+            "E-LOOP-004" :> Severity.Error
+            "E-LOOP-006" :> Severity.Error
+            "E-LOOP-DO-WHILE-RETIRED" :> Severity.Error
+            "E-LOOP-WHILE-RETIRED" :> Severity.Error
             "E-MATCH-012" :> Severity.Error
             "E-MATCH-ARM-SEPARATOR" :> Severity.Error
             "E-MATCH-ARM-SHORTHAND-AMBIGUOUS" :> Severity.Error
@@ -179,6 +190,8 @@ ${
             "E-PROGRAM-NESTED-ATTR" :> Severity.Error
             "E-PROGRAM-NESTED-AUTH" :> Severity.Error
             "E-PROGRAM-NESTED-SESSION" :> Severity.Error
+            "E-RANGE-BOUND-NOT-INT" :> Severity.Error
+            "E-RANGE-OUTSIDE-LOOP-HEAD" :> Severity.Error
             "E-REACTIVE-003" :> Severity.Error
             "E-RESET-ON-CYCLE" :> Severity.Error
             "E-RESET-ON-ENGINE-REFUSED" :> Severity.Error

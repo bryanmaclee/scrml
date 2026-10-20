@@ -60,6 +60,23 @@ ${
         SComment(text: string),
         SImportAll(name: string, from: string),
         SBlank,
+        // s469 (§49) — a loop, `label: ` printed before it when `label` is not
+        // "", and `break` / `continue` (naming `label` when it is not "").
+        SLoop(label: string, head: JsLoopHead, body: JsStmt[]),
+        SBreak(label: string),
+        SContinue(label: string),
+    }
+
+    // s469 — a JS loop head: `for (;;)`, `while (test)`, a C-style
+    // `for (init; test; step)` (`init`: `let a = v, …` when `isLet`, else the
+    // assignments `a = v, …`; `step`: the assignments `a = v, …`), and
+    // `for (const x of iter)` (`let` when `mutable`).
+    export type JsForInit:struct = { isLet: boolean, items: JsProp[] }
+    export type JsLoopHead:enum = {
+        JForever,
+        JWhile(test: JsExpr),
+        JForC(init: JsForInit, test: JsExpr | not, step: JsProp[]),
+        JForOf(name: string, mutable: boolean, iter: JsExpr),
     }
 
     // ---- shorthands used by the Core printer ---------------------------------
@@ -300,7 +317,57 @@ ${
             .SComment(text: t) :> ind + "// " + t + "\n"
             .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n"
             .SBlank :> "\n"
+            .SLoop(label: l, head: h, body: body) :> ind + labelText(l) + loopHeadText(h, ind) + " {\n" + stmts(body, ind + "  ") + ind + "}\n"
+            .SBreak(label: l) :> ind + "break" + jumpLabelText(l) + ";\n"
+            .SContinue(label: l) :> ind + "continue" + jumpLabelText(l) + ";\n"
         }
+    }
+
+    // s469 — loops.
+    fn labelText(l: string) -> string {
+        if (l == "") return ""
+        return l + ": "
+    }
+
+    fn jumpLabelText(l: string) -> string {
+        if (l == "") return ""
+        return " " + l
+    }
+
+    fn loopHeadText(h: JsLoopHead, ind: string) -> string {
+        return match h {
+            .JForever :> "for (;;)"
+            .JWhile(test: t) :> "while (" + expr(t, ind) + ")"
+            .JForC(init: i, test: t, step: st) :> "for (" + forInitText(i, ind) + "; " + maybeExprText(t, ind) + "; " + assignsText(st, ind) + ")"
+            .JForOf(name: n, mutable: m, iter: it) :> "for (" + declWord(m) + " " + n + " of " + expr(it, ind) + ")"
+        }
+    }
+
+    fn declWord(mutable: boolean) -> string {
+        if (mutable) return "let"
+        return "const"
+    }
+
+    fn forInitText(i: JsForInit, ind: string) -> string {
+        if (i.items.length == 0) return ""
+        if (i.isLet) return "let " + assignsText(i.items, ind)
+        return assignsText(i.items, ind)
+    }
+
+    fn assignsText(ps: JsProp[], ind: string) -> string {
+        let out: string = ""
+        let first = true
+        for (const p of ps) {
+            if (!first) out = out + ", "
+            out = out + p.key + " = " + wrap(p.value, 2, ind)
+            first = false
+        }
+        return out
+    }
+
+    fn maybeExprText(t: JsExpr | not, ind: string) -> string {
+        if (t is not) return ""
+        return expr(t, ind)
     }
 
     // An expression statement may not start with `{` (or `function`).

@@ -9,7 +9,7 @@
 // over Core (the TS compiler's F1 "walker misses a position" family).
 // =============================================================================
 ${
-    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm,
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm, LoopHead,
              Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
              ValidityOf, validityInst } from "./core.scrml"
 
@@ -142,7 +142,37 @@ ${
             .Fail(args: args) :> exprNodes(args)
             .Join(k: k, body: b) :> [Node.NBlock(b)]          // s454 (U1b)
             .Jump(k: k) :> []
+            .Loop(label: l, head: h, body: b) :> loopHeadKids(h).concat([Node.NBlock(b)])   // s469 (§49)
+            .Break(target: t) :> []
+            .Continue(target: t) :> []
         }
+    }
+
+    // s469 — a loop head's children, in evaluation order: the counted head's
+    // `init` statements, its condition and `step` statements; a condition; an
+    // iterable; a range's bounds.
+    fn loopHeadKids(h: LoopHead) -> Node[] {
+        return match h {
+            .Forever :> []
+            .While(cond: c) :> [Node.NExpr(c)]
+            .Counted(init: i, cond: c, step: sp) :> stmtNodes(i).concat(maybeExpr(c)).concat(stmtNodes(sp))
+            .Each(h: eh) :> [Node.NExpr(eh.src)]
+            .Range(h: rh) :> [Node.NExpr(rh.lo), Node.NExpr(rh.hi)]
+        }
+    }
+
+    // s469 — what a loop binds: its label (printed when a `break` / `continue`
+    // must name it), an iterate head's binder, a range's `end` and `counter`.
+    // (A counted head's `init` Lets bind as Lets, below them.)
+    fn loopBinds(label: Sym, h: LoopHead) -> Sym[] {
+        const own: Sym[] = match h {
+            .Each(h: eh) :> [eh.bind]
+            .Range(h: rh) :> [rh.bind, rh.end].concat(maybeSym(rh.counter))
+            .Forever :> []
+            .While(cond: c) :> []
+            .Counted(init: i) :> []
+        }
+        return [label].concat(own)
     }
 
     // s451 (Ue): an Attempt's children — the failable's values, the success
@@ -406,6 +436,9 @@ ${
             .Fail(err: x) :> []
             .Join(k: k) :> [k]                           // s454 (U1b): the continuation is a named local
             .Jump(k: x) :> []
+            .Loop(label: l, head: h) :> loopBinds(l, h)  // s469
+            .Break(target: x) :> []
+            .Continue(target: x) :> []
         }
     }
 
@@ -493,6 +526,9 @@ ${
             .Fail(err: x) :> -1
             .Join(k: x) :> -1
             .Jump(k: x) :> -1
+            .Loop(label: x) :> -1
+            .Break(target: x) :> -1
+            .Continue(target: x) :> -1
         }
     }
 }

@@ -50,7 +50,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, AFor, AForHead, AIterSrc, mkSpan, newDiag } from "./ast.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -286,6 +286,7 @@ ${
     fn parseTernary(tp: TP) -> RExpr {
         const start: int = cur(tp).start
         const test: RExpr = parseBinary(tp, 1)
+        if (isRangeTok(test.tp)) return rangeOutsideHead(test.tp, start)
         if (!isP(test.tp, "?")) return test
         // s451: `?{` is the SQL sigil (§8.1), never a ternary's `?` — the
         // expression ends here and a `?{` statement follows
@@ -294,6 +295,20 @@ ${
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
         return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e))
+    }
+
+    // s469 (§49.2.5): `a..b` / `a..=b` is legal ONLY as the whole iterable of a
+    // `for (x of …)` head — parseForIter reads it there, at additive precedence,
+    // without coming through here. Every other position an expression can stand
+    // in reaches this from parseTernary: E-RANGE-OUTSIDE-LOOP-HEAD, and the
+    // upper bound is consumed (recovered; nothing downstream types it).
+    fn isRangeTok(tp: TP) -> boolean { return isP(tp, "..") || isP(tp, "..=") }
+
+    fn rangeOutsideHead(tp: TP, start: int) -> RExpr {
+        const op: PTok = cur(tp)
+        const d: TP = diagAt(tp, "E-RANGE-OUTSIDE-LOOP-HEAD", "a range `a" + op.text + "b` is not a value — it stands only as the whole iterable of a `for (i of a" + op.text + "b)` head (§49.2.5)", op)
+        const hi: RExpr = parseBinary(adv(d), 6)
+        return mkE(hi.tp, start, AExprK.Recovered)
     }
 
     fn parseBinary(tp: TP, minPrec: int) -> RExpr {
@@ -1244,6 +1259,14 @@ ${
         }
         // s451 (Ue): `match e { … }` (§19.7.1 — analyze admits a failable subject)
         if (t.v == "match") return parseMatch(tp, start)
+        // s469 — a `for` where a value stands: the value form (§49.6, `const xs =
+        // for (…) { lift … }`, and `${ for … lift }` in markup) is not in the
+        // bootstrap yet. Read past as a loop (so its own errors report), refused.
+        if (t.v == "for") {
+            const df: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `for` used as a value (the value form, §49.6) is not in the bootstrap yet — write the loop as a statement in a function and return what it builds", t)
+            const rf: RStmt = parseFor(df, "", start)
+            return mkE(rf.tp, start, AExprK.Recovered)
+        }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
 
@@ -1367,6 +1390,14 @@ ${
             const v: RExpr = parseAssign(adv(tp))
             return mkS(v.tp, start, AStmtK.Return(v.e))
         }
+        // s469 — the one loop (§49): `for`, a labelled `for`, `break` / `continue`,
+        // and the retired spellings, refused with their §34 codes
+        if (isWord(tp, "for")) return parseFor(tp, "", start)
+        if (labelAhead(tp)) return parseFor(adv(adv(tp)), t.v, start)
+        if (isWord(tp, "while")) return retiredWhile(tp)
+        if (isWord(tp, "do")) return retiredDoWhile(tp)
+        if (isWord(tp, "break")) return parseJump(tp, true)
+        if (isWord(tp, "continue")) return parseJump(tp, false)
         if (isWord(tp, "if")) return parseIf(tp)
         if (isWord(tp, "given")) return parseGiven(tp)
         if (whenAhead(tp)) {
@@ -1563,6 +1594,427 @@ ${
         return s == "/>" || s == "/effect>"
     }
 
+    // =========================================================================
+    // s469 — the `for` statement (SPEC §49 "one `for`"; §49.2.1, §49.2.4).
+    //   for-stmt ::= label-prefix? 'for' for-head? loop-body
+    //   for-head ::= '(' iterate-head ')' | '(' counted-head ')' | '(' condition ')'
+    // The head is told apart by the tokens at the TOP LEVEL of its parentheses
+    // (§49.2.4): none → infinite; exactly two `;` → counted; a binder then `of`
+    // → iterate; otherwise → condition. One `;`, or more than two, is a syntax
+    // error, and so is `for ()`. A `for (… in …)` head is E-CTRL-011; the
+    // braceless `for x in xs { … }` / `for x of xs { … }` is
+    // E-FOR-UNPARENTHESIZED-HEAD (§49.4.1). `while` and `do … while` are retired
+    // (E-LOOP-WHILE-RETIRED / E-LOOP-DO-WHILE-RETIRED). A refused loop is read
+    // past (its body parsed, so the body's own syntax errors report) and stands
+    // as a Recovered statement: nothing downstream types or runs it.
+    // Not in the bootstrap (refused): a destructuring binder, `for-else`
+    // (§17.4a), a `key` clause.
+    // =========================================================================
+    type HeadScan:struct = { semis: int, close: int }
+    type RStmts:struct = { ss: AStmt[], tp: TP }
+    type RSrc:struct = { src: AIterSrc, tp: TP }
+
+    // `name :` then `for` — a loop label (§49.2.2: "written before the `for`
+    // keyword (on the same line or the line before)"). Nothing else that
+    // starts `name :` is read as a label.
+    fn labelAhead(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Ident) return false
+        const c: PTok = peekAt(tp, 1)
+        if (c.cls != TC.Punct || c.text != ":") return false
+        const f: PTok = peekAt(tp, 2)
+        if (f.cls != TC.Keyword || f.v != "for") return false
+        return f.line - t.line <= 1
+    }
+
+    fn advN(tp: TP, n: int) -> TP {
+        let t: TP = tp
+        let i: int = 0
+        while (i < n) {
+            t = adv(t)
+            i = i + 1
+        }
+        return t
+    }
+
+    // At `(`: the number of top-level `;` before its matching `)`, and the
+    // offset of that `)` from `tp` (the end of input when it never closes).
+    fn scanHead(tp: TP) -> HeadScan {
+        let k: int = 1
+        let depth: int = 1
+        let semis: int = 0
+        while (depth > 0) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.End) return { semis: semis, close: k }
+            if (x.cls == TC.Punct) {
+                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
+                if (x.text == ")" || x.text == "]" || x.text == "}") depth = depth - 1
+                if (depth == 1 && x.text == ";") semis = semis + 1
+            }
+            if (depth > 0) k = k + 1
+        }
+        return { semis: semis, close: k }
+    }
+
+    // At `(`: past its matching `)`.
+    fn skipParens(tp: TP) -> TP {
+        const hs: HeadScan = scanHead(tp)
+        return advN(tp, hs.close + 1)
+    }
+
+    // At `(`: `[let | const] name w` — the offset of `w` from `tp`, or -1.
+    fn binderThen(tp: TP, w: string) -> int {
+        let k: int = 1
+        const a: PTok = peekAt(tp, 1)
+        if (isNameTok(a) && (a.v == "let" || a.v == "const")) k = 2
+        const n: PTok = peekAt(tp, k)
+        if (n.cls != TC.Ident) return -1
+        const o: PTok = peekAt(tp, k + 1)
+        if (isNameTok(o) && o.v == w) return k + 1
+        return -1
+    }
+
+    // At `(`: `[let | const] { … } of` / `[let | const] [ … ] of` — a
+    // destructuring binder (§49.2.1 `for-binder`), not in the bootstrap.
+    fn destructAhead(tp: TP) -> boolean {
+        let k: int = 1
+        const a: PTok = peekAt(tp, 1)
+        if (isNameTok(a) && (a.v == "let" || a.v == "const")) k = 2
+        const o: PTok = peekAt(tp, k)
+        if (o.cls != TC.Punct || (o.text != "{" && o.text != "[")) return false
+        let depth: int = 0
+        let going = true
+        while (going) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.End) return false
+            if (x.cls == TC.Punct && (x.text == "{" || x.text == "[")) depth = depth + 1
+            if (x.cls == TC.Punct && (x.text == "}" || x.text == "]")) depth = depth - 1
+            k = k + 1
+            if (depth == 0) going = false
+        }
+        const w: PTok = peekAt(tp, k)
+        return isNameTok(w) && w.v == "of"
+    }
+
+    fn recoveredStmt(tp: TP, start: int) -> RStmt {
+        const re: RExpr = mkE(tp, start, AExprK.Recovered)
+        return mkS(re.tp, start, AStmtK.Eval(re.e))
+    }
+
+    // A refused head: reported at `at`; the head (from `(` at `tp`) is skipped
+    // and the body read, so the statement after the loop parses where it stands.
+    fn refusedHead(tp: TP, code: string, msg: string, at: PTok, start: int) -> RStmt {
+        const d: TP = diagAt(tp, code, msg, at)
+        const body: RBlock = parseLoopBody(skipParens(d))
+        return recoveredStmt(body.tp, start)
+    }
+
+    // §49.2.1 `loop-body ::= '{' loop-statement* '}'` — a body is a block.
+    fn parseLoopBody(tp: TP) -> RBlock {
+        if (isP(tp, "{")) return parseBlock(tp)
+        const t: PTok = cur(tp)
+        const d: TP = diagAt(tp, "E-PARSE-EXPECTED", "a `for` body is a block — expected `{`, found `" + t.text + "` (§49.2.1 `loop-body ::= '{' loop-statement* '}'`)", t)
+        return parseBlockOrStmt(d)
+    }
+
+    // At `for` (`label` "" — none; `start` — where the statement, label included, starts).
+    fn parseFor(tp: TP, label: string, start: int) -> RStmt {
+        const kw: PTok = cur(tp)
+        const t: TP = adv(tp)
+        if (isP(t, "{")) {
+            const fb: RBlock = parseBlock(t)
+            return forStmt(fb.tp, start, label, AForHead.HForever, fb.b)
+        }
+        if (!isP(t, "(")) return bracelessFor(t, kw, start)
+        const hs: HeadScan = scanHead(t)
+        if (hs.close == 1) return refusedHead(t, "E-PARSE-FOR-HEAD", "`for ()` has no head — write `for { … }` for a loop that runs until a `break` (§49.2.4)", kw, start)
+        if (hs.semis == 2) return parseCounted(t, label, start)
+        if (hs.semis != 0) return refusedHead(t, "E-PARSE-FOR-HEAD", "a `for` head has no `;` (a condition, or `x of xs`) or exactly two (`init; cond; step`) — this one has " + hs.semis + " (§49.2.4)", kw, start)
+        if (binderThen(t, "in") >= 0) return refusedHead(t, "E-CTRL-011", "`for (… in …)` is not a scrml loop — scrml iterates values with `of`: `for (x of xs) { … }` (§17.4, §49.2.4)", kw, start)
+        if (destructAhead(t)) return refusedHead(t, "E-BOOTSTRAP-UNSUPPORTED", "a destructuring `for` binder is not in the bootstrap yet — bind the element and read its fields (`for (o of xs) { … o.id … }`)", kw, start)
+        if (binderThen(t, "of") >= 0) return parseIterHead(t, label, start)
+        // the condition head (§49.3.1)
+        const cond: RExpr = parseAssign(adv(t))
+        let t2: TP = cond.tp
+        if (!isP(t2, ")")) {
+            const bad: PTok = cur(t2)
+            t2 = diagAt(t2, "E-PARSE-EXPECTED", "expected `)` to end the `for` condition, found `" + bad.text + "`", bad)
+            t2 = advN(t, hs.close)
+        }
+        t2 = adv(t2)
+        if (condContinues(t2)) {
+            const cc: PTok = cur(t2)
+            const dc: TP = diagAt(t2, "E-CONDITION-HEAD-UNPARENTHESIZED", "the `for` condition continues past its closing `)` — the parentheses wrap the WHOLE condition: write `for (… " + cc.text + " …) { … }` (§49.2.3)", cc)
+            return recoveredStmt(dc, start)
+        }
+        const body: RBlock = parseLoopBody(t2)
+        return forStmt(body.tp, start, label, AForHead.HCond(cond.e), body.b)
+    }
+
+    // §49.2.3 (E-CONDITION-HEAD-UNPARENTHESIZED): after the head's `)`, an
+    // operator that continues the condition — the §34 row's conservative set.
+    fn condContinues(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Punct) return false
+        return ["<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?"].indexOf(t.text) >= 0
+    }
+
+    // A built `for` (§49.2.1). `for-else` (§17.4a) after an iterate head is
+    // refused — not in the bootstrap.
+    fn forStmt(tp: TP, start: int, label: string, head: AForHead, body: ABlock) -> RStmt {
+        if (isIterHead(head) && isWord(tp, "else") && peekAt(tp, 1).text == "{") {
+            const d: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`for … else { … }` (the empty-state block, §17.4a) is not in the bootstrap yet — test `xs.length == 0` before the loop", cur(tp))
+            const eb: RBlock = parseBlock(adv(d))
+            return recoveredStmt(eb.tp, start)
+        }
+        const f: AFor = { nid: tp.nid, span: spanFrom(tp, start), label: label, head: head, body: body }
+        return mkS(bumpId(tp), start, AStmtK.For(f))
+    }
+
+    fn isIterHead(h: AForHead) -> boolean {
+        return match h {
+            .HIter(bind: b) :> true
+            .HForever :> false
+            .HCond(cond: c) :> false
+            .HCounted(init: i) :> false
+        }
+    }
+
+    // At `(` of `[let | const] name of iterable`.
+    fn parseIterHead(tp: TP, label: string, start: int) -> RStmt {
+        let t: TP = adv(tp)
+        let mutable = false
+        if (isWord(t, "let")) {
+            mutable = true
+            t = adv(t)
+        } else if (isWord(t, "const")) {
+            t = adv(t)
+        }
+        const bt: PTok = cur(t)
+        const bind: ABind = { nid: t.nid, span: mkSpan(bt.start, bt.end), name: bt.v }
+        t = adv(adv(bumpId(t)))
+        const src: RSrc = parseIterSrc(t)
+        const body: RBlock = parseLoopBody(expectP(src.tp, ")"))
+        return forStmt(body.tp, start, label, AForHead.HIter(bind, mutable, src.src), body.b)
+    }
+
+    // The iterable (after `of`), up to (not consuming) the head's `)`: an
+    // expression, or — when a range glyph stands at the head's top level — a
+    // range `lo..hi` / `lo..=hi`, each bound an additive expression (§49.2.1
+    // `range ::= additive-expr '..' additive-expr`). A range that is not the
+    // WHOLE iterable (`a || 0..n`, `0..n > 1`) is E-RANGE-OUTSIDE-LOOP-HEAD.
+    fn parseIterSrc(tp: TP) -> RSrc {
+        if (!rangeAtTop(tp)) {
+            const e: RExpr = parseAssign(tp)
+            return { src: AIterSrc.IterOf(e.e), tp: e.tp }
+        }
+        const lo: RExpr = parseBinary(tp, 6)
+        if (!isRangeTok(lo.tp)) return rangeNotWhole(lo.tp, cur(lo.tp))
+        const inclusive: boolean = isP(lo.tp, "..=")
+        const hi: RExpr = parseBinary(adv(lo.tp), 6)
+        if (!isP(hi.tp, ")")) return rangeNotWhole(hi.tp, cur(lo.tp))
+        return { src: AIterSrc.IterRange(lo.e, hi.e, inclusive), tp: hi.tp }
+    }
+
+    fn rangeNotWhole(tp: TP, at: PTok) -> RSrc {
+        const d: TP = diagAt(tp, "E-RANGE-OUTSIDE-LOOP-HEAD", "a range in a `for` head is the WHOLE iterable (`for (i of a..b)`), not an operand of it — a range is not a value (§49.2.5)", at)
+        const t: TP = toHeadClose(d)
+        const re: RExpr = mkE(t, at.start, AExprK.Recovered)
+        return { src: AIterSrc.IterOf(re.e), tp: re.tp }
+    }
+
+    // Is a range glyph at depth 0 before the head's closing `)`?
+    fn rangeAtTop(tp: TP) -> boolean {
+        let k: int = 0
+        let depth: int = 0
+        let going = true
+        while (going) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.End) return false
+            if (x.cls == TC.Punct) {
+                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
+                if (x.text == ")" || x.text == "]" || x.text == "}") {
+                    if (depth == 0) return false
+                    depth = depth - 1
+                }
+                if (depth == 0 && (x.text == ".." || x.text == "..=")) return true
+            }
+            k = k + 1
+        }
+        return false
+    }
+
+    // Forward to the head's closing `)` (at depth 0; not consumed).
+    fn toHeadClose(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        while (!atEnd(t)) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.Punct) {
+                if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
+                if (x.text == ")" || x.text == "]" || x.text == "}") {
+                    if (depth == 0) return t
+                    depth = depth - 1
+                }
+            }
+            t = adv(t)
+        }
+        return t
+    }
+
+    // At `(` of `init; cond; step` (§49.3.2). `init`: `let` declarators (a
+    // comma list, §40.8) or assignments; an empty `cond` is `true`; `step`: a
+    // comma list. `for (;;)` is the infinite head (§49.2.1).
+    fn parseCounted(tp: TP, label: string, start: int) -> RStmt {
+        let t: TP = adv(tp)
+        let init: AStmt[] = []
+        if (isWord(t, "const")) {
+            const ck: PTok = cur(t)
+            t = diagAt(t, "E-PARSE-FOR-HEAD", "a counted head declares its counters with `let` — the step rebinds them (§49.2.1 `for-init ::= 'let' declarator …`)", ck)
+        }
+        if (isWord(t, "let") || isWord(t, "const")) {
+            const rd: RStmts = parseForDecls(t)
+            init = rd.ss
+            t = rd.tp
+        } else if (!isP(t, ";")) {
+            const ra: RStmts = parseForAssigns(t)
+            init = ra.ss
+            t = ra.tp
+        }
+        t = expectP(t, ";")
+        let cond: AExpr | not = not
+        if (!isP(t, ";")) {
+            const c: RExpr = parseAssign(t)
+            cond = c.e
+            t = c.tp
+        }
+        t = expectP(t, ";")
+        let step: AExpr[] = []
+        let going = !isP(t, ")") && !atEnd(t)
+        while (going) {
+            const r: RExpr = parseAssign(t)
+            step = step.concat([r.e])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else {
+                going = false
+            }
+        }
+        const body: RBlock = parseLoopBody(expectP(t, ")"))
+        if (init.length == 0 && cond is not && step.length == 0) return forStmt(body.tp, start, label, AForHead.HForever, body.b)
+        return forStmt(body.tp, start, label, AForHead.HCounted(init, cond, step), body.b)
+    }
+
+    // `let a = 0, b: int = 1` — each declarator its own Local statement.
+    fn parseForDecls(tp: TP) -> RStmts {
+        const mutable: boolean = isWord(tp, "let")
+        let t: TP = adv(tp)
+        let out: AStmt[] = []
+        let going = true
+        while (going) {
+            const r: RStmt = parseDeclarator(t, mutable)
+            out = out.concat([r.s])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else {
+                going = false
+            }
+        }
+        return { ss: out, tp: t }
+    }
+
+    // `name [: T] = init` (after the `let`).
+    fn parseDeclarator(tp: TP, mutable: boolean) -> RStmt {
+        const nameTok: PTok = cur(tp)
+        const start: int = nameTok.start
+        let t: TP = tp
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name in the `let` of a `for` head", nameTok)
+        t = adv(t)
+        let aty: AType | not = not
+        if (isP(t, ":")) {
+            const ty: RType = parseType(adv(t))
+            aty = ty.t
+            t = ty.tp
+        }
+        t = expectP(t, "=")
+        const init: RExpr = parseAssign(t)
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
+    }
+
+    // `i = 0, j = n` — each an expression statement.
+    fn parseForAssigns(tp: TP) -> RStmts {
+        let t: TP = tp
+        let out: AStmt[] = []
+        let going = true
+        while (going) {
+            const start: int = cur(t).start
+            const r: RExpr = parseAssign(t)
+            const s: RStmt = mkS(r.tp, start, AStmtK.Eval(r.e))
+            out = out.concat([s.s])
+            t = s.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else {
+                going = false
+            }
+        }
+        return { ss: out, tp: t }
+    }
+
+    // After `for` with no `(`: the braceless head, removed (§49.4.1). The
+    // recovery is the §34 row's bounded one — the binder, the `in` / `of`,
+    // the iterable — so no part of it is read as statements.
+    fn bracelessFor(tp: TP, kw: PTok, start: int) -> RStmt {
+        let t: TP = diagAt(tp, "E-FOR-UNPARENTHESIZED-HEAD", "a `for` head is parenthesized — write `for (x of xs) { … }` (§49.4.1, §17.4; the braceless `for x in xs` form is removed)", kw)
+        if (isWord(t, "let") || isWord(t, "const")) t = adv(t)
+        if (cur(t).cls == TC.Ident) t = adv(t)
+        if (isWord(t, "in") || isWord(t, "of")) t = adv(t)
+        const it: RExpr = parseAssign(t)
+        const body: RBlock = parseLoopBody(it.tp)
+        return recoveredStmt(body.tp, start)
+    }
+
+    // `break [label]` / `continue [label]` (§49.2.1). There is no `break
+    // value` (§49.6).
+    fn parseJump(tp: TP, isBreak: boolean) -> RStmt {
+        const kw: PTok = cur(tp)
+        let t: TP = adv(tp)
+        let label: string = ""
+        const nx: PTok = cur(t)
+        if (nx.cls == TC.Ident && nx.line == kw.line) {
+            label = nx.v
+            t = adv(t)
+        } else if (nx.cls != TC.End && nx.line == kw.line && nx.text != ";" && nx.text != "}") {
+            t = diagAt(t, "E-PARSE-EXPECTED", "`" + kw.v + "` takes only a loop label — there is no `" + kw.v + " value` (§49.2.1, §49.6)", nx)
+        }
+        if (isBreak) return mkS(t, kw.start, AStmtK.Break(label))
+        return mkS(t, kw.start, AStmtK.Continue(label))
+    }
+
+    // `while (cond) { … }` — retired (§49.4.1); the fix is the same head under `for`.
+    fn retiredWhile(tp: TP) -> RStmt {
+        const kw: PTok = cur(tp)
+        let t: TP = adv(diagAt(tp, "E-LOOP-WHILE-RETIRED", "`while` is not a scrml loop — write `for (cond) { … }`: a `for` with a condition head runs while the condition is true (§49.1, §49.4.1)", kw))
+        if (isP(t, "(")) t = skipParens(t)
+        const body: RBlock = parseBlockOrStmt(t)
+        return recoveredStmt(body.tp, kw.start)
+    }
+
+    // `do { … } while (cond)` — retired (§49.4.1); the fix is §49.3.6's body-first loop.
+    fn retiredDoWhile(tp: TP) -> RStmt {
+        const kw: PTok = cur(tp)
+        const t: TP = adv(diagAt(tp, "E-LOOP-DO-WHILE-RETIRED", "`do … while` is not a scrml loop — write a body-first `for { …; if (done) { break } }`, or, when the body uses `continue`, `for (let first = true; first || cond; first = false) { … }` (§49.3.6)", kw))
+        const body: RBlock = parseBlockOrStmt(t)
+        let t2: TP = body.tp
+        if (isWord(t2, "while")) {
+            t2 = adv(t2)
+            if (isP(t2, "(")) t2 = skipParens(t2)
+        }
+        return recoveredStmt(t2, kw.start)
+    }
+
     fn parseLocal(tp: TP) -> RStmt {
         const start: int = cur(tp).start
         const mutable: boolean = isWord(tp, "let")
@@ -1622,6 +2074,9 @@ ${
             .Given(name: n) :> s
             .EffectStmt(w: w) :> s
             .Fail(f: x) :> s
+            .For(f: x) :> s
+            .Break(label: x) :> s
+            .Continue(label: x) :> s
         }
     }
 

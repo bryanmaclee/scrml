@@ -15,3 +15,7 @@ Baseline: bootstrap conformance PASS 205 / FAIL 81 / UNSUPPORTED 845 (1806 attem
 7. tests (slice-m4/loops-s469.test.js) + acceptance/loop/*.
 
 ## Log
+- [commit 2] parse/ast/core/analyze/lower/check/print/walk/js/runtime: the four heads, labels,
+  break/continue (loop-control pass), ranges, `xs[i]` (rt.indexRead trap) and `xs.at(i)` (rt.atRead).
+  First end-to-end program compiles + prints readable JS. slice-m1..m4 + codec: 2650 tests, the 4
+  diffs were pins (whileCond/forBody/arrayLit now retired/refused/PASS; double E-TYPE-031 fixed).

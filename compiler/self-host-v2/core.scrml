@@ -129,6 +129,13 @@ ${
         EqPrim, NeqPrim, EqStruct, NeqStruct,
         IsSome, IsNot,
         Concat, Length,
+        // s469 (§49.13) — reading a tape by position. `IndexRead` is `xs[i]`
+        // (args: the tape, the index, and a Str literal naming the source
+        // location): the element when `0 <= i < xs.length`, else the
+        // E-INDEX-OUT-OF-RANGE-RT trap (§19.17) — never `undefined`, never
+        // `not`. `AtRead` is `xs.at(i)` (args: the tape, the index): the
+        // element, or `not` when `i` is out of range (a negative `i` included).
+        IndexRead, AtRead,
     }
 
     export type Pattern:enum = {
@@ -420,8 +427,42 @@ ${
         // the Suspend's `then` (check.scrml C12).
         Join(k: Sym, body: Block),
         Jump(k: Sym),
+        // s469 — the ONE loop (§49, "one `for`"). `label` is a binder-minted
+        // Sym naming THIS loop; a Break / Continue names the loop it leaves /
+        // re-enters by it, and stands only inside that loop's body, in the same
+        // owner (check.scrml C19 — §49.4.3: no crossing a function boundary).
+        // Every head binds per iteration (§49.3.7). A loop body holds no
+        // Suspend and no Defer (C19: the CPS split and the deferred exit do not
+        // reach loops yet).
+        Loop(label: Sym, head: LoopHead, body: Block),
+        Break(target: Sym),
+        Continue(target: Sym),
     }
     export type Block:struct = { stmts: Stmt[] }
+
+    // s469 — a loop head (§49.2.4, §49.3):
+    //   Forever       `for { … }` / `for (;;)` — until a Break / Return / Fail
+    //   While(cond)   `for (cond)` — `cond` before each iteration
+    //   Counted       `for (init; cond; step)` — `init` once (Lets, or Assigns of
+    //                 outer locals; C19), `cond` (`not`: true) before each
+    //                 iteration, `step` (Assigns only) after each and on Continue
+    //   Each          `for (x of xs)` — the iterable evaluated once; `bind` each
+    //                 element in position order (a string: each code point)
+    //   Range         `for (i of lo..hi)` / `lo..=hi` — the bounds evaluated
+    //                 once, `lo` first, `hi` into `end`; `bind` (an int) runs
+    //                 lo, lo + 1, … up to `end` (excluded, unless `inclusive`).
+    //                 `counter`: the loop's own count when `bind` is a `let` the
+    //                 body may rebind (§49.3.5: "writing it changes the binder,
+    //                 never the iterable"); `not` when `bind` is the count.
+    export type EachHead:struct = { bind: Sym, src: Expr }
+    export type RangeHead:struct = { bind: Sym, counter: Sym | not, end: Sym, lo: Expr, hi: Expr, inclusive: boolean }
+    export type LoopHead:enum = {
+        Forever,
+        While(cond: Expr),
+        Counted(init: Stmt[], cond: Expr | not, step: Stmt[]),
+        Each(h: EachHead),
+        Range(h: RangeHead),
+    }
 
     // -------------------------------------------------------------------------
     // Views. Every child position is a View LIST (no Fragment variant).
