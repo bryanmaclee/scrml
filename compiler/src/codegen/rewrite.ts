@@ -3,7 +3,7 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
 import { sqlSitesInExpressionText } from "../sql-in-expression-text.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
-import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive, blankLiteralTextInSource } from "../expression-parser.ts";
+import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive, blankLiteralTextInSource, tokenizeTemplateInterpolations } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
@@ -3236,36 +3236,34 @@ export function hasTemplateInterpolation(value: string): boolean {
 export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
   const reactiveVars = new Set<string>();
 
+  // S469 (review of 834e41cba, F2) — the interpolations are sliced by THE template slicer
+  // (`tokenizeTemplateInterpolations`, brace- / string- / nested-template-aware), the one the
+  // failable-call check reads the same attribute with (`templateTextInterpolationNodes`). Before,
+  // this counted braces with no regard to strings (`${"}"}` closed early), a second reader of the
+  // text the check could not share.
   let result = "`";
-  let i = 0;
-
-  while (i < value.length) {
-    if (value[i] === '$' && value[i + 1] === '{') {
-      let depth = 1;
-      let j = i + 2;
-      while (j < value.length && depth > 0) {
-        if (value[j] === '{') depth++;
-        else if (value[j] === '}') depth--;
-        if (depth > 0) j++;
-      }
-      const interiorExpr = value.slice(i + 2, j);
-
-      const rewrittenExpr = interiorExpr.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
+  for (const seg of tokenizeTemplateInterpolations(value ?? "", { bare: true })) {
+    if (seg.kind === "expr") {
+      const rewrittenExpr = seg.text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
         reactiveVars.add(name);
         return `_scrml_reactive_get("${name}")`;
       });
-
       result += `\${${rewrittenExpr}}`;
-      i = j + 1;
-    } else if (value[i] === '`') {
-      result += '\\`';
-      i++;
-    } else if (value[i] === '\\' && i + 1 < value.length) {
-      result += value[i] + value[i + 1];
-      i += 2;
-    } else {
-      result += value[i];
-      i++;
+      continue;
+    }
+    const q = seg.text;
+    let i = 0;
+    while (i < q.length) {
+      if (q[i] === '`') {
+        result += '\\`';
+        i++;
+      } else if (q[i] === '\\' && i + 1 < q.length) {
+        result += q[i] + q[i + 1];
+        i += 2;
+      } else {
+        result += q[i];
+        i++;
+      }
     }
   }
 

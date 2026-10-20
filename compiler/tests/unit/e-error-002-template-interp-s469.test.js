@@ -31,7 +31,8 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { forEachCallInValuePosition } from "../../src/failable-value-calls.ts";
-import { parseExprToNode, templateInterpolationNodesAll } from "../../src/expression-parser.ts";
+import { parseExprToNode, templateInterpolationNodesAll, tokenizeTemplateInterpolations } from "../../src/expression-parser.ts";
+import { rewriteTemplateAttrValue } from "../../src/codegen/rewrite.ts";
 
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -377,4 +378,62 @@ describe("F1 — a labeled block in a function-expression body does not hide a `
       expect(compileSource(LOGIN(decl), "f1").codes).toContain("E-ERROR-002");
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Review of 834e41cba, F2: a `${ … }` in a QUOTED attribute value
+// ---------------------------------------------------------------------------
+
+describe("F2 — a `!` call inside a quoted attribute interpolation is E-ERROR-002", () => {
+  const PAGE = (markup, extra = "") => `type AuthErr:enum = { Denied }
+<status> = "on"
+<xs> = ["a"]
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    const g = check
+${extra}
+}
+${markup}
+`;
+  const refused = [
+    ["data-*", '<p data-v="${check("wrong") ? "Y" : "N"}">r</p>'],
+    ["class", '<p class="c-${check("wrong") ? "y" : "n"}">r</p>'],
+    ["href", '<a href="/x/${check("wrong") ? "y" : "n"}">r</a>'],
+    ["an alias", '<p title="${g("wrong") ? "Y" : "N"}">r</p>'],
+    ["a .map callback", '<p data-v="${["wrong"].map(x => check(x) ? "Y" : "N").join("")}">r</p>'],
+    ["a tagged template", '<p data-v="${g`${"wrong"}` ? "Y" : "N"}">r</p>'],
+    ["String.raw", "<p data-v=\"${String.raw`${check('wrong') ? 'Y' : 'N'}`}\">r</p>"],
+    ["a sequence", '<p data-v="${(check("wrong"), 1) ? "Y" : "N"}">r</p>'],
+    ["an IIFE", '<p data-v="${(() => { return check("wrong") })() ? "Y" : "N"}">r</p>'],
+    ["a brace inside a string before the call", '<p data-v="${"}" + (check("wrong") ? "Y" : "N")}">r</p>'],
+    ["markup a function returns", "<div>${mk()}</div>", "    function mk() { return <p data-v=\"${check('wrong') ? 'Y' : 'N'}\">r</p> }"],
+  ];
+  for (const [what, markup, extra] of refused) {
+    test(what, () => {
+      expect(compileSource(PAGE(markup, extra ?? ""), "f2").codes).toContain("E-ERROR-002");
+    });
+  }
+
+  const clean = [
+    ["a reactive class", '<p class="item-${@status}">r</p>'],
+    ["plain text and an expression", '<p data-v="n-${@xs.length + 1}">r</p>'],
+    ["a handled result", '<p data-v="${ok ? "Y" : "N"}">r</p>', '    const ok = check("secret") !{ .Denied :> false }'],
+  ];
+  for (const [what, markup, extra] of clean) {
+    test(`no false positive: ${what}`, () => {
+      expect(compileSource(PAGE(markup, extra ?? ""), "f2c").codes).toEqual([]);
+    });
+  }
+
+  test("the slicer codegen emits from is the string-aware one (`${\"}\"}` does not close early)", () => {
+    const segs = tokenizeTemplateInterpolations('a ${"}" + x} b', { bare: true });
+    expect(segs.filter((s) => s.kind === "expr").map((s) => s.text)).toEqual(['"}" + x']);
+    expect(rewriteTemplateAttrValue('a ${"}" + @x} b').jsExpr).toBe('`a ${"}" + _scrml_reactive_get("x")} b`');
+    // unchanged for the ordinary shapes
+    expect(rewriteTemplateAttrValue("item-${@status}").jsExpr).toBe('`item-${_scrml_reactive_get("status")}`');
+    expect(rewriteTemplateAttrValue("`q` \\${x} ${a}").jsExpr).toBe("`\\`q\\` \\${x} ${a}`");
+  });
 });

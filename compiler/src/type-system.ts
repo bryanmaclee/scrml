@@ -74,7 +74,7 @@
 
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
@@ -16675,6 +16675,17 @@ function annotateNodes(
         }
       } else if (value.kind === "expr" && value.exprNode) {
         forEachCallInValuePosition(value.exprNode as ExprNode, "none", failableEnv, onCall);
+      } else if (value.kind === "string-literal" && typeof value.value === "string" && value.value.includes("${")) {
+        // S469 (review of 834e41cba, F2) — a QUOTED attribute value with `${ … }`
+        // (`data-v="${check(p) ? "a" : "b"}"`) is emitted by codegen as a JavaScript template
+        // literal (`rewriteTemplateAttrValue`) and evaluated at render. Before, it was never read
+        // here: a wrong password logged in through a direct call. Each interpolation is sliced by
+        // the slicer codegen emits from and read by the one expression reader; one it cannot read
+        // whole is refused by name (a `TemplateInterpFallback` hatch).
+        const vs = (value.span ?? attr.span ?? n.span) as { start?: number } | undefined;
+        for (const e of templateTextInterpolationNodes(value.value, filePath, vs?.start ?? 0, undefined, { bare: true })) {
+          forEachCallInValuePosition(e, "none", failableEnv, onCall);
+        }
       }
     }
   }

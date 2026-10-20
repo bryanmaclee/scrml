@@ -62,7 +62,7 @@
  */
 
 import type { ExprNode, CallExpr, LambdaExpr } from "./types/ast.ts";
-import { templateInterpolationNodesAll, guardCallArmsRaw, hasLostTrailingContent } from "./expression-parser.ts";
+import { templateInterpolationNodesAll, templateTextInterpolationNodes, guardCallArmsRaw, hasLostTrailingContent } from "./expression-parser.ts";
 import { tokenizeLogic } from "./tokenizer.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
@@ -1409,6 +1409,13 @@ class Walker {
         continue;
       }
       if (value.kind === "expr" && typeof value.raw === "string") { this.unreadText(value.raw, scope, vfn); continue; }
+      // S469 (review of 834e41cba, F2) — a QUOTED value with `${ … }` (`data-v="${check(p)}"`) is a
+      // JavaScript template literal at render: each interpolation is sliced by the slicer codegen
+      // emits from and read by the one expression reader (one it cannot read is refused by name).
+      if (value.kind === "string-literal" && typeof value.value === "string" && value.value.includes("${")) {
+        for (const e of templateTextInterpolationNodes(value.value, "", 0, undefined, { bare: true })) this.expr(e, scope, textCtx(vfn));
+        continue;
+      }
       this.opaque(value, scope, vfn);
     }
     if (Array.isArray(n.children)) for (const c of n.children) this.liftedMarkup(c, scope, fn);

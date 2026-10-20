@@ -4539,16 +4539,18 @@ export interface TemplateSegment {
  *            If the input does not look like a backtick template, returns
  *            a single quasi covering the whole string.
  */
-export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
+export function tokenizeTemplateInterpolations(raw: string, opts: { bare?: boolean } = {}): TemplateSegment[] {
   const segments: TemplateSegment[] = [];
   if (!raw || typeof raw !== "string") return segments;
 
   // Strip surrounding backticks if present; the inner content is what we walk.
   // We track offsets relative to the ORIGINAL `raw` string so spans line up.
+  // `opts.bare` (S469): `raw` is template TEXT with no surrounding backticks (a quoted
+  // attribute value) — a leading backtick is a literal character, never stripped.
   let i = 0;
   let innerStart = 0;
   let innerEnd = raw.length;
-  if (raw.startsWith("`")) {
+  if (!opts.bare && raw.startsWith("`")) {
     innerStart = 1;
     if (raw.endsWith("`") && raw.length >= 2) innerEnd = raw.length - 1;
     i = innerStart;
@@ -4812,8 +4814,23 @@ function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & objec
       }
     } catch { /* read segment by segment below */ }
   }
+  return templateTextInterpolationNodes(raw, file, start, lit.span);
+}
+
+/**
+ * S469 (review of 834e41cba, F2) — the `${…}` interpolations of template TEXT (a template
+ * literal's source, or a QUOTED attribute value `data-v="a ${x} b"`), sliced by THE template
+ * slicer (`tokenizeTemplateInterpolations`: brace-, string- and nested-template-aware — the
+ * same slicer codegen's `rewriteTemplateAttrValue` emits from) and each read by
+ * `parseExprToNode`. An interpolation the reader cannot read whole is a
+ * `TemplateInterpFallback` hatch carrying its text (read to refuse, never dropped).
+ */
+export function templateTextInterpolationNodes(
+  raw: string, file: string, start: number, span?: ExprSpan, opts: { bare?: boolean } = {},
+): ExprNode[] {
   const out: ExprNode[] = [];
-  for (const seg of tokenizeTemplateInterpolations(raw)) {
+  const at: ExprSpan = span ?? { file, start, end: start + raw.length, line: 1, col: 1 };
+  for (const seg of tokenizeTemplateInterpolations(raw, opts)) {
     if (seg.kind !== "expr") continue;
     const exprText = seg.text.trim();
     if (!exprText) continue;
@@ -4824,7 +4841,7 @@ function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & objec
     // regex-scans it; the failable-call walk reads it to refuse).
     out.push({
       kind: "escape-hatch",
-      span: lit.span,
+      span: at,
       nativeKind: "TemplateInterpFallback",
       raw: exprText,
     } as EscapeHatchExpr);
