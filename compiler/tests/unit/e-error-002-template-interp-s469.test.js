@@ -262,3 +262,98 @@ describe("an escape hatch with no source text is refused at the walk", () => {
     expect(found(hatch("SequenceExpression", "(check(p), 1)")).map((c) => c.calleeName)).toEqual(["check"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Same review, LOW: an object shorthand `{ check }` is a value read
+// ---------------------------------------------------------------------------
+
+describe("an object shorthand of a failable function is a value read (E-IMPL1-FAILABLE-FN-VALUE)", () => {
+  const env = {
+    resolveOuter: (n) => (n === "check" ? "check" : n === "g" ? "check" : null),
+    resolveOuterReturns: () => null,
+    resolveOuterExact: () => null,
+    resolveOuterReturnsExact: () => null,
+    parseStatements: () => null,
+    parseExpr: () => null,
+    parseGuardArms: () => null,
+    matchArmBodyText: () => null,
+  };
+  const found = (node) => { const out = []; forEachCallInValuePosition(node, "none", env, (c) => out.push(c)); return out; };
+
+  test("`{ check }` and `{ g }` are fn-value reads; `{ x }` is not", () => {
+    expect(found(parseExprToNode("{ check }", "t", 0)).map((c) => [c.refKind, c.calleeName])).toEqual([["fn-value", "check"]]);
+    expect(found(parseExprToNode("{ g }", "t", 0)).map((c) => [c.refKind, c.calleeName, c.via])).toEqual([["fn-value", "check", "g"]]);
+    expect(found(parseExprToNode("{ x }", "t", 0)).length).toBe(0);
+  });
+
+  test("compiled: `const o = { check }` is refused", () => {
+    const codes = compileSource(LOGIN('const o = { check }\n        const s = o.check(p) ? "Y" : "N"'), "short").codes;
+    expect(codes).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Same review, MEDIUM: an exported `const` alias reaches importers unchecked
+// ---------------------------------------------------------------------------
+
+function compileProject(files, label = "proj") {
+  const uniq = `${label}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const dir = resolve(tmpdir(), `scrml-s469ti-${uniq}`);
+  mkdirSync(dir, { recursive: true });
+  for (const [name, src] of Object.entries(files)) writeFileSync(resolve(dir, name), src);
+  try {
+    const result = compileScrml({ inputFiles: [resolve(dir, "app.scrml")], write: true, outputDir: resolve(dir, "out"), log: () => {} });
+    return (result.errors ?? []).filter((e) => e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("an exported `const` alias of a failable function is refused (E-IMPL1-FAILABLE-FN-VALUE)", () => {
+  const LIB = (tail) => `\${
+    export type AuthErr:enum = { Denied }
+    export function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    ${tail}
+}
+`;
+  const APP = (imp, use) => `<msg> = "init"
+\${
+    import { ${imp}, AuthErr } from "./lib.scrml"
+    function login(p) {
+        ${use}
+        if (ok) { @msg = "LOGGED IN" } else { @msg = "rejected" }
+    }
+}
+<button id="wrong" onclick=login("wrong")>go</button>
+<p id="out">\${@msg}</p>
+`;
+  const USE_G = "const ok = g(p)";
+  const HANDLED = "const ok = check(p) !{ .Denied :> false }";
+
+  test("`export const g = check`", () => {
+    expect(compileProject({ "app.scrml": APP("g", USE_G), "lib.scrml": LIB("export const g = check") })).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+  test("`const g = check` + `export { g }` (the export written first)", () => {
+    expect(compileProject({ "app.scrml": APP("g", USE_G), "lib.scrml": LIB("export { g }\n    const g = check") })).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+  test("`export { g as h }`", () => {
+    expect(compileProject({ "app.scrml": APP("h", "const ok = h(p)"), "lib.scrml": LIB("const g = check\n    export { g as h }") })).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+  test("through `export *`", () => {
+    const STAR = "${\n    export * from \"./lib.scrml\"\n}\n";
+    const app = APP("g", USE_G).replace('"./lib.scrml"', '"./star.scrml"');
+    expect(compileProject({ "app.scrml": app, "star.scrml": STAR, "lib.scrml": LIB("export const g = check") })).toContain("E-IMPL1-FAILABLE-FN-VALUE");
+  });
+  test("an exported initializer is a value position: an unhandled call is E-ERROR-002", () => {
+    expect(compileProject({ "app.scrml": APP("v", "const ok = v"), "lib.scrml": LIB('export const v = check("wrong")') })).toContain("E-ERROR-002");
+  });
+  test("no false positive: exporting the `!` function itself, a plain const", () => {
+    expect(compileProject({ "app.scrml": APP("check", HANDLED), "lib.scrml": LIB("export const n = 1") })).toEqual([]);
+  });
+  test("no false positive: a local `const` alias that is not exported", () => {
+    expect(compileProject({ "app.scrml": APP("check", HANDLED), "lib.scrml": LIB("const g = check\n    export const n = 1") })).toEqual([]);
+  });
+});

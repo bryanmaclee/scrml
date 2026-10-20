@@ -16450,10 +16450,67 @@ function annotateNodes(
    * function that is neither declared `!` nor split is not failable on impl#1 at
    * all (`g-impl1-client-server-call-not-failable-s451`) — unchanged here.
    */
+  /**
+   * S469 (the #1444 review, MEDIUM) — an EXPORTED value. `export const g = check` (or
+   * `const g = check` + `export { g }`) hands an importer a failable function under a name the
+   * importer knows nothing about: impl#1 carries failability across modules only for a function
+   * DECLARATION (api.js `importedFnDecls`), never for a `const` alias, so the importer's `g(p)`
+   * was never checked. The `const`-alias exemption (the one value read of a failable function
+   * impl#1 accepts) does not extend to an exported binding: refused, E-IMPL1-FAILABLE-FN-VALUE.
+   * A re-export (`export { g } from …`, `export * from …`) is refused in the file that declares
+   * the binding. An exported initializer is otherwise a value position like any other.
+   */
+  const pendingFailableExports: Array<{ n: ASTNodeLike; scope: Scope }> = [];
+  function exportedFailableAliasError(local: string, target: string, span: Span): void {
+    errors.push(new TSError(
+      "E-IMPL1-FAILABLE-FN-VALUE",
+      `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function exported as a value: ` +
+      `'${local}' is an alias of '${target}', and impl#1 carries failability across files only for ` +
+      `a function declaration, so a call of '${local}' in an importing file would go unchecked. This is a ` +
+      `limitation of this compiler (impl#1), not a language rule. Export '${target}' itself ` +
+      `('export { ${target} }') and alias it in the importing file.`,
+      span,
+    ));
+  }
+  function checkFailableExport(n: ASTNodeLike): void {
+    if (valuePositionChecked.has(n)) return;
+    valuePositionChecked.add(n);
+    const rec = n as Record<string, unknown>;
+    if (typeof rec.reExportSource === "string" && rec.reExportSource !== "") return;
+    const span = n.span as Span;
+    const init = rec.valueInitExpr;
+    if (init && typeof init === "object") {
+      const iv = init as { kind?: unknown; name?: unknown };
+      const local = typeof rec.exportedName === "string" ? rec.exportedName : "";
+      if (iv.kind === "ident" && typeof iv.name === "string") {
+        const target = fnFactsIs(iv.name);
+        if (target !== null) { exportedFailableAliasError(local || iv.name, target, span); return; }
+      }
+      forEachCallInValuePosition(init as ExprNode, "none", failableEnv, (c) =>
+        reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : false, false));
+    }
+    if (Array.isArray(rec.renames) && rec.renames.length > 0) {
+      // Resolved after the walk: `export { g }` may precede `const g = check`.
+      pendingFailableExports.push({ n, scope: scopeChain.current });
+    }
+  }
+  function checkPendingFailableExports(): void {
+    for (const { n, scope } of pendingFailableExports) {
+      for (const r of (n as { renames: unknown[] }).renames) {
+        const local = (r as { local?: unknown })?.local;
+        if (typeof local !== "string" || local === "") continue;
+        if (resolveFnBinding(local, scope, false).k !== "alias") continue;
+        const target = fnFactsIs(local, scope);
+        if (target !== null) exportedFailableAliasError(local, target, n.span as Span);
+      }
+    }
+  }
+
   function checkFailableCallsInValuePositions(n: ASTNodeLike): void {
     const kind = n.kind as string;
     const rec = n as Record<string, unknown>;
     if (kind === "markup") { checkFailableCallsInAttrValues(n); return; }
+    if (kind === "export-decl") { checkFailableExport(n); return; }
     if (!VALUE_POSITION_STMT_KINDS.has(kind)) return;
     if (kind === "match-expr" && "subject" in rec) return; // an expression, not a statement
     if (valuePositionChecked.has(n)) return;
@@ -17741,6 +17798,8 @@ function annotateNodes(
   for (const node of topNodes) {
     visitNode(node);
   }
+  // S469 — `export { g }` of a `const` alias of a failable function (see checkFailableExport).
+  checkPendingFailableExports();
 
   // Also annotate typeDecl nodes that may exist only in fileAST.typeDecls.
   const typeDeclNodes = (fileAST.typeDecls as ASTNodeLike[] | undefined)

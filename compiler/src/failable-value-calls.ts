@@ -760,6 +760,8 @@ class Walker {
             if (typeof p.key !== "string") this.expr(p.key as ExprNode, scope, fn);
             this.expr(p.value, scope, fn);
           } else if (p.kind === "spread") this.expr(p.argument, scope, fn);
+          // S469 — `{ check }` reads `check` as a VALUE (the shorthand of `{ check: check }`).
+          else if (p.kind === "shorthand") this.fnValueRead(p, scope, fn);
         }
         return;
       case "map-lit": for (const e of node.entries) { this.expr(e.key, scope, fn); this.expr(e.value, scope, fn); } return;
@@ -1428,7 +1430,8 @@ class Walker {
       if (r.kind === "call" && r.callee && typeof r.callee === "object" && (r.callee as { kind?: unknown }).kind === "ident") {
         callees.add(r.callee as object);
       }
-      if (r.kind === "ident" && typeof r.name === "string" && !callees.has(r)) {
+      // An identifier that is not a callee, or an object shorthand `{ check }` (a value read).
+      if ((r.kind === "ident" || r.kind === "shorthand") && typeof r.name === "string" && !callees.has(r)) {
         this.fnValueRead(r, scope, fn);
         return;
       }

@@ -1,9 +1,9 @@
 // security-failable-pack — the §19.4.3 failable wrong-password probe corpus as a permanent gate
 // (S468 fix round 1; a sibling of ../security-await-pack).
 //
-// 275 shapes: the S468 fix-round-1 review of 7ecae57eb (n1–n8 client, s1–s2 server) plus the dev's
+// 282 shapes: the S468 fix-round-1 review of 7ecae57eb (n1–n8 client, s1–s2 server) plus the dev's
 // n9 (the F1 class through a name) and n10 (by-binding probes), and S469's n11 (a failable `match`
-// in every event-handler value form × container) n12 (the `!` function imported) n13 (a handler through a `const` alias) and n14 (a failable call inside a template-literal interpolation). Each shape is compiled and run with a
+// in every event-handler value form × container) n12 (the `!` function imported) n13 (a handler through a `const` alias) n14 (a failable call inside a template-literal interpolation) and n15 (an object shorthand / an exported `const` alias). Each shape is compiled and run with a
 // wrong and a right password. The floor: a wrong password never logs in. See pack.js for the classes
 // and README.md for the why.
 //
@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { loadFamilies, runShape } from "./pack.js";
 import { KNOWN_FAIL, UNJUDGED, BY_DESIGN_LOGS_IN } from "./known-fail.js";
 
-const EXPECTED_SHAPE_COUNT = 275;
+const EXPECTED_SHAPE_COUNT = 282;
 const families = await loadFamilies();
 const ids = families.flatMap(({ family, shapes }) => Object.keys(shapes).map((n) => `${family}/${n}`));
 
