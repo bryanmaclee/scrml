@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-range",
+  "description": "`0..3` runs 0, 1, 2; `1..=2` runs 1, 2.",
+  "language-version": "1.0",
+  "spec": "§49.2.5",
+  "rationale": "§49.2.5: \"`a..b` is half-open … `a..=b` is inclusive\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "1212"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-break-outside",
+  "description": "E-LOOP-001: `break` with no loop.",
+  "language-version": "1.0",
+  "spec": "§49.4.1 · §49.9",
+  "rationale": "§49.4.1: \"The compiler SHALL reject `break` that appears outside any enclosing loop with E-LOOP-001.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-001"
+    ],
+    "codeCounts": {
+      "E-LOOP-001": 1
+    }
+  }
+}

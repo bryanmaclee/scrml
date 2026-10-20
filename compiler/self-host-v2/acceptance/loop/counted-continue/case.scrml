@@ -1,0 +1,15 @@
+// §49.3.2: `continue` in a counted head runs the step.
+<program>
+
+    function f() -> int {
+        let s = 0
+        for (let i = 0; i < 5; i = i + 1) {
+            if (i == 2) { continue }
+            s = s + i
+        }
+        return s
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

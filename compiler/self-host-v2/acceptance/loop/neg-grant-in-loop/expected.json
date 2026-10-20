@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-grant-in-loop",
+  "description": "E-WRITE-NOT-GRANTED: an ungranted tape appended to in a loop.",
+  "language-version": "1.0",
+  "spec": "§49.3.5 · §66.12.6",
+  "rationale": "§49.3.5: \"Every write in a loop body … is checked against the target's grants exactly as anywhere else (§66.12.6). A loop does not widen what a tape grants.\"",
+  "expect": {
+    "codes": [
+      "E-WRITE-NOT-GRANTED"
+    ],
+    "codeCounts": {
+      "E-WRITE-NOT-GRANTED": 1
+    }
+  }
+}

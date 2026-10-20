@@ -172,7 +172,34 @@ ${
         Defer(body: ABlock, arrayLead: boolean, bare: boolean),
         // s451 (Ue) — `fail …` (§19.3).
         Fail(f: AFail),
+        // s469 — the ONE loop (§49, "one `for`"): a `for` statement with its
+        // head, and `break` / `continue` with their optional label ("" — none).
+        // Which loop a `break` leaves, and whether that is legal (E-LOOP-001 …
+        // -006), is analyze's (the loop-control pass).
+        For(f: AFor),
+        Break(label: string),
+        Continue(label: string),
     }
+
+    // s469 — a `for` (§49.2.1). `label` is its `label:` prefix ("" — none).
+    // The four heads (§49.2.4): no parentheses / `(;;)` is HForever; two
+    // top-level `;` is HCounted (`init` holds `let` declarations or assignments,
+    // as statements; `cond` `not` = empty, i.e. true; `step` the comma-listed
+    // step expressions); `binder of iterable` is HIter; anything else HCond.
+    // HIter's `mutable` is a `let` binder (§49.3.5: keywordless and `const` are
+    // const). A range is ONLY an iterable (§49.2.5: "A range is not a value"),
+    // so it is IterRange here and no expression kind can hold one.
+    export type AIterSrc:enum = {
+        IterOf(e: AExpr),
+        IterRange(lo: AExpr, hi: AExpr, inclusive: boolean),
+    }
+    export type AForHead:enum = {
+        HForever,
+        HCond(cond: AExpr),
+        HCounted(init: AStmt[], cond: AExpr | not, step: AExpr[]),
+        HIter(bind: ABind, mutable: boolean, src: AIterSrc),
+    }
+    export type AFor:struct = { nid: int, span: ASpan, label: string, head: AForHead, body: ABlock }
 
     // -------------------------------------------------------------------------
     // Type expressions and type declarations.

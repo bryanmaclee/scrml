@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-continue-label",
+  "description": "E-LOOP-004: `continue nope`.",
+  "language-version": "1.0",
+  "spec": "§49.4.2 · §49.9",
+  "rationale": "§49.4.2: \"… with E-LOOP-004.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-004"
+    ],
+    "codeCounts": {
+      "E-LOOP-004": 1
+    }
+  }
+}

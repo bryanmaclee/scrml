@@ -1,0 +1,12 @@
+// §49.4.1: `do … while` is retired.
+<program>
+
+    function f() -> int {
+        let n = 0
+        do { n = n + 1 } while (n < 3)
+        return n
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

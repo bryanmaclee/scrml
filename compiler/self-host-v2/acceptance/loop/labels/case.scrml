@@ -1,0 +1,17 @@
+// §49.2.2: `break outer` leaves both loops.
+<program>
+
+    function f() -> int {
+        let t = 0
+        outer: for (r of 0..5) {
+            for (c of 0..5) {
+                if (r * c == 6) { break outer }
+                t = t + 1
+            }
+        }
+        return t
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

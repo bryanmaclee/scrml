@@ -31,10 +31,34 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 664 | 7 |
-| LOW | 447 | 0 |
+| MED | 666 | 7 |
+| LOW | 449 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-loop-value-form-s469 — in the BOOTSTRAP, a `for` bound as a value (§49.6, `const xs = for (…) { lift e }`) and the Tier-0 `${ for … lift }` in markup are REFUSED (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (refused, fails closed)`
+
+<!-- @gap id=g-bootstrap-loop-value-form-s469 sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseKeywordPrimary: a `for` where a value stands is refused and read past as a loop) prov=brief:s469-boot-loops-1(value form optional for the first loop slice);spec:§49.6 -->
+
+The first loop slice (s469-boot-loops-1) builds the four heads as STATEMENTS. §49.6 rules 1-9 (any head, a fresh immutable tape, `break` keeps the prefix, the bound loop is a `break` boundary — E-LOOP-005 — and E-LOOP-007 for a bound loop that lifts nothing) are owed. The value positions §6.15 lists as owed when it lands (Tier-0 `for … lift`) are owed with it.
+
+### g-bootstrap-loop-wait-and-defer-s469 — in the BOOTSTRAP, a loop cannot wait or defer: a server call / waiting call / `?{}` in a loop head or body, a `defer` inside a loop body, and a loop inside a deferred body are REFUSED (E-BOOTSTRAP-UNSUPPORTED; check.scrml C19 re-checks the Core) — `NEW S469; MED; open (refused, fails closed)`
+
+<!-- @gap id=g-bootstrap-loop-wait-and-defer-s469 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(planLoop refuses every suspension point in a loop; loopDefer / loopFor refuse defer-in-loop and loop-in-defer);compiler/self-host-v2/check.scrml(C19 loopForbidden) prov=spec:§49.3.7(per-iteration binding across a suspension);spec:§49.12.7;spec:§19.16.2(break/continue exits) -->
+
+§49.12.7: "A server call in a loop body of a function is awaited once per iteration (§13)", and §49.3.7 makes each iteration's binding survive the suspension. The CPS split (lower.scrml's continuation pass) does not reach loops, so the slice refuses the wait at the point. The deferred exit is a block's `try … finally`, which JavaScript runs on `break` / `continue`, but no slice has graded it with loop control, so `defer` inside a loop and a loop inside a deferred body are refused too. The server half prints native `async`, where an awaited loop is straight-line; it is refused there as well for one rule on both sides.
+
+### g-bootstrap-loop-head-surface-s469 — in the BOOTSTRAP, parts of the §49 head surface are refused: compound assignment (`i += 1`, the SPEC's own counted-head spelling — write `i = i + 1`), a destructuring binder, `for … else` (§17.4a), a `key` clause, iterables other than a tape / a string / a range (map / set views, `Enum.variants`, generators), a field of an index read (`xs[i].f`), and a loop in a top-level `${ }` logic block — `NEW S469; LOW; open (refused, fails closed)`
+
+<!-- @gap id=g-bootstrap-loop-head-surface-s469 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseAssign compound-assignment refusal; destructAhead; forStmt for-else);compiler/self-host-v2/analyze.scrml(iterElemOf; resolveMember isIndexExpr guard) prov=brief:s469-boot-loops-1;spec:§49.2.1;spec:§49.3.5;spec:§49.13 -->
+
+Each is refused with a named diagnostic, never approximated. Also not built: narrowing past a loop-control exit (`if (x is not) { continue }` does not narrow `x` for the rest of the body — `stmtExits` counts only `return` / `fail`), so such a read is E-OPERAND-NOT-NARROWED (a false refusal, safe). The typer keeps no narrowing of a cell across a loop entry or exit at all (tDeferEnv's rule) — sound, possibly over-strict.
+
+### g-bootstrap-loop-codes-owed-s469 — loop-adjacent codes the SPEC does not settle for the bootstrap: a write to a `const` loop binder reports the bootstrap-local E-ASSIGN-CONST where §49.3.5 names E-ASSIGN-004; an iterate head over a non-iterable (`for (x of 5)`) has no §34 code (E-BOOTSTRAP-UNSUPPORTED); `for (… ; …)` / `for ()` are the bootstrap-local E-PARSE-FOR-HEAD — `NEW S469; LOW; open (ruling owed)`
+
+<!-- @gap id=g-bootstrap-loop-codes-owed-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveAssign E-ASSIGN-CONST; iterElemOf);compiler/self-host-v2/parse.scrml(parseFor E-PARSE-FOR-HEAD) prov=spec:§49.3.5("a write to it is E-ASSIGN-004");spec:§49.2.4("is a syntax error") -->
+
+The binder goes through the one local-binding path, so its write is reported as every `const` local's is. Owed: a ruling on whether E-ASSIGN-CONST becomes E-ASSIGN-004 everywhere (one code for one rule), and a §34 code for a non-iterable iterate head.
 
 ### g-bootstrap-let-struct-field-tape-no-let-on-sequence-s469 — in the BOOTSTRAP, a `let` struct field of tape type (`type Box:struct = { let xs: int[] }`) gets no E-GRANT-LET-ON-SEQUENCE and is writable: `let <b:Box=({ xs: [] })/>` + `@b.xs = [1]` compiles clean (setIn) — `NEW S469; MED; open`
 

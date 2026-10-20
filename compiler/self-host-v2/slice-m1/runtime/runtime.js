@@ -994,6 +994,37 @@ export function setIn(target, path, v) {
   target.set(go(target.peek(), 0));
 }
 
+// ---------------------------------------------------------------------------
+// s469 — reading a tape by position (SPEC §49.13), and the trap (§19.17).
+//
+// A TRAP is a defined runtime error that is not a scrml `!` error value: no
+// `!{}`, `?` or `match` sees it. It stops the current unit of execution at
+// the trapping expression (an event handler, a render, an effect, a server
+// request) — here, by throwing a `ScrmlTrap`, which carries the code and, for
+// E-INDEX-OUT-OF-RANGE-RT, the index, the length and the source location. It
+// is never caught here: it reaches the host's error reporting (the console;
+// on the server, a fixed 500).
+export class ScrmlTrap extends Error {
+  constructor(code, message, detail) {
+    super(code + ": " + message);
+    this.name = "ScrmlTrap";
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/** `xs[i]` (§49.13): the element when `0 <= i < xs.length`; otherwise the E-INDEX-OUT-OF-RANGE-RT trap — never `undefined`. */
+export function indexRead(xs, i, at) {
+  if (Number.isInteger(i) && i >= 0 && i < xs.length) return xs[i];
+  throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", "index " + i + " is out of range for a tape of length " + xs.length + " (" + at + ")", { index: i, length: xs.length, at });
+}
+
+/** `xs.at(i)` (§49.13): the element, or `not` when `i` is out of range — a negative `i` included (no counting from the end). Never a trap. */
+export function atRead(xs, i) {
+  if (Number.isInteger(i) && i >= 0 && i < xs.length) return xs[i];
+  return null;
+}
+
 /** Structural equality (§45) for `==` on structs and sequences. */
 export function eq(a, b) {
   if (Object.is(a, b)) return true;

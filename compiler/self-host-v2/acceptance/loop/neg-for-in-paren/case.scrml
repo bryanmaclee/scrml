@@ -1,0 +1,12 @@
+// §49.2.4: `for (… in …)` is not a scrml loop.
+<program>
+
+    function f() -> int {
+        let n = 0
+        for (x in [1, 2]) { n = n + 1 }
+        return n
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

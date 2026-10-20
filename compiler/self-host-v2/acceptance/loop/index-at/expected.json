@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-loop-index-at",
+  "description": "`[5, 6, 7][1]` is 6; `.at` gives `not` past the end and below zero.",
+  "language-version": "1.0",
+  "spec": "§49.13",
+  "rationale": "§49.13 rule 3: \"`xs.at(i)` has type `T | not`. It is the element when `0 <= i < xs.length`, and `not` otherwise (including any negative `i`).\"",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "6"
+      },
+      {
+        "selector": "#b",
+        "text": "some none none"
+      }
+    ]
+  }
+}
