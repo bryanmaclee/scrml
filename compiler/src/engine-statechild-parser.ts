@@ -81,6 +81,31 @@ import type {
 // genuine URL is exempted; a real `// comment` still strips). See the
 // `urlSlashesAt` doc-comment in block-splitter.js for the exemption criteria.
 import { urlSlashesAt } from "./block-splitter.js";
+// S469 (SECURITY) — every `${…}` block in an opener is bounded by acorn (`logicBlockClose`),
+// never by a brace counter: the text cut out is what the failable walk reads and codegen emits.
+import { logicBlockClose, braceBlockClose } from "./logic-block-extent.ts";
+
+/**
+ * S469 — the index one past a BODY `${…}` interpolation at `i` (a closer-finder's skip),
+ * bounded by acorn. A body interpolation may hold a markup value (`${ c ? <p>x</p> : "" }`),
+ * which acorn cannot lex; the closer-finders only locate STRUCTURE (where a state-child /
+ * `<onTransition>` / nested engine ends) — no code text is cut here — so such an
+ * interpolation falls back to the block splitter's brace-depth rule. Every CODE block in an
+ * engine (an `effect=`, an `if=` guard, an `<onTransition>` body, a message-arm block) is
+ * bounded by acorn alone and refused when acorn cannot read it.
+ */
+function skipInterpolation(s: string, i: number): number {
+  const close = logicBlockClose(s, i);
+  if (close >= 0) return close + 1;
+  let j = i + 2;
+  let depth = 1;
+  while (j < s.length && depth > 0) {
+    if (s[j] === "{") depth++;
+    else if (s[j] === "}") depth--;
+    j++;
+  }
+  return j;
+}
 
 /**
  * HTML void elements (mirrors `block-splitter.js` VOID_ELEMENTS). Their opener
@@ -268,16 +293,10 @@ export function parsePayloadBindings(afterTag: string): PayloadBinding[] {
             valueText = work.slice(start, k);
             if (k < work.length) k++; // consume closing quote
           } else if (c === "$" && work[k + 1] === "{") {
-            // ${...} — match balanced braces.
-            k += 2;
-            let depth = 1;
-            const start = k;
-            while (k < work.length && depth > 0) {
-              if (work[k] === "{") depth++;
-              else if (work[k] === "}") depth--;
-              if (depth === 0) break;
-              k++;
-            }
+            // ${...} — bounded by acorn (S469); an unreadable block runs to the end.
+            const close = logicBlockClose(work, k);
+            const start = k + 2;
+            k = close >= 0 ? close : work.length;
             valueText = work.slice(start, k);
             if (k < work.length) k++; // consume `}`
           } else if (c === "(") {
@@ -832,15 +851,11 @@ function parseOpenerAttributes(attrs: string): {
         continue;
       }
       // Logic-context `${...}` opener — consume a balanced brace block.
+      // S469 — bounded by acorn; an unreadable block runs to the end of the opener.
       if (c === "$" && attrs[j + 1] === "{") {
-        j += 2;
-        braceDepth = 1;
-        while (j < n && braceDepth > 0) {
-          const c2 = attrs[j];
-          if (c2 === "{") braceDepth++;
-          else if (c2 === "}") braceDepth--;
-          j++;
-        }
+        const close = logicBlockClose(attrs, j);
+        j = close >= 0 ? close + 1 : n;
+        braceDepth = 0;
         continue;
       }
       if (c === "(") { parenDepth++; j++; continue; }
@@ -1134,14 +1149,7 @@ function findOnTransitionCloser(bodyRaw: string, from: number): number {
     }
     // Skip ${...} interpolation
     if (bodyRaw.startsWith("${", i)) {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < bodyRaw.length && braceDepth > 0) {
-        if (bodyRaw[j] === "{") braceDepth++;
-        else if (bodyRaw[j] === "}") braceDepth--;
-        j++;
-      }
-      i = j;
+      i = skipInterpolation(bodyRaw, i); // S469 — acorn's extent
       continue;
     }
     // Closer: `</>` (generic) — closes the most-recently-opened element.
@@ -1234,14 +1242,7 @@ function findEngineCloser(bodyRaw: string, from: number): number {
     }
     // Skip ${...} interpolation
     if (bodyRaw.startsWith("${", i)) {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < bodyRaw.length && braceDepth > 0) {
-        if (bodyRaw[j] === "{") braceDepth++;
-        else if (bodyRaw[j] === "}") braceDepth--;
-        j++;
-      }
-      i = j;
+      i = skipInterpolation(bodyRaw, i); // S469 — acorn's extent
       continue;
     }
     // Closer: `</>` (generic) — closes the most-recently-opened element.
@@ -1740,16 +1741,13 @@ function findOpenerEnd(s: string, open: number): number {
     // B17.2 — `${...}` logic-context block. Consume balanced brace block
     // so `>` operators inside (e.g., `if=${@a > 0}`) don't terminate the
     // opener prematurely.
+    // S469 (SECURITY) — bounded by acorn, so a `}` / `>` in a string, comment, template or
+    // regular expression inside the block neither closes it nor ends the opener. A block acorn
+    // cannot bound leaves the opener unterminated (-1): the caller's malformed path.
     if (c === "$" && s[i + 1] === "{") {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < s.length && braceDepth > 0) {
-        const c2 = s[j];
-        if (c2 === "{") braceDepth++;
-        else if (c2 === "}") braceDepth--;
-        j++;
-      }
-      i = j;
+      const close = logicBlockClose(s, i);
+      if (close < 0) return -1;
+      i = close + 1;
       continue;
     }
     if (c === "(") depth++;
@@ -1857,14 +1855,9 @@ function findInsideOpenerColonPos(s: string, tagNameEnd: number, openerEnd: numb
     // a ternary `:` (`${a ? b : c}`) inside it is not mistaken for the body-
     // introducer.
     if (c === "$" && s[i + 1] === "{") {
-      i += 2;
-      let depth = 1;
-      while (i < openerEnd && depth > 0) {
-        const c2 = s[i]!;
-        if (c2 === "{") depth++;
-        else if (c2 === "}") depth--;
-        i++;
-      }
+      // S469 — bounded by acorn (the reader `findOpenerEnd` found `openerEnd` with).
+      const close = logicBlockClose(s, i);
+      i = close >= 0 ? close + 1 : openerEnd;
       prevChar = "}";
       continue;
     }
@@ -1923,14 +1916,7 @@ function findStateChildCloser(rulesRaw: string, from: number, tag: string): numb
     }
     // Skip ${...} interpolation
     if (rulesRaw.startsWith("${", i)) {
-      let j = i + 2;
-      let braceDepth = 1;
-      while (j < rulesRaw.length && braceDepth > 0) {
-        if (rulesRaw[j] === "{") braceDepth++;
-        else if (rulesRaw[j] === "}") braceDepth--;
-        j++;
-      }
-      i = j;
+      i = skipInterpolation(rulesRaw, i); // S469 — acorn's extent
       continue;
     }
     // A5-2 (§51.0.Q.1) — a nested `<engine ...>` opener inside a state-child
@@ -2327,26 +2313,12 @@ export function parseMessageArms(
     let bodyText = "";
     let isBlockBody = false;
     if (p < len && bodyRaw[p] === "{") {
-      // Balanced brace scan (string-aware) — capture WITH braces.
+      // S469 (SECURITY) — the block's extent is read by acorn (`braceBlockClose`: strings,
+      // comments, templates, regular expressions as JavaScript reads them), not a brace
+      // counter. Capture WITH braces.
       isBlockBody = true;
-      let depth = 1;
-      let r = p + 1;
-      let inDQ = false;
-      let inSQ = false;
-      let inTick = false;
-      while (r < len && depth > 0) {
-        const c = bodyRaw[r]!;
-        if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") r++; r++; continue; }
-        if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") r++; r++; continue; }
-        if (inTick) { if (c === "`") inTick = false; else if (c === "\\") r++; r++; continue; }
-        if (c === '"') { inDQ = true; r++; continue; }
-        if (c === "'") { inSQ = true; r++; continue; }
-        if (c === "`") { inTick = true; r++; continue; }
-        if (c === "{") { depth++; r++; continue; }
-        if (c === "}") { depth--; if (depth === 0) break; r++; continue; }
-        r++;
-      }
-      if (depth === 0) {
+      const r = braceBlockClose(bodyRaw, p);
+      if (r >= 0) {
         bodyText = bodyRaw.slice(p, r + 1).trim(); // include `{` .. `}`
         p = r + 1;
       } else {
@@ -2681,16 +2653,12 @@ export function parseEngineStateChildren(rulesRaw: string): EngineStateChildEntr
       // Locate the `${` after `effect=`.
       const dollarBrace = afterTagForRule.indexOf("${", effectIdx);
       if (dollarBrace >= 0) {
-        let j = dollarBrace + 2;
-        let braceDepth = 1;
-        while (j < afterTagForRule.length && braceDepth > 0) {
-          const ch = afterTagForRule[j];
-          if (ch === "{") braceDepth++;
-          else if (ch === "}") braceDepth--;
-          if (braceDepth === 0) break;
-          j++;
-        }
-        if (braceDepth === 0) {
+        // S469 (SECURITY, §19.4.3) — the body's extent is read by acorn (`logicBlockClose`), not
+        // a brace counter blind to strings / comments / templates / regular expressions. The text
+        // cut here is the text the failable walk (type-system `checkEngineRawBodies`) reads and
+        // codegen emits; a block acorn cannot bound is malformed (refused, below).
+        const j = logicBlockClose(afterTagForRule, dollarBrace);
+        if (j >= 0) {
           // `effectRaw` is the substring between `${` and the matching `}`.
           effectRaw = afterTagForRule.slice(dollarBrace + 2, j);
           // S182 (Fix 1) — an empty `${ }` body has nothing to run; treat as

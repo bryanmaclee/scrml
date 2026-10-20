@@ -102,7 +102,20 @@ export function hasHtmlLikeCommentText(text: string): boolean {
  */
 export function logicBlockClose(src: string, dollarIdx: number): number {
   if (typeof src !== "string" || src[dollarIdx] !== "$" || src[dollarIdx + 1] !== "{") return -1;
-  const start = dollarIdx + 2;
+  return blockCloseFrom(src, dollarIdx + 2);
+}
+
+/**
+ * The same reader for a block whose opening brace is `src[braceIdx]` (`{`): an engine
+ * `(state × message)` arm's block body `{ effects; .Target }`. Returns the index of its `}`, or -1.
+ */
+export function braceBlockClose(src: string, braceIdx: number): number {
+  if (typeof src !== "string" || src[braceIdx] !== "{") return -1;
+  return blockCloseFrom(src, braceIdx + 1);
+}
+
+/** The index of the `}` that closes a block whose payload starts at `start`; -1 when unreadable. */
+function blockCloseFrom(src: string, start: number): number {
   const asModule = closeUnder(GOALS[0], src, start);
   if (asModule < 0) return -1;
   const asScript = closeUnder(GOALS[1], src, start);
