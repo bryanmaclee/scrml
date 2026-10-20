@@ -21908,7 +21908,59 @@ Inside `${}` logic blocks, the following JavaScript standard globals are availab
 
 **Note:** `setTimeout`, `setInterval`, and `Promise` are available but their use inside `fn` bodies is prohibited by E-FN-005 (async/timing constraints). Use them in regular `function` bodies only.
 
-Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.
+~~Instance methods on these types (`.map()`, `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available on any value of the corresponding type.~~ *(struck S469: a value's methods are its type's, not the host's. A string's are D.1 below; a tape's are §66.12.6 (JavaScript's array method names are refused, `E-TAPE-JS-METHOD`); a map's are §59. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants". Direction of change: the struck sentence was the only text admitting the host methods wholesale; what it admitted beyond the typed tables is now unspecified, ⚑ OPEN in D.1.)*
+
+### D.1 Strings — the typed method table (S469)
+
+> **Amendment S469 — a string counts code points, everywhere.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
+> RULED — strings: code points everywhere, `.length` included" — *"Code points everywhere (Recommended)"* (*"A
+> string's `.length`, `slice`, `charAt`, index and iteration all count code points ("a😀".length → 2). It differs
+> from JS, and `.length` is O(n). Graphemes (combined emoji) are not addressed; a grapheme API may come later. Tape
+> `.length` is unaffected."*). **supersedes:** for strings, the sentence *"Instance methods on these types (`.map()`,
+> `.filter()`, `.has()`, `.get()`, `.set()`, `.push()`, `.slice()`, `.trim()`, `.startsWith()`, etc.) are available
+> on any value of the corresponding type"* (struck below), which handed every host string method through with
+> JavaScript's UTF-16 meaning; and §49.3.5's note *"`s.length` counts UTF-16 units"*, which the S469 string
+> iteration ruling had asked for and this ruling reverses. **Direction of change:** semantics-changed for every
+> string position and length (JavaScript counts UTF-16 units); newly-rejecting nothing by itself (see "Not in the
+> table"). The bootstrap implements it (`compiler/self-host-v2/analyze.scrml` `strMethodOp`, `methodSig`;
+> `compiler/self-host-v2/slice-m1/runtime/runtime.js` `strLength`, `strSlice`, `strCharAt`, `strIncludes`,
+> `strStartsWith`, `strEndsWith`, `strSplit`); impl#1 carries the divergence (§34.0) and still emits JavaScript's
+> UTF-16 methods.
+
+A `string` is a sequence of Unicode **code points**. Every position, length and match on a string counts code
+points: a surrogate pair is one position; a lone surrogate is a position of its own. A match (`includes`,
+`startsWith`, `endsWith`, a `split` separator) succeeds only where it starts and ends on a code-point boundary, so
+a lone-surrogate argument never matches half of a pair. Graphemes (a base character with combining marks, a
+multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A grapheme API may come later. A TAPE's
+`.length` counts its elements and is unaffected.
+
+| Member | Type | Meaning |
+|---|---|---|
+| `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
+| `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
+| `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
+| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. |
+| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points). |
+| `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
+| `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
+| `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
+| `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
+| `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
+
+**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
+`padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
+not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
+type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
+them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
+(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).
+
+**Normative statements:**
+
+- A string's `.length` SHALL be its number of code points.
+- Every string position (`s[i]`, `charAt`, `slice`) SHALL count code points, and a string iteration SHALL step by
+  code point.
+- A string match (`includes`, `startsWith`, `endsWith`, `split`) SHALL succeed only on code-point boundaries.
+- A tape's `.length` SHALL be its element count (unchanged).
 
 ---
 
@@ -34952,7 +35004,11 @@ behaviour) or UTF-16 units, and the type of `ch`.~~ *(RULED S469 — below.)*
 **Iterating a string (S469).** `for (ch of s)` over a `string` binds `ch` to each **Unicode code point** of `s`,
 in order, as a `string` holding that one code point (JavaScript's `for…of` behaviour: a surrogate pair is one
 step; a lone surrogate is a step of its own). `s[i]` follows: it is the code point at position `i` (§66.12.8).
-Note: `s.length` counts UTF-16 units, so it can differ from the number of steps the loop takes.
+~~Note: `s.length` counts UTF-16 units, so it can differ from the number of steps the loop takes.~~ *(struck S469 —
+`s.length` counts code points too, so it equals the number of steps: Appendix D.1. Provenance:
+ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included" — "Code points
+everywhere (Recommended)", which supersedes the iteration ruling's "Document that `s.length` counts UTF-16 units".
+Direction of change: semantics-changed.)*
 
 > **Amendment S469 — string iteration is by code point.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐
 > RULED — open items from the loops + tapes SPEC PRs (#1473, #1472)" — String iteration: *"Code points

@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 667 | 7 |
-| LOW | 456 | 0 |
+| LOW | 455 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -102,11 +102,13 @@ Fail closed by name. A discarded `fill` / `copyWithin` statement on a tape is al
 
 RULED (bryan, S469): every string position is a code point — `.length`, `slice`, `charAt`, `split`, iteration. The bootstrap now lowers a STRING's `.length` to Core `StrLength` (runtime `strLength`, client and server; a tape's `.length` is unchanged), and every match (`includes`, `startsWith`, `endsWith`, `split(sep)`) counts only where it starts and ends on a code-point boundary — chosen over refusing lone-surrogate literals, because an argument need not be a literal. The `length(…)` validator counts a string's code points too. Pinned by `slice-m4/strings-s469.test.js` (the failing idioms above, the runtime against `for…of`, the lone-surrogate cases). The SPEC text is tracked separately (`g-spec-string-methods-code-point-text-owed-s469`). **Owed to the loops lane (`s469-boot-loops-1`):** `for (ch of s)` and a range `0..s.length` must iterate code points, agreeing with `strLength` — this branch has no loops to test that against.
 
-### g-spec-string-methods-code-point-text-owed-s469 — SPEC text owed for the S469 "code points everywhere" ruling: Appendix D still sanctions the host string methods wholesale with JavaScript's UTF-16 semantics, §49.3.5 still carries the "⚑ OPEN" line on string iteration (and the S469 note that `s.length` counts UTF-16 units), and O65 (§66.22) is still listed open — `NEW S469; LOW; open (SPEC follow-up)`
+### g-spec-string-methods-code-point-text-owed-s469 — SPEC text owed for the S469 "code points everywhere" ruling: Appendix D still sanctions the host string methods wholesale with JavaScript's UTF-16 semantics, §49.3.5 still carries the "⚑ OPEN" line on string iteration (and the S469 note that `s.length` counts UTF-16 units), and O65 (§66.22) is still listed open — `NEW S469; LOW; RESOLVED S469 (s469-spec-followup)`
 
-<!-- @gap id=g-spec-string-methods-code-point-text-owed-s469 sev=LOW status=open locus=compiler/SPEC.md(Appendix D "Instance methods on these types … are available"; §49.3.5 "⚑ OPEN (not ruled): whether `for (ch of s)` over a `string` iterates code points"; §66.22 O65; §66.12.6 rule 3 "the order with no `cmp`: ⚑ O65") prov=ruling:user-voice-scrml.md(S469 "code points everywhere, `.length` included"; S469 "sort(): Natural order by type", "toSorted etc.: Refuse, one name each");review:s469-boot-strings-1(round 2, item 4) -->
+<!-- @gap id=g-spec-string-methods-code-point-text-owed-s469 sev=LOW status=resolved locus=compiler/SPEC.md(Appendix D "Instance methods on these types … are available"; §49.3.5 "⚑ OPEN (not ruled): whether `for (ch of s)` over a `string` iterates code points"; §66.22 O65; §66.12.6 rule 3 "the order with no `cmp`: ⚑ O65") prov=ruling:user-voice-scrml.md(S469 "code points everywhere, `.length` included"; S469 "sort(): Natural order by type", "toSorted etc.: Refuse, one name each");review:s469-boot-strings-1(round 2, item 4) -->
 
 The bootstrap implements the rulings (`g-spec-string-position-code-unit-vs-code-point-s469`, resolved). Owed in the SPEC: a string-method table replacing Appendix D's blanket sentence for strings, with every position and match by code point (`.length`, `slice`, `charAt`, `includes`, `startsWith`, `endsWith`, `split`); §49.3.5's OPEN line replaced by the ruling; O65 marked RULED (natural-order `sort()`; `toSorted` / `toReversed` / `with` refused, E-TAPE-JS-METHOD).
+
+RESOLVED S469 (s469-spec-followup): Appendix D.1 is the typed string-method table (every position, length and match by code point; the host-passthrough sentence struck); §49.3.5's OPEN line and its UTF-16 `.length` note are struck for the ruling; §66.12.8 rule 6 gives `s[i]`; §66.12.6 rule 3 and §66.22 record O65 RULED; `E-TAPE-JS-METHOD` has its §34 row. Still open in the SPEC: which further host string methods (`indexOf`, `replace`, `padStart`, …) the language admits (⚑ in Appendix D.1).
 
 ### g-bootstrap-local-tape-rebinding-not-grant-checked-s469 — in the BOOTSTRAP, rebinding a LOCAL tape is never grant-checked: `let out: int[] = …; out = out.sort();` and `out = [];` compile, though a local `let` grants a tape nothing, not even `replace` (O63) — `NEW S469 (pre-existing); LOW; open`
 
