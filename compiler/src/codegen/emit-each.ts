@@ -41,6 +41,12 @@ import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-
 import { guardDetachedListener } from "./detached-listener.ts";
 import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
+
+/** S469 — lazy (emit-control-flow imports this module's dependents): see `hasFailableMatchStamp`. */
+function hasFailableMatchStamp(node: unknown): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return (require("./emit-control-flow.ts") as { hasFailableMatchStamp: (n: unknown) => boolean }).hasFailableMatchStamp(node);
+}
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
@@ -2312,6 +2318,25 @@ function buildEachExprHandlerBody(preLowered: string, iterVarName: string): stri
     return `${rewriteIterValueExpr(preLowered, iterVarName)};`;
   }
 
+  return finishEachExprHandler(node, raw, preLowered, iterVarName);
+}
+
+/**
+ * S469 — `buildEachExprHandlerBody` for a value whose OWN node must be lowered (it carries a
+ * TS stamp the text re-parse would lose, `hasFailableMatchStamp`): a clone of the node with
+ * the row's `@.` / `as`-name idents rewritten structurally (`rewriteEachScopeInExprNode`).
+ */
+function buildEachExprHandlerBodyFromNode(exprNode: unknown, raw: string, preLowered: string, iterVarName: string): string {
+  const clone = structuredClone(exprNode) as any;
+  rewriteEachScopeInExprNode(clone, iterVarName);
+  return finishEachExprHandler(clone, raw.trim(), preLowered, iterVarName);
+}
+
+function finishEachExprHandler(node: any, raw: string, preLowered: string, iterVarName: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { emitExprField } = require("./emit-expr.ts") as {
+    emitExprField: (n: any, fb: string, c: Record<string, unknown>) => string;
+  };
   let lowered: string;
   try {
     lowered = emitExprField(node, raw, { mode: "client" });
@@ -2556,7 +2581,14 @@ function renderTemplateAttrToJs(
         // invoked, and an assignment LHS lowers to `_scrml_reactive_set` (was a
         // getter-on-LHS -> E-CODEGEN-INVALID-LOGIC). Bug-73 live-keying still wraps
         // this body below so the iter var resolves to the LIVE item at fire-time.
-        handlerBody = buildEachExprHandlerBody(preLowered, iterVarName);
+        // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — a value
+        // holding a `match` TS stamped as a match on a FAILABLE result is lowered from a CLONE of
+        // its own node (row idents rewritten structurally, as the statement-list path above
+        // does): re-parsing the text loses the stamp and compared the error object as a plain
+        // value — `<each …><button onclick=${ @msg = match check("wrong") {…} }>` logged in.
+        handlerBody = val.exprNode && typeof val.exprNode === "object" && hasFailableMatchStamp(val.exprNode)
+          ? buildEachExprHandlerBodyFromNode(val.exprNode, String(val.raw ?? ""), preLowered, iterVarName)
+          : buildEachExprHandlerBody(preLowered, iterVarName);
       }
     } else if (valKind === "variable-ref") {
       // `onclick=@handler` — reference a reactive/handler cell. Rewrite then
@@ -2871,8 +2903,26 @@ function serializeCallArgs(callRef: any, iterVarName: string): string {
  */
 function serializeCallArgsLowered(callRef: any, iterVarName: string): string {
   const args: any[] = Array.isArray(callRef?.args) ? callRef.args : [];
+  // S469 fix round 2 (H2) — an argument holding a `match` TS stamped as a match on a FAILABLE
+  // result (`onclick=say(match check(p) { … })` in a row) is lowered from a clone of its own
+  // node: the text lowering re-reads it without the stamp and compared the error object as a
+  // plain value (a wrong password logged in). Other arguments keep the text lowering.
+  const nodes: any[] | null = Array.isArray(callRef?.argExprNodes) && callRef.argExprNodes.length === args.length
+    ? callRef.argExprNodes : null;
   return args
-    .map((a) => lowerEachExpr(String(a ?? ""), iterVarName))
+    .map((a, i) => {
+      const n = nodes ? nodes[i] : null;
+      if (n && typeof n === "object" && hasFailableMatchStamp(n)) {
+        const clone = structuredClone(n);
+        rewriteEachScopeInExprNode(clone, iterVarName);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { emitExprField } = require("./emit-expr.ts") as {
+          emitExprField: (n: any, fb: string, c: Record<string, unknown>) => string;
+        };
+        return emitExprField(clone, String(a ?? ""), { mode: "client" });
+      }
+      return lowerEachExpr(String(a ?? ""), iterVarName);
+    })
     .join(", ");
 }
 

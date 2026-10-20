@@ -1,0 +1,23 @@
+{
+  "id": "error-failable-fn-value-passed-handled-neg",
+  "description": "A failable function passed as a VALUE (`applyOr(risky, 2)`) whose eventual call is handled where it happens (`f(n) !{ .Empty :> 0 }`) is a clean program: its failability travels with its type (§19.4.3, S469).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S469 \"Split + audit\" — a failable function MAY be used as a value (passed, returned, stored in a binding); every eventual call is checked",
+  "rationale": "§19.4.3 (S469): the call `f(n)` inside `applyOr` is a call of a failable function value and is handled by its `!{}`. impl#1 cannot follow a function value to its call and refuses the read `risky` (E-IMPL1-FAILABLE-FN-VALUE) — an impl#1 limitation, carried as g-impl1-failable-fn-value-refused-s469; the bootstrap implements the rule.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-002", "E-IMPL1-FAILABLE-FN-VALUE"]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-failable-fn-value-refused-s469",
+      "fails": {
+        "codes": [
+          "emitted:E-IMPL1-FAILABLE-FN-VALUE=1",
+          "forbidden:E-IMPL1-FAILABLE-FN-VALUE"
+        ]
+      }
+    }
+  }
+}

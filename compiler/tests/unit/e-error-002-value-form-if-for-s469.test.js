@@ -118,32 +118,44 @@ describe("A — an unhandled failable call through a value-form if/for is E-ERRO
   }
 });
 
+// S469 #1444 fix round 3 (PA decision): ONE reader of "a failable function read as a value" —
+// `refKind: "fn-value"` — reports E-IMPL1-FAILABLE-FN-VALUE (ruling:user-voice-scrml.md S469
+// "Split + audit": the language allows it; impl#1 cannot follow it). These lift-operand cases
+// were E-ERROR-002 ("lifted as a VALUE") before the two readers were unified; the code changed,
+// the refusal did not.
+const fnValue = (src) => compileSource(src).errors.filter((e) => e.code === "E-IMPL1-FAILABLE-FN-VALUE").length;
+
 describe("A2 — a failable function lifted as a VALUE is refused", () => {
   test("`lift check` then `g(p)`", () => {
     const r = compileSource(LOGIN("const g = if (p != \"\") { lift check } else { lift plain }\n        const ok = g(p)"));
-    const d = r.errors.filter((e) => e.code === "E-ERROR-002");
+    const d = r.errors.filter((e) => e.code === "E-IMPL1-FAILABLE-FN-VALUE");
     expect(d.length).toBeGreaterThanOrEqual(1);
-    expect(d.some((e) => /lifted as a VALUE/.test(e.message))).toBe(true);
+    expect(d.some((e) => /impl#1 cannot check a failable function used as a value/.test(e.message))).toBe(true);
   });
 
   test("module-level `const mg = if (true) { lift check } else { lift plain }`", () => {
-    expect(compileSource(LOGIN("const ok = mg(p)", "    const mg = if (true) { lift check } else { lift plain }")).codes).toContain("E-ERROR-002");
+    expect(compileSource(LOGIN("const ok = mg(p)", "    const mg = if (true) { lift check } else { lift plain }")).codes).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   });
 
   test("`match g(p)` on that binding", () => {
     const r = compileSource(LOGIN(
       "const g = if (p != \"\") { lift check } else { lift plain }\n        const ok = match g(p) { .Denied :> false\n        else :> true }"));
-    expect(r.codes).toContain("E-ERROR-002");
+    expect(r.codes).toContain("E-IMPL1-FAILABLE-FN-VALUE");
   });
 
   test("a ternary over the function, a lambda returning it, a value-form `for` lifting it", () => {
-    expect(e002(LOGIN("const g = if (p != \"\") { lift p ? check : plain } else { lift plain }\n        const ok = g(p)"))).toBeGreaterThanOrEqual(1);
-    expect(e002(LOGIN("const g = if (p != \"\") { lift () => check } else { lift () => plain }\n        const ok = g()(p)"))).toBeGreaterThanOrEqual(1);
-    expect(e002(LOGIN("const gs = for (const x of [p]) { lift check }\n        const ok = gs[0](p)"))).toBeGreaterThanOrEqual(1);
+    expect(fnValue(LOGIN("const g = if (p != \"\") { lift p ? check : plain } else { lift plain }\n        const ok = g(p)"))).toBeGreaterThanOrEqual(1);
+    expect(fnValue(LOGIN("const g = if (p != \"\") { lift () => check } else { lift () => plain }\n        const ok = g()(p)"))).toBeGreaterThanOrEqual(1);
+    expect(fnValue(LOGIN("const gs = for (const x of [p]) { lift check }\n        const ok = gs[0](p)"))).toBeGreaterThanOrEqual(1);
   });
 
   test("an alias of the function, lifted", () => {
-    expect(e002(LOGIN("const h = check\n        const g = if (p != \"\") { lift h } else { lift plain }\n        const ok = g(p)"))).toBeGreaterThanOrEqual(1);
+    expect(fnValue(LOGIN("const h = check\n        const g = if (p != \"\") { lift h } else { lift plain }\n        const ok = g(p)"))).toBeGreaterThanOrEqual(1);
+  });
+
+  test("one report per read: the lift-operand scan and the value walk do not both report it", () => {
+    const r = compileSource(LOGIN("const g = if (p != \"\") { lift check } else { lift plain }\n        const ok = true"));
+    expect(r.errors.filter((e) => e.code === "E-IMPL1-FAILABLE-FN-VALUE").length).toBe(1);
   });
 });
 
