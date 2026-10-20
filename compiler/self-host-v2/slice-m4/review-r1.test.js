@@ -45,7 +45,9 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
     expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
-    expect(codes(withFn(`function lp() {\n let s = @audit\n s.push(${E})\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    // s469-boot-strings-1: JavaScript's `push` is refused by NAME before anything else (§66.12.6 rule 3)
+    expect(codes(withFn(`function lp() {\n let s = @audit\n s.push(${E})\n }`))).toEqual(["E-TAPE-JS-METHOD"]);
+    expect(codes(withFn(`function lp() {\n let s = @audit\n s.append(${E})\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
     expect(codes(withFn(`function lp() {\n let s = @audit\n s.shift()\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(withFn(`function lp() {\n let s = @audit\n s[0].action = "x"\n }`)).length).toBeGreaterThan(0);
   });
@@ -222,11 +224,11 @@ describe("F7 — growing a FIXED-length sequence is provably an invariant break 
     const fixed = "<audit:Entry[append]=[]/>";
     // the fixture's own record() (push) and recordBySpread() (the spread shape) grow it too: 3 sites each time
     const inv = (src) => codes(src).filter((c) => c === "E-WRITE-INVARIANT").length;
-    expect(inv(withFn(`function g() { @audit.push(${E}) }`, fixed))).toBe(3);
+    expect(inv(withFn(`function g() { @audit.append(${E}) }`, fixed))).toBe(3);
     expect(inv(withFn(`function g() { @audit = [...@audit, ${E}] }`, fixed))).toBe(3);
-    expect(codes(withFn(`function g() { @audit.unshift(${E}) }`, "<audit:Entry[prepend]=[]/>"))).toContain("E-WRITE-INVARIANT");
+    expect(codes(withFn(`function g() { @audit.prepend(${E}) }`, "<audit:Entry[prepend]=[]/>"))).toContain("E-WRITE-INVARIANT");
   });
   test("the same writes on `Entry[free, append]` are fine", () => {
-    expect(codes(withFn(`function g() { @audit.push(${E})\n @audit = [...@audit, ${E}] }`))).toEqual([]);
+    expect(codes(withFn(`function g() { @audit.append(${E})\n @audit = [...@audit, ${E}] }`))).toEqual([]);
   });
 });

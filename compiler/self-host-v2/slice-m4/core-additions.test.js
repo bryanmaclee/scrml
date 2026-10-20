@@ -329,7 +329,7 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
   });
 
   test("C3: a removal the field does not grant is refused in Core; C9: a count other than an int ≥ 1, a shrink that is not a filter of the field", () => {
-    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop() }\n    function q() { @xs.push("z") }`));
+    const core = coreOf(seq("free, append, pop", `    function p() { @xs.pop() }\n    function q() { @xs.append("z") }`));
     const [pop, push] = walkCore(core, (n) => n.variant === "Write").map((n) => n.data);
     push.edit = "RemoveFront";
     push.value = { variant: "Lit", data: { lit: { variant: "Int", data: { v: 1 } } } };
@@ -422,7 +422,7 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
 // ===========================================================================
 describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Expr.SeqCall)", () => {
   test("as a value in markup: reactive", async () => {
-    const src = P(`    <xs:string[free, append]=(["a", "bb", "c"])/>\n    function add() { @xs.push("dd") }`,
+    const src = P(`    <xs:string[free, append]=(["a", "bb", "c"])/>\n    function add() { @xs.append("dd") }`,
       `        <p>\${@xs.filter(x => x.length > 1).length}</p>\n        <button onclick=add()>add</button>`);
     await loadProgram(coreOf(src), "lam-markup");
     expect($("main > p").textContent).toBe("1");

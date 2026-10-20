@@ -1,0 +1,36 @@
+{
+  "id": "acceptance-tapes-sort-reverse-join",
+  "description": "sort / reverse / join on tapes; the receiver is unchanged.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 3 · S469 sort ruling",
+  "rationale": "`[10, 9, 1, 100].sort()` is numeric (JS would give 1,10,100,9); strings by code point: `Zed` (U+005A) before `apple`, `éclair` (U+00E9) last.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#nums",
+        "text": "1 9 10 100 "
+      },
+      {
+        "selector": "#orig",
+        "text": "10 9 1 100 "
+      },
+      {
+        "selector": "#desc",
+        "text": "100 10 9 1 "
+      },
+      {
+        "selector": "#words",
+        "text": "Zed,apple,pear,éclair"
+      },
+      {
+        "selector": "#rev",
+        "text": "éclair,apple,Zed,pear"
+      },
+      {
+        "selector": "#w0",
+        "text": "pear,Zed,apple,éclair"
+      }
+    ]
+  }
+}

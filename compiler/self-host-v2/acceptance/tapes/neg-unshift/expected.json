@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-tapes-neg-unshift",
+  "description": "E-TAPE-JS-METHOD: `@log.unshift(\"x\");`.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 3 · §66.20 E-TAPE-JS-METHOD",
+  "rationale": "JavaScript's names are refused whatever the tape grants; a discarded `sort()` would do nothing.",
+  "expect": {
+    "codes": [
+      "E-TAPE-JS-METHOD"
+    ],
+    "codeCounts": {
+      "E-TAPE-JS-METHOD": 1
+    }
+  }
+}

@@ -1,0 +1,7 @@
+// `charAt` takes one argument.
+<program>
+    let <s:string="abc"/>
+    <main>
+        <p>${@s.charAt()}</p>
+    </main>
+</program>

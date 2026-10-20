@@ -1,0 +1,64 @@
+{
+  "id": "acceptance-strings-methods",
+  "description": "the string methods compute what they say; `charAt` / `slice` / `split(\"\")` count code points.",
+  "language-version": "1.0",
+  "spec": "Appendix D · S469 code-point ruling (user-voice S469 'open items from the loops + tapes SPEC PRs')",
+  "rationale": "Each method is a typed member call on a `string` receiver; a position counts code points, so the emoji is one position.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#up",
+        "text": "HELLO, WORLD"
+      },
+      {
+        "selector": "#lo",
+        "text": "hello, world"
+      },
+      {
+        "selector": "#inc",
+        "text": "true"
+      },
+      {
+        "selector": "#sw",
+        "text": "true"
+      },
+      {
+        "selector": "#ew",
+        "text": "false"
+      },
+      {
+        "selector": "#sl",
+        "text": "World"
+      },
+      {
+        "selector": "#sl2",
+        "text": "Hello"
+      },
+      {
+        "selector": "#neg",
+        "text": "World"
+      },
+      {
+        "selector": "#ch",
+        "text": "😀"
+      },
+      {
+        "selector": "#ch1",
+        "text": "ab"
+      },
+      {
+        "selector": "#past",
+        "text": "[]"
+      },
+      {
+        "selector": "#sp",
+        "text": "😀|a|b"
+      },
+      {
+        "selector": "#sp2",
+        "text": "a/b//c"
+      }
+    ]
+  }
+}

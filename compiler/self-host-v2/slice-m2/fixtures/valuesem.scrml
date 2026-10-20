@@ -3,7 +3,7 @@
     let <seen:int=0/>
     function log() {
         let before = @audit              // a snapshot (§66.10)
-        @audit.push("x")                 // an end-append edit, granted by [free, end]
+        @audit.append("x")                 // an end-append edit, granted by [free, end]
         @seen = before.length            // the snapshot did not grow
     }
     <main>

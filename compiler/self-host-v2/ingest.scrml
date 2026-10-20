@@ -505,6 +505,8 @@ ${
         const prop: string | not = strAt(n, "property")
         const o: LE = lowerExprAt(cx, n, "object")
         if (prop == "length") {
+            // s469: a string's `.length` counts code points (StrLength); a sequence's, its elements
+            if (isStrTy(o.ty)) return okE(Expr.Prim(PrimOp.StrLength, [o.e]), Type.Int, why.concat(o.why))
             if (hasLength(o.ty)) return okE(Expr.Prim(PrimOp.Length, [o.e]), Type.Int, why.concat(o.why))
         }
         return notYetE("expr: member access (other than `.length` of a string or sequence)")
@@ -1369,6 +1371,20 @@ ${
             .IsNot :> "IsNot"
             .Concat :> "Concat"
             .Length :> "Length"
+            .StrUpper :> "StrUpper"
+            .StrLower :> "StrLower"
+            .StrTrim :> "StrTrim"
+            .StrSlice :> "StrSlice"
+            .StrCharAt :> "StrCharAt"
+            .StrLength :> "StrLength"
+            .StrIncludes :> "StrIncludes"
+            .StrStartsWith :> "StrStartsWith"
+            .StrEndsWith :> "StrEndsWith"
+            .StrSplit :> "StrSplit"
+            .SortNum :> "SortNum"
+            .SortStr :> "SortStr"
+            .Reverse :> "Reverse"
+            .Join :> "Join"
             .IndexRead :> "IndexRead"
             .AtRead :> "AtRead"
         }
