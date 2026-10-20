@@ -853,3 +853,9 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
   a code-default display literal takes it back (`displayNodes`).
 - **A (int→string)** — held by the PA (owner reconsidering conversions): `g-bootstrap-int-to-string-conversion-unruled-s469`.
 - **Gates** — `slice-m4/strings-s469.test.js`; `acceptance/{strings,tapes,interp}` (25 cases) in `acceptance.test.js`.
+- **Follow-up round** (review LAND-W-F/U; bryan, S469: "code points everywhere, `.length` included") — a string's
+  `.length` is Core `StrLength` (code points; a tape's stays `Length`); `includes` / `startsWith` / `endsWith` /
+  `split(sep)` match only on code-point boundaries; a discarded `sort` / `reverse` in a ternary arm or `&&` / `||`
+  right operand is E-TAPE-JS-METHOD; new tapes (`sort` / `reverse` / `filter` / `map`) carry no grants; C9 checks a
+  PositionWrite's value (a map / sort / reverse of the field itself); the severity generator's PROVISIONAL table
+  throws on a struck / non-compile row, an `E-` downgrade, or a stale entry.
