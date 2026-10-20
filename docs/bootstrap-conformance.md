@@ -766,7 +766,7 @@ none
 - `defer/loop-per-iteration` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
 - `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
 - `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
-- `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `.push(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)
+- `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: a write to a part of the local `o` (`o.a = …`) is not in the bootstrap yet — Core rebinds a local only as a whole; build the new value and rebind it (`o = …`), or write the cell it came from
 - `defer/scope-redeclare-with-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
 - `defer/server-block-nested-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/server-callee-error-total-handler` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap

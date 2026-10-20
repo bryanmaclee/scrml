@@ -23,20 +23,37 @@ if (!globalThis.document) GlobalRegistrator.register();
 // dispatchEvent — happy-dom (like a browser) reports them as a window `error`
 // event. Capture them (and unhandled rejections) so a throwing handler FAILS the
 // test instead of vanishing (review F1).
-const pageErrors = [];
-if (!globalThis.__sliceM1ErrorCapture) {
-  globalThis.__sliceM1ErrorCapture = true;
-  window.addEventListener("error", (e) => pageErrors.push(e.error ?? e.message));
-  window.addEventListener("unhandledrejection", (e) => pageErrors.push(e.reason));
+//
+// ONE array for every instance of this module (s469): a combined run (`bun test
+// ./slice-m1 ./slice-m2 …`) can load this file more than once, and the listeners
+// are registered once per process — with a per-module array, every later
+// instance's takePageErrors / expectNoPageErrors read an array nothing fills,
+// so they silently checked NOTHING.
+const pageErrors = (globalThis.__sliceM1PageErrors ??= []);
+// The listeners are (re-)attached on EVERY use, never behind a once-per-process
+// flag: in a combined run the window's listener registry was observed to lose
+// them while every flag survived, so the capture silently stopped. The two
+// listener functions are shared (one pair per process), and adding the same
+// function again is a no-op (DOM `addEventListener`), so nothing is captured twice.
+const listeners = (globalThis.__sliceM1PageListeners ??= {
+  error: (e) => pageErrors.push(e.error ?? e.message),
+  rejection: (e) => pageErrors.push(e.reason),
+});
+function ensureCapture() {
+  window.addEventListener("error", listeners.error);
+  window.addEventListener("unhandledrejection", listeners.rejection);
 }
+ensureCapture();
 
 /** Drain the captured page errors. */
 export function takePageErrors() {
+  ensureCapture();
   return pageErrors.splice(0, pageErrors.length);
 }
 
 /** Throw if any page error was captured since the last drain (use in afterEach). */
 export function expectNoPageErrors() {
+  ensureCapture();
   const errs = takePageErrors();
   if (errs.length > 0) throw new Error("uncaught page error(s): " + errs.map((e) => String(e && e.stack ? e.message : e)).join(" | "));
 }

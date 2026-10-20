@@ -133,8 +133,14 @@ describe("index reads — `xs[i]` traps out of range, `xs.at(i)` is `T | not` (�
   test("out of range (past the end, negative): the trap stops the handler, naming the index and the length (runtime)", async () => {
     await load(P);
     for (const [b, i] of [["past", 3], ["neg", -1]]) {
+      // the test's OWN capture (not only the shared page-error capture, which a
+      // combined run once left dead): the handler's error reaches `window`
+      const errs = [];
+      const onErr = (e) => errs.push(e.error);
+      window.addEventListener("error", onErr);
       btn(b).dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-      const errs = takePageErrors();
+      window.removeEventListener("error", onErr);
+      takePageErrors();      // drained: the trap is this test's expected page error
       expect(errs.length).toBe(1);
       expect(errs[0].code).toBe("E-INDEX-OUT-OF-RANGE-RT");
       expect(errs[0].detail).toEqual({ index: i, length: 3, at: "t.scrml:5" });
@@ -255,5 +261,58 @@ describe("Core — the loop nodes and C19", () => {
     const brk = JSON.parse(JSON.stringify(loop)).data.body.stmts[1].data.thenB.stmts[0];
     f.body.stmts.splice(f.body.stmts.length - 1, 0, brk);
     expect(mods.check.checkCore(r.core).join("\n")).toContain("C19");
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
+  test("HIGH 1: junk in a condition head is reported and the head is skipped forward — never compiled as `while (c)`", () => {
+    const r = run(fnProg(`        let c = 0\n        for (c < 3 c) { c = c + 1 }\n        return c`));
+    expect([...new Set(r.diags.map((d) => d.code))]).toEqual(["E-PARSE-EXPECTED"]);
+    expect(r.core).toBeFalsy();
+    expect(codes(fnProg(`        for (true q) { }\n        return 1`))).toEqual(["E-PARSE-EXPECTED"]);
+  });
+  test("HIGH 1: node ids are not reused after the head's error (no two expression nodes share an id)", () => {
+    const f = mods.parse.parseFile("t.scrml", fnProg(`        let c = 0\n        for (c < 3 c) { c = c + 1 }\n        return c`), 0);
+    const ids = [];
+    const walk = (x) => {
+      if (x && typeof x === "object") {
+        if (typeof x.nid === "number" && x.k && x.span) ids.push(x.nid);
+        for (const v of Object.values(x)) walk(v);
+      }
+    };
+    walk(f);
+    expect(ids.length).toBeGreaterThan(5);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+  test("HIGH 1 (audit): junk in an iterate / counted head is E-PARSE-EXPECTED, not a compiled loop", () => {
+    expect(fnCodes(`        let s = 0\n        for (x of [1] q) { s = s + x }\n        return s`)).toEqual(["E-PARSE-EXPECTED"]);
+    expect(fnCodes(`        let s = 0\n        for (let i = 0; i < 2; i = i + 1 q) { s = s + 1 }\n        return s`)).toEqual(["E-PARSE-EXPECTED"]);
+  });
+  test("HIGH 2: a field / element write through a local is refused, never a rebinding of the whole local", () => {
+    const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
+    expect(codes(prog(P, `        <button onclick={ for (let p of @ps) { p.name = "z" } }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(P, `        <button onclick={ let p = @ps[0]; p.name = "z" }>b</button>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(P + `\n    function g() -> string {\n        let q: P = { name: "q" }\n        q.name = "z"\n        return q.name\n    }`, `        <p>\${g()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(prog(`    function g() -> int {\n        let ys: int[] = [1]\n        ys[0] = 2\n        return 1\n    }`, `        <p>\${g()}</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+  test("LOW: `for (c < 3) (c) {` is E-CONDITION-HEAD-UNPARENTHESIZED; `0..3 q` and `1..=` at the end are plain syntax errors", () => {
+    expect(fnCodes(`        let c = 0\n        for (c < 3) (c) { c = c + 1 }\n        return c`)).toContain("E-CONDITION-HEAD-UNPARENTHESIZED");   // §49.2.3: rejection only — what follows parses as it stands
+    expect(fnCodes(`        let c = 0\n        for (c) + 1 { c = c + 1 }\n        return c`)).toContain("E-CONDITION-HEAD-UNPARENTHESIZED");
+    expect(fnCodes(`        let s = 0\n        for (i of 0..3 q) { s = s + 1 }\n        return s`)).toEqual(["E-PARSE-EXPECTED"]);
+    expect(codes(`<program>\n    function f() -> int {\n        for (i of 1..=`)).not.toContain("E-RANGE-OUTSIDE-LOOP-HEAD");
+  });
+  test("LOW: `for (const i = 0; …)` is reported once (E-PARSE-FOR-HEAD), with no E-ASSIGN-CONST cascade", () => {
+    expect(fnCodes(`        let s = 0\n        for (const i = 0; i < 2; i = i + 1) { s = s + 1 }\n        return s`)).toEqual(["E-PARSE-FOR-HEAD"]);
+  });
+  test("the shared page-error capture is live (a throwing listener is captured)", () => {
+    takePageErrors();
+    const b = document.createElement("button");
+    document.body.appendChild(b);
+    b.addEventListener("click", () => { throw new Error("probe"); });
+    b.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const errs = takePageErrors();
+    expect(errs.map((e) => String(e && e.message))).toEqual(["probe"]);
+    b.remove();
   });
 });

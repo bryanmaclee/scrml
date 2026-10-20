@@ -851,3 +851,8 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
   `ScrmlTrap` E-INDEX-OUT-OF-RANGE-RT naming index and length; `rt.atRead` gives `null` (`not`).
 - **Gates** — slice-m4 `loops-s469.test.js` (33), acceptance `loop/*` (20: 7 runtime, 13 exact-code), all slices 2702 pass.
 - **Not built** — see known-gaps `g-bootstrap-loop-value-form-s469`, `-loop-wait-and-defer-s469`, `-loop-head-surface-s469`, `-loop-codes-owed-s469`.
+- **Review round (FIX)** — parseFor's condition head rebuilt its state from `t` after a diagnostic (dropped it, rewound the
+  node ids: `for (c < 3 c)` compiled to `while (c < 3) { c = c + null }`); every head now closes FORWARD (`closeHead`).
+  A field / element write through a local (`p.name = v`, `ys[0] = v`) was lowered as a rebinding of the whole local — now
+  refused (E-BOOTSTRAP-UNSUPPORTED; slice-m2 typer R3-H1 pins moved). `slice-m1/load-program.js`'s page-error capture was
+  DEAD in a combined slice run (listeners lost, flag kept): re-attached on every use, one shared array. Combined run 2709 pass.

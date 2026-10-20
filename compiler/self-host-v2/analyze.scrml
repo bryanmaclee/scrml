@@ -6232,6 +6232,10 @@ ${
         let st: AS = rp.st
         const l: LocalB | not = rp.local
         if (l is given) {
+            // s469 review: a write to a PART of a local (`p.name = v`, `ys[0] = v`) is not a
+            // rebinding of the local — Core has no field or element write of a local, and
+            // lowering it as `p = v` replaced the whole value. Refused, never approximated.
+            if (exprName(target) == "") return addDiag(resolveExpr(env, value, not, st).st, env.file, target.span, "E-BOOTSTRAP-UNSUPPORTED", "a write to a part of the local `" + l.name + "` (`" + placeKey(target) + " = …`) is not in the bootstrap yet — Core rebinds a local only as a whole; build the new value and rebind it (`" + l.name + " = …`), or write the cell it came from")
             if (!l.mutable) st = addDiag(st, env.file, target.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
             st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s))
             return resolveExpr(env, value, l.ty, st).st

@@ -1739,7 +1739,7 @@ ${
         if (!isP(t2, ")")) {
             const bad: PTok = cur(t2)
             t2 = diagAt(t2, "E-PARSE-EXPECTED", "expected `)` to end the `for` condition, found `" + bad.text + "`", bad)
-            t2 = advN(t, hs.close)
+            t2 = toHeadClose(t2)       // forward from t2: its diagnostics and node ids are kept
         }
         t2 = adv(t2)
         if (condContinues(t2)) {
@@ -1752,11 +1752,13 @@ ${
     }
 
     // §49.2.3 (E-CONDITION-HEAD-UNPARENTHESIZED): after the head's `)`, an
-    // operator that continues the condition — the §34 row's conservative set.
+    // operator that continues the condition. Wider than the §34 row's set for
+    // `if` / `while`: a `for` body is always braced (§49.2.1), so `+ - / ( . [`
+    // cannot begin a braceless body here.
     fn condContinues(tp: TP) -> boolean {
         const t: PTok = cur(tp)
         if (t.cls != TC.Punct) return false
-        return ["<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?"].indexOf(t.text) >= 0
+        return ["<", "<=", ">", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "*", "%", "?", "+", "-", "/", "(", ".", "["].indexOf(t.text) >= 0
     }
 
     // A built `for` (§49.2.1). `for-else` (§17.4a) after an iterate head is
@@ -1794,7 +1796,7 @@ ${
         const bind: ABind = { nid: t.nid, span: mkSpan(bt.start, bt.end), name: bt.v }
         t = adv(adv(bumpId(t)))
         const src: RSrc = parseIterSrc(t)
-        const body: RBlock = parseLoopBody(expectP(src.tp, ")"))
+        const body: RBlock = parseLoopBody(closeHead(src.tp))
         return forStmt(body.tp, start, label, AForHead.HIter(bind, mutable, src.src), body.b)
     }
 
@@ -1812,8 +1814,32 @@ ${
         if (!isRangeTok(lo.tp)) return rangeNotWhole(lo.tp, cur(lo.tp))
         const inclusive: boolean = isP(lo.tp, "..=")
         const hi: RExpr = parseBinary(adv(lo.tp), 6)
-        if (!isP(hi.tp, ")")) return rangeNotWhole(hi.tp, cur(lo.tp))
-        return { src: AIterSrc.IterRange(lo.e, hi.e, inclusive), tp: hi.tp }
+        if (isP(hi.tp, ")")) return { src: AIterSrc.IterRange(lo.e, hi.e, inclusive), tp: hi.tp }
+        if (hi.tp.diags.length == lo.tp.diags.length && continuesExpr(hi.tp)) return rangeNotWhole(hi.tp, cur(lo.tp))
+        const re: RExpr = mkE(hi.tp, cur(lo.tp).start, AExprK.Recovered)
+        return { src: AIterSrc.IterOf(re.e), tp: re.tp }
+    }
+
+    // An operator that would continue an expression (a binary operator, `?`).
+    fn continuesExpr(tp: TP) -> boolean {
+        if (binPrec(tp) > 0) return true
+        return isP(tp, "?")
+    }
+
+    // At a head's closing `)`: past it. Anything else there is a syntax error,
+    // reported once, and the head is skipped FORWARD to its `)` — the state is
+    // never rebuilt from an earlier one (that would drop the diagnostic and
+    // rewind the node ids).
+    fn closeHead(tp: TP) -> TP {
+        if (isP(tp, ")")) return adv(tp)
+        let t: TP = tp
+        if (!atEnd(t)) {
+            const bad: PTok = cur(t)
+            t = diagAt(t, "E-PARSE-EXPECTED", "expected `)` to end the `for` head, found `" + bad.text + "`", bad)
+        }
+        t = toHeadClose(t)
+        if (isP(t, ")")) return adv(t)
+        return t
     }
 
     fn rangeNotWhole(tp: TP, at: PTok) -> RSrc {
@@ -1873,7 +1899,7 @@ ${
             t = diagAt(t, "E-PARSE-FOR-HEAD", "a counted head declares its counters with `let` — the step rebinds them (§49.2.1 `for-init ::= 'let' declarator …`)", ck)
         }
         if (isWord(t, "let") || isWord(t, "const")) {
-            const rd: RStmts = parseForDecls(t)
+            const rd: RStmts = parseForDecls(t, true)
             init = rd.ss
             t = rd.tp
         } else if (!isP(t, ";")) {
@@ -1901,14 +1927,13 @@ ${
                 going = false
             }
         }
-        const body: RBlock = parseLoopBody(expectP(t, ")"))
+        const body: RBlock = parseLoopBody(closeHead(t))
         if (init.length == 0 && cond is not && step.length == 0) return forStmt(body.tp, start, label, AForHead.HForever, body.b)
         return forStmt(body.tp, start, label, AForHead.HCounted(init, cond, step), body.b)
     }
 
     // `let a = 0, b: int = 1` — each declarator its own Local statement.
-    fn parseForDecls(tp: TP) -> RStmts {
-        const mutable: boolean = isWord(tp, "let")
+    fn parseForDecls(tp: TP, mutable: boolean) -> RStmts {
         let t: TP = adv(tp)
         let out: AStmt[] = []
         let going = true
