@@ -5876,7 +5876,15 @@ ${
         let recv: string = "xs"
         if (at != "") recv = at
         if (fix != "") return refuseMethod(env, e, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants)", args, ro.st).st
-        return refuseMethod(env, e, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` returns a NEW tape and leaves `" + recv + "` unchanged, so as a statement it does nothing (§66.12.6 rule 3) — write `" + recv + " = " + recv + "." + m.method + "(…);` (needs `writable`), or bind the result", args, ro.st).st
+        return refuseMethod(env, e, "E-TAPE-JS-METHOD", discardedMessage(at, m.method, "as a statement"), args, ro.st).st
+    }
+
+    // The trigger-(b) message: write-back is offered only for a PLACE receiver
+    // (`@xs = @xs.sort(…);`); any other receiver (`@s.split(",").reverse();`)
+    // has nothing to write back to — bind the result.
+    fn discardedMessage(at: string, method: string, where: string) -> string {
+        if (at == "") return "`." + method + "(…)` returns a NEW tape, and its value is discarded " + where + ", so it does nothing (§66.12.6 rule 3) — bind the result (`const t = …." + method + "(…);`)"
+        return "`" + at + "." + method + "(…)` returns a NEW tape and leaves `" + at + "` unchanged, and its value is discarded " + where + ", so it does nothing (§66.12.6 rule 3) — write `" + at + " = " + at + "." + method + "(…);` (needs `writable`), or bind the result"
     }
 
     // s469 F/U-4 — a statement whose VALUE is discarded through a ternary or a
@@ -5897,9 +5905,7 @@ ${
                         const ot: Type | not = resolveExpr(env, m.obj, not, st).x.ty
                         if (ot is given) {
                             if (seqElem(ot) is given) {
-                                let recv: string = placeKey(m.obj)
-                                if (recv == "") recv = "xs"
-                                st = addDiag(st, env.file, b.span, "E-TAPE-JS-METHOD", "`" + recv + "." + m.method + "(…)` returns a NEW tape and leaves `" + recv + "` unchanged, and this branch's value is discarded, so it does nothing (§66.12.6 rule 3) — write `" + recv + " = " + recv + "." + m.method + "(…);` (needs `writable`), or bind the result")
+                                st = addDiag(st, env.file, b.span, "E-TAPE-JS-METHOD", discardedMessage(placeKey(m.obj), m.method, "in this branch"))
                             }
                         }
                     }

@@ -102,6 +102,48 @@ describe("B — string methods are typed member calls", () => {
       expect([s, rt.strSplit(s, "").length]).toEqual([s, n]);
     }
   });
+  test("round 3 (runtime): the code-point helpers agree with a code-point REFERENCE on random strings (surrogates, pairs, ASCII, regex metacharacters)", async () => {
+    const rt = await import("../slice-m1/runtime/runtime.js");
+    const cps = (s) => [...s];
+    const refIndex = (a, b, from) => {
+      for (let i = from; i + b.length <= a.length; i++) if (b.every((c, j) => a[i + j] === c)) return i;
+      return -1;
+    };
+    const refIncludes = (s, t) => refIndex(cps(s), cps(t), 0) >= 0;
+    const refSplit = (s, t) => {
+      const a = cps(s), b = cps(t), out = [];
+      let start = 0, i = refIndex(a, b, 0);
+      while (i >= 0) { out.push(a.slice(start, i).join("")); start = i + b.length; i = refIndex(a, b, start); }
+      out.push(a.slice(start).join(""));
+      return out;
+    };
+    const A = ["a", "b", "😀", "\uD83D", "\uDE00", ".", "*", "(", "\\", "$", "|", "/", "-", "é"];
+    let seed = 12345;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const str = (max) => { let s = ""; const n = rnd(max + 1); for (let i = 0; i < n; i++) s += A[rnd(A.length)]; return s; };
+    for (let k = 0; k < 3000; k++) {
+      const s = str(10), t = str(3);
+      expect([s, t, rt.strIncludes(s, t)]).toEqual([s, t, refIncludes(s, t)]);
+      if (t !== "") expect([s, t, rt.strSplit(s, t)]).toEqual([s, t, refSplit(s, t)]);
+      const n = cps(s).length;
+      expect([s, rt.strLength(s)]).toEqual([s, n]);
+      const i = rnd(n + 2) - 1;
+      expect([s, i, rt.strCharAt(s, i)]).toEqual([s, i, i >= 0 && i < n ? cps(s)[i] : ""]);
+    }
+  });
+  test("round 3 (runtime): includes / split are linear on adversarial input (the pre-fix search took ~350 ms here)", async () => {
+    const rt = await import("../slice-m1/runtime/runtime.js");
+    const s = "😀".repeat(1e5);
+    const t = "\uDE00" + "😀".repeat(1e4) + "\uD83D";
+    const t0 = performance.now();
+    expect(rt.strIncludes(s, t)).toBe(false);
+    expect(rt.strSplit(s, t)).toEqual([s]);
+    const big = "a😀".repeat(5e4);
+    let n = 0;
+    for (let i = 0; i < 200; i++) n += rt.strCharAt(big, i).length;
+    expect(n).toBe(300);
+    expect(performance.now() - t0).toBeLessThan(150);       // generous: about 5 ms measured
+  });
   test("F/U-2 (runtime): includes / startsWith / endsWith / split match only on code-point boundaries — a lone surrogate never matches half of an astral character", async () => {
     const rt = await import("../slice-m1/runtime/runtime.js");
     const hi = "\uD83D", lo = "\uDE00";            // the two halves of 😀
@@ -117,6 +159,7 @@ describe("B — string methods are typed member calls", () => {
     expect(rt.strSplit("a😀b😀c", "😀")).toEqual(["a", "b", "c"]);
     expect(rt.strSplit("a,b,,c", ",")).toEqual(["a", "b", "", "c"]);
     expect(rt.strIncludes("abc", "")).toBe(true);
+    expect(rt.strSplit("x" + hi + "y" + hi, hi)).toEqual(["x", "y", ""]);   // lone surrogates split as whole code points
     expect(() => rt.strSlice("abc", 1.5)).toThrow("not an int");
     expect(() => rt.strCharAt("abc", "1")).toThrow("not an int");
   });
@@ -202,6 +245,12 @@ describe("C — tape functions return a NEW tape; JavaScript's names are refused
     visit(core);
     expect(grafted).toBe(1);
     expect(mods.check.checkCore(core).join("\n")).toContain("C9");
+  });
+  test("round 3: a discarded sort / reverse on a NON-place receiver says bind the result (no write-back to offer)", () => {
+    const fn = (body) => prog(S + `\n    function go() {\n        ${body}\n    }`, `        <button onclick=go()>go</button>`);
+    const m = diag(fn(`@s.split(",").reverse();`), "E-TAPE-JS-METHOD")?.message ?? "";
+    expect(m).toContain("bind the result");
+    expect(m).not.toContain("writable");
   });
   test("F/U-8: the arity message of `sort` names its two forms", () => {
     expect(diag(prog(T, `        <p>\${@xs.sort((a, b) => a - b, 1).length}</p>`), "E-CALL-ARITY")?.message).toContain("no argument (the natural order) or one comparator");

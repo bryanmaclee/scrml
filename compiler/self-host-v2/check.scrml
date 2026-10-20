@@ -2295,7 +2295,7 @@ ${
         if (problem != "") out = out.concat(["C3: " + where + ": " + problem])
         const cp: string = checkProblem(p, f, edit, value, check)
         if (cp != "") out = out.concat(["C6: " + where + ": " + cp])
-        const rv: string = removalValueProblem(d.sym, owner.idx, edit, value)
+        const rv: string = removalValueProblem(d.sym, owner.idx, inst, edit, value)
         if (rv != "") out = out.concat(["C9: " + where + ": " + rv])
         return out
     }
@@ -2304,7 +2304,7 @@ ${
     // removed (an Int literal >= 1); RemoveAnywhere carries the new value, which
     // must be `SeqCall(Filter, <this field>, f)` — a filter of the field itself,
     // so a shrink grant can never carry an arbitrary replace.
-    fn removalValueProblem(d: Sym, idx: int, edit: EditKind, value: Expr) -> string {
+    fn removalValueProblem(d: Sym, idx: int, inst: InstRef, edit: EditKind, value: Expr) -> string {
         return match edit {
             .RemoveEnd :> countProblem(value)
             .RemoveFront :> countProblem(value)
@@ -2313,7 +2313,7 @@ ${
             .Append :> ""
             .Prepend :> ""
             .Anywhere :> ""
-            .PositionWrite :> positionProblem(d, idx, value)
+            .PositionWrite :> positionProblem(d, idx, inst, value)
             .FieldAt(path: x) :> ""
             .Transition :> ""
             .ElemAt(index: x) :> ""
@@ -2375,11 +2375,11 @@ ${
     // `Prim(SortNum | SortStr | Reverse, [<this field>])`. So a `writable`
     // grant can never carry an arbitrary replace (any other value, a grow or a
     // shrink, another field's tape).
-    fn positionProblem(d: Sym, idx: int, v: Expr) -> string {
+    fn positionProblem(d: Sym, idx: int, inst: InstRef, v: Expr) -> string {
         const bad: string = "a position write's value is not a map / sort / reverse of the field"
         return match v {
-            .SeqCall(op: op, seq: sq) :> seqPositionOf(d, idx, op, sq)
-            .Prim(op: op, args: xs) :> primPositionOf(d, idx, op, xs)
+            .SeqCall(op: op, seq: sq) :> seqPositionOf(d, idx, inst, op, sq)
+            .Prim(op: op, args: xs) :> primPositionOf(d, idx, inst, op, xs)
             .Lit(lit: x) :> bad
             .Local(sym: x) :> bad
             .Read(place: x) :> bad
@@ -2397,23 +2397,27 @@ ${
         }
     }
 
-    fn seqPositionOf(d: Sym, idx: int, op: SeqFn, sq: Expr) -> string {
-        if (op == SeqFn.Filter) return "a position write's value is a filter (a shrink), not a map / sort of the field"
-        return fieldItself(d, idx, sq, "a position write")
+    // Only a map and a comparator sort keep the length (a filter shrinks).
+    fn seqPositionOf(d: Sym, idx: int, inst: InstRef, op: SeqFn, sq: Expr) -> string {
+        return match op {
+            .Map :> fieldItself(d, idx, inst, sq, "a position write")
+            .SortBy :> fieldItself(d, idx, inst, sq, "a position write")
+            .Filter :> "a position write's value is a filter (a shrink), not a map / sort of the field"
+        }
     }
 
-    fn primPositionOf(d: Sym, idx: int, op: PrimOp, xs: Expr[]) -> string {
+    fn primPositionOf(d: Sym, idx: int, inst: InstRef, op: PrimOp, xs: Expr[]) -> string {
         if (op != PrimOp.SortNum && op != PrimOp.SortStr && op != PrimOp.Reverse) return "a position write's value is not a map / sort / reverse of the field"
         if (xs.length != 1) return "a position write's sort / reverse has " + xs.length + " operands"
-        return fieldItself(d, idx, xs[0], "a position write")
+        return fieldItself(d, idx, inst, xs[0], "a position write")
     }
 
-    // "" when `sq` reads field `idx` of `d` itself (filterOf's rule).
-    fn fieldItself(d: Sym, idx: int, sq: Expr, what: string) -> string {
+    // "" when `sq` reads the SAME place the write targets: field `idx` of `d`
+    // through the write's own instance (not another instance's field).
+    fn fieldItself(d: Sym, idx: int, inst: InstRef, sq: Expr, what: string) -> string {
         const k: string = readKey(sq)
-        const pre: string = "<" + d.hint + "#" + d.id + ">@"
-        const tail: string = "." + d.id + ":" + idx
-        if (k.indexOf(pre) != 0 || k.substring(k.length - tail.length) != tail) return what + " reads " + k + ", not the field it writes"
+        const want: string = placeKeyOf(d, inst, [{ owner: d, idx: idx }])
+        if (k != want) return what + " reads " + k + ", not the place it writes (" + want + ")"
         return ""
     }
 

@@ -1025,8 +1025,15 @@ function codePoints(s) {
 
 /** A string's `.length`: its number of code points. */
 export function strLength(s) {
-  let n = 0;
-  for (const _ of s) n++;
+  // the UTF-16 length less one per surrogate PAIR (a lone surrogate is a code point of its own)
+  let n = s.length;
+  for (let j = 0; j + 1 < s.length; j++) {
+    const c = s.charCodeAt(j);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = s.charCodeAt(j + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { n--; j++; }
+    }
+  }
   return n;
 }
 
@@ -1056,9 +1063,15 @@ export function strSlice(s, from, to) {
 /** `s.charAt(i)`: the code point at position `i`, or `""` when there is none. */
 export function strCharAt(s, i) {
   requireInt(i, "charAt");
-  const cps = codePoints(s);
-  if (i < 0 || i >= cps.length) return "";
-  return cps[i];
+  if (i < 0) return "";
+  // walk code points without building them: `codePointAt` reads a pair as one (> 0xFFFF, two units)
+  let k = 0;
+  for (let j = 0; j < s.length; k++) {
+    const w = s.codePointAt(j) > 0xffff ? 2 : 1;
+    if (k === i) return s.slice(j, j + w);
+    j += w;
+  }
+  return "";
 }
 
 /** Is UTF-16 index `i` of `s` a code-point boundary (not between the two halves of a surrogate pair)? */
@@ -1069,19 +1082,19 @@ function atBoundary(s, i) {
   return !(hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff);
 }
 
-/** The first UTF-16 index at or after `from` where `t` occurs in `s` on code-point boundaries, or -1. */
-function boundaryIndexOf(s, t, from) {
-  let i = s.indexOf(t, from);
-  while (i >= 0) {
-    if (atBoundary(s, i) && atBoundary(s, i + t.length)) return i;
-    i = s.indexOf(t, i + 1);
-  }
-  return -1;
+/**
+ * The needle `t` as a `u`-flag RegExp: the engine then reads both strings as CODE POINTS, so a match
+ * starts and ends on code-point boundaries by construction, and a lone surrogate in `t` matches only
+ * a lone surrogate in the string — never half of a pair. Linear like a native search (a candidate is
+ * never re-scanned after a rejected full compare). Only the u-mode syntax characters are escaped.
+ */
+function codePointNeedle(t) {
+  return new RegExp(t.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&"), "u");
 }
 
 /** `s.includes(t)`, on code-point boundaries. */
 export function strIncludes(s, t) {
-  return boundaryIndexOf(s, t, 0) >= 0;
+  return codePointNeedle(t).test(s);
 }
 
 /** `s.startsWith(t)`, on code-point boundaries. */
@@ -1097,16 +1110,7 @@ export function strEndsWith(s, t) {
 /** `s.split(sep)`: `""` splits into code points; any other separator splits only on code-point boundaries. */
 export function strSplit(s, sep) {
   if (sep === "") return codePoints(s);
-  const out = [];
-  let start = 0;
-  let i = boundaryIndexOf(s, sep, 0);
-  while (i >= 0) {
-    out.push(s.slice(start, i));
-    start = i + sep.length;
-    i = boundaryIndexOf(s, sep, start);
-  }
-  out.push(s.slice(start));
-  return out;
+  return s.split(codePointNeedle(sep));
 }
 
 function copyOf(xs) {

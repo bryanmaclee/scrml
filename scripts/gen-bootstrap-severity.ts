@@ -49,9 +49,9 @@ export function bootstrapCodes(): string[] {
 
 /**
  * PROVISIONAL codes — named by the bootstrap, approved by the owner as provisional, and with NO §34 row
- * yet. Each carries its intended severity here until the SPEC follow-up adds its row; from then on the
- * row decides and the entry is ignored, and `resolveSeverities` throws if the row disagrees (so this
- * table can never override §34). Keep it SHORT: every entry is owed a §34 row.
+ * yet. Each carries its intended severity here until the SPEC follow-up adds its row; once the row
+ * exists `resolveSeverities` throws (agreeing or not) until the entry is removed, so this table can
+ * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
  *   W-STRING-INTERP-LITERAL (S469, s469-boot-strings-1) — a logic string literal holding `${`, which
  *   is plain text there (§5.5.3, §4.18 interpolate only in markup); a Warning (the program means what
  *   it says). Owed: its §34 row.
@@ -109,7 +109,9 @@ export function resolveSeverities(
     }
     const sevs = [...new Set(live.map((r) => compileSeverityOf(r)!))];
     if (sevs.length > 1) throw new Error(`§34 rows for ${code} disagree on severity: ${live.map((r) => `${compileSeverityOf(r)}@${r.line}`).join(", ")}`);
-    if (provisional[code] && provisional[code] !== sevs[0]) throw new Error(`${code}: its §34 row says ${sevs[0]}, the PROVISIONAL table ${provisional[code]} — the row decides; remove the provisional entry`);
+    // a provisional entry exists only until its row lands: once the row exists — agreeing or not —
+    // the entry is stale and is removed (the row decides; the table never shadows §34)
+    if (provisional[code]) throw new Error(`PROVISIONAL ${code}: its §34 row exists (${sevs[0]}; the table says ${provisional[code]}) — the row decides; remove the entry`);
     entries.push({ code, severity: sevs[0], line: live[0].line });
   }
   return { entries, gaps };

@@ -66,11 +66,12 @@ describe("the PROVISIONAL table's guards", () => {
     expect(entries.find((e) => e.code === "W-STRING-INTERP-LITERAL")).toMatchObject({ severity: "Warning", provisional: true });
     expect(mods.severity.severityOf("W-STRING-INTERP-LITERAL")).toBe("Warning");
   });
-  test("a §34 row decides once it exists; a row that DISAGREES throws", () => {
+  test("once a §34 row exists the provisional entry is stale: it throws whether the row AGREES or not", () => {
     const t = { "W-X-ONE": "Warning" };
-    expect(resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], t).entries[0]).toMatchObject({ severity: "Warning" });
-    expect(resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], t).entries[0].provisional).toBeUndefined();
-    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Info |"]), ["W-X-ONE"], t)).toThrow("the row decides");
+    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], t)).toThrow("row exists");
+    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Info |"]), ["W-X-ONE"], t)).toThrow("row exists");
+    // with the entry removed, the row decides
+    expect(resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], {}).entries[0]).toMatchObject({ severity: "Warning" });
   });
   test("a STRUCK or non-compile §34 row for a provisional code throws (no silent fall-through to Error)", () => {
     const t = { "W-X-ONE": "Warning" };
