@@ -831,3 +831,23 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
 - **Not built (refused, fail closed)** — a waiting ambient function's server-side copy; the conditional positions
   (`&&`/`||` right operand, ternary branch, arm, `defer` body, lambda) for a server wait; `<schema>`; body split (U1d);
   transactions (U1e).
+
+---
+
+# s469 — the first loop slice: SPEC §49 "one `for`" (branch s469-boot-loops-1)
+
+- **lex** — `..` / `..=` are single tokens (DotDot / DotDotEq); `0..n` lexes the int (`...` stays three Dots).
+- **parse** — `for { }` / `for (;;)`, `for (cond)`, `for (init; cond; step)`, `for ([let|const] x of xs)`, `for (i of a..b / a..=b)`,
+  labels, `break` / `continue` [label]. Refused at parse: E-LOOP-WHILE-RETIRED, E-LOOP-DO-WHILE-RETIRED, E-FOR-UNPARENTHESIZED-HEAD,
+  E-CTRL-011, E-RANGE-OUTSIDE-LOOP-HEAD (a range anywhere but the whole iterable), E-CONDITION-HEAD-UNPARENTHESIZED (for a `for (cond)`),
+  E-PARSE-FOR-HEAD (one / three `;`, `for ()`); the value form, a destructuring binder and `for-else` are E-BOOTSTRAP-UNSUPPORTED.
+- **analyze** — resolveFor (the body through the one statement path: every write is classified and grant-checked as anywhere else);
+  the LOOP-CONTROL PASS per body root (fn body, handler block, effect body): E-LOOP-001..004, -006, BJump targets; the typer
+  (condition rule, iterable must be a provable tape / string, E-RANGE-BOUND-NOT-INT; no cell narrowing survives a loop entry or exit);
+  `xs[i]` (VIndex: element type, E-TYPE-031 index) and `xs.at(i)` (VAt: `T | not`); planLoop refuses every wait in a loop.
+- **Core** — `Stmt.Loop(label, head, body)`, `Break(target)`, `Continue(target)`; `LoopHead` Forever / While / Counted / Each / Range;
+  PrimOp IndexRead / AtRead. **check C19**: Counted init Lets-or-Assigns, step Assigns; no Suspend / Join / Jump / Defer in a body;
+  every Break / Continue names a Loop enclosing it in its owner. **print** — native JS loops; `rt.indexRead(xs, i, "file:line")` throws a
+  `ScrmlTrap` E-INDEX-OUT-OF-RANGE-RT naming index and length; `rt.atRead` gives `null` (`not`).
+- **Gates** — slice-m4 `loops-s469.test.js` (33), acceptance `loop/*` (20: 7 runtime, 13 exact-code), all slices 2702 pass.
+- **Not built** — see known-gaps `g-bootstrap-loop-value-form-s469`, `-loop-wait-and-defer-s469`, `-loop-head-surface-s469`, `-loop-codes-owed-s469`.

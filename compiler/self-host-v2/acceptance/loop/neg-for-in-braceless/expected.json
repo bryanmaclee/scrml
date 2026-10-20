@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-for-in-braceless",
+  "description": "E-FOR-UNPARENTHESIZED-HEAD: `for x in xs { … }`.",
+  "language-version": "1.0",
+  "spec": "§49.4.1 · §17.4",
+  "rationale": "§49.4.1: \"The braceless `for item in @items { ... }` spelling SHALL be rejected with E-FOR-UNPARENTHESIZED-HEAD\".",
+  "expect": {
+    "codes": [
+      "E-FOR-UNPARENTHESIZED-HEAD"
+    ],
+    "codeCounts": {
+      "E-FOR-UNPARENTHESIZED-HEAD": 1
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-loop-forever-break",
+  "description": "`for { … }` with a `break` at 4.",
+  "language-version": "1.0",
+  "spec": "§49.3.6 · §49.3.3",
+  "rationale": "§49.3.6: \"The body executes repeatedly until a `break`, `return` or `fail` leaves the loop\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#o",
+        "text": "4"
+      }
+    ]
+  }
+}

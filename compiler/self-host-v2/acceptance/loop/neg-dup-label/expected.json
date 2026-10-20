@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-dup-label",
+  "description": "E-LOOP-006: two loops labelled `a`.",
+  "language-version": "1.0",
+  "spec": "§49.2.2 · §49.4.2",
+  "rationale": "§49.2.2: \"The compiler SHALL reject duplicate labels with E-LOOP-006.\"",
+  "expect": {
+    "codes": [
+      "E-LOOP-006"
+    ],
+    "codeCounts": {
+      "E-LOOP-006": 1
+    }
+  }
+}

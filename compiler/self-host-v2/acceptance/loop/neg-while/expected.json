@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-while",
+  "description": "E-LOOP-WHILE-RETIRED: a `while` loop.",
+  "language-version": "1.0",
+  "spec": "§49.4.1 · §49.9",
+  "rationale": "§49.4.1: \"A `while` statement SHALL be rejected with E-LOOP-WHILE-RETIRED\".",
+  "expect": {
+    "codes": [
+      "E-LOOP-WHILE-RETIRED"
+    ],
+    "codeCounts": {
+      "E-LOOP-WHILE-RETIRED": 1
+    }
+  }
+}

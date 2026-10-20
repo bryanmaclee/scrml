@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-do-while",
+  "description": "E-LOOP-DO-WHILE-RETIRED: a `do … while` loop.",
+  "language-version": "1.0",
+  "spec": "§49.4.1 · §49.9",
+  "rationale": "§49.4.1: \"A `do...while` statement SHALL be rejected with E-LOOP-DO-WHILE-RETIRED\".",
+  "expect": {
+    "codes": [
+      "E-LOOP-DO-WHILE-RETIRED"
+    ],
+    "codeCounts": {
+      "E-LOOP-DO-WHILE-RETIRED": 1
+    }
+  }
+}

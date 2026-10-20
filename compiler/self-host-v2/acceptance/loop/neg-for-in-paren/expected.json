@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-for-in-paren",
+  "description": "E-CTRL-011: `for (x in xs)`.",
+  "language-version": "1.0",
+  "spec": "§49.2.4 · §17.4",
+  "rationale": "§49.2.4: \"A `for (… in …)` head is `E-CTRL-011`\".",
+  "expect": {
+    "codes": [
+      "E-CTRL-011"
+    ],
+    "codeCounts": {
+      "E-CTRL-011": 1
+    }
+  }
+}

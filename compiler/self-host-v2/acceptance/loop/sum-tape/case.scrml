@@ -1,0 +1,14 @@
+// §49.3.5: loop over a tape, sum it, show the sum in markup.
+<program>
+    <xs:int[]=([3, 4, 5])/>
+    function sum(ys: int[]) -> int {
+        let total = 0
+        for (y of ys) {
+            total = total + y
+        }
+        return total
+    }
+    <main>
+        <p id="s">${sum(@xs)}</p>
+    </main>
+</program>

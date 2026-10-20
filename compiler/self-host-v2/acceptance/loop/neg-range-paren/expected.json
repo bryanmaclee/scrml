@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-range-paren",
+  "description": "E-RANGE-OUTSIDE-LOOP-HEAD: a parenthesized range.",
+  "language-version": "1.0",
+  "spec": "§49.2.5",
+  "rationale": "§49.2.5 lists `for (i of (0..n))` as E-RANGE-OUTSIDE-LOOP-HEAD.",
+  "expect": {
+    "codes": [
+      "E-RANGE-OUTSIDE-LOOP-HEAD"
+    ],
+    "codeCounts": {
+      "E-RANGE-OUTSIDE-LOOP-HEAD": 1
+    }
+  }
+}

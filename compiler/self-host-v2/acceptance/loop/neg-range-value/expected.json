@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-range-value",
+  "description": "E-RANGE-OUTSIDE-LOOP-HEAD: `const r = 0..10`.",
+  "language-version": "1.0",
+  "spec": "§49.2.5 · §49.9",
+  "rationale": "§49.2.5: \"A range is not a value … Anywhere else … it is E-RANGE-OUTSIDE-LOOP-HEAD\".",
+  "expect": {
+    "codes": [
+      "E-RANGE-OUTSIDE-LOOP-HEAD"
+    ],
+    "codeCounts": {
+      "E-RANGE-OUTSIDE-LOOP-HEAD": 1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-loop-neg-range-bound",
+  "description": "E-RANGE-BOUND-NOT-INT: `0..1.5`.",
+  "language-version": "1.0",
+  "spec": "§49.2.5 · §49.9",
+  "rationale": "§49.2.5: \"Both bounds SHALL be `int`. A bound of any other type is E-RANGE-BOUND-NOT-INT\".",
+  "expect": {
+    "codes": [
+      "E-RANGE-BOUND-NOT-INT"
+    ],
+    "codeCounts": {
+      "E-RANGE-BOUND-NOT-INT": 1
+    }
+  }
+}

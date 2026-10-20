@@ -1,0 +1,11 @@
+// §49.2.5: a range is not a value.
+<program>
+
+    function f() -> int {
+        const r = 0..10
+        return 1
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>

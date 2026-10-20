@@ -1,0 +1,11 @@
+// §49.4.2: `continue label` names an enclosing loop.
+<program>
+
+    function f() -> int {
+        for (i of 0..2) { continue nope }
+        return 1
+    }
+    <main>
+        <p id="o">${f()}</p>
+    </main>
+</program>
