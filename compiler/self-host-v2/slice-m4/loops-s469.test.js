@@ -316,3 +316,47 @@ describe("review fixes (s469-boot-loops-1 adversarial review)", () => {
     b.remove();
   });
 });
+
+// ---------------------------------------------------------------------------
+describe("review round 3 (s469-boot-loops-1 delta review)", () => {
+  const count = (src) => run(src).diags.length;
+  test("L1: a missing `)` in a `for` head stops at the body's `{` — the report is no longer than the same slip in an `if`", () => {
+    // The loop parser stops at the `{` (the first report). What follows is the
+    // CODE-REGION scanner's: an unclosed `(` keeps the function's region open
+    // to the end of the file, for an `if` exactly as for a `for` — the same
+    // count, and no longer the 18 the round-2 recovery produced.
+    const ifCount = count(fnProg(`        let c = 0\n        if (c < 3 { c = c + 1 }\n        return c`));
+    for (const head of ["c < 3", "x of [1, 2]", "let i = 0; i < 2; i = i + 1"]) {
+      const r = run(fnProg(`        let c = 0\n        for (${head} { c = c + 1 }\n        return c`));
+      expect([head, r.diags[0].code, r.diags[0].message.includes("found `{`")]).toEqual([head, "E-PARSE-EXPECTED", true]);
+      expect([head, r.diags.length <= ifCount]).toEqual([head, true]);
+    }
+  });
+  test("L3: a condition that continues past its `)` is reported once and the continuation skipped", () => {
+    const a = fnProg(`        let c = 0\n        for (c) + 1 < 3 { c = c + 1 }\n        return c`);
+    expect(codes(a)).toEqual(["E-CONDITION-HEAD-UNPARENTHESIZED"]);
+    expect(count(a)).toBe(1);
+    expect(codes(fnProg(`        let c = 0\n        for (c < 3) (c) { c = c + 1 }\n        return c`))).toEqual(["E-CONDITION-HEAD-UNPARENTHESIZED"]);
+  });
+  test("L2: the part-write advice names a `let` copy when the local cannot be rebound", () => {
+    const P = `    type P:struct = { name: string }\n    <ps:P[]=([{ name: "a" }])/>`;
+    const binder = diag(prog(P, `        <button onclick={ for (p of @ps) { p.name = "z" } }>b</button>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(binder.message).toContain("cannot be rebound");
+    expect(binder.message).not.toContain("rebind it (`p = …`)");
+    const param = diag(prog(P + `\n    function g(q: P) { q.name = "z" }`, `        <p>x</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(param.message).toContain("copy it into a `let`");
+    const mut = diag(prog(P + `\n    function g() { let q: P = { name: "q" }\n q.name = "z" }`, `        <p>x</p>`), "E-BOOTSTRAP-UNSUPPORTED");
+    expect(mut.message).toContain("rebind it (`q = …`)");
+  });
+  test("capture root cause: a throw planted right after the conformance adapter swaps the window is captured", async () => {
+    const adapter = await import("../../../conformance/adapters/impl1-ts.ts");
+    await adapter.run("<p>x</p>\n");          // unregister + register: a FRESH window
+    // no helper call in between — the adapter's swap hook re-attached the capture
+    const b = document.createElement("button");
+    document.body.appendChild(b);
+    b.addEventListener("click", () => { throw new Error("after-swap"); });
+    b.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    const errs = takePageErrors();
+    expect(errs.map((e) => String(e && e.message))).toEqual(["after-swap"]);
+  }, 60000);
+});

@@ -1741,11 +1741,16 @@ ${
             t2 = diagAt(t2, "E-PARSE-EXPECTED", "expected `)` to end the `for` condition, found `" + bad.text + "`", bad)
             t2 = toHeadClose(t2)       // forward from t2: its diagnostics and node ids are kept
         }
-        t2 = adv(t2)
+        // past the `)` only when there is one (toHeadClose stops at a depth-0 `{`
+        // too, so a missing `)` never eats the body or the enclosing block's `}`)
+        if (isP(t2, ")")) t2 = adv(t2)
         if (condContinues(t2)) {
             const cc: PTok = cur(t2)
             const dc: TP = diagAt(t2, "E-CONDITION-HEAD-UNPARENTHESIZED", "the `for` condition continues past its closing `)` — the parentheses wrap the WHOLE condition: write `for (… " + cc.text + " …) { … }` (§49.2.3)", cc)
-            return recoveredStmt(dc, start)
+            // reported once; the continuation is SKIPPED (never read as part of
+            // the condition, §49.2.3 "rejection only") and the body read past
+            const rb: RBlock = parseLoopBody(toBodyOpen(dc))
+            return recoveredStmt(rb.tp, start)
         }
         const body: RBlock = parseLoopBody(t2)
         return forStmt(body.tp, start, label, AForHead.HCond(cond.e), body.b)
@@ -1870,18 +1875,38 @@ ${
         return false
     }
 
-    // Forward to the head's closing `)` (at depth 0; not consumed).
+    // Forward to the head's closing `)` (at depth 0; not consumed) — or to a
+    // depth-0 `{`, which begins the body when the `)` is missing (a recovery
+    // must never eat the body, or the enclosing block's `}`).
     fn toHeadClose(tp: TP) -> TP {
         let t: TP = tp
         let depth: int = 0
         while (!atEnd(t)) {
             const x: PTok = cur(t)
             if (x.cls == TC.Punct) {
+                if (depth == 0 && x.text == "{") return t
                 if (x.text == "(" || x.text == "[" || x.text == "{") depth = depth + 1
                 if (x.text == ")" || x.text == "]" || x.text == "}") {
                     if (depth == 0) return t
                     depth = depth - 1
                 }
+            }
+            t = adv(t)
+        }
+        return t
+    }
+
+    // Forward to the body's `{` at depth 0 (not consumed); stops at a depth-0
+    // `}` or `;` (the statement ends there: no body to read).
+    fn toBodyOpen(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        while (!atEnd(t)) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.Punct) {
+                if (depth == 0 && (x.text == "{" || x.text == "}" || x.text == ";")) return t
+                if (x.text == "(" || x.text == "[") depth = depth + 1
+                if (x.text == ")" || x.text == "]") depth = depth - 1
             }
             t = adv(t)
         }
