@@ -46,6 +46,12 @@ export default [
   ["regex holding a brace", ATTR("${ 'a'.replace(/}/, '') && check('wrong') ? 'LOGGED IN' : 'rejected' }")],
   ["regex holding a brace, alias", ATTR("${ 'a'.replace(/}/, '') && g('wrong') ? 'LOGGED IN' : 'rejected' }")],
   ["line comment then a call", ATTR("${ 1 // }\n && check('wrong') ? 'LOGGED IN' : 'rejected' }")],
+  // Round 4 (review of d5f5d3ea1, HIGH-1): an Annex B HTML-like comment — a classic script (how the
+  // client bundle loads) reads `<!--` as a comment opener, a module does not.
+  ["html comment opener", ATTR("${ 1 <!--y }\n&& check('wrong') ? 'LOGGED IN' : 'rejected' }")],
+  ["html comment opener, alias", ATTR("${ 1 <!--y }\n&& g('wrong') ? 'LOGGED IN' : 'rejected' }")],
+  ["line-initial html comment closer", ATTR("${ 1\n--> }\n&& check('wrong') ? 'LOGGED IN' : 'rejected' }")],
+  ["line-initial html comment closer, alias", ATTR("${ 1\n--> }\n&& g('wrong') ? 'LOGGED IN' : 'rejected' }")],
   ["newline injection", INJ("\n")],
   ["carriage-return injection", INJ("\r")],
   ["U+2028 injection", INJ("\u2028")],

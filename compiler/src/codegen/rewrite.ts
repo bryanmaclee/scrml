@@ -3248,7 +3248,9 @@ function rewriteAtRefTokens(text: string, reactiveVars: Set<string>): string {
   const hits: Array<{ start: number; end: number; name: string }> = [];
   try {
     // @ts-ignore — acorn's static tokenizer on the extended parser
-    for (const t of ScrmlParser.tokenizer(text, { ecmaVersion: 2025, sourceType: "module", allowAwaitOutsideFunction: true })) {
+    // The goal the client bundle RUNS under: a classic script (sliceTemplateText has already
+    // refused any interpolation whose script and module readings differ).
+    for (const t of ScrmlParser.tokenizer(text, { ecmaVersion: 2025, sourceType: "script", allowAwaitOutsideFunction: true })) {
       const tok = t as { type?: { label?: string }; value?: unknown; start: number; end: number };
       if (tok.type?.label === "name" && typeof tok.value === "string" && /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test(tok.value)) {
         hits.push({ start: tok.start, end: tok.end, name: tok.value.slice(1) });

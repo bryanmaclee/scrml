@@ -4843,6 +4843,23 @@ function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & objec
  * The one slicer of this text: `rewriteTemplateAttrValue` (codegen) emits from these segments
  * and `templateTextInterpolationNodes` (the failable walk) reads them.
  */
+/**
+ * S469 (review of d5f5d3ea1, HIGH-1) — `text` holds `<!--`, or a `-->` that only white space
+ * (or a block comment's close) precedes on its line: Annex B HTML-like comment openers, which a
+ * classic script reads as comments and a module does not. Legitimate interpolation code never
+ * needs them (as text inside a string they are also refused: the check is lexical, fail closed).
+ */
+export function hasHtmlLikeComment(text: string): boolean {
+  if (text.includes("<!--")) return true;
+  for (const line of text.split(/\r\n|[\n\r\u2028\u2029]/)) {
+    const at = line.indexOf("-->");
+    if (at < 0) continue;
+    const before = line.slice(0, at);
+    if (before.trim() === "" || before.includes("*/")) return true;
+  }
+  return false;
+}
+
 export function sliceTemplateText(
   raw: string, opts: { bare?: boolean } = {},
 ): { segments: TemplateSegment[]; unreadable: string | null } {
@@ -4856,21 +4873,38 @@ export function sliceTemplateText(
   }
   const src = raw.slice(0, end);
   let quasiStart = i;
-  const acornOpts = { ecmaVersion: 2025, sourceType: "module", allowAwaitOutsideFunction: true };
+  // S469 (review of d5f5d3ea1, HIGH-1) — BOTH goals. A client bundle runs as a CLASSIC SCRIPT,
+  // where Annex B makes `<!--` (and a line-initial `-->`) a single-line comment; a module (a
+  // server bundle) has no such comments. An interpolation is bounded only when the script and
+  // the module readings agree on where it ends, and one holding either sequence is refused
+  // (`${ 1 <!--y }⏎&& check(p) … }` closed at the `}` for the module reader while the browser
+  // ran `check(p)`).
+  const closeUnder = (sourceType: "script" | "module", exprStart: number): number => {
+    const acornOpts = { ecmaVersion: 2025, sourceType, allowAwaitOutsideFunction: true };
+    try {
+      // @ts-ignore — acorn's static API on the extended parser
+      const node = ScrmlParser.parseExpressionAt(src, exprStart, acornOpts) as { end: number };
+      // The first token after the expression, read in place (a tokenizer over the WHOLE text
+      // started at the expression's end, so a line-initial `-->` is judged on its real line).
+      // @ts-ignore
+      const tz = ScrmlParser.tokenizer(src, acornOpts) as { pos: number; start: number; end: number; lastTokEnd: number; getToken(): { type?: { label?: string }; start: number } };
+      // `next()` copies `end` into `lastTokEnd`: both are set, so a `-->` counts as
+      // line-initial only when a line break really precedes it.
+      tz.pos = tz.start = tz.end = tz.lastTokEnd = node.end;
+      const tok = tz.getToken();
+      return tok && tok.type && tok.type.label === "}" ? tok.start : -1;
+    } catch { return -1; }
+  };
   while (i < end) {
     const ch = src.charCodeAt(i);
     if (ch === 92 /* \ */) { i += 2; continue; }
     if (ch === 36 /* $ */ && src.charCodeAt(i + 1) === 123 /* { */) {
       segments.push({ kind: "quasi", text: src.slice(quasiStart, i), offset: quasiStart });
       const exprStart = i + 2;
-      let closeAt = -1;
-      try {
-        // @ts-ignore — acorn's static API on the extended parser
-        const node = ScrmlParser.parseExpressionAt(src, exprStart, acornOpts) as { end: number };
-        // @ts-ignore
-        const tok = ScrmlParser.tokenizer(src.slice(node.end), acornOpts).getToken() as { type?: { label?: string }; start: number };
-        if (tok && tok.type && tok.type.label === "}") closeAt = node.end + tok.start;
-      } catch { closeAt = -1; }
+      const asModule = closeUnder("module", exprStart);
+      const asScript = closeUnder("script", exprStart);
+      let closeAt = asModule >= 0 && asModule === asScript ? asModule : -1;
+      if (closeAt >= 0 && hasHtmlLikeComment(src.slice(exprStart, closeAt))) closeAt = -1;
       if (closeAt < 0) {
         const rest = src.slice(exprStart);
         segments.push({ kind: "expr", text: rest, offset: exprStart });

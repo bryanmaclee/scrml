@@ -34,6 +34,7 @@ import { forEachCallInValuePosition } from "../../src/failable-value-calls.ts";
 import { parseExprToNode, templateInterpolationNodesAll, sliceTemplateText } from "../../src/expression-parser.ts";
 import { rewriteTemplateAttrValue } from "../../src/codegen/rewrite.ts";
 import { ScrmlParser } from "../../src/scrml-acorn.ts";
+import { findHtmlLikeComment } from "../../src/codegen/validate-emit.ts";
 
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -618,5 +619,44 @@ describe("HIGH-2 — a line terminator in a quoted template attribute cannot inj
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector("#p").getAttribute("class")).toBe("a x\n c");
     await GlobalRegistrator.unregister();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review of d5f5d3ea1, HIGH-1: script vs module (Annex B HTML-like comments)
+// ---------------------------------------------------------------------------
+
+describe("round 4 HIGH-1 — an interpolation is bounded under BOTH goals", () => {
+  test("`<!--` / a line-initial `-->` make the interpolation unreadable", () => {
+    expect(sliceTemplateText("${ 1 <!--y }\n&& x }", { bare: true }).unreadable).not.toBe(null);
+    expect(sliceTemplateText("${ 1\n--> }\n&& x }", { bare: true }).unreadable).not.toBe(null);
+    expect(sliceTemplateText("${ '<!--' }", { bare: true }).unreadable).not.toBe(null); // lexical, fail closed
+    // not line-initial: an ordinary `a-- > b`
+    expect(sliceTemplateText("${ a-->b }", { bare: true }).unreadable).toBe(null);
+  });
+
+  const PAGE = (value) => `type AuthErr:enum = { Denied }
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    const g = check
+}
+<p data-v="${value}">r</p>
+`;
+  for (const [what, v] of [
+    ["direct", "${ 1 <!--y }\n&& check('wrong') ? 'Y' : 'N' }"],
+    ["alias", "${ 1 <!--y }\n&& g('wrong') ? 'Y' : 'N' }"],
+  ]) {
+    test(`the classic-script reading is not missed (${what})`, () => {
+      expect(compileSource(PAGE(v), "r4").codes).toContain("E-ERROR-002");
+    });
+  }
+
+  test("the emitted-JS gate finds an HTML-like comment as a classic script reads it", () => {
+    expect(findHtmlLikeComment("let a = 1 <!-- b\n")).toBe(10);
+    expect(findHtmlLikeComment("let a = 1;\n--> b\n")).toBe(11);
+    expect(findHtmlLikeComment("let a = '<!--'; // <!--\n/* --> */ let b = c-->d;")).toBe(null);
   });
 });
