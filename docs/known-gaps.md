@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 263 | 4 |
 | MED | 668 | 6 |
-| LOW | 449 | 0 |
+| LOW | 451 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -72,11 +72,29 @@ The binder decides which member / built-in a receiver has (the one reader: `.len
 
 Fail closed by name. A discarded `fill` / `copyWithin` statement on a tape is already E-TAPE-JS-METHOD (trigger (b)). Also not built: the non-`writable` classification of a written-back `fill` / `copyWithin`; tape `slice` / `includes` / `indexOf`.
 
-### g-spec-string-position-code-unit-vs-code-point-s469 — SPEC conflict: Appendix D sanctions the host string methods with JavaScript's semantics (`slice` / `charAt` / `split("")` count UTF-16 units), while the S469 ruling makes string iteration and `s[i]` count CODE POINTS (and keeps `s.length` in UTF-16 units). The bootstrap implements `slice` / `charAt` / `split("")` by code point — `NEW S469; LOW; open (SPEC follow-up)`
+### g-spec-string-position-code-unit-vs-code-point-s469 — string positions in two units: `slice` / `charAt` / `split("")` counted code points while `.length` counted UTF-16 units, so `@e.slice(0, @e.length - 1)` on `"a😀"` returned `"a😀"` (not `"a"`) and `@e.charAt(@e.length - 1)` returned `""` (not `"😀"`); and `includes` / `startsWith` / `endsWith` / `split(sep)` compared UTF-16 units, so a lone-surrogate argument matched (or split) half of an astral character — `NEW S469; LOW; RESOLVED S469 (bootstrap, as ruled; SPEC text owed)`
 
-<!-- @gap id=g-spec-string-position-code-unit-vs-code-point-s469 sev=LOW status=open locus=compiler/SPEC.md(Appendix D "Instance methods … are available"; §49.3.5 "⚑ OPEN" on string iteration, superseded by the S469 ruling, not yet written) prov=ruling:user-voice-scrml.md(S469 "String iteration: Code points (Recommended)" — "`s[i]` follows. Document that `s.length` counts UTF-16 units");dispatch:s469-boot-strings-1(the PA reading: a position-taking method agrees with `s[i]`) -->
+<!-- @gap id=g-spec-string-position-code-unit-vs-code-point-s469 sev=LOW status=resolved locus=compiler/self-host-v2/analyze.scrml(resolveMember: a string's `.length` is VMethod(StrLength))+compiler/self-host-v2/slice-m1/runtime/runtime.js(strLength, strSlice, strCharAt, strIncludes, strStartsWith, strEndsWith, strSplit, check.length)+compiler/SPEC.md(Appendix D; §49.3.5 — text owed) prov=ruling:user-voice-scrml.md(S469, bryan on F/U-1: "code points everywhere, `.length` included" — supersedes the S469 "Document that `s.length` counts UTF-16 units");review:s469-boot-strings-1(F/U-1, F/U-2);dispatch:s469-boot-strings-1(follow-up round) -->
 
-The bootstrap's reading (flagged for the owner's veto): every position-taking string method agrees with `s[i]` — code points — so `"😀ab".charAt(0)` is `"😀"` and `.slice(1)` is `"ab"`. `.length` stays UTF-16 units, as ruled, so `s.slice(0, s.length)` is still the whole string (positions clamp). Owed in the SPEC: a string-method table (Appendix D is a blanket JS sanction), the code-point rule for `slice` / `charAt` / `split("")`, §49.3.5's OPEN line replaced by the S469 ruling, and O65 (§66.22) marked RULED (natural-order `sort()`; `toSorted` / `toReversed` / `with` refused).
+RULED (bryan, S469): every string position is a code point — `.length`, `slice`, `charAt`, `split`, iteration. The bootstrap now lowers a STRING's `.length` to Core `StrLength` (runtime `strLength`, client and server; a tape's `.length` is unchanged), and every match (`includes`, `startsWith`, `endsWith`, `split(sep)`) counts only where it starts and ends on a code-point boundary — chosen over refusing lone-surrogate literals, because an argument need not be a literal. The `length(…)` validator counts a string's code points too. Pinned by `slice-m4/strings-s469.test.js` (the failing idioms above, the runtime against `for…of`, the lone-surrogate cases). **Owed to the SPEC follow-up (not edited here):** Appendix D's blanket "instance methods are available" sentence → a string-method table with the code-point rule; §49.3.5's "⚑ OPEN" line on string iteration → the ruling (and its "`s.length` counts UTF-16 units" note → code points); O65 (§66.22) marked RULED. **Owed to the loops lane (`s469-boot-loops-1`):** `for (ch of s)` and a range `0..s.length` must iterate code points, agreeing with `strLength` — this branch has no loops to test that against.
+
+### g-bootstrap-local-tape-rebinding-not-grant-checked-s469 — in the BOOTSTRAP, rebinding a LOCAL tape is never grant-checked: `let out: int[] = …; out = out.sort();` and `out = [];` compile, though a local `let` grants a tape nothing, not even `replace` (O63) — `NEW S469 (pre-existing); LOW; open`
+
+<!-- @gap id=g-bootstrap-local-tape-rebinding-not-grant-checked-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveAssign: a local target takes the ordinary local path — §66.11.5 rebinding — and the §66.11.2 classifier is applied only to cell / field places) prov=spec:§66.12.6(rule 4: "For a local, rebinding a tape-typed name IS such a write … A local `let` gives a tape nothing, not even `replace` (O63 RULED)");review:s469-boot-strings-1(F/U-3) -->
+
+Pre-existing (not introduced by the string / tape slice). Owed: classify a local tape rebinding with the same classifier as a cell write and check it against the local's TYPE grants.
+
+### g-bootstrap-method-on-call-result-refused-s469 — in the BOOTSTRAP, a built-in method on a function call's result is refused even when the function declares its return type: `function get() -> string { … }` then `get().trim()` is E-BOOTSTRAP-UNSUPPORTED ("a value whose type the compiler cannot resolve") — `NEW S469; LOW; open`
+
+<!-- @gap id=g-bootstrap-method-on-call-result-refused-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveCall returns no binder type for a named-function call; resolveMethod admits only a receiver the BINDER types) prov=review:s469-boot-strings-1(F/U-8) -->
+
+Fail closed, never wrong. Workaround: bind the result to a typed local first (`const t: string = get();`). Owed: the binder types a named-function call by its declared return (as the typer does).
+
+### g-bootstrap-length-validator-html-attr-utf16-s469 — a `length(…)` validator on a string is lowered to the HTML `minlength` / `maxlength` attributes too, which the BROWSER counts in UTF-16 units, while the runtime check (and every other string position, S469 "code points everywhere") counts code points: with `length(<=3)`, typing `"😀😀"` (2 code points, 4 units) is blocked by the browser though scrml accepts it — `NEW S469; LOW; open`
+
+<!-- @gap id=g-bootstrap-length-validator-html-attr-utf16-s469 sev=LOW status=open locus=compiler/self-host-v2/print.scrml(the lowered `minlength` / `maxlength` attributes, §55.1)+compiler/self-host-v2/slice-m1/runtime/runtime.js(check.length counts code points since s469-boot-strings-1) prov=ruling:user-voice-scrml.md(S469 "code points everywhere, `.length` included");dispatch:s469-boot-strings-1(follow-up round — found while auditing what depended on UTF-16 `.length`) -->
+
+Stricter, not fail-open: the browser blocks or flags input that scrml's own check accepts. Owed: a ruling whether the native attributes stay (an approximation, documented) or go (scrml's check alone), or a code-point-aware native hint.
 
 ### g-spec-s34-rows-owed-e-tape-js-method-w-string-interp-literal-s469 — the bootstrap now EMITS `E-TAPE-JS-METHOD` (§66.20 row; no §34 row — "Its §34 row lands with its emitter") and the PROVISIONAL `W-STRING-INTERP-LITERAL` (no row anywhere); both owe §34 rows — `NEW S469; LOW; open (SPEC follow-up)`
 

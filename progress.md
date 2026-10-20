@@ -20,3 +20,9 @@ Branch `s469-boot-strings-1` (cut from origin/main 1c9cc4a6e). Bootstrap strings
 ## Remaining at last update
 - DONE (resumed after power loss): conformance `--write` (205 PASS / 81 FAIL, unchanged), 5 known-gaps entries +
   `bun scripts/state.ts --write`, branch renamed to s469-boot-strings-1. Final gate on the docs commit.
+
+## Follow-up round (review LAND-W-F/U + bryan's F/U-1 ruling "code points everywhere") — DONE
+- ec614e703 code: string `.length` = StrLength; boundary-safe includes/startsWith/endsWith/split; F/U-4 discarded
+  branches; F/U-5 ungranted new tapes; F/U-6 C9 PositionWrite value; F/U-7 PROVISIONAL guards + tests; F/U-8.
+- docs commit: gaps (code-point gap resolved; local-tape rebinding, method-on-call-result, length-validator
+  HTML attrs UTF-16) + conformance doc.
