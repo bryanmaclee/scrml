@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 146 codes with a §34 severity; 1 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: W-STRING-INTERP-LITERAL); 70 without one (FAIL-CLOSED Error):
+// 147 codes with a §34 severity; 1 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: W-STRING-INTERP-LITERAL); 69 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -75,7 +75,6 @@
 //   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
-//   E-RETURN-INCOMPLETE — no §34 row
 //   E-TAPE-JS-METHOD — no §34 row
 //   E-TYPE-STRUCT-CONTEXT — no §34 row
 //   E-TYPE-STRUCT-FIELD — no §34 row
@@ -199,6 +198,7 @@ ${
             "E-RESET-ON-ENGINE-REFUSED" :> Severity.Error
             "E-RESET-ON-INVALID-ENTRY" :> Severity.Error
             "E-RESET-ON-NOT-WRITABLE" :> Severity.Error
+            "E-RETURN-INCOMPLETE" :> Severity.Error
             "E-RI-002" :> Severity.Error
             "E-ROUTE-001" :> Severity.Error
             "E-ROUTE-002" :> Severity.Error
