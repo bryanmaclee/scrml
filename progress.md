@@ -18,4 +18,5 @@ Branch `s469-boot-strings-1` (cut from origin/main 1c9cc4a6e). Bootstrap strings
 - Acceptance: acceptance/{strings,tapes,interp}; slice-m4/strings-s469.test.js; acceptance.test.js STATUS.
 
 ## Remaining at last update
-- conformance `--write`, known-gaps entries + `bun scripts/state.ts --write`, gate.
+- DONE (resumed after power loss): conformance `--write` (205 PASS / 81 FAIL, unchanged), 5 known-gaps entries +
+  `bun scripts/state.ts --write`, branch renamed to s469-boot-strings-1. Final gate on the docs commit.
