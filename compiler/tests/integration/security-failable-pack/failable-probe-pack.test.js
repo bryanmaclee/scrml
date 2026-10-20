@@ -1,0 +1,77 @@
+// security-failable-pack — the §19.4.3 failable wrong-password probe corpus as a permanent gate
+// (S468 fix round 1; a sibling of ../security-await-pack).
+//
+// 265 shapes: the S468 fix-round-1 review of 7ecae57eb (n1–n8 client, s1–s2 server) plus the dev's
+// n9 (the F1 class through a name) and n10 (by-binding probes), and S469's n11 (a failable `match`
+// in every event-handler value form × container) n12 (the `!` function imported) and n13 (a handler through a `const` alias). Each shape is compiled and run with a
+// wrong and a right password. The floor: a wrong password never logs in. See pack.js for the classes
+// and README.md for the why.
+//
+// RED when: a shape not in KNOWN_FAIL / BY_DESIGN_LOGS_IN logs in on a wrong password; a KNOWN_FAIL
+// shape stops doing so (remove the entry); a shape not in UNJUDGED cannot be judged, or an UNJUDGED
+// one starts being judged; the shape count drifts.
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadFamilies, runShape } from "./pack.js";
+import { KNOWN_FAIL, UNJUDGED, BY_DESIGN_LOGS_IN } from "./known-fail.js";
+
+const EXPECTED_SHAPE_COUNT = 265;
+const families = await loadFamilies();
+const ids = families.flatMap(({ family, shapes }) => Object.keys(shapes).map((n) => `${family}/${n}`));
+
+let root;
+let seq = 0;
+
+beforeAll(() => {
+  root = mkdtempSync(join(tmpdir(), "scrml-failable-pack-"));
+});
+afterAll(() => {
+  if (root) rmSync(root, { recursive: true, force: true });
+});
+
+describe("security-failable-pack: the instrument", () => {
+  test(`the corpus holds ${EXPECTED_SHAPE_COUNT} shapes with unique ids`, () => {
+    expect(ids.length).toBe(EXPECTED_SHAPE_COUNT);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("every KNOWN_FAIL / UNJUDGED / BY_DESIGN_LOGS_IN entry names a shape in the corpus", () => {
+    const known = new Set(ids);
+    for (const list of [KNOWN_FAIL, UNJUDGED, BY_DESIGN_LOGS_IN]) {
+      expect(Object.keys(list).filter((id) => !known.has(id))).toEqual([]);
+    }
+  });
+
+  test("every family declares its side", () => {
+    expect(families.filter((f) => f.side !== "client" && f.side !== "server").map((f) => f.family)).toEqual([]);
+  });
+});
+
+for (const { family, side, shapes } of families) {
+  describe(`security-failable-pack: ${family}`, () => {
+    for (const [name, s] of Object.entries(shapes)) {
+      const id = `${family}/${name}`;
+      test(id, async () => {
+        const r = await runShape(s, side, join(root, String(seq++)));
+        const verdict = `${id}: ${r.cls} — ${r.detail}`;
+        if (KNOWN_FAIL[id]) {
+          // Still failing as recorded. If this goes red the shape is FIXED: delete its entry.
+          expect(verdict).toBe(`${id}: FAIL — ${r.detail}`);
+        } else if (UNJUDGED[id]) {
+          expect(verdict).toBe(`${id}: UNJUDGED — ${r.detail}`);
+        } else if (BY_DESIGN_LOGS_IN[id]) {
+          // Its own logic logs in on "wrong": any verdict is right; it must still be judged.
+          expect(r.cls === "UNJUDGED" ? `NEW UNJUDGED SHAPE — ${verdict}` : "ok").toBe("ok");
+        } else {
+          // THE FLOOR: a wrong password never logs in.
+          expect(r.cls === "FAIL" ? `WRONG PASSWORD ACCEPTED — ${verdict}` : "ok").toBe("ok");
+          // An instrument hole must be named, not absorbed.
+          expect(r.cls === "UNJUDGED" ? `NEW UNJUDGED SHAPE — ${verdict}` : "ok").toBe("ok");
+        }
+      }, 60_000);
+    }
+  });
+}

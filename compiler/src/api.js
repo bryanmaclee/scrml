@@ -62,7 +62,7 @@ import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports, inheritStdlibReExports } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative, validateStdlibImports, listStdlibModules, isStdlibFilePath, eraseStdlibTypeOnlyImports, inheritStdlibReExports, resolveExportedBinding } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
@@ -3100,26 +3100,24 @@ function _compileScrmlImpl(options = {}) {
     depFnDeclCache.set(absSource, out);
     return out;
   }
-  function resolveFnThroughReExport(absSource, fnName, visited) {
-    const key = `${absSource}::${fnName}`;
-    if (visited.has(key)) return null;
-    visited.add(key);
+  function fnDeclRecord(filePath, fnNode) {
+    const depFile = ceFileMap.get(filePath);
+    return { fnNode, depFilePath: filePath, depTypeDecls: depFile?.typeDecls ?? depFile?.ast?.typeDecls ?? [] };
+  }
+  // S469 fix round 2 (H3) — the binding an imported name resolves to is read by the module
+  // resolver's ONE re-export reader (`resolveExportedBinding`: named and RENAMED re-exports,
+  // `export *` by ES rules — an ambiguous star binds nothing — and cycles). The previous
+  // name-only chase here never followed `export *`, so a `!` function re-exported through
+  // `export * from "./lib.scrml"` was not failable in the importer: `const ok = check(p)`
+  // compiled and a wrong password logged in.
+  function resolveFnThroughReExport(absSource, fnName) {
+    const b = resolveExportedBinding(moduleResult.importGraph, absSource, fnName);
+    if (b) {
+      const decl = getDepFnDecls(b.filePath).get(b.localName ?? b.name);
+      return decl ? fnDeclRecord(b.filePath, decl) : null;
+    }
     const own = getDepFnDecls(absSource).get(fnName);
-    if (own) {
-      const depFile = ceFileMap.get(absSource);
-      return { fnNode: own, depFilePath: absSource, depTypeDecls: depFile?.typeDecls ?? depFile?.ast?.typeDecls ?? [] };
-    }
-    const depGraphEntry = moduleResult.importGraph.get(absSource);
-    if (!depGraphEntry || !depGraphEntry.exports) return null;
-    for (const exp of depGraphEntry.exports) {
-      if (exp.name !== fnName || !exp.reExportSource) continue;
-      // A RENAMED re-export (`export { yOf as g } from …`) is chased by the
-      // SOURCE-side name (`yOf`): the exported name `g` would find nothing, or
-      // an unrelated `g`, in the source file (S462 P0 audit).
-      const found = resolveFnThroughReExport(exp.reExportSource, exp.localName ?? fnName, visited);
-      if (found) return found;
-    }
-    return null;
+    return own ? fnDeclRecord(absSource, own) : null;
   }
   const importedFnDeclsByFile = new PathKeyedMap();
   for (const [filePath, graphEntry] of moduleResult.importGraph) {
@@ -3134,7 +3132,7 @@ function _compileScrmlImpl(options = {}) {
       for (const { imported: importedName, local: localName } of pairs) {
         if (!importedName || !localName || decls.has(localName)) continue;
         if (!depExports.has(importedName)) continue;
-        const found = resolveFnThroughReExport(imp.absSource, importedName, new Set());
+        const found = resolveFnThroughReExport(imp.absSource, importedName);
         if (found) decls.set(localName, found);
       }
     }

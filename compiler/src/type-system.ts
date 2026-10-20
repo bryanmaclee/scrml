@@ -75,7 +75,7 @@
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
-import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS } from "./failable-value-calls.ts";
+import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
 import { parseStatementText, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
@@ -9984,6 +9984,37 @@ function inferEnumFromQualifiedVariantInit(
   return t;
 }
 
+/**
+ * S469 — two resolutions of ONE enum declaration (the exporting file's and the importer's)
+ * agree: same name, same variants in order, same payload field names in order. Used to
+ * decide that an imported `!` function's error enum is readable in the importing file.
+ */
+function treeHasFailableMatchStamp(node: unknown, depth = 0): boolean {
+  // S469 — a `match` in this tree is stamped as a match on a failable result (the
+  // codegen-side twin is emit-control-flow.ts `hasFailableMatchStamp`).
+  if (!node || typeof node !== "object" || depth > 200) return false;
+  if (Array.isArray(node)) return node.some((x) => treeHasFailableMatchStamp(x, depth + 1));
+  const r = node as Record<string, unknown>;
+  if (r.__matchSubjectFailable === true) return true;
+  for (const [k, v] of Object.entries(r)) {
+    if (k === "span" || k === "__matchSubjectVariants") continue;
+    if (v && typeof v === "object" && treeHasFailableMatchStamp(v, depth + 1)) return true;
+  }
+  return false;
+}
+
+function sameEnumShape(a: EnumType, b: EnumType): boolean {
+  if (a.name !== b.name || a.variants.length !== b.variants.length) return false;
+  for (let i = 0; i < a.variants.length; i++) {
+    const va = a.variants[i], vb = b.variants[i];
+    if (va.name !== vb.name) return false;
+    const fa = va.payload ? [...va.payload.keys()] : [];
+    const fb = vb.payload ? [...vb.payload.keys()] : [];
+    if (fa.length !== fb.length || fa.some((f, j) => f !== fb[j])) return false;
+  }
+  return true;
+}
+
 function annotateNodes(
   fileAST: FileAST,
   scopeChain: ScopeChain,
@@ -10260,6 +10291,7 @@ function annotateNodes(
   const fnErrorTypes = new Map<string, string>();
   const fnCanFail = new Set<string>();     // all functions with canFail === true
   const fnAllDeclared = new Set<string>(); // all function-decl names in this file
+  const allFnDecls: ASTNodeLike[] = [];   // S468 — every function-decl node (for fnReturnsFailable)
   const nonPureFnNames = new Set<string>(); // names declared with `function` (not `fn`) — callable-but-not-pure (§48.6.2)
 
   // A9-Ext-4 D2 (2026-05-08): CPS-implicit-failable set — functions that have
@@ -10439,6 +10471,7 @@ function annotateNodes(
     for (const n of nodes) {
       if (n.kind === "function-decl" && n.name) {
         fnAllDeclared.add(n.name as string);
+        allFnDecls.push(n);
         // S84 v0.2.4 #5-followon — populate fnSignatures (Gap B.3 + B.4).
         // Resolve param types against the file's typeRegistry (already
         // built before annotateNodes runs). Falls back to tAsIs() when
@@ -10535,11 +10568,47 @@ function annotateNodes(
       if (Array.isArray(children)) collectFnErrorTypes(children);
     }
   }
-  collectFnErrorTypes(
+  const fileTopLevelNodes: ASTNodeLike[] =
     (fileAST.nodes as ASTNodeLike[] | undefined)
     ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
-    ?? []
-  );
+    ?? [];
+  collectFnErrorTypes(fileTopLevelNodes);
+
+  // S469 (P0, g-imported-failable-function-never-checked) — an IMPORTED `!` function is a
+  // failable function in the importing file too. §19.4.3: "A call to a `!` function SHALL NOT
+  // be ignored"; §19.4.4: "An unhandled `!` function call SHALL be a compile error
+  // (E-ERROR-002)" — neither is limited to functions declared in the calling file. Before, the
+  // failable set was built from this file's declarations only, so `import { check } from
+  // "./auth.scrml"` + `const ok = check(p)` compiled and a wrong password logged in.
+  // Read off the exporting file's DECLARATION (api.js `importedFnDeclsByFile`, through
+  // re-exports and renames). A server function the exporting file's route map body-splits is
+  // CPS-implicitly failable, as for a local one. The error enum is registered only when the
+  // importer's registry holds that same enum under its name (§19.4.4.1: an enum); otherwise
+  // the import is failable with an error type this file cannot read, and a `match` on its
+  // result cannot be lowered to discriminate it — `importedFailableUnreadableErr` makes such a
+  // subject unprovable, so it is refused (E-ERROR-002), never compared as a plain value.
+  const importedFailableUnreadableErr = new Set<string>();
+  for (const [localName, d] of importedFnDecls ?? []) {
+    if (fnAllDeclared.has(localName)) continue; // a local declaration of the name is that binding
+    const fnNode = d.fnNode;
+    let failable = fnNode.canFail === true;
+    let cpsImplicit = false;
+    if (!failable) {
+      const entry = routeMap?.functions?.get(`${d.depFilePath}::${(fnNode.span as Span | undefined)?.start}`);
+      if (entry && entry.cpsSplit) { failable = true; cpsImplicit = true; }
+    }
+    if (!failable) continue;
+    fnCanFail.add(localName);
+    if (cpsImplicit) { fnCpsImplicitFailable.add(localName); continue; }
+    const errName = typeof fnNode.errorType === "string" ? fnNode.errorType.trim() : "";
+    const depEnum = importedFnSignatures?.get(localName)?.errorEnum;
+    const here = errName ? typeRegistry.get(errName) : undefined;
+    if (depEnum && here && here.kind === "enum" && sameEnumShape(here as EnumType, depEnum)) {
+      fnErrorTypes.set(localName, errName);
+    } else {
+      importedFailableUnreadableErr.add(localName);
+    }
+  }
 
   // §14.10 — the call-argument bare-variant walker's signature table: this
   // file's functions PLUS the functions it imports (their DECLARED parameter
@@ -11026,6 +11095,77 @@ function annotateNodes(
   // S467 r2 — `const g = check`: per scope, the bindings that alias a failable
   // function (name → that function). Read by `resolveFailableCallee`.
   const failableAliasesByScope = new WeakMap<object, Map<string, string>>();
+  // S468 — per scope, the bindings whose CALL may return a failable function
+  // (`const mk = () => check`). Read by `fnFactsReturns`.
+  const failableReturnsByScope = new WeakMap<object, Map<string, string>>();
+  // S468 fix round 1 — the PROVABLE versions (a `const` / `lin` binding only, never written
+  // again): the failable functions a binding provably is / a call of it provably returns.
+  // Read by `fnFactsIsExact` / `fnFactsReturnsExact` (the `match`-subject judgement).
+  const failableExactByScope = new WeakMap<object, Map<string, string[]>>();
+  const failableExactReturnsByScope = new WeakMap<object, Map<string, string[]>>();
+  // S468 fix round 1 (F5) — function declarations BY BINDING: per scope, the declarations of
+  // each name (a function body's direct declarations registered when its scope is pushed,
+  // hoisted; a block-level one when it is bound; top-level ones on first use), and per
+  // declaration the scope that holds it. `declaredAheadByScope`: per function-body scope, every
+  // name declared anywhere in the body (not inside a nested function) — a name it declares
+  // later than the current point is not provably anything yet.
+  const fnDeclsByScope = new WeakMap<object, Map<string, ASTNodeLike[]>>();
+  const fnDeclScope = new WeakMap<object, Scope>();
+  const declaredAheadByScope = new WeakMap<object, Set<string>>();
+  function registerFnDecl(scope: Scope, decl: ASTNodeLike): void {
+    ensureTopLevelFnDecls();
+    if (typeof decl.name !== "string" || fnDeclScope.has(decl)) return;
+    let m = fnDeclsByScope.get(scope);
+    if (!m) { m = new Map(); fnDeclsByScope.set(scope, m); }
+    const list = m.get(decl.name) ?? [];
+    list.push(decl);
+    m.set(decl.name, list);
+    fnDeclScope.set(decl, scope);
+  }
+  /** A function body's scope: register its direct declarations (hoisted) and every name it declares. */
+  function registerFnBodyScope(scope: Scope, body: unknown): void {
+    if (!Array.isArray(body)) return;
+    for (const st of body) {
+      if (st && typeof st === "object" && (st as ASTNodeLike).kind === "function-decl") registerFnDecl(scope, st as ASTNodeLike);
+    }
+    const names = new Set<string>();
+    const seen = new WeakSet<object>();
+    const visit = (v: unknown): void => {
+      if (!v || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) { for (const x of v) visit(x); return; }
+      const r = v as Record<string, unknown>;
+      const k = r.kind;
+      if (typeof k === "string" && (k === "function-decl" || k === "let-decl" || k === "const-decl"
+          || k === "tilde-decl" || k === "lin-decl" || k === "state-decl")) {
+        if (typeof r.name === "string") names.add(r.name);
+        if (Array.isArray(r.boundNames)) for (const b of r.boundNames) if (typeof b === "string") names.add(b);
+        if (k === "function-decl") return; // a nested function's own body is its own scope
+      }
+      for (const key of STATEMENT_CHILD_KEYS) if (key in r) visit(r[key]);
+    };
+    visit(body);
+    declaredAheadByScope.set(scope, names);
+  }
+  let topLevelFnDeclsRegistered = false;
+  /** The file's top-level function declarations (not inside a function body), registered on the global scope. */
+  function ensureTopLevelFnDecls(): void {
+    if (topLevelFnDeclsRegistered) return;
+    topLevelFnDeclsRegistered = true;
+    const seen = new WeakSet<object>();
+    const visit = (nodes: unknown): void => {
+      if (!Array.isArray(nodes)) return;
+      for (const n of nodes) {
+        if (!n || typeof n !== "object" || seen.has(n as object)) continue;
+        seen.add(n as object);
+        const r = n as ASTNodeLike;
+        if (r.kind === "function-decl") { registerFnDecl(scopeChain.global, r); continue; }
+        visit(r.body);
+        visit(r.children);
+      }
+    };
+    visit(fileTopLevelNodes);
+  }
   const valuePositionChecked = new WeakSet<object>();
   function withHandlerCheckContext(fn: () => void): void {
     const savedDepth = errorBoundaryDepth;
@@ -11702,6 +11842,8 @@ function annotateNodes(
         const boundary = functionBoundary(n);
 
         scopeChain.push(`fn:${(n.name as string) ?? "anon"}:${boundary}`);
+        // S468 fix round 1 (F5) — this body's own function declarations, by binding (hoisted).
+        registerFnBodyScope(scopeChain.current, n.body);
 
         // Bind parameters into the function scope. §14: respect type annotations
         // on parameters (`function foo(x: Type)`) so downstream match / is .Variant
@@ -11885,6 +12027,9 @@ function annotateNodes(
             resolvedType: fnType,
             isPure: false,
           });
+          // S468 fix round 1 (F5) — a block-level declaration not hoisted by its function
+          // body's registration is registered where it is bound.
+          if (n.kind === "function-decl") registerFnDecl(scopeChain.current, n);
         }
 
         // §19 Error system validation.
@@ -14403,7 +14548,8 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "match-stmt":
       case "match-expr": {
-        checkMatchDiagnostics(n, scopeChain, errors, filePath, fnCanFail, fnErrorTypes, typeRegistry);
+        checkMatchDiagnostics(n, scopeChain, errors, filePath, fnCanFail, fnErrorTypes, typeRegistry,
+          failableSubjectCallees((n as { headerExpr?: unknown }).headerExpr));
         // §2a — E-SCOPE-001 on an undeclared subject ident (e.g.
         // `match undeclaredSubj { ... }`). checkMatchDiagnostics already
         // resolves the subject for type lookup but doesn't emit a scope
@@ -16035,6 +16181,23 @@ function annotateNodes(
     // is keyed by NAME, so an `<each in=@fns as risky>` row's `onclick=risky()`
     // would otherwise be taken for the file's failable `risky` (S440 F7).
     if (bareCallee && handlerCheckDepth > 0 && isShadowedByLocalBinding(bareCallee)) return;
+    // S469 fix round 2 (F4) — a `const` alias of a failable function is the one value read
+    // impl#1 accepts, so a handler that calls it (`const h = check` + `onclick=h()`) is a call of
+    // that function: judged by the alias, not by the name (it compiled and logged in before).
+    if (bareCallee && handlerCheckDepth > 0 && !fnCanFail.has(bareCallee) && !inGuarded) {
+      const aliased = resolveFailableCallee(bareCallee);
+      if (aliased !== null && !fnCpsImplicitFailable.has(aliased)) {
+        errors.push(new TSError(
+          "E-ERROR-002",
+          `E-ERROR-002: Result of failable function '${aliased}' (called through '${bareCallee}') is not handled ` +
+          `in this event handler. Catch it with '!{}' (e.g. '${bareCallee}(…) !{ | .Variant :> … }'), match the ` +
+          `result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised ` +
+          `in event handlers (§19.6.6).`,
+          n.span as Span,
+        ));
+        return;
+      }
+    }
     if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
       if (fnCpsImplicitFailable.has(bareCallee)) {
         if (!enclosingFnCanFail) {
@@ -16096,29 +16259,145 @@ function annotateNodes(
   }
 
   /**
-   * S467 r2 — the failable function a callee NAME resolves to through the live
-   * scope chain: the name itself when it is a failable function no local binding
-   * shadows; the aliased function when a binding's initializer is (or resolves to)
-   * a failable function (`const g = check; g(p)` — fails closed); otherwise null.
+   * S467 r2 / S468 — what a NAME is as a function value, resolved through the scope
+   * chain starting at `from` (the live scope by default). One reading for the four
+   * facts a callee needs (`fnFactsIs` / `fnFactsIsExact` / `fnFactsReturns` /
+   * `fnFactsReturnsExact`):
+   *   - "alias"   — a binding whose facts were recorded (`const g = check`, `let g = …`,
+   *                 `const mk = () => check`) in `scope`;
+   *   - "decl"    — function declarations of that name registered in `scope` (hoisted:
+   *                 a function body's direct declarations are registered when its scope
+   *                 is pushed, top-level ones on first use) — judged BY BINDING;
+   *   - "shadow"  — a local non-function binding: not a function value we know;
+   *   - "ahead"   — (provable facts only) a scope that declares the name later than
+   *                 this point: what it will hold is not provable here;
+   *   - "unknown" — nothing found: the by-name file facts (fail closed for "may",
+   *                 never provable).
    */
-  function resolveFailableCallee(name: string): string | null {
-    let scope: Scope | null = scopeChain.current;
-    while (scope !== null) {
-      const aliases = failableAliasesByScope.get(scope);
-      if (aliases && aliases.has(name)) return aliases.get(name) ?? null;
+  type FnBindingRes =
+    | { k: "alias"; scope: Scope }
+    | { k: "decl"; decls: ASTNodeLike[]; scope: Scope }
+    | { k: "shadow" }
+    | { k: "ahead" }
+    | { k: "unknown" };
+  function resolveFnBinding(name: string, from: Scope, forExact: boolean): FnBindingRes {
+    ensureTopLevelFnDecls();
+    for (let scope: Scope | null = from; scope !== null; scope = scope.parent) {
+      if (failableAliasesByScope.get(scope)?.has(name) || failableReturnsByScope.get(scope)?.has(name)
+          || failableExactByScope.get(scope)?.has(name) || failableExactReturnsByScope.get(scope)?.has(name)) {
+        return { k: "alias", scope };
+      }
+      const decls = fnDeclsByScope.get(scope)?.get(name);
+      if (decls && decls.length > 0) return { k: "decl", decls, scope };
       if (scope.hasOwn(name)) {
         const entry = scope.bindings.get(name);
-        if (scope !== scopeChain.global && !!entry && entry.kind !== "function") return null;
-        break;
+        if (scope !== scopeChain.global && !!entry && entry.kind !== "function") return { k: "shadow" };
+        return { k: "unknown" };
       }
+      if (forExact && scope !== scopeChain.global && declaredAheadByScope.get(scope)?.has(name)) return { k: "ahead" };
+    }
+    return { k: "unknown" };
+  }
+
+  /** The failable function a callee NAME may be (fail closed); see `resolveFnBinding`. */
+  function fnFactsIs(name: string, from: Scope = scopeChain.current): string | null {
+    const r = resolveFnBinding(name, from, false);
+    switch (r.k) {
+      case "alias": return failableAliasesByScope.get(r.scope)?.get(name) ?? null;
+      case "shadow": return null;
+      default: return fnCanFail.has(name) ? name : null;
+    }
+  }
+
+  /**
+   * The failable functions a callee NAME PROVABLY is (S468 fix round 1), or null: a
+   * `const` / `lin` bound to provable ones, or the ONE declaration of that name in the
+   * resolving scope when it is declared `!` (or CPS-implicitly failable).
+   */
+  function fnFactsIsExact(name: string, from: Scope = scopeChain.current): string[] | null {
+    const r = resolveFnBinding(name, from, true);
+    if (r.k === "alias") return failableExactByScope.get(r.scope)?.get(name) ?? null;
+    if (r.k === "decl") {
+      if (r.decls.length !== 1 || !fnCanFail.has(name)) return null;
+      const d = r.decls[0];
+      return d.canFail === true || fnCpsImplicitFailable.has(name) ? [name] : null;
+    }
+    // A failable name no declaration in the file binds and no local binding shadows: a
+    // built-in failable bound by import (`parseVariant`, §41.13), or (S469) an imported `!`
+    // function — it IS that function. Not provable when its error enum is unreadable here:
+    // the `match` lowering could not discriminate the error (`importedFailableUnreadableErr`).
+    if (r.k === "unknown" && fnCanFail.has(name) && !allFnDecls.some((d) => d.name === name)) {
+      return importedFailableUnreadableErr.has(name) ? null : [name];
+    }
+    return null;
+  }
+
+  /**
+   * The failable function a CALL of `name` may return — from a recorded binding fact only
+   * (`const mk = () => check` is recorded, and refused at its `check` read).
+   *
+   * S469 fix round 2 (F4, ruling:user-voice-scrml.md S469 "Split + audit") — what a function
+   * DECLARATION returns is no longer analysed. impl#1 refuses every read of a failable function
+   * as a value outside callee position except a `const` alias by name
+   * (E-IMPL1-FAILABLE-FN-VALUE), so a `return` that could yield one (`return check`, `return g`,
+   * `return c ? check : id`) is itself refused: in an ACCEPTED program no declared function
+   * returns a failable function, and the analysis could only add diagnostics to a program that
+   * is already refused. It is retired with its cost and its flaw — the S468/S469 cycle handling
+   * (`declReturnFacts`) was exponential on recursive call graphs before S469 and, after the
+   * per-query cache, could memoize a partial result read through a path that did not run
+   * through the in-progress declaration (review of 5092a14fa, H1/L1). Nothing replaces it.
+   */
+  function fnFactsReturns(name: string, from: Scope = scopeChain.current): string | null {
+    const r = resolveFnBinding(name, from, false);
+    return r.k === "alias" ? failableReturnsByScope.get(r.scope)?.get(name) ?? null : null;
+  }
+
+  /** The failable functions a CALL of `name` PROVABLY returns (recorded binding facts only), or null. */
+  function fnFactsReturnsExact(name: string, from: Scope = scopeChain.current): string[] | null {
+    const r = resolveFnBinding(name, from, true);
+    return r.k === "alias" ? failableExactReturnsByScope.get(r.scope)?.get(name) ?? null : null;
+  }
+
+  /** The failable function a callee name may be, from the live scope (S467 r2 name). */
+  function resolveFailableCallee(name: string): string | null {
+    return fnFactsIs(name);
+  }
+
+  /** The scope that owns `name`'s binding (the global scope when none does). */
+  function owningScopeOf(name: string): Scope {
+    let scope: Scope | null = scopeChain.current;
+    while (scope !== null) {
+      if (scope.hasOwn(name)) return scope;
       scope = scope.parent;
     }
-    return fnCanFail.has(name) ? name : null;
+    return scopeChain.global;
+  }
+
+  /**
+   * S468 fix round 1 — a `match` subject's PROVABLE failable callees (the one judgement
+   * the value-position walk accepts a subject by: `provableSubjectCallees`), names
+   * resolved through the live scope chain; [] when the subject is not provably a call of
+   * a failable function (null when there is no subject tree).
+   */
+  function failableSubjectCallees(subject: unknown): string[] | null {
+    if (!subject || typeof subject !== "object") return null;
+    return provableSubjectCallees(subject as ExprNode, {
+      is: (n) => fnFactsIs(n),
+      returns: (n) => fnFactsReturns(n),
+      isExact: (n) => fnFactsIsExact(n),
+      returnsExact: (n) => fnFactsReturnsExact(n),
+    }) ?? [];
   }
 
   /** The text / structure readers the value-position walk needs (`failable-value-calls.ts`). */
   const failableEnv: FailableEnv = {
-    resolveOuter: resolveFailableCallee,
+    resolveOuter: (n) => fnFactsIs(n),
+    resolveOuterReturns: (n) => fnFactsReturns(n),
+    resolveOuterExact: (n) => fnFactsIsExact(n),
+    resolveOuterReturnsExact: (n) => fnFactsReturnsExact(n),
+    onFailableMatchSubject: (node, callees) => {
+      stampFailableMatchSubject(node as unknown as ASTNodeLike, callees, fnErrorTypes, typeRegistry);
+    },
     parseStatements: (text) => {
       const r = parseStatementText(text, filePath);
       return r.ok ? r.stmts : null;
@@ -16199,19 +16478,91 @@ function annotateNodes(
       if (renderTimeInBoundary && !c.inFunction && boundaryMayHandle(c)) { boundaryHandlesCall(c, span); return; }
       reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : enclosingFnCanFail, inDefer && !c.inFunction);
     });
-    // `const g = check` — `g` aliases the failable function (read by resolveFailableCallee).
-    if ((kind === "const-decl" || kind === "let-decl" || kind === "tilde-decl" || kind === "lin-decl")
-        && typeof rec.name === "string") {
-      const init = rec.initExpr as { kind?: string; name?: string } | undefined;
-      if (init && init.kind === "ident" && typeof init.name === "string") {
-        const target = resolveFailableCallee(init.name);
-        if (target !== null) {
-          let m = failableAliasesByScope.get(scopeChain.current);
-          if (!m) { m = new Map(); failableAliasesByScope.set(scopeChain.current, m); }
-          m.set(rec.name, target);
+    // A binding that may hold a failable function — `const g = check`, `p ? check : id`,
+    // `check || id`, `getF()` — is one; a binding whose CALL may return one
+    // (`const mk = () => check`) is recorded too (read by resolveFailableCallee /
+    // fnFactsReturns). Judged by the value (`failableBindingFacts`), fail closed.
+    // A reassignment `g = check` records on the scope that owns `g`, so a call after it
+    // — in that scope or any nested one — sees it.
+    {
+      let name: string | null = null;
+      let init: unknown = null;
+      const owners: Scope[] = [scopeChain.current];
+      if ((kind === "const-decl" || kind === "let-decl" || kind === "tilde-decl" || kind === "lin-decl")
+          && typeof rec.name === "string") {
+        name = rec.name;
+        init = rec.initExpr;
+        // A bare `g = v` in an inner block is a tilde-decl that WRITES an outer `g` when one
+        // exists: record on that binding's scope too, so a call after the block sees it.
+        if (kind === "tilde-decl") {
+          for (let s: Scope | null = scopeChain.current.parent; s !== null; s = s.parent) {
+            if (s.hasOwn(name)) { owners.push(s); break; }
+          }
+        }
+      } else if (kind === "bare-expr") {
+        const e = rec.exprNode as { kind?: string; op?: string; target?: { kind?: string; name?: string }; value?: unknown } | undefined;
+        if (e && e.kind === "assign" && e.target && e.target.kind === "ident" && typeof e.target.name === "string") {
+          name = e.target.name;
+          init = e;
+          owners[0] = owningScopeOf(name);
+        }
+      }
+      if (name !== null && init && typeof init === "object") {
+        const facts = failableBindingFacts(init as ExprNode, failableEnv);
+        const returns = facts.returns
+          ?? ((init as { kind?: string }).kind === "assign"
+            ? failableBindingFacts((init as { value?: ExprNode }).value, failableEnv).returns : null);
+        // S468 fix round 1 — PROVABLE facts only for a binding never written again.
+        const once = kind === "const-decl" || kind === "lin-decl";
+        const isExact = once && facts.is !== null ? facts.isExact : null;
+        const returnsExact = once && returns !== null ? facts.returnsExact : null;
+        for (const owner of owners) {
+          if (facts.is !== null) {
+            let m = failableAliasesByScope.get(owner);
+            if (!m) { m = new Map(); failableAliasesByScope.set(owner, m); }
+            m.set(name, facts.is);
+          }
+          if (returns !== null) {
+            let m = failableReturnsByScope.get(owner);
+            if (!m) { m = new Map(); failableReturnsByScope.set(owner, m); }
+            m.set(name, returns);
+          }
+          if (isExact !== null) {
+            let m = failableExactByScope.get(owner);
+            if (!m) { m = new Map(); failableExactByScope.set(owner, m); }
+            m.set(name, isExact);
+          }
+          if (returnsExact !== null) {
+            let m = failableExactReturnsByScope.get(owner);
+            if (!m) { m = new Map(); failableExactReturnsByScope.set(owner, m); }
+            m.set(name, returnsExact);
+          }
         }
       }
     }
+  }
+
+  /**
+   * S468 (§19.4.3 item 1, §19.7.1) — an expression-position `match` whose subject is a call
+   * of a PROVABLY failable function (`provableSubjectCallees`) is a match on a failable
+   * result: stamp it so codegen discriminates the error (`__matchSubjectFailable`) and binds
+   * the error arms against the declared error enums (`__matchSubjectVariants`: `Ok` + the
+   * union of the callees' variants). Exactly the statement-position rule
+   * (`checkMatchDiagnostics`): stamped only when every callee's error type resolves to an
+   * enum — as a direct-call subject always was.
+   */
+  function stampFailableMatchSubject(
+    node: ASTNodeLike,
+    callees: string[],
+    errTypes: Map<string, string>,
+    registry: Map<string, ResolvedType>,
+  ): void {
+    if (callees.length === 0) return;
+    const union = failableResultUnion(callees, errTypes, registry);
+    const variants = union ? matchSubjectVariantsOf(union) : null;
+    if (!variants) return;
+    (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable = true;
+    (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = variants;
   }
 
   /**
@@ -16367,16 +16718,20 @@ function annotateNodes(
       return;
     }
     if (c.refKind === "fn-value") {
-      // S469 (§19.4.3) — `lift check` (or any operand reading `check` as a value) hands the
-      // failable function to a binding whose calls impl#1 does not follow, so a call through it
-      // would go unhandled. Refused (fails closed), whatever the callee class.
-      const via = c.via ? `'${c.via}' (an alias of failable function '${calleeName}')` : `failable function '${calleeName}'`;
+      // S469 F4 — ruling:user-voice-scrml.md S469 "Split + audit": the LANGUAGE lets a failable
+      // function be used as a value (§19.4.3 — its failability travels with its type, so every
+      // eventual call is checked); impl#1 does not follow a failable function through a value (an
+      // argument, a return, an operator alias, the binding a value-form `if` / `for` produces from
+      // `lift check`), so it refuses the read, whatever the callee class. An impl#1 limitation,
+      // said so plainly — not the language rule.
+      const named = c.via ? `'${calleeName}' (through '${c.via}')` : `'${calleeName}'`;
       errors.push(new TSError(
-        "E-ERROR-002",
-        `E-ERROR-002: ${via} is lifted as a VALUE. impl#1 does not follow a failable function through ` +
-        `the binding a value-form 'if' / 'for' produces, so a call through it would not be handled. ` +
-        `Lift the handled RESULT instead ('lift ${calleeName}(…) !{ | .Variant :> … }'), or call ` +
-        `'${calleeName}' directly where its result is handled.`,
+        "E-IMPL1-FAILABLE-FN-VALUE",
+        `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function used as a value: ${named} ` +
+        `is read here other than as a call. This is a limitation of this compiler (impl#1), not a ` +
+        `language rule — scrml allows it. Call it directly, alias it with 'const' ` +
+        `('const g = ${calleeName}'), or handle it at the call with '!{}' (for a 'lift', lift the ` +
+        `handled result: 'lift ${calleeName}(…) !{ | .Variant :> … }').`,
         span,
       ));
       return;
@@ -16419,6 +16774,33 @@ function annotateNodes(
         `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
         span,
         "warning",
+      ));
+      return;
+    }
+    if (c.matchSubjectNotProvable === true && importedFailableUnreadableErr.has(calleeName)) {
+      // S469 — an imported `!` function whose error enum this file cannot read (not imported
+      // under its name, or a different enum of that name): the match cannot discriminate it.
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled: it is the subject of a ` +
+        `'match', but '${calleeName}' is imported and its error type is not available in this file, ` +
+        `so the match cannot tell its error from a plain value. Import the error type from the ` +
+        `module that declares '${calleeName}', or catch the call with '!{}'.`,
+        span,
+      ));
+      return;
+    }
+    if (c.matchSubjectNotProvable === true) {
+      // S468 fix round 1 — a `match` subject whose callee may be the failable function but may
+      // also be a plain one: no lowering reads both correctly, so the match does not handle it.
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: Result of failable function ${shown} is not handled: it is the subject of a ` +
+        `'match', but the function called there may also be one that is not failable, so the match ` +
+        `cannot tell its error from a plain value. A 'match' handles a failable call only when the ` +
+        `subject is a call of a function that is certainly failable — call '${calleeName}(…)' directly ` +
+        `(or through a 'const' bound to it), or catch it with '!{}'.`,
+        span,
       ));
       return;
     }
@@ -16782,8 +17164,37 @@ function annotateNodes(
         });
         scopeChain.pop();
         const produced = errors.splice(before);
-        for (const e of produced) if (e && e.code === "E-ERROR-002") errors.push(e);
-      } else {
+        for (const e of produced) if (e && (e.code === "E-ERROR-002" || e.code === "E-IMPL1-FAILABLE-FN-VALUE")) errors.push(e);
+      }
+      // S469 (g-match-failable-subject-in-handler-attribute-not-discriminated-s468) — the walk
+      // above reads a CHECK-ONLY re-parse of the value, so the `match` stamps it applies land
+      // on a copy; codegen lowers the value's own `exprNode` (emit-html `handlerExprNode`), which
+      // was never stamped: `onclick=${ @msg = match check("wrong") { .Denied :> … _ :> … } }`
+      // compared the error object as a plain value and a wrong password logged in (the same for
+      // a one-statement braced value and an expression arrow). Stamp the tree codegen reads —
+      // the same provable-subject judgement, reports discarded (the copy walk owns them).
+      const ownExpr = value.kind === "expr" ? (value as Record<string, unknown>).exprNode : undefined;
+      if (ownExpr && typeof ownExpr === "object") {
+        scopeChain.push(`handler-stamp:${attr.name as string}`);
+        withHandlerCheckContext(() => forEachCallInValuePosition(ownExpr as ExprNode, "none", failableEnv, () => {}));
+        scopeChain.pop();
+      }
+      // FAIL CLOSED: the copy holds a match on a failable result but the tree codegen will
+      // lower carries no such stamp (no `exprNode` yet — a component body's value, whose node
+      // codegen synthesizes later): that match would compare the error as a plain value.
+      if (Array.isArray(checkStmts) && treeHasFailableMatchStamp(checkStmts)
+          && !(ownExpr && typeof ownExpr === "object" && treeHasFailableMatchStamp(ownExpr))) {
+        withHandlerCheckContext(() => {
+          errors.push(new TSError(
+            "E-ERROR-002",
+            `E-ERROR-002: a 'match' on the result of a failable function in this '${attr.name as string}' ` +
+            `handler is not handled: impl#1 cannot lower it here so that it tells the error from a plain ` +
+            `value. Move the 'match' into a function the handler calls, or catch the call with '!{}'.`,
+            (valueSpan ?? attr.span) as Span,
+          ));
+        });
+      }
+      if (!Array.isArray(checkStmts)) {
         const call = handlerValueAsBareCall(value, valueSpan);
         // Scope: the ruling covers calls to functions DECLARED `!`. A
         // CPS-implicit-failable callee (a server fn not declared `!`) is still
@@ -16818,12 +17229,31 @@ function annotateNodes(
             ? (parentRec._componentPropNames as unknown[])
             : null;
           const isDeclaredComponentProp = !!declaredProps && declaredProps.includes(attr.name);
+          // S469 fix round 2 (F4) — a failable function handed to a component as a declared
+          // callback prop (`<Btn onSave=risky/>`) is a function VALUE: the language allows it
+          // (§19.4.3), but impl#1 cannot verify the component's call of it, so it refuses it
+          // (E-IMPL1-FAILABLE-FN-VALUE). Only the call site of an EXPANDED component is judged
+          // here once: the prop attribute merged onto its root.
+          // S469 fix round 2 — the reference judged by what it names: a failable function, or a
+          // `const` alias of one (`const h = check` + `onclick=h`), the one value read impl#1 follows.
+          const refTarget = refName ? (fnCanFail.has(refName) ? refName : resolveFailableCallee(refName)) : null;
+          if (refName && refTarget !== null && isDeclaredComponentProp && parentTag !== "formFor"
+              && !isShadowedByLocalBinding(refName)) {
+            errors.push(new TSError(
+              "E-IMPL1-FAILABLE-FN-VALUE",
+              `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function used as a value: '${refName}' ` +
+              `is passed to a component as its '${attr.name as string}' prop. This is a limitation of this ` +
+              `compiler (impl#1), not a language rule — scrml allows it. Pass a function that handles the ` +
+              `call (e.g. one that calls '${refName}(…) !{ … }'), or call it directly in the component.`,
+              (valueSpan ?? attr.span) as Span,
+            ));
+          }
           if (
             refName
+            && refTarget !== null
             && !isDeclaredComponentProp
             && parentTag !== "formFor"
-            && fnCanFail.has(refName)
-            && !fnCpsImplicitFailable.has(refName)
+            && !fnCpsImplicitFailable.has(refTarget)
           ) {
             // Inside an expanded component, a handler that wires a callback PROP
             // as its raw reference (`onclick=onSave`) was substituted with the
@@ -21122,34 +21552,63 @@ function resolveFailableCallResultType(
   fnCanFail: Set<string>,
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
+  subjectCallees: string[] | null = null,
 ): EnumType | null {
-  // Extract the callee name — ExprNode CallExpr first, header-string fallback
+  // S468 — the caller resolved the failable calls the subject carries (through the
+  // live scope, aliases and operators included: `failableResultCallees`). Without
+  // that, extract the callee name — ExprNode CallExpr first, header-string fallback
   // (mirrors the `!{}`-handler callee extraction, ~line 10572).
-  let calleeName: string | null = null;
-  if (headerExpr && typeof headerExpr === "object") {
-    const e = headerExpr as { kind?: string; callee?: { kind?: string; name?: string } };
-    if (e.kind === "call" && e.callee && e.callee.kind === "ident" && typeof e.callee.name === "string") {
-      calleeName = e.callee.name;
+  let callees: string[] = [];
+  if (subjectCallees !== null) {
+    callees = subjectCallees;
+  } else {
+    let calleeName: string | null = null;
+    if (headerExpr && typeof headerExpr === "object") {
+      const e = headerExpr as { kind?: string; callee?: { kind?: string; name?: string } };
+      if (e.kind === "call" && e.callee && e.callee.kind === "ident" && typeof e.callee.name === "string") {
+        calleeName = e.callee.name;
+      }
+    }
+    if (!calleeName && typeof header === "string") {
+      const m = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(header);
+      if (m) calleeName = m[1];
+    }
+    if (calleeName && fnCanFail.has(calleeName)) callees = [calleeName];
+  }
+  if (callees.length === 0) return null;
+  return failableResultUnion(callees, fnErrorTypes, typeRegistry);
+}
+
+/**
+ * §19.7.1 — the synthetic result union of failable calls: the implicit `::Ok`
+ * success variant + every callee's declared error variants (deduplicated by name,
+ * first declaration wins). Null unless every callee's error type resolves to an
+ * enum. The checker reads only variant NAMES for exhaustiveness, so the `::Ok`
+ * payload shape is immaterial here.
+ */
+function failableResultUnion(
+  callees: string[],
+  fnErrorTypes: Map<string, string>,
+  typeRegistry: Map<string, ResolvedType>,
+): EnumType | null {
+  const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
+  const variants: VariantDef[] = [okVariant];
+  const names: string[] = [];
+  for (const callee of callees) {
+    const errorTypeName = fnErrorTypes.get(callee);
+    if (!errorTypeName) return null;
+    const errEnum = resolveFailableErrorType(errorTypeName, typeRegistry);
+    if (!errEnum || errEnum.kind !== "enum") return null;
+    const display = errorTypeDisplayName(errorTypeName);
+    if (!names.includes(display)) names.push(display);
+    for (const v of (errEnum as EnumType).variants ?? []) {
+      if (!variants.some((x) => x.name === v.name)) variants.push(v);
     }
   }
-  if (!calleeName && typeof header === "string") {
-    const m = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(header);
-    if (m) calleeName = m[1];
-  }
-  if (!calleeName || !fnCanFail.has(calleeName)) return null;
-  const errorTypeName = fnErrorTypes.get(calleeName);
-  if (!errorTypeName) return null;
-  const errEnum = resolveFailableErrorType(errorTypeName, typeRegistry);
-  if (!errEnum || errEnum.kind !== "enum") return null;
-  const errVariants = (errEnum as EnumType).variants ?? [];
-  // Synthetic result union: the implicit `::Ok` success variant + the declared
-  // error variants. The checker reads only variant NAMES for exhaustiveness, so
-  // the `::Ok` payload shape is immaterial here.
-  const okVariant: VariantDef = { name: "Ok", payload: null, renders: null };
   return {
     kind: "enum",
-    name: errorTypeDisplayName(errorTypeName),
-    variants: [okVariant, ...errVariants],
+    name: names.join(" | "),
+    variants,
     transitionRules: null,
   };
 }
@@ -21277,6 +21736,7 @@ function checkMatchDiagnostics(
   fnCanFail: Set<string>,
   fnErrorTypes: Map<string, string>,
   typeRegistry: Map<string, ResolvedType>,
+  subjectCallees: string[] | null = null,
 ): void {
   const span = (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   const extracted = extractArmsFromMatchNode(node);
@@ -21466,6 +21926,32 @@ function checkMatchDiagnostics(
     if (subjectVariants) {
       (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = subjectVariants;
     }
+  }
+
+  // S468 fix round 1 (§19.4.3 item 1, §19.7.1) — a subject that is a call of a PROVABLY
+  // failable function (`match check(p)`, `match g(p)` through `const g = check`,
+  // `match getF()(p)` when every return of `getF` is one — `provableSubjectCallees`, the
+  // judgement the E-ERROR-002 check accepts the subject by) is a match on a failable
+  // result: the error reaches the arms as its variant, every other value as `.Ok`. A
+  // subject that may also be a plain value is refused there (E-ERROR-002), so it never
+  // reaches this stamp (g-match-failable-subject-through-operator-miscompiled-s467).
+  if (subjectCallees !== null && subjectCallees.length > 0) {
+    const failableResult = failableResultUnion(subjectCallees, fnErrorTypes, typeRegistry);
+    if (failableResult) {
+      const failableVariants = matchSubjectVariantsOf(failableResult);
+      if (failableVariants) {
+        (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = failableVariants;
+        (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable = true;
+      }
+      checkExhaustiveness(
+        { arms: extracted.armPatterns } as unknown as ASTNodeLike,
+        failableResult,
+        span,
+        errors,
+        isPartial,
+      );
+    }
+    return;
   }
 
   if (!subjectType) {
@@ -29168,6 +29654,11 @@ type FnSignature = {
   returnType: ResolvedType;
   /** Read off an IMPORTED declaration (resolveImportedFnSignatures). */
   imported?: boolean;
+  /**
+   * S469 (imported failable) — an imported `!` function's declared error type, resolved in
+   * the EXPORTING file's scope (absent when it is not declared or does not resolve to an enum).
+   */
+  errorEnum?: EnumType;
 };
 
 /**
@@ -29223,7 +29714,14 @@ function resolveImportedFnSignatures(
         }
         params.push({ name: paramName, type });
       }
-      out.set(localName, { params, returnType: tAsIs(), imported: true });
+      // S469 — the error enum of an imported `!` function, read where it was declared.
+      let errorEnum: EnumType | undefined;
+      const errAnnot = d.fnNode.errorType;
+      if (d.fnNode.canFail === true && typeof errAnnot === "string" && errAnnot.trim().length > 0) {
+        const t = resolveTypeExpr(errAnnot, reg);
+        if (t.kind === "enum") errorEnum = t as EnumType;
+      }
+      out.set(localName, { params, returnType: tAsIs(), imported: true, ...(errorEnum ? { errorEnum } : {}) });
     } catch {
       // A signature that cannot be read is simply absent: its call arguments stay
       // unstamped (the codegen side then refuses to guess) — never a crash.
