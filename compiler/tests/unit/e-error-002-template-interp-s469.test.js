@@ -31,8 +31,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { forEachCallInValuePosition } from "../../src/failable-value-calls.ts";
-import { parseExprToNode, templateInterpolationNodesAll, tokenizeTemplateInterpolations } from "../../src/expression-parser.ts";
+import { parseExprToNode, templateInterpolationNodesAll, sliceTemplateText } from "../../src/expression-parser.ts";
 import { rewriteTemplateAttrValue } from "../../src/codegen/rewrite.ts";
+import { ScrmlParser } from "../../src/scrml-acorn.ts";
 
 afterAll(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -428,8 +429,8 @@ ${markup}
     });
   }
 
-  test("the slicer codegen emits from is the string-aware one (`${\"}\"}` does not close early)", () => {
-    const segs = tokenizeTemplateInterpolations('a ${"}" + x} b', { bare: true });
+  test("the slicer codegen emits from is acorn's (`${\"}\"}` does not close early)", () => {
+    const segs = sliceTemplateText('a ${"}" + x} b', { bare: true }).segments;
     expect(segs.filter((s) => s.kind === "expr").map((s) => s.text)).toEqual(['"}" + x']);
     expect(rewriteTemplateAttrValue('a ${"}" + @x} b').jsExpr).toBe('`a ${"}" + _scrml_reactive_get("x")} b`');
     // unchanged for the ordinary shapes
@@ -487,5 +488,135 @@ describe("F4 — `export const hv = check(x) !{ … }` is not reported unhandled
   });
   test("unhandled: still E-ERROR-002", () => {
     expect(compileProject({ "app.scrml": APP, "lib.scrml": LIB('export const hv = check("x")\n    export const n = 1') })).toContain("E-ERROR-002");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review of 065fd2035, HIGH-1: the interpolation boundaries are acorn's
+// ---------------------------------------------------------------------------
+
+describe("HIGH-1 — quoted-attribute interpolation boundaries are the ones JavaScript runs", () => {
+  const PAGE = (markup) => `type AuthErr:enum = { Denied }
+\${
+    function check(p)! -> AuthErr {
+        if (p != "secret") fail AuthErr::Denied
+        return true
+    }
+    const g = check
+}
+${markup}
+`;
+  const refused = [
+    ["a `}` in a block comment", "<p data-v=\"${ /* } */ check('wrong') ? 'Y' : 'N' }\">r</p>"],
+    ["a `}` in a block comment, alias", "<p data-v=\"${ /* } */ g('wrong') ? 'Y' : 'N' }\">r</p>"],
+    ["a `}` in a regular expression", "<p class=\"${ 'a'.replace(/}/, '') && check('wrong') ? 'y' : 'n' }\">r</p>"],
+    ["a `}` in a regular expression, alias", "<p class=\"${ 'a'.replace(/}/, '') && g('wrong') ? 'y' : 'n' }\">r</p>"],
+    ["a `}` in a line comment", "<p data-v=\"${ 1 // }\n && check('wrong') ? 'Y' : 'N' }\">r</p>"],
+  ];
+  for (const [what, markup] of refused) {
+    test(what, () => {
+      expect(compileSource(PAGE(markup), "h1").codes).toContain("E-ERROR-002");
+    });
+  }
+
+  test("an interpolation the readers cannot read is refused even when it names no failable function", () => {
+    const out = compileSource(PAGE("<p data-v=\"${ 1 + }\">r</p>"), "h1u");
+    expect(out.codes).toContain("E-ERROR-002");
+    expect(out.errors.map((e) => e.message).join("\n")).toContain("cannot read this template interpolation");
+    expect(compileSource(PAGE("<p data-v=\"${ /* only a comment */ }\">r</p>"), "h1e").codes).toContain("E-ERROR-002");
+  });
+
+  test("fuzz: the slicer's spans equal acorn's spans of the same template", () => {
+    // Expressions built from pieces that hold `}`, a backtick and `${` in every context acorn
+    // knows: strings, comments, regular expressions, nested templates, object literals.
+    const pieces = [
+      '"}"', "'}'", '"${"', "'`'", "/* } */ 1", "/* ` ${ */ 2", "(/}/).source", "(/`/).source", "(/\\${/).source",
+      "`a${'}'}b`", "`${`${1}`}`", "({ a: 1 }).a", "[1, 2].map(x => ({ v: x }))", "(() => { return '}' })()",
+      "x", "@cell", "1 // }\n", "'a'.replace(/}/g, '')", "`\\``",
+    ];
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    for (let round = 0; round < 300; round++) {
+      const exprs = [];
+      let value = "q" + round;
+      const count = 1 + rnd(3);
+      for (let k = 0; k < count; k++) {
+        const parts = [];
+        const len = 1 + rnd(3);
+        for (let m = 0; m < len; m++) parts.push(pieces[rnd(pieces.length)]);
+        const e = " " + parts.join(" + ").replace(/\n \+/g, "\n+") + " ";
+        exprs.push(e);
+        value += "${" + e + "} t" + k + " ";
+      }
+      const segs = sliceTemplateText(value, { bare: true });
+      expect(segs.unreadable).toBe(null);
+      expect(segs.segments.filter((s) => s.kind === "expr").map((s) => s.text)).toEqual(exprs);
+      // acorn (the compiler's, with the `@cell` plugin) over the whole value as a template literal.
+      const src = "`" + value + "`";
+      const tl = ScrmlParser.parseExpressionAt(src, 0, { ecmaVersion: 2025, sourceType: "module" });
+      expect(tl.type).toBe("TemplateLiteral");
+      expect(tl.end).toBe(src.length);
+      const acornSpans = tl.quasis.slice(0, -1).map((q, idx) => src.slice(q.end + 2, tl.quasis[idx + 1].start - 1));
+      expect(acornSpans).toEqual(exprs);
+    }
+  });
+
+  test("codegen emits from the same spans: the emitted template parses to the same interpolations", () => {
+    const v = 'a ${ /* } */ 1 + "}" } b ${ (/}/).source } c';
+    const js = rewriteTemplateAttrValue(v).jsExpr;
+    const tl = ScrmlParser.parseExpressionAt(js, 0, { ecmaVersion: 2025, sourceType: "module" });
+    expect(tl.end).toBe(js.length);
+    expect(tl.expressions.length).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review of 065fd2035, HIGH-2: source text never leaves a generated comment
+// ---------------------------------------------------------------------------
+
+describe("HIGH-2 — a line terminator in a quoted template attribute cannot inject code", () => {
+  const INJ = (sep) => `<msg> = "init"
+<p id="r" data-v="a \${1}${sep}window.__inj = 1;//">r</p>
+`;
+  for (const [what, sep] of [["LF", "\n"], ["CR", "\r"], ["U+2028", "\u2028"], ["U+2029", "\u2029"]]) {
+    test(`${what}: the value stays inside the comment and the template literal (executed)`, async () => {
+      const out = compileSource(INJ(sep), "h2");
+      expect(out.codes).toEqual([]);
+      // The debugging comment quotes the value on ONE line (its line terminator escaped).
+      const line = out.clientJs.split(/\r\n|[\n\r\u2028\u2029]/).find((l) => l.includes("template-attr data-v"));
+      expect(line).toContain("window.__inj = 1;//");
+      if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+      GlobalRegistrator.register();
+      try {
+        const m = out.html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+        document.body.innerHTML = (m ? m[1] : out.html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+        (0, eval)(`(function() {\n${SCRML_RUNTIME}\n${out.clientJs}\n})();`);
+        document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+        for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+        expect(window.__inj).toBe(undefined);
+        expect(document.querySelector("#r").getAttribute("data-v")).toBe(`a 1${sep === "\r" ? "\n" : sep}window.__inj = 1;//`); // a template literal (like HTML) reads CR as LF
+      } finally {
+        await GlobalRegistrator.unregister();
+      }
+    });
+  }
+
+  test("a legitimate multi-line class value compiles and renders its text", async () => {
+    const src = `<b> = "x"
+<p id="p" class="a \${@b}
+ c">r</p>
+<p id="out">\${@b}</p>
+`;
+    const out = compileSource(src, "h2m");
+    expect(out.codes).toEqual([]);
+    if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+    GlobalRegistrator.register();
+    const m = out.html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    document.body.innerHTML = (m ? m[1] : out.html).replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+    (0, eval)(`(function() {\n${SCRML_RUNTIME}\n${out.clientJs}\n})();`);
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(document.querySelector("#p").getAttribute("class")).toBe("a x\n c");
+    await GlobalRegistrator.unregister();
   });
 });

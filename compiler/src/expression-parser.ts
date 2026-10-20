@@ -4547,18 +4547,19 @@ export interface TemplateSegment {
  *            If the input does not look like a backtick template, returns
  *            a single quasi covering the whole string.
  */
-export function tokenizeTemplateInterpolations(raw: string, opts: { bare?: boolean } = {}): TemplateSegment[] {
+export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
   const segments: TemplateSegment[] = [];
   if (!raw || typeof raw !== "string") return segments;
 
   // Strip surrounding backticks if present; the inner content is what we walk.
   // We track offsets relative to the ORIGINAL `raw` string so spans line up.
-  // `opts.bare` (S469): `raw` is template TEXT with no surrounding backticks (a quoted
-  // attribute value) — a leading backtick is a literal character, never stripped.
+  // (S469: NOT the slicer of any text the failable walk or codegen must agree on — that is
+  // `sliceTemplateText`, acorn's boundaries. This one is a heuristic that does not know
+  // comments or regular expressions.)
   let i = 0;
   let innerStart = 0;
   let innerEnd = raw.length;
-  if (!opts.bare && raw.startsWith("`")) {
+  if (raw.startsWith("`")) {
     innerStart = 1;
     if (raw.endsWith("`") && raw.length >= 2) innerEnd = raw.length - 1;
     i = innerStart;
@@ -4826,33 +4827,92 @@ function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & objec
 }
 
 /**
- * S469 (review of 834e41cba, F2) — the `${…}` interpolations of template TEXT (a template
- * literal's source, or a QUOTED attribute value `data-v="a ${x} b"`), sliced by THE template
- * slicer (`tokenizeTemplateInterpolations`: brace-, string- and nested-template-aware — the
- * same slicer codegen's `rewriteTemplateAttrValue` emits from) and each read by
- * `parseExprToNode`. An interpolation the reader cannot read whole is a
- * `TemplateInterpFallback` hatch carrying its text (read to refuse, never dropped).
+ * S469 (review of 065fd2035, HIGH-1) — the `${…}` boundaries of template TEXT, taken from THE
+ * reader JavaScript uses: each interpolation's expression is parsed by acorn (`ScrmlParser`,
+ * the compiler's acorn with the `@cell` / enum plugins) from just after its `${`, and its
+ * closing `}` is the first TOKEN after that expression — so a `}` inside a string, a regular
+ * expression, a comment or a nested template never closes it, exactly as when the browser runs
+ * the emitted template literal. Quasi text follows the template-literal rules codegen writes it
+ * under: a `\` escapes the next character; a literal backtick is escaped on emission.
+ *
+ * `raw` is a template literal's source (outer backticks stripped) or, with `bare`, a QUOTED
+ * attribute value. Returns the segments (offsets into `raw`) and, when an interpolation does
+ * not parse or is not closed by a `}`, `unreadable` = its text from after the `${` to the end
+ * (nothing after it is sliced: the boundaries are no longer known).
+ *
+ * The one slicer of this text: `rewriteTemplateAttrValue` (codegen) emits from these segments
+ * and `templateTextInterpolationNodes` (the failable walk) reads them.
+ */
+export function sliceTemplateText(
+  raw: string, opts: { bare?: boolean } = {},
+): { segments: TemplateSegment[]; unreadable: string | null } {
+  const segments: TemplateSegment[] = [];
+  if (typeof raw !== "string") return { segments, unreadable: null };
+  let i = 0;
+  let end = raw.length;
+  if (!opts.bare && raw.startsWith("`")) {
+    i = 1;
+    if (raw.length >= 2 && raw.endsWith("`")) end = raw.length - 1;
+  }
+  const src = raw.slice(0, end);
+  let quasiStart = i;
+  const acornOpts = { ecmaVersion: 2025, sourceType: "module", allowAwaitOutsideFunction: true };
+  while (i < end) {
+    const ch = src.charCodeAt(i);
+    if (ch === 92 /* \ */) { i += 2; continue; }
+    if (ch === 36 /* $ */ && src.charCodeAt(i + 1) === 123 /* { */) {
+      segments.push({ kind: "quasi", text: src.slice(quasiStart, i), offset: quasiStart });
+      const exprStart = i + 2;
+      let closeAt = -1;
+      try {
+        // @ts-ignore — acorn's static API on the extended parser
+        const node = ScrmlParser.parseExpressionAt(src, exprStart, acornOpts) as { end: number };
+        // @ts-ignore
+        const tok = ScrmlParser.tokenizer(src.slice(node.end), acornOpts).getToken() as { type?: { label?: string }; start: number };
+        if (tok && tok.type && tok.type.label === "}") closeAt = node.end + tok.start;
+      } catch { closeAt = -1; }
+      if (closeAt < 0) {
+        const rest = src.slice(exprStart);
+        segments.push({ kind: "expr", text: rest, offset: exprStart });
+        return { segments, unreadable: rest };
+      }
+      segments.push({ kind: "expr", text: src.slice(exprStart, closeAt), offset: exprStart });
+      i = closeAt + 1;
+      quasiStart = i;
+      continue;
+    }
+    i++;
+  }
+  if (quasiStart < end) segments.push({ kind: "quasi", text: src.slice(quasiStart, end), offset: quasiStart });
+  return { segments, unreadable: null };
+}
+
+/**
+ * S469 (review of 834e41cba F2; 065fd2035 HIGH-1) — the `${…}` interpolations of template TEXT
+ * (a template literal's source, or a QUOTED attribute value `data-v="a ${x} b"`), bounded by
+ * `sliceTemplateText` (acorn's boundaries — the ones codegen emits from and JavaScript runs)
+ * and each read by `parseExprToNode`. An interpolation the reader cannot read whole, or one the
+ * slicer could not bound, is a `TemplateInterpFallback` hatch carrying its text: the failable
+ * walk REFUSES it (E-ERROR-002) whether or not it names a failable function.
  */
 export function templateTextInterpolationNodes(
   raw: string, file: string, start: number, span?: ExprSpan, opts: { bare?: boolean } = {},
 ): ExprNode[] {
   const out: ExprNode[] = [];
   const at: ExprSpan = span ?? { file, start, end: start + raw.length, line: 1, col: 1 };
-  for (const seg of tokenizeTemplateInterpolations(raw, opts)) {
+  const fallback = (text: string): void => {
+    out.push({ kind: "escape-hatch", span: at, nativeKind: "TemplateInterpFallback", raw: text.trim() === "" ? "${}" : text } as EscapeHatchExpr);
+  };
+  const { segments, unreadable } = sliceTemplateText(raw, opts);
+  const last = segments[segments.length - 1];
+  for (const seg of segments) {
     if (seg.kind !== "expr") continue;
+    if (unreadable !== null && seg === last) { fallback(unreadable); continue; }
     const exprText = seg.text.trim();
-    if (!exprText) continue;
     let node: ExprNode | null = null;
-    try { node = parseExprToNode(exprText, file, start + seg.offset); } catch { node = null; }
+    try { node = exprText ? parseExprToNode(exprText, file, start + seg.offset) : null; } catch { node = null; }
     if (node && !isUnreadExprNode(node)) { out.push(node); continue; }
-    // Text the reader cannot read whole: a sentinel carrying it (the identifier walker
-    // regex-scans it; the failable-call walk reads it to refuse).
-    out.push({
-      kind: "escape-hatch",
-      span: at,
-      nativeKind: "TemplateInterpFallback",
-      raw: exprText,
-    } as EscapeHatchExpr);
+    fallback(exprText);
   }
   return out;
 }

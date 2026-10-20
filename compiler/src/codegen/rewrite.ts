@@ -3,7 +3,8 @@ import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
 import { sqlSitesInExpressionText } from "../sql-in-expression-text.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
-import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive, blankLiteralTextInSource, tokenizeTemplateInterpolations } from "../expression-parser.ts";
+import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive, blankLiteralTextInSource, sliceTemplateText } from "../expression-parser.ts";
+import { ScrmlParser } from "../scrml-acorn.ts";
 import { CGError } from "./errors.ts";
 import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
@@ -3233,22 +3234,53 @@ export function hasTemplateInterpolation(value: string): boolean {
  * Rewrite a string attribute value containing `${...}` interpolations into
  * a JS template literal expression.
  */
+/**
+ * `@name` → `_scrml_reactive_get("name")` for every `@name` TOKEN of `text` (acorn's tokenizer
+ * with the `@` plugin), recording each name in `reactiveVars`. Text the tokenizer cannot read
+ * falls back to the textual rewrite (the failable-call check refuses such an interpolation, so
+ * that output never ships).
+ */
+function rewriteAtRefTokens(text: string, reactiveVars: Set<string>): string {
+  const regexRewrite = (): string => text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
+    reactiveVars.add(name);
+    return `_scrml_reactive_get("${name}")`;
+  });
+  const hits: Array<{ start: number; end: number; name: string }> = [];
+  try {
+    // @ts-ignore — acorn's static tokenizer on the extended parser
+    for (const t of ScrmlParser.tokenizer(text, { ecmaVersion: 2025, sourceType: "module", allowAwaitOutsideFunction: true })) {
+      const tok = t as { type?: { label?: string }; value?: unknown; start: number; end: number };
+      if (tok.type?.label === "name" && typeof tok.value === "string" && /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test(tok.value)) {
+        hits.push({ start: tok.start, end: tok.end, name: tok.value.slice(1) });
+      }
+    }
+  } catch {
+    return regexRewrite();
+  }
+  let out = "";
+  let last = 0;
+  for (const h of hits) {
+    reactiveVars.add(h.name);
+    out += text.slice(last, h.start) + `_scrml_reactive_get("${h.name}")`;
+    last = h.end;
+  }
+  return out + text.slice(last);
+}
+
 export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
   const reactiveVars = new Set<string>();
 
-  // S469 (review of 834e41cba, F2) — the interpolations are sliced by THE template slicer
-  // (`tokenizeTemplateInterpolations`, brace- / string- / nested-template-aware), the one the
-  // failable-call check reads the same attribute with (`templateTextInterpolationNodes`). Before,
-  // this counted braces with no regard to strings (`${"}"}` closed early), a second reader of the
-  // text the check could not share.
+  // S469 (reviews of 834e41cba F2 / 065fd2035 HIGH-1) — the interpolations are bounded by
+  // `sliceTemplateText`: acorn's boundaries, the ones the browser applies to the template
+  // literal emitted here, and the ones the failable-call check reads the same attribute with
+  // (`templateTextInterpolationNodes`). Before, this counted braces with no regard to strings,
+  // comments or regular expressions, so a `}` inside one closed the interpolation early and the
+  // rest ran as code the check never saw. A `@cell` read is rewritten by TOKEN (never inside a
+  // string, comment or regular expression), so the rewrite cannot move a boundary either.
   let result = "`";
-  for (const seg of tokenizeTemplateInterpolations(value ?? "", { bare: true })) {
+  for (const seg of sliceTemplateText(value ?? "", { bare: true }).segments) {
     if (seg.kind === "expr") {
-      const rewrittenExpr = seg.text.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
-        reactiveVars.add(name);
-        return `_scrml_reactive_get("${name}")`;
-      });
-      result += `\${${rewrittenExpr}}`;
+      result += `\${${rewriteAtRefTokens(seg.text, reactiveVars)}}`;
       continue;
     }
     const q = seg.text;

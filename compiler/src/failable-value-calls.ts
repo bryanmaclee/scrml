@@ -135,7 +135,7 @@ export interface FailableCallCandidate {
    *     impl#1 lowers that guard against the LIFT's result, not the call's (the error object is
    *     lifted unchecked; executed S469), so the `!{}` does not handle it.
    */
-  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable" | "unreadable-expr";
+  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable" | "unreadable-expr" | "unreadable-interp";
   /**
    * S469 follow-up — `refKind: "unreadable"`: a `lift` operand this walk could not read — the
    * operand text (`lift if (c) { lift if … }`, a value form nested two deep) parses neither as
@@ -984,6 +984,18 @@ class Walker {
     // ClassExpression, …) or an interpolation the parser could not read. Before, it was not
     // read at all. Its text is read to refuse (fails closed): every failable function it names
     // is an unhandled call.
+    if (nk === "TemplateInterpFallback") {
+      // S469 (review of 065fd2035, HIGH-1) — an interpolation the readers could not bound or
+      // read (`templateTextInterpolationNodes`). Its text is what JavaScript runs, whatever
+      // it names: refused even when it names no failable function (a `/* } */` once made the
+      // slice ` /* `, which named nothing, while the browser ran `check(…)` after it).
+      if (!this.unreadText(raw, scope, fn)) {
+        this.cb({ call: null, calleeName: "", via: null, inFunction: fn.inFunction,
+          inFailableFn: fn.inFunction && fn.inFailableFn, fromText: true, refKind: "unreadable-interp",
+          text: String(raw).trim() });
+      }
+      return;
+    }
     this.unreadText(raw, scope, fn);
   }
 

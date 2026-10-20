@@ -52,7 +52,12 @@
  * @module lint-transaction
  */
 import { isMetaKind } from "../types/ast.ts";
-import { parseStatementText, textBodiesOf } from "./defer-structure.ts";
+import { parseStatementTextDetailed, textBodiesOf } from "./defer-structure.ts";
+// S469 (review of 065fd2035, LOW) — the STRICT statement reader: a text-carried body read only
+// by dropping trailing content (a labeled block `a: { return x }` read as the bare expression `a`)
+// is refused (E-TRANSACTION-CONTROL-FLOW "could not be verified"), never half-read — a `return`
+// inside it would otherwise pass the transaction control-flow check unseen.
+const parseStatementText = (text: string, filePath?: string) => parseStatementTextDetailed(text, filePath, {});
 import type { FileAST, Span } from "../types/ast.ts";
 
 export type TransactionCode = "E-ERROR-001" | "E-ERROR-007" | "E-TRANSACTION-CONTROL-FLOW";

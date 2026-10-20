@@ -16780,6 +16780,20 @@ function annotateNodes(
   ): void {
     const calleeName = c.calleeName;
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "unreadable-interp") {
+      // S469 (review of 065fd2035, HIGH-1) — a template interpolation (a quoted attribute value's
+      // `${ … }`, or a template literal's) the compiler's readers could not bound or read. The
+      // browser runs it regardless, so it is refused whatever it names (fails closed).
+      const t = (c.text ?? "").replace(/\s+/g, " ");
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: impl#1 cannot read this template interpolation ('\${${t.length > 60 ? t.slice(0, 57) + "..." : t}}'), ` +
+        `so it cannot check it for an unhandled failable call (§19.4.3). Compute the value in a ` +
+        `logic block first (handling any '!' call there with '!{}' or 'match') and interpolate the name.`,
+        span,
+      ));
+      return;
+    }
     if (c.refKind === "unreadable-expr") {
       // S469 (§19.4.3) — an expression the failable-call check can read neither as structure nor
       // as text (an escape hatch with no source text). Refused (fails closed): before, it was
