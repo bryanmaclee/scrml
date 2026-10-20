@@ -1,0 +1,7 @@
+// `sort()` with no comparator needs a natural order.
+<program>
+    <bs:bool[]=([true, false])/>
+    <main>
+        <p>${@bs.sort().length}</p>
+    </main>
+</program>

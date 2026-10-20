@@ -302,7 +302,7 @@ describe("§66.2.4 (S451) — a union type in a declaration opener", () => {
       expect(r.diags.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("sequence in a union type"))).toBe(true);
     });
     test("a tape alone is unaffected: the granted append compiles, an ungranted shift is E-WRITE-NOT-GRANTED", () => {
-      const ok = `<program>\n${E}\n    <audit:Entry[free, append]=[]/>\n    function add() { @audit.push({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
+      const ok = `<program>\n${E}\n    <audit:Entry[free, append]=[]/>\n    function add() { @audit.append({ at: 1, actor: "a", action: "b" }); }\n    <main><p>x</p></main>\n</program>\n`;
       expect(codes(ok)).toEqual([]);
       expect(codes(ok.replace("function add()", "function bad() { @audit.shift(); }\n    function add()"))).toEqual(["E-WRITE-NOT-GRANTED"]);
     });

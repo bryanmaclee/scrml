@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-tapes-append-prepend",
+  "description": "`append` / `prepend` edit the tape their grants allow.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 rule 3",
+  "rationale": "Tape methods are named after their grants.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#log",
+        "text": "a,m,z"
+      }
+    ]
+  }
+}

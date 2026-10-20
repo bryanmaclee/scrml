@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-tapes-neg-sort-bool",
+  "description": "E-TYPE-031: a bool tape has no natural order.",
+  "language-version": "1.0",
+  "spec": "S469 sort ruling",
+  "rationale": "\"Any other element type without a comparator is a compile error.\"",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-unknown-method",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: `padStart` is not one of the bootstrap's string methods.",
+  "language-version": "1.0",
+  "spec": "Appendix D",
+  "rationale": "An unknown method is never a generic JS passthrough.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

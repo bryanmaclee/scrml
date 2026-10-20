@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-interp-quoted-attr-no-warn",
+  "description": "a quoted attribute is not linted (the bootstrap refuses the template itself).",
+  "language-version": "1.0",
+  "spec": "§5.5.3",
+  "rationale": "The only code is the bootstrap's refusal; no W-STRING-INTERP-LITERAL.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

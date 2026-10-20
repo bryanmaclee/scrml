@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-maybe-receiver",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: a method on a `string | not`.",
+  "language-version": "1.0",
+  "spec": "§42",
+  "rationale": "A method needs the value itself; the bootstrap does not read a narrowing at a receiver.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

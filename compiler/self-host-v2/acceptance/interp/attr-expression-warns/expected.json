@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-interp-attr-expression-warns",
+  "description": "W-STRING-INTERP-LITERAL (provisional) in an attribute expression.",
+  "language-version": "1.0",
+  "spec": "§5.5.3 · §4.18",
+  "rationale": "`title=(…)` is an expression, so the string is a logic string.",
+  "expect": {
+    "codes": [
+      "W-STRING-INTERP-LITERAL"
+    ],
+    "codeCounts": {
+      "W-STRING-INTERP-LITERAL": 1
+    },
+    "domAnchored": [
+      {
+        "selector": "#t",
+        "text": "x"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+// a method outside the table is refused by name (fail closed), never passed to the host.
+<program>
+    let <s:string="x"/>
+    <main>
+        <p>${@s.padStart(3)}</p>
+    </main>
+</program>

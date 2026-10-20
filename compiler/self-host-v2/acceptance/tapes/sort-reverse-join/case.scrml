@@ -1,0 +1,13 @@
+// sort / reverse return NEW tapes (§66.12.6 rule 3); natural order: numbers numerically, strings by code point (S469).
+<program>
+    <nums:int[]=([10, 9, 1, 100])/>
+    <words:string[]=(["pear", "Zed", "apple", "éclair"])/>
+    <main>
+        <p id="nums"><each in=@nums.sort() as n><b>${n} </b></each></p>
+        <p id="orig"><each in=@nums as n><b>${n} </b></each></p>
+        <p id="desc"><each in=@nums.sort((a, b) => b - a) as n><b>${n} </b></each></p>
+        <p id="words">${@words.sort().join(",")}</p>
+        <p id="rev">${@words.reverse().join(",")}</p>
+        <p id="w0">${@words.join(",")}</p>
+    </main>
+</program>

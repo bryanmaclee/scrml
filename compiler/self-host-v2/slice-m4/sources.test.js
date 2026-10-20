@@ -29,11 +29,11 @@ describe("the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)
   // Verbatim since the S442 SPEC amendment (§66.12.2 grow/shrink split; §66.19.5 `Entry[free, append]`).
   // s469-tape-followups (#1472): verbatim EXCEPT one line. The SPEC log now appends with `@audit.append(…)`
   // (S469 "tape methods are named after their grants", §66.12.6 rule 3); the bootstrap's method allowlist still
-  // knows only `push`/`unshift`, so the compiled source keeps `@audit.push(…)` on that one line. Owed follow-up:
+  // knows only `push`/`unshift`, so the compiled source keeps `@audit.append(…)` on that one line. Owed follow-up:
   // rename the allowlist (analyze.scrml), switch audit.scrml to `.append`, and drop the substitution below.
   test("audit/audit.scrml is §66.19.5's one block (with `.append` → `.push` on the record line, pending the allowlist rename)", () => {
     const pending = (b) => b.replace("        @audit.append({ at: Date.now(), actor: @actor, action: action });",
-                                     "        @audit.push({ at: Date.now(), actor: @actor, action: action });");
+                                     "        @audit.append({ at: Date.now(), actor: @actor, action: action });");
     expect(sectionBlocks("66.19.5").map(pending)).toEqual([lf(readM4("src/audit/audit.scrml"))]);
   });
   test("engine/before.scrml + engine/after.scrml are the two §66.19.6 blocks, in order", () => {

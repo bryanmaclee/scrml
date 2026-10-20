@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-int-receiver",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: `toUpperCase` on an `int`.",
+  "language-version": "1.0",
+  "spec": "Appendix D",
+  "rationale": "The receiver must be a `string`.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-tapes-neg-join-int",
+  "description": "E-TYPE-031: `join` on an int tape.",
+  "language-version": "1.0",
+  "spec": "§66.12.6 · conversions unruled",
+  "rationale": "Nothing converts an int to a string implicitly.",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

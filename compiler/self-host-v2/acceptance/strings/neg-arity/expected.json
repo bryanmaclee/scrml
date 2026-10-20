@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-arity",
+  "description": "E-CALL-ARITY: `charAt()` with no argument.",
+  "language-version": "1.0",
+  "spec": "§7.3",
+  "rationale": "A built-in's arity is checked like a function's.",
+  "expect": {
+    "codes": [
+      "E-CALL-ARITY"
+    ],
+    "codeCounts": {
+      "E-CALL-ARITY": 1
+    }
+  }
+}

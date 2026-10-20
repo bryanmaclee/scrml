@@ -214,7 +214,7 @@ describe("tapes keep their grants through a match", () => {
   });
   test("a write inside a statement match's arm is grant-checked like any other write", () => {
     const D = `    type Color:enum = { Red, Green }\n    let <c:Color=.Red/>\n    <xs:int[free, append]=[]/>`;
-    expect(codes(prog(D + `\n    function f() {\n        match @c {\n            .Red :> @xs.push(1)\n            .Green :> @xs.pop()\n        }\n    }`, `        <button onclick=f()>f</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(prog(D + `\n    function f() {\n        match @c {\n            .Red :> @xs.append(1)\n            .Green :> @xs.pop()\n        }\n    }`, `        <button onclick=f()>f</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
 

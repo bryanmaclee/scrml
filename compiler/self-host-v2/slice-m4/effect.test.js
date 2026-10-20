@@ -312,7 +312,7 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
   test("rule 1: a direct write in the body — assignment, `reset`, an edit call — each is an error", () => {
     expect(W(writes("", `<effect deps=[@query]>\${ @page = 1 }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(W(writes("", `<effect deps=[@query]>\${ reset(@page) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(W(writes("", `<effect deps=[@query]>\${ @xs.push(1) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes("", `<effect deps=[@query]>\${ @xs.append(1) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(W(writes("", `<effect deps=[@query]>\${\n        if (@page > 1) {\n            @hits = @hits + 1\n        }\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
   });
 

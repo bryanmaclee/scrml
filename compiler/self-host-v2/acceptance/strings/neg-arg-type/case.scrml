@@ -1,0 +1,7 @@
+// `slice` takes an int.
+<program>
+    let <s:string="abc"/>
+    <main>
+        <p>${@s.slice("1")}</p>
+    </main>
+</program>

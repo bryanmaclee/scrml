@@ -3,7 +3,7 @@
 // "an alias snapshot does not change when the source is later written".
 //
 // Neither §66.19 target program takes a snapshot, so this third, minimal program
-// states the §66.10 item-1 example (`let b = @a` then `@a.push(3)`) in the
+// states the §66.10 item-1 example (`let b = @a` then `@a.append(3)`) in the
 // ruled spelling. It also exercises a non-replace sequence edit (`.Append`),
 // used by the §6.1 O(n)-copy measurement.
 //
@@ -12,7 +12,7 @@
 //       let <seen:int=0/>
 //       function log() {
 //           let before = @audit              // a snapshot (§66.10)
-//           @audit.push("x")                 // an end-append edit, granted by [free, end]
+//           @audit.append("x")                 // an end-append edit, granted by [free, end]
 //           @seen = before.length            // the snapshot did not grow
 //       }
 //       <main>
