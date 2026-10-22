@@ -6693,7 +6693,7 @@ does not run on mount and writes nothing — it only reports the search to analy
     let <page:int=1/>
     let <lastSeen:string=""/>
 
-    ${ function remember(p: int) { @lastSeen = "page " + p } }
+    ${ function remember(p: int) { @lastSeen = `page ${p}` } }
 
     <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
     <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
@@ -8308,7 +8308,7 @@ const VERSION = "v0.3.0"
 - `${expr}` in markup-body position SHALL evaluate `expr` and display its string value at render time.
 - When `expr` references one or more reactive cells (`@x` access), the interpolation site SHALL re-render whenever any referenced cell changes — the standard reactive subscription contract (cross-ref §6.1 V5-strict access).
 - When `expr` references NO reactive cells AND the expression collapses to a compile-time-known constant value (literal, `const`-bound to a literal, simple arithmetic on constants), the compiler MAY inline the string value directly into the emitted HTML at that position. This is a permitted optimization — the rendered output is observationally equivalent.
-- When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, `${Math.random()}`, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
+- When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, ~~`${Math.random()}`~~ `${random()}` with `random` imported from `scrml:random` *(S469: no ambient `Math`, Appendix D)*, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
 - The reactive case (deps present) and the non-reactive non-constant case (deps absent, expression not foldable) SHALL be observationally distinguished only by whether subsequent state changes trigger re-render — both produce the value at module init.
 - **(S449) Evaluating `expr` SHALL NOT write any reactive cell, directly or through a called function** — an interpolation, a multi-statement `${ … }` in a markup body and a markup attribute value are render expressions, and the rule's one home is §6.15 (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). Without it a render that writes a cell it reads re-renders itself without end. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 - When `expr` does NOT resolve in scope, the compiler SHALL emit `E-NAME-NOT-FOUND` (or the applicable lookup-failure diagnostic per the resolver's normal contract). Interpolation does NOT bypass normal name resolution.
@@ -11682,7 +11682,7 @@ type, the raw value is a string (e.g., `"Todo"`) not an enum variant (`TaskStatu
 In generated JS, `TaskStatus.Todo` compiles to the string `"Todo"`, so these are equivalent
 at runtime. The issue is type clarity and developer intent, not runtime correctness.
 
-**The recommended idiom** — use `toEnum()` in the row mapping:
+**The recommended idiom** — use ~~`toEnum()`~~ `E.parse()` *(S469 — `toEnum`'s ruled name, §14.4.1 amendment above)* in the row mapping:
 
 ```scrml
 type TaskStatus:enum = { Todo | InProgress | Done }
@@ -11693,7 +11693,7 @@ type TaskStatus:enum = { Todo | InProgress | Done }
 
 ${ @tasks = @tasks.map(row => ({
     ...row,
-    status: TaskStatus.toEnum(row.status) ?? row.status
+    status: TaskStatus.parse(row.status) ?? row.status
 })) }
 ```
 
@@ -11708,8 +11708,8 @@ type Status:enum = { Open | Closed | Pending }
 
 ${ @issues = ?{`SELECT * FROM issues`}.all().map(row => ({
     ...row,
-    priority: Priority.toEnum(row.priority) ?? row.priority,
-    status: Status.toEnum(row.status) ?? row.status
+    priority: Priority.parse(row.priority) ?? row.priority,
+    status: Status.parse(row.status) ?? row.status
 })) }
 ```
 
@@ -17762,7 +17762,7 @@ The `as conflict` clause binds the meaningful name `conflict` to the current ite
 
 ```scrml
 <each of=10>
-    <li : "Slot " + @.>
+    <li : "Slot ${@.}">
 </each>
 ```
 
@@ -17996,7 +17996,7 @@ Runtime keying falls back to positional (the index) when inference fails. Correc
 
 ```scrml
 <each of=@daysLeft>
-    <li : "Day " + (@. + 1)>
+    <li : "Day ${@. + 1}">
 </each>
 ```
 
@@ -18548,7 +18548,7 @@ match shape {
     .Circle(r) :> {
         let area = r * r * 3.14159
         let perimeter = 2 * r * 3.14159
-        area + perimeter
+        lift area + perimeter;              // S469: a value-position block arm yields with `lift` (§18.5)
     }
     .Rectangle(w, h) :> w * h
     .Point            :> 0
@@ -19264,7 +19264,7 @@ match expr {
             .Lit(v)    :> v
             .Add(l, r) :> l + r   // recursive; here simplified
         }
-        leftVal + evalExpr(right)
+        lift leftVal + evalExpr(right);   // S469: `lift` (§18.5)
     }
     .Lit(v) :> v
 }
@@ -20503,7 +20503,7 @@ function processOrder(orderId: int)! -> OrderError {
     let customer = loadCustomer(orderId)?    // propagates CustomerError
     let payment = chargeCard(customer.card)?  // propagates PaymentError
     let receipt = generateReceipt(payment)?   // propagates ReceiptError
-    receipt
+    return receipt
 }
 ```
 
@@ -20788,7 +20788,7 @@ function loadUser(id: int)! -> UserError {
     let row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
     // If the query fails, SqlError is propagated via implicit ?
     if (!row) fail UserError::NotFound(id)
-    row
+    return row
 }
 ```
 
@@ -20820,7 +20820,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    function openOrders(customerId: int) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
            ::Ok(found)       :> found
-           ::QueryFailed(m)  :> { log(m); [] }
+           ::QueryFailed(m)  :> { log(m); lift []; }
            _                 :> []
        }
        return rows
@@ -20990,7 +20990,7 @@ function notifyOrder(orderId: number) {
     ?{`INSERT INTO order_log (order_id, event, ts) VALUES (${orderId}, 'notified', NOW())`}.run()
 
     // Client tail: read log to format message
-    @msg = "Order #" + orderId + " notification logged"
+    @msg = `Order #${orderId} notification logged`
 
     // Batch 2 — server: email send (would be rejected at compile time today
     // by E-CPS-MULTIBATCH-REORDER if the batches were dependency-ordered
@@ -21483,7 +21483,7 @@ added — S454 F7):
 ${
     function save() {
         @version = saveNote("n1", @body, @version) !{      // saveNote: server-placed, declared `! SaveError`
-            .Conflict(cur) :> { @status = "edited elsewhere (now v" + cur + ")"; return }
+            .Conflict(cur) :> { @status = `edited elsewhere (now v${cur})`; return }
             .Storage       :> { @status = "the server could not store it"; return }
             .Transport(t)  :> { @status = callProblem(t); return }
         }
@@ -21493,8 +21493,8 @@ ${
     fn callProblem(t: ServerCallError) -> string {
         return match t {
             .Unreachable    :> "offline — not saved"
-            .Refused(s)     :> "the server refused the save (" + s + ") — sign in again"
-            .ServerFault(s) :> "the server failed (" + s + ") — try again later"
+            .Refused(s)     :> `the server refused the save (${s}) — sign in again`
+            .ServerFault(s) :> `the server failed (${s}) — try again later`
             .Malformed(r)   :> "the server's answer could not be read"
         }
     }
@@ -22083,7 +22083,7 @@ ${
         }
 
         let txn = ?{`SELECT * FROM transactions WHERE customerId = ${customerId} ORDER BY date DESC LIMIT 1`}.get()
-        txn
+        return txn
     }
 }
 ```
@@ -22142,7 +22142,7 @@ ${
         }
 
         let user = ?{`SELECT * FROM users WHERE email = ${email}`}.get()
-        user
+        return user
     }
 }
 
@@ -22193,7 +22193,7 @@ ${
         }
 
         let updated = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
-        updated
+        return updated
     }
 }
 ```
@@ -34551,7 +34551,8 @@ anonymous function, a `!` function's success path — follows one rule:
 
 **Reading the rest of this SPEC.** Examples written before S469 that end a `fn` / `function` body in a bare
 expression meant to be its result (`fn double(x) { x * 2 }`) predate the ruling. Read each as `return <expr>;`.
-They are not rewritten by this amendment.
+~~They are not rewritten by this amendment.~~ *(S469 catch-up: the examples found by a sweep were rewritten
+to `return` / `lift` in place — `g-spec-s469-pre-ruling-examples-owed`; read any that remain as `return <expr>;`.)*
 
 ### 48.1 Overview
 
@@ -39098,7 +39099,7 @@ emitted.)*
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }   <!-- id (state) + col (msg) in scope -->
     .End       :> .Idle
     _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
@@ -39240,7 +39241,7 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
     _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
-    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); lift .Idle; }
     .End       :> .Idle
     _          :> @dragPhase
   </>
