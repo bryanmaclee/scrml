@@ -89,6 +89,13 @@ TMPDIR=$HOME/.cache/<scratch> bun compiler/tests/integration/security-failable-p
 | base `b75ad70f7` | 3 | 14 | 0 | 9 | 0 | **19** |
 | after | 11 | 31 | 0 | 3 | 0 | **0** |
 
+The 14 shapes added for the review of 6e0770356 (text-lowered slots and a quoted guard): on main
+`d10936fdb`, 11 FAIL (the handled guard in `to=` / `from=` / engine-direct / `once` form, the quoted
+`if="false"`, `derived=` paren and bare, `<engine if=>`, `<match if=>`, `<match on=>` paren and
+interpolated), 1 PASS-REFUSED, 1 PASS-DENY, and `derived match` throws at run time (it crashes the
+harness on main). After: 13 PASS-REFUSED, 1 PASS-DENY (`delay handled`: the timer is lost, see
+`g-ontimeout-after-brace-loses-timer-s469`), **0 FAIL**. Whole pack: 374 shapes, 0 FAIL.
+
 Every body the compiler kept as raw text in an `<engine>` (a state-child / opener `effect=`, an
 `<onTransition>` body and `if=` guard, a `(state × message)` arm, a computed `<onTimeout after=>`,
 a `:`-shorthand state body) or a `<match>` (an arm body, bare or `:`-shorthand, and the handlers in
