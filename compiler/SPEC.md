@@ -1141,11 +1141,11 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 **Inside-opener placement is canonical EVERYWHERE (S160 — S154 ruling (b)).** The `:`-shorthand body opens INSIDE the tag opener — the `:` follows the last attribute, the body runs to the `>` that terminates the opener (the normative statements above) — in EVERY locus that admits the form: HTML elements (§24), `<each>` per-item (§17.7.6), match block-form arms (§18.0.1), and engine state-children (§51.0.I). This is the single canonical placement (Pillar 5 — one `:`-shorthand placement across the whole language). A LEGACY AFTER-`>` placement (`<Variant rule=... > : expr`, where the `:` follows the opener's `>` rather than preceding it) was used by older §51.0.I / §18.0.1 / §51.0.B worked examples. The after-`>` placement is **DEPRECATED**: it parses identically during the deprecation window and surfaces the info-level lint `W-COLON-SHORTHAND-LEGACY-PLACEMENT` (§34). All placements build an identical AST and emit identical output — the difference is purely the source position of the `: expr`. Resolution: move the `: expr` inside the opener, before the `>` (`<Variant rule=... : expr>`), or run `bun scrml migrate --fix` (AST-driven). End-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT`.
 
-**Prefer bare-body for multi-element markup arms (S160 doc note).** A `:`-shorthand body is for a terse SINGLE expression — display text (`<Idle : "Waiting…">`), a call (`<Idle : startGame()>`), or a single-element markup value (`<Small : <span>x</span>>`). A MULTI-element markup body (`<ul>…</ul>`, `<p class="error">…</p>`) reads more clearly as a bare-body (`<Variant><ul>…</ul></>`); the `:`-shorthand form would produce a dense `</ul>>` / `</p>>` tail. The bare-body form (§4 / §18.0.1 / §51.0.I) is the natural shape for multi-element markup arms; reserve `:`-shorthand for the single terse expression.
+**Prefer bare-body for multi-element markup arms (S160 doc note).** A `:`-shorthand body is for a terse SINGLE expression — display text (`<Idle : "Waiting…">`), a value-returning call (~~`<Idle : startGame()>`~~ `<Idle : idleBanner(@best)>` — S469, below), or a single-element markup value (`<Small : <span>x</span>>`). A MULTI-element markup body (`<ul>…</ul>`, `<p class="error">…</p>`) reads more clearly as a bare-body (`<Variant><ul>…</ul></>`); the `:`-shorthand form would produce a dense `</ul>>` / `</p>>` tail. The bare-body form (§4 / §18.0.1 / §51.0.I) is the natural shape for multi-element markup arms; reserve `:`-shorthand for the single terse expression.
 
 **Loci where `:`-shorthand is legal in v0.next:**
 
-- Engine state-children (§51.0.I): `<Idle : startGame()>` — single-expression body for a state-child arm.
+- Engine state-children (§51.0.I): ~~`<Idle : startGame()>`~~ `<Idle : idleBanner(@best)>` — single-expression body for a state-child arm (S469 amendment below).
 - Match block-form arms (§18.0.1): `<.Variant : expr>` — single-expression match arm body.
 - Other state-types and HTML elements MAY accept `:`-shorthand where doing so is meaningful; the universal grammar registers the form, and per-element rules (in their owning sections) say whether each element accepts it. For HTML elements (§24) the per-element rule is the content-model rule stated next.
 
@@ -1167,14 +1167,39 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 **Worked example — engine state-child with `:`-shorthand:**
 
 ```scrml
+<best> = 0
+fn idleBanner(best: int) -> string { return `Best so far: ${best}`; }
+
 <engine for=Phase initial=.Idle>
-    <Idle : startGame()>
+    <Idle : idleBanner(@best)>
     <Loading rule="onResult.ok(n) -> Success(n)" : <p>Loading...</>>
     <Success count : <p>Got it: ${count}</>>
 </>
 ```
 
-In this example each `:`-shorthand body is valid code: `startGame()` is a call; `<p>Loading...</>` and `<p>Got it: ${count}</>` are nested markup elements (markup-as-value, §1.4) — and the `<p>` bodies (`Loading...`, `Got it: ${count}`) are plain-markup free-text, unchanged by the quoted-text model.
+In this example each `:`-shorthand body is valid code: ~~`startGame()` is a call;~~ `idleBanner(@best)` is a call that returns the `string` the
+state-child renders; `<p>Loading...</>` and `<p>Got it: ${count}</>` are nested markup elements (markup-as-value, §1.4) — and the `<p>` bodies (`Loading...`, `Got it: ${count}`) are plain-markup free-text, unchanged by the quoted-text model.
+
+> **Amendment (S469) — a `:` body is a rendered value; the call in it returns one.** The worked example above
+> showed `<Idle : startGame()>` and called it simply "a call". A state-child's `:` body is the body the engine
+> RENDERS in that state (§51.0.I), so it is a render expression — a value position (§6.15 position 3, *"every
+> expression the runtime evaluates to produce or update rendered output"*; reading a state-child `:` body as one is
+> a PA derivation from that clause, not an owner ruling). A call there must therefore (1) return a value — a call of
+> a function that returns nothing is not a value (§48 "The return rule", rule 3; E-TYPE-001 in a value position),
+> and (2) not write reactive state, directly or through what it calls (§6.15, E-VALUE-WRITES-STATE). A name like
+> `startGame()` reads as an action that does both wrong things. The point this section makes — a `:` body may be a
+> call — is kept, with a call that returns the text the state renders. An action to run on entering a state belongs
+> in `effect=` / `<onTransition>` (§51.0.H), an action position.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" —
+> *"A function with no return type returns nothing, and if any path returns a value, every path must (error)."* ·
+> ruling:user-voice-scrml.md S449 item 3 — *"Initializers / derived formulas / markup interpolations may NOT write
+> reactive state = (a) — a compile error everywhere, directly or through a called function"*.
+> **supersedes:** ~~`<Idle : startGame()>`~~ in this section's doc note and loci list and the sentence
+> ~~"`startGame()` is a call;"~~ (struck in place above), and the worked example's line ~~`<Idle : startGame()>`~~
+> (a code block cannot carry a strike; the replaced line is quoted here). The negative examples below
+> (`<Idle : startGame(); track()>`, `<Idle : { startGame(); track() }>`) are unchanged: they show the
+> statement / block refusals, which fire first.
+> **Direction of change:** inert — an example correction; the rules it now agrees with (§6.15, §48) already stood.
 
 **Worked example — `:`-shorthand body that IS display text (S111, quoted-text model).** When the `:`-shorthand body is display text directly (not wrapped in a plain-markup element), it is a `"..."` display-text literal:
 
@@ -37849,7 +37874,21 @@ identically during the deprecation window and surfaces the info-level lint
 `W-COLON-SHORTHAND-LEGACY-PLACEMENT` (§34). Move the `: expr` inside the opener
 (`<Variant rule=... : expr>`), or run `bun scrml migrate --fix` (AST-driven). Prefer
 bare-body for multi-element markup arms; reserve `:`-shorthand for a terse single
-expression / display-text / call (§4.14 doc note).
+expression / display-text / ~~call~~ value-returning call (§4.14 doc note).
+
+> **Amendment (S469) — the `:` body is rendered, so a call there returns a value and writes nothing.** A
+> state-child's `:` body is what the engine renders in that state: a render expression, a value position (§6.15
+> position 3 — reading the state-child body as one is a PA derivation, not an owner ruling). A call in it SHALL
+> return a value (§48 "The return rule", rule 3: a call of a function that returns nothing is not a value,
+> E-TYPE-001) and SHALL NOT write reactive state (§6.15, E-VALUE-WRITES-STATE). `<Idle : idleBanner(@best)>`
+> (with `fn idleBanner(best: int) -> string`) is the form; the void, state-writing `<Idle : startGame()>` the §4.14
+> example used to show is not. An entry action belongs in `effect=` / `<onTransition>` (§51.0.H).
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" —
+> *"A function with no return type returns nothing, and if any path returns a value, every path must (error)."* ·
+> ruling:user-voice-scrml.md S449 item 3 — *"Initializers / derived formulas / markup interpolations may NOT write
+> reactive state = (a) — a compile error everywhere, directly or through a called function"*.
+> **supersedes:** ~~call~~ in the sentence above (struck in place). **Direction of change:** inert — the rules
+> already stood; the prose now says what they imply.
 
 **Three legitimate body forms (mutually exclusive by syntactic shape):**
 
