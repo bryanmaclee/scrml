@@ -231,6 +231,7 @@ const <doubled> = @count * 2
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66); compiles on the bootstrap (`bun run boot:compile`), not on the shipping compiler
 let <count:int=0/>                          // writable: `let`, before the `<`, is the replace grant on a scalar (§66.9, §66.2.5)
 <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
 <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
@@ -259,6 +260,7 @@ type Phase:enum = { Idle, Loading, Done, Failed }
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.13); not yet in the shipping compiler
 <phase:Phase=.Idle single>                      // one vehicle; the name IS the variable (§66.13.3)
     <Idle    rule=.Loading : "Ready">              // ⚑ O52: state-child marker + `:`-shorthand body
     <Loading rule=(.Done | .Failed) : "Loading…">
@@ -288,6 +290,7 @@ const Swatch = <span class="chip" props={ label: string, hex: string }>
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.15); not yet in the shipping compiler
 export <swatch:struct>                                         // writable fields are CHILD declarations (§66.4 rule 6, S447)
     let <label:string="Brand"/>
     let <hex:string=@brand/>                                   // `let` + reactive initializer = SEEDED (§66.9)
@@ -320,6 +323,7 @@ function wipe() { @audit = [] }
 Specified:
 
 ```scrml
+// gate: skip — specified (SPEC §66.12); not yet in the shipping compiler
 <audit:Entry[free, append]=[]/>                  // free length, grows at the end only, no replace
 
 function record(action: string) {

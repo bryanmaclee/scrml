@@ -171,9 +171,9 @@ type Invoice:struct = {
 }
 
 fn discount(amount: number(>0 && <10000)) -> number {
-    let discounted = amount * 0.9
-    let safe: number(>0 && <10000) = discounted
-    return safe
+    let discounted = amount * 0.9;
+    let safe: number(>0 && <10000) = discounted;
+    return safe;
 }
 
 <p>${discount(@price)} ${@email}</p>
@@ -383,6 +383,7 @@ Use `function` for general-purpose callables; use `fn` for deterministic computa
 scrml ships a Model Context Protocol surface so an LLM agent can read your app's structure first-hand instead of guessing. Opt in on the root program:
 
 ```scrml
+// gate: skip — fragment: the root opener only; the app body is elided
 <program mcp="dev-only">
 ```
 
