@@ -1,15 +1,15 @@
 {
   "id": "acceptance-strings-neg-unknown-method",
-  "description": "E-BOOTSTRAP-UNSUPPORTED: `padStart` is not one of the bootstrap's string methods.",
+  "description": "E-STRING-METHOD-UNKNOWN: `substring` is not in Appendix D.1's string table (the nearest admitted form is `slice`).",
   "language-version": "1.0",
-  "spec": "Appendix D",
-  "rationale": "An unknown method is never a generic JS passthrough.",
+  "spec": "Appendix D.1",
+  "rationale": "Ruled S469 \"more string methods admitted\": \"Anything not admitted is refused.\" An unknown method is never a generic JS passthrough.",
   "expect": {
     "codes": [
-      "E-BOOTSTRAP-UNSUPPORTED"
+      "E-STRING-METHOD-UNKNOWN"
     ],
     "codeCounts": {
-      "E-BOOTSTRAP-UNSUPPORTED": 1
+      "E-STRING-METHOD-UNKNOWN": 1
     }
   }
 }

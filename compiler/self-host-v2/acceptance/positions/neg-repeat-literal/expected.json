@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-positions-neg-repeat-literal",
+  "description": "E-POSITION-NEGATIVE: `s.repeat(-1)`.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "D.1 (derived: the no-negatives ruling applied to a count).",
+  "expect": {
+    "codes": [
+      "E-POSITION-NEGATIVE"
+    ],
+    "codeCounts": {
+      "E-POSITION-NEGATIVE": 1
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-strings-index-read",
+  "description": "`s[i]` counts code points.",
+  "language-version": "1.0",
+  "spec": "§66.12.8 rule 6",
+  "rationale": "Ruled S469 \"open items from the loops + tapes SPEC PRs\": \"`s[i]` follows\" iteration (code points).",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#r",
+        "text": "[a][😀][b]"
+      }
+    ]
+  }
+}

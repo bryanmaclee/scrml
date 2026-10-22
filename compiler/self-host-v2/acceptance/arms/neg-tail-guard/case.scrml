@@ -1,0 +1,24 @@
+// §18.5: a statement-holding block arm whose value is used may not end in a bare expression.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    let <n:int=0/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+    function v() {
+        @out = load("x") !{
+            .NotFound(m) :> {
+                @n = @n + 1
+                "nf:" + m
+            },
+            .Timeout :> "to",
+        }
+    }
+    <main>
+        <button id="v" onclick=v()>v</button>
+        <p id="out">${@out}</p>
+    </main>
+</program>

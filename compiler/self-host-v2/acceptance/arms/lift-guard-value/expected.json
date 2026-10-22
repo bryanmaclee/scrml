@@ -1,0 +1,34 @@
+{
+  "id": "acceptance-arms-lift-guard-value",
+  "description": "the block arm runs its statements, then its `lift` operand is the handled call's value (`nf:x`, then `to`; `@n` counts both arms' statements).",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "Ruled S469 \"block arms yield with `lift`\": \"A block arm in a value position must yield explicitly (`.B :> { log(); lift 2 }`).\"",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#v"
+      },
+      {
+        "wait": "settle"
+      },
+      {
+        "click": "#w"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "to"
+      },
+      {
+        "selector": "#n",
+        "text": "11"
+      }
+    ]
+  }
+}

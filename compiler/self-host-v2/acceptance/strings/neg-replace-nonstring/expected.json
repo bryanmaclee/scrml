@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-replace-nonstring",
+  "description": "E-TYPE-031: `replace`'s replacement is an int, not a string.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "Ruled S469: \"`replace`/`replaceAll` take plain strings only\".",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

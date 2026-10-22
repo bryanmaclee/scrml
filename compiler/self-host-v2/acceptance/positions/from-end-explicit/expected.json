@@ -1,0 +1,24 @@
+{
+  "id": "acceptance-positions-from-end-explicit",
+  "description": "the explicit from-the-end form; past the end clamps (`\"\"`); `to < from` is `\"\"`; `charAt(-1)` is `\"\"`.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "D.1: \"A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `\\\"\\\"`\"; `s.charAt(i)` is `\\\"\\\"` for a negative `i`.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#last",
+        "text": "😀"
+      },
+      {
+        "selector": "#past",
+        "text": "[][]"
+      },
+      {
+        "selector": "#ch",
+        "text": "[][]"
+      }
+    ]
+  }
+}

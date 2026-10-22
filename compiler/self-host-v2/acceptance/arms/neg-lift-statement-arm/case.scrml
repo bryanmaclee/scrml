@@ -1,0 +1,24 @@
+// §18.5: in a statement position a block arm yields nothing — a `lift` there is refused.
+<program>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    let <n:int=0/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        if (id == "y") fail LoadError.Timeout
+        return id
+    }
+    function blk() {
+        load("y") !{
+            .NotFound(m) :> { @out = m },
+            .Timeout :> {
+                @n = @n + 1
+                lift "to"
+            },
+        }
+    }
+    <main>
+        <button id="blk" onclick=blk()>blk</button>
+        <p id="n">${@n}</p>
+    </main>
+</program>

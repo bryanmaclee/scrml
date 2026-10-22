@@ -1160,6 +1160,7 @@ ${
     fn primTy(ann: string) -> Type | not {
         return match ann {
             "int" :> Type.Int
+            "integer" :> Type.Int     // s469: §14.13.6 — the same type as `int`
             "number" :> Type.Num
             "string" :> Type.Str
             "boolean" :> Type.Bool
@@ -1387,6 +1388,18 @@ ${
             .Join :> "Join"
             .IndexRead :> "IndexRead"
             .AtRead :> "AtRead"
+            .StrIndexOf :> "StrIndexOf"
+            .StrLastIndexOf :> "StrLastIndexOf"
+            .StrReplace :> "StrReplace"
+            .StrReplaceAll :> "StrReplaceAll"
+            .StrPadStart :> "StrPadStart"
+            .StrPadEnd :> "StrPadEnd"
+            .StrRepeat :> "StrRepeat"
+            .StrTrimStart :> "StrTrimStart"
+            .StrTrimEnd :> "StrTrimEnd"
+            .ParseInt :> "ParseInt"
+            .ParseNum :> "ParseNum"
+            .ParseBool :> "ParseBool"
         }
     }
 }

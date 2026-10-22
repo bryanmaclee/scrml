@@ -1,0 +1,5 @@
+// §17.6.10: the value-form `if` is not in the bootstrap; it is refused by name (its branch rule, S469, is moot there).
+<program>
+    let <b:bool=true/>
+    <main><p>${if (@b) { "yes" } else { "no" }}</p></main>
+</program>

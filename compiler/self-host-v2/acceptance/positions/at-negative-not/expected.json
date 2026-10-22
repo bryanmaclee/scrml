@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-positions-at-negative-not",
+  "description": "`at(-1)` is `not`.",
+  "language-version": "1.0",
+  "spec": "§66.12.8 rule 3, rule 7",
+  "rationale": "Ruled S469: \"`at(-1)` is `not`\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#r",
+        "text": "none none some"
+      }
+    ]
+  }
+}

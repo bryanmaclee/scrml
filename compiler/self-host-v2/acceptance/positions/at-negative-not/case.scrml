@@ -1,0 +1,16 @@
+// §66.12.8 rule 3/7: `xs.at(-1)` is `not` — literal or computed; never counted from the end.
+<program>
+    function h(xs: int[], i: int) -> string {
+        return match xs.at(i) {
+            not :> "none"
+            else :> "some"
+        }
+    }
+    function lit(xs: int[]) -> string {
+        return match xs.at(-1) {
+            not :> "none"
+            else :> "some"
+        }
+    }
+    <main><p id="r">${h([5, 6], -1)} ${lit([5, 6])} ${h([5, 6], 1)}</p></main>
+</program>

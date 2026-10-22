@@ -1,0 +1,9 @@
+// Appendix D.1: count from the end explicitly — `s.slice(s.length - 1)`; a position past the end clamps.
+<program>
+    let <s:string="a😀"/>
+    <main>
+        <p id="last">${@s.slice(@s.length - 1)}</p>
+        <p id="past">[${@s.slice(9)}][${@s.slice(1, 0)}]</p>
+        <p id="ch">[${@s.charAt(-1)}][${@s.charAt(5)}]</p>
+    </main>
+</program>

@@ -1,0 +1,5 @@
+// Appendix D.1: `at` is not a string method (it is a TAPE's); `charAt` or `s[i]` is the string form.
+<program>
+    let <s:string="abc"/>
+    <main><p>${@s.at(0)}</p></main>
+</program>

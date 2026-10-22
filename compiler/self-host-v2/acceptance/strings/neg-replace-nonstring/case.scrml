@@ -1,0 +1,5 @@
+// Appendix D.1: `replace` takes plain strings.
+<program>
+    let <s:string="a1"/>
+    <main><p>${@s.replace("1", 2)}</p></main>
+</program>

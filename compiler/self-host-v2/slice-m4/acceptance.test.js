@@ -24,6 +24,16 @@ const STATUS = {
   "arms/comma-match": ["PASS", []],
   "arms/mixed-neg": ["PASS", ["E-MATCH-ARM-SEPARATOR"]],
   "arms/newline-still-read": ["PASS", []],
+  // s469-boot-ruled-backlog — §18.5 block arms yield with `lift` (S469); the value-form `if` refused by name
+  "arms/lift-guard-value": ["PASS", []],
+  "arms/single-expr-block": ["PASS", []],
+  "arms/neg-tail-guard": ["PASS", ["E-ARM-TAIL-VALUE"]],
+  "arms/neg-tail-plain": ["PASS", ["E-ARM-TAIL-VALUE"]],
+  // the ruled form, but a plain-value `match` arm with statements is beyond Core's one-expression arm
+  "arms/lift-plain-multi-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-lift-statement-arm": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-lift-nested": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-if-value": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "opener/union-maybe": ["PASS", []],
   // a general union needs a union type in the bootstrap's type system
   "opener/union-multi-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -89,11 +99,37 @@ const STATUS = {
   "strings/guess-ci-maybe": ["PASS", []],
   "strings/guess-ci-empty": ["PASS", []],
   "strings/methods": ["PASS", []],
-  "strings/neg-unknown-method": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  // s469-boot-ruled-backlog: an unknown string method is Appendix D.1's refusal (was E-BOOTSTRAP-UNSUPPORTED)
+  "strings/neg-unknown-method": ["PASS", ["E-STRING-METHOD-UNKNOWN"]],
   "strings/neg-int-receiver": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "strings/neg-maybe-receiver": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "strings/neg-arg-type": ["PASS", ["E-TYPE-031"]],
   "strings/neg-arity": ["PASS", ["E-CALL-ARITY"]],
+  // s469-boot-ruled-backlog — the admitted string methods (S469 "more string methods admitted"), `s[i]`
+  "strings/admitted-methods": ["PASS", []],
+  "strings/index-read": ["PASS", []],
+  "strings/neg-indexof-plain-int": ["PASS", ["E-TYPE-031"]],
+  "strings/neg-indexof-start": ["PASS", ["E-CALL-ARITY"]],
+  "strings/neg-replace-nonstring": ["PASS", ["E-TYPE-031"]],
+  "strings/neg-unknown-at": ["PASS", ["E-STRING-METHOD-UNKNOWN"]],
+  // s469-boot-ruled-backlog — `T.parse(s)` (§14.13.4) and `integer` / `boolean` (§14.13.6)
+  "parse/int-strict": ["PASS", []],
+  "parse/number-finite": ["PASS", []],
+  "parse/bool-exact": ["PASS", []],
+  "parse/enum-parse": ["PASS", []],
+  "parse/integer-type-name": ["PASS", []],
+  "parse/neg-plain-cell": ["PASS", ["E-TYPE-031"]],
+  "parse/neg-arg-type": ["PASS", ["E-TYPE-031"]],
+  "parse/neg-namespace": ["PASS", ["E-SCOPE-001"]],
+  "parse/neg-integer-parse": ["PASS", ["E-SCOPE-001"]],
+  // s469-boot-ruled-backlog — no negative positions (S469 "no negative positions anywhere")
+  "positions/neg-slice-literal": ["PASS", ["E-POSITION-NEGATIVE"]],
+  "positions/neg-slice-end-literal": ["PASS", ["E-POSITION-NEGATIVE"]],
+  "positions/neg-repeat-literal": ["PASS", ["E-POSITION-NEGATIVE"]],
+  "positions/neg-pad-literal": ["PASS", ["E-POSITION-NEGATIVE"]],
+  "positions/from-end-explicit": ["PASS", []],
+  "positions/at-negative-not": ["PASS", []],
+  "positions/neg-slice-computed-traps": ["PASS", []],
   // tape sort / reverse / join (new tapes), append / prepend, JavaScript's names refused
   "tapes/sort-reverse-join": ["PASS", []],
   "tapes/append-prepend": ["PASS", []],
@@ -179,6 +215,13 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
                        "security/return-not-value", "security/return-not-stmt", "security/return-not-string", "security/return-not-enum",
                        "security/failable-fails",
                        "loop/sum-tape", "loop/range", "loop/cond-head", "loop/counted-continue", "loop/forever-break", "loop/labels", "loop/index-at"]) {
+      expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
+    }
+  });
+  test("s469-boot-ruled-backlog: every positive parse / string / position case RAN on the bootstrap (output checked)", () => {
+    for (const rel of ["parse/int-strict", "parse/number-finite", "parse/bool-exact", "parse/enum-parse", "parse/integer-type-name",
+                       "strings/admitted-methods", "strings/index-read", "arms/lift-guard-value", "arms/single-expr-block",
+                       "positions/from-end-explicit", "positions/at-negative-not", "positions/neg-slice-computed-traps"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }
   });
