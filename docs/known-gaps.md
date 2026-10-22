@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 4 |
-| MED | 670 | 7 |
-| LOW | 457 | 0 |
+| HIGH | 265 | 4 |
+| MED | 673 | 7 |
+| LOW | 458 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -67,6 +67,36 @@ Found by the s469-corpus-templates lane (PR #1483) while rewriting `String(…)`
 <!-- @gap id=g-impl1-template-slot-not-argument-unlowered-s469 sev=MED status=open locus=searched:compiler/src/codegen(logic template-literal slot text — the `not` → absence lowering is not applied inside `${…}` of a backtick template)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-corpus-templates(PR #1483) -->
 
 Found by the s469-corpus-templates lane (PR #1483). Reproduced S469 (s469-spec-catchup): `` const b = `${stmt(not)}`; `` compiles at exit 0 and the client JS holds `` `${_scrml_stmt_2(not)}` `` — `not` is left as a free identifier, a runtime ReferenceError. The same call outside a template lowers. Not fixed (S435): the owner's "File as gaps" ruling names the first two S469 impl#1 bugs; the PA applies it to this one (a PA application, not a separate ruling).
+
+### g-impl1-pinned-read-by-later-decl-false-forward-ref-s469 — impl#1 reports `E-STATE-PINNED-FORWARD-REF` when a LATER declaration reads a `pinned` cell (`<count pinned> = 1` then `<doubled> = @count * 2`), and points the error at line 1 — `NEW S469 (filed); MED; open`
+
+<!-- @gap id=g-impl1-pinned-read-by-later-decl-false-forward-ref-s469 sev=MED status=open locus=searched:compiler/src(the E-STATE-PINNED-FORWARD-REF check — declaration order of a reader vs the pinned cell)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-public-docs(PR #1485) -->
+
+Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `<program>⏎<count pinned> = 1⏎<doubled> = @count * 2⏎…` → `E-STATE-PINNED-FORWARD-REF` ("reads before its declaration site"), reported at `1:1`. The read is AFTER the declaration, which `pinned` allows; the error is false and its location is wrong. An adopter cannot read a pinned cell from a derived cell below it. Not fixed (S435): filed under the owner's "File as gaps" ruling (S469), which named two other impl#1 bugs; the PA applies it here (a PA application, not a separate ruling).
+
+### g-impl1-form1-export-component-raw-in-js-s469 — impl#1 emits the §21.2 canonical Form-1 component export (`export <Greeting props={ name: string }>…</>`) into the module JS verbatim, so it fails as `E-CODEGEN-INVALID-LOGIC` — `NEW S469 (filed); MED; open (fails closed)`
+
+<!-- @gap id=g-impl1-form1-export-component-raw-in-js-s469 sev=MED status=open locus=searched:compiler/src(top-level `export <Name …>` in a file with no `<program>` — not routed to the component path)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§21.2 -->
+
+Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup) on §21.2's own worked example, alone in a file: the codegen validity gate reports *"...from './this-file.js' export <Greeting props={ name: string...  Unexpected token"*, no output. The SPEC calls Form 1 canonical and Form 2 (`export const Greeting = <p props=…>`) transitional, so the canonical spelling does not compile in that shape. Not fixed (S435): filed under the owner's "File as gaps" ruling (S469), which named two other impl#1 bugs; the PA applies it here (a PA application, not a separate ruling).
+
+### g-impl1-ruled-forms-emitted-verbatim-fail-open-s469 — (fail-open) impl#1 compiles ruled forms it does not implement — `int.parse(s)`, `Enum.parse(s)`, a tape's `.append(x)` — with no diagnostic and emits them verbatim, a ReferenceError / TypeError at run time — `NEW S469 (filed); HIGH; open`
+
+<!-- @gap id=g-impl1-ruled-forms-emitted-verbatim-fail-open-s469 sev=HIGH status=open locus=searched:compiler/src(member calls on a primitive type name / an enum type name / a sequence receiver pass through to JS unchecked)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§14.13.4,§14.4.1,§66.12.6 -->
+
+Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `` const n = int.parse("12"); `` compiles at exit 0 and the client JS holds `const n = int.parse("12");` — `int` is not defined at run time. The lane reports the same for `Enum.parse(s)` and `.append(x)` (no JS array has `append`). **This is a fail-open:** a ruled form impl#1 does not build should be REFUSED at compile time (a labelled impl#1 limitation, per S469 "Split + audit" — "impl#1 refuses what it cannot verify as a labelled impl#1 limitation"), not emitted for the runtime to throw. An adopter writing today's spelling from the SPEC gets a clean build and a broken page. Severity HIGH for the silent wrong output, not for security. Not fixed (S435): filed under the owner's "File as gaps" ruling (S469), which named two other impl#1 bugs; the PA applies it here (a PA application, not a separate ruling).
+
+### g-impl1-ruled-loop-heads-codegen-invalid-s469 — impl#1 fails the ruled `for` heads (an annotated C-style `for (let i: int = 0; …; …)`, and the other S469 loop heads) as `E-CODEGEN-INVALID-LOGIC` ("compiler defect") instead of a clear "not supported by impl#1" — `NEW S469 (filed); LOW; open (fails closed)`
+
+<!-- @gap id=g-impl1-ruled-loop-heads-codegen-invalid-s469 sev=LOW status=open locus=searched:compiler/src(C-style `for` head with a typed `let` — annotation text reaches the emitted JS)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§49 -->
+
+Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `for (let i: int = 0; i < 3; i = i + 1) { … }` in a function → `E-CODEGEN-INVALID-LOGIC`. It fails closed, but the message calls it a compiler defect; the honest diagnostic is a labelled impl#1 refusal naming the ruled form (S469 "Split + audit"). Not fixed (S435): filed under the owner's "File as gaps" ruling (S469), which named two other impl#1 bugs; the PA applies it here (a PA application, not a separate ruling).
+
+### g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 — impl#1 REFUSES a comma between arms (`E-MATCH-ARM-SEPARATOR`), but dpa-073 F5(1) ruled that impl#1 ACCEPTS arm commas (an S435 exception that powers the `;` / `,` codemod) — `NEW S469 (filed); MED; open (owed impl#1 change, bootstrap-serving)`
+
+<!-- @gap id=g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469 sev=MED status=open locus=compiler/src(the E-MATCH-ARM-SEPARATOR check — fires on `,` after a match arm) prov=ruling:user-voice-scrml.md(S469 "⭐ RULED — dpa-073 F5 Bootstrap enforces (Recommended)" — "(1) impl#1 ACCEPTS arm commas — an S435 exception (S452 precedent), and powers the codemod");ruling:user-voice-scrml.md(S469 dpa-073 F2 "Comma list (Recommended)");dispatch:s469-public-docs(PR #1485);spec:§18.2 -->
+
+Found by the public-docs lane (PR #1485). Reproduced S469 (s469-spec-catchup): `match @k { "a" :> 1, else :> 2 }` → `E-MATCH-ARM-SEPARATOR` ("Match arms are separated by newlines, not commas (§18.2)"). This is NOT a stays-a-gap bug: it is an owed impl#1 change, ruled under the S435 exception because the migration route needs it — impl#1 must accept arm commas (match, `!{}` and engine message arms, trailing comma optional) so the `scrml fix` codemod can insert them and verify by emit diff (dpa-073 F5 steps 1–2). impl#1 does not ENFORCE commas (newline-separated arms stay accepted, a carried divergence). SPEC §18.2 / §19.4.5 state the comma list (s469-spec-catchup).
 
 ### g-spec-s469-pre-ruling-examples-owed — SPEC examples outside the amended sections still use forms the S469 rulings retired: a tail expression as a function's value, a block arm's bare last expression, `+` with a number, ambient `Math.*` / `String(…)` / `parseInt(…)`, `E.toEnum(…)` — `NEW S469; LOW; open (SPEC editorial)`
 
