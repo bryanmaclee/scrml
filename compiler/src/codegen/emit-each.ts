@@ -1305,12 +1305,49 @@ function _eachIfCondReferencesItem(rawCond: string, itemNames: string[]): boolea
 let _eachIfGateEnv: any | null = null;
 
 /**
+ * §59.8 / §59.12 — the file's value-native MAP / SET cell names, so a NESTED `<each>`'s
+ * `in=` lowers a map / set iterable exactly as the top-level render fn does
+ * (`rewriteMapAwareIterable`). Set by `emitEachBodyRenderForFile`; null elsewhere (the
+ * nested iterable then takes the row-scope text lowering, as before).
+ */
+let _eachMapSetNames: { maps: Set<string>; sets: Set<string> } | null = null;
+
+/**
+ * A nested `<each>`'s `in=` source, lowered in the enclosing row's scope. A source that
+ * names a value-native map / set cell takes the top level's map/set-aware lowering
+ * (after `@.` is resolved to the enclosing item) — the row-scope text lowering left
+ * `@m.entries()` as a method call on the plain map object (TypeError) and iterated a bare
+ * `@s` as the map object instead of its elements. Every other source is unchanged.
+ */
+function lowerRowScopedIterable(inExpr: string, enclosingIterVar: string | null): string {
+  const names = _eachMapSetNames;
+  if (names && names.maps.size > 0 && typeof inExpr === "string") {
+    const mentions = [...names.maps].some((n) => new RegExp("@" + _escapeForRegex(n) + "(?![\\w$])").test(inExpr));
+    if (mentions) {
+      const scoped = enclosingIterVar ? rewriteContextualSigil(inExpr.replace(/@\s*\.\s*/g, "@."), enclosingIterVar) : inExpr;
+      return rewriteMapAwareIterable(scoped, names.maps, names.sets);
+    }
+  }
+  return rewriteIterValueExpr(inExpr, enclosingIterVar);
+}
+
+/**
  * Set the `if=` lowering inputs for a Tier-0 (`${ for … lift }`) walk; returns the
  * previous value so the caller can restore it.
  */
 export function setEachIfGateEnv(env: any | null): any | null {
   const prev = _eachIfGateEnv;
   _eachIfGateEnv = env;
+  return prev;
+}
+
+/**
+ * Set the file's map / set cell names for a Tier-0 (`${ for … lift }`) walk; returns the
+ * previous value so the caller can restore it. See `_eachMapSetNames`.
+ */
+export function setEachMapSetNames(names: { maps: Set<string>; sets: Set<string> } | null): { maps: Set<string>; sets: Set<string> } | null {
+  const prev = _eachMapSetNames;
+  _eachMapSetNames = names;
   return prev;
 }
 
@@ -2095,7 +2132,7 @@ function renderTemplateChildToJs(
     // passes through unchanged. `@cell` → `_scrml_reactive_get("cell")`.
     let innerItemsExpr: string;
     if (innerNode.iterShape === "in") {
-      innerItemsExpr = rewriteIterValueExpr(innerNode.inExprRaw ?? "[]", iterVarName);
+      innerItemsExpr = lowerRowScopedIterable(innerNode.inExprRaw ?? "[]", iterVarName);
     } else if (innerNode.iterShape === "of") {
       const ofResolved = rewriteIterValueExpr(innerNode.ofExprRaw ?? "0", iterVarName);
       innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
@@ -3422,6 +3459,7 @@ export function resetEachModuleState(): void {
   _eachRequestIds = null;
   _eachLiftRegistry = null;
   _eachIfGateEnv = null;
+  _eachMapSetNames = null;
 }
 
 /**
@@ -4082,6 +4120,12 @@ function eachAttrRawText(attrVal: any): string | null {
   if (kind === "variable-ref" && typeof attrVal.name === "string") return attrVal.name.trim() || null;
   if (kind === "expr" && typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
   if (kind === "string-literal" && typeof attrVal.value === "string") return attrVal.value.trim() || null;
+  // A call (`in=items()`, `in=@m.entries()`) is a `call-ref` whose `name` is the callee
+  // only — reading `name` alone (the fallback below) dropped the call, so the list
+  // iterated the function / method itself and rendered nothing (S469 audit).
+  if (kind === "call-ref" && typeof attrVal.name === "string" && attrVal.name.trim()) {
+    return `${attrVal.name.trim()}(${(Array.isArray(attrVal.args) ? attrVal.args : []).join(", ")})`;
+  }
   if (typeof attrVal.raw === "string") return attrVal.raw.trim() || null;
   if (typeof attrVal.name === "string") return attrVal.name.trim() || null;
   if (typeof attrVal.value === "string") return attrVal.value.trim() || null;
@@ -4241,7 +4285,7 @@ export function emitNestedEachFromMarkup(
   // form (when the lift is itself inside another each) lowers to that var.
   let innerItemsExpr: string;
   if (eachBlock.iterShape === "in") {
-    innerItemsExpr = rewriteIterValueExpr(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
+    innerItemsExpr = lowerRowScopedIterable(eachBlock.inExprRaw ?? "[]", enclosingScopeVar);
   } else {
     const ofResolved = rewriteIterValueExpr(eachBlock.ofExprRaw ?? "0", enclosingScopeVar);
     innerItemsExpr = `_scrml_g.Array.from({length: _scrml_g.Number(${ofResolved}) || 0}, (_v, _i) => _i)`;
@@ -4580,6 +4624,8 @@ export function emitEachBodyRenderForFile(
   // condition with: the SAME ones emit-event-wiring hands the top-level mount
   // controller (`IfGateLoweringEnv`). Restored in the finally below.
   const _prevIfGateEnv = _eachIfGateEnv;
+  const _prevMapSetNames = _eachMapSetNames;
+  _eachMapSetNames = { maps: eachMapVarNames, sets: eachSetVarNames };
   _eachIfGateEnv = {
     derivedNames: ctx.derivedNames,
     synthCellKeys: ctx.synthCellKeys,
@@ -4730,6 +4776,7 @@ export function emitEachBodyRenderForFile(
     // set so a later caller (or the Tier-0 lift path) never reads a stale file's.
     _eachRequestIds = null;
     _eachIfGateEnv = _prevIfGateEnv;
+    _eachMapSetNames = _prevMapSetNames;
     _eachLiftRegistry = _prevLiftRegistry;
   }
 
