@@ -3,7 +3,7 @@ ${
     <v> : number = 0
     <s> : string = "none"
     <w> : number = 0
-    function show(x: number) -> string { return "s=" + x }
+    function show(x: number) -> string { return `s=${x}` }
     function go() {
         let n: number | not = 5
         @s = show(match K.A {

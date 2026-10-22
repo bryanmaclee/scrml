@@ -1,7 +1,7 @@
 ${
     type K:enum = { A, B }
     <out> : string = "none"
-    function show(n: number) -> string { return "n=" + n }
+    function show(n: number) -> string { return `n=${n}` }
     function scan(k: K) -> string {
         let s = ""
         outer: for (const i of [1, 2]) {
