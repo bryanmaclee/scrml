@@ -125,6 +125,31 @@ function blockCloseFrom(src: string, start: number): number {
 }
 
 /**
+ * The `${ … }` interpolation payloads of template TEXT (a template literal's source, outer
+ * backticks optional), each bounded by `logicBlockClose`; a `\` escapes the next character. An
+ * interpolation acorn cannot bound yields the rest of the text as its payload (a reader of
+ * names over-approximates; it never drops the tail).
+ */
+export function templateInterpolationPayloads(text: string): string[] {
+  const out: string[] = [];
+  if (typeof text !== "string") return out;
+  let i = 0;
+  while (i < text.length) {
+    const c = text.charCodeAt(i);
+    if (c === 92 /* \ */) { i += 2; continue; }
+    if (c === 36 /* $ */ && text.charCodeAt(i + 1) === 123 /* { */) {
+      const close = logicBlockClose(text, i);
+      if (close < 0) { out.push(text.slice(i + 2)); break; }
+      out.push(text.slice(i + 2, close));
+      i = close + 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+/**
  * `text` (trimmed) is exactly ONE `${ … }` block, read by `logicBlockClose`: returns its payload,
  * or null when `text` is not one whole block (it does not start with `${`, the block cannot be
  * read, or anything follows its `}`).

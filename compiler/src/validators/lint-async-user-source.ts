@@ -53,6 +53,58 @@ import { isMetaKind } from "../types/ast.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 import { resolve } from "path";
 import { isStdlibFilePath } from "../module-resolver.js";
+// @ts-ignore — acorn ships its own types but the plugin API is untyped
+import * as acorn from "acorn";
+import { ScrmlParser } from "../scrml-acorn.ts";
+import { logicBlockClose } from "../logic-block-extent.ts";
+
+/**
+ * S469 (LOW-1) — does JavaScript read an `await` in `payload` (an interpolation's text)? Read by
+ * acorn's lexer under BOTH goals (a script reads `await` as a name, a module as a keyword), so an
+ * `await` inside a string, a comment or a regular expression is not one. A payload the lexer
+ * cannot read falls back to a word match (fail closed).
+ */
+function payloadHasAwait(payload: string): boolean {
+  for (const opts of [
+    { ecmaVersion: "latest", sourceType: "module", allowAwaitOutsideFunction: true },
+    { ecmaVersion: "latest", sourceType: "script" },
+  ]) {
+    try {
+      // @ts-ignore — the extended parser class inherits acorn's static tokenizer.
+      for (const tok of ScrmlParser.tokenizer(payload, opts) as Iterable<{ type: acorn.TokenType; value?: unknown }>) {
+        if ((tok.type === acorn.tokTypes.name || tok.type.keyword === "await") && tok.value === "await") return true;
+        if (tok.type.keyword === "await") return true;
+      }
+    } catch {
+      if (/\bawait\b/.test(payload)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * S469 (LOW-1) — does template TEXT (a template literal's source, or a quoted attribute value
+ * `data-v="… ${ … } …"`) hold an `await` in one of its `${ … }` interpolations? Each
+ * interpolation is bounded by acorn (`logicBlockClose`, the reader codegen's emitted template
+ * runs under); one it cannot bound is read to the end of the text.
+ */
+function templateTextHasAwait(text: string): boolean {
+  let i = 0;
+  while (i < text.length) {
+    const c = text.charCodeAt(i);
+    if (c === 92 /* \ */) { i += 2; continue; }
+    if (c === 36 /* $ */ && text.charCodeAt(i + 1) === 123 /* { */) {
+      const close = logicBlockClose(text, i);
+      const payload = close >= 0 ? text.slice(i + 2, close) : text.slice(i + 2);
+      if (payloadHasAwait(payload)) return true;
+      if (close < 0) return false;
+      i = close + 1;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
 
 export type AsyncAwaitRejectCode =
   | "E-ASYNC-NOT-IN-SCRML"
@@ -232,6 +284,40 @@ export function runAsyncAwaitReject(
             `read needs no \`await\`.`,
         });
         return;
+      }
+
+      // S469 (LOW-1) — an `await` in a template interpolation. A quoted attribute value
+      // (`data-v="${ await … }"`) is a `string-literal` carrying template TEXT, and a template
+      // literal keeps its interpolations as text: neither holds an `await` node, so the
+      // statement walk above never saw one and only the emitted bundle's module-goal gate
+      // caught it — reported as a compiler defect (E-CODEGEN-INVALID-LOGIC). Read each
+      // interpolation with acorn and reject the `await` here, with the language's own code.
+      const awaitInTemplate = (span: Span): void => {
+        diagnostics.push({
+          code: "E-AWAIT-NOT-IN-SCRML",
+          severity: "error",
+          span,
+          message:
+            `E-AWAIT-NOT-IN-SCRML: an \`await\` expression in a \`\${…}\` interpolation — scrml has no ` +
+            `\`await\` keyword (§19.9.8). ${CANONICAL_STEER}`,
+        });
+      };
+      if (kind === "markup") {
+        const attrs = (n.attrs ?? n.attributes) as unknown;
+        if (Array.isArray(attrs)) {
+          for (const a of attrs as Array<Record<string, unknown>>) {
+            const v = a?.value as Record<string, unknown> | undefined;
+            if (v && v.kind === "string-literal" && typeof v.value === "string" && v.value.includes("${")
+                && templateTextHasAwait(v.value)) {
+              awaitInTemplate(((a.span ?? v.span) as Span | undefined) ?? spanOf(n, filePath));
+            }
+          }
+        }
+      }
+      if (kind === "lit" && n.litType === "template" && typeof n.raw === "string" && n.raw.includes("${")) {
+        let raw = (n.raw as string).trim();
+        if (raw.startsWith("`")) raw = raw.slice(1, raw.endsWith("`") && raw.length > 1 ? -1 : undefined);
+        if (templateTextHasAwait(raw)) { awaitInTemplate(spanOf(n, filePath)); return; }
       }
 
       // `for await ... of` — E-FOR-AWAIT-NOT-IN-SCRML (ast-builder records
