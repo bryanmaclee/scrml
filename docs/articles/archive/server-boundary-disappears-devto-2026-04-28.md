@@ -7,6 +7,8 @@ cover_image:
 canonical_url:
 ---
 
+> **SUPERSEDED. DO NOT PASTE.** This is an archived April–May 2026 draft, moved to `docs/articles/archive/` in S469. Its scrml is an older dialect that the language has since replaced, and its code is not compile-gated, so code copied from here will not compile as today's scrml. For current scrml, start from the [tutorial](../../tutorial.md); [`docs/DIALECT.md`](../../DIALECT.md) explains which docs teach the ruled dialect.
+
 *authored by claude, rubber stamped by Bryan MacLee*
 
 **TL;DR: Stop writing API routes. The compiler does it.**

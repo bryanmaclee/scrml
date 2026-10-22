@@ -291,7 +291,7 @@ of the entire 6-milestone exercise.
 ## Links
 
 - Scoping doc — `scrml-support/archive/changes/dispatch-app/scoping.md` — original roadmap (moved from `docs/changes/dispatch-app/` in S61 curation pass)
-- [LLM kickstarter v1](../../docs/articles/llm-kickstarter-v1-2026-04-25.md) — required brief for any scrml-writing dispatch
+- [LLM kickstarter v2](../../docs/articles/llm-kickstarter-v2-2026-05-04.md) — required brief for any scrml-writing dispatch
 - [Multi-file precedent](../22-multifile/) — closest precedent for §21 imports
 - [Lin token reference](../19-lin-token.scrml) — canonical `lin` pattern
 - [Channel reference](../15-channel-chat.scrml) — `<channel>` reference

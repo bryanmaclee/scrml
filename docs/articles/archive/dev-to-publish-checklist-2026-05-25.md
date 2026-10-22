@@ -1,3 +1,5 @@
+> **SUPERSEDED. DO NOT PASTE.** This is an archived April–May 2026 draft, moved to `docs/articles/archive/` in S469. It is the publishing checklist for the archived drafts beside it. The drafts it lists teach an older scrml dialect. For current scrml, start from the [tutorial](../../tutorial.md); [`docs/DIALECT.md`](../../DIALECT.md) explains which docs teach the ruled dialect.
+
 # dev.to publication checklist — 2026-05-25 (S130)
 
 **Purpose:** all 12 dev.to articles have been audited (`docs/audits/article-truthfulness-audit-2026-05-21.md`, S115) and the corresponding in-repo `*-devto-*.md` files have been updated with the audit's recommended fixes. The retraction post for "scrml's Living Compiler" is drafted and ready to publish. This checklist is the user-side execution package — one row per platform action; work through top-to-bottom on dev.to.
