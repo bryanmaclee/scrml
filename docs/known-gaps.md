@@ -32,9 +32,15 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 667 | 7 |
-| LOW | 456 | 0 |
+| LOW | 457 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-bootstrap-integer-type-name-refused-s469 — the BOOTSTRAP refuses the type name `integer`, which SPEC §14.13.6 keeps as a soft-deprecated synonym of `int` through a §63 window — `NEW S469; LOW; open`
+
+<!-- @gap id=g-bootstrap-integer-type-name-refused-s469 sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(resolveTypeName: `int`, `bool`, `boolean` resolve; `integer` does not) prov=ruling:user-voice-scrml.md(S469 "three spec-follow-up opens" — "Deprecation window (Rec)": "The bootstrap accepts `integer` meanwhile.");spec:§14.13.6 -->
+
+Owed: the bootstrap resolves `integer` as `int` (and, once the window opens, emits `W-TYPE-NAME-DEPRECATED` for `integer` and `boolean`). impl#1 accepts both names today.
 
 ### g-spec-s469-pre-ruling-examples-owed — SPEC examples outside the amended sections still use forms the S469 rulings retired: a tail expression as a function's value, a block arm's bare last expression, `+` with a number, ambient `Math.*` / `String(…)` / `parseInt(…)`, `E.toEnum(…)` — `NEW S469; LOW; open (SPEC editorial)`
 

@@ -9692,7 +9692,7 @@ Plain `.css` files placed alongside `.scrml` source files are valid CSS. scrml's
 
 1. **Accumulation mode** (original behavior). When `lift` appears in an anonymous `${}` block whose parent is a markup or style context, `lift` appends the value to the block's accumulator array. The accumulated array is coerced when the logic block exits, according to the parent context type (§10.2). This is the original lift behavior and is unchanged.
 
-2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL designate that value in exactly one of two ways: an explicit `lift` statement, **or** the §17.6.10 value-form sugar, in which an arm body that is exactly one expression carries an *implied* `lift` of that expression. The designated value becomes the result of the if-as-expression at the binding site. *(⚑ S469: whether the implied `lift` of a single-expression branch survives the "block arms yield with `lift`" ruling is OPEN — §17.6.10.)*
+2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL designate that value in exactly one of two ways: an explicit `lift` statement, **or** the §17.6.10 value-form sugar, in which an arm body that is exactly one expression carries an *implied* `lift` of that expression. The designated value becomes the result of the if-as-expression at the binding site. *(RULED S469: the implied `lift` of a single-expression branch stands; a branch that holds a statement must `lift`, and a bare tail there is E-ARM-TAIL-VALUE — §17.6.10; ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — if-branch: *"Keep { e }, lift once a statement (Rec)"* (*"A braced value-form `if` branch holding ONE expression is that expression. Once the branch holds a statement, it must `lift` (the same rule as block arms; a bare tail is E-ARM-TAIL-VALUE)."*).)*
 
    > **S391 amendment.** The prior wording — "SHALL contain exactly one `lift` statement" — admitted only the explicit form and therefore contradicted both §17.6.10 and the shipping compiler, which accepts (and has accepted since the value-form landed) a lift-less single-expression arm. The sugar is defined in §17.6.10; this bullet is corrected here so §10 does not assert the opposite of §17.6. The multiplicity rule below ("at most once on any execution path") is unchanged and applies to the implied `lift` exactly as to an explicit one. Ratified S371, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`.
 
@@ -9756,7 +9756,7 @@ A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulat
 - `lift` SHALL be valid inside an anonymous `${ }` logic context (including the arm bodies of an if-as-expression, which are anonymous `${}` contexts).
 - `lift` SHALL also be valid inside a `fn` body, where it accumulates into the `fn` body's local `~` (§48.5); the `fn` returns the accumulated value with `return ~`. A `lift` inside a `fn` that targets a `~` initialized outside the `fn` boundary SHALL be E-FN-008 (§48.5.2).
 - `lift` inside a bare `function name() { ... }` body SHALL be a compile error (E-SYNTAX-002). E-SYNTAX-002 is scoped to bare `function` bodies and SHALL NOT fire on a `fn` body (§48.5, §48.6).
-- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002. This rule bounds MULTIPLICITY, not PRESENCE: it is satisfied by an arm body with no `lift` at all, and the §17.6.10 implied `lift` of a single-expression arm counts as that arm's one `lift` for the purpose of this rule. A single-expression arm body can therefore never trigger E-LIFT-002 (it has exactly one implied `lift` and, by the §17.6.10 grammar, no room for a second). *(⚑ S469: the implied `lift` is OPEN under the "block arms yield with `lift`" ruling — §17.6.10.)*
+- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002. This rule bounds MULTIPLICITY, not PRESENCE: it is satisfied by an arm body with no `lift` at all, and the §17.6.10 implied `lift` of a single-expression arm counts as that arm's one `lift` for the purpose of this rule. A single-expression arm body can therefore never trigger E-LIFT-002 (it has exactly one implied `lift` and, by the §17.6.10 grammar, no room for a second). *(RULED S469: the implied `lift` stands for a single-expression branch; a branch with a statement must `lift` — §17.6.10.)*
 - In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item. In value-lift mode, `lift` is a single-result designator, not an accumulator.
 - The compiler SHALL track all `lift` calls within a logic block and accumulate them into a typed array (accumulation mode only).
 - The compiler SHALL validate that all lifted values are of a compatible type. Lifting heterogeneous types that are not mutually coercible SHALL be a compile error (E-TYPE-012).
@@ -14829,7 +14829,7 @@ The parse is **strict and whole-string**:
 | Call | Accepts exactly | Everything else |
 |---|---|---|
 | `int.parse(s)` | an optional leading `-`, then one or more ASCII digits `0`–`9` (leading zeros allowed), naming a value within ±(2^53−1) | `not` |
-| `number.parse(s)` | an optional leading `-`, digits with an optional `.` fraction (at least one digit on one side of the point), an optional exponent (`e` or `E`, an optional sign, digits) ~~; and the texts a number's honest form produces (§20.7.2), including `NaN`, `Infinity`, `-Infinity`~~ *(S469 r2: moved under the ⚑ below — a derivation, not ruled)* | `not` |
+| `number.parse(s)` | an optional leading `-`, digits with an optional `.` fraction (at least one digit on one side of the point), an optional exponent (`e` or `E`, an optional sign, digits) ~~; and the texts a number's honest form produces (§20.7.2), including `NaN`, `Infinity`, `-Infinity`~~ *(S469: NaN, ±∞ and overflow are `not` — ruled below)* | `not` |
 | `bool.parse(s)` | `"true"`, `"false"` | `not` |
 | `E.parse(s)` | the name of a unit variant of `E`, exactly (case-sensitive) | `not` |
 
@@ -14838,18 +14838,16 @@ No trimming, no `+`, no `0x` / `0o` / `0b`, no `_` separators, no Unicode digits
 
 **Round trip.** For every value `x` of a built-in type with an honest text, `T.parse` of that text is `x` again:
 whatever `${n}` prints, `number.parse` reads back (for `-0`, whose text is `"0"`, the value read back is `0`) — for
-a FINITE number; NaN and ±∞ are the ⚑ below.
+a FINITE number (S469: a parse never yields NaN or ±∞, below).
 
 **A radix stays named.** Text in another base is read by `scrml:math.parseInt(s, radix)`, which returns
 `int | not` under the same whole-string rule for that radix (§41.18).
 
-⚑ **OPEN (not ruled) — the non-finite edge of `number.parse`.** (a) Whether `"NaN"`, `"Infinity"` and
-`"-Infinity"` — texts a number's honest form produces (§20.7.2) — parse to those values: a literal reading of the
-ruled round-trip law says yes *(derivation)*. (b) Whether `number.parse("1e400")` (finite text whose value
-overflows) is `not` or `Infinity`. **PA recommendation:** refuse all three cases — `number.parse` returns `not` for
-NaN, ±∞ and out-of-range text, and the round-trip law covers finite numbers only. Round-tripping a non-value is
-not worth letting a fake value reach a cell through a parse; a program that must carry NaN or ∞ in text writes
-its own check.
+✅ **RULED S469 — a parse yields only finite numbers.** `number.parse` returns `not` for `"NaN"`, `"Infinity"`,
+`"-Infinity"` and for finite text whose value overflows (`"1e400"`); the same holds for `parseFloat` / `toNumber`
+(§41.18). The round-trip law covers finite numbers. *(Replaces the ⚑ OPEN on the non-finite edge, which
+recommended this answer.)* **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — non-finite parse: *"not for all three (Rec)"* (*"`number.parse("NaN" | "Infinity" | "1e400")` → `not`. A parse produces only finite numbers, and the round-trip law covers finite numbers."*) **supersedes:** that ⚑ OPEN, including its derivation that the
+round-trip law would accept `"NaN"` / `"Infinity"`. **Direction of change:** semantics-defined (Nominal).
 
 `E.parse` replaces `E.toEnum` (§14.4.1), through a §63 deprecation window.
 
@@ -14885,10 +14883,14 @@ validity-surface listings). Left as written: SQL column types (`integer`, `boole
 §41.16 display mappings — SQL, not scrml), compiler-internal annotations (`hasLift: boolean` and the like), the
 quoted `scrml:md` source in §67 (it mirrors `stdlib/md/index.scrml`, which keeps its spelling until that file is
 migrated), and the English word "boolean" in prose. Whether `integer` /
-`boolean` enter a §63 window is ⚑ OPEN (not ruled). **PA recommendation:** yes — soft-deprecate both spellings
-through §63 (a `W-` lint, a reserved `E-`, a mechanical `scrml fix` rename), so the language has one name per
-type without a breaking change; until that is ruled the bootstrap should accept `integer` as the synonym this
-section names. The three grammar productions that list primitive type names (§7.5 `primitive-type`, §15
+`boolean` enter a §63 window ~~is ⚑ OPEN (not ruled)~~ — **RULED S469: yes.** `integer` and `boolean` keep working
+in type position, with **`W-TYPE-NAME-DEPRECATED`** (Info, §34) at each use naming `int` / `bool` and `scrml fix`,
+and are removed later through §63 (reserved `E-TYPE-NAME-DEPRECATED`; §63.7). The rewrite is mechanical (the
+name). The bootstrap SHALL accept `integer` during the window (it refuses it today — an owed gap,
+`g-bootstrap-integer-type-name-refused-s469`). **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — old type names: *"Deprecation window (Rec)"* (*"`integer`/`boolean` keep working with a warning under §63, then are removed. The bootstrap accepts `integer` meanwhile."*) **supersedes:** the ⚑ OPEN and the PA
+recommendation that stood here. **Direction of change:** inert (a lint; both spellings mean the same) — Nominal: the
+lint is named, not emitted, and the window opens per §63.2 when the lint, the reserved code and the `scrml fix`
+rule co-land. The three grammar productions that list primitive type names (§7.5 `primitive-type`, §15
 `primitive-type`, §53.2.1 `base-type`) name the same set from S469 r2: `int` / `integer`, `bool` / `boolean`,
 `number`, `string` *(PA alignment; adding `int` to the §15 bindable-prop set is newly-accepting and Nominal)*. *(PA choice, deep-dive §14 item 4: `int` is the dominant
 spelling by a wide margin; `bool` is the spelling of every S469 ruling (`bool.parse`, "string, int, number, bool")
@@ -17479,15 +17481,14 @@ cascade — the result is `not` (§17.6.4), which renders as **nothing**.
 - A branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`. The
   implied `lift` counts as that branch's single `lift` for the §10 multiplicity rule (E-LIFT-002).
 
-> ⚑ **OPEN (S469) — the same question as §18.5, for an `if` branch.** The S469 ruling *"Block arms yield with lift
-> (Recommended)"* (§18.5) makes a bare last expression in a value-position BLOCK ARM an error, and keeps the
-> single-expression arm `.A :> expr`. An if-as-expression branch is always braced, so its single-expression form
-> `{ "Admin" }` (this section's implied `lift`, ratified S371 "value-form b") is braced like a block but holds no
-> statement, like `.A :> expr`. The ruling did not say which it is. This section is unchanged until that is ruled;
-> the §10.1 value-lift bullets that cite it are flagged with it. A `match` value-form is unaffected: its arms are
-> inline-value arms. PA recommendation: keep the single-expression branch `{ e }` (it is the `if` spelling of
-> `.A :> e`, and S371 ratified it), and require `lift` as soon as a branch holds a statement — which §18.5's rule
-> already does for any branch that is a block with statements.
+> ✅ **RULED S469 — a single-expression `if` branch keeps its implied `lift`; a branch with a statement must `lift`.**
+> *(Replaces the ⚑ OPEN "the same question as §18.5, for an `if` branch", which recommended this answer.)*
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — if-branch: *"Keep { e }, lift once a statement (Rec)"* (*"A braced value-form `if` branch holding ONE expression is that expression. Once the branch holds a statement, it must `lift` (the same rule as block arms; a bare tail is E-ARM-TAIL-VALUE)."*)
+> A braced value-form `if` branch holding exactly ONE expression (`{ "Admin" }`) is that expression: the implied
+> `lift` above stands. A branch that holds a statement yields only by `lift`; a bare expression as its last
+> statement is compile error `E-ARM-TAIL-VALUE` (§18.5, §34), as for a block arm. **supersedes:** the ⚑ OPEN that
+> stood here. **Direction of change:** newly-rejecting (a statement-holding branch whose value is a bare tail);
+> none for the single-expression form. Nominal on impl#1.
 - A value-form `if` SHALL NOT require a trailing `else`. When the `else` is absent, the false path
   SHALL contribute `not` per §17.6.4 and SHALL render as nothing. The compiler SHALL NOT emit an
   error or warning for the missing `else` (§17.6.4 already forbids it).
@@ -27462,6 +27463,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-INT-CONVERSION-RT | §41.18, §19.17 | Runtime trap: `floor`, `ceil`, `trunc` or `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1). Stops the current unit of execution; not a `!` error (§19.17). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — *"Named, mode required (Recommended)"*. | Runtime |
 | W-TOENUM-DEPRECATED | §14.4.1, §63.7 | `E.toEnum(s)` — the soft-deprecated spelling of `E.parse(s)` (§14.4.1); parses identically. One lint per call, naming `E.parse` and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens only when this lint, `E-TOENUM-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`" — *"T.parse(s) (Recommended)"*. | Info |
 | E-TOENUM-DEPRECATED | §14.4.1, §63.7 | **Reserved** (§63.2) end-of-window code for the `toEnum` spelling. Not scheduled; never fires before a §62 MAJOR event schedules it. **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: parse spelling `T.parse(s)`". | Error |
+| W-TYPE-NAME-DEPRECATED | §14.13.6, §63.7 | The type name `integer` or `boolean` in type position — the soft-deprecated synonyms of `int` / `bool`; they mean exactly the same. One lint per use, naming the canonical name and `scrml fix`. **Reserved — not yet emitted:** the §63 window opens when this lint, `E-TYPE-NAME-DEPRECATED` and a `scrml fix` rule co-land (§63.2). **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Deprecation window (Rec)"*. Direction of change: inert. | Info |
+| E-TYPE-NAME-DEPRECATED | §14.13.6, §63.7 | **Reserved** (§63.2) end-of-window code for the `integer` / `boolean` type names. Not scheduled; never fires before a §62 MAJOR event schedules it. **Code name provisional (PA, S469).** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Deprecation window (Rec)"*. | Error |
 | W-ASSIGN-001 | §50.4 | `=` in condition position without double parentheses | Warning |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
@@ -27979,7 +27982,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
 | E-TYPE-043 | §17.6, §33, §42.3.3, §48 | **Widened S469.** (1) A function with a non-optional declared return type has a code path that returns `not` (the absence sentinel) ~~— directly via `return not` or implicitly by falling off the end of the function body~~ via `return not`. Resolution: include `\| not` in the declared return type, or return a non-`not` value. (2) **(S469)** A function with ANY declared return type — `-> T \| not` included — has a path that does not end in `return <expr>;`: it can reach the end of its body, has a bare `return;`, or ends in a tail expression it does not `return`. Falling off is never `not` and never JS `undefined`; write `return not;` (`-> T \| not`) or `return <value>;`. ~~Server functions that fall through implicitly are subject to the same rule.~~ Server functions are subject to the same rule (falling off no longer means `not`, §42.9). Provenance of (2): ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with a declared return type, `-> T \| not` included, MUST `return` on every path; falling off is a compile error, so you write `return not;`."*); bare `return`: the PA application recorded there. Limb (2) is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** for `-> T \| not` (impl#1 carries it, §34.0). (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 17901, 17928, 17988.) | Error |
 | E-RETURN-INCOMPLETE | §48, §48.8, §48.13 | A function with NO declared return type (or a `!` function, which has no success-type slot, §19.4.1) returns a value on some path (`return <expr>;`) and on another path falls off the end of its body or has a bare `return;`. If any path returns a value, every path SHALL (§48 "The return rule", rule 3). Resolution: end every path with `return <value>;`, or declare the return type. **Code name provisional** (named by the bootstrap, S469; not yet among the S469 confirmed names). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with no return type returns nothing, and if any path returns a value, every path must (error)."*). Direction of change: newly-rejecting. | Error |
-| E-ARM-TAIL-VALUE | §18.5 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
+| E-ARM-TAIL-VALUE | §18.5, §17.6.10 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. **(S469)** Also a value-form / if-as-expression `if` branch that holds a statement and ends in a bare expression (a branch of exactly one expression is that expression — ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Keep { e }, lift once a statement (Rec)"*). A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | E-TYPE-044 | §17.6 | `given` (presence-guard) is applied to a variable whose declared type does not include `\| not`. The guard has nothing to refine — the variable is already known to be non-`not`. Resolution: drop the `given` guard, or widen the variable's type. (Catalog addition S84 Wave 2 #5; full prose at §17.6 line 17929.) | Error |
 | E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point (§42.3.5, S462 "b"). A provably present write narrows again; a suspension point (a server call, a body-split boundary, a `yield`) ends every reactive cell's narrowing; a function body (a lambda, an event handler, a nested function) created in a narrowed scope re-tests reactive cells unless a known built-in calls it synchronously (§42.3.5, S462 "a"); an event handler inside an `if=` / `else-if=` gate keeps the narrowing that gate gives its cell when it handles a user-input event (an allow-list, §42.3.5: `click`, `input`, `keydown`, … — not `focus` / `blur` / `change` / leave / cancel / animation / custom events) (S462 "a", Q18). (Emitted at `compiler/src/type-system.ts` `checkOptionalMemberAccess`.) An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) | Error |
 | E-CONTRACT-002-RT | §53.11 | **Reserved.** Named shape registry lookup is fully resolved at compile time; this runtime form SHALL NOT be emitted by the runtime. Preserved for forensic search-hit stability and to mirror the runtime/compile-time naming convention used elsewhere in the contract family. (Catalog addition S84 Wave 2 #5; full prose at §53.11 lines 25028-25030.) | Runtime |
@@ -46784,6 +46787,11 @@ Applying the machine to the existing corpus:
   Once open: SOFT, unscheduled, gate-blocked until the fix rule is verified-landed (§63.4); the rewrite is
   mechanical (the member name `toEnum` becomes `parse`). *(Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED —
   conversions: parse spelling `T.parse(s)`" — "T.parse(s) (Recommended)".)*
+- **`W-TYPE-NAME-DEPRECATED` (`integer` → `int`, `boolean` → `bool` in type position, §14.13.6) — named S469:** the
+  window is SPECIFIED but NOT OPEN until the lint, the reserved `E-TYPE-NAME-DEPRECATED` and a `scrml fix` rule
+  co-land (§63.2). Once open: SOFT, unscheduled, gate-blocked until the fix rule is verified-landed (§63.4); the
+  rewrite is mechanical (the type name). The bootstrap accepts `integer` throughout the window. *(Provenance:
+  ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — "Deprecation window (Rec)".)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 
