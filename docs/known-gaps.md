@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
-| MED | 668 | 7 |
-| LOW | 455 | 0 |
+| MED | 670 | 7 |
+| LOW | 457 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -43,6 +43,30 @@
 RESOLVED S469 (s469-boot-ruled-backlog): the bootstrap resolves `integer` as `int` in type position (`analyze.scrml` type-name resolution); `integer.parse(s)` / `boolean.parse(s)` are refused with a message naming the canonical `int.parse` / `bool.parse` (the synonyms are type-position only, §14.13.6). `W-TYPE-NAME-DEPRECATED` is still reserved, not emitted (the §63 window opens when it co-lands with its fix rule). Original entry:
 
 Owed: the bootstrap resolves `integer` as `int` (and, once the window opens, emits `W-TYPE-NAME-DEPRECATED` for `integer` and `boolean`). impl#1 accepts both names today.
+
+### g-impl1-incomplete-let-accepted-silently-s469 — impl#1 accepts an incomplete declaration, `${ let x = }`, with exit 0 and no diagnostic, and emits `let x;` — `NEW S469 (owner: file as a gap); LOW; open`
+
+<!-- @gap id=g-impl1-incomplete-let-accepted-silently-s469 sev=LOW status=open locus=searched:compiler/src/ast-builder.js,compiler/src/expression-parser.ts(a `let` / `const` initializer with no expression after `=`)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)") -->
+
+Reproduced S469 (s469-spec-catchup): `<program>⏎${ let x = }⏎</program>` compiles (exit 0, only the SPA-inferred info lint) and the client JS holds `let x;`. A missing initializer after `=` is a syntax error and should be refused at the parse with the declaration's position. Likely the same missing parse refusal as [[g-incomplete-binary-return-reaches-codegen-s466]] (a dangling operator reaching later stages), on the declaration path, where it does not even reach the codegen validity gate. Not fixed: impl#1 work stays security-only (S435); the owner ruled to file it.
+
+### g-impl1-typed-inner-fn-in-on-mount-leaks-annotation-s469 — impl#1 emits a typed parameter of a function declared inside `on mount` (`function inner(x: int)`) into the client JS verbatim (`function inner ( x : int )`), which is not JavaScript — `NEW S469 (owner: file as a gap); MED; open (fails closed)`
+
+<!-- @gap id=g-impl1-typed-inner-fn-in-on-mount-leaks-annotation-s469 sev=MED status=open locus=searched:compiler/src/codegen(the `on mount` body lowering — a nested `function` declaration's text is emitted without stripping parameter annotations)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");pin:conformance/cases/server-db/on-mount-server-call-some-runtime -->
+
+Found by the S469 corpus lane: annotating `inner(x)` in `conformance/cases/server-db/on-mount-server-call-some-runtime` (required by the S469 "function parameters must be annotated" ruling) breaks the case, so that case keeps its unannotated parameter. Reproduced S469 (s469-spec-catchup) on the case with `x: int`: the build FAILS closed as `E-CODEGEN-INVALID-LOGIC` (the codegen validity gate: *"...() => { function inner ( x : int ) { return _scrml_fetch_..."*), so no SyntaxError ships; the corpus lane reported it as a runtime SyntaxError — whichever path a given shape takes, the annotation text reaches the client JS. Cost: an adopter cannot write a ruled-correct (annotated) helper inside `on mount` on impl#1. Not fixed (S435, owner ruling above).
+
+### g-impl1-template-slot-call-not-counted-as-caller-s469 — impl#1 does not count a call inside a logic template slot (`` `${pick(x)}` ``) as a caller of `pick`, so it reports a false `W-DEAD-FUNCTION` — `NEW S469 (owner: file as a gap); LOW; open`
+
+<!-- @gap id=g-impl1-template-slot-call-not-counted-as-caller-s469 sev=LOW status=open locus=searched:compiler/src/dependency-graph.ts,compiler/src/codegen/usage-analyzer.ts(callers are not collected from a backtick template's `${…}` slots in logic)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-corpus-templates(PR #1483) -->
+
+Found by the s469-corpus-templates lane (PR #1483) while rewriting `String(…)` / `+`-with-a-number to templates. Reproduced S469 (s469-spec-catchup): `function pick(x: int) -> string { … }` called only as `` return `a ${pick(@n)}`; `` from another function → `W-DEAD-FUNCTION` ("has no callers … will be tree-shaken"), yet `pick` is still emitted and called — the warning is false, the output is right. Side effect: a conformance case that gains the warning this way can no longer be twinned in bootstrap conformance (NOT-TWINNED). Not fixed (S435): the owner's "File as gaps" ruling names the first two S469 impl#1 bugs; the PA applies it to this one (a PA application, not a separate ruling).
+
+### g-impl1-template-slot-not-argument-unlowered-s469 — impl#1 does not lower a bare `not` argument inside a logic template slot: `` `${stmt(not)}` `` emits `stmt(not)` and throws `ReferenceError: not is not defined` at run time — `NEW S469 (owner: file as a gap); MED; open`
+
+<!-- @gap id=g-impl1-template-slot-not-argument-unlowered-s469 sev=MED status=open locus=searched:compiler/src/codegen(logic template-literal slot text — the `not` → absence lowering is not applied inside `${…}` of a backtick template)—not-traced prov=ruling:user-voice-scrml.md(S469 "Owner — impl#1 non-security bugs stay gaps" — "File as gaps (Recommended)");dispatch:s469-corpus-templates(PR #1483) -->
+
+Found by the s469-corpus-templates lane (PR #1483). Reproduced S469 (s469-spec-catchup): `` const b = `${stmt(not)}`; `` compiles at exit 0 and the client JS holds `` `${_scrml_stmt_2(not)}` `` — `not` is left as a free identifier, a runtime ReferenceError. The same call outside a template lowers. Not fixed (S435): the owner's "File as gaps" ruling names the first two S469 impl#1 bugs; the PA applies it to this one (a PA application, not a separate ruling).
 
 ### g-spec-s469-pre-ruling-examples-owed — SPEC examples outside the amended sections still use forms the S469 rulings retired: a tail expression as a function's value, a block arm's bare last expression, `+` with a number, ambient `Math.*` / `String(…)` / `parseInt(…)`, `E.toEnum(…)` — `NEW S469; LOW; open (SPEC editorial)`
 
