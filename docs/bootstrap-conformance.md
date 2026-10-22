@@ -11,26 +11,26 @@ Scope: **1807 of 1807 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 205 | 11.3% |
+| PASS | 218 | 12.1% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 81 | 4.5% |
+| FAIL | 68 | 3.8% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 675 | 37.4% |
 | UNSUPPORTED | 846 | 46.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 286; of those, 205 hold (71.7%). Runtime half executed on the bootstrap for 85 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 286; of those, 218 hold (76.2%). Runtime half executed on the bootstrap for 90 case(s).
 
-- **Vacuous** passes: 14 of 205 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **191**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 81; the other 48 are implemented checks that answered wrong.
+- **Vacuous** passes: 16 of 218 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **202**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 33 of 68; the other 35 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 570 · parse-reject 276.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **797** — PASS 106 · FAIL 68 · UNSUPPORTED 623. Twin holds 106 (non-vacuous 95). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **797** — PASS 119 · FAIL 55 · UNSUPPORTED 623. Twin holds 119 (non-vacuous 106). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -109,7 +109,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | components | 68 | · | · | 1 | · | 65 | 2 | · | · |
 | condition | 36 | 18 | · | 5 | · | 8 | 5 | · | · |
 | control-flow | 75 | 15 | · | 3 | · | 20 | 37 | · | · |
-| defer | 51 | 8 | · | 5 | · | 4 | 34 | · | · |
+| defer | 51 | 11 | · | 2 | · | 4 | 34 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | element-refusal | 34 | 7 | · | · | · | 11 | 16 | · | · |
@@ -117,7 +117,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | engine | 92 | 6 | · | 5 | · | 50 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 72 | 17 | · | 11 | · | 4 | 40 | · | · |
+| error | 72 | 23 | · | 5 | · | 4 | 40 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 19 | · | · | 1 | · | 1 | 17 | · | · |
@@ -130,9 +130,9 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 89 | 7 | · | 3 | · | 36 | 43 | · | · |
+| markup-handler | 89 | 8 | · | 2 | · | 36 | 43 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
-| match-codes | 25 | 1 | · | 5 | · | · | 19 | · | · |
+| match-codes | 25 | 4 | · | 2 | · | · | 19 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | match-leave | 45 | 15 | · | 1 | · | 9 | 20 | · | · |
 | md | 18 | · | · | 7 | · | 3 | 8 | · | · |
@@ -163,7 +163,7 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 | tenant | 23 | · | · | · | · | · | 23 | · | · |
 | type-state-codes | 32 | 3 | · | 1 | · | 3 | 25 | · | · |
 
-### FAIL (81)
+### FAIL (68)
 
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
@@ -194,12 +194,6 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - runtime: no artifact — the compile reported an error (E-DEFER-UNHANDLED-FAILABLE)
 - `defer/fail-path` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
-- `defer/fn-prohibition-applies-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-043
-- `defer/fn-pure-local` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-TYPE-043)
-- `defer/propagate-path` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `engine/initial-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-INITIAL-INVALID-VARIANT)
   - missing E-ENGINE-INITIAL-INVALID-VARIANT
   - severity: E-ENGINE-INITIAL-INVALID-VARIANT did not fire (expected error)
@@ -218,9 +212,6 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 - `enum/variant-name-lowercase-reject` (twin · codes; not in the bootstrap: E-ENUM-VARIANT-CASE)
   - missing E-ENUM-VARIANT-CASE
   - severity: E-ENUM-VARIANT-CASE did not fire (expected error)
-- `error/arm-pipe-legacy-handler` (twin · codes+runtime)
-  - forbidden family E-* fired: E-TYPE-001
-  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `error/await-not-in-scrml` (twin · codes; not in the bootstrap: E-AWAIT-NOT-IN-SCRML)
   - missing E-AWAIT-NOT-IN-SCRML
   - forbidden E-SCOPE-001 fired
@@ -229,18 +220,8 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-SCOPE-001
 - `error/handler-non-exhaustive` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
-- `error/handler-pipeless-arms-rt` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-TYPE-001)
-- `error/handler-recovery-into-cell` (twin · runtime)
-  - runtime: no artifact — the compile reported an error (E-TYPE-001)
 - `error/handler-wildcard-escape` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-SCOPE-001
-- `error/propagate-in-non-failable-fn-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-001
-- `error/propagate-in-non-failable-fn-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-001
-- `error/propagate-non-failable-callee-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-001
 - `error/throw-not-in-scrml` (twin · codes; not in the bootstrap: E-THROW-NOT-IN-SCRML)
   - missing E-THROW-NOT-IN-SCRML
   - severity: E-THROW-NOT-IN-SCRML did not fire (expected error)
@@ -253,20 +234,12 @@ NOT-TWINNED by reason (675 cases; a case counts once per distinct reason):
 - `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
-- `markup-handler/multi-stmt-handler-colon-shorthand-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-001, E-VALUE-WRITES-STATE
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
-- `match-codes/e-match-012-tnot-else-exhaustive-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-043
 - `match-codes/e-match-012-tnot-missing-not-arm-pos` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-043
-- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-043
-- `match-codes/e-type-025-enum-subject-neg` (twin · twin-extra-error)
-  - twin emitted unasserted error(s): E-TYPE-043
+  - twin emitted unasserted error(s): E-TYPE-031
 - `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
   - missing E-TYPE-026
 - `match-leave/stmt-arm-braced-break-continue-loop` (twin · runtime)
@@ -377,7 +350,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (205)
+### PASS / CODES-ONLY (218)
 
 - `attr-executable-sink/bound-svg-animation-runtime-guard` — PASS · TWIN
 - `attr-executable-sink/bound-url-runtime-guard` — PASS · TWIN
@@ -440,12 +413,15 @@ none
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
 - `control-flow/s462-braceless-else-if-chain-dangling` — PASS · TWIN
 - `control-flow/s462-braceless-if-else-same-line` — PASS · TWIN
+- `defer/fn-prohibition-applies-neg` — PASS · TWIN
+- `defer/fn-pure-local` — PASS · TWIN
 - `defer/handled-failable-ok` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
 - `defer/match-stmt-braced-arm` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
+- `defer/propagate-path` — PASS · TWIN
 - `defer/return-value-before-deferred` — PASS · TWIN
 - `defer/unhandled-failable-neg` — PASS · TWIN
 - `element-refusal/code-raw-style-pos` — PASS
@@ -461,6 +437,7 @@ none
 - `engine/rule-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
+- `error/arm-pipe-legacy-handler` — PASS · TWIN
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
 - `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
@@ -474,9 +451,14 @@ none
 - `error/failable-match-nonexhaustive-err` — PASS · TWIN
 - `error/failable-match-nonexhaustive-ok` — PASS · TWIN
 - `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
+- `error/handler-pipeless-arms-rt` — PASS · TWIN
+- `error/handler-recovery-into-cell` — PASS · TWIN
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
+- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
+- `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
 - `error/propagate-incompat-variants` — PASS · TWIN
+- `error/propagate-non-failable-callee-neg` — PASS · TWIN
 - `error/propagate-non-failable-callee-pos` — PASS · TWIN
 - `files/multifile-import` — PASS · TWIN
 - `forms/bind-value-input` — PASS · TWIN
@@ -498,11 +480,15 @@ none
 - `lifecycle/when-effect-writes-state-pos` — PASS · TWIN
 - `markup-handler/inline-block-handler-multi-line` — PASS · TWIN
 - `markup-handler/multi-stmt-handler-attr-neg` — PASS · TWIN · VACUOUS
+- `markup-handler/multi-stmt-handler-colon-shorthand-neg` — PASS · TWIN · VACUOUS
 - `markup-handler/s437-r4-undeclared-fn-2nd-each-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `markup-handler/s462-handler-nested-if-else` — PASS · TWIN
+- `match-codes/e-match-012-tnot-else-exhaustive-neg` — PASS · TWIN
+- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — PASS · TWIN
+- `match-codes/e-type-025-enum-subject-neg` — PASS · TWIN · VACUOUS
 - `match-codes/e-type-026-match-in-logic-neg` — PASS · TWIN · VACUOUS
 - `match-leave/dpa068-failable-decl-bare-return` — PASS · TWIN
 - `match-leave/dpa068-failable-stmt-bare-fail` — PASS · TWIN
