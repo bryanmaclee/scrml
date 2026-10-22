@@ -26,7 +26,7 @@
                 generators.
             </p>
             <div class="flex gap-3 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§10"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§10"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC &sect;10
                 </a>
@@ -351,7 +351,7 @@
             &sect;10.4) +
             <strong>&sect;17.6</strong>
             (if-as-expression value-lift). Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

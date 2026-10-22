@@ -31,7 +31,7 @@
                 inspection.
             </p>
             <div class="flex gap-3 mt-4 text-xs">
-                <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md#§22"
+                <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md#§22"
                    class="text-blue-700 hover:text-blue-900 underline">
                     SPEC &sect;22 (Metaprogramming)
                 </a>
@@ -355,7 +355,7 @@ meta-body  ::= (any sequence of scrml statements and expressions)</code></pre>
             <code class="font-mono text-sm">reflect</code> resolution
             &sect;22.4.2, runtime meta &sect;22.5, phase-separation
             &sect;22.8, error codes &sect;22.11). Spec lives at
-            <a href="https://github.com/bryanmaclee/scrmlTS/blob/main/compiler/SPEC.md"
+            <a href="https://github.com/scrml-lang/scrml/blob/main/compiler/SPEC.md"
                class="text-blue-700 hover:text-blue-900 underline">
                 compiler/SPEC.md
             </a>.

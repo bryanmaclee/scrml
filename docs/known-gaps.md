@@ -11510,7 +11510,7 @@ Authority: lifecycle DD at `scrml-support/docs/deep-dives/lifecycle-annotation-e
 
 ## §9 Where to discuss / report
 
-- **New gaps in adopter code:** file a GitHub Issue at https://github.com/bryanmaclee/scrmlTS
+- **New gaps in adopter code:** file a GitHub Issue at https://github.com/scrml-lang/scrml/issues
 - **Cross-reference with phase status:** [`master-list.md`](../master-list.md) §0 LIVE DASHBOARD
 - **Per-gap implementation arcs:** [`docs/changes/`](./changes/) — each gap with an active impl arc has a SCOPING.md + progress.md there
 - **Per-session landings:** [`docs/changelog.md`](./changelog.md)
