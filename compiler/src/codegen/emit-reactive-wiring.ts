@@ -1347,10 +1347,19 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // An `<each>` inside Tier-0 lifted markup emits its rows from inside this
   // loop (emit-lift → emit-each); give its per-row lift path the registry.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { setEachLiftRegistry } = require("./emit-each.ts") as {
+  const { setEachLiftRegistry, setEachIfGateEnv } = require("./emit-each.ts") as {
     setEachLiftRegistry: (r: any) => any;
+    setEachIfGateEnv: (e: any) => any;
   };
   const prevEachLiftRegistry = setEachLiftRegistry(ctx.registry ?? null);
+  // §17.1.2 (S469) — and the inputs its `<each if=…>` gate lowers the condition with:
+  // the SAME ones the top-level mount controller gets (if-gate-condition.ts).
+  const prevEachIfGateEnv = setEachIfGateEnv({
+    derivedNames: ctx.derivedNames,
+    synthCellKeys: ctx.synthCellKeys,
+    encodingCtx: ctx.encodingCtx,
+    requestIds,
+  });
 
   // s427-lift-body-lowering — names declared at chunk scope by the groups emitted
   // so far (SPEC §7.6 file scope). See `groupNames` below.
@@ -1842,6 +1851,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
   setEachLiftRegistry(prevEachLiftRegistry);
+  setEachIfGateEnv(prevEachIfGateEnv);
 
   // Emit each mount-deferred lift group as `function _scrml_lift_mount_<pid>(host, _scrml_effect, _scrml_effect_static)`.
   // The two effect constructors are PARAMETERS so every effect the group's code
