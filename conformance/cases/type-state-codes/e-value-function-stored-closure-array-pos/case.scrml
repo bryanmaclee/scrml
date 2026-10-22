@@ -1,5 +1,5 @@
 ${
-    function pick(i) { return i * 2 }
+    function pick(i: int) { return i * 2 }
     const items = [1, 2, 3]
     const handlers = items.map((i) => () => pick(i))
 }

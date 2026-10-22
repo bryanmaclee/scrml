@@ -4,7 +4,7 @@
             body: text }
 </>
 <program auth="required">
-function add(body) {
+function add(body: string) {
     ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
 }
 <button onclick={ add("x") !{ .Transport(_) :> return } }>add</button>

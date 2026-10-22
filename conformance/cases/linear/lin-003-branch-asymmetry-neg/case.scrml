@@ -1,7 +1,7 @@
 ${
     function fetchToken() { return "t" }
-    function useAdminToken(t) { return t }
-    function useToken(t) { return t }
+    function useAdminToken(t: string) { return t }
+    function useToken(t: string) { return t }
     let admin = true
     lin token = fetchToken()
     if (admin) {

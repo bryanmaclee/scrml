@@ -1,10 +1,10 @@
 <program db="./test.db">
 ${
-    fn readOne(id) {
+    fn readOne(id: int) {
         ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return 1
     }
-    fn loadName(id) {
+    fn loadName(id: int) {
         let row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{ _ :> not }
         return row is not ? "" : row.name
     }

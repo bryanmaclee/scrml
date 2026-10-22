@@ -1,6 +1,6 @@
 <program>
 ${
-    fn build(x) {
+    fn build(x: int) {
         let t = x + 1
         return t
     }

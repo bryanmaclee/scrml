@@ -150,14 +150,23 @@ function pruneCache(dir: string, keep: number) {
 
 const IMPORT_RE = /\bfrom\s*"(\.\.?\/[^"]*\.scrml)"/g;
 
-export function sourceClosure(entryAbs: string): string[] {
+function readSource(f: string, overlay?: ReadonlyMap<string, string>): string {
+  const o = overlay?.get(f);
+  return o !== undefined ? o : readFileSync(f, "utf8");
+}
+
+/**
+ * `overlay` (absolute path → text) stands in for the disk: an editor's unsaved buffers. A path in
+ * the overlay is read from it (and need not exist on disk); every other path is read from disk.
+ */
+export function sourceClosure(entryAbs: string, overlay?: ReadonlyMap<string, string>): string[] {
   const seen = new Set<string>();
   const todo = [entryAbs];
   while (todo.length > 0) {
     const f = todo.pop() as string;
-    if (seen.has(f) || !existsSync(f)) continue;
+    if (seen.has(f) || !(overlay?.has(f) || existsSync(f))) continue;
     seen.add(f);
-    const src = readFileSync(f, "utf8");
+    const src = readSource(f, overlay);
     for (const m of src.matchAll(IMPORT_RE)) todo.push(resolve(dirname(f), m[1]));
   }
   return [...seen];
@@ -179,7 +188,9 @@ export type Diagnostic = {
   message: string;
   file?: string; // absolute
   line?: number; // 1-based
-  col?: number; // 1-based
+  col?: number; // 1-based (UTF-16 code units, as JS strings index)
+  endLine?: number; // the span's (exclusive) end, when the bootstrap reports one
+  endCol?: number;
 };
 
 /** A path as the user reads it: relative to the cwd when it is under it, else absolute. */
@@ -257,31 +268,57 @@ export function defaultOutDir(entryAbs: string): string {
   return join(dirname(entryAbs), "dist", basename(entryAbs, extname(entryAbs)));
 }
 
-export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void } = {}): Promise<CompileResult> {
-  const entryAbs = resolve(file);
-  const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
+/** A compile with nothing written: the diagnostics, and the printed artifacts when it got that far. */
+export type CheckResult = {
+  ok: boolean;
+  diagnostics: Diagnostic[];
+  sources: Map<string, string>; // absolute path → source (the overlay's text where it had one)
+  files: string[]; // absolute source paths compiled
+  client?: { html: string; js: string }; // present when ok
+  serverJs?: string; // present when ok and the program has a server half the client calls
+  ms: { boot: number; compile: number };
+};
+
+/**
+ * Compile `entry` and the `.scrml` files it imports IN MEMORY — nothing is written. `overlay`
+ * (absolute path → text) replaces the disk for the paths it names: an editor's unsaved buffers
+ * (the entry itself need not exist on disk). Findings are diagnostics; a bootstrap crash throws.
+ */
+export async function compileSource(
+  entry: string,
+  opts: { overlay?: ReadonlyMap<string, string>; rebuild?: boolean; log?: (s: string) => void } = {},
+): Promise<CheckResult> {
+  const entryAbs = resolve(entry);
+  const overlay = opts.overlay;
   const boot = await loadBoot({ rebuild: opts.rebuild, log: opts.log });
   const t0 = performance.now();
-  const abs = sourceClosure(entryAbs);
+  const abs = sourceClosure(entryAbs, overlay);
+  if (abs.length === 0) throw new Error(`no such file: ${entryAbs}`);
   const root = commonDir(abs);
   const toRel = (f: string) => relative(root, f).split(sep).join("/");
   const sources = new Map<string, string>();
   const files = abs.map((f) => {
-    const src = readFileSync(f, "utf8");
+    const src = readSource(f, overlay);
     sources.set(f, src);
     return { path: toRel(f), src };
   });
   const relToAbs = new Map(abs.map((f) => [toRel(f), f]));
   const diagnostics: Diagnostic[] = [];
-  const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
-    ({ ok, diagnostics, sources, files: abs, outDir, written, server, ms: { boot: boot.ms, compile: performance.now() - t0 } });
+  const result = (ok: boolean, extra: Partial<CheckResult> = {}): CheckResult =>
+    ({ ok, diagnostics, sources, files: abs, ...extra, ms: { boot: boot.ms, compile: performance.now() - t0 } });
 
   const { frontEnd } = await import("../compiler/self-host-v2/slice-m2/lowered.js");
   const fe = frontEnd(boot.mods, files, toRel(entryAbs));
   for (const d of [...fe.diags, ...(fe.infos ?? [])]) {
     const f = relToAbs.get(d.file);
-    const lc = f !== undefined && d.span ? lineCol(sources.get(f) as string, d.span.start) : undefined;
-    diagnostics.push({ severity: severityOf(d), code: String(d.code), message: String(d.message), file: f, line: lc?.line, col: lc?.col });
+    const src = f !== undefined ? sources.get(f) : undefined;
+    const lc = src !== undefined && d.span ? lineCol(src, d.span.start) : undefined;
+    const ec = src !== undefined && d.span && typeof d.span.end === "number" && d.span.end > d.span.start
+      ? lineCol(src, d.span.end) : undefined;
+    diagnostics.push({
+      severity: severityOf(d), code: String(d.code), message: String(d.message), file: f,
+      line: lc?.line, col: lc?.col, endLine: ec?.line, endCol: ec?.col,
+    });
   }
   if (diagnostics.some((d) => d.severity === "error") || fe.core == null) {
     if (!diagnostics.some((d) => d.severity === "error")) {
@@ -295,15 +332,26 @@ export async function compileFile(file: string, opts: { outDir?: string; rebuild
   const so = boot.mods["print-server"].printServer(fe.core, "program.server.js", "scrml-server-runtime.js");
   for (const r of so.refused ?? []) if (!(out.refused ?? []).includes(r)) diagnostics.push(refusalDiag(String(r)));
   if (diagnostics.some((d) => d.severity === "error")) return result(false);
+  const serverJs = typeof so.js === "string" && so.js !== "" ? (so.js as string) : undefined;
+  return result(true, { client: { html: out.html, js: out.js }, serverJs });
+}
+
+export async function compileFile(file: string, opts: { outDir?: string; rebuild?: boolean; log?: (s: string) => void } = {}): Promise<CompileResult> {
+  const entryAbs = resolve(file);
+  const outDir = opts.outDir ? resolve(opts.outDir) : defaultOutDir(entryAbs);
+  const c = await compileSource(entryAbs, { rebuild: opts.rebuild, log: opts.log });
+  const result = (ok: boolean, written: string[] = [], server = false): CompileResult =>
+    ({ ok, diagnostics: c.diagnostics, sources: c.sources, files: c.files, outDir, written, server, ms: c.ms });
+  if (!c.ok || c.client === undefined) return result(false);
 
   mkdirSync(outDir, { recursive: true });
   const written = ["index.html", "program.client.js", "scrml-runtime.js"];
-  writeFileSync(join(outDir, "index.html"), out.html);
-  writeFileSync(join(outDir, "program.client.js"), out.js);
+  writeFileSync(join(outDir, "index.html"), c.client.html);
+  writeFileSync(join(outDir, "program.client.js"), c.client.js);
   copyFileSync(RUNTIME, join(outDir, "scrml-runtime.js"));
-  const server = typeof so.js === "string" && so.js !== "";
-  if (server) {
-    writeFileSync(join(outDir, "program.server.js"), so.js);
+  const server = c.serverJs !== undefined;
+  if (c.serverJs !== undefined) {
+    writeFileSync(join(outDir, "program.server.js"), c.serverJs);
     copyFileSync(SERVER_RUNTIME, join(outDir, "scrml-server-runtime.js"));
     copyFileSync(RUNTIME, join(outDir, "runtime.js"));
     written.push("program.server.js", "scrml-server-runtime.js", "runtime.js");

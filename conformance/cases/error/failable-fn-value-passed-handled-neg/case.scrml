@@ -1,10 +1,10 @@
 ${
     type LoadError:enum = { Empty }
-    function risky(n)! -> LoadError {
+    function risky(n: int)! -> LoadError {
         if (n < 1) fail LoadError::Empty
         return n
     }
-    function applyOr(f, n) {
+    function applyOr(f, n: int) {
         return f(n) !{ .Empty :> 0 }
     }
     function total() {

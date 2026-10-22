@@ -1,7 +1,7 @@
 ${
     <link>: string(url) = "https://scrml.dev/"
     <evil>: string = "javascript:alert(1)"
-    function setLink(v) {
+    function setLink(v: string) {
         @link = v
     }
 }
