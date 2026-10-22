@@ -1173,8 +1173,13 @@ ${
     fn emitOneToken(st: LexState) -> LexState {
         const c0: int = peekCode(st.cur, 0)
         const scan: Scan = pickScan(st.cur, c0)
-        const nstack: BracketKind[] = pushBracket(st.bracketStack, c0)
-        const marked: LexState = markSlot(st, closerWhy(st, c0))
+        const cw: string = closerWhy(st, c0)
+        let nstack: BracketKind[] = pushBracket(st.bracketStack, c0)
+        // a closer with no opener inside the slot does not pop the brackets
+        // OUTSIDE it (the slot is refused; its `}` still closes it, so the
+        // refusal names this closer rather than an unclosed template)
+        if (cw != "" && st.bracketStack.length <= st.interps[st.interps.length - 1].depth) nstack = st.bracketStack
+        const marked: LexState = markSlot(st, cw)
         return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, marked.interps, st.display)
     }
 

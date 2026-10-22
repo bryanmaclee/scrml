@@ -159,6 +159,12 @@ describe("P — parse", () => {
       "match c {\n            .A :> `a, ${n}\n| x`\n            .B :> `b`\n        }");
     expect(codes(src)).toEqual([]);
   });
+  test("a closer with no opener in a slot is named — it does not pop the brackets around the template", () => {
+    const src = fnProg("    fn g(t: string) -> string { return t }", "a: int", "g(`${ a ) }`)");
+    const d = diag(src, "E-PARSE-TEMPLATE");
+    expect(d.message).toContain("with no opener inside the slot");
+    expect(codes(src)).toEqual(["E-PARSE-TEMPLATE"]);
+  });
   test("a `?{}` bound parameter is read by the same reader: one it cannot bound one way is refused (§8.1.2)", () => {
     const SQ = "?" + "{";
     const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run()\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
