@@ -73,6 +73,8 @@ export default [
   ["effect comment hides close", EFF(`@msg = /* } */ check(@pw) ? "LOGGED IN" : "rejected"`)],
   ["effect template hides close", EFF("@msg = `}` == `}` && check(@pw) ? \"LOGGED IN\" : \"rejected\"")],
   ["effect match", EFF(`@msg = match check(@pw) { .Denied :> "rejected"  _ :> "LOGGED IN" }`)],
+  // A markup value in the body: no JS lexer reads it, so the extent falls to the block splitter's rule.
+  ["effect with a markup value", EFF(`const card = <p>x</p>\n    @msg = check(@pw) ? "LOGGED IN" : "rejected"`)],
   ["effect arrow", EFF(`@msg = (() => check(@pw))() ? "LOGGED IN" : "rejected"`)],
   ["effect handled", EFF(`@msg = (check(@pw) !{ _ :> false }) ? "LOGGED IN" : "rejected"`)],
   ["effect handled statement", EFF(`check(@pw) !{ .Denied :> @msg = "rejected" }\n    @msg = @msg == "rejected" ? "rejected" : "LOGGED IN"`)],

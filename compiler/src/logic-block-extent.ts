@@ -117,11 +117,36 @@ export function braceBlockClose(src: string, braceIdx: number): number {
 /** The index of the `}` that closes a block whose payload starts at `start`; -1 when unreadable. */
 function blockCloseFrom(src: string, start: number): number {
   const asModule = closeUnder(GOALS[0], src, start);
-  if (asModule < 0) return -1;
   const asScript = closeUnder(GOALS[1], src, start);
-  if (asScript !== asModule) return -1;
+  if (asModule < 0 && asScript < 0) return markupBlockClose(src, start);
+  if (asModule < 0 || asScript !== asModule) return -1;
   if (hasHtmlLikeCommentText(src.slice(start, asModule))) return -1;
   return asModule;
+}
+
+/**
+ * A block JavaScript's lexer cannot read under either goal because it holds a MARKUP VALUE
+ * (`${ @card = <p>hi</p> }`, `${ c ? <b>x</b> : "" }` — scrml markup-as-value, which no JS lexer
+ * reads: `</p>` lexes as a regular expression): bounded by the block splitter's own rule for a
+ * `${` (brace depth), the reader that then parses the body. The callers that cut CODE out of raw
+ * text (engine-body-reader) re-check that the block splitter reads the cut text as exactly one
+ * logic block, so the cut and the parse cannot disagree. -1 when the block holds no markup (an
+ * unterminated string / template / comment — unreadable), does not close, or holds an HTML-like
+ * comment.
+ */
+function markupBlockClose(src: string, start: number): number {
+  let depth = 1;
+  let j = start;
+  for (; j < src.length; j++) {
+    const c = src[j];
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (depth === 0) break; }
+  }
+  if (depth !== 0) return -1;
+  const payload = src.slice(start, j);
+  if (!/<\/?[A-Za-z][\w:.-]*(?=[\s>\/])/.test(payload)) return -1;
+  if (hasHtmlLikeCommentText(payload)) return -1;
+  return j;
 }
 
 /**

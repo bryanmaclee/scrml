@@ -64,6 +64,10 @@ describe("logic-block-extent — acorn bounds a raw-text ${…} block", () => {
     expect(close("x=${ await /}/g }>")).toBe(null);
     expect(close("x=${ a <!-- }\n }>")).toBe(null);
   });
+  test("a markup value (no JS lexer reads it) is bounded by the block splitter's brace rule", () => {
+    expect(close("x=${ c = <p>x</p> }>")).toBe(" c = <p>x</p> ");
+    expect(close("x=${ c = 'open }>")).toBe(null); // no markup: unreadable stays unreadable
+  });
   test("braceBlockClose / soleLogicBlockPayload", () => {
     const s = '{ @a = "}"; .B } rest';
     expect(s.slice(0, braceBlockClose(s, 0) + 1)).toBe('{ @a = "}"; .B }');
