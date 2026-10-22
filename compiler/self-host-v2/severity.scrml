@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 146 codes with a §34 severity; 1 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: W-STRING-INTERP-LITERAL); 70 without one (FAIL-CLOSED Error):
+// 149 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -75,8 +75,6 @@
 //   E-PROGRAM-MISSING — no §34 row
 //   E-RESET-ARG — no §34 row
 //   E-RESET-POSITION — no §34 row
-//   E-RETURN-INCOMPLETE — no §34 row
-//   E-TAPE-JS-METHOD — no §34 row
 //   E-TYPE-STRUCT-CONTEXT — no §34 row
 //   E-TYPE-STRUCT-FIELD — no §34 row
 //   E-TYPE-UNKNOWN — no §34 row
@@ -99,6 +97,7 @@ ${
             "W-MATCH-002" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
+            "W-STRING-INTERP-LITERAL" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -199,6 +198,7 @@ ${
             "E-RESET-ON-ENGINE-REFUSED" :> Severity.Error
             "E-RESET-ON-INVALID-ENTRY" :> Severity.Error
             "E-RESET-ON-NOT-WRITABLE" :> Severity.Error
+            "E-RETURN-INCOMPLETE" :> Severity.Error
             "E-RI-002" :> Severity.Error
             "E-ROUTE-001" :> Severity.Error
             "E-ROUTE-002" :> Severity.Error
@@ -220,6 +220,7 @@ ${
             "E-SYNTAX-044" :> Severity.Error
             "E-SYNTAX-064" :> Severity.Error
             "E-SYNTHESIZED-WRITE" :> Severity.Error
+            "E-TAPE-JS-METHOD" :> Severity.Error
             "E-TYPE-001" :> Severity.Error
             "E-TYPE-020" :> Severity.Error
             "E-TYPE-021" :> Severity.Error
@@ -240,8 +241,6 @@ ${
             "E-VALUE-WRITE-UNPROVEN" :> Severity.Error
             "E-VALUE-WRITES-STATE" :> Severity.Error
             "E-VARIANT-AMBIGUOUS" :> Severity.Error
-            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)
-            "W-STRING-INTERP-LITERAL" :> Severity.Warning
             // no usable §34 row — fail closed (listed in the header)
             _ :> Severity.Error
         }

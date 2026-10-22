@@ -104,7 +104,7 @@ const STATUS = {
   "tapes/neg-unshift": ["PASS", ["E-TAPE-JS-METHOD"]],
   "tapes/neg-tosorted": ["PASS", ["E-TAPE-JS-METHOD"]],
   "tapes/neg-sort-discarded": ["PASS", ["E-TAPE-JS-METHOD"]],
-  // the PROVISIONAL W-STRING-INTERP-LITERAL lint (no §34 row yet)
+  // the W-STRING-INTERP-LITERAL lint (§34 row landed s469-spec-followup; name still provisional)
   "interp/logic-literal-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/attr-expression-warns": ["PASS", ["W-STRING-INTERP-LITERAL"]],
   "interp/markup-does-not-warn": ["PASS", []],
