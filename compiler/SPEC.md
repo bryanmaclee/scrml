@@ -8048,7 +8048,7 @@ c = stepped(c)
 | code-default body — engine state-child, `<match>` block-form arm (§4.18) | rules 1–9 for its statements. A standalone `"…"` display-text literal and a markup child are items, not statements: a display literal is a `"…"` that stands alone on its line (§40.8 S441 sub-bullet — whose "nothing but whitespace, `;` or a `//` comment follows" now reads `;` as this separator) |
 | `<program>` / `<page>` / `<channel>` body top (§40.8) | rules 1–9; a `;` is the separator (rule 6) |
 | `:`-shorthand body (§4.14) | exactly one expression; newlines between the `:` and the opener's `>` are insignificant (rule 4 — the body is bracket-like). Not a statement list |
-| JS-style `match` arms (§18) and `!{}` arms (§19) | arms are newline-separated (§18.2, unchanged). See "Arm heads" below |
+| JS-style `match` arms (§18) and `!{}` arms (§19) | ~~arms are newline-separated (§18.2, unchanged)~~ arms are a comma list, trailing `,` optional (S469, dpa-073 F2 — §18.2 amendment; newline-separated lists are still read during the F5 migration). See "Arm heads" below |
 | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
 
 **Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
@@ -18305,7 +18305,8 @@ error from the compiler. `match` is the only exhaustiveness-enforced branch form
 **Formal grammar:**
 
 ```
-match-expr      ::= 'match' expression '{' match-arm+ '}'
+match-expr      ::= 'match' expression '{' arm-list '}'
+arm-list        ::= match-arm (',' match-arm)* ','?     // S469 dpa-073 F2: a comma list (was `match-arm+`)
 match-arm       ::= arm-pattern (':>' | '=>' | '->') arm-body
 arm-pattern     ::= variant-pattern | wildcard-arm | whole-error-arm | is-pattern
 whole-error-arm ::= '_' Identifier          // failable subjects only — §18.6.1 (S451)
@@ -18373,12 +18374,33 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   arm-arrow parser rule. (S452: a `!{}` arm IS a `match-arm` — the whole grammar above, not only
   its separator, §19.4.5.) (S145 ratification — `match-arrow-colon-canonical` deep-dive; user-voice
   S145; supersedes the prior "`=>` canonical / `->` alias / formatter-normalizes" rule.)
-- Match arms SHALL be juxtaposed (`match-arm+`) and written one per line (newline-separated).
+- ~~Match arms SHALL be juxtaposed (`match-arm+`) and written one per line (newline-separated).
   There is NO comma separator between arms — the arm body's terminating expression / `block-body`
   ends the arm; the next `arm-pattern` begins the next arm. A `,` following an arm body is invalid
   and SHALL produce **E-MATCH-ARM-SEPARATOR** (§34). The grammar admits exactly one canonical
   separator (the `=>`/`->` arrow within an arm); widening it to accept commas is rejected for
-  language cohesion (one canonical separator). (S144 Cluster D — Bug Y.)
+  language cohesion (one canonical separator). (S144 Cluster D — Bug Y.)~~ *(struck S469 — dpa-073 F2, below.)*
+- **The arm list is a comma list (S469).** Arms SHALL be separated by `,` — a `,` between every pair of arms,
+  block arms and leaving arms included, and a trailing `,` after the last arm optional:
+  `match x { .A :> 1, .B :> { log(); lift 2; }, }`. One spelling: the same arm list for a `match`, a `!{}`
+  handler (§19.4.5) and an engine message arm (§51.0.S.2.3). A `,` inside an arm body (a call's arguments, an
+  object literal, a multi-scrutinee head) is the body's own and does not end the arm.
+
+> **Amendment (S469) — arms are a comma list.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"the arm list is a comma list (`match x { .A :> 1, .B :> 2, }`), one spelling, trailing comma optional — under S452 one arm grammar for match arms, `!{}` handler arms and engine message arms. … Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2(i) / F3(i) / F4(ii)" — *"F2 \"Always a comma (Recommended)\""* (*"a `,` between every pair of arms, block arms included, trailing `,` optional — no Rust block-arm exemption."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F5 \"Bootstrap enforces (Recommended)\"" — *"(1) impl#1 ACCEPTS arm commas — an S435 exception (S452 precedent), and powers the codemod; … (4) the BOOTSTRAP enforces `;` + commas by construction. impl#1 does NOT enforce `;`/commas"*.
+> **supersedes:** the struck "Match arms SHALL be juxtaposed … NO comma separator" statement above and the
+> `match-arm+` grammar (S144), and the old meaning of `E-MATCH-ARM-SEPARATOR` ("a `,` after an arm is invalid").
+> **Direction of change:** newly-accepting (arm commas) now; newly-rejecting (an arm list without commas) when the
+> migration ends.
+> **Migration (dpa-073 F5, as ruled):** no Stage-1 window. A `scrml fix` rule inserts the commas at impl#1-legacy's
+> parsed arm boundaries, then the corpus is migrated; the BOOTSTRAP enforces commas by construction. impl#1
+> ACCEPTS arm commas (an S435 exception — today it still refuses them, an owed impl#1 change,
+> `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`) and keeps accepting newline-separated arms as a carried,
+> impl#1-labelled divergence; it never enforces commas.
+> **`E-MATCH-ARM-SEPARATOR`, its new meaning** *(PA derivation — the ruling retires the old meaning but names no
+> new one)*: an arm list that does not separate its arms with `,`. While the codemod has not run, a list written
+> wholly newline-separated is still read (both compilers), and the bootstrap reports a list that MIXES `,` and
+> newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`
+> `parseArms`); once the migration ends, every missing `,` is this code.
 - An arm pattern MAY list several alternates separated by `|` (`.B | .C :> r`, `"a" | "b" :> r`,
   `1 | 2 :> r` — the §51.0.J `derived=match` form), at ANY arm position. An alternation containing
   a wildcard alternate (`_` / `else`) is the wildcard arm. The alternates of one arm SHALL NOT carry
@@ -20281,11 +20303,11 @@ not the SPEC sentence — is what actually moved it.
 #### 19.4.5 The `!{}` Handler Arm Grammar — one arm grammar in logic (S452)
 
 A `!{}` handler's arms are `match` arms. The arm list is a sequence of §18.2 `match-arm`s — the same
-patterns, the same separator, the same juxtaposition — and this section adds nothing to the arm
-itself:
+patterns, the same separator, ~~the same juxtaposition~~ the same comma list *(S469, dpa-073 F2 — §18.2)* — and
+this section adds nothing to the arm itself:
 
 ```
-handled-expr  ::= expression '!{' handler-arm+ '}'
+handled-expr  ::= expression '!{' handler-arm (',' handler-arm)* ','? '}'   // S469: a comma list (was `handler-arm+`)
 handler-arm   ::= match-arm                  // §18.2 — arm-pattern, ':>' (or a deprecated alias), arm-body
 ```
 
@@ -20294,8 +20316,9 @@ A handler arm's body is a §18.2 `arm-body`, so it MAY be a bare leave statement
 
 So, in a `!{}` exactly as in a `match`: a variant arm is `.V`, or `.V(binding-list)` to bind its
 payload (§18.7; `::V` is the §18.2 alias); `_` / `else` is the catch-all; `_ <name>` binds the whole
-error (§18.6.1); alternates are separated by `|` within one arm (`.A | .B :> …`, §18.2); arms are
-written one per line with no separator between them (E-MATCH-ARM-SEPARATOR); a bare name is not a
+error (§18.6.1); alternates are separated by `|` within one arm (`.A | .B :> …`, §18.2); ~~arms are
+written one per line with no separator between them (E-MATCH-ARM-SEPARATOR)~~ arms are separated by `,`, the
+trailing one optional (S469 — the §18.2 amendment, dpa-073 F2; ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"one arm grammar for match arms, `!{}` handler arms and engine message arms"*; migration and `E-MATCH-ARM-SEPARATOR` as §18.2 states them); a bare name is not a
 pattern (E-MATCH-BARE-BINDER). The arm's pattern resolves against the type of the failure being
 handled (the declared error enum, `SqlError` for a `?{}`, §18.6.1's list).
 
@@ -27662,7 +27685,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-ALT-BINDING | §18.2, §18.7 | A `|` alternation arm whose alternates carry PAYLOAD PATTERNS — a binding (`.P(a: x) \| .Q(a: x) :> x`, `.P(x) \| .Q(x) :> x`), a NAMED field even when discarded (`.P(a: _) \| .Q(a: _)`), or a nested / literal pattern — in a JS-style `match`, at any arm position. The arm has no lowering (dispatch compares the variant tags only); before S438 it compiled with ZERO diagnostics and the arm silently never matched (or, as a non-first arm, satisfied exhaustiveness while being dropped). Only POSITIONAL `_` discards are accepted in an alternation. Resolution: give each variant its own arm, or use positional `_` discards (`.P(_) \| .Q(_) :> …`) when the body does not need the payload. (Catalog addition S438 — g-impl1-match-miscompiles F12 review F1; emitted at `compiler/src/ast-builder.js` `armChainBindingAlternate`.) | Error |
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
-| E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
+| E-MATCH-ARM-SEPARATOR | §18.2, §19.4.5 | **Meaning changed S469 (dpa-073 F2 — arms are a comma list).** An arm list that does not separate its arms with `,` (PA derivation; the ruling retires the old meaning and names no new one). During the dpa-073 F5 migration a wholly newline-separated list is still read; the bootstrap reports a list that MIXES `,` and newline boundaries, once, at the first arm with no `,` before it (`compiler/self-host-v2/parse.scrml`, the arm-list parser); after the migration every missing `,` is this code. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — dpa-073 F2 = (iii) \"Comma list (Recommended)\"" — *"Comma list (Recommended)"* (*"Supersedes §18.2 \"arms SHALL be juxtaposed … NO comma separator\" (S144) and E-MATCH-ARM-SEPARATOR's meaning."*). impl#1 still emits the OLD meaning (it refuses a `,`) — an owed impl#1 change, `g-impl1-arm-commas-refused-owed-by-dpa-073-f5-s469`. ~~A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.)~~ | Error |
 | E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match` or a `!{}` handler (in a `!{}`, also its soft-deprecated `\| err :> …` spelling, §19.4.5). In a `!{}` arm or a `match` on a failable result the fix is `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`; in a `!{}` also the soft-deprecated `\| .V x :>`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
 | E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`) is exempt — it covers every position at once. *(S452 currency correction, spec: §18.2 / §18.19 grammar — struck "optionally `\| _`"; impl#1 still accepts it, `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`.)* Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted at `compiler/src/type-system.ts:19159` (`checkMatchDiagnostics`).) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
@@ -38956,7 +38979,7 @@ and `break` / `continue` are **E-LOOP-001** / **E-LOOP-002**: legality is by con
 
 Payload binding follows §18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }`
 matches §18.2. The message arms are the leading items of the state-child body (before any render
-content), one per line; at that position a line whose first token is an arm pattern is an arm head
+content), ~~one per line~~ separated by `,` as every arm list is (S469, dpa-073 F2 — §18.2 amendment); at that position a line whose first token is an arm pattern is an arm head
 (§7.2.2 "arm heads" — by position, not by a `:>` lookahead). The pre-S452 `|`-led spelling
 (`| .Variant(binding) :> body`) is SOFT-DEPRECATED under §19.4.5's rule — it parses identically and
 surfaces `W-ARM-PIPE-LEGACY`; reserved `E-ARM-PIPE-LEGACY`; `scrml fix` deletes the `|`. Element arms
