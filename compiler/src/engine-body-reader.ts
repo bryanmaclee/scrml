@@ -102,6 +102,21 @@ export function bodyWasWalked(parse: unknown): boolean {
   return !!parse && typeof parse === "object" && _walked.has(parse as object);
 }
 
+// L1 (review of 5a88c3030) — the owners (state-child, `<onTransition>` entry, arm, engine meta,
+// timer entry) whose body the type system already REFUSED: codegen skips the body without a
+// second "reached codegen without being checked" diagnostic. One diagnostic, not two.
+const _reported = new WeakSet<object>();
+
+/** The type system reported an error on this body owner (codegen will not lower it). */
+export function markOwnerReported(owner: unknown): void {
+  if (owner && typeof owner === "object") _reported.add(owner as object);
+}
+
+/** Did the type system already report this body owner? */
+export function ownerReported(owner: unknown): boolean {
+  return !!owner && typeof owner === "object" && _reported.has(owner as object);
+}
+
 /** Turn the floor on for a compile's codegen stage (and off after it). */
 export function setRawBodyWalkFloor(on: boolean): void {
   _floor = on;

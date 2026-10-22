@@ -177,6 +177,46 @@ describe("review of 6e0770356 — a slot lowered from its TEXT admits no failabl
   });
 });
 
+describe("review of 5a88c3030 — <each> openers, late aliases, unlexable slots, one diagnostic", () => {
+  const EACH = (attrs, inExpr = "@xs", extra = "") => HEAD.replace("    }\n}\n", `    }${extra}\n}\n`).replace(/<button id="go"[^\n]*\n/, "") + `<xs> = [1]\n<div><each in=${inExpr} as x ${attrs}>IN</each></div>\n`;
+  test("H1 <each if=> unhandled call is E-ERROR-002 (interp, paren, bare)", () => {
+    for (const a of ['if=${ @pw != "" && check(@pw) }', 'if=(@pw != "" && check(@pw))', "if=check(@pw)"]) {
+      expect(codes(EACH(a))).toContain("E-ERROR-002");
+    }
+  });
+  test("H1 <each if=> handled by !{} compiles", () => {
+    expect(codes(EACH("if=${ check(@pw) !{ _ :> false } }"))).toEqual([]);
+  });
+  test("H1 <each if=> match on a failable call is refused", () => {
+    expect(codes(EACH("if=${ match check(@pw) { .Denied :> false  _ :> true } }"))).toContain("E-ERROR-002");
+  });
+  test("H1 <each in=> is a text slot", () => {
+    expect(codes(EACH("", '(@pw != "" && check(@pw) ? [1] : [])'))).toContain("E-ERROR-002");
+  });
+  const LATE = (body) => ENG(body) + "${\n    const g = check\n}\n";
+  test("H2 a const alias declared after the engine: guard refused, effect body E-SCOPE-001", () => {
+    expect(codes(LATE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ g(@pw) }>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`))).toContain("E-ERROR-002");
+    expect(codes(LATE(`<A rule=.B effect=\${ @msg = g(@pw) ? "IN" : "OUT" }><p>a</p></A>\n<B rule=.A><p>b</p></B>`))).toContain("E-SCOPE-001");
+  });
+  test("M1 a text slot acorn cannot lex is refused", () => {
+    expect(codes(HEAD + `<div><match for=S on=(S.A \u00a4 S.B)><A : "a"><B : "b"></match></div>\n`)).toContain("E-ERROR-002");
+  });
+  test("L1 a refused guard reports ONE diagnostic", () => {
+    const dir = join(root, String(seq++));
+    require("node:fs").mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "app.scrml"), ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ check(@pw) !{ _ :> false } }>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`));
+    const res = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: false, outputDir: join(dir, "out"), log: () => {} });
+    expect((res.errors ?? []).filter((e) => e.code === "E-ERROR-002").length).toBe(1);
+  });
+  test("L2 a `>` in an <onTimeout after=${…}> no longer drops the timer; an invalid after= is E-ENGINE-021", () => {
+    expect(codes(ENG(`<A rule=.B>\n<p>a</p>\n<onTimeout after=\${ [1].map((x) => x)[0] }ms to=.B/>\n</A>\n<B rule=.A><p>b</p></B>`))).toEqual([]);
+    expect(codes(ENG(`<A rule=.B>\n<p>a</p>\n<onTimeout after=soon to=.B/>\n</A>\n<B rule=.A><p>b</p></B>`))).toContain("E-ENGINE-021");
+  });
+  test("L2 derived= is scope-checked", () => {
+    expect(codes(HEAD + `<engine for=S derived=(nosuchname > 0 ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`)).toContain("E-SCOPE-001");
+  });
+});
+
 describe("hardening — the codegen floor refuses a body the failable walk never read", () => {
   test("with the floor on, an unwalked hook body is refused, not emitted", async () => {
     const { setRawBodyWalkFloor } = await import("../../src/engine-body-reader.ts");

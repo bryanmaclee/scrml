@@ -63,6 +63,11 @@ const HMSEQ = (p) => `onclick={\n    @pw = "${p}"\n    @msg = match check(@pw) {
 const HSEQ = (p) => `onclick={\n    check("${p}")\n    @msg = "LOGGED IN"\n}`;
 const MATCH = (b) => HEAD + `<st> = S.A\n` + BTN("@st = S.B") + `<match for=S on=@st>\n<A><p id="out">\${@msg}</p></A>\n<B>${b}</B>\n</match>\n`;
 
+// An `<each>` whose rendered text is #out's: `extraDecl` goes in the logic block, `inExpr` replaces `@xs`.
+const EACHP = (attrs, extraDecl = "", inExpr = "@xs") => HEAD.replace("    }\n}\n", `    }${extraDecl}\n}\n`) + `<xs> = [1]\n` + BTN("@msg = @pw") + `<div id="out"><each in=${inExpr} as x ${attrs}>LOGGED IN</each></div>\n`;
+// An engine whose bodies call `g`, a `const` alias of `check` declared AFTER the engine.
+const LATE = (body, extra = "") => ENG(body) + `\${\n    const g = check${extra}\n}\n`;
+
 export default [
   // --- state-child effect= ---
   ["effect ternary", EFF(TERN)],
@@ -130,5 +135,22 @@ export default [
   ["match if=", HEAD + `<st> = S.B\n` + BTN("@msg = @pw") + `<match for=S on=@st if=(@pw != "" && check(@pw))>\n<A><p>a</p></A>\n<B><p id="out">LOGGED IN</p></B>\n</match>\n`],
   ["match on= paren", HEAD + BTN("@msg = @pw") + `<div id="out"><match for=S on=(check(@pw) ? S.B : S.A)><A : "rejected"><B : "LOGGED IN"></match></div>\n`],
   ["match on= interp", HEAD + BTN("@msg = @pw") + `<div id="out"><match for=S on=\${ check(@pw) ? S.B : S.A }><A : "rejected"><B : "LOGGED IN"></match></div>\n`],
+  // --- review of 5a88c3030: <each> opener expressions (H1) ---
+  ["each if= interp", EACHP(`if=\${ @pw != "" && check(@pw) }`)],
+  ["each if= paren", EACHP(`if=(@pw != "" && check(@pw))`)],
+  ["each if= bare", EACHP(`if=check(@pw)`)],
+  ["each if= alias", EACHP(`if=\${ h(@pw) }`, "\n    const h = check")],
+  ["each if= match", EACHP(`if=\${ match check(@pw) { .Denied :> false  _ :> true } }`)],
+  ["each if= handled", EACHP(`if=\${ check(@pw) !{ _ :> false } }`)],
+  ["each in=", EACHP("", "", `(@pw != "" && check(@pw) ? [1] : [])`)],
+  // --- review of 5a88c3030: a `const` alias declared AFTER the engine (H2) ---
+  ["late alias guard", LATE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ g(@pw) }>\${ @msg = "LOGGED IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+  ["late alias handled guard", LATE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=\${ g(@pw) !{ _ :> false } }>\${ @msg = "LOGGED IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+  ["late alias delay", LATE(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTimeout after=\${ (@msg = g(@pw) ? "LOGGED IN" : "rejected", 1) }ms to=.A/>\n</B>`)],
+  ["late alias effect", LATE(`<A rule=.B effect=\${ @msg = g(@pw) ? "LOGGED IN" : "rejected" }><p>a</p></A>\n<B rule=.A><p>b</p></B>`)],
+  ["late alias onTransition body", LATE(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B>\${ @msg = g(@pw) ? "LOGGED IN" : "rejected" }</>\n</A>\n<B rule=.A><p>b</p></B>`)],
+  ["late alias of alias effect", LATE(`<A rule=.B effect=\${ @msg = g2(@pw) ? "LOGGED IN" : "rejected" }><p>a</p></A>\n<B rule=.A><p>b</p></B>`, "\n    const g2 = g")],
+  // --- review of 5a88c3030 M1: a text slot acorn cannot lex is refused outright ---
+  ["unlexable match on=", HEAD + BTN("@msg = @pw") + `<div id="out"><match for=S on=(check(@pw) ¤ S.B)><A : "rejected"><B : "LOGGED IN"></match></div>\n`],
   ["onTimeout after", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTimeout after=\${ (@msg = check(@pw) ? "LOGGED IN" : "rejected", 1) }ms to=.A/>\n</B>`)],
 ];

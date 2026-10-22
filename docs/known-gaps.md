@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 668 | 7 |
-| LOW | 461 | 0 |
+| LOW | 460 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -90,6 +90,12 @@ The engine body is kept as raw text (`rulesRaw`) and re-scanned by `engine-state
 - **Text-lowered slots (review of 6e0770356, H1–H5).** These slots are lowered from their source text: the `<onTransition if=>` guard, the computed `<onTimeout>` / `<onIdle>` delay, a `derived=` expression or inline `match`, the structural `if=` on `<engine>` / `<match>`, and the `<match on=>` subject. A text lowering cannot honour a handler. The guard dropped `!{…}`, so `if=${ check(p) !{ _ :> false } }` emitted `if (check(p))` and a wrong password logged in. In such a slot a failable call (or `?{}`) is refused, handled or not (`failableNamedInText`, read lexically by acorn). A quoted guard (`if="false"`, which lowered to an always-true `if ("false")`) is E-COND-NOT-BOOLEAN.
 - **Walked floor.** The type system marks every body parse it walks. During a compile's codegen, a parse it never walked is refused rather than lowered (`bodyWasWalked`, set around the CG stage in api.js): a hook / effect / arm body, a guard, a delay, a `<match>` arm or a `:`-shorthand body.
 - **Live readers.** `native-walker/engine-statechild-walker.ts` is live for engine-decls that the native parser synthesizes. The text rescanner reads every engine of the per-file `buildAST` parse. Either way the body text goes through the one body parse.
+- **Round 3 (review of 5a88c3030).**
+  - **H1 — `<each>`.** The `<each>` opener `if=` is walked like any attribute value (E-ERROR-002). Its `!{}` form lowers correctly; a failable `match` there is refused, because the `if=` is lowered from text. `in=` / `of=` / `key=` are text slots.
+  - **H2 — late aliases.** Alias facts are hoisted file-wide: `hoistedFailableNames` judges every binding in the file with `failableFnValueOf`, to a fixpoint. A slot naming an alias declared after it is refused. An engine body that uses one is E-SCOPE-001 (a use before declaration), because the walk resolves names in document order.
+  - **M1 — unlexable text.** A text slot acorn cannot lex is refused outright.
+  - **L1 — one diagnostic.** A body the type system refused gets no second diagnostic from codegen (`markOwnerReported`).
+  - **L2.** `derived=` is scope-checked, and the timer fix is under `g-ontimeout-after-brace-loses-timer-s469`.
 
 Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to 11 / 31 / 3 / **0**. Corpus (`scripts/corpus-emit-differential.ts` over samples / examples / compiler/tests/fixtures / stdlib, base = archive of `b75ad70f7`): 1047 sources on both sides, 0 compile-outcome or diagnostic changes, and no artifact differs except for the embedded project-root path. Browser suite: per-test JUnit identical to main. Pins: `compiler/tests/unit/s469-engine-raw-body-failable.test.js` and the pack.
 
@@ -111,11 +117,11 @@ The dropped text is never emitted, so it is not walked-vs-emitted divergence. It
 
 Silent drop (no output, no diagnostic). It is not a failable hole: the dropped arm body is never emitted.
 
-### g-ontimeout-after-brace-loses-timer-s469 — a `}` or `!{` inside an `<onTimeout after=${…}>` (or `<onIdle>`) delay drops the timer silently: the `after=` value is captured by a regex that stops early, `parseAfterDuration` returns `invalid`, and codegen skips the entry — `NEW S469 (review of 6e0770356); LOW; open`
+### g-ontimeout-after-brace-loses-timer-s469 — a `}` or `!{` inside an `<onTimeout after=${…}>` (or `<onIdle>`) delay drops the timer silently: the `after=` value is captured by a regex that stops early, `parseAfterDuration` returns `invalid`, and codegen skips the entry — `NEW S469 (review of 6e0770356); LOW; RESOLVED S469`
 
-<!-- @gap id=g-ontimeout-after-brace-loses-timer-s469 sev=LOW status=open locus=compiler/src/engine-statechild-parser.ts(scanForOnTimeoutEntries / scanForOnIdleEntries after= regex) prov=review:S469-6e0770356;pack:n18 "delay handled" (PASS-DENY) -->
+<!-- @gap id=g-ontimeout-after-brace-loses-timer-s469 sev=LOW status=resolved locus=compiler/src/engine-statechild-parser.ts(scanForOnTimeoutEntries / scanForOnIdleEntries after= regex) prov=review:S469-6e0770356;pack:n18 "delay handled" (PASS-DENY) -->
 
-The timer never arms, so it fails closed for failable calls. The value should be bounded by `interpolation-extent.ts` (`logicBlockClose`), and an invalid `after=` should be refused instead of skipped.
+The timer never armed, so for failable calls it failed closed. **RESOLVED S469** (review of 5a88c3030, L2). `timerOpeners` (engine-statechild-parser.ts) ends the opener with `findOpenerEnd`, whose `${…}` is bounded by acorn; the old `[^>]*?\/>` regex lost a timer on `=>` / `:>`. `after=` is read by `parseOpenerAttributes`. `parseAfterDuration` bounds the computed form with `logicBlockClose`. An `after=` that is still not a duration is **E-ENGINE-021** (§51.0.M) in the type system; before, codegen skipped it with no diagnostic.
 
 ### g-effect-body-brace-in-markup-text-warning-s469 — a `{` inside an engine `effect=${…}` body is reported by the markup-text lint as a stray brace in text (a false warning): the block splitter's markup scan reads the opener's attribute region as text — `NEW S469 (review of 6e0770356); LOW; open`
 

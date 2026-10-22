@@ -501,6 +501,47 @@ export function parseRuleAttrValue(raw: string): EngineRuleForm {
 }
 
 /**
+ * S469 (review of 5a88c3030, L2) — the self-closing `<onTimeout …/>` / `<onIdle …/>` openers in
+ * `text`, ended by `findOpenerEnd` (a `${…}` value is bounded by acorn, so a `>` in it —
+ * `=>`, `:>`, a comparison — does not end the opener). Before, a regex (`[^>]*?\/>`) ended
+ * the opener at the first `>`: `after=${ f((x) => x) }ms` matched nothing and the timer was
+ * dropped with no diagnostic. An opener whose end cannot be read yields `[1] = ""` (no `after=`):
+ * the typer refuses the timer instead of it vanishing. `[1]` is the attribute text (between the
+ * tag name and the self-close `/`), `index` the `<`.
+ */
+function timerOpeners(text: string, tag: string): Array<{ index: number; 1: string }> {
+  const out: Array<{ index: number; 1: string }> = [];
+  if (!text) return out;
+  const open = "<" + tag;
+  let i = text.indexOf(open);
+  while (i >= 0) {
+    const after = text[i + open.length];
+    if (after === undefined || /[\s/>]/.test(after)) {
+      const end = findOpenerEnd(text, i + 1);
+      if (end < 0) {
+        out.push({ index: i, 1: "" });
+        break;
+      }
+      const inner = text.slice(i + open.length, end);
+      if (inner.trimEnd().endsWith("/")) out.push({ index: i, 1: inner.trimEnd().slice(0, -1) });
+      i = text.indexOf(open, end + 1);
+      continue;
+    }
+    i = text.indexOf(open, i + 1);
+  }
+  return out;
+}
+
+/**
+ * The `after=` value of a timer opener's attribute text, read by `parseOpenerAttributes` (whose
+ * `${…}` values are bounded by acorn), as a `[match, value]` pair like the regex it replaces.
+ */
+function afterAttrMatch(attrs: string): [string, string] | null {
+  const v = parseOpenerAttributes(attrs).valued.get("after");
+  return v === undefined ? null : ["after=" + v, v];
+}
+
+/**
  * A5-2 (§51.0.M) — scan a state-child body for `<onTimeout/>` siblings.
  *
  * `<onTimeout>` is a self-closing structural element with required `after`
@@ -549,9 +590,7 @@ export function scanForOnTimeoutEntries(
   // so `>` inside attribute values is handled minimally — `<onTimeout>` does
   // not host structural children, so no quote/paren depth tracking is needed
   // for the spec-canonical form.
-  const re = /<onTimeout\b([^>]*?)\/>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(bodyRaw)) !== null) {
+  for (const m of timerOpeners(bodyRaw, "onTimeout")) {
     const startIdx = m.index;
     if (inSkipRegion(startIdx)) continue;
     if (inMaskedRegion(startIdx)) continue;
@@ -560,7 +599,7 @@ export function scanForOnTimeoutEntries(
     // Extract `after=` value — accepts:
     //   after=Nms / after=Ns / after="500ms" / after=${expr}<unit>
     // Greedy-stop at next bareword `<ident>=` OR self-close.
-    const afterMatch = attrs.match(/\bafter\s*=\s*(.+?)(?=\s+\w+\s*=|\s*\/?\s*$)/s);
+    const afterMatch = afterAttrMatch(attrs);
     let afterVal = "";
     if (afterMatch) {
       let v = afterMatch[1]!.trim();
@@ -637,16 +676,14 @@ export function scanForOnIdleEntries(rulesRaw: string): OnIdleEntry[] {
     return false;
   };
 
-  const re = /<onIdle\b([^>]*?)\/>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(rulesRaw)) !== null) {
+  for (const m of timerOpeners(rulesRaw, "onIdle")) {
     const startIdx = m.index;
     if (inMaskedRegion(startIdx)) continue;
     const attrs = m[1] ?? "";
 
     // Extract `after=` value — accepts:
     //   after=Nms / after=Ns / after="500ms" / after=${expr}<unit>
-    const afterMatch = attrs.match(/\bafter\s*=\s*(.+?)(?=\s+\w+\s*=|\s*\/?\s*$)/s);
+    const afterMatch = afterAttrMatch(attrs);
     let afterVal = "";
     if (afterMatch) {
       let v = afterMatch[1]!.trim();

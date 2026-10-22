@@ -57,7 +57,7 @@ import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
 import { readShorthandBody, walkedArmBodyOrRefuse } from "../arm-body-reader.ts";
-import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, bodyWasWalked } from "../engine-body-reader.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, bodyWasWalked, ownerReported } from "../engine-body-reader.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "../markup-statement-refusal.ts";
 
 /** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
@@ -577,7 +577,7 @@ export function emitEngineTimersTable(meta: EngineMetadata): string[] {
         // S469 (hardening) — only a delay the type system walked is lowered.
         const dr = readEngineBody(ot, "after", parsed.exprText, ENGINE_BODY_FILE.guard);
         if (!dr.stmts || !bodyWasWalked(dr.stmts)) {
-          recordRefusedLowering(
+          refuseEngineBody(
             new CGError(
               "E-ERROR-002",
               `E-ERROR-002: an \`<onTimeout after=>\` delay of engine \`${meta.varName}\` reached codegen without being checked (§19.4.3); it is not emitted.`,
@@ -645,7 +645,7 @@ export function emitEngineIdleWatchdog(meta: EngineMetadata): string[] {
     // S469 (hardening) — only a delay the type system walked is lowered.
     const dr = readEngineBody(entry, "after", parsed.exprText, ENGINE_BODY_FILE.guard);
     if (!dr.stmts || !bodyWasWalked(dr.stmts)) {
-      recordRefusedLowering(
+      refuseEngineBody(
         new CGError(
           "E-ERROR-002",
           `E-ERROR-002: the \`<onIdle after=>\` delay of engine \`${meta.varName}\` reached codegen without being checked (§19.4.3); it is not emitted.`,
@@ -983,7 +983,7 @@ function parseEngineSynthLogicBody(src: string, filePath: string, owner?: object
     // S469 (hardening) — the WALKED floor: a parse the failable walk never read is refused,
     // never lowered (engine-body-reader `bodyWasWalked`; on only during a compile's CG).
     if (read.stmts && !bodyWasWalked(read.stmts)) {
-      recordRefusedLowering(
+      refuseEngineBody(
         new CGError(
           "E-ERROR-002",
           `E-ERROR-002: an engine body (${filePath.replace(/^__|__\.scrml$/g, "").replace(/_/g, " ")}) reached codegen without being ` +
@@ -999,6 +999,16 @@ function parseEngineSynthLogicBody(src: string, filePath: string, owner?: object
     // fall through
   }
   return null;
+}
+
+/**
+ * S469 — record a codegen refusal of an engine body, unless the type system already reported an
+ * error on the same body owner (L1, review of 5a88c3030: one diagnostic, not two). The body is
+ * not lowered either way.
+ */
+function refuseEngineBody(err: CGError, owner: unknown): void {
+  if (ownerReported(owner)) return;
+  recordRefusedLowering(err, (owner && typeof owner === "object" ? owner : null) as object | null);
 }
 
 /** A message-arm body's source text (block body: surrounding braces stripped). */
@@ -1145,7 +1155,7 @@ function emitMessageArmBodyFn(
     // the whole (bare) body as the target — a malformed multi-statement body
     // surfaces a loud downstream JS parse error rather than silently dropping.
     // S469 (SECURITY) — never the unwalked raw text: refused (the type system refuses first).
-    recordRefusedLowering(
+    refuseEngineBody(
       new CGError(
         "E-ERROR-002",
         `E-ERROR-002: a \`(state × message)\` arm body cannot be read as statements, so it cannot be ` +
@@ -2174,7 +2184,7 @@ export function emitEngineOpenerEffect(
     // S469 (SECURITY) — a body that does not parse to statements is never emitted unwalked
     // (it was: the single-expression rewrite of the raw text). The type system refuses it
     // first (`checkEngineRawBodies`); this is the codegen floor.
-    recordRefusedLowering(
+    refuseEngineBody(
       new CGError(
         "E-ERROR-002",
         `E-ERROR-002: the opener \`effect=\` body of engine \`${meta.varName}\` cannot be read as ` +
@@ -4546,7 +4556,7 @@ function emitHookArm(
   const stmts = arm.kind === "effect" ? parseStateEffectBody(arm.owner ?? { effectRaw: arm.bodyRaw })
     : parseOnTransitionBody(arm.owner ?? { bodyRaw: arm.bodyRaw });
   if (!stmts) {
-    recordRefusedLowering(
+    refuseEngineBody(
       new CGError(
         "E-ERROR-002",
         `E-ERROR-002: the ${arm.kind === "effect" ? "`effect=`" : "`<onTransition>`"} body for ` +
@@ -4580,7 +4590,7 @@ function emitHookArm(
     // S469 — the guard text the failable walk read (`guardSource`); unreadable → refused.
     const g = guardSource(arm.ifExprRaw);
     if (!g || !("src" in g)) {
-      recordRefusedLowering(
+      refuseEngineBody(
         new CGError(
           "E-ERROR-002",
           `E-ERROR-002: the \`if=\` guard of an \`<onTransition>\` (.${arm.from} → .${arm.to}) of engine ` +
@@ -4595,7 +4605,7 @@ function emitHookArm(
     // and was walked); a guard it never walked is refused, never lowered.
     const gr = readEngineBody(arm.owner ?? null, "if", g.src, ENGINE_BODY_FILE.guard);
     if (!gr.stmts || !bodyWasWalked(gr.stmts)) {
-      recordRefusedLowering(
+      refuseEngineBody(
         new CGError(
           "E-ERROR-002",
           `E-ERROR-002: the \`if=\` guard of an \`<onTransition>\` (.${arm.from} → .${arm.to}) of engine ` +

@@ -73,13 +73,13 @@
  */
 
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
-import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked } from "./engine-body-reader.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked, markOwnerReported } from "./engine-body-reader.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
-import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
+import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts, failableFnValueOf } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
 import { parseStatementTextDetailed, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
@@ -15279,6 +15279,34 @@ function annotateNodes(
         // below binds `as name`, or `if=item.ok` would resolve against the row
         // variable and ship a runtime `Cannot read properties of undefined`.
         visitStructuralIfAttr(n);
+        // S469 (SECURITY, §19.4.3 — review of 5a88c3030 H1). The opener `if=` and the
+        // `in=` / `of=` / `key=` expressions were never checked for failable calls:
+        // `<each in=@xs as x if=${ @pw != "" && check(@pw) }>LOGGED IN</each>` rendered on a wrong
+        // password (the error object is truthy). `if=` is a parsed attribute value — walked by the
+        // attribute value check (E-ERROR-002; its `!{}` form lowers correctly); a failable `match`
+        // there is refused, because codegen lowers the `if=` from its text and would compare the
+        // error object as a plain value. `in=` / `of=` / `key=` are lowered from raw text: no
+        // failable call there, handled or not (`refuseFailableInTextSlot`).
+        {
+          const eSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+          const ifc = (n as { ifCond?: unknown }).ifCond as Record<string, unknown> | undefined;
+          if (ifc && typeof ifc === "object") {
+            const attrSpan = ((ifc.span as Span | undefined) ?? eSpan) as Span;
+            checkFailableCallsInAttrValues({ kind: "markup", tag: "each", attrs: [{ name: "if", value: ifc, span: attrSpan }], span: eSpan } as unknown as ASTNodeLike);
+            if (ifc.exprNode && treeHasFailableMatchStamp(ifc.exprNode)) {
+              errors.push(new TSError(
+                "E-ERROR-002",
+                `E-ERROR-002: a 'match' on the result of a failable function in the 'if=' of an <each> is not handled: ` +
+                `impl#1 lowers this 'if=' from its text and cannot tell the error from a plain value there. ` +
+                `Move the 'match' into a function the 'if=' calls, or catch the call with '!{}'.`,
+                attrSpan,
+              ));
+            }
+          }
+          for (const [key, label] of [["inExprRaw", "in="], ["ofExprRaw", "of="], ["keyExprRaw", "key="]] as const) {
+            refuseFailableInTextSlot((n as Record<string, unknown>)[key], `the '${label}' of an <each>`, eSpan);
+          }
+        }
         // §6.1.2 / §17.X / §34 — route the `<each>` OPENER EXPRESSIONS through
         // the read-side E-STATE-UNDECLARED walker.
         //
@@ -15679,6 +15707,16 @@ function annotateNodes(
         visitStructuralIfAttr(n);
         // S469 (SECURITY, §19.4.3) — the engine's raw-text bodies, walked for failable calls.
         checkEngineRawBodies(n);
+        // S469 (review of 5a88c3030, L2) — `derived=<expr>` is lowered from its text and was never
+        // scope-checked: an undeclared name compiled and threw a ReferenceError at run time. The
+        // same read-side check the `<match on=>` subject gets (E-SCOPE-001 / E-STATE-UNDECLARED).
+        {
+          const dNode = (n as { derivedExprNode?: unknown }).derivedExprNode;
+          if (dNode && typeof dNode === "object") {
+            const dSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+            checkLogicExprIdents(dNode, dSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          }
+        }
         // §18.2 / §51.0.J / §34 — W-MATCH-ARROW-LEGACY (S171). A derived engine
         // `<engine for=T derived=match @VAR { .A => .X  _ -> .Y }>` is a match-
         // shaped construct whose arms join the `:>` arm-separator deprecation.
@@ -17280,27 +17318,39 @@ function annotateNodes(
    * S469 (SECURITY, §19.4.3 — review of 6e0770356, H1–H5) — the failable function (or `?{}`)
    * NAMED in an expression slot impl#1 lowers from its TEXT (`rewriteExpr` / the slot's raw
    * source): an `<onTransition if=>` guard, an `<onTimeout>` / `<onIdle>` computed delay, a
-   * `derived=` engine expression or inline `match`, a structural `if=` on `<engine>` / `<match>`
-   * / `<each>`, a `<match on=>` subject. A text lowering cannot honour a handler — it dropped
-   * `!{ … }` (`if=${ check(p) !{ _ :> false } }` emitted `if (check(p))`, the error object is
-   * truthy, a wrong password logged in) and ignores the stamp a failable `match` needs — so a
-   * failable call there is refused HANDLED OR NOT. Read lexically by acorn's tokenizer (both
-   * goals; a word match when it cannot lex), so a name inside a string or a comment is not one;
-   * an identifier bound to a failable function (`fnFactsIs`) or returning one counts.
-   * Returns the first such name (`?{}` for a query), or null.
+   * `derived=` engine expression or inline `match`, the structural `if=` on `<engine>` /
+   * `<match>`, a `<match on=>` subject, and the `in=` / `of=` / `key=` of an `<each>`. (The
+   * `<each>` `if=` is a parsed attribute value: it is walked like any attribute — see the
+   * each-block case — and only a failable `match` in it is refused.) A text lowering cannot
+   * honour a handler — it dropped `!{ … }` (`if=${ check(p) !{ _ :> false } }` emitted
+   * `if (check(p))`, the error object is truthy, a wrong password logged in) and ignores the
+   * stamp a failable `match` needs — so a failable call there is refused HANDLED OR NOT. Read
+   * lexically by acorn's tokenizer under both goals, so a name inside a string or a comment is
+   * not one. A name counts when it is declared `!`, bound to a failable function in document
+   * order (`fnFactsIs` / `fnFactsReturns`), or bound to one ANYWHERE in the file
+   * (`hoistedFailableNames` — a `const` alias declared after the slot). Text acorn cannot lex is
+   * refused outright (M1, review of 5a88c3030). Returns the first such name (`?{}` for a query,
+   * `UNLEXABLE` for text that does not lex), or null.
    */
   function failableNamedInText(text: string): string | null {
     if (typeof text !== "string" || text.length === 0) return null;
-    const isFailableName = (nm: string): boolean => {
-      if (!nm || nm.startsWith("@")) return false;
-      if (fnCanFail.has(nm)) return true;
-      try {
-        if (fnFactsIs(nm) !== null) return true;
-        if (fnFactsReturns(nm) !== null) return true;
-      } catch { /* scope query unavailable — fall back to the declared set */ }
-      return false;
-    };
-    let lexed = false;
+    const lexed = lexSlotNames(text);
+    // M1 (review of 5a88c3030) — text acorn cannot lex under BOTH goals is refused outright: no
+    // word-match guess about what it names.
+    if (lexed === null) return "UNLEXABLE";
+    if (lexed.sql) return "?{}";
+    for (const nm of lexed.names) if (isFailableNameAnywhere(nm)) return nm;
+    return null;
+  }
+
+  /**
+   * The identifier names acorn's tokenizer reads in `text` under BOTH goals (a name inside a
+   * string, comment, template quasi or regular expression is not one), and whether it holds a
+   * `?{` query opener. null when either goal cannot lex it.
+   */
+  function lexSlotNames(text: string): { names: string[]; sql: boolean } | null {
+    const names = new Set<string>();
+    let sql = false;
     for (const opts of [
       { ecmaVersion: "latest", sourceType: "module", allowAwaitOutsideFunction: true },
       { ecmaVersion: "latest", sourceType: "script" },
@@ -17308,26 +17358,131 @@ function annotateNodes(
       try {
         let prevQ = false;
         // @ts-ignore — the extended parser class inherits acorn's static tokenizer.
-        for (const tok of ScrmlParser.tokenizer(text, opts) as Iterable<{ type: { label?: string; keyword?: string }; value?: unknown }>) {
+        for (const tok of ScrmlParser.tokenizer(text, opts) as Iterable<{ type: { label?: string }; value?: unknown }>) {
           const label = tok.type?.label;
-          if (prevQ && label === "{") return "?{}";
+          if (prevQ && label === "{") sql = true;
           prevQ = label === "?";
-          if (label === "name" && typeof tok.value === "string" && isFailableName(tok.value)) return tok.value;
+          if (label === "name" && typeof tok.value === "string") names.add(tok.value);
         }
-        lexed = true;
-      } catch { /* not lexable under this goal */ }
+      } catch {
+        return null;
+      }
     }
-    if (!lexed) {
-      if (/\?\s*\{/.test(text)) return "?{}";
-      for (const m of text.matchAll(/(?<![\w$@])([A-Za-z_$][\w$]*)/g)) if (isFailableName(m[1])) return m[1];
+    return { names: [...names], sql };
+  }
+
+  /**
+   * H2 (review of 5a88c3030) — a name bound ANYWHERE in the file to a failable function, or to a
+   * value that names one (`const g = check`, `const mk = () => check`, `g = cond ? check : f`,
+   * an alias of an alias), collected FILE-WIDE before the walk — hoisted, so a slot or engine body
+   * that uses an alias declared LATER in the file (`if=\${ g(p) }` … `\${ const g = check }`) is
+   * judged by it. Alias facts otherwise resolve in document order (`fnFactsIs`), which an engine
+   * body written above the alias never sees. Over-approximates: a name bound to a failable value
+   * in ANY scope counts everywhere (fail closed).
+   */
+  let _hoistedFailable: Set<string> | null = null;
+  function hoistedFailableNames(): Set<string> {
+    if (_hoistedFailable) return _hoistedFailable;
+    // Every binding in the file: a declaration's initializer, or a plain `name = value`.
+    const binds: Array<{ name: string; init: ExprNode | null }> = [];
+    const seen = new WeakSet<object>();
+    const visit = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const y of x) visit(y); return; }
+      const r = x as Record<string, unknown>;
+      const k = r.kind;
+      if ((k === "const-decl" || k === "let-decl" || k === "tilde-decl" || k === "lin-decl")
+          && typeof r.name === "string" && r.initExpr && typeof r.initExpr === "object") {
+        binds.push({ name: r.name, init: r.initExpr as ExprNode });
+      }
+      if (k === "assign" && r.target && typeof r.target === "object") {
+        const t = r.target as { kind?: unknown; name?: unknown };
+        if (t.kind === "ident" && typeof t.name === "string" && !t.name.startsWith("@") && r.value && typeof r.value === "object") {
+          binds.push({ name: t.name, init: r.value as ExprNode });
+        }
+      }
+      for (const key of Object.keys(r)) if (key !== "span" && key !== "_record") visit(r[key]);
+    };
+    visit(fileTopLevelNodes);
+    // What a binding's VALUE is, judged by the same structural reader the in-order facts use
+    // (`failableFnValueOf`: an identifier, a ternary / `||` / `??` / `&&` of them, a call of a
+    // factory), against the hoisted sets: `isSet` — bound to a failable function; `retSet` — a
+    // call of it returns one (`const mk = () => check`). A call's RESULT (`const r = check(p) !{…}`)
+    // is not a function and does not count.
+    const isSet = new Set<string>(fnCanFail);
+    const retSet = new Set<string>();
+    const lk = {
+      is: (n: string) => (isSet.has(n) ? n : null),
+      returns: (n: string) => (retSet.has(n) ? n : null),
+      isExact: () => null,
+      returnsExact: () => null,
+    };
+    const lambdaReturns = (v: ExprNode | null): boolean => {
+      const r = v as unknown as { kind?: string; body?: { kind?: string; value?: ExprNode }; bodyRaw?: unknown; raw?: unknown; nativeKind?: unknown } | null;
+      if (!r) return false;
+      if (r.kind === "lambda" && r.body && r.body.kind === "expr") return failableFnValueOf(r.body.value as ExprNode, lk) !== null;
+      // A block-bodied lambda the parser kept as text: over-approximate by the names its body reads.
+      const text = typeof r.bodyRaw === "string" ? r.bodyRaw : r.kind === "lambda" && typeof r.raw === "string" ? r.raw : null;
+      if (text === null) return false;
+      const lx = lexSlotNames(text);
+      const names = lx ? lx.names : [];
+      return names.some((n) => isSet.has(n));
+    };
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const { name, init } of binds) {
+        if (!isSet.has(name) && failableFnValueOf(init, lk) !== null) { isSet.add(name); changed = true; }
+        if (!retSet.has(name) && lambdaReturns(init)) { retSet.add(name); changed = true; }
+      }
+    }
+    _hoistedFailable = new Set<string>([...isSet, ...retSet]);
+    return _hoistedFailable;
+  }
+
+  /** `nm` names a failable function: declared `!`, bound to one in document order, or hoisted. */
+  function isFailableNameAnywhere(nm: string): boolean {
+    if (!nm || nm.startsWith("@")) return false;
+    if (fnCanFail.has(nm) || hoistedFailableNames().has(nm)) return true;
+    try {
+      if (fnFactsIs(nm) !== null) return true;
+      if (fnFactsReturns(nm) !== null) return true;
+    } catch { /* scope query unavailable */ }
+    return false;
+  }
+
+  /**
+   * H2 (review of 5a88c3030) — a name an engine raw body USES that the file binds to a failable
+   * function only LATER (hoisted, not yet resolvable in document order): the body walk cannot
+   * see the call through it. Refused as a use before declaration (E-SCOPE-001), as a read of a
+   * not-yet-declared name is elsewhere. Returns the first such name, or null.
+   */
+  function lateFailableAliasIn(text: string): string | null {
+    const lx = lexSlotNames(text);
+    if (lx === null) return null; // an unlexable body is refused by its own reader
+    for (const nm of lx.names) {
+      if (nm.startsWith("@") || fnCanFail.has(nm) || !hoistedFailableNames().has(nm)) continue;
+      let known = false;
+      try { known = fnFactsIs(nm) !== null || fnFactsReturns(nm) !== null; } catch { known = false; }
+      if (!known) return nm;
     }
     return null;
   }
+
   /** E-ERROR-002 for a failable call named in a text-lowered slot (see `failableNamedInText`). */
   function refuseFailableInTextSlot(text: unknown, what: string, span: Span): boolean {
     if (typeof text !== "string") return false;
     const nm = failableNamedInText(text);
     if (nm === null) return false;
+    if (nm === "UNLEXABLE") {
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: impl#1 cannot read ${what}: its text does not lex as JavaScript, so it cannot be ` +
+        `checked for failable calls (§19.4.3), and it is lowered from that text. Rewrite it as a plain expression.`,
+        span,
+      ));
+      return true;
+    }
     errors.push(new TSError(
       "E-ERROR-002",
       `E-ERROR-002: ${nm === "?{}" ? "a `?{}` query" : `failable function '${nm}'`} is used in ${what}, which impl#1 ` +
@@ -17400,6 +17555,24 @@ function annotateNodes(
     };
     // A STATEMENT body: read, refuse when unreadable, walk.
     const statementBody = (owner: object, slot: string, src: string, file: string, what: string, span: Span, bindings: string[]): void => {
+      const before = errors.length;
+      statementBodyCheck(owner, slot, src, file, what, span, bindings);
+      if (errors.length > before) markOwnerReported(owner); // L1 — codegen does not report it again
+    };
+    const statementBodyCheck = (owner: object, slot: string, src: string, file: string, what: string, span: Span, bindings: string[]): void => {
+      // H2 (review of 5a88c3030) — a name the file binds to a failable function only LATER: the
+      // walk below resolves names in document order and would not see the call through it.
+      const late = lateFailableAliasIn(src);
+      if (late !== null) {
+        errors.push(new TSError(
+          "E-SCOPE-001",
+          `E-SCOPE-001: '${late}' is used in ${what} of engine '${engineName}' before it is declared: the file ` +
+          `binds it to a failable function further down, and impl#1 checks a call only through a name declared ` +
+          `before its use. Declare '${late}' above the engine (or call the function by its own name).`,
+          span,
+        ));
+        return;
+      }
       const read = readEngineBody(owner, slot, src, file);
       const parseErr = (read.built?.errors ?? []).find((e: { severity?: string; code?: string }) =>
         e && e.severity !== "warning" && e.severity !== "info" && !/^[WI]-/.test(String(e.code ?? ""))
@@ -17411,7 +17584,13 @@ function annotateNodes(
     // An EXPRESSION slot lowered from its text by `rewriteExpr`: one expression statement, no
     // failable `match` (rewriteExpr would compare the error object as a plain value).
     const expressionSlot = (owner: object, slot: string, src: string, what: string, span: Span, bindings: string[]): void => {
-      // H1 (review of 6e0770356) — lowered from its TEXT: any failable call, handled or not.
+      const before = errors.length;
+      expressionSlotCheck(owner, slot, src, what, span, bindings);
+      if (errors.length > before) markOwnerReported(owner); // L1 — codegen does not report it again
+    };
+    const expressionSlotCheck = (owner: object, slot: string, src: string, what: string, span: Span, bindings: string[]): void => {
+      // H1 (review of 6e0770356) — lowered from its TEXT: any failable call, handled or not
+      // (names hoisted file-wide, H2 review of 5a88c3030).
       if (refuseFailableInTextSlot(src, what, span)) return;
       const read = readEngineBody(owner, slot, src, ENGINE_BODY_FILE.guard);
       const stmts = read.stmts;
@@ -17437,6 +17616,11 @@ function annotateNodes(
     const children = Array.isArray((meta as { stateChildren?: unknown }).stateChildren)
       ? (meta as { stateChildren: Record<string, unknown>[] }).stateChildren : [];
     const onTransitionEntry = (entry: Record<string, unknown>, where: string, span: Span, bindings: string[]): void => {
+      const before = errors.length;
+      onTransitionEntryCheck(entry, where, span, bindings);
+      if (errors.length > before) markOwnerReported(entry); // L1 — one diagnostic, not two
+    };
+    const onTransitionEntryCheck = (entry: Record<string, unknown>, where: string, span: Span, bindings: string[]): void => {
       const body = onTransitionBodySource(entry);
       if (body && "unreadable" in body) refuse(`the <onTransition> body ${where}`, span, "is not one readable '${ … }' block.");
       else if (body) statementBody(entry, "body", body.src, ENGINE_BODY_FILE.onTransition, `the <onTransition> body ${where}`, span, bindings);
@@ -17463,6 +17647,17 @@ function annotateNodes(
       if (typeof entry.after !== "string") return;
       const parsed = parseAfterDuration(entry.after);
       if (parsed.kind === "computed") expressionSlot(entry, "after", parsed.exprText, what, span, bindings);
+      else if (parsed.kind === "invalid") {
+        // L2 (review of 5a88c3030) — an `after=` that does not read as a duration was skipped by
+        // codegen with no diagnostic: the timer vanished. §51.0.M: E-ENGINE-021.
+        errors.push(new TSError(
+          "E-ENGINE-021",
+          `E-ENGINE-021: ${what} is not a valid duration (${parsed.reason}). Write \`after=500ms\` / ` +
+          `\`after=2s\`, or a computed \`after=\${expr}ms\` (§51.0.M, §51.12.3.1).`,
+          span,
+        ));
+        markOwnerReported(entry);
+      }
     };
     for (const child of children) {
       if (!child || typeof child !== "object") continue;
