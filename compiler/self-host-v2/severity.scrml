@@ -11,8 +11,8 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 148 codes with a §34 severity; 1 PROVISIONAL (no row yet, severity from the
-// generator's PROVISIONAL table: W-STRING-INTERP-LITERAL); 68 without one (FAIL-CLOSED Error):
+// 149 codes with a §34 severity; 0 PROVISIONAL (no row yet, severity from the
+// generator's PROVISIONAL table: none); 68 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -97,6 +97,7 @@ ${
             "W-MATCH-002" :> Severity.Warning
             "W-PROGRAM-TITLE-NESTED" :> Severity.Warning
             "W-STORY-ON-TOP-LEVEL" :> Severity.Warning
+            "W-STRING-INTERP-LITERAL" :> Severity.Warning
             "W-WHEN-EFFECT-DEPRECATED" :> Severity.Warning
             // §34 Severity: Info
             "I-FORM-SUBMIT-GATED" :> Severity.Info
@@ -240,8 +241,6 @@ ${
             "E-VALUE-WRITE-UNPROVEN" :> Severity.Error
             "E-VALUE-WRITES-STATE" :> Severity.Error
             "E-VARIANT-AMBIGUOUS" :> Severity.Error
-            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)
-            "W-STRING-INTERP-LITERAL" :> Severity.Warning
             // no usable §34 row — fail closed (listed in the header)
             _ :> Severity.Error
         }
