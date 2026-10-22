@@ -77,6 +77,7 @@ import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySou
 import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
+import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts, failableFnValueOf } from "./failable-value-calls.ts";
@@ -15711,7 +15712,18 @@ function annotateNodes(
         // scope-checked: an undeclared name compiled and threw a ReferenceError at run time. The
         // same read-side check the `<match on=>` subject gets (E-SCOPE-001 / E-STATE-UNDECLARED).
         {
-          const dNode = (n as { derivedExprNode?: unknown }).derivedExprNode;
+          let dNode = (n as { derivedExprNode?: unknown }).derivedExprNode;
+          // `derived=${ expr }`: the parsed node is the interpolation wrapper (its `$` read as a name —
+          // "Undeclared identifier '$'"); check the expression inside it instead, read by the one
+          // extent reader. A wrapper that cannot be read is left to the text-slot refusal above.
+          const dText = String((n as { derivedExprText?: unknown }).derivedExprText ?? "").trim();
+          if (dText.startsWith("${")) {
+            const inner = soleLogicBlockPayload(dText);
+            dNode = null;
+            if (inner !== null && inner.trim().length > 0) {
+              try { dNode = parseExprToNode(inner.trim(), filePath, (n.span as Span | undefined)?.start ?? 0); } catch { dNode = null; }
+            }
+          }
           if (dNode && typeof dNode === "object") {
             const dSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
             checkLogicExprIdents(dNode, dSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
@@ -17485,7 +17497,7 @@ function annotateNodes(
     }
     errors.push(new TSError(
       "E-ERROR-002",
-      `E-ERROR-002: ${nm === "?{}" ? "a `?{}` query" : `failable function '${nm}'`} is used in ${what}, which impl#1 ` +
+      `E-ERROR-002: ${nm === "?{}" ? "a `?{}` query" : fnCanFail.has(nm) ? `failable function '${nm}'` : `'${nm}' (a name this file binds to a failable function, here or in another scope)`} is used in ${what}, which impl#1 ` +
       `lowers from its source text: it cannot handle a failable result there (a '!{}' or a 'match' on it ` +
       `is not lowered), so the call is refused whether or not it is handled (§19.4.3). This is a limitation ` +
       `of this compiler. Call it in a function that handles the result and use that function's plain value here.`,
@@ -17566,9 +17578,11 @@ function annotateNodes(
       if (late !== null) {
         errors.push(new TSError(
           "E-SCOPE-001",
-          `E-SCOPE-001: '${late}' is used in ${what} of engine '${engineName}' before it is declared: the file ` +
-          `binds it to a failable function further down, and impl#1 checks a call only through a name declared ` +
-          `before its use. Declare '${late}' above the engine (or call the function by its own name).`,
+          `E-SCOPE-001: '${late}' is used in ${what} of engine '${engineName}', and this file binds a '${late}' to a ` +
+          `failable function that impl#1 cannot resolve from here — further down the file, or in another scope. ` +
+          `impl#1 checks a call in an engine body only through a name that resolves, at that point, to the function ` +
+          `it calls, so a name bound to a failable function anywhere in the file cannot be used here otherwise. ` +
+          `Declare the alias above the engine, call the function by its own name, or rename the other binding.`,
           span,
         ));
         return;

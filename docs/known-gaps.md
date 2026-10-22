@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 264 | 4 |
-| MED | 668 | 7 |
-| LOW | 460 | 0 |
+| HIGH | 265 | 4 |
+| MED | 669 | 7 |
+| LOW | 461 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -78,6 +78,24 @@ Found in the #1468 r2 review. `let` on a sequence is E-GRANT-LET-ON-SEQUENCE: a 
 
 SPEC §66.12.6 rule 4 (S469, point (4)): *"Spread-rebuild and other whole-value writes are classified as edits or a `replace` (§66.11.2, O37 = certify). They never get around the grants."* A whole-struct write that changes a tape field IS a `replace` of that field, so it must be judged against the field's own grants. Today the owner's `let` alone admits it, and the field-level refusal is bypassed by writing the whole struct. The PA reads the S469 ruling this way and has told bryan. Owed: in `wholeFieldWrite` (and the spread-override path), for a struct-typed target, classify each tape-typed field of the new value. An unchanged field (`xs: @b.xs`) or a spread that keeps it is no write; any other value is a `replace` of the field, refused unless the field's type grants `replace`.
 
+### g-nested-each-if-guard-dropped-s469 — (security) a NESTED `<each if=>` guard is silently dropped: `<each in=@xs as y><each in=@xs as x if=(@pw == "secret")>LOGGED IN</each></each>` renders the inner rows whatever the condition — `NEW S469 (final review of c2f7f9944; pre-existing); HIGH; open`
+
+<!-- @gap id=g-nested-each-if-guard-dropped-s469 sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(~1930-1990, the nested-each branch never reads innerNode.ifCond) prov=review:S469-c2f7f9944-final -->
+
+The top-level `<each>` lowers its `if=` (and the type system now walks it for failable calls). The nested branch of the each-render emitter builds the inner each without reading `innerNode.ifCond`, so the guard is lost. Any condition is silently true: an access check written as an `if=` renders protected rows. A separate fix is being dispatched.
+
+### g-derived-inline-match-arms-unscoped-s469 — the arm bodies of an inline `derived=match @x { … }` are not scope-checked: an undeclared name compiles, throws a ReferenceError when the arm runs, and leaves the engine state stale — `NEW S469 (final review of c2f7f9944); MED; open`
+
+<!-- @gap id=g-derived-inline-match-arms-unscoped-s469 sev=MED status=open locus=compiler/src/type-system.ts(engine-decl case: derivedExprNode is checked, inlineMatchBody arms are not) prov=review:S469-c2f7f9944-final -->
+
+The S469 round-3 scope check covers the `derived=<expr>` form only (`derivedExprNode`, including `derived=${ … }`). The inline-match form is checked for exhaustiveness (`checkDerivedEngineMatchExhaustiveness`) and for failable calls (the text-slot rule), but its arm bodies never reach `checkLogicExprIdents`.
+
+### g-engine-raw-body-names-unscoped-s469 — names in an engine raw body (a state-child / opener `effect=`, an `<onTransition>` body, a message arm) are not scope-checked: an undeclared `zzz()` in `effect=` compiles and throws at run time — `NEW S469 (final review of c2f7f9944); LOW; open`
+
+<!-- @gap id=g-engine-raw-body-names-unscoped-s469 sev=LOW status=open locus=compiler/src/type-system.ts(checkEngineRawBodies walk keeps only the §19.4.3 codes and E-SCOPE-001 for a late failable alias) prov=review:S469-c2f7f9944-final -->
+
+`checkEngineRawBodies` walks each body with the handler-context walk and keeps only E-ERROR-002 / E-IMPL1-FAILABLE-FN-VALUE (plus its own E-SCOPE-001 for a failable alias declared later). It discards the walk's scope diagnostics, because a body sees bindings the walk does not model: payload bindings, the engine variable, and names declared after the engine that run fine at transition time. Owed: model the body scope (payload bindings, engine vars, hoisted top-level declarations), then keep E-SCOPE-001.
+
 ### g-engine-match-raw-body-failable-unwalked-s469 — (security) an engine or `<match>` body the compiler kept as RAW TEXT was never walked for failable calls: `<A rule=.B effect=${ @msg = check("wrong") ? "LOGGED IN" : "rejected" }>` compiled and a WRONG PASSWORD LOGGED IN — also the opener `effect=`, `<onTransition>` bodies and `if=` guards, `(state × message)` arms, `<onTimeout after=${…}>`, `:`-shorthand state / arm bodies, and a `match` on a failable call in a `<match>` arm (render or handler) — `NEW S469 (review); HIGH; RESOLVED S469`
 
 <!-- @gap id=g-engine-match-raw-body-failable-unwalked-s469 sev=HIGH status=resolved locus=compiler/src/engine-statechild-parser.ts(effect= brace counter)+compiler/src/type-system.ts(engine-decl / match-block cases)+compiler/src/codegen/emit-engine.ts(emitHookArm rewriteExpr of bodyRaw)+compiler/src/codegen/emit-match.ts(buildMatchArms re-parse) prov=spec:§19.4.3("Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: E-ERROR-002");review:S469-engine-effect;dispatch:s469-engine-effect-failable -->
@@ -95,7 +113,8 @@ The engine body is kept as raw text (`rulesRaw`) and re-scanned by `engine-state
   - **H2 — late aliases.** Alias facts are hoisted file-wide: `hoistedFailableNames` judges every binding in the file with `failableFnValueOf`, to a fixpoint. A slot naming an alias declared after it is refused. An engine body that uses one is E-SCOPE-001 (a use before declaration), because the walk resolves names in document order.
   - **M1 — unlexable text.** A text slot acorn cannot lex is refused outright.
   - **L1 — one diagnostic.** A body the type system refused gets no second diagnostic from codegen (`markOwnerReported`).
-  - **L2.** `derived=` is scope-checked, and the timer fix is under `g-ontimeout-after-brace-loses-timer-s469`.
+  - **L2.** The `derived=<expr>` expression is scope-checked, including `derived=${ … }`: the check reads the expression inside the wrapper and no longer reports "Undeclared identifier '$'". That form still does not lower (E-CODEGEN-INVALID-LOGIC on main and here). The inline `derived=match` arm bodies are NOT scope-checked (`g-derived-inline-match-arms-unscoped-s469`), and neither are names in engine raw bodies (`g-engine-raw-body-names-unscoped-s469`). The timer fix is under `g-ontimeout-after-brace-loses-timer-s469`.
+  - **Over-approximation wording.** A name bound to a failable function anywhere in the file counts in every slot, whatever scope it is bound in. The E-SCOPE-001 / E-ERROR-002 messages now say so ("this file binds a 'g' to a failable function … here or in another scope"). They no longer say "declare it above the engine" when it already is.
 
 Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to 11 / 31 / 3 / **0**. Corpus (`scripts/corpus-emit-differential.ts` over samples / examples / compiler/tests/fixtures / stdlib, base = archive of `b75ad70f7`): 1047 sources on both sides, 0 compile-outcome or diagnostic changes, and no artifact differs except for the embedded project-root path. Browser suite: per-test JUnit identical to main. Pins: `compiler/tests/unit/s469-engine-raw-body-failable.test.js` and the pack.
 
