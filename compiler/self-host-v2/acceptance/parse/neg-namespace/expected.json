@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-parse-neg-namespace",
+  "description": "E-SCOPE-001: `int.from(…)` — `int` is a namespace for `.parse(s)` only.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "\"A primitive type name is a namespace for `parse` and nothing else.\"",
+  "expect": {
+    "codes": [
+      "E-SCOPE-001"
+    ],
+    "codeCounts": {
+      "E-SCOPE-001": 1
+    }
+  }
+}

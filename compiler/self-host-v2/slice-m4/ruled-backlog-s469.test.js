@@ -121,7 +121,7 @@ describe("T — `integer` / `boolean` are `int` / `bool` (§14.13.6)", () => {
     expect(codes(prog(`    function f(x: integer) -> integer { return x * 2 }`, `        <p>\${f(2)}</p>`))).toEqual([]);
     expect(codes(prog(`    let <n:integer=1.5/>`, `        <p>\${@n}</p>`))).toEqual(["E-TYPE-031"]);
     expect(codes(prog(`    function f(x: int) -> int { return x }\n    let <n:integer=3/>`, `        <p>\${f(@n)}</p>`))).toEqual([]);
-    expect(codes(prog(`    let <xs:integer[]=([1, 2])/>`, `        <p>\${@xs.length}</p>`))).toEqual([]);
+    expect(codes(prog(`    <xs:integer[]=([1, 2])/>`, `        <p>\${@xs.length}</p>`))).toEqual([]);
   });
 });
 

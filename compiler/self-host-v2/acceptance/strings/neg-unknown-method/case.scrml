@@ -1,7 +1,7 @@
-// a method outside the table is refused by name (fail closed), never passed to the host.
+// a method outside Appendix D.1's table is refused by name (fail closed), never passed to the host.
 <program>
     let <s:string="x"/>
     <main>
-        <p>${@s.padStart(3)}</p>
+        <p>${@s.substring(0, 1)}</p>
     </main>
 </program>

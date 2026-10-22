@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-strings-neg-indexof-start",
+  "description": "E-CALL-ARITY: the host's start-position argument is not admitted.",
+  "language-version": "1.0",
+  "spec": "Appendix D.1",
+  "rationale": "D.1: \"The host's optional start-position argument is not admitted\".",
+  "expect": {
+    "codes": [
+      "E-CALL-ARITY"
+    ],
+    "codeCounts": {
+      "E-CALL-ARITY": 1
+    }
+  }
+}

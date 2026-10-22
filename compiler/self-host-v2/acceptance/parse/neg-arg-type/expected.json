@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-parse-neg-arg-type",
+  "description": "E-TYPE-031: `int.parse`'s argument is an int.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "`T.parse` has the signature `string -> T | not`.",
+  "expect": {
+    "codes": [
+      "E-TYPE-031"
+    ],
+    "codeCounts": {
+      "E-TYPE-031": 1
+    }
+  }
+}

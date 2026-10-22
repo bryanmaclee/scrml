@@ -1,0 +1,6 @@
+// Appendix D.1: `indexOf` is `int | not` — never -1, so a plain `int` cannot hold it.
+<program>
+    let <s:string="abc"/>
+    <i:int=(@s.indexOf("b"))/>
+    <main><p>${@i}</p></main>
+</program>

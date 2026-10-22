@@ -1,0 +1,28 @@
+{
+  "id": "acceptance-parse-number-finite",
+  "description": "`number.parse` reads `-1.5e2` and `.5`; `NaN`, `Infinity`, `-Infinity` and the overflow `1e400` are `not` (finite only); `.`, `\" 1\"`, `+1`, `1e` are `not`.",
+  "language-version": "1.0",
+  "spec": "§14.13.4",
+  "rationale": "Ruled S469 \"three spec-follow-up opens\" — non-finite parse: \"not for all three (Rec)\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#a",
+        "text": "-150"
+      },
+      {
+        "selector": "#b",
+        "text": "0.5"
+      },
+      {
+        "selector": "#c",
+        "text": "not not not not"
+      },
+      {
+        "selector": "#d",
+        "text": "num not not not not"
+      }
+    ]
+  }
+}

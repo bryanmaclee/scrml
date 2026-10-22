@@ -1,0 +1,5 @@
+// Appendix D.1 (derived): a negative literal `repeat` count.
+<program>
+    let <s:string="ab"/>
+    <main><p>${@s.repeat(-1)}</p></main>
+</program>

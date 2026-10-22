@@ -10,7 +10,7 @@
         <p id="ew">${@s.endsWith("x")}</p>
         <p id="sl">${@s.trim().slice(7)}</p>
         <p id="sl2">${@s.trim().slice(0, 5)}</p>
-        <p id="neg">${@s.trim().slice(-5)}</p>
+        <p id="neg">${@s.trim().slice(@s.trim().length - 5)}</p>
         <p id="ch">${@e.charAt(0)}</p>
         <p id="ch1">${@e.slice(1)}</p>
         <p id="past">[${@e.charAt(9)}]</p>

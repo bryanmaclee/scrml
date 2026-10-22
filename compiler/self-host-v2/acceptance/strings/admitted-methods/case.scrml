@@ -1,0 +1,20 @@
+// Appendix D.1 (S469 "more string methods admitted"): indexOf / lastIndexOf / replace / replaceAll /
+// padStart / padEnd / repeat / trimStart / trimEnd — every position and width in code points.
+<program>
+    let <e:string="a😀b😀"/>
+    function pos(x: int | not) -> string {
+        return match x {
+            not :> "not"
+            else :> "at"
+        }
+    }
+    let <i:int | not=(@e.indexOf("b"))/>
+    let <j:int | not=(@e.lastIndexOf("😀"))/>
+    <main>
+        <p id="io">${@i} ${@j} ${pos(@e.indexOf("x"))} ${pos(@e.lastIndexOf("\uDE00"))}</p>
+        <p id="rp">${@e.replace("😀", "-")}|${@e.replaceAll("😀", "$&")}|${"a.b.c".replaceAll(".", "")}</p>
+        <p id="pd">[${"ab".padStart(5, "😀x")}][${"ab".padEnd(4)}][${@e.padStart(2)}]</p>
+        <p id="rr">${"😀".repeat(3)}[${"x".repeat(0)}]</p>
+        <p id="tr">[${"  a  ".trimStart()}][${"  a  ".trimEnd()}]</p>
+    </main>
+</program>

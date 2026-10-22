@@ -1,0 +1,6 @@
+// Appendix D.1: `indexOf` takes no start position (slice first, then search).
+<program>
+    let <s:string="abcb"/>
+    <i:int | not=(@s.indexOf("b", 2))/>
+    <main><p>${@i}</p></main>
+</program>

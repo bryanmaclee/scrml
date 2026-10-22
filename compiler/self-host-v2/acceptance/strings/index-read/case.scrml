@@ -1,0 +1,5 @@
+// §66.12.8 rule 6: `s[i]` is the code point at position `i` (a string), in range.
+<program>
+    let <s:string="a😀b"/>
+    <main><p id="r">[${@s[0]}][${@s[1]}][${@s[2]}]</p></main>
+</program>

@@ -903,7 +903,9 @@ ${
     }
 
     fn resolveTypeName(te: TypeEnv, at: AType, n: string, st: AS) -> RType {
-        if (n == "int") return { t: Type.Int, st: st, unresolved: false }
+        // s469 — `integer` / `boolean` are `int` / `bool` in type position (§14.13.6; the §63 window,
+        // W-TYPE-NAME-DEPRECATED, is not open yet — so no warning). Never namespaces (resolvePrimParse).
+        if (n == "int" || n == "integer") return { t: Type.Int, st: st, unresolved: false }
         if (n == "number") return { t: Type.Num, st: st, unresolved: false }
         if (n == "string") return { t: Type.Str, st: st, unresolved: false }
         if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
