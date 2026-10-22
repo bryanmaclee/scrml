@@ -59,6 +59,8 @@
     "bench": "bun run compiler/src/cli.js compile examples/ --verbose",
     "security": "bun run compiler/src/cli.js compile samples/compilation-tests/ && node --check samples/compilation-tests/*/dist/*.client.js 2>&1",
     "lsp": "bun run lsp/server.js --stdio",
+    "//lsp:boot": "S469 — the language server backed by the BOOTSTRAP (live scrml-boot diagnostics of the unsaved buffer). Diagnostics only. See lsp-boot/README.md.",
+    "lsp:boot": "bun run lsp-boot/server.ts --stdio",
     "//types": "S365 — bun runs .ts TRANSPILE-ONLY, so nothing type-checked compiler/src until this landed. See scripts/types-gate.ts; it found nine live exhaustive-switch `never` failures that had been invisible.",
     "types": "bun scripts/types-gate.ts",
     "types:check": "bun scripts/types-gate.ts --check",
