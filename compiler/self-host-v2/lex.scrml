@@ -639,7 +639,9 @@ ${
             c = advance(c, 1)                            // consume the closing }
         }
         const cp: int = parseInt(hex, 16)
-        if (Number.isNaN(cp)) return { text: "", cur: c }
+        // s469: past U+10FFFF is no code point (a host RangeError before) — decoded to
+        // nothing; escapeWhy reports the escape in a template, a slot string
+        if (Number.isNaN(cp) || cp > 1114111) return { text: "", cur: c }
         return { text: String.fromCodePoint(cp), cur: c }
     }
 
@@ -1155,8 +1157,16 @@ ${
     fn codeStep(st: LexState) -> LexState {
         const cur: Cursor = skipTrivia(st.cur)
         let st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interps, st.display)
-        if (st2.interps.length > 0 && isSlash(cur)) st2 = markSlot(st2, slashWhy(st2))
-        const ev: LexEvent = classifyCode(st2, cur)
+        let ev: LexEvent = classifyCode(st2, cur)
+        if (st2.interps.length > 0 && isSlash(cur)) {
+            const why: string = slashWhy(st2)
+            if (why != "") {
+                // refused either way; read as a division so a regular expression
+                // never swallows the slot's `}` (the refusal names this `/`)
+                st2 = markSlot(st2, why)
+                if (ev is .SawRegexSlash) ev = LexEvent.Ordinary
+            }
+        }
         return dispatch(st2, ev)
     }
 
