@@ -22176,27 +22176,50 @@ multi-code-point emoji) are NOT a unit here: `"👍🏽".length` is `2`. A graph
 | `s.length` | `int` | the number of code points (`"a😀".length` → `2`). Computing it is O(n). |
 | `s[i]` | `string` | the code point at position `i`; out of range it traps (§66.12.8 rule 6). |
 | `for (c of s)` | `c: string` | each code point in order (§49.3.5). |
-| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. |
-| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points). |
+| `s.charAt(i)` | `(i: int) -> string` | the code point at position `i`, or `""` when there is none (a negative `i` included). Never traps. *(PA derivation: the ruling makes a negative position out of range, and `charAt` keeps its non-trapping `""` answer for every out-of-range position; aligning it with `at` — `string \| not` — is the alternative, not taken because `""` is already a defined, non-absent "no character" here.)* |
+| `s.slice(from)`, `s.slice(from, to)` | `(from: int, to: int) -> string` (`to` optional) | the code points from position `from` up to (not including) `to`, or to the end. ~~A negative position counts from the end; positions are clamped to `0 … s.length` (JavaScript's argument rules, counted in code points).~~ *(struck S469 — no negative positions.)* A position greater than `s.length` is clamped to `s.length`, and `to < from` gives `""`. A NEGATIVE position is out of range: a negative literal (`s.slice(-1)`) is compile error **`E-POSITION-NEGATIVE`**; a negative computed position traps with `E-INDEX-OUT-OF-RANGE-RT` (§19.17). Count from the end explicitly: `s.slice(s.length - 1)`. |
 | `s.includes(t)` | `(t: string) -> bool` | `t` occurs in `s` on code-point boundaries. |
 | `s.startsWith(t)`, `s.endsWith(t)` | `(t: string) -> bool` | `s` begins / ends with `t`, on a code-point boundary. |
 | `s.split(sep)` | `(sep: string) -> string[]` | `""` splits into code points; any other separator splits only at code-point boundaries. The result is a new tape with no grants (§66.12.6 rule 2). |
 | `s.toUpperCase()`, `s.toLowerCase()` | `() -> string` | Unicode default case mapping (the result may differ in length). |
 | `s.trim()` | `() -> string` | `s` without leading and trailing white space (JavaScript's set). |
+| `s.trimStart()`, `s.trimEnd()` *(S469)* | `() -> string` | `s` without leading / trailing white space. |
+| `s.indexOf(t)`, `s.lastIndexOf(t)` *(S469)* | `(t: string) -> int \| not` | the code-point position of the first / last occurrence of `t` on code-point boundaries, or `not` when there is none — never `-1`. *(The host's optional start-position argument is not admitted: PA reading of "a typed signature"; slice first, then search.)* |
+| `s.replace(find, with)`, `s.replaceAll(find, with)` *(S469)* | `(find: string, with: string) -> string` | `s` with the first / every occurrence of `find` (on code-point boundaries) replaced by `with`. Both are plain strings: no regular expression (until regex has a ruled type), and `with` is literal text — the host's `$&` / `$1` replacement patterns do not apply *(derived: "plain strings only")*. `replaceAll` with `find` `""` inserts `with` between code points *(derived: JavaScript's behaviour, counted in code points)*. |
+| `s.padStart(width, fill)`, `s.padEnd(width, fill)` *(S469)* | `(width: int, fill: string) -> string` (`fill` optional, default `" "`) | `s` with `fill` repeated before / after it until it is `width` code points long, the last repeat cut on a code-point boundary; `s` unchanged when already that long. String padding lives here; `scrml:format` pads NUMBERS only (§41.22). |
+| `s.repeat(n)` *(S469)* | `(n: int) -> string` | `s` written `n` times. A negative `n` is out of range: a negative literal is `E-POSITION-NEGATIVE`, a computed one traps (`E-INDEX-OUT-OF-RANGE-RT`) *(derived: the no-negatives ruling applied to a count)*. |
 
-**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
+~~**Not in the table.** Other host string methods (`indexOf`, `lastIndexOf`, `replace`, `replaceAll`, `padStart`,
 `padEnd`, `repeat`, `codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …) are
 not specified as scrml string methods. ⚑ **OPEN (not ruled):** which of them the language admits, and with what
 type; any that takes or returns a position SHALL count code points when it is specified. Until then impl#1 passes
 them to JavaScript (an impl#1 note, not language — FORK RULE row 0) and the bootstrap refuses them
-(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).
+(`E-BOOTSTRAP-UNSUPPORTED`). Padding is `scrml:format`'s `pad` / `padEnd` (§41.22).~~ *(RULED S469 — below.)*
+
+**Not in the table: refused (S469).** The table is the whole string surface. A call of any other method on a
+`string` (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, `concat`, …) SHALL
+be compile error **`E-STRING-METHOD-UNKNOWN`** (§34), naming the nearest admitted form where there is one. A
+method may be admitted later, and an admitted one may be deprecated later (§63). impl#1 still passes these to
+JavaScript (an impl#1 note, not language — FORK RULE row 0); the bootstrap refuses them today under
+`E-BOOTSTRAP-UNSUPPORTED`, and does not yet build the S469 additions.
+
+> **Amendment S469 — more string methods admitted; the rest refused; no negative positions.** **Provenance:**
+> ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"indexOf / lastIndexOf, replace / replaceAll, padStart / padEnd / repeat, trimStart / trimEnd, I suppose including them all is safe enough. things can be depped later."* (*"Each gets a typed signature counted in code points. `indexOf`/`lastIndexOf` return `int | not` (no -1). `replace`/`replaceAll` take plain strings only (no regex until regex has a ruled type). Anything not admitted is refused."*) · ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **supersedes:** the struck OPEN paragraph and the struck `slice` negative-position
+> sentence. **Direction of change:** newly-accepting (the eight admitted methods); newly-rejecting (every other
+> string method; a negative `slice` / `repeat` literal); semantics-changed (a negative computed `slice` position now
+> traps). **Nominal / spec-ahead:** neither compiler builds the additions; the bootstrap's `slice` still counts a
+> negative from the end and is owed the change.
 
 **Normative statements:**
 
 - A string's `.length` SHALL be its number of code points.
-- Every string position (`s[i]`, `charAt`, `slice`) SHALL count code points, and a string iteration SHALL step by
-  code point.
-- A string match (`includes`, `startsWith`, `endsWith`, `split`) SHALL succeed only on code-point boundaries.
+- Every string position (`s[i]`, `charAt`, `slice`, `indexOf`, `lastIndexOf`) and every width (`padStart`,
+  `padEnd`) SHALL count code points, and a string iteration SHALL step by code point.
+- A negative position SHALL be out of range for every string and tape position (S469): a negative literal position
+  SHALL be compile error `E-POSITION-NEGATIVE`; a negative computed one SHALL trap (`E-INDEX-OUT-OF-RANGE-RT`),
+  except where the form is defined not to trap (`at` → `not`, `charAt` → `""`).
+- A string method not in the table SHALL be compile error `E-STRING-METHOD-UNKNOWN`.
+- A string match (`includes`, `startsWith`, `endsWith`, `split`, `indexOf`, `lastIndexOf`, `replace`, `replaceAll`) SHALL succeed only on code-point boundaries.
 - A tape's `.length` SHALL be its element count (unchanged).
 
 ---
@@ -22662,7 +22685,7 @@ always rule out before the program runs, and that is **not a value of any `!` er
 
 | Code | Raised by | Section |
 |---|---|---|
-| `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length` (Nominal / spec-ahead — not yet emitted) | §66.12.8 (moved from §49.13) |
+| `E-INDEX-OUT-OF-RANGE-RT` | an index read `xs[i]` with `i < 0` or `i >= xs.length`; `s[i]` out of range; a negative computed `slice` position or `repeat` count (S469) (Nominal / spec-ahead — not yet emitted) | §66.12.8 (moved from §49.13), Appendix D.1 |
 | `E-INT-CONVERSION-RT` | `floor` / `ceil` / `trunc` / `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1) (S469; Nominal / spec-ahead — not yet emitted) | §41.18 |
 
 (`E-CONTRACT-001-RT`, §53.4.5, and the loud error past 2^53 for an `int8` column, ruling:user-voice-scrml.md
@@ -27389,8 +27412,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LOOP-DO-WHILE-RETIRED | §49.4.1, §49.9 | A `do { … } while (cond)` statement — `do...while` retired S469; fix-it the body-first `for { …; if (done) { break; } }`, or `for (let first = true; first \|\| cond; first = false) { … }` when the body uses `continue` (§49.3.6). `do` stays reserved. **Nominal / spec-ahead — not yet emitted** (impl#1 accepts it, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F1 *"One `for` (Recommended)"*. | Error |
 | E-RANGE-OUTSIDE-LOOP-HEAD | §49.2.5, §49.9 | A range `a..b` / `a..=b` anywhere other than the whole iterable of a `for` iterate head or the bounded-length token of a tape type (§66.12.2) — a range is not a value. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"* (*"loop-head only"*). | Error |
 | E-RANGE-BOUND-NOT-INT | §49.2.5, §49.9 | A range bound whose type is not `int`. **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F3 *"`..` and `..=` (Recommended)"*. | Error |
-| E-INDEX-OUT-OF-RANGE-RT | §66.12.8 (was §49.13), §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
+| E-INDEX-OUT-OF-RANGE-RT | §66.12.8 (was §49.13), §19.17 | Runtime trap: an index read `xs[i]` on a tape with `i < 0` or `i >= xs.length`. **(S469)** Also `s[i]` out of range on a string, and a negative COMPUTED position or count in `s.slice(…)` / `s.repeat(n)` (Appendix D.1; ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"*; Nominal). Stops the current unit of execution; not a `!` error (§19.17). `xs.at(i)` is the non-trapping form (`T \| not`). **Nominal / spec-ahead — not yet emitted** (impl#1 reads JavaScript's `undefined`, §49.8). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — loops: one `for`" F4 *"Trap + `.at()` (Recommended)"*. | Runtime |
 | E-TAPE-JS-METHOD | §66.12.6, §66.20 | (a) A JavaScript array method name called on a tape, in any position, whatever the tape grants — the mutating `push` / `unshift` / `splice` (S469 "tape methods are named after their grants") or the copy-returning `toSorted` / `toReversed` / `with` (S469, O65 (a)); the fix-it names the scrml form (`.append(x)`, `.prepend(x)`, `.remove(i)` / `.insert(i, x)`, `.sort(…)`, `.reverse()`, a position write `xs[i] = v`). (b) A call of `sort`, `reverse`, `fill` or `copyWithin` on a tape whose result is discarded (a statement) — these return a new tape, so the JavaScript in-place idiom would do nothing (derived, §66.12.6 rule 3). Code inside a `_{ }` slice is not checked. **Nominal on impl#1** (impl#1 does not implement §66; it carries the code, §34.0). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`tapeJsFix`, `tapeMethodStmt`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — tape methods are named after their grants" — *"Names match the grants (Recommended)"*; ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" — *"Refuse, one name each (Recommended)"*, *"E-TAPE-JS-METHOD (Recommended)"*. Direction of change: newly-rejecting. | Error |
+| E-POSITION-NEGATIVE | Appendix D.1, §66.12.8 | A negative LITERAL position or count where a string or tape position is taken — `s.slice(-1)`, `s.slice(0, -2)`, `s.repeat(-1)`, `xs[-1]`, `s[-1]` — refused at compile time: no position counts from the end. A negative COMPUTED one traps instead (`E-INDEX-OUT-OF-RANGE-RT`); `xs.at(-1)` is `not`. Fix-it: count from the end explicitly (`s.slice(s.length - 1)`). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (the bootstrap's `slice` still counts a negative from the end). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"`slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading)"*). Direction of change: newly-rejecting. | Error |
+| E-STRING-METHOD-UNKNOWN | Appendix D.1 | A call on a `string` of a method that is not in Appendix D.1's table (`codePointAt`, `normalize`, `localeCompare`, `match`, `search`, `substring`, `at`, …). The message names the nearest admitted form where there is one. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (impl#1 passes host methods through; the bootstrap refuses them as `E-BOOTSTRAP-UNSUPPORTED`). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted" — *"Anything not admitted is refused."* Direction of change: newly-rejecting. | Error |
 | E-TEXT-NON-PRIMITIVE | §14.13.2, §7.4.2, §5.5.3 | A value that is not a primitive (`string`, `int`, `number`, `bool`, unit enum value) in a text sink other than `print` / `println`: markup text `${e}`, a `${e}` in a quoted attribute value, or a `${e}` slot of a logic backtick template — a struct, tape, tuple, map or set, payload enum value, function, or a value of unresolved type. The message names a field read, a `scrml:format` call (§41.22) or `log()`. A markup value is not text (it renders as markup). `print` keeps E-PRINT-NON-PRIMITIVE. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted** (impl#1 renders JavaScript `String()`; the bootstrap's `typeInterp` does not check it, deep-dive slice C2). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*. Direction of change: newly-rejecting. | Error |
 | W-STRING-INTERP-LITERAL | §14.13.3 | A QUOTED string literal in logic (`"…"` / `'…'`) whose raw text holds an unescaped `${ … }`. A quoted string is not a template: the `${` is plain text, which a JavaScript reader does not expect. Not reported: an escaped `\${`; a `${` with no closing `}`; a code-default body's display-text literal (§4.18.4), which interpolates. Fix: a backtick template (§14.13.3), or interpolate in markup. **Code name provisional** (named by the bootstrap, S469; owner-approved as provisional). Emitted by the bootstrap at `compiler/self-host-v2/parse.scrml` (`interpLiteralLint`); **Nominal on impl#1**. Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — provisional diagnostic codes confirmed" (the provisional-code approval) · dispatch:s469-boot-strings-1. Direction of change: inert (a warning). | Warning |
 | E-INT-CONVERSION-RT | §41.18, §19.17 | Runtime trap: `floor`, `ceil`, `trunc` or `round` of NaN, ±∞, or a value that rounds outside ±(2^53−1). Stops the current unit of execution; not a `!` error (§19.17). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: lossy number → int is named, round needs a mode" — *"Named, mode required (Recommended)"*. | Runtime |
@@ -32556,9 +32581,9 @@ Shim: `compiler/runtime/stdlib/time.js`; source: `stdlib/time/index.scrml`.
 > and templates give only the one plain form. Formatting is a typed `scrml:format` call (e.g. `fixed(x, 2)`,
 > `pad(n, 3, "0")`) that returns a string to interpolate. `scrml:format` gets a SPEC section. No format specifiers
 > inside `${}`."*). **supersedes:** nothing struck — before this section the SPEC named `scrml:format` only in
-> §41.18's purity statement. **Direction of change:** newly-accepting (`fixed`, `pad`, `padEnd`); typing the
+> §41.18's purity statement. **Direction of change:** newly-accepting (`fixed`, `pad`; ~~`padEnd`~~ dropped S469 r2); typing the
 > existing exports is newly-rejecting for an argument of the wrong type. **Nominal / spec-ahead:** the module
-> (`stdlib/format/index.scrml`) is untyped today and has no `fixed`, `pad` or `padEnd`; neither compiler checks
+> (`stdlib/format/index.scrml`) is untyped today and has no `fixed` or `pad`; neither compiler checks
 > these signatures yet.
 
 `scrml:format` turns a value into display text by a rule the call names. It is the only home of formatting: a
@@ -32573,8 +32598,8 @@ trailing optional parameter may be omitted).
 | Member | Signature | Result |
 |---|---|---|
 | `fixed` | `fixed(x: number, digits: int) -> string` | `x` with exactly `digits` digits after the point (`0 <= digits <= 100`), rounding the exact value half away from zero (`Rounding.HalfUp`, §41.18). No grouping, no locale. `fixed(2.5, 0)` → `"3"`; `fixed(-2.5, 0)` → `"-3"`; `fixed(1, 2)` → `"1.00"`. |
-| `pad` | `pad(x: int \| string, width: int, fill: string) -> string` | the text of `x` (§20.7.2) with `fill` repeated on the LEFT until it is `width` code points long; unchanged when already that long. `fill` SHALL be one code point. `pad(7, 3, "0")` → `"007"`. |
-| `padEnd` | `padEnd(x: int \| string, width: int, fill: string) -> string` | as `pad`, filling on the right. |
+| `pad` | ~~`pad(x: int \| string, width: int, fill: string) -> string`~~ `pad(n: int, width: int, fill: string) -> string` *(S469 r2: numbers only — a string is padded by `s.padStart`, Appendix D.1)* | the text of `n` (§20.7.2) with `fill` repeated on the LEFT until it is `width` code points long; unchanged when already that long. `fill` SHALL be one code point. `pad(7, 3, "0")` → `"007"`. |
+| ~~`padEnd`~~ | ~~`padEnd(x: int \| string, width: int, fill: string) -> string`~~ | ~~as `pad`, filling on the right.~~ *(dropped S469 r2: string padding has one home, `s.padStart` / `s.padEnd` (Appendix D.1, ruling:user-voice-scrml.md S469 "⭐ RULED — more string methods admitted"); `scrml:format` keeps `pad` for numbers — the owner's own example, `pad(n, 3, "0")`.)* |
 | `formatNumber` | `formatNumber(n: number, decimals: int \| not, locale: string \| not) -> string` | locale-grouped decimal text (host `Intl.NumberFormat`); `decimals` fixes the fraction digits. |
 | `formatPercent` | `formatPercent(value: number, decimals: int \| not) -> string` | `value × 100` with `decimals` (default 0) fraction digits and `%`. |
 | `compactNumber` | `compactNumber(n: number, locale: string \| not) -> string` | compact notation (`"1.2K"`). |
@@ -32589,8 +32614,10 @@ Money is not formatted here: the one money display path is `formatCurrency(Money
 S440 dpa-054), which lands with `scrml:money`. The untyped `formatCurrency(amount, currency, locale)` and
 `formatNumberAdvanced(n, options, locale)` exports (host `Intl` passthroughs) are **not part of the typed surface**:
 `formatCurrency` waits for `scrml:money`, and `formatNumberAdvanced`'s `options` is a host object with no scrml type.
-`padLeft` / `padRight` are the untyped predecessors of `pad` / `padEnd` *(PA naming: the ruling's example spells
-`pad`; `padEnd` follows the host's `padStart` / `padEnd` pair)*.
+`padLeft` / `padRight` are the untyped predecessors of ~~`pad` / `padEnd`~~ *(S469 r2)* `pad` (numbers) and the string
+methods `s.padStart` / `s.padEnd` (strings, Appendix D.1). **One home per job:** a NUMBER is padded by
+`scrml:format`'s `pad`; a STRING by its own `padStart` / `padEnd` *(PA choice under the S469 "more string methods
+admitted" ruling, which admitted `padStart` / `padEnd`; the earlier `scrml:format` `padEnd` is dropped)*.
 
 **Normative statements:**
 
@@ -42578,6 +42605,14 @@ Where ε is `1` for integer constraints and the smallest step value for floating
 // Compiled HTML: <input type="password" minlength="8" maxlength="254" ...>
 ```
 
+**Code points vs the browser (S469).** A string's `.length` counts code points (Appendix D.1), but the browser's
+`minlength` / `maxlength` count UTF-16 units. For text with characters outside the Basic Multilingual Plane (most
+emoji) the two differ: the browser's `maxlength` is STRICTER (it stops input early) and its `minlength` is LOOSER
+(it accepts text whose code-point length is still too short). The generated attributes stay a first-line filter
+only; the compiler-emitted runtime check (§53.7.2), which counts code points, is authoritative. *(Provenance:
+ruling:user-voice-scrml.md S469 "⭐ RULED — strings: code points everywhere, `.length` included"; the note is a PA
+derivation recorded in the fidelity review of the S469 follow-up. Direction of change: inert.)*
+
 **Named shapes:**
 
 A named shape with a corresponding HTML type SHALL emit that type attribute, overriding any
@@ -49310,11 +49345,6 @@ For a tape `xs` whose element type is `T`, and an `int` index `i`:
    `for (let i = 0; i < xs.length; i += 1)`, in each case where the body writes neither `i` nor the binding
    `xs`, and `xs`'s length cannot change in the body (its type grants no length change, or no write to it is in
    the body's write set).
-
-Index writes are §66.12.6's (an index write at or past the end is `E-WRITE-INVARIANT`). Per-position reads of a
-tuple (§66.12.5) are typed per position and are not governed by this subsection. ~~⚑ **OPEN (not ruled):**
-`s[i]` on a `string`.~~ *(RULED S469 — rule 6.)*
-
 6. **`s[i]` on a `string` is the code point at position `i` (S469).** Its type is `string` (one code point).
    Positions count code points, as iteration does (§49.3.5). Out of range (`i < 0`, or `i` at or past the last
    code point) it traps with `E-INDEX-OUT-OF-RANGE-RT`, exactly as rule 2 *(derived: rule 2 applied to a string;
@@ -49322,6 +49352,15 @@ tuple (§66.12.5) are typed per position and are not governed by this subsection
    **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — open items from the loops + tapes SPEC PRs" —
    *"Code points (Recommended)"* (*"`for (c of s)` over a string yields Unicode code points … `s[i]` follows."*).
    **Direction of change:** semantics-defined (impl#1 emits JavaScript's `s[i]`, a UTF-16 unit, and carries it).
+7. **No negative positions (S469).** A negative position is out of range in every position read, tape or string:
+   `xs[-1]` and `s[-1]` trap (rules 2 and 6), `xs.at(-1)` is `not` (rule 3), and a negative literal position is
+   `E-POSITION-NEGATIVE` at compile time (Appendix D.1). There is no counting from the end; write it:
+   `xs[xs.length - 1]`. **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — no negative positions anywhere" — *"No negatives anywhere (Recommended)"* (*"A negative position is out of range for every string and tape position: `slice(-1)` is refused (a literal at compile time; a computed one traps at run time, the PA reading), `s[-1]` / `xs[-1]` trap, `at(-1)` is `not`. Count from the end explicitly: `s.slice(s.length - 1)`."*) **Direction of change:** none for rules 2 and 3 (already so);
+   newly-rejecting for a negative literal.
+
+Index writes are §66.12.6's (an index write at or past the end is `E-WRITE-INVARIANT`). Per-position reads of a
+tuple (§66.12.5) are typed per position and are not governed by this subsection. ~~⚑ **OPEN (not ruled):**
+`s[i]` on a `string`.~~ *(RULED S469 — rule 6, above.)*
 
 **Status:** Nominal / spec-ahead. impl#1 emits JavaScript's `xs[i]` (§49.8); the bootstrap refuses an index
 read today.
