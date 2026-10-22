@@ -159,6 +159,16 @@ describe("P — parse", () => {
       "match c {\n            .A :> `a, ${n}\n| x`\n            .B :> `b`\n        }");
     expect(codes(src)).toEqual([]);
   });
+  test("a `?{}` bound parameter is read by the same reader: one it cannot bound one way is refused (§8.1.2)", () => {
+    const SQ = "?" + "{";
+    const prog = (slot) => `<program db="./app.db">\n    function f(id: int) {\n        ${SQ}\`UPDATE t SET a = 1 WHERE id = \${${slot}}\`}.run()\n    }\n    <main>\n        <p>x</p>\n    </main>\n</program>\n`;
+    const bad = run(prog(" { a: id } / 2 "));
+    const d = bad.diags.find((x) => x.code === "E-PARSE-TEMPLATE");
+    expect(d.message).toContain("bound parameter cannot be read one way");
+    expect(bad.diags.map((x) => x.code)).not.toContain("E-SQL-008");
+    // twin: a readable parameter is no template refusal
+    expect(run(prog("id")).diags.map((x) => x.code)).not.toContain("E-PARSE-TEMPLATE");
+  });
   test("`${\"${\"}` spells the characters `${` (no W-STRING-INTERP-LITERAL)", () => {
     expect(codes(fnProg("", "", "`a${\"${\"}b`"))).toEqual([]);
   });

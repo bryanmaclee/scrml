@@ -1123,6 +1123,16 @@ ${
             params = params.concat([pe.e])
             t = pe.tp
             if (cur(t).cls != TC.TIEnd) return mkE(sql008(t, open), start, AExprK.Recovered)
+            // s469 — the one reader of a slot's extent (§8.1.2) could not bound this
+            // bound parameter one way (lex.scrml InterpFrame.why): refused, as a
+            // logic template's slot is
+            if (cur(t).v != "") {
+                const d: TP = diagAt(t, "E-PARSE-TEMPLATE", "this `" + sqlSigil() + "}` bound parameter cannot be read one way — " + cur(t).v + " — so where it ends is not known, and it is refused (§8.1.2: one reader of a slot's extent). Compute the value into a local first and bind the local", cur(t))
+                const past: RSkip = skipToSqlClose(adv(d), open)
+                if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
+                const rcu: RSqlChain = parseSqlChain(past.tp, emptySqlChain())
+                return mkE(rcu.tp, start, AExprK.Recovered)
+            }
             t = adv(t)
             if (cur(t).cls != TC.TChunk) return mkE(sql008(t, open), start, AExprK.Recovered)
             chunks = chunks.concat([cur(t).v])
