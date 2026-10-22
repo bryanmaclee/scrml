@@ -1387,6 +1387,18 @@ ${
             .Join :> "Join"
             .IndexRead :> "IndexRead"
             .AtRead :> "AtRead"
+            .StrIndexOf :> "StrIndexOf"
+            .StrLastIndexOf :> "StrLastIndexOf"
+            .StrReplace :> "StrReplace"
+            .StrReplaceAll :> "StrReplaceAll"
+            .StrPadStart :> "StrPadStart"
+            .StrPadEnd :> "StrPadEnd"
+            .StrRepeat :> "StrRepeat"
+            .StrTrimStart :> "StrTrimStart"
+            .StrTrimEnd :> "StrTrimEnd"
+            .ParseInt :> "ParseInt"
+            .ParseNum :> "ParseNum"
+            .ParseBool :> "ParseBool"
         }
     }
 }

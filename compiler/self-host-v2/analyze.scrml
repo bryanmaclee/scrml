@@ -5183,14 +5183,22 @@ ${
                     const ra: RX | not = resolveAtCall(env, e, m, args, st0)
                     if (ra is given) return ra
                 }
-                // s469 — `E.toEnum(s)` (§14.4.1): a typed built-in, `string -> E | not`
-                if (m.method == "toEnum") {
+                // s469 — a primitive type name is a namespace for `.parse` only (§14.13.4)
+                const pn: string = primNamespace(env, m.obj)
+                if (pn != "") return resolvePrimParse(env, e, pn, m, args, st0)
+                // s469 — `E.parse(s)` (§14.13.4) and `E.toEnum(s)` (§14.4.1, folding into
+                // `E.parse` — the same path): a typed built-in, `string -> E | not`
+                if (m.method == "parse" || m.method == "toEnum") {
                     const te: RX | not = resolveToEnum(env, e, m, args, st0)
                     if (te is given) return te
                 }
                 // s469 — the typed built-in methods of a string and a tape, and
                 // JavaScript's tape method names, refused (E-TAPE-JS-METHOD)
                 if (isBuiltinMethodName(m.method)) return resolveMethod(env, e, m, args, st0)
+                // s469 — any other method on a `string` is E-STRING-METHOD-UNKNOWN (D.1:
+                // "The table is the whole string surface")
+                const su: RX | not = unknownStrMethod(env, e, m, args, st0)
+                if (su is given) return su
             }
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", callText(env, callee) + "only calls of a named function, " + dateNowText() + ", `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods " + strMethodList() + " are in the bootstrap", st0)
         }
@@ -5635,7 +5643,10 @@ ${
         return plain(Type.Named(es), addValue(st, e.nid, ValueFact.VVariant(es, i)))
     }
 
-    // s469 — `E.toEnum(s)` (SPEC §14.4.1): "accepts a string value and returns
+    // s469 — `E.parse(s)` (SPEC §14.13.4, S469 "parse spelling `T.parse(s)`")
+    // and `E.toEnum(s)`, which folds into it through a §63 window not yet open
+    // (so no warning): ONE path, ONE fact (VToEnum), ONE lowering. §14.4.1:
+    // `E.toEnum(s)` "accepts a string value and returns
     // the corresponding enum variant, or `not` if no variant matches … The
     // return type is `E | not` … String matching is case-sensitive — the string
     // must exactly match the variant name as declared." A typed signature
@@ -5655,13 +5666,60 @@ ${
         const ts: Sym | not = typeNamedHere(env, n)
         if (ts is not) return not
         const es: Sym | not = isEnumType(env.g.types, Type.Named(ts))
-        if (es is not) return diagX(env, e, "E-SCOPE-001", "`" + n + "` is not an enum — `toEnum` is defined on enum types (§14.4.1)", resolveExprs(env, args, not, st0))
-        if (args.length != 1) return diagX(env, e, "E-CALL-ARITY", "`" + n + ".toEnum(…)` takes one argument, the string to convert (§14.4.1); " + args.length + " given", resolveExprs(env, args, not, st0))
+        if (es is not) return diagX(env, e, "E-SCOPE-001", "`" + n + "` is not an enum — `" + m.method + "` is defined on enum types (and on `int`, `number`, `bool`) (§14.13.4)", resolveExprs(env, args, not, st0))
+        if (args.length != 1) return diagX(env, e, "E-CALL-ARITY", "`" + n + "." + m.method + "(…)` takes one argument, the string to convert (§14.13.4); " + args.length + " given", resolveExprs(env, args, not, st0))
         const st: AS = resolveExpr(env, args[0], Type.Str, st0).st
         for (const v of enumVariantsOf(env.g, es)) {
-            if (v.fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + ".toEnum(…)` on an enum with a payload variant (`." + v.sym.hint + "`) — a name alone cannot build its payload, and §14.4.1 does not say what it gives; the bootstrap admits `toEnum` on an enum of unit variants only", st)
+            if (v.fields.length > 0) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + n + "." + m.method + "(…)` on an enum with a payload variant (`." + v.sym.hint + "`) — a name alone cannot build its payload, and §14.4.1 / §14.13.4 do not say what it gives; the bootstrap admits `" + m.method + "` on an enum of unit variants only", st)
         }
         return plain(Type.Maybe(Type.Named(es)), addValue(st, e.nid, ValueFact.VToEnum(es)))
+    }
+
+    // s469 — `int.parse(s)`, `number.parse(s)`, `bool.parse(s)` (SPEC §14.13.4,
+    // ruled S469 "conversions: parse spelling `T.parse(s)`"): "A primitive type
+    // name is a namespace for `parse` and nothing else; the spellings
+    // `integer.parse` and `boolean.parse` do not exist." Each is `string ->
+    // T | not`, strict and whole-string (the runtime's parseIntText /
+    // parseNumText / parseBoolText — the ONE reader of number text). The
+    // receiver names a type, not a value, so it gets no fact; anything else
+    // written on a primitive type name is refused by name (fail closed).
+    // `""` when `obj` is not a primitive type name (or a local shadows it).
+    fn primNamespace(env: Env, obj: AExpr) -> string {
+        const n: string = exprName(obj)
+        if (!isPrimTypeName(n)) return ""
+        if (lookupLocal(env, n) is given) return ""
+        return n
+    }
+
+    fn isPrimTypeName(n: string) -> boolean {
+        return n == "int" || n == "number" || n == "bool" || n == "string" || n == "integer" || n == "boolean"
+    }
+
+    fn resolvePrimParse(env: Env, e: AExpr, pn: string, m: MethodCall, args: AExpr[], st0: AS) -> RX {
+        const call: string = "`" + pn + "." + m.method + "(…)`"
+        if (m.method != "parse") return diagX(env, e, "E-SCOPE-001", call + " — `" + pn + "` is a type, and a primitive type name is a namespace for `.parse(s)` only (§14.13.4)", resolveExprs(env, args, not, st0))
+        if (pn == "integer" || pn == "boolean") return diagX(env, e, "E-SCOPE-001", call + " does not exist — `" + pn + "` is a synonym of `" + primCanon(pn) + "` in type position only; write `" + primCanon(pn) + ".parse(s)` (§14.13.4, §14.13.6)", resolveExprs(env, args, not, st0))
+        if (pn == "string") return diagX(env, e, "E-SCOPE-001", call + " does not exist — text is already a `string`; `T.parse(s)` reads text as an `int`, a `number`, a `bool` or an enum (§14.13.4)", resolveExprs(env, args, not, st0))
+        if (args.length != 1) return diagX(env, e, "E-CALL-ARITY", call + " takes one argument, the text to read (§14.13.4); " + args.length + " given", resolveExprs(env, args, not, st0))
+        const st: AS = resolveExpr(env, args[0], Type.Str, st0).st
+        const op: PrimOp = primParseOp(pn)
+        return plain(methodResult(op, Type.Str), addValue(st, e.nid, ValueFact.VMethod(op)))
+    }
+
+    fn primCanon(n: string) -> string {
+        if (n == "integer") return "int"
+        if (n == "boolean") return "bool"
+        return n
+    }
+
+    fn primParseOp(pn: string) -> PrimOp {
+        if (pn == "int") return PrimOp.ParseInt
+        if (pn == "number") return PrimOp.ParseNum
+        return PrimOp.ParseBool
+    }
+
+    fn isParseOp(op: PrimOp) -> boolean {
+        return op == PrimOp.ParseInt || op == PrimOp.ParseNum || op == PrimOp.ParseBool
     }
 
     // =========================================================================
@@ -5713,12 +5771,35 @@ ${
     }
 
     fn isStrMethodName(n: string) -> boolean {
-        return n == "toUpperCase" || n == "toLowerCase" || n == "trim" || n == "slice" || n == "charAt" ||
-            n == "includes" || n == "startsWith" || n == "endsWith" || n == "split"
+        return strMethodOp(n) is given
     }
 
     fn strMethodList() -> string {
-        return "`toUpperCase` / `toLowerCase` / `trim` / `slice` / `charAt` / `includes` / `startsWith` / `endsWith` / `split`"
+        return "`toUpperCase` / `toLowerCase` / `trim` / `trimStart` / `trimEnd` / `slice` / `charAt` / `includes` / `startsWith` / `endsWith` / `split` / `indexOf` / `lastIndexOf` / `replace` / `replaceAll` / `padStart` / `padEnd` / `repeat`"
+    }
+
+    // s469 — E-STRING-METHOD-UNKNOWN's fix-it: the nearest admitted form of a
+    // host string method that is not in Appendix D.1's table ("" when there is
+    // none to name).
+    fn strMethodNearest(n: string) -> string {
+        return match n {
+            "substring" :> "`.slice(from, to)`"
+            "substr" :> "`.slice(from, to)`"
+            "at" :> "`.charAt(i)` (the empty string out of range), or the index read `s[i]` (a trap out of range)"
+            "codePointAt" :> "`.charAt(i)` — a position is already a code point"
+            "charCodeAt" :> "`.charAt(i)` — a position is already a code point"
+            "trimLeft" :> "`.trimStart()`"
+            "trimRight" :> "`.trimEnd()`"
+            "search" :> "`.indexOf(t)` (a plain string; `int | not`)"
+            "match" :> "`.includes(t)` / `.indexOf(t)` (plain strings — regex has no ruled type yet)"
+            "matchAll" :> "`.indexOf(t)` (plain strings — regex has no ruled type yet)"
+            "concat" :> "a backtick template holding both values"
+            "toLocaleUpperCase" :> "`.toUpperCase()`"
+            "toLocaleLowerCase" :> "`.toLowerCase()`"
+            "toString" :> "the string itself (it is already text)"
+            "valueOf" :> "the string itself"
+            _ :> ""
+        }
     }
 
     // The fix-it for a JavaScript tape method name (E-TAPE-JS-METHOD), "" for
@@ -5762,28 +5843,50 @@ ${
             "startsWith" :> PrimOp.StrStartsWith
             "endsWith" :> PrimOp.StrEndsWith
             "split" :> PrimOp.StrSplit
+            // s469 — admitted (S469 "more string methods admitted"), code points everywhere
+            "indexOf" :> PrimOp.StrIndexOf
+            "lastIndexOf" :> PrimOp.StrLastIndexOf
+            "replace" :> PrimOp.StrReplace
+            "replaceAll" :> PrimOp.StrReplaceAll
+            "padStart" :> PrimOp.StrPadStart
+            "padEnd" :> PrimOp.StrPadEnd
+            "repeat" :> PrimOp.StrRepeat
+            "trimStart" :> PrimOp.StrTrimStart
+            "trimEnd" :> PrimOp.StrTrimEnd
             _ :> not
         }
     }
 
     // The ONE signature table: a built-in's argument types, in order. `slice`'s
     // second argument is optional (methodArity's minimum).
+    // s469: `padStart` / `padEnd`'s `fill` is optional (default " "); `indexOf`
+    // / `lastIndexOf` take NO start position (D.1: slice first, then search);
+    // `replace` / `replaceAll` take plain strings (a regex is not a `string`,
+    // so it is E-TYPE-031 — or unparsed). A parse's one argument is its text.
     fn methodSig(op: PrimOp) -> Type[] {
         if (op == PrimOp.StrSlice) return [Type.Int, Type.Int]
-        if (op == PrimOp.StrCharAt) return [Type.Int]
+        if (op == PrimOp.StrCharAt || op == PrimOp.StrRepeat) return [Type.Int]
+        if (op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) return [Type.Int, Type.Str]
         if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return [Type.Str]
+        if (op == PrimOp.StrIndexOf || op == PrimOp.StrLastIndexOf) return [Type.Str]
+        if (op == PrimOp.StrReplace || op == PrimOp.StrReplaceAll) return [Type.Str, Type.Str]
         if (op == PrimOp.StrSplit || op == PrimOp.Join) return [Type.Str]
+        if (isParseOp(op)) return [Type.Str]
         return []
     }
 
     fn methodMinArity(op: PrimOp) -> int {
-        if (op == PrimOp.StrSlice) return 1
+        if (op == PrimOp.StrSlice || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) return 1
         return methodSig(op).length
     }
 
     // The result type of a built-in on a receiver of type `recv`.
     fn methodResult(op: PrimOp, recv: Type) -> Type {
         if (op == PrimOp.StrIncludes || op == PrimOp.StrStartsWith || op == PrimOp.StrEndsWith) return Type.Bool
+        if (op == PrimOp.StrIndexOf || op == PrimOp.StrLastIndexOf) return Type.Maybe(Type.Int)
+        if (op == PrimOp.ParseInt) return Type.Maybe(Type.Int)
+        if (op == PrimOp.ParseNum) return Type.Maybe(Type.Num)
+        if (op == PrimOp.ParseBool) return Type.Maybe(Type.Bool)
         if (op == PrimOp.StrSplit) return Type.Seq(Type.Str, anySeqGrants())
         if (op == PrimOp.SortNum || op == PrimOp.SortStr || op == PrimOp.Reverse) return ungranted(recv)
         return Type.Str
@@ -5810,6 +5913,18 @@ ${
         if (op == PrimOp.StrStartsWith) return "startsWith"
         if (op == PrimOp.StrEndsWith) return "endsWith"
         if (op == PrimOp.StrSplit) return "split"
+        if (op == PrimOp.StrIndexOf) return "indexOf"
+        if (op == PrimOp.StrLastIndexOf) return "lastIndexOf"
+        if (op == PrimOp.StrReplace) return "replace"
+        if (op == PrimOp.StrReplaceAll) return "replaceAll"
+        if (op == PrimOp.StrPadStart) return "padStart"
+        if (op == PrimOp.StrPadEnd) return "padEnd"
+        if (op == PrimOp.StrRepeat) return "repeat"
+        if (op == PrimOp.StrTrimStart) return "trimStart"
+        if (op == PrimOp.StrTrimEnd) return "trimEnd"
+        if (op == PrimOp.ParseInt) return "parse"
+        if (op == PrimOp.ParseNum) return "parse"
+        if (op == PrimOp.ParseBool) return "parse"
         if (op == PrimOp.Reverse) return "reverse"
         if (op == PrimOp.Join) return "join"
         return "sort"
@@ -5840,6 +5955,7 @@ ${
         const fix: string = tapeJsFix(m.method)
         if (fix != "") {
             if (seqElem(ot) is given) return plain(tapeGuess(m.method, ot), refuseMethod(env, e, "E-TAPE-JS-METHOD", call + " is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants, and `sort` / `reverse` return a new tape)", args, st).st)
+            if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap", args, st)
         }
         if (maybeInner(ot) is given) {
@@ -5854,6 +5970,7 @@ ${
             if (m.method == "join" && el is given) {
                 return refuseMethod(env, e, "E-TYPE-031", "`.join(sep)` joins a tape of strings, and this one holds `" + typeName(el) + "` — there is no ruled conversion of a `" + typeName(el) + "` to a string yet, so nothing converts it implicitly", args, st)
             }
+            if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap — its built-in methods are, on a string: " + strMethodList() + "; on a tape: `.sort()`, `.reverse()`, `.join(sep)`, `.filter(x => …)`, `.map(x => …)`", args, st)
         }
         const lo: int = methodMinArity(op)
@@ -5869,9 +5986,74 @@ ${
         let i = 0
         for (const a of args) {
             st2 = resolveExpr(env, a, sig[i], st2).st
+            if (isPositionArg(op, i) && negLiteral(a)) st2 = addDiag(st2, env.file, a.span, "E-POSITION-NEGATIVE", negPositionMsg(op))
             i = i + 1
         }
         return plain(methodResult(op, ot), addValue(st2, e.nid, ValueFact.VMethod(op)))
+    }
+
+    // s469 — no negative positions (S469 "No negatives anywhere (Recommended)";
+    // Appendix D.1): a negative LITERAL `slice` position — and, derived, a
+    // `repeat` count or a `padStart` / `padEnd` width — is E-POSITION-NEGATIVE
+    // at compile time; a negative COMPUTED one traps at run time
+    // (E-INDEX-OUT-OF-RANGE-RT, the runtime's helpers). `charAt` is not here (a
+    // negative `i` is `""`), nor is an index read (`s[-1]` / `xs[-1]` trap,
+    // literal or computed — §66.12.8 rule 7).
+    fn isPositionArg(op: PrimOp, i: int) -> boolean {
+        if (op == PrimOp.StrSlice) return true
+        if (op == PrimOp.StrRepeat || op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) return i == 0
+        return false
+    }
+
+    // A negative number literal as written: `-` applied to a non-zero literal.
+    fn negLiteral(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .Unary(op: o, e: inner) :> o == UnOp.Neg && positiveLit(inner)
+            else :> false
+        }
+    }
+
+    fn positiveLit(x: AExpr) -> boolean {
+        const k: AExprK = x.k
+        return match k {
+            .Num(raw: r) :> Number(r) > 0
+            else :> false
+        }
+    }
+
+    fn negPositionMsg(op: PrimOp) -> string {
+        let what: string = "a position"
+        let fix: string = "count from the end explicitly: `s.slice(s.length - 1)`"
+        if (op == PrimOp.StrRepeat) {
+            what = "a count"
+            fix = "a count is 0 or more"
+        }
+        if (op == PrimOp.StrPadStart || op == PrimOp.StrPadEnd) {
+            what = "a width"
+            fix = "a width is 0 or more"
+        }
+        return "a negative literal as " + what + " of `." + methodName(op) + "(…)` — no position counts from the end, and a negative one is out of range (Appendix D.1, S469); " + fix
+    }
+
+    // s469 — E-STRING-METHOD-UNKNOWN (Appendix D.1, §34): a method that is not
+    // in the string table, called on a receiver the binder types `string` (the
+    // ONE reader of a receiver's type, as resolveMethod). `not` when the
+    // receiver is not provably a string: the probe's facts and reports are
+    // dropped, and the call takes the general refusal exactly as before.
+    fn unknownStrMethod(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
+        const ro: RX = resolveExpr(env, m.obj, not, st0)
+        const rt: Type | not = ro.x.ty
+        if (rt is not) return not
+        if (rt != Type.Str) return not
+        return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, ro.st)
+    }
+
+    fn strUnknownMsg(n: string) -> string {
+        let fix: string = ""
+        const near: string = strMethodNearest(n)
+        if (near != "") fix = "; write " + near
+        return "`." + n + "(…)` is not a string method — a string's methods are Appendix D.1's table, and nothing else is passed to the host: " + strMethodList() + fix
     }
 
     // s469 — `xs.sort((a, b) => n)`: a NEW tape ordered by the comparator, an
@@ -10162,7 +10344,11 @@ ${
         if (t is not || ro.x.inst is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index read `xs[i]` is in the bootstrap on a value of tape type (`T[…]`) — this value's type is not known to be one; annotate it", st)
         const el: Type | not = seqElem(t)
         if (el is given) return plain(el, addValue(st, e.nid, ValueFact.VIndex(env.file + ":" + lineOf(env.g, env.file, e.span.start))))
-        if (t == Type.Str) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`s[i]` on a `string` is not ruled (§49.13: ⚑ OPEN) — iterate the string (`for (ch of s)`) or use a string method", st)
+        // s469 — `s[i]` on a string (§66.12.8 rule 6, RULED S469): the code point at
+        // position `i`, a `string`; out of range — a negative `i` included, literal or
+        // computed (rule 7) — the same E-INDEX-OUT-OF-RANGE-RT trap (the runtime's ONE
+        // `indexRead`, which counts a string's positions in code points)
+        if (t == Type.Str) return plain(Type.Str, addValue(st, e.nid, ValueFact.VIndex(env.file + ":" + lineOf(env.g, env.file, e.span.start))))
         if (maybeInner(t) is given) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "this value is `" + typeName(t) + "` — it may be `not`, so it cannot be indexed; narrow it first (`if (xs is given) { … xs[i] … }`)", st)
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`[i]` reads a tape by position (§49.13), and this value is `" + typeName(t) + "`", st)
     }
@@ -10219,6 +10405,7 @@ ${
         const ts: TypeState = checkValue(env, ri.vt, Type.Int, i.span, "the index of `xs[i]` (an `int`, §49.13)", ri.ts)
         const t: Type | not = knownOf(ro.vt)
         if (t is not) return rvt(VType.Unknown, ts)
+        if (t == Type.Str) return rvt(known(Type.Str), ts)     // s469: `s[i]` is one code point (§66.12.8 rule 6)
         const el: Type | not = seqElem(t)
         if (el is not) return rvt(VType.Unknown, ts)
         return rvt(known(el), ts)
@@ -13984,6 +14171,7 @@ ${
     // s469 — a typed built-in method's value: methodResult over the receiver's
     // type (the binder admitted the call only for a receiver of a known type).
     fn methodType(ts: TypeState, op: PrimOp, callee: AExpr) -> VType {
+        if (isParseOp(op)) return known(methodResult(op, Type.Str))    // `int.parse(s)`: the receiver is a type, not a value
         const obj: AExpr | not = memberObj(callee)
         if (obj is not) return VType.Unknown
         const rt: Type | not = knownOf(exprType0(ts, obj.nid))
@@ -14075,7 +14263,7 @@ ${
     fn toEnumArgCheck(env: TEnv, e: AExpr, args: AExpr[], ts: TypeState) -> TypeState {
         if (args.length != 1) return ts
         if (!isToEnumFact(valueFact(env.t.values, e.nid))) return ts
-        return checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the argument of `toEnum` (a string, §14.4.1)", ts)
+        return checkValue(env, exprType0(ts, args[0].nid), Type.Str, args[0].span, "the argument of `E.parse` / `E.toEnum` (a string, §14.13.4)", ts)
     }
 
     fn isVariantFact(f: ValueFact | not) -> boolean {
@@ -14234,6 +14422,18 @@ ${
             .Join :> ts
             .IndexRead :> ts
             .AtRead :> ts
+            .StrIndexOf :> ts
+            .StrLastIndexOf :> ts
+            .StrReplace :> ts
+            .StrReplaceAll :> ts
+            .StrPadStart :> ts
+            .StrPadEnd :> ts
+            .StrRepeat :> ts
+            .StrTrimStart :> ts
+            .StrTrimEnd :> ts
+            .ParseInt :> ts
+            .ParseNum :> ts
+            .ParseBool :> ts
         }
     }
 
@@ -14715,6 +14915,18 @@ ${
             .Join :> VType.Unknown
             .IndexRead :> VType.Unknown
             .AtRead :> VType.Unknown
+            .StrIndexOf :> VType.Unknown
+            .StrLastIndexOf :> VType.Unknown
+            .StrReplace :> VType.Unknown
+            .StrReplaceAll :> VType.Unknown
+            .StrPadStart :> VType.Unknown
+            .StrPadEnd :> VType.Unknown
+            .StrRepeat :> VType.Unknown
+            .StrTrimStart :> VType.Unknown
+            .StrTrimEnd :> VType.Unknown
+            .ParseInt :> VType.Unknown
+            .ParseNum :> VType.Unknown
+            .ParseBool :> VType.Unknown
         }
     }
 
