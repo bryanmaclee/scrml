@@ -10463,6 +10463,23 @@ The compiler SHALL:
 
 > **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
 
+> ⚑ **Ruled direction, pending function types (S469, R3′) — this bullet is the current rule, not the language's
+> end state.** The owner re-ruled the S467 F4 line this bullet carries: waiting-ness belongs on the FUNCTION TYPE,
+> bindings MAY hold waiting functions, and a call through such a binding is a suspension point the compiler awaits.
+> That cannot be stated as a rule yet: scrml has no function types, and R3′ is to be built after RP1 (effect
+> subsumption) is ruled. Until then this bullet and §13.9.6 stand as written and are enforced as written —
+> `E-ASYNC-FN-ESCAPES-AS-VALUE` is unchanged. Read them as INTERIM. *(Calling them interim, and keeping them in
+> force until function types land, is the PA's reading of R3′'s "built after RP1"; it is not a separate ruling.)*
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RE-RULED after the live panel — \"what may a function be\"" —
+> *"R3: \"Adopt R3′ (Recommended)\""* — *"**R3 — R3′ adopted.** Waiting-ness is on the function type; bindings may
+> hold waiting functions; a call through one is a suspension point. Built after RP1 subsumption; until then a join
+> of functions with different effects is refused, and no function of unknown effect reaches an indirect call. The
+> sync-host-caller refusal stands."* (supersedes, as LANGUAGE direction, ruling:user-voice-scrml.md S467 "b it is" —
+> dpa-023 F4) · panel text: scrml-support/docs/debates/function-values-generics-panel-2026-10-18.md §4 (R3′) ·
+> the R1–R4 re-ruling is flagged low-confidence by its owner (ruling:user-voice-scrml.md S469 "⚠ CONFIDENCE NOTE").
+> **Direction of change:** none yet — a pointer, not a rule change. When function types and RP1 land, the
+> amendment that adopts R3′ is newly-accepting (a binding that holds a waiting function becomes legal).
+
 - The fire-and-forget exemption applies only to the GLOBAL scheduler. A callee the program itself binds under a scheduler's name (a local, parameter, file-scope function, top-level declaration or import named `setTimeout`, …) is an ordinary function, and passing an async-colored function to it SHALL be `E-ASYNC-FN-ESCAPES-AS-VALUE` The scheduler is global only when the file neither binds its name in any form (a declaration of any pattern shape, a parameter, a function, class or method name, a catch parameter, an import alias, an object-literal key) nor writes it (`setTimeout = …`, `globalThis.setTimeout = …`, `window.setTimeout = …`, a computed write, or a reflective definition such as `Object.defineProperty(globalThis, "setTimeout", …)`); otherwise no exemption is given (fail closed). A scheduler name inside a plain string or a comment is neither.
 - When a handler awaits (above), it runs asynchronously from its first `await` on; by then the browser has performed the event's default action and propagated it. After the handler's first `await` (in source order, once the awaited operand has been evaluated), the handler's event parameter — identified by BINDING, not by name — and every value derived from it SHALL be usable only for a plain read of a non-control property (`event.target`, `event.key`, …). Any other use SHALL be a compile error (`E-EVENT-CONTROL-AFTER-AWAIT`): reading, calling, `.call`/`.bind`-ing or assigning a control member (`preventDefault`, `stopPropagation`, `stopImmediatePropagation`, `returnValue`, `cancelBubble`); a computed member access with a non-literal key; passing the event as an argument; and any use of a value derived from the event — an alias in any binding form (`const`/`let` declaration or later assignment, array or object destructuring of a control member or rest, a container that holds it), a control method taken off it, or a function that uses the event other than by a plain non-control read. A value derived BEFORE the first `await` is equally restricted after it. A destructure of non-control fields (`const { target } = event`) binds plain values and is not restricted. The compiler SHALL NOT move a call (a conditional call would change meaning). "After" is source order, so a call in a branch that does not follow the awaiting branch (`if (c) { … await … } else { event.preventDefault() }`), or after an `await` in a branch that was not taken, is also rejected — a known conservative case: move the call before the first server call. An inner parameter or a block-local binding that is also named `event` is a different binding and is not restricted.
 - A call the compiler awaits yields the resolved value, not a Promise. Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile error (`E-ASYNC-CALL-PROMISE-METHOD`).
@@ -11255,6 +11272,24 @@ declared type or leave (E-ERROR-012). `not` is a value of `(not to T)`: it retur
 ```
 
 #### 13.9.6 A waiting function is bound only by a `function` declaration
+
+> ⚑ **Ruled direction, pending function types (S469, R3′).** This subsection states S467 F4 as a rule, and it
+> stays the rule — enforced, unchanged — until function types exist. The owner has since re-ruled the direction:
+> waiting-ness is part of a function's type, a binding MAY hold a waiting function, and a call through one is a
+> suspension point. R3′ is built after RP1 (effect subsumption); until RP1 rules, a join of functions with different
+> effects is refused and no function of unknown effect reaches an indirect call; the synchronous-host-caller
+> refusal stands. When that lands, this subsection's "no binding SHALL hold an async-colored function" is
+> superseded, not before. *(Treating this subsection as INTERIM until then is the PA's reading of R3′'s
+> sequencing, not a separate ruling.)* The §13.2 async-colored bullet carries the same note.
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RE-RULED after the live panel — \"what may a function be\"" —
+> *"R3: \"Adopt R3′ (Recommended)\""* — *"**R3 — R3′ adopted.** Waiting-ness is on the function type; bindings may
+> hold waiting functions; a call through one is a suspension point. Built after RP1 subsumption; until then a join
+> of functions with different effects is refused, and no function of unknown effect reaches an indirect call. The
+> sync-host-caller refusal stands."* (supersedes, as LANGUAGE direction, ruling:user-voice-scrml.md S467 "b it is" —
+> dpa-023 F4) · panel text: scrml-support/docs/debates/function-values-generics-panel-2026-10-18.md §4 (R3′) ·
+> the R1–R4 re-ruling is flagged low-confidence by its owner (ruling:user-voice-scrml.md S469 "⚠ CONFIDENCE NOTE").
+> **Direction of change:** none yet — a pointer, not a rule change. When function types and RP1 land, the
+> amendment that adopts R3′ is newly-accepting (a binding that holds a waiting function becomes legal).
 
 An async-colored function (§13.2) SHALL be bound only by a `function` declaration, including `export function`
 and a `function` declared inside another function's body. **No binding SHALL hold an async-colored function.** A
