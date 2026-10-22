@@ -2,9 +2,10 @@ type Phase:enum = { Idle, Running, Done }
 
 <count> = 0
 
-${ function startGame() {
-    @count = @count + 1;
-    @count = @count + "start".length;
+${ function startGame() -> string {
+    let label = "Idle";
+    label = label + ": press start";
+    return label;
 } }
 
 <p>Count: ${@count}</>

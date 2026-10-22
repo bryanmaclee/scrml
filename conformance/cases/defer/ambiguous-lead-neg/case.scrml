@@ -1,6 +1,6 @@
 ${
     <trace> = ""
-    function note(x) { @trace = @trace + x + ";" }
+    function note(x: int) { @trace = @trace + x + ";" }
 
     function a() {
         let defer = [1, 2]

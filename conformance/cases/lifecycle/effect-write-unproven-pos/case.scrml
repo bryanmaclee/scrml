@@ -1,7 +1,7 @@
 // §6.7.4 rule 4 — a call through a local.
 <program>
   <n> = 0
-  function beacon(v) {
+  function beacon(v: number) {
     return v
   }
   <effect deps=[@n]>${

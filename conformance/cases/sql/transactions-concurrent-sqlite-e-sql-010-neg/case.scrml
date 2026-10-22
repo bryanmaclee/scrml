@@ -1,6 +1,6 @@
 <program db="./ledger.db" transactions="concurrent">
     ${
-        function record(note) {
+        function record(note: string) {
             ?{`INSERT INTO entries (note) VALUES (${note})`}.run()
             return 1
         }

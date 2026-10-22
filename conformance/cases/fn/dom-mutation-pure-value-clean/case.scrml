@@ -1,6 +1,6 @@
 <program>
 ${
-    fn build(x) {
+    fn build(x: int) {
         let n = x * 2
         return n
     }

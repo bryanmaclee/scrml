@@ -2,7 +2,7 @@ ${
     <n> = 0
     fn bad(x: number) -> number {
         defer @n = 5
-        x + 1
+        return x + 1
     }
     function go() {
         @n = bad(1)

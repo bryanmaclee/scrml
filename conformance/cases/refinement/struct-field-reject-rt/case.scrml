@@ -3,7 +3,7 @@ ${
     <good>: string = "https://scrml.dev/"
     <evil>: string = "javascript:alert(1)"
     <shown>: string = "none"
-    function show(h) {
+    function show(h: string) {
         const l: Link = { href: h }
         @shown = l.href
     }

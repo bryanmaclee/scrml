@@ -4,7 +4,7 @@ ${
     fn settle(x: number) -> number {
         let acc = x * 2
         defer acc = 0
-        acc + 1
+        return acc + 1
     }
 
     function go() {

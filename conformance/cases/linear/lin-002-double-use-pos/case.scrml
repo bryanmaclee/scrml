@@ -1,7 +1,7 @@
 ${
     function fetchToken() { return "t" }
-    function authenticate(t) { return t }
-    function refresh(t) { return t }
+    function authenticate(t: string) { return t }
+    function refresh(t: string) { return t }
     lin token = fetchToken()
     authenticate(token)
     refresh(token)

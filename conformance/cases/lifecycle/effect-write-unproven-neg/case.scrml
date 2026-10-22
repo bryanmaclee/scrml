@@ -1,7 +1,7 @@
 // §6.7.4 — a resolved, write-free call.
 <program>
   <n> = 0
-  function beacon(v) {
+  function beacon(v: number) {
     return v
   }
   <effect deps=[@n]>${ beacon(@n) }</>

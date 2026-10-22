@@ -5,7 +5,7 @@ ${
         @trace = @trace + s
     }
 
-    function f(x) {
+    function f(x: string) {
         defer D("x=" + x + ";")
         let x = "inner"
         return x

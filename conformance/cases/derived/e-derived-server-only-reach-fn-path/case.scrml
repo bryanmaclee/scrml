@@ -14,7 +14,7 @@ ${ import { hashPassword } from 'scrml:auth' }
 //
 // This is also the resolution E-DERIVED-SERVER-ONLY-REACH's message names: move
 // the call into a `function`, write the result to a plain reactive cell.
-${ function computeHash(pw) {
+${ function computeHash(pw: string) {
     return hashPassword(pw)
 } }
 

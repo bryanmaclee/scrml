@@ -1,6 +1,6 @@
 ${
     <trace> = ""
-    function note(v) { @trace = @trace + v + ";" }
+    function note(v: string) { @trace = @trace + v + ";" }
     type M:enum = { A(defer: string), B }
     function go() { h(M.A("xy")) }
     function h(m: M) {

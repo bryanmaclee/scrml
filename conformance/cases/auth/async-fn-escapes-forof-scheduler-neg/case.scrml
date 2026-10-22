@@ -3,7 +3,7 @@ ${
   import { verifyPassword } from 'scrml:auth'
 }
 <verdict> = "unset"
-server function check(pw, hash) {
+server function check(pw: string, hash: string) {
   for (const setTimeout of [(f, a, b) => f(a, b)]) {
     return setTimeout(verifyPassword, pw, hash) ? "accepted" : "rejected"
   }

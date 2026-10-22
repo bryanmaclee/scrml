@@ -1,6 +1,6 @@
 <program db="./test.db">
 ${
-    fn loadName(id) {
+    fn loadName(id: int) {
         let row = ?{`SELECT name FROM users WHERE id = ${id}`}.get()
         return row.name
     }

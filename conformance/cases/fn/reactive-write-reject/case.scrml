@@ -1,7 +1,7 @@
 <program>
 ${ @counter = 0 }
 ${
-    fn badWrite(a) {
+    fn badWrite(a: int) {
         @counter = a
         return a
     }
