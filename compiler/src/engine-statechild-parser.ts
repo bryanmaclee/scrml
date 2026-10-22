@@ -83,7 +83,7 @@ import type {
 import { urlSlashesAt } from "./block-splitter.js";
 // S469 (SECURITY) — every `${…}` block in an opener is bounded by acorn (`logicBlockClose`),
 // never by a brace counter: the text cut out is what the failable walk reads and codegen emits.
-import { logicBlockClose, braceBlockClose } from "./logic-block-extent.ts";
+import { logicBlockClose, braceBlockClose } from "./interpolation-extent.ts";
 
 /**
  * S469 — the index one past a BODY `${…}` interpolation at `i` (a closer-finder's skip),

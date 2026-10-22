@@ -98,7 +98,7 @@ import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 // template text), never `/\$\{([^}]*)\}/`, which ended a slot at a `}` inside a string
 // (`${ "}" + k }` read as ` "`): the name `k` was missed, a batch that reads `k` was split off
 // without it, and its server half threw a ReferenceError (or read a module-scope `k`).
-import { templateInterpolationPayloads } from "./logic-block-extent.ts";
+import { templateInterpolationPayloads } from "./interpolation-extent.ts";
 const sqlSlotText = (sql: string): string => liveSqlInterpolations(sql).map((s) => s.expr).join(" ");
 import { exprReadsFreeSession, markLocallyBoundSession, identityReadInDefaultDeep, type IdentityNameResolution } from "./free-name.ts";
 import { bindingsOfFile, bindingsOfName, type Binding } from "./binding-provenance.ts";

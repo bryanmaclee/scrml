@@ -22,7 +22,7 @@
 // codegen never emits it.
 // ---------------------------------------------------------------------------
 
-import { soleLogicBlockPayload } from "./logic-block-extent.ts";
+import { soleLogicBlockPayload } from "./interpolation-extent.ts";
 
 export interface EngineBodyRead {
   /** The AST builder's output for the wrapped body (`{ ast, errors, … }`), or null when it threw. */

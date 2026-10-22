@@ -56,7 +56,7 @@ import { isStdlibFilePath } from "../module-resolver.js";
 // @ts-ignore — acorn ships its own types but the plugin API is untyped
 import * as acorn from "acorn";
 import { ScrmlParser } from "../scrml-acorn.ts";
-import { logicBlockClose } from "../logic-block-extent.ts";
+import { sliceTemplateText } from "../interpolation-extent.ts";
 
 /**
  * S469 (LOW-1) — does JavaScript read an `await` in `payload` (an interpolation's text)? Read by
@@ -83,25 +83,14 @@ function payloadHasAwait(payload: string): boolean {
 }
 
 /**
- * S469 (LOW-1) — does template TEXT (a template literal's source, or a quoted attribute value
- * `data-v="… ${ … } …"`) hold an `await` in one of its `${ … }` interpolations? Each
- * interpolation is bounded by acorn (`logicBlockClose`, the reader codegen's emitted template
- * runs under); one it cannot bound is read to the end of the text.
+ * S469 (LOW-1) — does template TEXT (a template literal's source, or with `bare` a quoted
+ * attribute value `data-v="… ${ … } …"`) hold an `await` in one of its `${ … }` interpolations?
+ * Sliced by THE slicer codegen emits from (`sliceTemplateText`, interpolation-extent.ts); an
+ * interpolation it cannot bound is read to the end of the text.
  */
-function templateTextHasAwait(text: string): boolean {
-  let i = 0;
-  while (i < text.length) {
-    const c = text.charCodeAt(i);
-    if (c === 92 /* \ */) { i += 2; continue; }
-    if (c === 36 /* $ */ && text.charCodeAt(i + 1) === 123 /* { */) {
-      const close = logicBlockClose(text, i);
-      const payload = close >= 0 ? text.slice(i + 2, close) : text.slice(i + 2);
-      if (payloadHasAwait(payload)) return true;
-      if (close < 0) return false;
-      i = close + 1;
-      continue;
-    }
-    i++;
+function templateTextHasAwait(text: string, bare: boolean): boolean {
+  for (const seg of sliceTemplateText(text, { bare }).segments) {
+    if (seg.kind === "expr" && payloadHasAwait(seg.text)) return true;
   }
   return false;
 }
@@ -308,16 +297,14 @@ export function runAsyncAwaitReject(
           for (const a of attrs as Array<Record<string, unknown>>) {
             const v = a?.value as Record<string, unknown> | undefined;
             if (v && v.kind === "string-literal" && typeof v.value === "string" && v.value.includes("${")
-                && templateTextHasAwait(v.value)) {
+                && templateTextHasAwait(v.value, true)) {
               awaitInTemplate(((a.span ?? v.span) as Span | undefined) ?? spanOf(n, filePath));
             }
           }
         }
       }
       if (kind === "lit" && n.litType === "template" && typeof n.raw === "string" && n.raw.includes("${")) {
-        let raw = (n.raw as string).trim();
-        if (raw.startsWith("`")) raw = raw.slice(1, raw.endsWith("`") && raw.length > 1 ? -1 : undefined);
-        if (templateTextHasAwait(raw)) { awaitInTemplate(spanOf(n, filePath)); return; }
+        if (templateTextHasAwait((n.raw as string).trim(), false)) { awaitInTemplate(spanOf(n, filePath)); return; }
       }
 
       // `for await ... of` — E-FOR-AWAIT-NOT-IN-SCRML (ast-builder records

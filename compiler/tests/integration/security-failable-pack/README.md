@@ -92,6 +92,6 @@ TMPDIR=$HOME/.cache/<scratch> bun compiler/tests/integration/security-failable-p
 Every body the compiler kept as raw text in an `<engine>` (a state-child / opener `effect=`, an
 `<onTransition>` body and `if=` guard, a `(state × message)` arm, a computed `<onTimeout after=>`,
 a `:`-shorthand state body) or a `<match>` (an arm body, bare or `:`-shorthand, and the handlers in
-it) is bounded by acorn (`logic-block-extent.ts`), parsed once (`engine-body-reader.ts`,
+it) is bounded by acorn (`interpolation-extent.ts`, the one reader shared with the template-interpolation slicer), parsed once (`engine-body-reader.ts`,
 `arm-body-reader.ts`), walked by the failable check and lowered from the same nodes. The handled
 forms (`check(p) !{…}`, a `match` on the call) went from refused or silently wrong to PASS.

@@ -1,6 +1,6 @@
 // S469 (s469-engine-effect-failable, SECURITY) — engine / `<match>` bodies kept as raw text.
 //
-//   1. logic-block-extent: a raw-text `${ … }` block ends where acorn (both goals) ends it.
+//   1. interpolation-extent (BLOCK mode): a raw-text `${ … }` block ends where acorn (both goals) ends it.
 //   2. E-ERROR-002 over every engine raw-text body (state-child / opener `effect=`,
 //      `<onTransition>` body and `if=` guard, message arm, `<onTimeout after=${…}>`,
 //      `:`-shorthand state body) and `<match>` `:`-shorthand arm; the handled forms compile.
@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileScrml } from "../../src/api.js";
-import { logicBlockClose, braceBlockClose, soleLogicBlockPayload } from "../../src/logic-block-extent.ts";
+import { logicBlockClose, braceBlockClose, soleLogicBlockPayload, interpolationClose, sliceTemplateText } from "../../src/interpolation-extent.ts";
 
 let root;
 let seq = 0;
@@ -47,7 +47,7 @@ const ENG = (body, opener = "") => HEAD + `<engine for=S initial=.A${opener}>\n$
 const EFF = (e) => ENG(`<A rule=.B effect=\${ ${e} }><p>a</p></A>\n<B rule=.A><p>b</p></B>`);
 const TERN = `@msg = check(@pw) ? "IN" : "OUT"`;
 
-describe("logic-block-extent — acorn bounds a raw-text ${…} block", () => {
+describe("interpolation-extent BLOCK mode — acorn bounds a raw-text ${…} block", () => {
   const close = (s) => { const i = s.indexOf("${"); const e = logicBlockClose(s, i); return e < 0 ? null : s.slice(i + 2, e); };
   test("a } in a string, comment, template or regex does not close it", () => {
     expect(close('x=${ a = "}" + b }>')).toBe(' a = "}" + b ');
@@ -73,6 +73,24 @@ describe("logic-block-extent — acorn bounds a raw-text ${…} block", () => {
     expect(s.slice(0, braceBlockClose(s, 0) + 1)).toBe('{ @a = "}"; .B }');
     expect(soleLogicBlockPayload(' ${ a("}") } ')).toBe(' a("}") ');
     expect(soleLogicBlockPayload("${ a }${ b }")).toBe(null);
+  });
+});
+
+describe("interpolation-extent — ONE reader for template interpolations and logic blocks", () => {
+  test("EXPRESSION mode (template text) admits one expression only — no token / markup fallback", () => {
+    const s = "${ a\n b }";
+    expect(interpolationClose(s, 2)).toBe(-1);
+    expect(logicBlockClose(s, 0)).toBe(s.length - 1); // a statement list is a logic block
+    expect(sliceTemplateText("x ${ <p>y</p> } z", { bare: true }).unreadable).not.toBe(null);
+  });
+  test("the script goal reads `await` as a name: `${ await /}/ }` is unreadable in both modes", () => {
+    expect(sliceTemplateText("${ await /}/g }", { bare: true }).unreadable).not.toBe(null);
+    expect(logicBlockClose("${ await /}/g }", 0)).toBe(-1);
+  });
+  test("tokenizeTemplateInterpolations is the same slicer (a `}` in a comment does not close)", async () => {
+    const { tokenizeTemplateInterpolations } = await import("../../src/expression-parser.ts");
+    const segs = tokenizeTemplateInterpolations("`a ${ /* } */ x } b`");
+    expect(segs.filter((s) => s.kind === "expr").map((s) => s.text)).toEqual([" /* } */ x "]);
   });
 });
 

@@ -23,6 +23,8 @@ import * as acorn from "acorn";
 import { generate as astringGenerate } from "astring";
 import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 import { ScrmlParser } from "./scrml-acorn.ts";
+import { sliceTemplateText } from "./interpolation-extent.ts";
+import type { TemplateSegment } from "./interpolation-extent.ts";
 import { boundNamesOf } from "./binding-names.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
@@ -4521,12 +4523,10 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
  *   surrounding `${` and `}`); `exprOffset` is the offset of the FIRST
  *   character of the expression text within the full `raw` string.
  */
-export interface TemplateSegment {
-  kind: "quasi" | "expr";
-  text: string;
-  /** Offset of `text[0]` within the original `raw` string. */
-  offset: number;
-}
+// S469 — the segment shape and the slicer live in interpolation-extent.ts (THE one reader of a
+// `${…}` extent); re-exported here for existing importers.
+export type { TemplateSegment } from "./interpolation-extent.ts";
+export { sliceTemplateText, hasHtmlLikeComment } from "./interpolation-extent.ts";
 
 /**
  * Tokenize a template-literal `raw` string into quasis and interpolations.
@@ -4548,111 +4548,14 @@ export interface TemplateSegment {
  *            a single quasi covering the whole string.
  */
 export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
-  const segments: TemplateSegment[] = [];
-  if (!raw || typeof raw !== "string") return segments;
-
-  // Strip surrounding backticks if present; the inner content is what we walk.
-  // We track offsets relative to the ORIGINAL `raw` string so spans line up.
-  // (S469: NOT the slicer of any text the failable walk or codegen must agree on — that is
-  // `sliceTemplateText`, acorn's boundaries. This one is a heuristic that does not know
-  // comments or regular expressions.)
-  let i = 0;
-  let innerStart = 0;
-  let innerEnd = raw.length;
-  if (raw.startsWith("`")) {
-    innerStart = 1;
-    if (raw.endsWith("`") && raw.length >= 2) innerEnd = raw.length - 1;
-    i = innerStart;
-  }
-
-  let quasiStart = i;
-
-  while (i < innerEnd) {
-    const ch = raw.charCodeAt(i);
-    // Backslash escape: skip the next char inside literal text.
-    if (ch === 92 /* \ */) { i += 2; continue; }
-    // ${ — interpolation start.
-    if (ch === 36 /* $ */ && i + 1 < innerEnd && raw.charCodeAt(i + 1) === 123 /* { */) {
-      // Emit the preceding quasi.
-      if (i > quasiStart) {
-        segments.push({ kind: "quasi", text: raw.slice(quasiStart, i), offset: quasiStart });
-      } else {
-        segments.push({ kind: "quasi", text: "", offset: quasiStart });
-      }
-      const exprStart = i + 2;
-      // Walk forward respecting nested braces and strings.
-      let depth = 1;
-      let j = exprStart;
-      while (j < innerEnd && depth > 0) {
-        const c = raw.charCodeAt(j);
-        if (c === 92 /* \ */) { j += 2; continue; }
-        if (c === 123 /* { */) { depth++; j++; continue; }
-        if (c === 125 /* } */) { depth--; j++; continue; }
-        // Single-quoted string.
-        if (c === 39 /* ' */) {
-          j++;
-          while (j < innerEnd) {
-            const sc = raw.charCodeAt(j);
-            if (sc === 92) { j += 2; continue; }
-            if (sc === 39) { j++; break; }
-            j++;
-          }
-          continue;
-        }
-        // Double-quoted string.
-        if (c === 34 /* " */) {
-          j++;
-          while (j < innerEnd) {
-            const sc = raw.charCodeAt(j);
-            if (sc === 92) { j += 2; continue; }
-            if (sc === 34) { j++; break; }
-            j++;
-          }
-          continue;
-        }
-        // Nested backtick template — count balanced backticks. We do not
-        // recurse here; re-parse will handle the nested template structure
-        // via esTreeToExprNode (which calls back into the lit case).
-        if (c === 96 /* ` */) {
-          j++;
-          let nestedDepth = 0;
-          while (j < innerEnd) {
-            const tc = raw.charCodeAt(j);
-            if (tc === 92) { j += 2; continue; }
-            if (tc === 36 /* $ */ && j + 1 < innerEnd && raw.charCodeAt(j + 1) === 123) {
-              nestedDepth++;
-              j += 2;
-              continue;
-            }
-            if (tc === 125 /* } */ && nestedDepth > 0) {
-              nestedDepth--;
-              j++;
-              continue;
-            }
-            if (tc === 96 /* ` */ && nestedDepth === 0) { j++; break; }
-            j++;
-          }
-          continue;
-        }
-        j++;
-      }
-      // depth==0 means we consumed the closing `}`; the expression text
-      // ends at j-1 (one before the closing brace).
-      const exprEnd = depth === 0 ? j - 1 : j;
-      segments.push({ kind: "expr", text: raw.slice(exprStart, exprEnd), offset: exprStart });
-      i = j;
-      quasiStart = i;
-      continue;
-    }
-    i++;
-  }
-
-  // Trailing quasi.
-  if (quasiStart < innerEnd) {
-    segments.push({ kind: "quasi", text: raw.slice(quasiStart, innerEnd), offset: quasiStart });
-  }
-
-  return segments;
+  // S469 — no longer a second reader: the segments are `sliceTemplateText`'s (acorn's
+  // boundaries, both goals). Its brace / quote walk did not know comments or regular
+  // expressions, so `${ /* } */ x }` was cut at the comment's `}` for every caller here (the
+  // `@`-reference reader, the meta allow-list, the reserved-prefix check, the gauntlet checks).
+  // An interpolation the slicer cannot bound is one `expr` segment holding the rest of the
+  // text (readers of names over-approximate; nothing after it is sliced).
+  if (!raw || typeof raw !== "string") return [];
+  return sliceTemplateText(raw).segments;
 }
 
 /**
@@ -4824,101 +4727,6 @@ function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & objec
     } catch { /* read segment by segment below */ }
   }
   return templateTextInterpolationNodes(raw, file, start, lit.span);
-}
-
-/**
- * S469 (review of 065fd2035, HIGH-1) — the `${…}` boundaries of template TEXT, taken from THE
- * reader JavaScript uses: each interpolation's expression is parsed by acorn (`ScrmlParser`,
- * the compiler's acorn with the `@cell` / enum plugins) from just after its `${`, and its
- * closing `}` is the first TOKEN after that expression — so a `}` inside a string, a regular
- * expression, a comment or a nested template never closes it, exactly as when the browser runs
- * the emitted template literal. Quasi text follows the template-literal rules codegen writes it
- * under: a `\` escapes the next character; a literal backtick is escaped on emission.
- *
- * `raw` is a template literal's source (outer backticks stripped) or, with `bare`, a QUOTED
- * attribute value. Returns the segments (offsets into `raw`) and, when an interpolation does
- * not parse or is not closed by a `}`, `unreadable` = its text from after the `${` to the end
- * (nothing after it is sliced: the boundaries are no longer known).
- *
- * The one slicer of this text: `rewriteTemplateAttrValue` (codegen) emits from these segments
- * and `templateTextInterpolationNodes` (the failable walk) reads them.
- */
-/**
- * S469 (review of d5f5d3ea1, HIGH-1) — `text` holds `<!--`, or a `-->` that only white space
- * (or a block comment's close) precedes on its line: Annex B HTML-like comment openers, which a
- * classic script reads as comments and a module does not. Legitimate interpolation code never
- * needs them (as text inside a string they are also refused: the check is lexical, fail closed).
- */
-export function hasHtmlLikeComment(text: string): boolean {
-  if (text.includes("<!--")) return true;
-  for (const line of text.split(/\r\n|[\n\r\u2028\u2029]/)) {
-    const at = line.indexOf("-->");
-    if (at < 0) continue;
-    const before = line.slice(0, at);
-    if (before.trim() === "" || before.includes("*/")) return true;
-  }
-  return false;
-}
-
-export function sliceTemplateText(
-  raw: string, opts: { bare?: boolean } = {},
-): { segments: TemplateSegment[]; unreadable: string | null } {
-  const segments: TemplateSegment[] = [];
-  if (typeof raw !== "string") return { segments, unreadable: null };
-  let i = 0;
-  let end = raw.length;
-  if (!opts.bare && raw.startsWith("`")) {
-    i = 1;
-    if (raw.length >= 2 && raw.endsWith("`")) end = raw.length - 1;
-  }
-  const src = raw.slice(0, end);
-  let quasiStart = i;
-  // S469 (review of d5f5d3ea1, HIGH-1) — BOTH goals. A client bundle runs as a CLASSIC SCRIPT,
-  // where Annex B makes `<!--` (and a line-initial `-->`) a single-line comment; a module (a
-  // server bundle) has no such comments. An interpolation is bounded only when the script and
-  // the module readings agree on where it ends, and one holding either sequence is refused
-  // (`${ 1 <!--y }⏎&& check(p) … }` closed at the `}` for the module reader while the browser
-  // ran `check(p)`).
-  const closeUnder = (sourceType: "script" | "module", exprStart: number): number => {
-    const acornOpts = { ecmaVersion: 2025, sourceType, allowAwaitOutsideFunction: true };
-    try {
-      // @ts-ignore — acorn's static API on the extended parser
-      const node = ScrmlParser.parseExpressionAt(src, exprStart, acornOpts) as { end: number };
-      // The first token after the expression, read in place (a tokenizer over the WHOLE text
-      // started at the expression's end, so a line-initial `-->` is judged on its real line).
-      // @ts-ignore
-      const tz = ScrmlParser.tokenizer(src, acornOpts) as { pos: number; start: number; end: number; lastTokEnd: number; getToken(): { type?: { label?: string }; start: number } };
-      // `next()` copies `end` into `lastTokEnd`: both are set, so a `-->` counts as
-      // line-initial only when a line break really precedes it.
-      tz.pos = tz.start = tz.end = tz.lastTokEnd = node.end;
-      const tok = tz.getToken();
-      return tok && tok.type && tok.type.label === "}" ? tok.start : -1;
-    } catch { return -1; }
-  };
-  while (i < end) {
-    const ch = src.charCodeAt(i);
-    if (ch === 92 /* \ */) { i += 2; continue; }
-    if (ch === 36 /* $ */ && src.charCodeAt(i + 1) === 123 /* { */) {
-      segments.push({ kind: "quasi", text: src.slice(quasiStart, i), offset: quasiStart });
-      const exprStart = i + 2;
-      const asModule = closeUnder("module", exprStart);
-      const asScript = closeUnder("script", exprStart);
-      let closeAt = asModule >= 0 && asModule === asScript ? asModule : -1;
-      if (closeAt >= 0 && hasHtmlLikeComment(src.slice(exprStart, closeAt))) closeAt = -1;
-      if (closeAt < 0) {
-        const rest = src.slice(exprStart);
-        segments.push({ kind: "expr", text: rest, offset: exprStart });
-        return { segments, unreadable: rest };
-      }
-      segments.push({ kind: "expr", text: src.slice(exprStart, closeAt), offset: exprStart });
-      i = closeAt + 1;
-      quasiStart = i;
-      continue;
-    }
-    i++;
-  }
-  if (quasiStart < end) segments.push({ kind: "quasi", text: src.slice(quasiStart, end), offset: quasiStart });
-  return { segments, unreadable: null };
 }
 
 /**

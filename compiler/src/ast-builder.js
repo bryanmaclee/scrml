@@ -119,7 +119,7 @@ import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
 import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
 import { lowerMdBlock, checkMdInPhrasing, assignMdHeadingIds, sourceHasMdElement, refuseUnreadMdElements } from "./md-lower.ts";
-import { logicBlockClose } from "./logic-block-extent.ts";
+import { logicBlockClose } from "./interpolation-extent.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
