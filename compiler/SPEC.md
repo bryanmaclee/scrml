@@ -3459,8 +3459,8 @@ notifications and two potential re-renders.
 ```scrml
 ${ function removeTwo(i, j) {
     // One reactive write. Subscribers see only the final state.
-    let lo = Math.min(i, j)
-    let hi = Math.max(i, j)
+    let lo = min(i, j)              // `min` / `max` from scrml:math (§41.18; no ambient `Math`, Appendix D)
+    let hi = max(i, j)
     let tmp = @arr.slice()          // plain clone; does NOT trigger subscribers
     tmp.splice(hi, 1)               // plain JS splice on non-reactive variable
     tmp.splice(lo, 1)               // plain JS splice on non-reactive variable
@@ -7515,7 +7515,7 @@ Writes to `@scrollY` are throttled. The first write in any window emits immediat
 | Form | Example | Notes |
 |---|---|---|
 | Literal | `300ms`, `2s`, `1m`, `1h` | Constant-folded to integer milliseconds at compile time. |
-| Computed | `${expr}ms`, `${@delay}s`, `${Math.min(1000, @backoff)}ms` | Any non-negative-number expression × unit-multiplier, evaluated per-fire. Negative / NaN clamped to zero by the runtime. |
+| Computed | `${expr}ms`, `${@delay}s`, `${min(1000, @backoff)}ms` (`min` from `scrml:math`, §41.18) | Any non-negative-number expression × unit-multiplier, evaluated per-fire. Negative / NaN clamped to zero by the runtime. |
 
 The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/parse-after-duration.ts`) — the same parser used by `<onTimeout after=>` and the legacy `<machine>` `.From after DURATION => .To` form. Single-level brace match for the computed form (no nested braces inside `${...}`); see the helper's grammar note.
 
@@ -9680,7 +9680,7 @@ Plain `.css` files placed alongside `.scrml` source files are valid CSS. scrml's
 
 1. **Accumulation mode** (original behavior). When `lift` appears in an anonymous `${}` block whose parent is a markup or style context, `lift` appends the value to the block's accumulator array. The accumulated array is coerced when the logic block exits, according to the parent context type (§10.2). This is the original lift behavior and is unchanged.
 
-2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL designate that value in exactly one of two ways: an explicit `lift` statement, **or** the §17.6.10 value-form sugar, in which an arm body that is exactly one expression carries an *implied* `lift` of that expression. The designated value becomes the result of the if-as-expression at the binding site.
+2. **Value-lift mode**. When `lift` appears inside an if-as-expression context (§17.6), `lift` designates the expression's result value. Each arm of an if-as-expression that wishes to produce a value SHALL designate that value in exactly one of two ways: an explicit `lift` statement, **or** the §17.6.10 value-form sugar, in which an arm body that is exactly one expression carries an *implied* `lift` of that expression. The designated value becomes the result of the if-as-expression at the binding site. *(⚑ S469: whether the implied `lift` of a single-expression branch survives the "block arms yield with `lift`" ruling is OPEN — §17.6.10.)*
 
    > **S391 amendment.** The prior wording — "SHALL contain exactly one `lift` statement" — admitted only the explicit form and therefore contradicted both §17.6.10 and the shipping compiler, which accepts (and has accepted since the value-form landed) a lift-less single-expression arm. The sugar is defined in §17.6.10; this bullet is corrected here so §10 does not assert the opposite of §17.6. The multiplicity rule below ("at most once on any execution path") is unchanged and applies to the implied `lift` exactly as to an explicit one. Ratified S371, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`.
 
@@ -9744,7 +9744,7 @@ A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulat
 - `lift` SHALL be valid inside an anonymous `${ }` logic context (including the arm bodies of an if-as-expression, which are anonymous `${}` contexts).
 - `lift` SHALL also be valid inside a `fn` body, where it accumulates into the `fn` body's local `~` (§48.5); the `fn` returns the accumulated value with `return ~`. A `lift` inside a `fn` that targets a `~` initialized outside the `fn` boundary SHALL be E-FN-008 (§48.5.2).
 - `lift` inside a bare `function name() { ... }` body SHALL be a compile error (E-SYNTAX-002). E-SYNTAX-002 is scoped to bare `function` bodies and SHALL NOT fire on a `fn` body (§48.5, §48.6).
-- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002. This rule bounds MULTIPLICITY, not PRESENCE: it is satisfied by an arm body with no `lift` at all, and the §17.6.10 implied `lift` of a single-expression arm counts as that arm's one `lift` for the purpose of this rule. A single-expression arm body can therefore never trigger E-LIFT-002 (it has exactly one implied `lift` and, by the §17.6.10 grammar, no room for a second).
+- In value-lift mode (§17.6), `lift` SHALL appear at most once on any execution path through an arm body. If a single arm body contains two or more reachable `lift` statements on the same execution path, the compiler SHALL emit E-LIFT-002. This rule bounds MULTIPLICITY, not PRESENCE: it is satisfied by an arm body with no `lift` at all, and the §17.6.10 implied `lift` of a single-expression arm counts as that arm's one `lift` for the purpose of this rule. A single-expression arm body can therefore never trigger E-LIFT-002 (it has exactly one implied `lift` and, by the §17.6.10 grammar, no room for a second). *(⚑ S469: the implied `lift` is OPEN under the "block arms yield with `lift`" ruling — §17.6.10.)*
 - In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item. In value-lift mode, `lift` is a single-result designator, not an accumulator.
 - The compiler SHALL track all `lift` calls within a logic block and accumulate them into a typed array (accumulation mode only).
 - The compiler SHALL validate that all lifted values are of a compatible type. Lifting heterogeneous types that are not mutually coercible SHALL be a compile error (E-TYPE-012).
@@ -10851,11 +10851,11 @@ fix · Nominal with §13.9.)*
   } }
 
   <n> = userCount()                                   // E-VALUE-SERVER-CALL — the initializer of `@n` calls `userCount`
-  const <label> = "Users: " + userCount()             // E-VALUE-SERVER-CALL — the formula of derived `@label`
+  const <label> = `Users: ${userCount()}`             // E-VALUE-SERVER-CALL — the formula of derived `@label`
   <p>${userCount()}</p>                               // E-VALUE-SERVER-CALL — the interpolation
   <p class=${userCount() > 10 ? "busy" : ""}>…</p>    // E-VALUE-SERVER-CALL — the `class=` value
 
-  ${ function usersLabel() { return "Users: " + userCount() } }   // a client function that reaches userCount
+  ${ function usersLabel() { return `Users: ${userCount()}` } }   // a client function that reaches userCount
   <p>${usersLabel()}</p>                              // E-VALUE-SERVER-CALL (item 2) — usersLabel reaches userCount
   <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
   <about> = fetch("/about.txt")                       // E-VALUE-SERVER-CALL (item 4) — `fetch` returns a Promise
@@ -17369,7 +17369,7 @@ ${
 ```scrml
 <div>${
     const label = if (@count > 0) {
-        lift "Items: " + @count
+        lift `Items: ${@count}`                  // S469: `+` takes two strings; a template interpolates (§14.13)
     } else {
         lift "No items"
     }
@@ -17439,6 +17439,16 @@ cascade — the result is `not` (§17.6.4), which renders as **nothing**.
   value into the interpolation's position.
 - A branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`. The
   implied `lift` counts as that branch's single `lift` for the §10 multiplicity rule (E-LIFT-002).
+
+> ⚑ **OPEN (S469) — the same question as §18.5, for an `if` branch.** The S469 ruling *"Block arms yield with lift
+> (Recommended)"* (§18.5) makes a bare last expression in a value-position BLOCK ARM an error, and keeps the
+> single-expression arm `.A :> expr`. An if-as-expression branch is always braced, so its single-expression form
+> `{ "Admin" }` (this section's implied `lift`, ratified S371 "value-form b") is braced like a block but holds no
+> statement, like `.A :> expr`. The ruling did not say which it is. This section is unchanged until that is ruled;
+> the §10.1 value-lift bullets that cite it are flagged with it. A `match` value-form is unaffected: its arms are
+> inline-value arms. PA recommendation: keep the single-expression branch `{ e }` (it is the `if` spelling of
+> `.A :> e`, and S371 ratified it), and require `lift` as soon as a branch holds a statement — which §18.5's rule
+> already does for any branch that is a block with statements.
 - A value-form `if` SHALL NOT require a trailing `else`. When the `else` is absent, the false path
   SHALL contribute `not` per §17.6.4 and SHALL render as nothing. The compiler SHALL NOT emit an
   error or warning for the missing `else` (§17.6.4 already forbids it).
@@ -18490,34 +18500,45 @@ The expression is the arm's result value.
 ```scrml
 .Circle(r) :> {
     let scaled = r * scaleFactor
-    scaled * scaled * 3.14159
+    lift scaled * scaled * 3.14159                 // S469: a value-position block arm yields with `lift`
 }
 ```
-A block arm is `{ statement* expression? }`. The block's result is its **last expression**.
-If the block has no final expression (all statements, no trailing expression), the arm
-produces `void`.
+A block arm is `{ statement* expression? }`. ~~The block's result is its **last expression**.~~ *(struck S469 for
+a value position — the arm's value is the operand of its `lift`, below.)* If the block ~~has no final expression
+(all statements, no trailing expression)~~ *(S469: has no `lift`)*, the arm produces `void`.
 
-> ⚑ **OPEN (S469, not ruled) — does "always explicit" reach a block arm?** The S469 ruling
-> (*"There is NO implicit tail return anywhere … values leave a function only through `return`
-> (and a block or loop only through `lift`)"*, ruling:user-voice-scrml.md S469 "⭐ RULED —
-> fall-off and tail returns: ALWAYS EXPLICIT") names §48, §42.7 and §48.13. Read literally, it
-> also reaches this paragraph: a block arm's value is its last expression, an implicit tail. The
-> ruling did not name §18.5 and did not say what a value-position block arm writes instead
-> (`lift`, as a block does, or a `return`-like arm keyword). This section is unchanged until
-> that is ruled. PA recommendation: apply the ruling here too — a block arm in a value position
-> yields with `lift <expr>;`, and a single-expression arm (`.A :> expr`) stays as it is, since
-> `:>` is itself the explicit value form.
+> ✅ **RULED S469 — a block arm in a value position yields with `lift`.** *(This block replaces the ⚑ OPEN
+> question that stood here, "does "always explicit" reach a block arm?", which recommended this answer.)*
+> **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"* (*"A block arm in a value position must yield explicitly (`.B :> { log(); lift 2 }`). A bare last expression in a block arm is an error. A single-expression arm `.A :> expr` is unchanged. Extends "always explicit" (22e98ce) to §18.5."*)
+> **supersedes:** *"A block arm is `{ statement* expression? }`. The block's result is its **last expression**."* and
+> the normative statements *"A block arm body's result type SHALL be the type of its last expression"* and *"the
+> last expression's type is the arm's contribution to the unified result type"*, for a block arm in a value
+> position (each struck or amended below). **Direction of change:** newly-rejecting (a value-position block arm
+> whose value is a bare last expression). **Nominal / spec-ahead:** impl#1 carries it (§34.0); the bootstrap is
+> owed the check.
+
+**The rule (S469).** A block arm in a VALUE position — a `match` or `!{}` whose result is used (§18.9, §19.4.3) —
+yields its value with **`lift <expr>;`**, exactly as a block does (§10.1): `.B :> { log(); lift 2 }`. A bare
+expression as the block's last statement is not the arm's value: in a value position it SHALL be compile error
+**`E-ARM-TAIL-VALUE`** (§34), whose fix-it is `lift <expr>;`. A single-expression arm, `.A :> expr`, is unchanged:
+`:>` is itself the explicit value form. An arm that leaves (`return`, `fail`, `break`, `continue`) is unchanged. In
+a STATEMENT position a block arm yields nothing and needs no `lift`. A brace body that reads as an object literal
+(below) is a single expression, not a block, and is unchanged. `lift` in an arm block designates that arm's value
+at most once on any path (E-LIFT-002, §10.1).
+
 
 **Normative statements:**
 
 - An arm body SHALL be a single expression, a `{ }` block, or a single leave statement (`return [expr]`,
   `fail <variant>`, `break [Label]`, `continue [Label]` — §18.2). A leaving arm produces no value; it
   contributes no type to the arm unification (§18.4).
-- A block arm body's result type SHALL be the type of its last expression. If the block
-  ends with a statement and has no trailing expression, the arm result type is `void`.
+- ~~A block arm body's result type SHALL be the type of its last expression. If the block
+  ends with a statement and has no trailing expression, the arm result type is `void`.~~ *(struck S469)* A block
+  arm body's result type SHALL be the type of its `lift` operand; a block arm with no `lift` has result type `void`.
+  In a value position, a bare expression as a block arm's last statement SHALL be compile error `E-ARM-TAIL-VALUE`.
 - The result type rule from §18.4 applies to block arm bodies the same as to
-  single-expression bodies: the last expression's type is the arm's contribution to the
-  unified result type.
+  single-expression bodies: ~~the last expression's type~~ the `lift` operand's type *(S469)* is the arm's
+  contribution to the unified result type.
 - **A brace body that reads as an object literal is the arm's value.** An arm body
   `{ … }` whose content is an object literal SHALL be that object, in every position a
   `match` appears (declaration, `return`, argument, statement), exactly as `return { … }`
@@ -18874,7 +18895,7 @@ remains legal (a subset-of-the-subset).
 type Post:struct = { role: Role oneOf([.Admin, .Editor]) }   // Role = { Admin, Editor, Viewer }
 
 fn label(p: Post) -> string {
-  match p.role {
+  return match p.role {                          // S469: a value leaves only by `return` (§48)
     .Admin  => "Admin"
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
@@ -19984,10 +20005,10 @@ A handler handles the call the way any other caller does: `onclick={ risky() !{ 
 
 In a value position, every arm SHALL do one of two things:
 
-1. **Yield a value** of the call's success type: the arm is an expression, or a block whose last expression is that value (§18.5). The `match` form's `.Ok(v)` arm is an arm like any other. For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not` yields a value; `.all()` yields `Row[]`, so `_ :> []` does.
+1. **Yield a value** of the call's success type: the arm is an expression, or a block that ~~whose last expression is that value~~ *(S469)* yields it with `lift <value>;` (§18.5). The `match` form's `.Ok(v)` arm is an arm like any other. For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not` yields a value; `.all()` yields `Row[]`, so `_ :> []` does.
 2. **Leave**: the arm ends in `return` or `fail` on every path through it (an `if` whose two branches each leave, leaves). A `break` or `continue` that targets a loop enclosing the whole statement also leaves, where §7 makes it legal there.
 
-An arm that does neither — it ends in a write (`@phase = .Missing`), a declaration, a call whose result is not a value of the success type (`log(m)`), or a block whose last statement is not an expression — **falls through**, and in a value position that SHALL be a compile error: **E-ERROR-012** — `Arm '{pattern}' of the handler on '{name}(…)' produces no value, but the handler's result is used here ({position}). In a value position every arm must yield a value of '{name}'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| {pattern} :> { @phase = …; fallback }'), leave with 'return', or call '{name}(…) !{ … }' as a statement and keep the writes in its arms.` An arm that yields a value of the WRONG type is not E-ERROR-012: it is the existing type error (E-TYPE-001, §18.4). The two never fire for the same arm.
+An arm that does neither — it ends in a write (`@phase = .Missing`), a declaration, a call whose result is not a value of the success type (`log(m)`), or a block ~~whose last statement is not an expression~~ *(S469)* with no `lift` — **falls through**, and in a value position that SHALL be a compile error: **E-ERROR-012** — `Arm '{pattern}' of the handler on '{name}(…)' produces no value, but the handler's result is used here ({position}). In a value position every arm must yield a value of '{name}'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| {pattern} :> { @phase = …; lift fallback; }' — S469: a block arm yields with `lift`, §18.5), leave with 'return', or call '{name}(…) !{ … }' as a statement and keep the writes in its arms.` An arm that yields a value of the WRONG type is not E-ERROR-012: it is the existing type error (E-TYPE-001, §18.4). The two never fire for the same arm.
 
 In a statement position an arm MAY fall through: the handler's result is not read, so no arm owes it a value, and an arm that does yield one has it discarded.
 
@@ -22738,7 +22759,8 @@ route.path          // string — the current URL path (e.g., "/users/42")
 
 Parameter values accessed via `route.params` and `route.query` are always typed
 `string` (URL parameters are strings by nature). The developer is responsible for
-parsing numeric IDs (e.g., `let id = parseInt(route.params.id)`).
+parsing numeric IDs (e.g., `let id = int.parse(route.params.id)`, an `int | not` — §14.13.4; S469 replaces the
+ambient `parseInt`, Appendix D).
 
 **Normative statements:**
 
@@ -27891,6 +27913,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
 | E-TYPE-043 | §17.6, §33, §42.3.3, §48 | **Widened S469.** (1) A function with a non-optional declared return type has a code path that returns `not` (the absence sentinel) ~~— directly via `return not` or implicitly by falling off the end of the function body~~ via `return not`. Resolution: include `\| not` in the declared return type, or return a non-`not` value. (2) **(S469)** A function with ANY declared return type — `-> T \| not` included — has a path that does not end in `return <expr>;`: it can reach the end of its body, has a bare `return;`, or ends in a tail expression it does not `return`. Falling off is never `not` and never JS `undefined`; write `return not;` (`-> T \| not`) or `return <value>;`. ~~Server functions that fall through implicitly are subject to the same rule.~~ Server functions are subject to the same rule (falling off no longer means `not`, §42.9). Provenance of (2): ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with a declared return type, `-> T \| not` included, MUST `return` on every path; falling off is a compile error, so you write `return not;`."*); bare `return`: the PA application recorded there. Limb (2) is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** for `-> T \| not` (impl#1 carries it, §34.0). (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 17901, 17928, 17988.) | Error |
 | E-RETURN-INCOMPLETE | §48, §48.8, §48.13 | A function with NO declared return type (or a `!` function, which has no success-type slot, §19.4.1) returns a value on some path (`return <expr>;`) and on another path falls off the end of its body or has a bare `return;`. If any path returns a value, every path SHALL (§48 "The return rule", rule 3). Resolution: end every path with `return <value>;`, or declare the return type. **Code name provisional** (named by the bootstrap, S469; not yet among the S469 confirmed names). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with no return type returns nothing, and if any path returns a value, every path must (error)."*). Direction of change: newly-rejecting. | Error |
+| E-ARM-TAIL-VALUE | §18.5 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted.** Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | E-TYPE-044 | §17.6 | `given` (presence-guard) is applied to a variable whose declared type does not include `\| not`. The guard has nothing to refine — the variable is already known to be non-`not`. Resolution: drop the `given` guard, or widen the variable's type. (Catalog addition S84 Wave 2 #5; full prose at §17.6 line 17929.) | Error |
 | E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point (§42.3.5, S462 "b"). A provably present write narrows again; a suspension point (a server call, a body-split boundary, a `yield`) ends every reactive cell's narrowing; a function body (a lambda, an event handler, a nested function) created in a narrowed scope re-tests reactive cells unless a known built-in calls it synchronously (§42.3.5, S462 "a"); an event handler inside an `if=` / `else-if=` gate keeps the narrowing that gate gives its cell when it handles a user-input event (an allow-list, §42.3.5: `click`, `input`, `keydown`, … — not `focus` / `blur` / `change` / leave / cancel / animation / custom events) (S462 "a", Q18). (Emitted at `compiler/src/type-system.ts` `checkOptionalMemberAccess`.) An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) | Error |
 | E-CONTRACT-002-RT | §53.11 | **Reserved.** Named shape registry lookup is fully resolved at compile time; this runtime form SHALL NOT be emitted by the runtime. Preserved for forensic search-hit stability and to mirror the runtime/compile-time naming convention used elsewhere in the contract family. (Catalog addition S84 Wave 2 #5; full prose at §53.11 lines 25028-25030.) | Runtime |
@@ -30994,7 +31017,7 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
   - **`E-STMT-NO-EFFECT` is language-wide** *(S446, dpa-063 Call 5)*. The S445 rule above is NOT a body-top rule: it SHALL hold in **every statement list** (§7.2.2 "Terms") — a function or `fn` body, an inline handler block, a `${ … }` logic context, a `^{ … }` meta body, a `when` / `on mount` body, a code-default body (engine state-child, `<match>` block-form arm), an arm or if-as-expression block, and this body top. This is the one home of the rule; §7.2.2 rule 9 and §34 point here.
     - **Effect** (unchanged from S445): a call — any call, a pure function's too —, an assignment (compound too), `++` / `--`, or a `send`; with S445's listed equivalents (`new`, a tagged template, `delete`, a `?{ … }` SQL block, `reset(…)`). A lambda's body is not evaluated by the statement and does not count.
     - **Used through `~`, not dead.** An expression statement whose value the NEXT statement reads through `~` (§32.2) is used, and is not `E-STMT-NO-EFFECT`: the rule is "no effect AND its value is never read through `~`". (`@a * 2⏎let d = ~` is legal.) When `E-STMT-NO-EFFECT` fires, `E-TILDE-002` (§32.5) SHALL NOT be reported for the same statement.
-    - **Not expression statements** (value positions — the value IS used, so the rule does not apply): the expression of a markup `${ … }` interpolation in a render position (§17.6.10); a match arm's single-expression body and a block arm's result expression (§18.5); an if-as-expression value-form arm `{ expression }` (§17.6.10); a `:`-shorthand body (§4.14); a bare handler value (§5.2.3); a `lift` / `return` / `fail` operand. *(⚑ S446 also recorded bryan's stated position that implicit tail values are rejected in principle and `lift` is the explicit form; that position is NOT ruled into §18.5 here — this bullet only declines to call a §18.5 result expression dead.)* A `${ … }` is a value position ONLY as a markup interpolation in a render position; a `${ … }` logic block whose content is read as statements is a statement list, so `${ @count }` there is `E-STMT-NO-EFFECT` (S445 #2's reach question — settled: yes, everywhere).
+    - **Not expression statements** (value positions — the value IS used, so the rule does not apply): the expression of a markup `${ … }` interpolation in a render position (§17.6.10); a match arm's single-expression body and a block arm's result expression (§18.5); an if-as-expression value-form arm `{ expression }` (§17.6.10); a `:`-shorthand body (§4.14); a bare handler value (§5.2.3); a `lift` / `return` / `fail` operand. *(~~⚑ S446 also recorded bryan's stated position that implicit tail values are rejected in principle and `lift` is the explicit form; that position is NOT ruled into §18.5 here — this bullet only declines to call a §18.5 result expression dead.~~ Struck S469: it IS ruled now — a value-position block arm yields with `lift`, and a bare last expression there is `E-ARM-TAIL-VALUE`, not `E-STMT-NO-EFFECT` (§18.5; ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — "Block arms yield with lift (Recommended)"). "A block arm's result expression" above now means its `lift` operand.)* A `${ … }` is a value position ONLY as a markup interpolation in a render position; a `${ … }` logic block whose content is read as statements is a statement list, so `${ @count }` there is `E-STMT-NO-EFFECT` (S445 #2's reach question — settled: yes, everywhere).
       > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
     - **Outside this body top**, the body-top-only shapes in the bullets above do not apply: a literal-only statement (`404`, `[]`) is `E-STMT-NO-EFFECT` (there is no undeclared-display-text reading outside a code-default body's display positions), and a label that no `break` / `continue` targets is `E-STMT-NO-EFFECT` on the label. In a code-default body the §4.18 display-literal rule still decides first what is a display item.
       > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 8, ACCEPTED: *"literal / untargeted label outside the body top = E-STMT-NO-EFFECT"*; at the body top both stay `E-UNQUOTED-DISPLAY-TEXT`, and the `E-TILDE-002` suppression in the "Used through `~`" bullet above is part of the same accepted reading).
@@ -40329,7 +40352,7 @@ number and `<unit>` is one of `ms` / `s` / `m` / `h`. Examples:
 
 ```scrml
 <onTimeout after=${@backoffDelay}ms to=.Retry/>                       <!-- engine form -->
-<onTimeout after=${Math.min(1000 * 2 ** @attempt, 30000)}ms to=.Retry/>
+<onTimeout after=${min(1000 * 2 ** @attempt, 30000)}ms to=.Retry/>   <!-- `min` from scrml:math (§41.18) -->
 
 .Connecting after ${@backoffDelay}ms => .Open                         <!-- legacy machine form -->
 ```
@@ -43297,7 +43320,7 @@ defers to those sections for the exhaustiveness pass. Summary:
 type Post:struct = { role: Role oneOf([.Admin, .Editor]) }
 
 fn label(p: Post) -> string {
-  match p.role {
+  return match p.role {                          // S469: a value leaves only by `return` (§48)
     .Admin  => "Admin"
     .Editor => "Editor"
     // no .Viewer arm, no else — STILL exhaustive (Option A); a .Viewer arm is DEAD.
