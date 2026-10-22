@@ -12,7 +12,7 @@ ${
         @out = risky(3) !{
             .Boom(m) :> { @seen = "boom:" + m; return }
         }
-        @seen = "loaded:" + @out
+        @seen = `loaded:${@out}`
     }
 }
 <button id="load" onclick=load()>Load</>
