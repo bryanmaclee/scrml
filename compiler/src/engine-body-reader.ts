@@ -78,6 +78,35 @@ export function readEngineBody(owner: object | null | undefined, slot: string, s
   return read;
 }
 
+// ---------------------------------------------------------------------------
+// S469 (review of 6e0770356, hardening) — the WALKED floor. The type system marks every body
+// parse it walked (`markBodyWalked` — a statement list here, or an arm-body-reader node list);
+// while a compile's codegen runs (`setRawBodyWalkFloor(true)`, api.js around the CG stage),
+// codegen refuses a body whose parse was never walked (`bodyWasWalked`) instead of lowering
+// it: a cache miss — an owner object codegen reached that the walk did not, a text that
+// changed between the stages — is an error, never a silent re-parse emitted unchecked. Outside
+// a compile (an emitter unit-tested on a synthetic engine) the floor is off.
+// ---------------------------------------------------------------------------
+
+const _walked = new WeakSet<object>();
+let _floor = false;
+
+/** The type system walked this parse (a statement list / node list). */
+export function markBodyWalked(parse: unknown): void {
+  if (parse && typeof parse === "object") _walked.add(parse as object);
+}
+
+/** May codegen lower this parse? True when the floor is off or the parse was walked. */
+export function bodyWasWalked(parse: unknown): boolean {
+  if (!_floor) return true;
+  return !!parse && typeof parse === "object" && _walked.has(parse as object);
+}
+
+/** Turn the floor on for a compile's codegen stage (and off after it). */
+export function setRawBodyWalkFloor(on: boolean): void {
+  _floor = on;
+}
+
 /** Synthetic file names, one per body kind (emit-engine keys its refusal handling on them). */
 export const ENGINE_BODY_FILE = {
   openerEffect: "__opener_effect__.scrml",
@@ -125,6 +154,9 @@ export function onTransitionBodySource(entry: { bodyRaw?: unknown; isColonShorth
 export function guardSource(ifExprRaw: unknown): BodySource {
   const raw = typeof ifExprRaw === "string" ? ifExprRaw.trim() : "";
   if (raw.length === 0) return null;
+  // A QUOTED guard (`if="false"`) is a string — always truthy if lowered (S469 review MEDIUM):
+  // the type system reports E-COND-NOT-BOOLEAN; it is never a readable guard.
+  if (/^["'`]/.test(raw)) return { unreadable: raw };
   if (raw.startsWith("${")) {
     const payload = soleLogicBlockPayload(raw);
     if (payload === null || payload.trim().length === 0) return { unreadable: raw };

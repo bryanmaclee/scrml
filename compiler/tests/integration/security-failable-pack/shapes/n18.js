@@ -115,5 +115,20 @@ export default [
   ["engine arm handler match", EHANDLER(HM("wrong"), HM("secret"))],
   ["engine arm handler block match", EHANDLER(HMSEQ("wrong"), HMSEQ("secret"))],
   // --- other expression sites ---
+  // --- review of 6e0770356: text-lowered slots (a handled call is refused too) ---
+  ["guard handled to=", HOOK("to=.B if=${ check(@pw) !{ _ :> false } }", `@msg = "LOGGED IN"`)],
+  ["guard handled from=", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTransition from=.A if=\${ check(@pw) !{ _ :> false } }>\${ @msg = "LOGGED IN" }</>\n</B>`)],
+  ["guard handled direct", DIRECT("from=.A to=.B if=${ check(@pw) !{ _ :> false } }", `@msg = "LOGGED IN"`)],
+  ["guard handled once", HOOK("to=.B once if=${ check(@pw) !{ _ :> false } }", `@msg = "LOGGED IN"`)],
+  ["guard quoted false", HOOK(`to=.B if="false"`, `@msg = "LOGGED IN"`)],
+  ["delay handled", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTimeout after=\${ (@msg = (check(@pw) !{ _ :> false }) ? "LOGGED IN" : "rejected", 1) }ms to=.A/>\n</B>`)],
+  ["derived paren", HEAD + BTN("@pw = @pw") + `<p id="out">\${ @s == S.B ? "LOGGED IN" : "rejected" }</p>\n<engine for=S derived=(check(@pw) ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+  ["derived bare", HEAD + BTN("@pw = @pw") + `<p id="out">\${ @s == S.B ? "LOGGED IN" : "rejected" }</p>\n<engine for=S derived=check(@pw) ? .B : .A>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+  ["derived handled", HEAD + BTN("@pw = @pw") + `<p id="out">\${ @s == S.B ? "LOGGED IN" : "rejected" }</p>\n<engine for=S derived=((check(@pw) !{ _ :> false }) ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+  ["derived match", HEAD.replace("<pw> = \"\"", "<pw> = \"\"\ntype P:enum = { X, Y }\n<src>: P = P.X") + BTN("@src = P.Y") + `<p id="out">\${ @s == S.B ? "LOGGED IN" : "rejected" }</p>\n<engine for=S derived=match @src { .X :> .A  .Y :> (check(@pw) ? .B : .A) }>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+  ["engine if=", HEAD + BTN("@msg = @pw") + `<engine for=S initial=.A if=\${ @pw != "" && check(@pw) }>\n<A rule=.B><p id="out">LOGGED IN</p></A>\n<B rule=.A><p>b</p></B>\n</engine>\n`],
+  ["match if=", HEAD + `<st> = S.B\n` + BTN("@msg = @pw") + `<match for=S on=@st if=(@pw != "" && check(@pw))>\n<A><p>a</p></A>\n<B><p id="out">LOGGED IN</p></B>\n</match>\n`],
+  ["match on= paren", HEAD + BTN("@msg = @pw") + `<div id="out"><match for=S on=(check(@pw) ? S.B : S.A)><A : "rejected"><B : "LOGGED IN"></match></div>\n`],
+  ["match on= interp", HEAD + BTN("@msg = @pw") + `<div id="out"><match for=S on=\${ check(@pw) ? S.B : S.A }><A : "rejected"><B : "LOGGED IN"></match></div>\n`],
   ["onTimeout after", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A>\n<p>b</p>\n<onTimeout after=\${ (@msg = check(@pw) ? "LOGGED IN" : "rejected", 1) }ms to=.A/>\n</B>`)],
 ];

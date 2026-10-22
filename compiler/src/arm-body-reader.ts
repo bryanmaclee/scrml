@@ -20,6 +20,8 @@
 // two codegen sites; behaviour unchanged except that it is shared.
 // ---------------------------------------------------------------------------
 
+import { bodyWasWalked } from "./engine-body-reader.ts";
+
 const _cache = new WeakMap<object, Map<string, { raw: string; nodes: any[] }>>();
 
 function cached(owner: object | null | undefined, key: string, raw: string, build: () => any[]): any[] {
@@ -123,4 +125,26 @@ export function readBareArmBody(
 /** The cache key of a `<match>` arm: its index in `parseMatchArms(armsRaw).arms` and variant. */
 export function matchArmKey(index: number, variantName: string): string {
   return `arm:${index}:${variantName}`;
+}
+
+/**
+ * S469 (hardening) — the WALKED floor for an arm / shorthand body parse: a non-empty parse the
+ * type system never walked is refused (E-ERROR-002), never lowered. Returns the nodes to lower.
+ */
+export function walkedArmBodyOrRefuse(nodes: any[], what: string, anchor: object | null): any[] {
+  if (!Array.isArray(nodes) || nodes.length === 0 || bodyWasWalked(nodes)) return nodes;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { recordRefusedLowering } = require("./codegen/refused-lowering-errors.ts");
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { CGError } = require("./codegen/errors.ts");
+  recordRefusedLowering(
+    new CGError(
+      "E-ERROR-002",
+      `E-ERROR-002: ${what} reached codegen without being checked for unhandled failable calls ` +
+      `(§19.4.3); it is not emitted. This is a compiler defect — please report it.`,
+      { file: "", start: 0, end: 0, line: 1, col: 1 },
+    ),
+    anchor,
+  );
+  return [];
 }

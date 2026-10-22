@@ -124,17 +124,14 @@ import {
   ARRAY_MUTATING_METHODS,
   isDerivedMutatingAssignOp,
 } from "./derived-mutation-ops.ts";
-// B15 — engine state-child structural parser. Legacy text-rescanner; M6.6.b.2
-// retired its use at PASS 11 step 3 in favor of the native block-tree walker
-// (`walkEngineStateChildren`). M6.6.b.3 extended the migration to
-// `isLegacyArrowRulesBody` + `scanForOnIdleEntries` (now also discriminated
-// via the native walker). The legacy parser survives here ONLY as a fallback
-// for synthetic ASTs that don't carry `_nativeEngineBlock` (test harnesses
-// that build an engine-decl directly without going through the native
-// pipeline). All three legacy helpers are still imported because the
-// discriminated branches at the call sites fall back to them when the
-// bridge fields are absent. The fallback retires at M6.8 once synthetic-AST
-// test harnesses migrate to native-pipeline construction.
+// B15 — engine state-child structural parser (the text rescanner). S469 correction: BOTH
+// readers are LIVE. The per-file parse is `splitBlocks` + `buildAST` (the M6 native routing
+// was retired S449), which does not stamp `_nativeEngineBlock`, so every engine in a file's
+// own markup is read by THIS parser. The native walker below reads an engine-decl the native
+// parser synthesized (`synthEngineDecl`, collect-hoisted.js) — an engine reached through one
+// of the native parser's internal re-parse sites (component / `<match>` arm / `^{}`). Whichever
+// reader produced a state-child's raw text, the failable walk and codegen read that text
+// through the one body parse (engine-body-reader.ts), so they cannot disagree with each other.
 import {
   parseEngineStateChildren,
   scanForEngineDirectOnTransitions,
@@ -7044,12 +7041,11 @@ export function validateEngineStateChildrenAndRules(
     );
   }
 
-  // Step 3 — parse state-children. M6.6.b.2: prefer the native block-tree
-  // walker (`walkEngineStateChildren`) when the engine-decl was synthesized
-  // by the native pipeline (it stamps `_nativeEngineBlock` + `_source` on the
-  // decl). Fall back to the legacy text-rescanner when those bridge fields
-  // are absent — synthetic ASTs (test harnesses constructing engine-decls
-  // directly) and the live `buildAST` pipeline don't populate them.
+  // Step 3 — parse state-children. The native block-tree walker
+  // (`walkEngineStateChildren`) reads an engine-decl the native parser synthesized
+  // (it stamps `_nativeEngineBlock` + `_source`); the text rescanner reads every other
+  // one — including every engine the live `buildAST` pipeline builds. Both are live
+  // (S469 correction; see the import note above).
   const rulesRaw: string = typeof engineDecl.rulesRaw === "string" ? engineDecl.rulesRaw : "";
   const nativeEngineBlock = (engineDecl as { _nativeEngineBlock?: unknown })._nativeEngineBlock;
   const nativeSource = (engineDecl as { _source?: unknown })._source;

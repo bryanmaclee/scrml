@@ -73,9 +73,10 @@
  */
 
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
-import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "./engine-body-reader.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, markBodyWalked } from "./engine-body-reader.ts";
 import { readShorthandBody, readBareArmBody, matchArmKey } from "./arm-body-reader.ts";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
+import { ScrmlParser } from "./scrml-acorn.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
@@ -15796,6 +15797,13 @@ function annotateNodes(
         // §17.1.2 — scope-check the opener `if=` render gate (see
         // `visitStructuralIfAttr`).
         visitStructuralIfAttr(n);
+        // S469 (SECURITY, review of 6e0770356 H4–H5) — `on=` and `if=` are lowered from their
+        // text: no failable call there, handled or not (`refuseFailableInTextSlot`).
+        {
+          const mSpan = ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as Span;
+          refuseFailableInTextSlot((n as { onExprRaw?: unknown }).onExprRaw, "the 'on=' subject of a <match>", mSpan);
+          refuseFailableInTextSlot((n as { ifRaw?: unknown }).ifRaw, "the 'if=' of a <match>", mSpan);
+        }
         // §18.0.1 / §34 (ss42 item-2) — route the markup-match `on=@cell` read
         // through the read-side E-STATE-UNDECLARED walker. The match-block node
         // carries its `on=` as RAW TEXT (`onExprRaw`); codegen (emit-match.ts
@@ -17268,6 +17276,69 @@ function annotateNodes(
    * `rewriteExpr`, which does not honour a failable-`match` stamp, so a failable `match` in one
    * is refused rather than lowered as a plain comparison.
    */
+  /**
+   * S469 (SECURITY, §19.4.3 — review of 6e0770356, H1–H5) — the failable function (or `?{}`)
+   * NAMED in an expression slot impl#1 lowers from its TEXT (`rewriteExpr` / the slot's raw
+   * source): an `<onTransition if=>` guard, an `<onTimeout>` / `<onIdle>` computed delay, a
+   * `derived=` engine expression or inline `match`, a structural `if=` on `<engine>` / `<match>`
+   * / `<each>`, a `<match on=>` subject. A text lowering cannot honour a handler — it dropped
+   * `!{ … }` (`if=${ check(p) !{ _ :> false } }` emitted `if (check(p))`, the error object is
+   * truthy, a wrong password logged in) and ignores the stamp a failable `match` needs — so a
+   * failable call there is refused HANDLED OR NOT. Read lexically by acorn's tokenizer (both
+   * goals; a word match when it cannot lex), so a name inside a string or a comment is not one;
+   * an identifier bound to a failable function (`fnFactsIs`) or returning one counts.
+   * Returns the first such name (`?{}` for a query), or null.
+   */
+  function failableNamedInText(text: string): string | null {
+    if (typeof text !== "string" || text.length === 0) return null;
+    const isFailableName = (nm: string): boolean => {
+      if (!nm || nm.startsWith("@")) return false;
+      if (fnCanFail.has(nm)) return true;
+      try {
+        if (fnFactsIs(nm) !== null) return true;
+        if (fnFactsReturns(nm) !== null) return true;
+      } catch { /* scope query unavailable — fall back to the declared set */ }
+      return false;
+    };
+    let lexed = false;
+    for (const opts of [
+      { ecmaVersion: "latest", sourceType: "module", allowAwaitOutsideFunction: true },
+      { ecmaVersion: "latest", sourceType: "script" },
+    ]) {
+      try {
+        let prevQ = false;
+        // @ts-ignore — the extended parser class inherits acorn's static tokenizer.
+        for (const tok of ScrmlParser.tokenizer(text, opts) as Iterable<{ type: { label?: string; keyword?: string }; value?: unknown }>) {
+          const label = tok.type?.label;
+          if (prevQ && label === "{") return "?{}";
+          prevQ = label === "?";
+          if (label === "name" && typeof tok.value === "string" && isFailableName(tok.value)) return tok.value;
+        }
+        lexed = true;
+      } catch { /* not lexable under this goal */ }
+    }
+    if (!lexed) {
+      if (/\?\s*\{/.test(text)) return "?{}";
+      for (const m of text.matchAll(/(?<![\w$@])([A-Za-z_$][\w$]*)/g)) if (isFailableName(m[1])) return m[1];
+    }
+    return null;
+  }
+  /** E-ERROR-002 for a failable call named in a text-lowered slot (see `failableNamedInText`). */
+  function refuseFailableInTextSlot(text: unknown, what: string, span: Span): boolean {
+    if (typeof text !== "string") return false;
+    const nm = failableNamedInText(text);
+    if (nm === null) return false;
+    errors.push(new TSError(
+      "E-ERROR-002",
+      `E-ERROR-002: ${nm === "?{}" ? "a `?{}` query" : `failable function '${nm}'`} is used in ${what}, which impl#1 ` +
+      `lowers from its source text: it cannot handle a failable result there (a '!{}' or a 'match' on it ` +
+      `is not lowered), so the call is refused whether or not it is handled (§19.4.3). This is a limitation ` +
+      `of this compiler. Call it in a function that handles the result and use that function's plain value here.`,
+      span,
+    ));
+    return true;
+  }
+
   function checkEngineRawBodies(engineNode: ASTNodeLike): void {
     const meta = (engineNode as { _record?: { engineMeta?: Record<string, unknown> } })._record?.engineMeta;
     if (!meta || typeof meta !== "object") return;
@@ -17296,6 +17367,7 @@ function annotateNodes(
     // Walk one statement list as a body run on a transition; keep the §19.4.3 codes, re-spanned
     // onto `span` (the statements' own spans are relative to the body's synthetic parse).
     const walk = (stmts: unknown[], what: string, span: Span, bindings: string[]): void => {
+      markBodyWalked(stmts); // the codegen floor lowers only walked parses
       const before = errors.length;
       const savedWhere = handlerCheckWhere;
       const savedKind = handlerCheckKind;
@@ -17339,6 +17411,8 @@ function annotateNodes(
     // An EXPRESSION slot lowered from its text by `rewriteExpr`: one expression statement, no
     // failable `match` (rewriteExpr would compare the error object as a plain value).
     const expressionSlot = (owner: object, slot: string, src: string, what: string, span: Span, bindings: string[]): void => {
+      // H1 (review of 6e0770356) — lowered from its TEXT: any failable call, handled or not.
+      if (refuseFailableInTextSlot(src, what, span)) return;
       const read = readEngineBody(owner, slot, src, ENGINE_BODY_FILE.guard);
       const stmts = read.stmts;
       if (!stmts || stmts.length !== 1) { refuse(what, span, "is not one expression."); return; }
@@ -17347,6 +17421,12 @@ function annotateNodes(
         refuse(what, span, "holds a 'match' on a failable result, which impl#1 cannot lower in this position so that it tells the error from a plain value. Move it into a function that handles the call.");
       }
     };
+
+    // 0. H2–H3 (review of 6e0770356) — the engine OPENER's text-lowered slots: `derived=` (an
+    // expression, or an inline `match @x { … }`) and the structural `if=` render gate.
+    refuseFailableInTextSlot((engineNode as { derivedExprText?: unknown }).derivedExprText, `the 'derived=' expression of engine '${engineName}'`, engSpan);
+    refuseFailableInTextSlot((engineNode as { inlineMatchBody?: unknown }).inlineMatchBody, `the 'derived=match' of engine '${engineName}'`, engSpan);
+    refuseFailableInTextSlot((engineNode as { ifRaw?: unknown }).ifRaw, `the 'if=' of engine '${engineName}'`, engSpan);
 
     // 1. The opener `effect=` (boot-only).
     const openerEffect = (meta as { openerEffect?: unknown }).openerEffect;
@@ -17361,6 +17441,19 @@ function annotateNodes(
       if (body && "unreadable" in body) refuse(`the <onTransition> body ${where}`, span, "is not one readable '${ … }' block.");
       else if (body) statementBody(entry, "body", body.src, ENGINE_BODY_FILE.onTransition, `the <onTransition> body ${where}`, span, bindings);
       if (entry.ifExprRaw !== undefined && entry.ifExprRaw !== null) {
+        // MEDIUM (review of 6e0770356) — a QUOTED guard (`if="false"`) is a string: it lowered to
+        // `if ("false")`, always true. §42.4: a string has no truthiness — E-COND-NOT-BOOLEAN.
+        const rawGuard = String(entry.ifExprRaw).trim();
+        if (/^["'`]/.test(rawGuard)) {
+          errors.push(new TSError(
+            "E-COND-NOT-BOOLEAN",
+            `E-COND-NOT-BOOLEAN: the <onTransition if=> guard ${where} is a quoted string (${rawGuard.length > 40 ? rawGuard.slice(0, 37) + "…" : rawGuard}). ` +
+            `A string has no truthiness (§42.4): it would always pass. Write the condition unquoted — ` +
+            `\`if=(@ready)\` or \`if=\${ @n > 0 }\`.`,
+            span,
+          ));
+          return;
+        }
         const g = guardSource(entry.ifExprRaw);
         if (g && "unreadable" in g) refuse(`the <onTransition if=> guard ${where}`, span, "cannot be read.");
         else if (g) expressionSlot(entry, "if", g.src, `the <onTransition if=> guard ${where}`, span, bindings);
@@ -17425,6 +17518,7 @@ function annotateNodes(
    */
   function walkCodegenCopy(nodes: unknown[], bindings: string[], label: string, span: Span, report: boolean): void {
     if (!Array.isArray(nodes) || nodes.length === 0) return;
+    markBodyWalked(nodes); // the codegen floor lowers only walked parses
     const saved: Array<[Record<string, unknown>, unknown]> = [];
     const seen = new WeakSet<object>();
     let next = _nextReparseIdBase();

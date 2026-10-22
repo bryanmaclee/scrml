@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 668 | 7 |
-| LOW | 456 | 0 |
+| LOW | 461 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -87,8 +87,41 @@ The engine body is kept as raw text (`rulesRaw`) and re-scanned by `engine-state
 - **One parse, walked and emitted.** `engine-body-reader.ts` parses each engine statement body once and caches it on its owner: state-child and opener `effect=`, `<onTransition>` body and guard, message arm, computed delay. A body the block splitter does not read as exactly one logic block is unreadable. `arm-body-reader.ts` does the same for `<match>` arm bodies (bare and `:`-shorthand) and engine `:`-shorthand state bodies. The type system walks these exact nodes: `checkEngineRawBodies` in the handler context, and `walkCodegenCopy` in render context. Codegen lowers the same nodes, so the walk's stamps reach the emitted code. Hook bodies now lower as statements (`emitLogicBody`).
 - **Fail closed.** An unreadable body is E-ERROR-002 in the type system, and codegen's floor refuses it as well; there is no raw-text fallback. A failable `match` in an expression slot lowered by `rewriteExpr` (a guard, a delay) is refused.
 - **Handled forms.** `check(p) !{…}`, and a `match` on the call, in an effect, an `<onTransition>` or an arm, were refused or silently wrong before. They now compile and discriminate the error.
+- **Text-lowered slots (review of 6e0770356, H1–H5).** These slots are lowered from their source text: the `<onTransition if=>` guard, the computed `<onTimeout>` / `<onIdle>` delay, a `derived=` expression or inline `match`, the structural `if=` on `<engine>` / `<match>`, and the `<match on=>` subject. A text lowering cannot honour a handler. The guard dropped `!{…}`, so `if=${ check(p) !{ _ :> false } }` emitted `if (check(p))` and a wrong password logged in. In such a slot a failable call (or `?{}`) is refused, handled or not (`failableNamedInText`, read lexically by acorn). A quoted guard (`if="false"`, which lowered to an always-true `if ("false")`) is E-COND-NOT-BOOLEAN.
+- **Walked floor.** The type system marks every body parse it walks. During a compile's codegen, a parse it never walked is refused rather than lowered (`bodyWasWalked`, set around the CG stage in api.js): a hook / effect / arm body, a guard, a delay, a `<match>` arm or a `:`-shorthand body.
+- **Live readers.** `native-walker/engine-statechild-walker.ts` is live for engine-decls that the native parser synthesizes. The text rescanner reads every engine of the per-file `buildAST` parse. Either way the body text goes through the one body parse.
 
 Pack: n18 goes from base 3 PASS / 14 PASS-REFUSED / 9 PASS-DENY / **19 FAIL** to 11 / 31 / 3 / **0**. Corpus (`scripts/corpus-emit-differential.ts` over samples / examples / compiler/tests/fixtures / stdlib, base = archive of `b75ad70f7`): 1047 sources on both sides, 0 compile-outcome or diagnostic changes, and no artifact differs except for the embedded project-root path. Browser suite: per-test JUnit identical to main. Pins: `compiler/tests/unit/s469-engine-raw-body-failable.test.js` and the pack.
+
+### g-engine-in-match-arm-emits-nothing-s469 — an `<engine>` written inside a `<match>` arm body compiles clean and emits nothing: no transition table, no variant cell, no rendered arm — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-engine-in-match-arm-emits-nothing-s469 sev=LOW status=open locus=compiler/src/arm-body-reader.ts(native re-parse of the arm)+compiler/src/symbol-table.ts(PASS 10.A never registers an engine-decl from the arm re-parse) prov=review:S469-6e0770356 -->
+
+The arm body is re-parsed by the native parser (arm-body-reader `readBareArmBody`), which synthesizes an engine-decl (`synthEngineDecl`). That engine-decl never reaches SYM's engine registration, so it has no `engineMeta` and no codegen. Its bodies are not run, so this is no failable hole. It is a silent drop: refuse the form or support it.
+
+### g-state-child-duplicate-attr-dropped-s469 — a second `effect=` (or a `class=${…}`) on an engine state-child opener is dropped silently: only the first `effect=` is captured — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-state-child-duplicate-attr-dropped-s469 sev=LOW status=open locus=compiler/src/engine-statechild-parser.ts(effect= capture reads the first match) prov=review:S469-6e0770356 -->
+
+The dropped text is never emitted, so it is not walked-vs-emitted divergence. It should be a refusal (a duplicate reserved attribute) instead of a silent drop.
+
+### g-shorthand-match-in-component-body-dropped-s469 — a `<match>` whose arms use the `:`-shorthand, written inside a component body, renders nothing — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-shorthand-match-in-component-body-dropped-s469 sev=LOW status=open locus=compiler/src/component-expander.ts(+ codegen/emit-match.ts buildMatchArms) prov=review:S469-6e0770356 -->
+
+Silent drop (no output, no diagnostic). It is not a failable hole: the dropped arm body is never emitted.
+
+### g-ontimeout-after-brace-loses-timer-s469 — a `}` or `!{` inside an `<onTimeout after=${…}>` (or `<onIdle>`) delay drops the timer silently: the `after=` value is captured by a regex that stops early, `parseAfterDuration` returns `invalid`, and codegen skips the entry — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-ontimeout-after-brace-loses-timer-s469 sev=LOW status=open locus=compiler/src/engine-statechild-parser.ts(scanForOnTimeoutEntries / scanForOnIdleEntries after= regex) prov=review:S469-6e0770356;pack:n18 "delay handled" (PASS-DENY) -->
+
+The timer never arms, so it fails closed for failable calls. The value should be bounded by `interpolation-extent.ts` (`logicBlockClose`), and an invalid `after=` should be refused instead of skipped.
+
+### g-effect-body-brace-in-markup-text-warning-s469 — a `{` inside an engine `effect=${…}` body is reported by the markup-text lint as a stray brace in text (a false warning): the block splitter's markup scan reads the opener's attribute region as text — `NEW S469 (review of 6e0770356); LOW; open`
+
+<!-- @gap id=g-effect-body-brace-in-markup-text-warning-s469 sev=LOW status=open locus=compiler/src/block-splitter.js(engine body attribute region) prov=review:S469-6e0770356 -->
+
+Warning only; no behaviour change.
 
 ### g-engine-direct-ontransition-one-sided-dropped-s469 — an engine-direct `<onTransition to=.B>` (no `from=`) is silently dropped by codegen: no hook fires and no diagnostic is reported (`collectEngineHooks` "defensive skip") — `NEW S469 (s469-engine-effect-failable probe); LOW; open`
 

@@ -56,8 +56,8 @@ import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 import { judgeDescriptorExpr, describeJudgeType } from "./emit-predicates.ts";
 import { CGError } from "./errors.ts";
 import { recordRefusedLowering } from "./refused-lowering-errors.ts";
-import { readShorthandBody } from "../arm-body-reader.ts";
-import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource } from "../engine-body-reader.ts";
+import { readShorthandBody, walkedArmBodyOrRefuse } from "../arm-body-reader.ts";
+import { readEngineBody, ENGINE_BODY_FILE, messageArmSource, onTransitionBodySource, guardSource, bodyWasWalked } from "../engine-body-reader.ts";
 import { markupNotRenderedMessage, refuseUnrenderedStatementMarkup } from "../markup-statement-refusal.ts";
 
 /** One anchor per engine body text + refusal offset (see parseEngineSynthLogicBody). */
@@ -574,6 +574,19 @@ export function emitEngineTimersTable(meta: EngineMetadata): string[] {
       if (parsed.kind === "literal") {
         arrayParts.push(`{ ms: ${parsed.ms}, target: ${targetLit}${nameField} }`);
       } else if (parsed.kind === "computed") {
+        // S469 (hardening) — only a delay the type system walked is lowered.
+        const dr = readEngineBody(ot, "after", parsed.exprText, ENGINE_BODY_FILE.guard);
+        if (!dr.stmts || !bodyWasWalked(dr.stmts)) {
+          recordRefusedLowering(
+            new CGError(
+              "E-ERROR-002",
+              `E-ERROR-002: an \`<onTimeout after=>\` delay of engine \`${meta.varName}\` reached codegen without being checked (§19.4.3); it is not emitted.`,
+              { file: "", start: 0, end: 0, line: 1, col: 1 },
+            ),
+            ot as object,
+          );
+          continue;
+        }
         // Rewrite the expression so reactive reads (@var → _scrml_reactive_get) wire.
         const rewritten = rewriteExpr(parsed.exprText);
         // Multiply by unit multiplier inside the IIFE so the runtime clamp is
@@ -629,6 +642,20 @@ export function emitEngineIdleWatchdog(meta: EngineMetadata): string[] {
   if (parsed.kind === "literal") {
     lines.push(`const ${constName} = _scrml_g.Object.freeze({ ms: ${parsed.ms}, target: ${targetLit} });`);
   } else if (parsed.kind === "computed") {
+    // S469 (hardening) — only a delay the type system walked is lowered.
+    const dr = readEngineBody(entry, "after", parsed.exprText, ENGINE_BODY_FILE.guard);
+    if (!dr.stmts || !bodyWasWalked(dr.stmts)) {
+      recordRefusedLowering(
+        new CGError(
+          "E-ERROR-002",
+          `E-ERROR-002: the \`<onIdle after=>\` delay of engine \`${meta.varName}\` reached codegen without being checked (§19.4.3); it is not emitted.`,
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+        ),
+        entry as object,
+      );
+      lines.push(`const ${constName} = null;`);
+      return lines;
+    }
     const rewritten = rewriteExpr(parsed.exprText);
     lines.push(
       `const ${constName} = _scrml_g.Object.freeze({ msExpr: function(){ return (${rewritten}) * ${parsed.unitMultiplier}; }, target: ${targetLit} });`,
@@ -953,6 +980,20 @@ function parseEngineSynthLogicBody(src: string, filePath: string, owner?: object
         once(filePath + "\u0000" + src + "\u0000lead" + String((lead.span as any)?.start ?? 0)),
       );
     }, "effect");
+    // S469 (hardening) — the WALKED floor: a parse the failable walk never read is refused,
+    // never lowered (engine-body-reader `bodyWasWalked`; on only during a compile's CG).
+    if (read.stmts && !bodyWasWalked(read.stmts)) {
+      recordRefusedLowering(
+        new CGError(
+          "E-ERROR-002",
+          `E-ERROR-002: an engine body (${filePath.replace(/^__|__\.scrml$/g, "").replace(/_/g, " ")}) reached codegen without being ` +
+          `checked for unhandled failable calls (§19.4.3); it is not emitted. This is a compiler defect — please report it.`,
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+        ),
+        (owner as object) ?? null,
+      );
+      return null;
+    }
     return read.stmts;
   } catch (_e) {
     // fall through
@@ -2656,7 +2697,10 @@ function buildEngineArms(
       const synthLabel = `<engine:${meta.varName}:${tag}>`;
       const filePath = (fileAST?.filePath as string | undefined) ?? synthLabel;
       const span = (match as any).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      body = readShorthandBody(sc as object, "shorthand", trimmed, synthLabel, filePath, span, trimmed);
+      body = walkedArmBodyOrRefuse(
+        readShorthandBody(sc as object, "shorthand", trimmed, synthLabel, filePath, span, trimmed),
+        `the :-shorthand body of state .${tag} of engine \`${meta.varName}\``, sc as object,
+      );
     } else {
       body = filterRenderableChildren(rawChildren);
     }
@@ -4541,6 +4585,21 @@ function emitHookArm(
           "E-ERROR-002",
           `E-ERROR-002: the \`if=\` guard of an \`<onTransition>\` (.${arm.from} → .${arm.to}) of engine ` +
           `\`${varName}\` cannot be read, so it cannot be checked for unhandled failable calls (§19.4.3).`,
+          { file: "", start: 0, end: 0, line: 1, col: 1 },
+        ),
+        (arm.owner as object) ?? null,
+      );
+      return [];
+    }
+    // S469 (hardening) — the guard text the type system read (its parse is cached on the entry
+    // and was walked); a guard it never walked is refused, never lowered.
+    const gr = readEngineBody(arm.owner ?? null, "if", g.src, ENGINE_BODY_FILE.guard);
+    if (!gr.stmts || !bodyWasWalked(gr.stmts)) {
+      recordRefusedLowering(
+        new CGError(
+          "E-ERROR-002",
+          `E-ERROR-002: the \`if=\` guard of an \`<onTransition>\` (.${arm.from} → .${arm.to}) of engine ` +
+          `\`${varName}\` reached codegen without being checked (§19.4.3); it is not emitted.`,
           { file: "", start: 0, end: 0, line: 1, col: 1 },
         ),
         (arm.owner as object) ?? null,

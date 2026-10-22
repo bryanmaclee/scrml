@@ -161,6 +161,37 @@ describe("route-inference — a `}` in a string inside a SQL `${…}` slot hides
   }
 });
 
+describe("review of 6e0770356 — a slot lowered from its TEXT admits no failable call, handled or not", () => {
+  const GUARD = (g) => ENG(`<A rule=.B>\n<p>a</p>\n<onTransition to=.B if=${g}>\${ @msg = "IN" }</>\n</A>\n<B rule=.A><p>b</p></B>`);
+  const cases = [
+    ["H1 handled guard", GUARD("${ check(@pw) !{ _ :> false } }")],
+    ["H2 derived= expression", HEAD + `<engine for=S derived=(check(@pw) ? .B : .A)>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</engine>\n`],
+    ["H3 <engine if=>", ENG(`<A rule=.B><p>a</p></A>\n<B rule=.A><p>b</p></B>`, ` if=\${ @pw != "" && check(@pw) }`)],
+    ["H4 <match if=>", HEAD + `<st> = S.B\n<match for=S on=@st if=(@pw != "" && check(@pw))>\n<A><p>a</p></A>\n<B><p>b</p></B>\n</match>\n`],
+    ["H5 <match on=>", HEAD + `<div><match for=S on=(check(@pw) ? S.B : S.A)><A : "a"><B : "b"></match></div>\n`],
+  ];
+  for (const [name, src] of cases) test(name, () => { expect(codes(src)).toContain("E-ERROR-002"); });
+  test("a name in a string is not a call", () => { expect(codes(GUARD('${ "check" == @pw }'))).toEqual([]); });
+  test("MEDIUM — a quoted guard is E-COND-NOT-BOOLEAN, never `if (\"false\")`", () => {
+    expect(codes(GUARD('"false"'))).toContain("E-COND-NOT-BOOLEAN");
+  });
+});
+
+describe("hardening — the codegen floor refuses a body the failable walk never read", () => {
+  test("with the floor on, an unwalked hook body is refused, not emitted", async () => {
+    const { setRawBodyWalkFloor } = await import("../../src/engine-body-reader.ts");
+    const { emitEngineHookFiringFunction } = await import("../../src/codegen/emit-engine.ts");
+    const { drainRefusedLowerings } = await import("../../src/codegen/refused-lowering-errors.ts");
+    const meta = { varName: "m", forType: "S", stateChildren: [{ tag: "A", rule: { kind: "single", target: "B" }, effectRaw: " @msg = 1 " }] };
+    drainRefusedLowerings();
+    setRawBodyWalkFloor(true);
+    let out;
+    try { out = emitEngineHookFiringFunction(meta).join("\n"); } finally { setRawBodyWalkFloor(false); }
+    expect(out).not.toContain("msg");
+    expect(drainRefusedLowerings().map((e) => e.code)).toContain("E-ERROR-002");
+  });
+});
+
 describe("LOW-1 — `await` in a template interpolation is E-AWAIT-NOT-IN-SCRML", () => {
   test("quoted attribute interpolation", () => {
     const c = codes(`<p data-v="\${ await /qq,window.__inj = 1,qq/g }">x</p>\n`);

@@ -65,7 +65,7 @@ import { ifChainChildNodes } from "../ast-if-chain.js";
 import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 import { sourceHasMdElement } from "../md-lower.ts";
-import { readShorthandBody, readBareArmBody, matchArmKey } from "../arm-body-reader.ts";
+import { readShorthandBody, readBareArmBody, matchArmKey, walkedArmBodyOrRefuse } from "../arm-body-reader.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
 // (called 2–3× per match block) does not re-walk the whole AST each time.
@@ -885,7 +885,10 @@ function buildMatchArms(
       // (`checkRawArmBodies`) read these same nodes, so the stamps it left are emitted.
       const filePath = (fileAST?.filePath as string | undefined) ?? `<match:${matchBlock.id}:${tag}>`;
       const span = matchBlock.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      body = readShorthandBody(matchBlock as object, armKey, entry.bodyRaw, `<match:${matchBlock.id}:${tag}>`, filePath, span, entry.bodyRaw);
+      body = walkedArmBodyOrRefuse(
+        readShorthandBody(matchBlock as object, armKey, entry.bodyRaw, `<match:${matchBlock.id}:${tag}>`, filePath, span, entry.bodyRaw),
+        `the <match> arm <${tag}> body`, matchBlock as object,
+      );
     } else if (entry.bodyForm !== "self-closing" && entry.bodyRaw && entry.bodyRaw.trim().length > 0) {
       // bare-body: re-parse as markup fragment (Phase 3 path; M6.3 native-parser route;
       // S153 each-in-block-form-match and `<md>` take splitBlocks+buildAST). S469 (SECURITY) —
@@ -904,7 +907,7 @@ function buildMatchArms(
           const found = restampEachBlockIds(read.nodes, matchBlock.id, tag);
           collectedEachBlocks.push(...found);
         }
-        body = read.nodes;
+        body = walkedArmBodyOrRefuse(read.nodes, `the <match> arm <${tag}> body`, matchBlock as object);
       } catch (_e) {
         // Defensive: same recovery shape as the shorthand path.
       }
