@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 /**
  * @module codegen/route-splitter
  *
@@ -1367,7 +1368,7 @@ function appendAtomLines(
       lines.push(`  _scrml_vendor_require(${JSON.stringify(specifier)});`);
       // Preserve the import-line as a comment for adopter-debug
       // traceability of the original §41 reference.
-      lines.push(`  // ${atom.replace(/\n$/, "")}`);
+      lines.push(`  // ${commentText(atom.replace(/\n$/, ""))}`);
     }
   }
 

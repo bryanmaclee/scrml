@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 import * as acorn from "acorn";
 import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
@@ -2492,7 +2493,7 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
     }
   }
 
-  lines.push(`// <${tag}${timerId ? ` id="${timerId}"` : ""}> interval=${intervalMs}ms`);
+  lines.push(`// <${tag}${timerId ? ` id="${commentText(timerId)}"` : ""}> interval=${commentText(intervalMs)}ms`);
   lines.push(`_scrml_timer_start(${scopeVar}, ${timerVar}, ${intervalMs}, function() {`);
   lines.push(`  ${bodyCode}`);
   lines.push(`}${immediateArg});`);
@@ -2574,7 +2575,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
       : `_scrml_register_cleanup(() => ${destroyCall});`;
 
   if (tag === "keyboard") {
-    lines.push(`// <keyboard${inputId ? ` id="${inputId}"` : ""}>`);
+    lines.push(`// <keyboard${inputId ? ` id="${commentText(inputId)}"` : ""}>`);
     lines.push(`_scrml_input_keyboard_create(${inputIdJs}, ${scopeVar});`);
     lines.push(registerDestroy(`_scrml_input_keyboard_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "mouse") {
@@ -2587,7 +2588,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
         targetExpr = `() => _scrml_reactive_get(${JSON.stringify(raw)})`;
       }
     }
-    lines.push(`// <mouse${inputId ? ` id="${inputId}"` : ""}${targetAttr ? " target=..." : ""}>`);
+    lines.push(`// <mouse${inputId ? ` id="${commentText(inputId)}"` : ""}${targetAttr ? " target=..." : ""}>`);
     lines.push(`_scrml_input_mouse_create(${inputIdJs}, ${scopeVar}, ${targetExpr});`);
     lines.push(registerDestroy(`_scrml_input_mouse_destroy(${inputIdJs}, ${scopeVar})`));
   } else if (tag === "gamepad") {
@@ -2603,7 +2604,7 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
         if (!isNaN(n) && n >= 0 && n <= 3) gamepadIndex = n;
       }
     }
-    lines.push(`// <gamepad${inputId ? ` id="${inputId}"` : ""} index=${gamepadIndex}>`);
+    lines.push(`// <gamepad${inputId ? ` id="${commentText(inputId)}"` : ""} index=${commentText(gamepadIndex)}>`);
     lines.push(`_scrml_input_gamepad_create(${inputIdJs}, ${scopeVar}, ${gamepadIndex});`);
     lines.push(registerDestroy(`_scrml_input_gamepad_destroy(${inputIdJs}, ${scopeVar})`));
   }
@@ -2764,7 +2765,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     const method = endpoint.method;
     const carriesBody = method === "POST" || method === "PUT" || method === "PATCH";
 
-    lines.push(`// <request id="${requestId}" api="${endpointName}"> (§60.4 — typed external API)`);
+    lines.push(`// <request id="${commentText(requestId)}" api="${commentText(endpointName)}"> (§60.4 — typed external API)`);
     lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
     lines.push(`var ${seqVar} = 0;`);
     lines.push(`var ${mountedVar} = true;`);
@@ -2873,7 +2874,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   const seqVar = `_scrml_request_${requestId}_seq`;
   const mountedVar = `_scrml_request_${requestId}_mounted`;
 
-  lines.push(`// <request id="${requestId}">`);
+  lines.push(`// <request id="${commentText(requestId)}">`);
     lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
   lines.push(`var ${seqVar} = 0;`);
   lines.push(`var ${mountedVar} = true;`);
@@ -2967,7 +2968,7 @@ function emitTimeoutNode(node: any, errors: CGError[], filePath: string): string
     }
   }
 
-  lines.push(`// <timeout${timeoutId ? ` id="${timeoutId}"` : ""} delay=${delayMs}>`);
+  lines.push(`// <timeout${timeoutId ? ` id="${commentText(timeoutId)}"` : ""} delay=${commentText(delayMs)}>`);
 
   // Emit the setTimeout call
   lines.push(`var ${timerVar} = _scrml_g.setTimeout(function() {`);

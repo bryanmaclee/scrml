@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 import { genVar } from "./var-counter.ts";
 import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
@@ -3049,7 +3050,7 @@ function _emitLogicNode(node: any, opts: EmitLogicOpts): string {
           .join("\n");
       }
       const trimmed = bareExpr.trim();
-      if (isLeakedComment(trimmed)) return `// ${trimmed}`;
+      if (isLeakedComment(trimmed)) return `// ${commentText(trimmed)}`; // S469 (review of d5f5d3ea1, LOW-1) — source text never leaves the comment
       // §32: If a tilde context is active, this bare-expr initializes the tilde variable.
       // Emit as `let _scrml_tilde_N = <expr>;` so `~` in subsequent nodes can reference it.
       // Gap 7: capture prev expr ctx (with previous tildeVar) BEFORE overwriting

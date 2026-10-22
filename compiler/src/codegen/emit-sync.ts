@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 /**
  * §52.6 Compiler-Generated Sync Infrastructure (READ-authority half)
  *
@@ -105,7 +106,7 @@ export function emitServerAuthorityLoad(varName: string, table: string): string[
   const varJs = JSON.stringify(varName);
   const routeJs = JSON.stringify(`/__serverLoad/${varName}`);
   return [
-    `// < ${varName} > server-authority type — SELECT * FROM ${table} load on mount (§52.6.1)`,
+    `// < ${varName} > server-authority type — SELECT * FROM ${commentText(table)} load on mount (§52.6.1)`,
     `(async () => {`,
     // §52.8 (ssr-b-substrate) — skip the fetch RTT when the SSR pre-render
     // already seeded this cell from window.__scrml_ssr_state (graceful no-op

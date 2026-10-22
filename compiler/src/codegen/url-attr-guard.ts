@@ -19,6 +19,7 @@
  * `../runtime-url-guard.js` — there is no second list here.
  */
 
+import { commentText } from "./comment-text.ts";
 import { _scrml_is_url_attr } from "../runtime-url-guard.js";
 import {
   ATTR_INTERP_EXECUTABLE_CODE,
@@ -118,5 +119,5 @@ export function refuseExecutableDataWrite(
   // the same-named attribute in the same file (a re-parsed `<match>` arm has its own spans).
   (err as { attrSinkName?: string }).attrSinkName = name.toLowerCase();
   recordRefusedLowering(err, anchor ?? null);
-  return `/* ${ATTR_INTERP_EXECUTABLE_CODE}: ${JSON.stringify(name)} is never written from data (executable sink) */`;
+  return `/* ${ATTR_INTERP_EXECUTABLE_CODE}: ${commentText(JSON.stringify(name))} is never written from data (executable sink) */`;
 }

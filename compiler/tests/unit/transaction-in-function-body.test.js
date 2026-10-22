@@ -215,6 +215,13 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
     const src = `\${ ${pre} function f(m: M)! -> E { transaction { let v = match m {\n .A :> { return 1 }\n .B :> 2\n } } } }`;
     expect(codes(src)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
   });
+  test("S469: a `return` in a LABELED BLOCK in a text-carried (unbraced) `match` arm in the block is not read past", () => {
+    // The lenient statement reader read `a: { return 1 }` as the bare expression `a` and dropped
+    // the block, so the check saw no `return`; the strict reader refuses the half-read body.
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    const src = `\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> a: { return 1 }\n .B :> log(1)\n } } } }`;
+    expect(codes(src)).toContain("E-TRANSACTION-CONTROL-FLOW");
+  });
   test("PA reading: an outward `break` / `continue` inside a `match` arm in the block → still E-TRANSACTION-CONTROL-FLOW", () => {
     const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
     expect(codes(`\${ ${pre} function f(m: M)! -> E { for (let i = 0; i < 2; i++) { transaction { match m {\n .A :> { break }\n .B :> { log(1) }\n } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);

@@ -42,7 +42,7 @@ import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
 import { refuseElementLowering, refuseRawContentLowering, refuseStaticAttrWrite } from "./refused-lowering-errors.ts";
 import { isRawContentElement, encodeRawContentBody } from "../raw-content-encode.ts";
-import { emitStringFromTree } from "../expression-parser.ts";
+import { emitStringFromTree, sliceTemplateText } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
 import { lookupStateCell, getCellKind } from "../symbol-table.ts";
@@ -218,38 +218,29 @@ function attrValueParts(valNode: any, iterVarName: string | null, tag = "", name
   // passed through the guard, and escaped once — the guard must read the URL the browser
   // will parse, not its escaped spelling.
   // S457 — an SVG animation value (`to="${@.url}"` on `<set attributeName="href">`) likewise.
+  // S469 (review of d5f5d3ea1, MEDIUM-1) — the interpolations are bounded by `sliceTemplateText`,
+  // the one boundary reader the client emitter and the failable-call check use (acorn's, under
+  // both goals). Before, `indexOf("}")` closed `${ "}" + x }` at the string's brace — a second
+  // reader of the text that agreed with neither the browser nor the check.
+  const sliced = sliceTemplateText(raw, { bare: true });
+  if (sliced.unreadable !== null) throw new SsrUnsupported("unreadable interpolation in attribute");
+  const interior = (inner: string): string => {
+    if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
+    return resolveRowRead(inner, iterVarName);
+  };
   if (name && quotedUrlAttrNeedsGuard(tag, name, raw, attrs)) {
     const segs: string[] = [];
-    let j = 0;
-    while (j < raw.length) {
-      const open = raw.indexOf("${", j);
-      if (open === -1) { segs.push(JSON.stringify(raw.slice(j))); break; }
-      if (open > j) segs.push(JSON.stringify(raw.slice(j, open)));
-      const close = raw.indexOf("}", open + 2);
-      if (close === -1) throw new SsrUnsupported("unterminated interpolation in attribute");
-      const inner = raw.slice(open + 2, close);
-      if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
-      segs.push(`_scrml_g.String(${resolveRowRead(inner, iterVarName)})`);
-      j = close + 1;
+    for (const sg of sliced.segments) {
+      if (sg.kind === "expr") segs.push(`_scrml_g.String(${interior(sg.text)})`);
+      else if (sg.text !== "") segs.push(JSON.stringify(sg.text));
     }
+    if (segs.length === 0) segs.push(JSON.stringify(""));
     return [`_scrml_esc_attr(${wrapUrlGuard("null", name, segs.join(" + "), urlGuardTarget(tag, name, attrs))})`];
   }
-  // Split `${...}` interpolations out of the literal.
   const parts: string[] = [];
-  let i = 0;
-  while (i < raw.length) {
-    const open = raw.indexOf("${", i);
-    if (open === -1) {
-      parts.push(JSON.stringify(escapeHtmlAttr(raw.slice(i))));
-      break;
-    }
-    if (open > i) parts.push(JSON.stringify(escapeHtmlAttr(raw.slice(i, open))));
-    const close = raw.indexOf("}", open + 2);
-    if (close === -1) throw new SsrUnsupported("unterminated interpolation in attribute");
-    const inner = raw.slice(open + 2, close);
-    if (inner.includes("${")) throw new SsrUnsupported("nested interpolation in attribute");
-    parts.push(`_scrml_esc_attr(_scrml_g.String(${resolveRowRead(inner, iterVarName)}))`);
-    i = close + 1;
+  for (const sg of sliced.segments) {
+    if (sg.kind === "expr") parts.push(`_scrml_esc_attr(_scrml_g.String(${interior(sg.text)}))`);
+    else if (sg.text !== "") parts.push(JSON.stringify(escapeHtmlAttr(sg.text)));
   }
   return parts;
 }
