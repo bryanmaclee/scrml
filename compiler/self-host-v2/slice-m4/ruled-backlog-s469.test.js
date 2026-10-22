@@ -97,6 +97,9 @@ describe("P — the runtime's parses, every edge (one grammar per type)", () => 
     const bad = ["", ".", "-", "e3", "1e", "1e+", "+1", " 1", "1 ", "0x1F", "1_0", "NaN", "Infinity", "-Infinity", "inf", "1e400", "-1e400", "1.8e308", "1..2", "1.2.3", "١"];
     for (const s of bad) expect([s, rt.parseNumText(s)]).toEqual([s, null]);
   });
+  test("review F3 (PA default): a parse never yields -0 — `-0` and an underflow read as 0", () => {
+    for (const s of ["-0", "-0.0", "-1e-400", "-0e5"]) expect([s, Object.is(rt.parseNumText(s), 0)]).toEqual([s, true]);
+  });
   test("number.parse reads back every finite value `${n}` prints (the round-trip law)", () => {
     for (const n of [0, 1, -1, 0.1, 1 / 3, 1e21, 1e-7, 123456789.125, -2.5e-300, Number.MAX_VALUE, Number.MIN_VALUE, 9007199254740993]) {
       expect(rt.parseNumText(`${n}`)).toBe(n);
@@ -164,6 +167,12 @@ describe("S — the admitted string methods (Appendix D.1)", () => {
     expect(codes(prog(S, `        <p>\${"abc".substring(1)}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
     expect(codes(prog(S, `        <p>\${@s.trim().substr(1)}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
   });
+  test("review F2: a string the binder knows only through a function's return type, or as `string | not`, is still D.1's refusal", () => {
+    expect(codes(prog(S + `\n    function g() -> string { return "a" }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.normalize() }\n        return ""\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function h(x: string | not) -> string {\n        if (x is given) { return x.sort() }\n        return ""\n    }`, `        <p>\${h("a")}</p>`))).toEqual(["E-STRING-METHOD-UNKNOWN"]);
+    expect(codes(prog(`    function g() -> int { return 1 }`, `        <p>\${g().normalize()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
   test("a receiver that is not provably a string keeps the bootstrap's own refusal (no guess)", () => {
     expect(codes(prog(`    let <n:int=1/>`, `        <p>\${@n.substring(1)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(`    let <m:string | not=not/>`, `        <p>\${@m.padStart(2)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
@@ -226,6 +235,28 @@ describe("S — the runtime's string additions, every edge", () => {
   test("repeat", () => {
     expect(rt.strRepeat("ab", 3)).toBe("ababab");
     expect(rt.strRepeat("ab", 0)).toBe("");
+    expect(rt.strRepeat("", 2 ** 40)).toBe("");
+  });
+  test("review F1: a huge width / count is a ScrmlTrap, checked UP FRONT (fast, no memory spent) — never a host RangeError", () => {
+    const trap = (f) => { try { f(); } catch (e) { return [e.name, e.code]; } return "no trap"; };
+    const T = ["ScrmlTrap", "E-INDEX-OUT-OF-RANGE-RT"];
+    const t0 = performance.now();
+    expect(trap(() => rt.strPadStart("a", 2 ** 40))).toEqual(T);
+    expect(trap(() => rt.strPadEnd("a", 2 ** 31, "😀"))).toEqual(T);
+    expect(trap(() => rt.strPadStart("a", 2 ** 29))).toEqual(T);
+    expect(trap(() => rt.strRepeat("ab", 2 ** 30))).toEqual(T);
+    expect(trap(() => rt.strRepeat("x", 2 ** 53 - 1))).toEqual(T);
+    expect(trap(() => rt.strReplaceAll("ab".repeat(1e6), "", "x".repeat(1000)))).toEqual(T);
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
+  test("review F1: a large but legal pad is built natively (one host repeat), in linear time", () => {
+    const t0 = performance.now();
+    const p = rt.strPadStart("a", 5e7);
+    expect(p.length).toBe(5e7);
+    expect(p.endsWith(" a")).toBe(true);
+    expect(rt.strPadEnd("😀", 8, "ab😀")).toBe("😀ab😀ab😀a");
+    expect(rt.strLength(rt.strPadEnd("😀", 1e6 + 1, "ab😀"))).toBe(1e6 + 1);
+    expect(performance.now() - t0).toBeLessThan(2000);
   });
 });
 
@@ -313,6 +344,15 @@ describe("A — block arms yield with `lift` (§18.5); the value-form `if` branc
     const src = prog(L + `\n    function pick2(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            const t: string = "lifted:"\n            lift t + id\n        } }\n        return r\n    }`, `        <p id="r">\${pick2("x")}</p>`);
     await load(src);
     expect($("#r").textContent).toBe("lifted:x");
+  });
+  test("review F4: an arm ending in a write falls through (E-ERROR-012) — never E-ARM-TAIL-VALUE, whose fix-it would be `lift @n = 7`", () => {
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "a"\n            @out = "b"\n        } }\n        return r`))).toEqual(["E-ERROR-012"]);
+  });
+  test("review F5: a `lift` operand is resolved as a value even where its arm is refused — a nested `match` there is not a statement-position one", () => {
+    const K = L + `\n    type K:enum = { A, B }\n    let <k:K=.A/>`;
+    const src = prog(K + `\n    function go() -> int {\n        return match @k {\n            .A :> {\n                const t: int = 1\n                lift match @k { .A :> {\n                    @out = "x"\n                    lift 2\n                }, .B :> 3, }\n            }\n            .B :> 2\n        }\n    }`, `        <p>x</p>`);
+    const msgs = run(src).diags.map((d) => d.message);
+    expect(msgs.filter((m) => m.includes("yields to nothing"))).toEqual([]);
   });
   test("the value-form `if` is not in the bootstrap: refused by name (never read as a name `if`)", () => {
     expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y" } else { "n" }}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

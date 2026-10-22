@@ -5952,14 +5952,17 @@ ${
         const ot: Type | not = ro.x.ty
         const call: string = "`." + m.method + "(…)`"
         if (ot is not) {
+            if (strMethodOp(m.method) is not && strReceiver(env, m.obj, ro)) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)", args, st)
         }
         const fix: string = tapeJsFix(m.method)
         if (fix != "") {
             if (seqElem(ot) is given) return plain(tapeGuess(m.method, ot), refuseMethod(env, e, "E-TAPE-JS-METHOD", call + " is JavaScript's array method, not a tape method — write " + fix + " (§66.12.6 rule 3: tape methods are named after their grants, and `sort` / `reverse` return a new tape)", args, st).st)
-            if (ot == Type.Str) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
+            if (isStrOrMaybeStr(ot)) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` is not in the bootstrap", args, st)
         }
+        // review F2: a method outside D.1 on a `string | not` is unknown on the string inside, narrowed or not
+        if (isStrOrMaybeStr(ot) && strMethodOp(m.method) is not) return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, st)
         if (maybeInner(ot) is given) {
             return refuseMethod(env, e, "E-BOOTSTRAP-UNSUPPORTED", call + " on a `" + typeName(ot) + "` — the value may be `not`, and the bootstrap does not read a narrowing at a method's receiver; pass the narrowed value to a function that takes the plain type", args, st)
         }
@@ -6085,10 +6088,32 @@ ${
     // dropped, and the call takes the general refusal exactly as before.
     fn unknownStrMethod(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> RX | not {
         const ro: RX = resolveExpr(env, m.obj, not, st0)
-        const rt: Type | not = ro.x.ty
-        if (rt is not) return not
-        if (rt != Type.Str) return not
+        if (!strReceiver(env, m.obj, ro)) return not
         return refuseMethod(env, e, "E-STRING-METHOD-UNKNOWN", strUnknownMsg(m.method), args, ro.st)
+    }
+
+    // review F2 — is a receiver provably TEXT, for the unknown-method refusal? Its
+    // binder type is `string` or `string | not` (a method outside D.1 does not exist
+    // on the string inside, narrowed or not), or — the binder types no call result —
+    // it is a call of a declared function whose return type is one of those (the
+    // function's own `ret`, the one record of it).
+    fn strReceiver(env: Env, obj: AExpr, ro: RX) -> boolean {
+        const rt: Type | not = ro.x.ty
+        if (rt is given) return isStrOrMaybeStr(rt)
+        const c: AExpr | not = calleeOf(obj.k)
+        if (c is not) return false
+        const f: FnInfo | not = calledFn(env, nameFactIn(ro.st, c.nid))
+        if (f is not) return false
+        const r: Type | not = f.ret
+        if (r is not) return false
+        return isStrOrMaybeStr(r)
+    }
+
+    fn isStrOrMaybeStr(t: Type) -> boolean {
+        if (t == Type.Str) return true
+        const i: Type | not = maybeInner(t)
+        if (i is not) return false
+        return i == Type.Str
     }
 
     fn strUnknownMsg(n: string) -> string {
@@ -8667,10 +8692,10 @@ ${
         // s469 (§18.5): a statement-holding arm whose value is a bare last expression —
         // after the §19.16.2 `defer` rule, in the order armBlock judges them (one report)
         const dsp: AStmt | not = directDefer(b)
-        if (dsp is given) return plain(not, addDiag(resolveBlock(env, b, st), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (a `match` whose value is used) — the deferred block would capture the arm's result (§19.16.2). Use the `match` as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block"))
+        if (dsp is given) return plain(not, addDiag(resolveArmStmts(env, a, b, st), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (a `match` whose value is used) — the deferred block would capture the arm's result (§19.16.2). Use the `match` as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block"))
         const bare: AExpr | not = bareTail(a, b)
         if (bare is given) return plain(not, addDiag(resolveBlock(env, b, st), env.file, bare.span, "E-ARM-TAIL-VALUE", armTailMsg()))
-        return plain(not, addDiag(resolveBlock(env, b, st), env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as a statement and write the result in each arm"))
+        return plain(not, addDiag(resolveArmStmts(env, a, b, st), env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as a statement and write the result in each arm"))
     }
 
     fn plainMatch(env: Env, e: AExpr, subj: AExpr, arms: AArm[], stmt: boolean, expected: Type | not, st0: AS) -> RX {
@@ -9369,7 +9394,7 @@ ${
         if (cx.stmt) {
             // s469 (§18.5): "In a STATEMENT position a block arm yields nothing and
             // needs no `lift`" — a `lift` there yields to nothing; refused, fail closed
-            if (a.lifted) return addDiag(resolveBlock(env, b, st0), env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lift` in an arm whose value is not used (a statement-position `match` / `!{}`) yields to nothing (§18.5: in a statement position a block arm yields nothing and needs no `lift`) — drop the `lift`, or use the form's value")
+            if (a.lifted) return addDiag(resolveArmStmts(env, a, b, st0), env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lift` in an arm whose value is not used (a statement-position `match` / `!{}`) yields to nothing (§18.5: in a statement position a block arm yields nothing and needs no `lift`) — drop the `lift`, or use the form's value")
             return resolveBlock(env, b, st0)
         }
         // s452 r2 (HIGH-1) — §19.16.2: "The same code covers a `defer` written
@@ -9380,7 +9405,7 @@ ${
         // an arm used for its value — refused too (fail closed, reversible). A
         // `defer` in a STATEMENT-position arm stays legal (above).
         const dsp: AStmt | not = directDefer(b)
-        if (dsp is given) return addDiag(resolveBlock(env, b, st0), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (" + whereLabel(cx.what) + ") — the deferred block would capture the arm's result (§19.16.2). Handle the call as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block")
+        if (dsp is given) return addDiag(resolveArmStmts(env, a, b, st0), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (" + whereLabel(cx.what) + ") — the deferred block would capture the arm's result (§19.16.2). Handle the call as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block")
         if (blockDiverges(b)) return resolveBlock(env, b, st0)
         const n: int = b.stmts.length
         if (n == 0) return fallsThrough(env, a, cx, st0)
@@ -9413,7 +9438,33 @@ ${
     // `not` otherwise.
     fn bareTail(a: AArm, b: ABlock) -> AExpr | not {
         if (a.lifted || b.stmts.length < 2) return not
-        return evalOf(b.stmts[b.stmts.length - 1])
+        const x: AExpr | not = evalOf(b.stmts[b.stmts.length - 1])
+        if (x is not) return not
+        // review F4: only an expression that could be a value — never a write (an
+        // assignment, a recognized edit), whose arm falls through (E-ERROR-012 says so)
+        if (isWriteExpr(x)) return not
+        return x
+    }
+
+    // review F5 — an arm block resolved where its value is refused (or yields to
+    // nothing): its statements in order, then a `lift` operand resolved as the VALUE it
+    // is — never as a statement, so a `match` there keeps its value position and its
+    // own arms are not judged as statement-position arms (no second, misleading report).
+    fn resolveArmStmts(env: Env, a: AArm, b: ABlock, st0: AS) -> AS {
+        if (!a.lifted || b.stmts.length == 0) return resolveBlock(env, b, st0)
+        const n: int = b.stmts.length
+        const last: AExpr | not = evalOf(b.stmts[n - 1])
+        if (last is not) return resolveBlock(env, b, st0)
+        let st: AS = st0
+        let env2: Env = env
+        let i = 0
+        while (i < n - 1) {
+            const r: RB = resolveStmt(env2, b.stmts[i], st)
+            env2 = r.env
+            st = r.st
+            i = i + 1
+        }
+        return resolveExpr(withWholeAt(env2, last.nid, "the value of an enclosing arm"), last, not, st).st
     }
 
     fn armTailMsg() -> string {

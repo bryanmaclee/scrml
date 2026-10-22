@@ -1268,12 +1268,14 @@ export function strReplaceAll(s, find, withText) {
   if (find === "") {
     const cps = codePoints(s);
     if (cps.length === 0) return withText;
+    requireFits((cps.length + 1) * withText.length + s.length, "replaceAll: the insertions", cps.length + 1);
     return withText + cps.join(withText) + withText;
   }
   let out = "";
   let pos = 0;
   let i = findOnBoundary(s, find, 0);
   while (i >= 0) {
+    requireFits(out.length + (i - pos) + withText.length + (s.length - i), "replaceAll: the replacements", out.length);
     out += s.slice(pos, i) + withText;
     pos = i + find.length;
     i = findOnBoundary(s, find, pos);
@@ -1281,12 +1283,30 @@ export function strReplaceAll(s, find, withText) {
   return out + s.slice(pos);
 }
 
-/** `fill` repeated to exactly `n` code points (the last repeat cut on a code-point boundary). */
-function fillTo(fill, n) {
+/**
+ * The longest string a result may be, in UTF-16 units: the smallest host limit among the engines the
+ * output runs on (V8's 2^29 − 24; JavaScriptCore's is larger), so every host refuses the same widths.
+ * A `repeat` / `padStart` / `padEnd` whose result would be longer is checked UP FRONT — before any text
+ * is built — and traps (E-INDEX-OUT-OF-RANGE-RT, the count or width out of range), never a raw host
+ * RangeError after the memory is spent (review s469-boot-ruled-backlog F1: a server DoS).
+ */
+const MAX_TEXT_UNITS = 2 ** 29 - 24;
+
+function requireFits(units, what, count) {
+  if (units > MAX_TEXT_UNITS) {
+    throw new ScrmlTrap("E-INDEX-OUT-OF-RANGE-RT", what + " " + count + " is out of range — the result would be " + units + " UTF-16 units, past the longest string (" + MAX_TEXT_UNITS + ")", { index: count, length: MAX_TEXT_UNITS });
+  }
+}
+
+/** `fill` repeated to exactly `n` code points (the last repeat cut on a code-point boundary): built natively, length checked first. */
+function fillTo(fill, n, extraUnits, what, width) {
   const f = codePoints(fill);
-  let out = "";
-  for (let k = 0; k < n; k++) out += f[k % f.length];
-  return out;
+  const q = Math.floor(n / f.length);
+  const r = n % f.length;
+  let prefix = "";
+  for (let k = 0; k < r; k++) prefix += f[k];
+  requireFits(q * fill.length + prefix.length + extraUnits, what + ": width", width);
+  return fill.repeat(q) + prefix;
 }
 
 /** The padding `padStart` / `padEnd` put on: `fill` repeated until `s` is `width` code points, or "" when it already is. */
@@ -1296,7 +1316,7 @@ function padding(s, width, fill, what) {
   requireNonNegative(width, what + ": width", n);
   if (fill === undefined) fill = " ";
   if (width <= n || fill === "") return "";
-  return fillTo(fill, width - n);
+  return fillTo(fill, width - n, s.length, what, width);
 }
 
 /** `s.padStart(width, fill?)`: `fill` (default " ") before `s` until it is `width` code points long. */
@@ -1313,6 +1333,7 @@ export function strPadEnd(s, width, fill) {
 export function strRepeat(s, n) {
   requireInt(n, "repeat");
   requireNonNegative(n, "repeat: count", strLength(s));
+  if (s.length > 0 && n > MAX_TEXT_UNITS / s.length) requireFits(s.length * n, "repeat: count", n);
   return s.repeat(n);
 }
 
@@ -1347,7 +1368,9 @@ export function parseNumText(s) {
   if (!NUMBER_TEXT.test(s)) return null;
   const n = Number(s);
   if (!Number.isFinite(n)) return null;
-  return n;
+  // PA default (review F3): a parse never yields -0 — `"-0"` and an underflow like `"-1e-400"` read as 0,
+  // as `int.parse` does; §14.13.4's round trip already reads the text of -0 back as 0
+  return n === 0 ? 0 : n;
 }
 
 /** `bool.parse(s)`: exactly `"true"` or `"false"`; else `not`. */
