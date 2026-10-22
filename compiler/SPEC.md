@@ -904,7 +904,7 @@ compiled as a separate worker bundle.
     // Separate compilation unit — no parent scope access
     ${ type ComputeResult:struct = { value: number, iterations: number } }
 
-    ${ function compute(data) {
+    ${ function compute(data: number[]) {
         let sum = 0
         for (let i = 0; i < data.length; i++) { sum += data[i] * data[i] }
         return { value: sum, iterations: data.length }
@@ -957,7 +957,7 @@ parent's compiled output.
 
 use foreign:ml { predict }
 
-${ function getPrediction(features, modelId) {
+${ function getPrediction(features: number[], modelId: string) {
     return predict({ features, modelId })
 } }
 
@@ -974,12 +974,12 @@ applications with clear scope boundaries.
 <program db="sqlite:./primary.db">
 
 <program db="postgres://analytics:5432/metrics">
-    ${ function getMetrics(period) {
+    ${ function getMetrics(period: string) {
         return ?{`SELECT * FROM daily_metrics WHERE period = ${period}`}.all()
     } }
 </>
 
-${ function getUser(id) {
+${ function getUser(id: int) {
     return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
 } }
 
@@ -1945,7 +1945,7 @@ A handler that runs several statements does NOT need the expression form: the in
 
 ```scrml
 <items> = [{ id: 1, name: "Alpha" }, { id: 2, name: "Beta" }]
-${ function deleteItem(id) {
+${ function deleteItem(id: int) {
     ?{`DELETE FROM items WHERE id = ${id}`}.run()
 } }
 
@@ -2063,7 +2063,7 @@ type Phase:enum = { Idle, Loading }
 <phase>: Phase = .Loading
 <last> = ""
 
-${ function track(name) { @last = name } }
+${ function track(name: string) { @last = name } }
 
 <button onclick={ @count = 0; @phase = .Idle; track("reset") }>Start over</>
 ```
@@ -3298,7 +3298,7 @@ the outer array is explicitly written:
 ```scrml
 <matrix> = [[1, 2], [3, 4]]
 
-${ function addToRow(rowIdx, val) {
+${ function addToRow(rowIdx: int, val: int) {
     const newRow = @matrix[rowIdx].concat(val)
     const newMatrix = @matrix.slice()
     newMatrix[rowIdx] = newRow
@@ -3326,7 +3326,7 @@ Mutating a field of an object inside a reactive array does NOT trigger subscribe
 writes to the array itself trigger subscribers. To update a field reactively:
 
 ```scrml
-${ function toggleDone(id) {
+${ function toggleDone(id: int) {
     @todos = @todos.map(t => t.id === id ? { ...t, done: !t.done } : t)
 } }
 ```
@@ -3350,7 +3350,7 @@ plain JavaScript expression; the compiler does not intercept it (non-mutating, �
         @newText = ""
     } }
 
-    ${ function removeTodo(id) {
+    ${ function removeTodo(id: int) {
         @todos = @todos.filter(t => t.id !== id)
     } }
 
@@ -3494,7 +3494,7 @@ notifications and two potential re-renders.
 **Clone-mutate-assign pattern for atomic mutations:**
 
 ```scrml
-${ function removeTwo(i, j) {
+${ function removeTwo(i: int, j: int) {
     // One reactive write. Subscribers see only the final state.
     let lo = min(i, j)              // `min` / `max` from scrml:math (§41.18; no ambient `Math`, Appendix D)
     let hi = max(i, j)
@@ -3511,7 +3511,7 @@ single `@arr = tmp` assignment is the only reactive write.
 
 **Worked example — two separate updates (non-atomic, sequential):**
 ```scrml
-${ function swap(i, j) {
+${ function swap(i: int, j: int) {
     let vi = @arr[i]
     @arr.splice(i, 1, @arr[j])   // reactive write 1: subscribers see intermediate state
     @arr.splice(j, 1, vi)        // reactive write 2: subscribers see final state
@@ -4377,7 +4377,7 @@ The motivating case is in-place mutation through a method call or property write
 ```scrml
 const <filteredItems> = @items.filter(i => i.active)
 
-${ function addItem(x) {
+${ function addItem(x: Item) {
     @filteredItems.push(x)        // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
@@ -4418,7 +4418,7 @@ ${ function addItem(x) {
 <items> = []
 const <activeItems> = @items.filter(i => i.active)
 
-${ function tryAdd(item) {
+${ function tryAdd(item: Item) {
     @activeItems.push(item)   // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
@@ -4438,7 +4438,7 @@ Error E-DERIVED-VALUE-MUTATE: In-place mutation of derived cell `@activeItems` v
 <formData> = { firstName: "", lastName: "" }
 const <formCopy> = { ...@formData, full: @formData.firstName + " " + @formData.lastName }
 
-${ function setFull(s) {
+${ function setFull(s: string) {
     @formCopy.full = s   // Error E-DERIVED-VALUE-MUTATE
 } }
 ```
@@ -4449,7 +4449,7 @@ ${ function setFull(s) {
 <items> = []
 const <activeItems> = @items.filter(i => i.active)
 
-${ function add(item) {
+${ function add(item: Item) {
     @items = [...@items, item]   // OK — upstream write; @activeItems recomputes
 } }
 ```
@@ -4517,7 +4517,7 @@ ${ import { hashPassword } from 'scrml:auth' }
 <pw> = "secret"
 <hashed> = ""
 
-${ function computeHash(pw) {       // escalates server-side per §12.2 Trigger 3
+${ function computeHash(pw: string) {       // escalates server-side per §12.2 Trigger 3
     return hashPassword(pw)
 } }
 
@@ -6693,7 +6693,7 @@ does not run on mount and writes nothing — it only reports the search to analy
     let <page:int=1/>
     let <lastSeen:string=""/>
 
-    ${ function remember(p) { @lastSeen = "page " + p } }
+    ${ function remember(p: int) { @lastSeen = "page " + p } }
 
     <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
     <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
@@ -6805,7 +6805,7 @@ The `<canvas>` element is not conditionally rendered here, so its scope is perma
 
 ```scrml
 // In network.scrml
-export fn openConnection(url) {
+export fn openConnection(url: string) {
     const ws = new WebSocket(url)
     cleanup(() => ws.close())   // cleanup() inside this function => RI classifies as client-side
     return ws
@@ -7420,7 +7420,7 @@ The placeholder pinning composes the static-surface invariant of `pinned` (§6.1
         return ?{`SELECT * FROM cards`}.all()
     }
 
-    function addCard(c) {
+    function addCard(c: Card) {
         @cards = [...@cards, c]            // optimistic update + server write
     }
 
@@ -8064,18 +8064,18 @@ c = stepped(c)
 ```scrml
 <program>
     <count> = 0
-    function total(o) {
+    function total(o: Order) {
         return o.items.
             map(i => i.price * i.qty).
             reduce((a, b) => a + b, 0)
     }
-    function label(o) {
+    function label(o: Order) {
         const tag = o.rush ?
             "RUSH " :
             ""
         return tag + o.id
     }
-    function chained(o) {
+    function chained(o: Order) {
         return (o.items
             .map(i => i.qty)
             .reduce((a, b) => a + b, 0))     // inside ( ): leading dots are fine
@@ -8120,7 +8120,7 @@ Inside a logic context, two lazy function declaration forms are supported in add
 Function declarations inside `${}` logic blocks MAY be nested. An inner function declared inside the body of an outer `function` or `fn` closes over the outer function's `let`, `const`, and `lin` bindings with standard JavaScript closure semantics.
 
 ```scrml
-${ function tokenize(input) {
+${ function tokenize(input: string) {
     let pos = 0
     function advance() { pos = pos + 1 }  // closes over `pos`
     function peek() { return input[pos] }  // closes over `input`, `pos`
@@ -8139,11 +8139,11 @@ The compiler SHALL NOT hoist inner function declarations out of their enclosing 
 Both `function` and `fn` declarations support default parameter values using the `= value` syntax:
 
 ```scrml
-${ function advance(n = 1) {
+${ function advance(n: int = 1) {
     for (let i = 0; i < n; i++) { pos = pos + 1 }
 } }
 
-${ fn clamp(value, min = 0, max = 100) {
+${ fn clamp(value: number, min: number = 0, max: number = 100) {
     if (value < min) { return min }
     if (value > max) { return max }
     return value
@@ -8153,7 +8153,7 @@ ${ fn clamp(value, min = 0, max = 100) {
 When a parameter with a default is omitted at the call site, the default value expression is evaluated at call time. Default values are arbitrary expressions and may reference earlier parameters in the same parameter list:
 
 ```scrml
-${ function makeSpan(start, end, line = 1, col = start) { ... } }
+${ function makeSpan(start: int, end: int, line: int = 1, col: int = start) { ... } }
 ```
 
 Default parameters compile directly to JavaScript default parameter syntax.
@@ -8228,9 +8228,13 @@ A call to a statically resolved scrml function — a `fn` or `function` declared
    which is not assignable to the parameter's declared type, is `E-TYPE-031`. "Assignable" is §7.5.1's
    relation (*"a value is assigned to a position whose declared type it does not satisfy"*, the §34 row), as
    §7.5.1 position 3 now states it.
-3. **An un-annotated parameter accepts any argument.** Type annotations are optional (§7.5 *"Type annotations
+3. ~~**An un-annotated parameter accepts any argument.** Type annotations are optional (§7.5 *"Type annotations
    SHALL be optional on all variable declarations and function parameters"*); a parameter without one
-   imposes no argument-type check. (Arity still applies.)
+   imposes no argument-type check. (Arity still applies.)~~ *(struck S469)* **Every parameter is annotated.** A
+   parameter without `: T` is `E-PARAM-TYPE-REQUIRED` at its declaration (§7.5, S469 — ruling:user-voice-scrml.md
+   S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"*), so every argument of
+   a statically resolved call is checked against a declared type. When the declaration was refused, its calls are
+   not checked again (no cascade); arity still applies.
 4. **An argument whose type is not proven passes.** Provable-or-silent, as everywhere in §7.5.1: where
    inference is defeated the argument is `unknown` and §7.5.2 governs; an `asIs` argument passes.
 5. **Worked cases** against `function addOne(a: number)`: `addOne(@n, 5)` is `E-CALL-ARITY` (two arguments to
@@ -8265,7 +8269,7 @@ let aDiv = <div id="staticId" class=dynamicClass()>;
 
 **Worked example:**
 ```scrml
-${ function makeItem(name) {
+${ function makeItem(name: string) {
     return <li class="item">${name}</>;
 } }
 ```
@@ -8367,6 +8371,7 @@ type-expr       ::= primitive-type | identifier | type-expr '[]' | type-expr '|'
 primitive-type  ::= 'string' | 'number' | 'int' | 'integer' | 'bool' | 'boolean' | 'void' | 'not'
                     (* S469: `int` / `bool` canonical, `integer` / `boolean` synonyms, §14.13.6 *)
 param-decl      ::= identifier ':' type-expr | identifier '?' ':' type-expr
+                    (* a parameter default follows the type: `n: int = 1` (§7.3.2); S469 — the `:` is REQUIRED *)
 return-type     ::= '->' type-expr
 ```
 
@@ -8374,7 +8379,49 @@ return-type     ::= '->' type-expr
 
 #### Semantics
 
-**Type annotations are optional.** The compiler infers types when annotations are omitted, to the extent §7.5.1 states. When present, the compiler validates assignments at the positions §7.5.1 enumerates (E-TYPE-031 on mismatch).
+**Type annotations are optional** ~~.~~ *(S469: on variable declarations — a FUNCTION PARAMETER's type is required, below.)* The compiler infers types when annotations are omitted, to the extent §7.5.1 states. When present, the compiler validates assignments at the positions §7.5.1 enumerates (E-TYPE-031 on mismatch).
+
+**A function parameter's type is required (S469).** Every parameter of a `function` / `fn` declaration or
+expression — named or anonymous, `server`, `pure`, `export`, generator (`function*`), nested, `lin` (§35.2.1) —
+SHALL carry `: T`. A parameter without one SHALL be compile error **`E-PARAM-TYPE-REQUIRED`** (§34), reported at
+the parameter and naming it; the fix is to write its type. A default does not stand in for the type: write
+`n: int = 1`, not `n = 1` *(PA reading of "an unannotated parameter is an error": `n = 1` has no annotation)*. A
+rest parameter is annotated like any other (`...xs: int[]`).
+- **Lambdas given to a tape method are inferred.** The parameters of a lambda written directly as the callback
+  argument of a tape method (`xs.map(x => x * 2)`, `.filter`, `.some`, `.every`, `.find`, `.findIndex`, `.forEach`,
+  `.reduce`, `.flatMap`, `.sort`, …) take their types from the tape's element type and MAY be written bare.
+- ⚑ **OPEN (not ruled) — every other lambda.** The ruling names one carve-out: lambdas in tape methods. It does
+  not say whether a lambda elsewhere — an `on*=` handler lambda (`${(e) => …}`), a lambda passed to a declared
+  callback parameter or a host call, a lambda bound by `const` — must annotate its parameters. Until ruled the
+  compiler SHALL NOT refuse a bare lambda parameter on this rule alone; a lambda parameter whose type nothing
+  fixes is unresolved and fails closed at each use (§42.4 statement 5, §7.5.2). **PA recommendation:** infer a
+  lambda parameter from the position it is written in when that position fixes the type (a tape method; a declared
+  callback parameter's function type; an `on*=` handler's event), and require `: T` on every other lambda — a
+  lambda bound by `const` has no such position.
+- **A function-valued parameter** is annotated with a function signature type. Until function types are built
+  (dpa-074 R1 deferred; R3′ after RP1), the spelling is the §15.11.4 signature type, `f: (x: int) => int`
+  *(PA derivation — the one function-signature type the SPEC has; it moves with the function-types slice)*.
+- A host-supplied value of no scrml type (a middleware `request`, a host event) is annotated `asIs` (§14.1.1)
+  where no scrml type names it.
+
+> **Amendment (S469) — function parameters must be annotated.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"* (*"`function f(x: int)` is required; an unannotated parameter is an error. Lambda parameters in tape methods (`xs.map(x => …)`) stay inferred from the tape. The SPEC currently tolerates unannotated parameters, so SPEC text is owed."*)
+> **supersedes:** §7.5's ~~"Type annotations SHALL be optional on all variable declarations and function
+> parameters"~~ (struck below) for parameters; §7.3.4 rule 3 ~~"An un-annotated parameter accepts any argument"~~;
+> §48.2.2 ~~"Parameters may carry type annotations"~~; the optional `[':' type-annotation]` of §35.2.1's
+> `parameter` production. The §7.5 `param-decl` production already required the `:`; the prose now agrees with it.
+> **Direction of change:** newly-rejecting. **Measured:** the bootstrap already refuses an unannotated parameter
+> (154 conformance cases at the time of the ruling, `docs/workability/bootstrap-map-2026-10-22.md` in scrml-support
+> §5.1) — under `E-BOOTSTRAP-UNSUPPORTED`, so re-coding it to `E-PARAM-TYPE-REQUIRED` is owed there. impl#1
+> accepts unannotated parameters: **Nominal on impl#1** (impl#1 carries the rule, §34.0; impl#1 fixes are
+> bootstrap- or security-only, S435). The conformance cases were rewritten by the corpus lane (user-voice
+> 67a4e5b); the SPEC's own examples are annotated by this amendment.
+> **Code name:** `E-PARAM-TYPE-REQUIRED` is provisional (PA, S469) — no existing code fits: `E-DECL-TYPE-REQUIRED-AT-BOUNDARY`
+> is an own value's boundary rule (§66.3 rule 9) and the bootstrap's former `E-TYPE-ANNOTATION-REQUIRED` was
+> retired by dpa-065 D1.
+> **Consequence for the unresolved-type rules:** §42.4 statement 5 (`E-COND-NOT-BOOLEAN` case 3), §66.3 rule 10
+> (`E-DECL-TYPE-UNPROVEN`) and §7.3.4 list "an unannotated parameter" as a source of an unresolved type. A
+> function's parameter can no longer be one (it is refused at the declaration, and the no-cascade clauses keep its
+> uses silent); a lambda parameter outside the carve-out can, while the ⚑ above is open.
 
 **`T?` sugar.** Postfix `?` is syntactic sugar for `T | not`. The compiler desugars before type checking.
 
@@ -8390,7 +8437,11 @@ function add(a: number, b: number) -> number { return a + b }
 
 #### Normative Statements
 
-- Type annotations SHALL be optional on all variable declarations and function parameters.
+- ~~Type annotations SHALL be optional on all variable declarations and function parameters.~~ *(struck S469)*
+  Type annotations SHALL be optional on variable declarations (subject to §66.3 for own values). Every parameter of
+  a `function` / `fn` SHALL carry a type annotation; an unannotated parameter SHALL be compile error
+  `E-PARAM-TYPE-REQUIRED`. A lambda written directly as a tape method's callback MAY leave its parameters bare
+  (inferred from the tape). Other lambdas: ⚑ OPEN, above.
 - The compiler SHALL emit E-TYPE-031 at the assignability positions enumerated in §7.5.1, and SHALL emit W-TYPE-031-UNPROVEN where inference is defeated (§7.5.2).
 - `T?` SHALL be desugared to `T | not` before type checking.
 - `->` is the sole return-type annotation syntax for `function` and `fn` declarations.
@@ -8660,7 +8711,9 @@ stated at §66.3: an own value is a declaration whose type is its write contract
 
   → ``error [E-TYPE-025]: Cannot match on `asIs`-typed subject.`` The parameter `powerUp`
   was bound to `asIs` by the compiler, not by the author, and the diagnostic then blames the author
-  for a hatch that is not in the source. Closing the remaining positions — parameters, return types,
+  for a hatch that is not in the source. *(S469: in the language this program is now refused at the
+  parameter, `E-PARAM-TYPE-REQUIRED` (§7.5); the example is kept as a record of impl#1's behaviour, which is
+  unchanged — impl#1 carries the rule.)* Closing the remaining positions — parameters, return types,
   operands, the builtin-method catalog — is rungs 1-3 (§7.5.1). Until they land, this section's
   guarantee is scoped to `inferExprType` and to the declaration site, and it is stated that way on
   purpose: a normative SHALL that the implementation does not hold is a false claim inside the
@@ -9007,7 +9060,7 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 
 ```scrml
 <program db="postgres://user:pass@localhost:5432/myapp">
-    ${ function getUsers(role) {
+    ${ function getUsers(role: string) {
         return ?{`SELECT id, name FROM users WHERE role = ${role}`}.all()
     } }
 </>
@@ -9046,7 +9099,7 @@ Error E-SQL-004 at line 3: `?{}` block has no `db=` declaration in any ancestor 
   <channel name="chat" topic="lobby">
     ${
       <messages> = []
-      function pushUser(id) {
+      function pushUser(id: int) {
         let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // runs on app.db
         broadcast(u)                                             // passwordHash stripped (§14.8.9)
       }
@@ -9182,7 +9235,7 @@ When a SQL template contains one or more `${}` expressions, the compiler SHALL:
 **Worked example — valid (single parameter):**
 ```scrml
 <db src="auth.sql" tables="users">
-    ${ function findUser(email) {
+    ${ function findUser(email: string) {
         let user = ?{`SELECT id, name FROM users WHERE email = ${email}`}.get();
         return user;
     } }
@@ -9198,7 +9251,7 @@ const [user] = await _scrml_sql`SELECT id, name FROM users WHERE email = ${email
 
 **Worked example — valid (two distinct parameters):**
 ```scrml
-${ function findPost(userId, category) {
+${ function findPost(userId: int, category: string) {
     let posts = ?{`SELECT * FROM posts WHERE user_id = ${userId} AND category = ${category}`}.all();
     return posts;
 } }
@@ -9211,7 +9264,7 @@ db.prepare("SELECT * FROM posts WHERE user_id = ?1 AND category = ?2").all(userI
 
 **Worked example — valid (parameter deduplication):**
 ```scrml
-${ function userActivity(userId) {
+${ function userActivity(userId: int) {
     let row = ?{`SELECT * FROM activity WHERE created_by = ${userId} OR updated_by = ${userId}`}.get();
     return row;
 } }
@@ -9265,7 +9318,7 @@ tagged-template, auto-`await`), see §44.
 **Worked example — dynamic query with bound parameter:**
 ```scrml
 <db src="db.sql" tables="posts">
-    ${ function loadPosts(authorId) {
+    ${ function loadPosts(authorId: int) {
         let posts = ?{`SELECT title, body FROM posts WHERE author_id = ${authorId}`}.all();
         return posts;
     } }
@@ -9277,7 +9330,7 @@ tagged-template, auto-`await`), see §44.
 The canonical scrml pattern for optional filter parameters in a WHERE clause is the SQLite null-coalescing idiom: `($param IS NULL OR column = $param)`. The SQL keyword `IS NULL` is SQL vocabulary (a SQLite token, not a scrml token); the scrml-level value bound into the placeholder is `not` (§42), which the `?{}` SQL binding layer maps to SQL NULL at the wire level.
 
 ```scrml
-${ function getPosts(category) {
+${ function getPosts(category: string | not) {
     // category may be not — pass not to retrieve all posts regardless of category
     let posts = ?{`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${category})`}.all();
     return posts;
@@ -9311,7 +9364,7 @@ await _scrml_sql`SELECT * FROM posts WHERE (${category} IS NULL OR category = ${
 
 **Worked example — valid (multi-filter optional search):**
 ```scrml
-${ function searchPosts(category, authorId) {
+${ function searchPosts(category: string | not, authorId: int | not) {
     let results = ?{`
         SELECT title, body, author_id, category
         FROM posts
@@ -9325,7 +9378,7 @@ ${ function searchPosts(category, authorId) {
 
 **Worked example — invalid (dynamic SQL construction — not supported):**
 ```scrml
-${ function badQuery(filterCol) {
+${ function badQuery(filterCol: string) {
     // INVALID: cannot construct the SQL template string at runtime
     // The content of ?{`...`} must be a fixed template, not a computed string
     let sql = "SELECT * FROM posts WHERE " + filterCol + " = 1";
@@ -9383,7 +9436,7 @@ write outcome is needed.
 
 ```scrml
 <db src="./app.db" tables="users">
-    ${ function createUser(name, email) {
+    ${ function createUser(name: string, email: string) {
         let [row] = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email}) RETURNING id`}.all()
         return row.id
     } }
@@ -9393,7 +9446,7 @@ write outcome is needed.
 **Worked example — DELETE (no return value needed):**
 
 ```scrml
-${ function deleteSession(token) {
+${ function deleteSession(token: string) {
     ?{`DELETE FROM sessions WHERE token = ${token}`}.run()
 } }
 ```
@@ -9408,7 +9461,7 @@ For batch inserts, write the same `?{}` query inside a loop — Bun.SQL caches t
 statement across iterations:
 
 ```scrml
-${ function bulkInsert(users) {
+${ function bulkInsert(users: User[]) {
     for (u of users) {
         ?{`INSERT INTO users (name, email) VALUES (${u.name}, ${u.email})`}.run()
     }
@@ -9420,7 +9473,7 @@ ${ function bulkInsert(users) {
 Write operations that must succeed or fail atomically are wrapped in a `transaction` block:
 
 ```scrml
-${ function transferFunds(fromId, toId, amount) {
+${ function transferFunds(fromId: int, toId: int, amount: number) {
     transaction {
         ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = ${fromId}`}.run()
         ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = ${toId}`}.run()
@@ -9805,7 +9858,7 @@ A `fn name(...) { ... }` body, by contrast, **does** permit `lift`: it accumulat
 **Worked example — invalid (`lift` inside a bare `function` body):**
 ```scrml
 <ul>${
-    function buildRows(items) {
+    function buildRows(items: Item[]) {
         for (item of items) {
             lift <li>${item.name}/;  // Error E-SYNTAX-002
         }
@@ -9818,7 +9871,7 @@ Error E-SYNTAX-002: `lift` is not valid inside a bare `function` body. A `functi
 **Worked example — valid (`lift` inside a `fn` body):**
 ```scrml
 <ul>${
-    fn buildRows(items) {
+    fn buildRows(items: Item[]) {
         for (item of items) {
             lift <li>${item.name}</>;   // OK — accumulates into fn-body `~`
         }
@@ -10364,7 +10417,7 @@ Return values are serialized as JSON. Supported return types:
 The compiler-generated fetch wrapper deserializes the JSON response and returns it as the declared return type. The developer uses the return value directly — no manual `fetch`, `JSON.parse`, or `await` required:
 
 ```scrml
-${ function getUser(id) {
+${ function getUser(id: int) {
     return ?{`SELECT id, name, email FROM users WHERE id = ${id}`}.get()
 } }
 
@@ -10438,10 +10491,10 @@ The compiler SHALL:
   **Why a data dependency is not enough.** Two calls that share no scrml value can still depend on each other through the database: a write and a read of the same table. The client-side dependency graph cannot see that edge, so the only parallelism it may introduce is between calls that write nothing.
 
   ```scrml
-  ${ function reserve(id)! -> SqlError { ?{`UPDATE seats SET held = held + 1 WHERE show_id = ${id}`}.run() }
-     function count(id)! -> SqlError   { return ?{`SELECT held FROM seats WHERE show_id = ${id}`}.get() }
+  ${ function reserve(id: int)! -> SqlError { ?{`UPDATE seats SET held = held + 1 WHERE show_id = ${id}`}.run() }
+     function count(id: int)! -> SqlError   { return ?{`SELECT held FROM seats WHERE show_id = ${id}`}.get() }
 
-     function book(id)! -> SqlError {
+     function book(id: int)! -> SqlError {
          const a = reserve(id)?    // UPDATE seats — not read-only
          const b = count(id)?      // SELECT seats — read-only
          @held = b.held
@@ -10543,13 +10596,13 @@ inlined into the caller's server handler.
 **Worked example — server function calling a helper server function (valid):**
 
 ```scrml
-${ function validateUser(id) {
+${ function validateUser(id: int) {
     let user = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
     if (not user) { throw "User not found" }
     return user
 } }
 
-${ function getOrderHistory(userId) {
+${ function getOrderHistory(userId: int) {
     let user = validateUser(userId)   // calls another server function
     let orders = ?{`SELECT * FROM orders WHERE user_id = ${userId}`}.all()
     return { user, orders }
@@ -10686,7 +10739,7 @@ ${
     <submitState> = OrderSubmit.Idle
     <orders>      = []
 
-    function createOrder(product, qty) {
+    function createOrder(product: string, qty: int) {
         ?{`INSERT INTO orders (product, qty) VALUES (${product}, ${qty})`}.run()
         return ?{`SELECT * FROM orders ORDER BY id DESC`}.all()
     }
@@ -10783,7 +10836,7 @@ ${
         }
     }
 
-    function takeN(gen, n) {
+    function takeN(gen: asIs, n: int) {
         let out = []
         let iter = gen.next()
         for (let i = 0; i < n; i++) {
@@ -10809,13 +10862,13 @@ The caller `takeN` is NOT a generator — it consumes the generator via ordinary
 
 ```scrml
 ${
-    function* chunkArray(arr, size) {
+    function* chunkArray(arr: Item[], size: int) {
         for (let i = 0; i < arr.length; i += size) {
             yield arr.slice(i, i + size)
         }
     }
 
-    function processInChunks(items) {
+    function processInChunks(items: Item[]) {
         for (chunk of chunkArray(items, 100)) {
             handleChunk(chunk)        // synchronous caller; for...of consumes generator inline
         }
@@ -11964,14 +12017,14 @@ warning message.
 **Valid — full schema in server function, client schema in markup:**
 ```scrml
 <db src="auth.sql" protect="passwordHash" tables="users">
-    ${ function displayName(userId) {
+    ${ function displayName(userId: int) {
         // This function is client-boundary (no protected field access).
         // In scope: Users (client schema) — id, email, createdAt only.
         let user = ?{`SELECT id, email FROM users WHERE id = ${userId}`}.get();
         // user has type: Users (client) = { id: number, email: string, createdAt: string }
         return user.email;
     } }
-    ${ function authenticate(email, password) {
+    ${ function authenticate(email: string, password: string) {
         // This function is server-escalated (explicit annotation).
         // In scope: Users (full schema) — id, email, passwordHash, createdAt.
         let user = ?{`SELECT passwordHash FROM users WHERE email = ${email}`}.get();
@@ -12001,7 +12054,7 @@ algorithm. The TS stage SHALL emit:
 view selection):**
 ```scrml
 <db src="auth.sql" protect="passwordHash" tables="users">
-    ${ function leakPassword(userId) {
+    ${ function leakPassword(userId: int) {
         // Client-boundary function. Users resolves to client schema.
         let row = ?{`SELECT id FROM users WHERE id = ${userId}`}.get();
         return row.passwordHash;  // E-PROTECT-001: field does not exist on client type Users
@@ -15736,7 +15789,7 @@ export const Tabs = <div class="tabs"
     props={ activeTab: string, onTabChange?: (tab: string) => void }
 >
     ${
-        function selectTab(tab) {
+        function selectTab(tab: string) {
             if (onTabChange) { onTabChange(tab) }
         }
     }
@@ -15754,7 +15807,7 @@ export const Tabs = <div class="tabs"
     props={ activeTab: string, onTabChange?: (tab: string) => void }
 >
     ${
-        function selectTab(tab) {
+        function selectTab(tab: string) {
             onTabChange(tab)   // Error: onTabChange is (fn | not), not callable without guard
         }
     }
@@ -18530,7 +18583,7 @@ right-hand side of an assignment.
 **Worked example — `return match` in a function body (valid):**
 
 ```scrml
-${ function getLabel(status) {
+${ function getLabel(status: LoadStatus) {
     return match status {
         .Loading :> "Loading..."
         .Success :> "Done!"
@@ -18547,7 +18600,7 @@ string. The function's return type is inferred as `string`.
 **Worked example — invalid (`return match` with void arms):**
 
 ```scrml
-${ function logStatus(status) {
+${ function logStatus(status: LoadStatus) {
     return match status {
         .Loading :> console.log("loading")
         .Success :> console.log("done")
@@ -20082,18 +20135,18 @@ failable-fn ::= 'function' identifier '(' param-list ')' '!' (('->' error-type) 
 
 ```scrml
 // Explicit error type — arrow form
-function processPayment(amount, customerId)! -> PaymentError {
+function processPayment(amount: number, customerId: int)! -> PaymentError {
     if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
     // ... success path
 }
 
 // Explicit error type — bare form (S137 ratification; equivalent to arrow form; §41.14 canon-shown)
-function processPayment(amount, customerId)! PaymentError {
+function processPayment(amount: number, customerId: int)! PaymentError {
     if (amount <= 0) fail PaymentError::InvalidAmount("Must be positive")
 }
 
 // Default error type (uses built-in Error enum)
-function quickCheck(value)! {
+function quickCheck(value: bool)! {
     if (!value) fail Error::Generic("Check failed")
 }
 ```
@@ -20446,7 +20499,7 @@ propagation-expr ::= expression '?'
 **Syntax:**
 
 ```scrml
-function processOrder(orderId)! -> OrderError {
+function processOrder(orderId: int)! -> OrderError {
     let customer = loadCustomer(orderId)?    // propagates CustomerError
     let payment = chargeCard(customer.card)?  // propagates PaymentError
     let receipt = generateReceipt(payment)?   // propagates ReceiptError
@@ -20731,7 +20784,7 @@ type SqlError:enum = {
 When a `?{}` query is executed inside a `!` function, SQL errors are propagated automatically. The `?{}` expression behaves as if it were a `!` function call that can produce `SqlError` variants.
 
 ```scrml
-function loadUser(id)! -> UserError {
+function loadUser(id: int)! -> UserError {
     let row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
     // If the query fails, SqlError is propagated via implicit ?
     if (!row) fail UserError::NotFound(id)
@@ -20751,7 +20804,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
 
 1. **A `!{}` handler on the query** — written after the terminator (`.get()`, `.all()`, `.run()`), its arms match `SqlError` variants:
    ```scrml
-   function userName(id) {
+   function userName(id: int) {
        const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
            .QueryFailed(m)         :> { log("lookup failed: " + m); return "?" }
            .ConstraintViolation(f) :> { return "?" }
@@ -20764,7 +20817,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    `.QueryFailed(m) :>` binds the variant's payload, the `message: string` (§18.7; §19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"* — this example was then written `| ::QueryFailed m :>`, the spelling S452 soft-deprecates, §19.4.5); `.ConstraintViolation(f) :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows.
 2. **A `match` on the result** — the success value arrives as `::Ok` (§19.7.1):
    ```scrml
-   function openOrders(customerId) {
+   function openOrders(customerId: int) {
        const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
            ::Ok(found)       :> found
            ::QueryFailed(m)  :> { log(m); [] }
@@ -20775,10 +20828,10 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```
 3. **Moving the query into a `!` function** — §19.8.2 then applies (implicit propagation), and the CALLER handles the function's result under §19.4.3 (`match`, `?`, `!{}`, or — when the result loads data for markup — a `<request>` body, whose failure is `<#id>.error`; S451: the function is server-placed by its `?{}`, so it cannot be called while rendering, §13.7):
    ```scrml
-   function loadUser(id)! -> SqlError {
+   function loadUser(id: int)! -> SqlError {
        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // a failure propagates (§19.8.2)
    }
-   function showUser(id) {
+   function showUser(id: int) {
        @user = loadUser(id) !{ _ :> not }                    // the caller handles it
    }
    ```
@@ -20863,14 +20916,14 @@ If a server function is declared with `!`, the CPS-generated client wrapper SHAL
 
 ```scrml
 // Developer writes:
-function loadUser(id)! -> UserError {
+function loadUser(id: int)! -> UserError {
     const row = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // ?{} escalates to server
     if (!row) fail UserError::NotFound(id)
     return row
 }
 
 // Compiler generates client wrapper (conceptual):
-// function loadUser(id)! -> UserError { /* CPS fetch call */ }
+// function loadUser(id: int)! -> UserError { /* CPS fetch call */ }
 ```
 
 The client calling `loadUser(id)?` propagates the same `UserError` variants that the server function produces.
@@ -20983,7 +21036,7 @@ function notifyOrder(orderId: number) {
 2. **Caller `!` modifier** (logic-context propagation):
    ```scrml
    type ReloadError:enum = { Transport(t: ServerCallError) }
-   function reloadProfile(id)! ReloadError {
+   function reloadProfile(id: int)! ReloadError {
        loadProfile(id)?  // ? propagates the call's Transport failure up the call stack
    }
    ```
@@ -21206,7 +21259,7 @@ A server batch runs its statements in source order, and a cell read inside it SH
 ```scrml
 <program db="sqlite:./shop.db">
   <total> = 0
-  ${ function snapshotTotal(orderId)! -> SqlError {
+  ${ function snapshotTotal(orderId: int)! -> SqlError {
       // one server batch: both statements are server work, nothing client-tier between them
       @total = ?{`SELECT count(*) AS n FROM items WHERE order_id = ${orderId}`}.get().n
       ?{`INSERT INTO totals (order_id, total) VALUES (${orderId}, ${@total})`}.run()
@@ -21604,7 +21657,7 @@ reached only through an alias or a cell is not counted, and nor is a call inside
 SQL transactions are expressed using explicit `?{}` blocks:
 
 ```scrml
-function transferFunds(from, to, amount)! -> TransferError {
+function transferFunds(from: int, to: int, amount: number)! -> TransferError {
     ?{BEGIN}
     let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get()
     if (fromBalance.balance < amount) {
@@ -21622,7 +21675,7 @@ function transferFunds(from, to, amount)! -> TransferError {
 The `transaction` keyword provides a scoped alternative that auto-rolls-back on `fail`:
 
 ```scrml
-function transferFunds(from, to, amount)! -> TransferError {
+function transferFunds(from: int, to: int, amount: number)! -> TransferError {
     transaction {
         let fromBalance = ?{`SELECT balance FROM accounts WHERE id = ${from}`}.get()
         if (fromBalance.balance < amount) {
@@ -22011,7 +22064,7 @@ type PaymentError:enum = {
 
 ```scrml
 ${
-    function processPayment(amount, customerId)! -> PaymentError {
+    function processPayment(amount: number, customerId: int)! -> PaymentError {
         if (amount <= 0) fail PaymentError::InvalidAmount("Amount must be positive")
         if (amount > 10000) fail PaymentError::InvalidAmount("Amount exceeds maximum")
 
@@ -22077,7 +22130,7 @@ type AuthError:enum = {
 }
 
 ${
-    function register(email, password)! -> AuthError {
+    function register(email: string, password: string)! -> AuthError {
         if (!isValidEmail(email)) fail AuthError::InvalidEmail(email)
         if (password.length < 8) fail AuthError::WeakPassword("Password must be at least 8 characters")
 
@@ -22117,7 +22170,7 @@ type CrudError:enum = {
 }
 
 ${
-    function updateUserProfile(userId, updates)! -> CrudError {
+    function updateUserProfile(userId: int, updates: ProfileUpdate)! -> CrudError {
         transaction {
             let current = ?{`SELECT * FROM users WHERE id = ${userId}`}.get()
             if (!current) fail CrudError::NotFound("User", userId)
@@ -22528,7 +22581,7 @@ disambiguation wherever the tokens decide, and a diagnostic, never a silent choi
 of the reserved word meets a reserved position.)
 
 ```scrml
-function save(doc) {
+function save(doc: Doc) {
     @busy = true
     defer @busy = false                 // single-statement form
     defer {                             // block form — one deferred body
@@ -22758,7 +22811,7 @@ The motivating host-code site (`compiler/self-host/pa.scrml`, `runPA` — that v
 which scrml does not have. With `defer`:
 
 ```scrml
-export function runPA(input) {
+export function runPA(input: string) {
     const views = new Map()
     const errors = []
     let cache = openSchemaCache()
@@ -23270,7 +23323,7 @@ session.
 **Worked example — login (establishes a session):**
 
 ```scrml
-${ server function authenticate(email, password) {
+${ server function authenticate(email: string, password: string) {
     let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get()
     if (!user || !verifyPassword(password, user.password_hash))
         fail AuthError::InvalidCredentials
@@ -23672,7 +23725,7 @@ by Phase P2 of the state-as-primary unification (§15.15, 2026-04-30).
 ```scrml
 ${ export type UserRole:enum = { Admin, Moderator, User, Banned } }
 ${ export type Config:struct = { timeout: number, retries: number } }
-${ export function formatDate(ts) { ... } }
+${ export function formatDate(ts: int) { ... } }
 ${ export const UserCard = <div props={ name: string, role: UserRole }>
      ...
    </> }
@@ -25820,7 +25873,7 @@ declaration inside the nested `<program>`).
 
     use foreign:ml { predict }
 
-    ${ function getPrediction(features, modelId) {
+    ${ function getPrediction(features: number[], modelId: string) {
         return predict({ features, modelId })
     } }
 </>
@@ -26024,12 +26077,12 @@ exactly as §23.2.1 resolves against the closest ancestor `<program lang>`. Capa
 // fsp-core.scrml — imported shared lib; needs BOTH a db-context and a foreign-lang-context
 <foreign lang="ts" />
 <db src="./flogence.db" tables="fsp_task, delta_log, projects" />
-export fn dispatch(db, frame, transport) { … ?{ SELECT … FROM fsp_task }.all() … _={ /* ts */ }= … }
+export fn dispatch(db: asIs, frame: Frame, transport: Transport) { … ?{ SELECT … FROM fsp_task }.all() … _={ /* ts */ }= … }
 ```
 ```scrml
 // lanes.scrml — imported shared lib; foreign-lang ONLY (no db)
 <foreign lang="ts" />
-export fn runOpen(model, prompt) { … _={ /* ts */ }= … }
+export fn runOpen(model: string, prompt: string) { … _={ /* ts */ }= … }
 ```
 
 **Error codes** (§34 catalog rows land with the impl):
@@ -27133,7 +27186,7 @@ A `pure` function is a function that performs no side effects. The compiler stat
 ### 33.2 Declaration
 
 ```scrml
-${ pure function add(a, b) { return a + b; } }
+${ pure function add(a: number, b: number) { return a + b; } }
 ```
 
 **Amended 2026-04-20 (S32).** The `pure` keyword is a modifier that attaches to any callable declaration site where purity is a meaningful contract. Supported attachment sites:
@@ -28100,6 +28153,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
 | E-TYPE-043 | §17.6, §33, §42.3.3, §48 | **Widened S469.** (1) A function with a non-optional declared return type has a code path that returns `not` (the absence sentinel) ~~— directly via `return not` or implicitly by falling off the end of the function body~~ via `return not`. Resolution: include `\| not` in the declared return type, or return a non-`not` value. (2) **(S469)** A function with ANY declared return type — `-> T \| not` included — has a path that does not end in `return <expr>;`: it can reach the end of its body, has a bare `return;`, or ends in a tail expression it does not `return`. Falling off is never `not` and never JS `undefined`; write `return not;` (`-> T \| not`) or `return <value>;`. ~~Server functions that fall through implicitly are subject to the same rule.~~ Server functions are subject to the same rule (falling off no longer means `not`, §42.9). Provenance of (2): ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with a declared return type, `-> T \| not` included, MUST `return` on every path; falling off is a compile error, so you write `return not;`."*); bare `return`: the PA application recorded there. Limb (2) is emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** for `-> T \| not` (impl#1 carries it, §34.0). (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 17901, 17928, 17988.) | Error |
 | E-RETURN-INCOMPLETE | §48, §48.8, §48.13 | A function with NO declared return type (or a `!` function, which has no success-type slot, §19.4.1) returns a value on some path (`return <expr>;`) and on another path falls off the end of its body or has a bare `return;`. If any path returns a value, every path SHALL (§48 "The return rule", rule 3). Resolution: end every path with `return <value>;`, or declare the return type. **Code name provisional** (named by the bootstrap, S469; not yet among the S469 confirmed names). Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fallOffDiags`); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — fall-off and tail returns: ALWAYS EXPLICIT" — *"Always explicit (Recommended)"* (*"A function with no return type returns nothing, and if any path returns a value, every path must (error)."*). Direction of change: newly-rejecting. | Error |
+| E-PARAM-TYPE-REQUIRED | §7.5, §7.3.4, §48.2.2, §35.2.1 | A parameter of a `function` / `fn` declaration or expression (named or anonymous; `server`, `pure`, `export`, generator, nested, `lin`) written without `: T`. A default does not stand in for the type (`n = 1` → `n: int = 1`). NOT fired for a lambda written directly as a tape method's callback (its parameters are inferred from the tape); other lambdas are ⚑ OPEN (§7.5). Reported once per parameter, naming it; the fix-it writes `: T`. Calls of a refused declaration are not checked again (no cascade). **Code name provisional (PA, S469).** **Nominal / spec-ahead — not yet emitted under this name:** the bootstrap refuses an unannotated parameter today as `E-BOOTSTRAP-UNSUPPORTED` (re-code owed); impl#1 accepts it (impl#1 carries the rule, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"* (*"`function f(x: int)` is required; an unannotated parameter is an error."*). Direction of change: newly-rejecting. | Error |
 | E-ARM-TAIL-VALUE | §18.5, §17.6.10 | A block arm of a `match` or `!{}` whose result is used (a value position) ends in a bare expression instead of yielding with `lift <expr>;`. **(S469 r5)** Only after a statement: a brace holding exactly ONE expression (`.A :> { e }`) is that expression and is not this code (ruling:user-voice-scrml.md S469 "⭐ RULED — `{ e }` in a value-position match arm is that expression" — *"Allow { e } in arms too (Recommended)"* (*"a brace holding ONE expression is that expression. `lift` is required once the block holds a statement, and a bare tail after a statement is E-ARM-TAIL-VALUE."*)). **(S469)** Also a value-form / if-as-expression `if` branch that holds a statement and ends in a bare expression (a branch of exactly one expression is that expression — ruling:user-voice-scrml.md S469 "⭐ RULED — three spec-follow-up opens" — *"Keep { e }, lift once a statement (Rec)"*). A block arm's value is the operand of its `lift`; a single-expression arm `.A :> expr`, a leaving arm, and a statement-position arm are unaffected. Fix-it: `lift <expr>;`. **Code name provisional (PA, S469).** ~~**Nominal / spec-ahead — not yet emitted.**~~ Emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` for `match` and `!{}` block arms (s469-boot-ruled-backlog); **Nominal on impl#1** (impl#1 carries it, §34.0). Provenance: ruling:user-voice-scrml.md S469 "⭐ RULED — block arms yield with `lift`" — *"Block arms yield with lift (Recommended)"*. Direction of change: newly-rejecting. | Error |
 | E-TYPE-044 | §17.6 | `given` (presence-guard) is applied to a variable whose declared type does not include `\| not`. The guard has nothing to refine — the variable is already known to be non-`not`. Resolution: drop the `given` guard, or widen the variable's type. (Catalog addition S84 Wave 2 #5; full prose at §17.6 line 17929.) | Error |
 | E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). A write to the narrowed place — direct, in a nested block, or by a call that writes it or whose write set cannot be determined — ends the narrowing from that point (§42.3.5, S462 "b"). A provably present write narrows again; a suspension point (a server call, a body-split boundary, a `yield`) ends every reactive cell's narrowing; a function body (a lambda, an event handler, a nested function) created in a narrowed scope re-tests reactive cells unless a known built-in calls it synchronously (§42.3.5, S462 "a"); an event handler inside an `if=` / `else-if=` gate keeps the narrowing that gate gives its cell when it handles a user-input event (an allow-list, §42.3.5: `click`, `input`, `keydown`, … — not `focus` / `blur` / `change` / leave / cancel / animation / custom events) (S462 "a", Q18). (Emitted at `compiler/src/type-system.ts` `checkOptionalMemberAccess`.) An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) | Error |
@@ -28333,7 +28387,7 @@ fn transform(lin src: Data, dst: Data) {
 The grammar extension is:
 
 ```
-parameter ::= ['lin'] identifier [':' type-annotation]
+parameter ::= ['lin'] identifier ':' type-annotation      (* S469: the type is required — §7.5; was `[':' type-annotation]` *)
 ```
 
 **Semantics:**
@@ -29136,7 +29190,7 @@ This feature composes three existing scrml concepts:
 
 ```scrml
 ${
-    server function* name(params) {
+    server function* name(param: Type, …) {
         body — yield expressions send events
     }
 }
@@ -29149,7 +29203,7 @@ The `*` immediately follows the `function` keyword with no whitespace required. 
 ```scrml
 ${
     // Simple counter stream
-    server function* countdown(from) {
+    server function* countdown(from: int) {
         for (let i = from; i >= 0; i--) {
             yield i
         }
@@ -29164,7 +29218,7 @@ ${
     }
 
     // Named events with structured payloads
-    server function* activityFeed(userId) {
+    server function* activityFeed(userId: int) {
         for await (let event of watchUser(userId)) {
             yield { event: "activity", data: event, id: event.id }
         }
@@ -29329,7 +29383,7 @@ The same security invariants that apply to standard server functions apply to SS
 <program>
 <count> = 0
 ${
-    server function* countdown(from) {
+    server function* countdown(from: int) {
         for (let i = from; i >= 0; i--) {
             yield i
         }
@@ -29378,7 +29432,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
   <channel name="chat" topic="lobby">
     <messages> = []                            // V5-strict declaration; auto-syncs across clients
 
-    function postMessage(author, body) {
+    function postMessage(author: string, body: string) {
       @messages = [...@messages, { author, body, ts: Date.now() }]
     }
   </>
@@ -29431,7 +29485,7 @@ A `<channel>` is a **scrml-defined structural element** that provides persistent
     <count> = 0                              // V5-strict declaration; auto-syncs across clients
     <messages> = []
 
-    function postMessage(body) {
+    function postMessage(body: string) {
       @messages = [...@messages, { body, ts: Date.now() }]
     }
   </>
@@ -29508,7 +29562,7 @@ Reactive variables declared inside a `<channel>` body are **automatically synchr
   <messages> = []                            // auto-synced — declared inside channel body
   <count>    = 0                             // auto-synced
 
-  function postMessage(body) {
+  function postMessage(body: string) {
     @messages = [...@messages, { body, ts: Date.now() }]
     @count    = @count + 1
   }
@@ -29597,7 +29651,7 @@ Independently of `auth=`, every channel upgrade in a web-application program ref
 <channel name="chat" topic=@room>
   <count> = 0                                 // V5-strict; auto-synced
 
-  function sendMessage(text) {
+  function sendMessage(text: string) {
     ?{`INSERT INTO messages (body) VALUES (${text})`}.run()
     broadcast({ type: "new_message", body: text })
   }
@@ -29610,7 +29664,7 @@ within the `<channel name="chat">` lexical scope.
 **Worked example — invalid (broadcast outside channel scope):**
 
 ```scrml
-function sendGlobal(text) {
+function sendGlobal(text: string) {
   broadcast({ type: "msg", body: text })   // E-CHANNEL-004
 }
 
@@ -29652,7 +29706,7 @@ in the call expression names the value the compiler will inject, not a variable 
 <channel name="chat"
          onserver:message=handleMessage(msg)>
   ${
-    function handleMessage(msg) {
+    function handleMessage(msg: ChatMessage) {
       broadcast({ type: "echo", body: msg.text })
     }
   }
@@ -29790,13 +29844,13 @@ If the call expression contains no parameter (e.g., `onclient:open=handleOpen()`
          onclient:error=handleError(err)>
   <connectionStatus> = "connecting"            // V5-strict; auto-synced
 
-  function handleOpen(e) {
+  function handleOpen(e: asIs) {
     @connectionStatus = "connected"
   }
-  function handleClose(e) {
+  function handleClose(e: asIs) {
     @connectionStatus = "disconnected"
   }
-  function handleError(err) {
+  function handleError(err: asIs) {
     @connectionStatus = "error"
   }
 </>
@@ -29827,7 +29881,7 @@ The compiler generates `ws.onopen = () => { markConnected(); }` and
 <channel name="chat"
          onclient:open=handleOpen(e)>
   ${
-    server function handleOpen(e) {   // ERROR: onclient:* handlers run on client only
+    server function handleOpen(e: asIs) {   // ERROR: onclient:* handlers run on client only
       broadcast({ type: "join" })
     }
   }
@@ -29840,7 +29894,7 @@ The compiler generates `ws.onopen = () => { markConnected(); }` and
 ```scrml
 <channel name="c" onclient:open=onOpen(e)>
     <joined> = 0
-    function onOpen(e) {      // ERROR: broadcast() places onOpen on the server (§12.2 Trigger 7)
+    function onOpen(e: asIs) {      // ERROR: broadcast() places onOpen on the server (§12.2 Trigger 7)
         broadcast({ joined: true })
     }
 </>
@@ -29902,7 +29956,7 @@ payload at receive time:
 ```scrml
 <channel name="driver-events">
   <events> = []                              // V5-strict; auto-synced
-  function postEvent(driverId, body) {
+  function postEvent(driverId: int, body: string) {
     broadcast({ targetDriverId: driverId, body, ts: Date.now() })
   }
 </>
@@ -30004,7 +30058,7 @@ being declared inside a channel body, see §38.4.)
 // channels/dispatch.scrml — PURE-CHANNEL-FILE (see §38.12.6)
 export <channel name="chat" topic="lobby">
   <messages> = []                              // V5-strict; auto-synced via channel body
-  function postMessage(author, body) {
+  function postMessage(author: string, body: string) {
     @messages = [...@messages, { author, body, ts: Date.now() }]
   }
 </>
@@ -30345,7 +30399,7 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 </>
 
 <db src="./app.db" protect="password_hash" tables="users, posts">
-    ${ function getUser(id) {
+    ${ function getUser(id: int) {
         return ?{`SELECT id, email, name FROM users WHERE id = ${id}`}.get()
     } }
 </>
@@ -30967,7 +31021,7 @@ INTEGER timestamps for cross-driver portability. TTL eviction is lazy on read; c
 ```scrml
 <program db="./app.db" log="structured" cors="*">
 
-${ function handle(request, resolve) {
+${ function handle(request: Request, resolve: (req: Request) => Response) {
     // Pre-middleware: runs before the matched route handler
     const start = Date.now()
 
@@ -31021,7 +31075,7 @@ The compiler-auto middleware order relative to `handle()` is fixed. If the devel
 `handle()` MAY return a response directly without calling `resolve()`. This short-circuits the pipeline and prevents the route handler from running.
 
 ```scrml
-${ function handle(request, resolve) {
+${ function handle(request: Request, resolve: (req: Request) => Response) {
     if (!isAllowedIP(request)) {
         return new Response("Forbidden", { status: 403 })
     }
@@ -31043,7 +31097,7 @@ The developer MAY combine `<program>` attributes with `handle()`. They are not m
 ```scrml
 <program db="./app.db" cors="*" log="structured" headers="strict">
 
-${ function handle(request, resolve) {
+${ function handle(request: Request, resolve: (req: Request) => Response) {
     // Add request ID before dispatch
     const reqId = crypto.randomUUID()
     const response = resolve(request)
@@ -33195,7 +33249,9 @@ A **condition** is the test of an `if` / `else if` statement, a `while` / `do �
 2. **A bare `T | not` is a presence test.** A condition that is, as a WHOLE (parentheses aside), a value of type `T | not` (`T` not `bool`) SHALL test presence: it is true when the value is not `not` and false when it is `not`. The defined values `""`, `0`, `false`, `[]` and `{}` are PRESENT (§42.1.1). The test SHALL lower to an absence check (§42.5), never to the host language's truthiness. Where the test is true, the tested place is narrowed from `T | not` to `T` (§42.3.5 item 2) — the `if` body, the ternary's first arm, the children and other attributes of an `if=` element; it is NOT narrowed in the `else` branch or a following `else-if=` / `else` element.
 3. **A bare `bool | not` is an error.** It SHALL be compile error **E-COND-NOT-BOOLEAN**, and the message SHALL name both fixes: `x is given` (is it present?) and `x == true` (is it true?). A `bool | not` already narrowed to `bool` is a boolean test (statement 1).
 4. **Any other known type is an error.** A condition whose value is a number (`int`, `number`), a `string`, a sequence, a struct, an enum, or any other type that is neither `bool` nor `T | not` SHALL be compile error **E-COND-NOT-BOOLEAN**. Numbers and strings have no truthiness: write the comparison (`@count > 0`, `@name != ""`); for a sequence's emptiness use `<each>` / `<empty>` (§17.7.4) or `xs.length > 0`.
-5. **An unresolved type is an error.** A condition whose value's type the compiler cannot resolve — an unannotated parameter, a call whose return type is neither declared nor inferred, a value that crosses the JavaScript boundary with no scrml type (§42.9), or a value typed `asIs` / `unknown` (§7.5.2) — SHALL be compile error **E-COND-NOT-BOOLEAN**. The message SHALL say that the type could not be resolved and SHALL name the fixes: annotate the value (a parameter type, a return type), or write what is tested — `x is given` (is it present?) or `x == true` (is it true?). A condition is never silently accepted because its type is unknown.
+5. **An unresolved type is an error.** A condition whose value's type the compiler cannot resolve — an unannotated parameter, a call whose return type is neither declared nor inferred, a value that crosses the JavaScript boundary with no scrml type (§42.9), or a value typed `asIs` / `unknown` (§7.5.2) — SHALL be compile error **E-COND-NOT-BOOLEAN**. *(S469: a function's parameter is now always annotated — an
+   unannotated one is `E-PARAM-TYPE-REQUIRED` at its declaration, §7.5 — so of the parameter sources only a lambda
+   parameter outside the tape-method carve-out remains, while the §7.5 ⚑ is open.)* The message SHALL say that the type could not be resolved and SHALL name the fixes: annotate the value (a parameter type, a return type), or write what is tested — `x is given` (is it present?) or `x == true` (is it true?). A condition is never silently accepted because its type is unknown.
 6. **No second report.** A condition SHALL NOT also be reported under statement 5 when the compiler has already reported **any Error-severity diagnostic whose span lies within the condition** — of any code: a parse error, an undeclared name or field, a refused operator (`E-OPERATOR-OPERAND-TYPE`), a state write in a render position (`E-VALUE-WRITES-STATE`), a wrong argument count (`E-CALL-ARITY`), and so on — or when the condition reads a declaration whose written type was refused (`E-TYPE-UNKNOWN`, reported at the declaration, not in the condition), calls a function whose written return type was refused, or sits in a construct already refused (an `if=` the compiler does not admit on that element, a region the binder skipped). **This is not fail-open:** every case above has already reported an Error, so the build still fails; the rule only keeps one root cause from being reported twice.
 7. **A whole condition, not an operand.** The presence test of statement 2 is the meaning of a bare `T | not` ONLY as the whole condition. As an operand of `!`, `&&` or `||` (and `and` / `or`) a `T | not` value is not a boolean and SHALL be compile error `E-OPERATOR-OPERAND-TYPE` (S440 Gotcha Q2: *"`!`, `&&`, `||` (and `and`/`or`) take booleans only"*). Compounds and value positions spell presence explicitly: `x is given` (present) / `x is not` (absent) — `if (@x is given && @x.n > 0)`, `const ready = @user is given`, `if (u is not) return`.
 8. **The explicit pair narrows.** `x is given` and `x is not` are `bool`-valued. Where `x` is a place (a local, a parameter, a cell or a member path), `x is given` narrows it to `T` where the test is true and `x is not` where it is false — including the right operand of `&&` / `||` and the rest of a block after `if (x is not) return` (§42.3.5 item 2). **Partly Nominal on impl#1:** impl#1 narrows an `if (x is given) { … }` / `is some` block, an `if (x is not) return` early-return, and the right operand of `&&` / `||` (`if (@user is some && @n > 0) { @user.name }`, `if (@user is not || @user.name == "")`), but NOT the children of a parenthesized attribute test (`<p if=(@user is given)>${@user.name}</p>` is E-TYPE-046 there); carried gap `g-impl1-condition-rule-s460`. (The value-position `const ok = @n is given && @b` lowers since S462.) The bootstrap narrows every case this statement names.
@@ -33221,11 +33277,14 @@ type User:struct = { name: string }
 </main>
 
 ${
-  function greet(u) {                               // `u` is unannotated: its type is unresolved
-    if (u) { @greeting = u.name }                   // E-COND-NOT-BOOLEAN — annotate `u: User | not`, or write `u is given`
+  function greet(u: asIs) {                         // `u` is `asIs`: its type is unresolved
+    if (u) { @greeting = u.name }                   // E-COND-NOT-BOOLEAN — type it `u: User | not`, or write `u is given`
   }
 }
 ```
+
+*(S469: this example's `u` was unannotated — ~~`function greet(u)`~~, commented "`u` is unannotated: its type is unresolved" — which is now `E-PARAM-TYPE-REQUIRED` at the parameter (§7.5). It is `asIs` instead, another
+unresolved source statement 5 lists, so the example still shows case 3.)*
 
 ### 42.5 Codegen
 
@@ -34549,7 +34608,7 @@ site — top-level and nested (`${ }`-scoped). (Before the reject, the shorthand
 `fn` may appear as an expression value without a name:
 
 ```scrml
-let makePoint = fn(x, y) {
+let makePoint = fn(x: number, y: number) {
     let p = <Point>
     p.x = x
     p.y = y
@@ -34561,10 +34620,10 @@ All constraints of §48.3 through §48.6 apply to anonymous `fn` expressions ide
 
 #### 48.2.2 Parameters
 
-`fn` accepts zero or more parameters using identical syntax to `function`. Parameters may carry type annotations. Parameters are local to the `fn` body. Parameters do not inherit `@` reactivity from the caller — a parameter whose value came from a reactive expression is bound by value at call time.
+`fn` accepts zero or more parameters using identical syntax to `function`. ~~Parameters may carry type annotations.~~ Every parameter SHALL carry a type annotation (S469 — §7.5, `E-PARAM-TYPE-REQUIRED`; ruling:user-voice-scrml.md S469 "⭐ RULED — function parameters must be annotated" — *"Require types (Recommended)"*). Parameters are local to the `fn` body. Parameters do not inherit `@` reactivity from the caller — a parameter whose value came from a reactive expression is bound by value at call time.
 
 ```scrml
-fn buildUser(name, age) {
+fn buildUser(name: string, age: int) {
     let u = <User>
     u.name = name
     u.age  = age
@@ -34582,7 +34641,7 @@ The following five constructs SHALL NOT appear anywhere inside a `fn` body, incl
 
 ```scrml
 // Invalid — E-FN-001
-fn buildProfile(id) {
+fn buildProfile(id: int) {
     let row = ?{ SELECT * FROM users WHERE id = $id }
     let p = <Profile>
     p.name = row.name
@@ -34637,7 +34696,7 @@ ${
     let counter = 0
 
     // Invalid — E-FN-003
-    fn buildItem(name) {
+    fn buildItem(name: string) {
         counter = counter + 1   // mutation of outer variable
         let item = <Item>
         item.name = name
@@ -34666,7 +34725,7 @@ This list is exhaustive for the initial version. Future amendments MAY extend it
 
 ```scrml
 // Invalid — E-FN-004
-fn buildSession(userId) {
+fn buildSession(userId: int) {
     let s = <Session>
     s.userId = userId
     s.token  = crypto.randomUUID()   // Error
@@ -34700,7 +34759,7 @@ A `fn` that requires asynchronous data (e.g., a server call result) SHALL receiv
 
 ```scrml
 // Invalid — E-FN-005: async fn declaration
-async fn buildProfile(id) {
+async fn buildProfile(id: int) {
     let p = <Profile>
     p.data = await fetchData(id)   // also E-FN-005
     return p
@@ -34723,7 +34782,7 @@ If branches produce incompatible types and no explicit union return type is decl
 
 ```scrml
 // Invalid — E-FN-007: branches return different types, no union declared
-fn buildEntity(kind) {
+fn buildEntity(kind: string) {
     if (kind == "user") {
         let u = <User>
         u.name = "anon"
@@ -34743,7 +34802,7 @@ fn buildEntity(kind) {
 **Valid resolution — explicit union return type:**
 
 ```scrml
-fn buildEntity(kind) -> User | Admin {
+fn buildEntity(kind: string) -> User | Admin {
     if (kind == "user") {
         let u = <User>
         u.name = "anon"
@@ -34770,7 +34829,7 @@ Attempting to `lift` a value past the `fn` boundary (i.e., lifting in a way that
 
 ```scrml
 ${
-    fn buildItems(names) {
+    fn buildItems(names: string[]) {
         for (name of names) {
             let item = <Item>
             item.name = name
@@ -34824,14 +34883,14 @@ ${
 A `fn` body MAY call other `fn`-declared functions. The transitivity of `fn` constraints applies: if a called `fn` is valid, calling it does not introduce any body prohibition violations.
 
 ```scrml
-fn buildAddress(city, country) {
+fn buildAddress(city: string, country: string) {
     let a = <Address>
     a.city    = city
     a.country = country
     return a
 }
 
-fn buildUser(name, city, country) {
+fn buildUser(name: string, city: string, country: string) {
     let u    = <User>
     let addr = buildAddress(city, country)   // valid: fn calling fn
     u.name    = name
@@ -34847,9 +34906,9 @@ A `fn` body SHALL NOT call a `function`-declared callable (§7.3), because `func
 **Exception:** A `fn` body MAY call a `pure function` (§33), because `pure function` enforces the same purity contract as `fn` (§33.3, §48.11). The two forms are semantically equivalent at the declaration site.
 
 ```scrml
-pure function double(x) { return x * 2; }
+pure function double(x: number) { return x * 2; }
 
-fn buildScaled(value) {
+fn buildScaled(value: number) {
     let s = <Scaled>
     s.value = double(value)   // valid: pure function call from fn
     return s
@@ -34859,7 +34918,7 @@ fn buildScaled(value) {
 ```scrml
 function effectfulHelper() { @counter = @counter + 1; }   // mutates reactive state
 
-fn buildItem(name) {
+fn buildItem(name: string) {
     let i = <Item>
     i.name = name
     effectfulHelper()   // Invalid — E-FN-003: calls a non-pure function
@@ -34889,23 +34948,23 @@ When a `fn` is stored in a `<state>` field, the field's type annotation carries 
 // Recursive-descent parser shape — mutual recursion across ~N parse functions.
 // Source order is non-load-bearing; any permutation type-checks identically.
 
-fn parseExpression(cursor) {
+fn parseExpression(cursor: Cursor) {
     return parseAssignment(cursor)            // forward reference — valid (hoisted)
 }
 
-fn parseAssignment(cursor) {
+fn parseAssignment(cursor: Cursor) {
     let left = parseConditional(cursor)       // forward reference — valid (hoisted)
     // ...
     return left
 }
 
-fn parseConditional(cursor) {
+fn parseConditional(cursor: Cursor) {
     let cond = parseBinary(cursor)            // forward reference — valid (hoisted)
     // ...
     return cond
 }
 
-fn parseBinary(cursor) {
+fn parseBinary(cursor: Cursor) {
     // May recurse back into parseExpression — valid (hoisted)
     let right = parseExpression(cursor)
     // ...
@@ -34930,7 +34989,7 @@ fn parseBinary(cursor) {
 A single `fn` body MAY construct multiple `<state>` objects. **Amended 2026-04-20 (S32):** each state literal is checked independently at its own closing tag by E-STATE-COMPLETE (§54.6.1); there is no longer a consolidated return-site phase check. Multiple literals in one `fn` body produce independent diagnostics, each pointing at the specific unassigned field.
 
 ```scrml
-fn buildPair(aName, bName) {
+fn buildPair(aName: string, bName: string) {
     let a = <Item>
     let b = <Item>
     a.name = aName
@@ -35045,7 +35104,7 @@ newly-rejecting, as §48's amendment states.)
     y: number
 </>
 
-fn makePoint(x, y) {
+fn makePoint(x: number, y: number) {
     let p = <Point>
     p.x = x
     p.y = y
@@ -35069,7 +35128,7 @@ Expected: Compiles without error. `makePoint` constructs fully-initialized `Poin
     label:       string
 </>
 
-fn makeRect(x1, y1, x2, y2, label) {
+fn makeRect(x1: number, y1: number, x2: number, y2: number, label: string) {
     let r           = <Rect>
     r.topLeft       = makePoint(x1, y1)
     r.bottomRight   = makePoint(x2, y2)
@@ -35088,7 +35147,7 @@ Expected: Compiles without error. `makeRect` calls `fn makePoint` (valid), assig
     priority: number
 </>
 
-fn buildTags(names) {
+fn buildTags(names: string[]) {
     for (name of names) {
         let t      = <Tag>
         t.name     = name
@@ -35113,7 +35172,7 @@ Expected: Compiles without error. `lift t` inside the `for` loop hoists each ful
     name: string
 </>
 
-fn buildUser(isAdmin, name) -> AdminUser | GuestUser {
+fn buildUser(isAdmin: bool, name: string) -> AdminUser | GuestUser {
     if (isAdmin) {
         let u  = <AdminUser>
         u.name  = name
@@ -35140,7 +35199,7 @@ Expected: Compiles without error. Explicit `-> AdminUser | GuestUser` return typ
     sku:   string
 </>
 
-fn buildProduct(name, price) {
+fn buildProduct(name: string, price: number) {
     let p  = <Product>
     p.name  = name
     p.price = price
@@ -35161,7 +35220,7 @@ E-STATE-COMPLETE: field 'sku' of <Product> is unassigned at literal close.
 #### 48.14.6 Invalid — SQL Inside fn (E-FN-001)
 
 ```scrml
-fn buildUserFromDb(id) {
+fn buildUserFromDb(id: int) {
     let row = ?{ SELECT name, age FROM users WHERE id = $id }
     let u   = <User>
     u.name  = row.name
@@ -35183,7 +35242,7 @@ E-FN-001: `fn buildUserFromDb` contains a `?{}` SQL access at line 2.
 #### 48.14.7 Invalid — Non-Deterministic Call (E-FN-004)
 
 ```scrml
-fn buildSession(userId) {
+fn buildSession(userId: int) {
     let s     = <Session>
     s.userId  = userId
     s.id      = crypto.randomUUID()
@@ -35205,7 +35264,7 @@ Two errors reported in one pass; compilation continues to find all violations.
 #### 48.14.8 Invalid — Branch Type Mismatch Without Union (E-FN-007)
 
 ```scrml
-fn buildEntity(kind) {
+fn buildEntity(kind: string) {
     if (kind == "product") {
         let p    = <Product>
         p.name   = "Widget"
@@ -35226,7 +35285,7 @@ Expected compiler output:
 E-FN-007: `fn buildEntity` returns `Product` at line 7 and `Category` at line 12.
   Both types must be the same, or declare an explicit union return type:
 
-    fn buildEntity(kind) -> Product | Category { ... }
+    fn buildEntity(kind: string) -> Product | Category { ... }
 ```
 
 ### 48.15 Interaction Notes
@@ -36478,7 +36537,7 @@ Assignment expressions are typed values and MAY appear wherever a value of their
 Assignment to variables declared inside a `fn` body is valid as an expression. The fn body's constraints (§48.3) are not relaxed; the expression form of assignment is purely a parsing/evaluation concern, not a permissions concern.
 
 ```scrml
-fn scanMatches(str, re) {
+fn scanMatches(str: string, re: asIs) {
     let results = []
     let m = not
     while ((m = re.exec(str)) is given) {
@@ -36501,7 +36560,7 @@ ${
     let log = []
 
     // Invalid — E-FN-003
-    fn buildItem(name) {
+    fn buildItem(name: string) {
         let i = <Item>
         i.name = name
         // assignment-as-expression to outer-scope `log` — still E-FN-003
@@ -36654,7 +36713,7 @@ And the escape, which is `let` and only `let`:
 
 ```scrml
 ${
-    function accumulate(items) {
+    function accumulate(items: number[]) {
         let total = 0
         for (item of items) {
             total = total + item    // legal, and legal on every iteration
@@ -36709,7 +36768,7 @@ ${
 
 ```scrml
 ${
-    function extractAll(str, pattern) {
+    function extractAll(str: string, pattern: string) {
         const re = new RegExp(pattern, "g")
         let results = []
         let m = not
@@ -36794,7 +36853,7 @@ The program compiles with the assignment semantics (assigns `5` to `x`, then eva
 #### 50.10.5 Valid — Assignment Inside `fn`, Local Variable
 
 ```scrml
-fn parseTokens(input) {
+fn parseTokens(input: string) {
     const tokenRe = /\w+/g
     let tokens = []
     let m = not
@@ -36814,7 +36873,7 @@ Expected: Compiles without error. `m` is local to the `fn` body. Assignment to i
 
 ```scrml
 ${
-    function process(val) { return val + 1 }
+    function process(val: int) { return val + 1 }
     const result = process(let x = 10)   // Error: let in expression position
 }
 ```
@@ -40202,7 +40261,7 @@ Before (observed in `samples/gauntlet-r11/rust-state-machine.scrml`):
 <isError>   = false
 
 ${
-  function setState(next) {
+  function setState(next: FetchState) {
     @state = next
     @isIdle    = next == FetchState.Idle
     @isLoading = next == FetchState.Loading
@@ -41284,13 +41343,13 @@ ${
     // server-authoritative source they derive from.
     const <todoCards> = @cards.filter(c => c.column == Column.Todo)
 
-    function createCard(title, desc, col) {
+    function createCard(title: string, desc: string, col: string) {
         ?{`INSERT INTO cards (title, description, column_name, position)
            VALUES (${title}, ${desc}, ${col}, ${@cards.length})`}.run()
         return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
     }
 
-    function updateCard(id, title, desc) {
+    function updateCard(id: int, title: string, desc: string) {
         ?{`UPDATE cards SET title = ${title}, description = ${desc} WHERE id = ${id}`}.run()
     }
 
@@ -41300,7 +41359,7 @@ ${
         @ui.draftDescription = ""
     }
 
-    function startEdit(card) {
+    function startEdit(card: Card) {
         @ui.editingId = card.id
         @ui.draftTitle = card.title
         @ui.draftDescription = card.description
@@ -41452,7 +41511,7 @@ ${
         return ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
     }
 
-    function createCard(title, desc, col, pos) {
+    function createCard(title: string, desc: string, col: string, pos: int) {
         ?{`INSERT INTO cards (title, description, column_name, position)
            VALUES (${title}, ${desc}, ${col}, ${pos})`}.run()
         return ?{`SELECT * FROM cards WHERE id = last_insert_rowid()`}.get()
@@ -41494,7 +41553,7 @@ E-AUTH-001: '@editingId' is client-local and cannot be used as a bound parameter
   Only server-authoritative variables and values derived from server function arguments
   may appear as bound parameters in INSERT/UPDATE/DELETE statements.
   To persist a client-local value, pass it to a server-side function first:
-    function logEdit(id) {
+    function logEdit(id: int) {
         ?{`INSERT INTO audit_log (object_id) VALUES (${id})`}.run()
     }
   Then call: logEdit(@editingId)
@@ -41517,7 +41576,7 @@ E-AUTH-002: '<doubleCount server>' is declared server-authoritative, but its ini
   value derives from '@localCount', which is client-local.
   A server-authoritative cell's initial value must not derive directly from a
   client-local cell. Use a server function as the authority boundary:
-    server fn computeDouble(n) { return n * 2 }
+    server fn computeDouble(n: int) { return n * 2 }
     <doubleCount server> = computeDouble(@localCount)
   Or reconsider whether @doubleCount should be server-authoritative.
 ```
@@ -44708,7 +44767,7 @@ Two rejected alternatives:
         return ?{`SELECT * FROM cards`}.all()
     }
 
-    function addCard(c) {
+    function addCard(c: Card) {
         @cards = [...@cards, c]
     }
 
