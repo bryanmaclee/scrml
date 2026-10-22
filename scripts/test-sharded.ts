@@ -9,19 +9,25 @@
 //               substring filters — the file set is enumerated here so it can be split. `--plan` prints it.
 //   --bail      stop EVERY shard on the first failure anywhere, print that failure, exit 1.
 //   --shards=N  shard count. Precedence: --shards, then $SCRML_HOOK_SHARDS, then the memory-aware default:
-//               min(floor(cores/2), 8, floor((MemAvailable - reserve) / shard-mem)), at least 1. An explicit N is
-//               honoured as given (the per-shard ceiling below still bounds each shard).
+//               min(floor(cores/2), floor(slots * 3/4), floor((MemAvailable - reserve) / budget)), at least 1
+//               (S469: was min(cores/2, 8, .../ceiling)). An explicit N is honoured as given (the per-shard ceiling
+//               below still bounds each shard; the machine-wide slots still bound how many run at once).
 //               N=1 runs one `bun test` process over the same file list (no parallelism).
 //   --shard-timeout=S   wall-clock bound per shard, seconds ($SCRML_HOOK_SHARD_TIMEOUT_S, default 1200). A shard
 //               still running at S is killed (its whole process group, nothing else) and the run FAILS, naming
 //               the shard, the file it was in and its assigned files. Never a pass.
 //   --shard-mem=MB      RSS ceiling per shard, MB, summed over the shard's process group (bun test + every
 //               child it spawned) ($SCRML_HOOK_SHARD_MEM_MB, default 3072). Over it -> killed, run FAILS, as above.
-//               Also the per-shard budget the default N is derived from. Sampled every second (Linux /proc;
-//               elsewhere the ceiling is not enforced and N falls back to os.freemem()).
+//               Sampled every second (Linux /proc; elsewhere the ceiling is not enforced and N falls back to
+//               os.freemem()).
+//   budget      $SCRML_HOOK_SHARD_BUDGET_MB (default 1536): the memory a shard is EXPECTED to hold — what the default
+//               N, the slot pool and the memory admission check are sized from (S469; until then they used the
+//               ceiling, which held the 32-core / 30 GB box to 8 slots for every hook combined).
 //               A memory-derived N of 1 (memory already short; the whole suite in one shard) doubles the ceiling,
 //               so the normal single-process peak (~2.8 GB) cannot false-red it.
-//   reserve     $SCRML_HOOK_MEM_RESERVE_MB (default 2048): memory left for everything else when deriving N.
+//   reserve     $SCRML_HOOK_MEM_RESERVE_MB (default 2048): memory left for everything else when deriving N and when
+//               admitting a shard (a shard starts only if MemAvailable - reserve >= budget, or none of its run's
+//               shards is running yet; otherwise it waits, bounded by slot-wait, like a busy slot).
 //   --slot-wait=S       how long a shard may wait for a machine-wide slot ($SCRML_HOOK_SLOT_WAIT_S, default 1800);
 //               past it the shard never starts and the run FAILS ("NEVER STARTED: no machine-wide test slot").
 //   slots       $SCRML_HOOK_SLOTS: the machine-wide concurrent-shard budget (default below, MACHINE-WIDE SLOTS).
@@ -69,6 +75,10 @@
 // inside the shard's process group, so the kernel releases it when the shard's processes die — never a pid file,
 // never stale. Placement depends on the plan: which shard waits, and so which files run later, varies with load.
 // Without `flock` on PATH (macOS) the budget is not enforced and the runner says so.
+// The pool is also a CORRECTNESS bound, not only a memory one: bun's per-test timeout is 5 s, and a box driven past
+// its cores turns slow tests into (fail) lines. Measured S469 on 32 cores: 16 shards of one hook plus other agents'
+// hooks passed; 24 shards plus other hooks false-redded twice in a row (a ~1 s file's first compile > 5 s). The
+// default pool there is 16 (cores/2; MemTotal*0.8/budget = 16); raise SCRML_HOOK_SLOTS only with that in mind.
 //
 // SERIAL PINS. A file listed in SERIAL_PINS below is assigned to shard 0 together with every other pinned file,
 // so pinned files never run concurrently with EACH OTHER. Use it only for tests that genuinely share an external
@@ -117,14 +127,35 @@ function availableMemoryBytes(): number {
 
 const MB = 1024 * 1024;
 
-function defaultShards(memMb: number): { n: number; why: string } {
-  const cores = typeof availableParallelism === "function" ? availableParallelism() : cpus().length;
+// S469 (s469-hook-shard-tuning). The PLANNING budget per shard — what a shard is expected to hold, used to size N
+// and the machine-wide slot pool — is separate from the KILL ceiling (--shard-mem, 3072). Until S469 both used the
+// ceiling, so the pool on a 32-core / 30 GB box was MemTotal*0.8/3072 = 8 slots for EVERY hook on the machine:
+// with 3-5 agents committing at once each hook got ~2 slots and took ~10 min. Measured (S469, N=8..16, 1614
+// files): a shard averages 0.85-1.0 GB (all-shards peak 7.7 GB at N=8, 11.7 GB at 12, 13.4 GB at 16) and the
+// worst single shard peaked at 1.9 GB (2.4 GB at N=4); the suite costs ~1500 CPU-seconds, ~1.25 cores per shard.
+const DEFAULT_BUDGET_MB = 1536;
+
+function cpuCount(): number {
+  return typeof availableParallelism === "function" ? availableParallelism() : cpus().length;
+}
+
+function defaultShards(budgetMb: number, slotCount: number): { n: number; why: string } {
+  const cores = cpuCount();
   const reserveMb = envNumber("SCRML_HOOK_MEM_RESERVE_MB", 2048);
   const availMb = Math.floor(availableMemoryBytes() / MB);
-  const byCores = Math.min(Math.floor(cores / 2), 8);
-  const byMem = Math.floor((availMb - reserveMb) / memMb);
-  const n = Math.max(1, Math.min(byCores, byMem));
-  return { n, why: `cores ${cores} -> ${byCores}; ${availMb} MB available - ${reserveMb} reserve / ${memMb} per shard -> ${Math.max(0, byMem)}` };
+  // Per-hook cap = 3/4 of the machine-wide pool (was a fixed 8): one hook alone gets most of the box, and a second
+  // hook arriving meanwhile still starts shards at once instead of queueing behind the whole first run. On the
+  // 32-core box: 16 slots -> 12. Measured there: N=12 117-136s vs N=8 129-167s; N=16 no faster (one file,
+  // corpus-bridge, is then a shard of its own and the slowest); N=24 FALSE-REDS (5 s per-test timeouts under CPU
+  // starvation at startup) — so the pool, not this cap, is what keeps the box below that point.
+  const byCores = Math.floor(cores / 2);
+  const byPool = Math.max(1, Math.floor((slotCount * 3) / 4));
+  const byMem = Math.floor((availMb - reserveMb) / budgetMb);
+  const n = Math.max(1, Math.min(byCores, byPool, byMem));
+  return {
+    n,
+    why: `cores ${cores} -> ${byCores}; pool ${slotCount} x 3/4 -> ${byPool}; ${availMb} MB available - ${reserveMb} reserve / ${budgetMb} budget per shard -> ${Math.max(0, byMem)}`,
+  };
 }
 
 function envNumber(name: string, dflt: number, max?: number): number {
@@ -148,8 +179,11 @@ function parsePositive(raw: string, from: string, max = Number.MAX_SAFE_INTEGER)
 // MACHINE-WIDE SLOT BUDGET. N per hook is derived from memory at that hook's START, and nothing reserves it — ten
 // agents committing together would each see the same free memory and together ask for several times the box.
 // So every shard of every hook on the host also holds one of SLOTS flock'd slot files under
-// ~/.cache/scrml/hook-slots/ while it runs. SLOTS = min(floor(cores/2), floor(MemTotal * 0.8 / ceiling)), >= 1
+// ~/.cache/scrml/hook-slots/ while it runs. SLOTS = min(floor(cores/2), floor(MemTotal * 0.8 / budget)), >= 1
 // ($SCRML_HOOK_SLOTS overrides). It is a property of the machine, not of the moment, so concurrent hooks agree.
+// The budget (SCRML_HOOK_SHARD_BUDGET_MB, 1536) is the measured per-shard average with headroom, not the kill
+// ceiling: slots x ceiling no longer has to fit in RAM, because every shard also passes a MEMORY ADMISSION check
+// before it starts (MemAvailable - reserve >= budget, else it waits like a busy slot) — see the run loop.
 const SLOT_BUSY = 199;
 const SLOT_MARKER = "__scrml_test_sharded_slot_acquired__";
 
@@ -163,18 +197,27 @@ function totalMemoryBytes(): number {
   return totalmem();
 }
 
-function slotBudget(memMb: number): { count: number; dir: string; flock: string; why: string } | null {
+function shardBudgetMb(): number {
+  return envNumber("SCRML_HOOK_SHARD_BUDGET_MB", DEFAULT_BUDGET_MB);
+}
+
+// The pool SIZE, computed with or without flock (it also caps the per-hook default N).
+function slotCount(budgetMb: number): { count: number; why: string } {
+  const env = process.env.SCRML_HOOK_SLOTS;
+  if (env !== undefined && env !== "") return { count: parseShardCount(env, "SCRML_HOOK_SLOTS"), why: "SCRML_HOOK_SLOTS" };
+  const cores = cpuCount();
+  const totalMb = Math.floor(totalMemoryBytes() / MB);
+  const byMem = Math.floor((totalMb * 0.8) / budgetMb);
+  const count = Math.max(1, Math.min(Math.floor(cores / 2), byMem));
+  return { count, why: `cores ${cores} -> ${Math.floor(cores / 2)}; ${totalMb} MB total x 0.8 / ${budgetMb} budget per shard -> ${byMem}` };
+}
+
+function slotBudget(budgetMb: number): { count: number; dir: string; flock: string; why: string } | null {
   const flock = Bun.which("flock");
   if (!flock) return null;
   const dir = join(dirname(timingsPath()), "hook-slots");
   mkdirSync(dir, { recursive: true });
-  const env = process.env.SCRML_HOOK_SLOTS;
-  if (env !== undefined && env !== "") return { count: parseShardCount(env, "SCRML_HOOK_SLOTS"), dir, flock, why: "SCRML_HOOK_SLOTS" };
-  const cores = typeof availableParallelism === "function" ? availableParallelism() : cpus().length;
-  const totalMb = Math.floor(totalMemoryBytes() / MB);
-  const byMem = Math.floor((totalMb * 0.8) / memMb);
-  const count = Math.max(1, Math.min(Math.floor(cores / 2), byMem));
-  return { count, dir, flock, why: `cores ${cores} -> ${Math.floor(cores / 2)}; ${totalMb} MB total x 0.8 / ${memMb} per shard -> ${byMem}` };
+  return { ...slotCount(budgetMb), dir, flock };
 }
 
 function parseShardCount(raw: string, from: string): number {
@@ -211,7 +254,7 @@ function parseArgs(argv: string[]): Options {
       o.shards = parseShardCount(env, "SCRML_HOOK_SHARDS");
       o.shardsWhy = "SCRML_HOOK_SHARDS";
     } else {
-      const d = defaultShards(o.memMb);
+      const d = defaultShards(shardBudgetMb(), slotCount(shardBudgetMb()).count);
       o.shards = d.n;
       o.shardsWhy = d.why;
       // Memory-derived N=1 happens only when memory is already short, and then the WHOLE suite is one shard: the
@@ -580,12 +623,27 @@ async function main(): Promise<void> {
   };
   const sampler = setInterval(sampleMemory, 1000);
 
-  const slots = slotBudget(envNumber("SCRML_HOOK_SHARD_MEM_MB", 3072)); // the configured ceiling, not an N=1 lift: every hook on the host must agree
+  const slots = slotBudget(shardBudgetMb()); // env-only (no per-run flag): every hook on the host must agree on the pool
   if (slots === null) console.log("test-sharded: no `flock` on PATH — machine-wide slot budget NOT enforced on this host");
   else console.log(`test-sharded: machine-wide budget ${slots.count} concurrent shard(s) across every hook on this host [${slots.why}]`);
-  const neverStarted = (shard: Shard, outcome: "stopped" | "noslot"): ShardResult => {
+  // MEMORY ADMISSION (S469). The pool is sized from the per-shard BUDGET, not the kill ceiling, so slots x ceiling
+  // may exceed RAM; what keeps concurrent hooks from over-committing memory is this check, made before every slot
+  // attempt: a shard starts only if MemAvailable - reserve >= budget, otherwise it waits exactly like a busy slot
+  // (announced, bounded by slot-wait, then NEVER STARTED -> the run FAILS). Progress guarantee: a run with no shard
+  // of its own running is always admitted — the memory-derived N=1 case of the pre-S469 runner, which ran anyway.
+  const reserveMb = envNumber("SCRML_HOOK_MEM_RESERVE_MB", 2048);
+  const budgetMb = shardBudgetMb();
+  // This run's shards admitted and not finished: counted SYNCHRONOUSLY at admission (all shards reach their first
+  // check in the same tick, so counting only after the slot is held would admit every one of them as "the first"),
+  // returned when a slot attempt finds the slot busy, and when the shard ends.
+  let admitted = 0;
+  const memoryShort = (): number | null => {
+    const availMb = Math.floor(availableMemoryBytes() / MB);
+    return admitted > 0 && availMb - reserveMb < budgetMb ? availMb : null;
+  };
+  const neverStarted = (shard: Shard, outcome: "stopped" | "noslot", why = "every machine-wide slot stayed busy"): ShardResult => {
     if (outcome === "noslot") {
-      console.log(`[s${shard.index}] NO SLOT: every machine-wide slot stayed busy for ${opts.slotWaitS}s — shard ${shard.index} never started`);
+      console.log(`[s${shard.index}] NO SLOT: ${why} for ${opts.slotWaitS}s — shard ${shard.index} never started`);
       bail(shard.index);
     }
     return { shard, exitCode: null, output: [], counts: null, failLines: [], outcome, lastFile: null, peakRssMb: 0, seconds: 0 };
@@ -634,8 +692,21 @@ async function main(): Promise<void> {
       let proc: ReturnType<typeof spawn>;
       let pumped: Promise<unknown>;
       let slotWaitAnnounced = false;
+      let memWaitAnnounced = false;
       for (let attempt = 0; ; attempt++) {
         if (bailedBy !== null) return neverStarted(shard, "stopped");
+        const short = memoryShort();
+        if (short !== null) {
+          if ((Date.now() - t0) / 1000 > opts.slotWaitS) return neverStarted(shard, "noslot", `memory stayed short (MemAvailable - ${reserveMb} reserve < ${budgetMb} budget)`);
+          if (!memWaitAnnounced) {
+            console.log(`[s${shard.index}] waiting for memory (${short} MB available, needs ${reserveMb} reserve + ${budgetMb} budget; bounded at ${opts.slotWaitS}s)`);
+            memWaitAnnounced = slotWaitAnnounced = true;
+          }
+          attempt--; // not a slot attempt
+          await Bun.sleep(1000 + Math.floor(Math.random() * 1000));
+          continue;
+        }
+        admitted++;
         if (slots === null) {
           proc = spawn(bound(testCmd), spawnOpts);
           pumped = pumpAll(proc);
@@ -650,6 +721,7 @@ async function main(): Promise<void> {
         const pp = pumpAll(p);
         const first = await Promise.race([acquired, p.exited]);
         if (first === SLOT_BUSY) {
+          admitted--;
           await pp;
           if ((attempt + 1) % slots.count === 0) {
             if ((Date.now() - t0) / 1000 > opts.slotWaitS) return neverStarted(shard, "noslot");
@@ -676,6 +748,7 @@ async function main(): Promise<void> {
       }, opts.timeoutS * 1000);
       await pumped;
       const exitCode = await proc.exited;
+      admitted--;
       clearTimeout(timer);
       // Anything the shard's tests left running in its group (a server a test never stopped) dies with it.
       killGroup(shard.index, "SIGKILL");
@@ -719,7 +792,7 @@ async function main(): Promise<void> {
         : r.outcome === "memory"
           ? `KILLED AT THE MEMORY CEILING (${opts.memMb} MB; peak ${r.peakRssMb.toFixed(0)} MB)`
           : r.outcome === "noslot"
-            ? `NEVER STARTED: no machine-wide test slot within ${opts.slotWaitS}s (other hooks held all of them)`
+            ? `NEVER STARTED: not admitted within ${opts.slotWaitS}s (every machine-wide slot busy, or memory short — see its NO SLOT line)`
             : r.outcome === "signal"
             ? `KILLED BY A SIGNAL THIS RUNNER DID NOT SEND (exit ${r.exitCode}; OOM killer?)`
               : `FAILED (exit ${r.exitCode})`;

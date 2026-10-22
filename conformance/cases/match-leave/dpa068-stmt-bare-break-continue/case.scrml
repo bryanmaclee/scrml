@@ -23,7 +23,8 @@ ${
         return n
     }
     function go() {
-        @out = "n=" + count()
+        const n = count()
+        @out = `n=${n}`
     }
 }
 <button id="go" onclick=go()>go</>

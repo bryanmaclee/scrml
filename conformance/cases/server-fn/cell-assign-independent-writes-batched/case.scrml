@@ -11,7 +11,7 @@ ${
     function indep() {
         @a = one(1)
         @b = two(2)
-        @seen = "indep:" + @a + "," + @b
+        @seen = `indep:${@a},${@b}`
     }
 }
 <button id="indep" onclick=indep()>i</>

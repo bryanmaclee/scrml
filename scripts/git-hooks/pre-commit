@@ -21,11 +21,13 @@ echo "Running tests (unit + integration + conformance, excluding browser)..."
 # naming the shard and its files — the hook cannot hang or eat the machine. Only the shard's own
 # process group is ever signalled.
 #   SCRML_HOOK_SHARDS=1   the original single-process command, exactly as before
-#   SCRML_HOOK_SHARDS=N   N shards (default min(cores/2, 8, (MemAvailable - reserve) / ceiling))
-#   SCRML_HOOK_SHARD_TIMEOUT_S (1200) · SCRML_HOOK_SHARD_MEM_MB (3072) · SCRML_HOOK_MEM_RESERVE_MB (2048)
+#   SCRML_HOOK_SHARDS=N   N shards (default min(cores/2, slots*3/4, (MemAvailable - reserve) / budget))
+#   SCRML_HOOK_SHARD_TIMEOUT_S (1200) · SCRML_HOOK_SHARD_MEM_MB (3072, the kill ceiling) ·
+#   SCRML_HOOK_SHARD_BUDGET_MB (1536, expected per-shard RSS) · SCRML_HOOK_MEM_RESERVE_MB (2048)
 # Machine-wide: every shard of every concurrent hook holds a flock'd slot (~/.cache/scrml/hook-slots/,
-# min(cores/2, MemTotal*0.8/ceiling) slots, SCRML_HOOK_SLOTS); none free -> the shard waits, bounded
-# by SCRML_HOOK_SLOT_WAIT_S (1800), then FAILS. Ten agents committing at once cannot oversubscribe the box.
+# min(cores/2, MemTotal*0.8/budget) slots, SCRML_HOOK_SLOTS) and starts only if MemAvailable - reserve >= budget;
+# otherwise the shard waits, bounded by SCRML_HOOK_SLOT_WAIT_S (1800), then FAILS. Ten agents committing at once
+# cannot oversubscribe the box. S469 (s469-hook-shard-tuning): 32-core box -> 16 slots (was 8), 12 per hook (was 8).
 # A branch cut before the runner existed has no scripts/test-sharded.ts and runs single-process.
 if [ "${SCRML_HOOK_SHARDS:-}" = "1" ] || [ ! -f scripts/test-sharded.ts ]; then
   if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then

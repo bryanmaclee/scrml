@@ -3,7 +3,7 @@ type Phase:enum = { Idle, Loading }
 <count> = 5
 <last> = ""
 
-${ function track(n: string) { @last = n + ":" + @count } }
+${ function track(n: string) { @last = `${n}:${@count}` } }
 
 <p id="out">${@count} ${@last}</p>
 
