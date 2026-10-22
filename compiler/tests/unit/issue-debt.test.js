@@ -64,8 +64,8 @@ describe("issue-debt — mentions() edge shapes", () => {
     expect(mentions("issue#519", 519)).toBe(true);
   });
   test("accepts the URL form `issues/<n>` — a home written as a link is still a home", () => {
-    expect(mentions("https://github.com/bryanmaclee/scrml/issues/519", 519)).toBe(true);
-    expect(mentions("https://github.com/bryanmaclee/scrml/issues/5190", 519)).toBe(false);
+    expect(mentions("https://github.com/scrml-lang/scrml/issues/519", 519)).toBe(true);
+    expect(mentions("https://github.com/scrml-lang/scrml/issues/5190", 519)).toBe(false);
   });
   test("rejects a bare number, a longer number, and non-positive input", () => {
     expect(mentions("519 is a number, not an issue", 519)).toBe(false);
