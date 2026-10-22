@@ -47,37 +47,83 @@ export function bootstrapCodes(): string[] {
   return [...out].sort();
 }
 
-export type SeverityEntry = { code: string; severity: CompileSeverity; line: number };
+/**
+ * PROVISIONAL codes — named by the bootstrap, approved by the owner as provisional, and with NO §34 row
+ * yet. Each carries its intended severity here until the SPEC follow-up adds its row; once the row
+ * exists `resolveSeverities` throws (agreeing or not) until the entry is removed, so this table can
+ * never shadow §34. Keep it SHORT: every entry is owed a §34 row.
+ *   W-STRING-INTERP-LITERAL (S469, s469-boot-strings-1) — a logic string literal holding `${`, which
+ *   is plain text there (§5.5.3, §4.18 interpolate only in markup); a Warning (the program means what
+ *   it says). Owed: its §34 row.
+ */
+export const PROVISIONAL: Record<string, CompileSeverity> = {
+  "W-STRING-INTERP-LITERAL": "Warning",
+};
+
+export type SeverityEntry = { code: string; severity: CompileSeverity; line: number; provisional?: boolean };
 export type CatalogGap = { code: string; why: string };
 
 /** Resolve each code against §34. Throws when two live rows of one code disagree. */
-export function resolveSeverities(specText: string, codes: string[]): { entries: SeverityEntry[]; gaps: CatalogGap[] } {
+/**
+ * The PROVISIONAL table's own guards (s469 F/U-7) — each a THROW, never a silent fall-through:
+ *   - a provisional code the bootstrap no longer emits (a stale entry);
+ *   - a provisional `E-` code given Warning / Info (the table may not DOWNGRADE an error: a missing
+ *     row already resolves fail-closed to Error, so an `E-` entry could only ever weaken it);
+ *   - (in resolveSeverities) a provisional code that has a §34 row the generator cannot use (struck,
+ *     or a non-compile severity): the row exists, so the table no longer speaks for it.
+ */
+export function checkProvisional(codes: string[], provisional: Record<string, CompileSeverity>): void {
+  for (const [code, sev] of Object.entries(provisional)) {
+    if (!codes.includes(code)) throw new Error(`PROVISIONAL ${code}: the bootstrap's sources no longer name it — remove the entry`);
+    if (code.startsWith("E-") && sev !== "Error") throw new Error(`PROVISIONAL ${code}: an E- code may not be downgraded to ${sev} by the provisional table`);
+  }
+}
+
+export function resolveSeverities(
+  specText: string,
+  codes: string[],
+  provisional: Record<string, CompileSeverity> = PROVISIONAL,
+): { entries: SeverityEntry[]; gaps: CatalogGap[] } {
+  // the downgrade guard always; the stale-entry guard needs the bootstrap's WHOLE code set, so it
+  // is `render`'s (a subset query — `resolveSeverities(spec, ["E-DG-002", …])` — is not a census)
+  checkProvisional(Object.keys(provisional), provisional);
   const rows = parseS34Rows(specText.split("\n"));
   const entries: SeverityEntry[] = [];
   const gaps: CatalogGap[] = [];
   for (const code of codes) {
     const mine = rows.filter((r) => r.code === code);
-    if (mine.length === 0) { gaps.push({ code, why: "no §34 row" }); continue; }
+    if (mine.length === 0) {
+      if (provisional[code]) { entries.push({ code, severity: provisional[code], line: 0, provisional: true }); continue; }
+      gaps.push({ code, why: "no §34 row" });
+      continue;
+    }
     const live = mine.filter((r) => compileSeverityOf(r) !== null);
     if (live.length === 0) {
       const r = mine[0];
+      const why = r.struck ? "§34 row struck" : `§34 Severity "${r.severity}" is not a compile severity`;
+      if (provisional[code]) throw new Error(`PROVISIONAL ${code}: it has a §34 row the generator cannot use (${why}) — fix the row or remove the entry (no silent fall-through to Error)`);
       // No SPEC line numbers in the generated text: an edit above the row would make the file
       // stale for a reason that changes nothing (the cry-wolf shape).
-      gaps.push({ code, why: r.struck ? "§34 row struck" : `§34 Severity "${r.severity}" is not a compile severity` });
+      gaps.push({ code, why });
       continue;
     }
     const sevs = [...new Set(live.map((r) => compileSeverityOf(r)!))];
     if (sevs.length > 1) throw new Error(`§34 rows for ${code} disagree on severity: ${live.map((r) => `${compileSeverityOf(r)}@${r.line}`).join(", ")}`);
+    // a provisional entry exists only until its row lands: once the row exists — agreeing or not —
+    // the entry is stale and is removed (the row decides; the table never shadows §34)
+    if (provisional[code]) throw new Error(`PROVISIONAL ${code}: its §34 row exists (${sevs[0]}; the table says ${provisional[code]}) — the row decides; remove the entry`);
     entries.push({ code, severity: sevs[0], line: live[0].line });
   }
   return { entries, gaps };
 }
 
 /** The generated module text. */
-export function render(specText: string, codes: string[]): string {
-  const { entries, gaps } = resolveSeverities(specText, codes);
+export function render(specText: string, codes: string[], table: Record<string, CompileSeverity> = PROVISIONAL): string {
+  checkProvisional(codes, table);       // every entry is a code the bootstrap still names
+  const { entries, gaps } = resolveSeverities(specText, codes, table);
   const arms = (sev: CompileSeverity) =>
-    entries.filter((e) => e.severity === sev).map((e) => `            "${e.code}" :> Severity.${sev}`);
+    entries.filter((e) => e.severity === sev && !e.provisional).map((e) => `            "${e.code}" :> Severity.${sev}`);
+  const provisional = entries.filter((e) => e.provisional);
   const L: string[] = [];
   L.push("// =============================================================================");
   L.push("// self-host-v2 / severity.scrml — GENERATED by scripts/gen-bootstrap-severity.ts");
@@ -92,7 +138,8 @@ export function render(specText: string, codes: string[]): string {
   L.push("// ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The");
   L.push("// code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).");
   L.push("//");
-  L.push(`// ${entries.length} codes with a §34 severity; ${gaps.length} without one (FAIL-CLOSED Error):`);
+  L.push(`// ${entries.length - provisional.length} codes with a §34 severity; ${provisional.length} PROVISIONAL (no row yet, severity from the`);
+  L.push(`// generator's PROVISIONAL table: ${provisional.map((e) => e.code).join(", ") || "none"}); ${gaps.length} without one (FAIL-CLOSED Error):`);
   for (const g of gaps) L.push(`//   ${g.code} — ${g.why}`);
   L.push("// =============================================================================");
   L.push("${");
@@ -108,6 +155,10 @@ export function render(specText: string, codes: string[]): string {
   L.push(...arms("Info"));
   L.push("            // §34 Severity: Error");
   L.push(...arms("Error"));
+  if (provisional.length > 0) {
+    L.push("            // PROVISIONAL — no §34 row yet (scripts/gen-bootstrap-severity.ts PROVISIONAL; each owes a row)");
+    for (const e of provisional) L.push(`            "${e.code}" :> Severity.${e.severity}`);
+  }
   L.push("            // no usable §34 row — fail closed (listed in the header)");
   L.push("            _ :> Severity.Error");
   L.push("        }");

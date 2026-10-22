@@ -1,0 +1,8 @@
+// a quoted attribute with `${…}` is a reactive template (§5.5.3) — not a logic string, so the lint stays
+// silent; the bootstrap does not build that template yet (its own refusal).
+<program>
+    let <s:string="ab"/>
+    <main>
+        <p title="len ${@s.length}">x</p>
+    </main>
+</program>

@@ -13,7 +13,7 @@ error object as a plain value (or reads a plain enum value as `.Ok`), the wrong 
 
 | file | what |
 |---|---|
-| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 260 shapes (S469 fix round 2: n11 grew to 56 — the call-form argument and nested containers; n12 to 16 — `export *`; n13 — a handler through a `const` alias, 5; 265 shapes; S469 s469-engine-effect-failable added n14 — a failable call in an engine `effect=` / `<onTransition>` body or guard / message arm / `<onTimeout>` delay / `:`-shorthand body and a `<match>` arm, 45; 310 shapes). Data only; each family declares its `SIDE`. |
+| `shapes/<family>.js` | the shapes, copied verbatim from the reviewer's scratch dir (`n1`–`n8` client, `s1`–`s2` server) and the fix-round dev's (`n9`, `n10`); S469 added `n11` (a failable `match` in every event-handler value form × container: top level, `<each>` row, component body, `if=` subtree) and `n12` (the `!` function imported; multi-file shapes — `pack.js` loads the imported modules' client chunks). 260 shapes (S469 fix round 2: n11 grew to 56 — the call-form argument and nested containers; n12 to 16 — `export *`; n13 — a handler through a `const` alias, 5; 265 shapes; S469 n14 — a failable call inside a template-literal interpolation, 10; 275 shapes; S469 n15 — an object shorthand or an exported `const` alias, 7; 282 shapes; S469 n16 — a labeled block in a function-expression body, or a `${…}` in a quoted attribute value, 19; 301 shapes; S469 n17 — a `}` in a comment or regular expression of a quoted-attribute interpolation, or a line terminator in a quoted template attribute, 10; 311 shapes; round 4 — an Annex B HTML-like comment in the interpolation, 4 more; 315 shapes; S469 s469-engine-effect-failable n18 — a failable call in an engine `effect=` / `<onTransition>` body or guard / message arm / `<onTimeout>` delay / `:`-shorthand body and a `<match>` arm, 45; 360 shapes). Data only; each family declares its `SIDE`. |
 | `pack.js` | compile → client: happy-dom, click `#wrong` / `#right`, read `#out`; server: POST the `login` route → classify |
 | `known-fail.js` | `KNOWN_FAIL` (shapes that log in on a wrong password today, each naming its gap), `UNJUDGED`, `BY_DESIGN_LOGS_IN` |
 | `failable-probe-pack.test.js` | the gate: one test per shape |
@@ -31,7 +31,7 @@ the right one: fail closed, a correctness defect or a probe whose callee is plai
 - a shape not in `KNOWN_FAIL` / `BY_DESIGN_LOGS_IN` logs in on a wrong password;
 - a `KNOWN_FAIL` shape stops doing so (it was fixed: delete the entry);
 - a shape not in `UNJUDGED` comes out `UNJUDGED`, or an `UNJUDGED` one starts being judged;
-- the corpus stops holding exactly 310 shapes; a list entry names no shape.
+- the corpus stops holding exactly 360 shapes; a list entry names no shape.
 
 It deliberately does NOT pin each shape's class: a shape moving from `PASS-REFUSED` to `PASS` is a
 compiler improvement, not a regression.
@@ -80,9 +80,9 @@ TMPDIR=$HOME/.cache/<scratch> bun test compiler/tests/integration/security-faila
 TMPDIR=$HOME/.cache/<scratch> bun compiler/tests/integration/security-failable-pack/classify.js [--json] [filter]
 ```
 
-~15 s for 310 shapes on a loaded dev machine, so it rides the pre-commit `integration` set.
+~15 s for 360 shapes on a loaded dev machine, so it rides the pre-commit `integration` set.
 
-## Measured (S469 s469-engine-effect-failable — n14, 45 shapes)
+## Measured (S469 s469-engine-effect-failable — n18, 45 shapes)
 
 | tree | PASS | PASS-REFUSED | PASS-500 | PASS-DENY | UNJUDGED | FAIL |
 |---|---|---|---|---|---|---|

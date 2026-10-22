@@ -1,0 +1,7 @@
+// a `string | not` receiver is refused (it may be `not`).
+<program>
+    let <s:string | not=not/>
+    <main>
+        <p>${@s.toUpperCase()}</p>
+    </main>
+</program>

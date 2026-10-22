@@ -1,0 +1,21 @@
+{
+  "id": "acceptance-interp-logic-literal-warns",
+  "description": "W-STRING-INTERP-LITERAL (provisional): a logic string holding `${`.",
+  "language-version": "1.0",
+  "spec": "§5.5.3 · §4.18 · W-STRING-INTERP-LITERAL (provisional, no §34 row yet)",
+  "rationale": "Interpolation happens only in markup and quoted attributes; the literal text is kept.",
+  "expect": {
+    "codes": [
+      "W-STRING-INTERP-LITERAL"
+    ],
+    "codeCounts": {
+      "W-STRING-INTERP-LITERAL": 1
+    },
+    "domAnchored": [
+      {
+        "selector": "#t",
+        "text": "typed ${n} chars"
+      }
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
@@ -677,7 +678,7 @@ export function emitBindDirectiveBody(
           ? `event.target.value === "true"`
           : "event.target.value";
 
-    lines.push(`// bind:value=@${bVarRaw}`);
+    lines.push(`// bind:value=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
@@ -700,7 +701,7 @@ export function emitBindDirectiveBody(
     // SPEC §5.4 M-3: bind:valueAsNumber coerces event.target.value to Number.
     const elementTag = (mkNode.tag as string) ?? "";
     const inputEvent = elementTag === "select" ? "change" : "input";
-    lines.push(`// bind:valueAsNumber=@${bVarRaw}`);
+    lines.push(`// bind:valueAsNumber=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
@@ -711,7 +712,7 @@ export function emitBindDirectiveBody(
     lines.push(`  }`);
     lines.push(`}`);
   } else if (bAttr.name === "bind:checked") {
-    lines.push(`// bind:checked=@${bVarRaw}`);
+    lines.push(`// bind:checked=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
@@ -722,7 +723,7 @@ export function emitBindDirectiveBody(
     lines.push(`  }`);
     lines.push(`}`);
   } else if (bAttr.name === "bind:selected") {
-    lines.push(`// bind:selected=@${bVarRaw}`);
+    lines.push(`// bind:selected=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
@@ -733,17 +734,17 @@ export function emitBindDirectiveBody(
     lines.push(`  }`);
     lines.push(`}`);
   } else if (bAttr.name === "bind:files") {
-    lines.push(`// bind:files=@${bVarRaw}`);
+    lines.push(`// bind:files=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
     lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.files")});`);
-    lines.push(`    ${wrapEffect(`_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${bVarRaw} */ ${readExpr}; })`)};`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${commentText(bVarRaw)} */ ${readExpr}; })`)};`);
     _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
     lines.push(`  }`);
     lines.push(`}`);
   } else if (bAttr.name === "bind:group") {
-    lines.push(`// bind:group=@${bVarRaw}`);
+    lines.push(`// bind:group=@${commentText(bVarRaw)}`);
     lines.push(`{`);
     lines.push(`  const ${bElemId} = ${elemExpr};`);
     lines.push(`  if (${bElemId}) {`);
@@ -801,7 +802,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         // the predicate is true at boot the mount runs inside
         // `_scrml_nav_rewire(document)` during `_scrml_boot`, so the ref would be
         // absent before first paint. Same `if (el)` shape as every other block here.
-        lines.push(`// ref=@${refVarName}`);
+        lines.push(`// ref=@${commentText(refVarName)}`);
         lines.push(`{`);
         lines.push(`  const ${refElemId} = (_scrml_root || _scrml_g.document).querySelector('[data-scrml-ref="${refVarName}"]');`);
         lines.push(`  if (${refElemId}) {`);
@@ -887,7 +888,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           if (isReactive) {
             // §5.5.2 form 1: class:active=@isActive — reactive variable
             const cVarName = rawName.replace(/^@/, "");
-            lines.push(`// class:${cClassName}=@${cVarName}`);
+            lines.push(`// class:${commentText(cClassName)}=@${commentText(cVarName)}`);
             lines.push(`{`);
             lines.push(`  const ${cElemId} = (_scrml_root || _scrml_g.document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
@@ -905,7 +906,7 @@ export function emitBindings(ctx: CompileContext): string[] {
             const readExpr = pathStr
               ? `_scrml_reactive_get(${JSON.stringify(rootKey)})${pathStr}`
               : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
-            lines.push(`// class:${cClassName}=${rawName}`);
+            lines.push(`// class:${commentText(cClassName)}=${commentText(rawName)}`);
             lines.push(`{`);
             lines.push(`  const ${cElemId} = (_scrml_root || _scrml_g.document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
@@ -941,7 +942,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           });
           const rewrittenExpr = (_loweredDir ? _loweredDir.jsExpr : "") as string;
           const exprRefs = (_loweredDir ? _loweredDir.refs : []) as string[];
-          lines.push(`// class:${cClassName}=${rawExpr}`);
+          lines.push(`// class:${commentText(cClassName)}=${commentText(rawExpr)}`);
           lines.push(`{`);
           lines.push(`  const ${cElemId} = (_scrml_root || _scrml_g.document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
@@ -970,7 +971,7 @@ export function emitBindings(ctx: CompileContext): string[] {
           while ((refMatch = refRe.exec(rawArgs)) !== null) {
             if (!callRefs.includes(refMatch[1])) callRefs.push(refMatch[1]);
           }
-          lines.push(`// class:${cClassName}=${callExpr}`);
+          lines.push(`// class:${commentText(cClassName)}=${commentText(callExpr)}`);
           lines.push(`{`);
           lines.push(`  const ${cElemId} = (_scrml_root || _scrml_g.document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
@@ -1027,7 +1028,7 @@ export function emitBindings(ctx: CompileContext): string[] {
         const isFormControlValue =
           attrName === "value" && FORM_VALUE_ELEMENTS.has(mkTag) && !hasBindValue;
 
-        lines.push(`// template-attr ${attrName}="${rawValue}"`);
+        lines.push(`// template-attr ${commentText(attrName)}="${commentText(rawValue)}"`);
         lines.push(`{`);
         lines.push(`  const ${tplElemId} = (_scrml_root || _scrml_g.document).querySelector('${tplSelector}');`);
         lines.push(`  if (${tplElemId}) {`);
@@ -1132,7 +1133,7 @@ export function emitBindings(ctx: CompileContext): string[] {
     }
 
     lines.push(
-      `// render-by-tag bind:${dispatch.flavour}=@${cellName} (cell=${cellName}, tag=${renderSpecTag})`,
+      `// render-by-tag bind:${commentText(dispatch.flavour)}=@${commentText(cellName)} (cell=${commentText(cellName)}, tag=${commentText(renderSpecTag)})`,
     );
     lines.push(`{`);
     lines.push(`  const ${elemId} = (_scrml_root || _scrml_g.document).querySelector('${selector}');`);
@@ -1178,7 +1179,7 @@ export function emitBindings(ctx: CompileContext): string[] {
       );
     } else if (dispatch.flavour === "files") {
       lines.push(
-        `    _scrml_mount_track(_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${cellName} */ ${readExpr}; }));`,
+        `    _scrml_mount_track(_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${commentText(cellName)} */ ${readExpr}; }));`,
       );
     }
 

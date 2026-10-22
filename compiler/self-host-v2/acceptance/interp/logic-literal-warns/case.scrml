@@ -1,0 +1,7 @@
+// `${…}` inside a LOGIC string is plain text (§5.5.3, §4.18): a provisional warning, and it prints as written.
+<program>
+    let <s:string="ab"/>
+    <main>
+        <p id="t">${"typed ${n} chars"}</p>
+    </main>
+</program>

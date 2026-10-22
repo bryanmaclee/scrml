@@ -90,6 +90,24 @@ export function conciseArrowBodyHasSql(text: string): boolean {
     let depth = 0;
     for (let k = j; k < n; k++) {
       const c = text[k];
+      // S469 — a BRACED inner arrow (`(a) => (b) => { … }`) is the emit-server site's,
+      // like any braced-body arrow: its escape hatch now carries its own source text
+      // (expression-parser.ts threads rawSource into an arrow's expression body), so
+      // that site sees the `?{`. Skip its balanced body here (one diagnostic, not two).
+      if (c === "=" && text[k + 1] === ">") {
+        let b = k + 2;
+        while (b < n && /\s/.test(text[b]!)) b++;
+        if (text[b] === "{") {
+          let d = 0;
+          let e = b;
+          for (; e < n; e++) {
+            if (text[e] === "{") d++;
+            else if (text[e] === "}" && --d === 0) break;
+          }
+          k = e;
+          continue;
+        }
+      }
       if (c === "(" || c === "[" || c === "{") depth++;
       else if (c === ")" || c === "]" || c === "}") {
         if (depth === 0) break;

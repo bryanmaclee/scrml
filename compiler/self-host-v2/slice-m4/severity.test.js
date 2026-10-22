@@ -14,7 +14,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
-import { bootstrapCodes, resolveSeverities } from "../../../scripts/gen-bootstrap-severity.ts";
+import { bootstrapCodes, resolveSeverities, render, PROVISIONAL } from "../../../scripts/gen-bootstrap-severity.ts";
 
 const SHV2 = join(import.meta.dir, "..");
 const SPEC_TEXT = readFileSync(join(SHV2, "..", "SPEC.md"), "utf8");
@@ -53,6 +53,38 @@ describe("the table is §34's, and current", () => {
       const code = readFileSync(join(SHV2, f), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
       expect([f, /\b(message|severity):\s/.test(code)]).toEqual([f, false]);
     }
+  });
+});
+
+// s469-boot-strings-1 (F/U-7) — the PROVISIONAL table (a code with no §34 row YET) can never weaken §34
+// or go stale silently: each guard THROWS.
+describe("the PROVISIONAL table's guards", () => {
+  const spec = (rows) => ["## 34. Diagnostics", "", "| Code | Section | Trigger | Severity |", "|---|---|---|---|", ...rows, "", "## 35. Next", ""].join("\n");
+  test("W-STRING-INTERP-LITERAL is provisional, a Warning, and the compiled table answers it", () => {
+    expect(PROVISIONAL["W-STRING-INTERP-LITERAL"]).toBe("Warning");
+    const { entries } = resolveSeverities(SPEC_TEXT, bootstrapCodes());
+    expect(entries.find((e) => e.code === "W-STRING-INTERP-LITERAL")).toMatchObject({ severity: "Warning", provisional: true });
+    expect(mods.severity.severityOf("W-STRING-INTERP-LITERAL")).toBe("Warning");
+  });
+  test("once a §34 row exists the provisional entry is stale: it throws whether the row AGREES or not", () => {
+    const t = { "W-X-ONE": "Warning" };
+    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], t)).toThrow("row exists");
+    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Info |"]), ["W-X-ONE"], t)).toThrow("row exists");
+    // with the entry removed, the row decides
+    expect(resolveSeverities(spec(["| W-X-ONE | §1 | t | Warning |"]), ["W-X-ONE"], {}).entries[0]).toMatchObject({ severity: "Warning" });
+  });
+  test("a STRUCK or non-compile §34 row for a provisional code throws (no silent fall-through to Error)", () => {
+    const t = { "W-X-ONE": "Warning" };
+    expect(() => resolveSeverities(spec(["| ~~W-X-ONE~~ | §1 | t | Warning |"]), ["W-X-ONE"], t)).toThrow("§34 row struck");
+    expect(() => resolveSeverities(spec(["| W-X-ONE | §1 | t | Runtime |"]), ["W-X-ONE"], t)).toThrow("not a compile severity");
+  });
+  test("an E- code may not be downgraded by the table", () => {
+    expect(() => resolveSeverities(spec([]), ["E-X-ONE"], { "E-X-ONE": "Warning" })).toThrow("may not be downgraded");
+    expect(() => resolveSeverities(spec([]), ["E-X-ONE"], { "E-X-ONE": "Info" })).toThrow("may not be downgraded");
+  });
+  test("a provisional code the bootstrap no longer names throws (render checks the whole code set)", () => {
+    expect(() => render(spec([]), ["W-OTHER"], { "W-X-GONE": "Warning" })).toThrow("no longer name it");
+    expect(() => render(spec([]), ["W-X-ONE"], { "W-X-ONE": "Warning" })).not.toThrow();
   });
 });
 

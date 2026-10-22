@@ -3308,7 +3308,10 @@ export function esTreeToExprNode(
 
       if (bodyNode.type !== "BlockStatement") {
         // Expression body: `x => expr`
-        const value = esTreeToExprNode(bodyNode, filePath, baseOffset);
+        // S469 — rawSource threaded: a hatch in the body (a sequence, a block-bodied
+        // arrow) carries its own source text, never raw "" (the failable-call walk
+        // reads hatch text to refuse; an empty one hid an unhandled `!` call).
+        const value = esTreeToExprNode(bodyNode, filePath, baseOffset, rawSource);
         return {
           kind: "lambda", span, params, isAsync, fnStyle,
           body: { kind: "expr", value },
@@ -3331,6 +3334,12 @@ export function esTreeToExprNode(
       const nodeStart = (node as { start?: number }).start;
       const nodeEnd = (node as { start?: number; end?: number }).end;
       let rawSlice = "";
+      // S469 (review of 834e41cba, F3) — an object-literal METHOD / getter / setter value
+      // (`{ m() { … } }`, `{ get v() { … } }`): acorn starts the FunctionExpression at its `(`,
+      // so the slice is not a function form and `raw` stays "" (codegen's behavior, unchanged).
+      // Its BODY is still real source: carried as `bodyRaw` / `params` below, so the failable
+      // walk reads it like any function body instead of refusing a hatch with no text.
+      let methodSlice = "";
       if (
         rawSource != null &&
         typeof nodeStart === "number" &&
@@ -3351,6 +3360,8 @@ export function esTreeToExprNode(
         const looksLikeFn = /^(async\s+)?function\b/.test(c);
         if (looksLikeArrow || looksLikeFn) {
           rawSlice = candidate;
+        } else if (node.type === "FunctionExpression" && c.startsWith("(")) {
+          methodSlice = candidate;
         }
         // If validation fails, rawSlice stays "" — same as pre-fix behavior.
       }
@@ -3363,7 +3374,7 @@ export function esTreeToExprNode(
       const bodyStart = (bodyNode as { start?: number }).start;
       const bodyEnd = (bodyNode as { end?: number }).end;
       if (
-        rawSlice !== "" && rawSource != null &&
+        (rawSlice !== "" || methodSlice !== "") && rawSource != null &&
         typeof nodeStart === "number" && typeof nodeEnd === "number" &&
         typeof bodyStart === "number" && typeof bodyEnd === "number" &&
         bodyStart >= nodeStart && bodyEnd <= nodeEnd && bodyEnd > bodyStart
@@ -3388,7 +3399,7 @@ export function esTreeToExprNode(
 
     // ---- Spread (in spread position, handled by parent; standalone is escape hatch) ----
     case "SpreadElement": {
-      const argument = esTreeToExprNode((node as { argument: ESNode }).argument, filePath, baseOffset);
+      const argument = esTreeToExprNode((node as { argument: ESNode }).argument, filePath, baseOffset, rawSource);
       return { kind: "spread", span, argument } satisfies SpreadExpr;
     }
 
@@ -3439,7 +3450,7 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number, r
     if (p.type === "AssignmentPattern" && (p.left as ESNode | undefined)?.type === "Identifier") {
       const left = (p as { left: ESNode }).left;
       const right = (p as { right: ESNode }).right;
-      const defaultValue = esTreeToExprNode(right, filePath, baseOffset);
+      const defaultValue = esTreeToExprNode(right, filePath, baseOffset, rawSource);
       return { name: left.name as string ?? "", defaultValue };
     }
     // Destructured patterns (a defaulted / rest one included). S458: the names the
@@ -4542,6 +4553,9 @@ export function tokenizeTemplateInterpolations(raw: string): TemplateSegment[] {
 
   // Strip surrounding backticks if present; the inner content is what we walk.
   // We track offsets relative to the ORIGINAL `raw` string so spans line up.
+  // (S469: NOT the slicer of any text the failable walk or codegen must agree on — that is
+  // `sliceTemplateText`, acorn's boundaries. This one is a heuristic that does not know
+  // comments or regular expressions.)
   let i = 0;
   let innerStart = 0;
   let innerEnd = raw.length;
@@ -4761,38 +4775,180 @@ export function templateInterpolationNodesAll(lit: { raw: string; span: ExprSpan
 function templateInterpolationNodesCached(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
   let cached = TEMPLATE_INTERP_CACHE.get(lit as unknown as LitExpr);
   if (!cached) {
-    cached = [];
-    const segments = tokenizeTemplateInterpolations(lit.raw);
-    for (const seg of segments) {
-      if (seg.kind !== "expr") continue;
-      const exprText = seg.text.trim();
-      if (!exprText) continue;
-      // Try to parse as a full expression.
-      const { ast, error } = parseExpression(exprText, { tolerant: true });
-      if (ast && !error) {
-        try {
-          const baseOffset = (lit.span?.start ?? 0) + seg.offset;
-          const node = esTreeToExprNode(ast, lit.span?.file ?? "", baseOffset);
-          cached.push(node);
-          continue;
-        } catch (_e) {
-          // Conversion error — fall through to regex fallback below.
-        }
-      }
-      // Fallback: synthesize an EscapeHatchExpr-ish marker carrying a regex
-      // pre-scan. We store a sentinel so future walks know to use the regex
-      // path. To keep this simple we cache nothing for the sentinel and
-      // re-run the regex each walk (fallback path is cold).
-      cached.push({
-        kind: "escape-hatch",
-        span: lit.span,
-        nativeKind: "TemplateInterpFallback",
-        raw: exprText,
-      } as EscapeHatchExpr);
-    }
+    cached = readTemplateInterpolations(lit);
     TEMPLATE_INTERP_CACHE.set(lit as unknown as LitExpr, cached);
   }
   return cached;
+}
+
+/** A node `parseExprToNode` returned for text it could not read whole. */
+function isUnreadExprNode(node: ExprNode): boolean {
+  if (hasLostTrailingContent(node)) return true;
+  if ((node as EscapeHatchExpr).kind !== "escape-hatch") return false;
+  const nk = (node as EscapeHatchExpr).nativeKind;
+  return nk === "ParseError" || nk === "ConversionError" || nk === "SqlPlaceholderError";
+}
+
+/**
+ * S469 (§19.4.3) — ONE reader of a template literal's interpolations: the interpolations are the
+ * ExprNodes the expression reader (`parseExprToNode` → `esTreeToExprNode`) built — the SAME nodes
+ * the structural template emitter writes out (emit-expr.ts `emitTemplateLitStructured`).
+ *
+ * Before, this re-parsed each `${…}` with bare `parseExpression` (no `!{}` / scrml-operator
+ * preprocessing) and converted it with NO source text: every escape hatch inside an interpolation
+ * (a sequence, a block-bodied arrow or function expression, a tagged template) carried `raw: ""`,
+ * so the failable-call walk read nothing in it and `${(check(p), 1) ? "Y" : "N"}` compiled — a
+ * wrong password logged in. Order:
+ *   1. the literal's own structure (`_tplExprs`, stamped by the parse that built it);
+ *   2. the literal's text re-read whole by `parseExprToNode` (a node that lost its structure — a
+ *      structuredClone — or a `TemplateLiteral` escape hatch / a quasi carried as text);
+ *   3. each interpolation read by `parseExprToNode`; one it cannot read whole is a
+ *      `TemplateInterpFallback` hatch carrying its text (read to refuse, never dropped).
+ */
+function readTemplateInterpolations(lit: { raw: string; span: ExprSpan } & object): ExprNode[] {
+  const own = (lit as { _tplExprs?: unknown })._tplExprs;
+  if (Array.isArray(own)) return own.slice() as ExprNode[];
+  if ((lit as { hasInterpolation?: unknown }).hasInterpolation === false) return [];
+  const raw = lit.raw;
+  if (typeof raw !== "string") return [];
+  const file = lit.span?.file ?? "";
+  const start = lit.span?.start ?? 0;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("`") && trimmed.endsWith("`")) {
+    try {
+      const re = parseExprToNode(trimmed, file, start) as unknown as LitExpr & { _tplExprs?: unknown };
+      if (re && re.kind === "lit" && re.litType === "template" && !isUnreadExprNode(re as unknown as ExprNode)) {
+        if (Array.isArray(re._tplExprs)) return (re._tplExprs as ExprNode[]).slice();
+        if (re.hasInterpolation === false) return [];
+      }
+    } catch { /* read segment by segment below */ }
+  }
+  return templateTextInterpolationNodes(raw, file, start, lit.span);
+}
+
+/**
+ * S469 (review of 065fd2035, HIGH-1) — the `${…}` boundaries of template TEXT, taken from THE
+ * reader JavaScript uses: each interpolation's expression is parsed by acorn (`ScrmlParser`,
+ * the compiler's acorn with the `@cell` / enum plugins) from just after its `${`, and its
+ * closing `}` is the first TOKEN after that expression — so a `}` inside a string, a regular
+ * expression, a comment or a nested template never closes it, exactly as when the browser runs
+ * the emitted template literal. Quasi text follows the template-literal rules codegen writes it
+ * under: a `\` escapes the next character; a literal backtick is escaped on emission.
+ *
+ * `raw` is a template literal's source (outer backticks stripped) or, with `bare`, a QUOTED
+ * attribute value. Returns the segments (offsets into `raw`) and, when an interpolation does
+ * not parse or is not closed by a `}`, `unreadable` = its text from after the `${` to the end
+ * (nothing after it is sliced: the boundaries are no longer known).
+ *
+ * The one slicer of this text: `rewriteTemplateAttrValue` (codegen) emits from these segments
+ * and `templateTextInterpolationNodes` (the failable walk) reads them.
+ */
+/**
+ * S469 (review of d5f5d3ea1, HIGH-1) — `text` holds `<!--`, or a `-->` that only white space
+ * (or a block comment's close) precedes on its line: Annex B HTML-like comment openers, which a
+ * classic script reads as comments and a module does not. Legitimate interpolation code never
+ * needs them (as text inside a string they are also refused: the check is lexical, fail closed).
+ */
+export function hasHtmlLikeComment(text: string): boolean {
+  if (text.includes("<!--")) return true;
+  for (const line of text.split(/\r\n|[\n\r\u2028\u2029]/)) {
+    const at = line.indexOf("-->");
+    if (at < 0) continue;
+    const before = line.slice(0, at);
+    if (before.trim() === "" || before.includes("*/")) return true;
+  }
+  return false;
+}
+
+export function sliceTemplateText(
+  raw: string, opts: { bare?: boolean } = {},
+): { segments: TemplateSegment[]; unreadable: string | null } {
+  const segments: TemplateSegment[] = [];
+  if (typeof raw !== "string") return { segments, unreadable: null };
+  let i = 0;
+  let end = raw.length;
+  if (!opts.bare && raw.startsWith("`")) {
+    i = 1;
+    if (raw.length >= 2 && raw.endsWith("`")) end = raw.length - 1;
+  }
+  const src = raw.slice(0, end);
+  let quasiStart = i;
+  // S469 (review of d5f5d3ea1, HIGH-1) — BOTH goals. A client bundle runs as a CLASSIC SCRIPT,
+  // where Annex B makes `<!--` (and a line-initial `-->`) a single-line comment; a module (a
+  // server bundle) has no such comments. An interpolation is bounded only when the script and
+  // the module readings agree on where it ends, and one holding either sequence is refused
+  // (`${ 1 <!--y }⏎&& check(p) … }` closed at the `}` for the module reader while the browser
+  // ran `check(p)`).
+  const closeUnder = (sourceType: "script" | "module", exprStart: number): number => {
+    const acornOpts = { ecmaVersion: 2025, sourceType, allowAwaitOutsideFunction: true };
+    try {
+      // @ts-ignore — acorn's static API on the extended parser
+      const node = ScrmlParser.parseExpressionAt(src, exprStart, acornOpts) as { end: number };
+      // The first token after the expression, read in place (a tokenizer over the WHOLE text
+      // started at the expression's end, so a line-initial `-->` is judged on its real line).
+      // @ts-ignore
+      const tz = ScrmlParser.tokenizer(src, acornOpts) as { pos: number; start: number; end: number; lastTokEnd: number; getToken(): { type?: { label?: string }; start: number } };
+      // `next()` copies `end` into `lastTokEnd`: both are set, so a `-->` counts as
+      // line-initial only when a line break really precedes it.
+      tz.pos = tz.start = tz.end = tz.lastTokEnd = node.end;
+      const tok = tz.getToken();
+      return tok && tok.type && tok.type.label === "}" ? tok.start : -1;
+    } catch { return -1; }
+  };
+  while (i < end) {
+    const ch = src.charCodeAt(i);
+    if (ch === 92 /* \ */) { i += 2; continue; }
+    if (ch === 36 /* $ */ && src.charCodeAt(i + 1) === 123 /* { */) {
+      segments.push({ kind: "quasi", text: src.slice(quasiStart, i), offset: quasiStart });
+      const exprStart = i + 2;
+      const asModule = closeUnder("module", exprStart);
+      const asScript = closeUnder("script", exprStart);
+      let closeAt = asModule >= 0 && asModule === asScript ? asModule : -1;
+      if (closeAt >= 0 && hasHtmlLikeComment(src.slice(exprStart, closeAt))) closeAt = -1;
+      if (closeAt < 0) {
+        const rest = src.slice(exprStart);
+        segments.push({ kind: "expr", text: rest, offset: exprStart });
+        return { segments, unreadable: rest };
+      }
+      segments.push({ kind: "expr", text: src.slice(exprStart, closeAt), offset: exprStart });
+      i = closeAt + 1;
+      quasiStart = i;
+      continue;
+    }
+    i++;
+  }
+  if (quasiStart < end) segments.push({ kind: "quasi", text: src.slice(quasiStart, end), offset: quasiStart });
+  return { segments, unreadable: null };
+}
+
+/**
+ * S469 (review of 834e41cba F2; 065fd2035 HIGH-1) — the `${…}` interpolations of template TEXT
+ * (a template literal's source, or a QUOTED attribute value `data-v="a ${x} b"`), bounded by
+ * `sliceTemplateText` (acorn's boundaries — the ones codegen emits from and JavaScript runs)
+ * and each read by `parseExprToNode`. An interpolation the reader cannot read whole, or one the
+ * slicer could not bound, is a `TemplateInterpFallback` hatch carrying its text: the failable
+ * walk REFUSES it (E-ERROR-002) whether or not it names a failable function.
+ */
+export function templateTextInterpolationNodes(
+  raw: string, file: string, start: number, span?: ExprSpan, opts: { bare?: boolean } = {},
+): ExprNode[] {
+  const out: ExprNode[] = [];
+  const at: ExprSpan = span ?? { file, start, end: start + raw.length, line: 1, col: 1 };
+  const fallback = (text: string): void => {
+    out.push({ kind: "escape-hatch", span: at, nativeKind: "TemplateInterpFallback", raw: text.trim() === "" ? "${}" : text } as EscapeHatchExpr);
+  };
+  const { segments, unreadable } = sliceTemplateText(raw, opts);
+  const last = segments[segments.length - 1];
+  for (const seg of segments) {
+    if (seg.kind !== "expr") continue;
+    if (unreadable !== null && seg === last) { fallback(unreadable); continue; }
+    const exprText = seg.text.trim();
+    let node: ExprNode | null = null;
+    try { node = exprText ? parseExprToNode(exprText, file, start + seg.offset) : null; } catch { node = null; }
+    if (node && !isUnreadExprNode(node)) { out.push(node); continue; }
+    fallback(exprText);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,12 @@
+// the grant-named tape methods (S469).
+<program>
+    <log:string[free, append, prepend]=(["m"])/>
+    function go() {
+        @log.append("z");
+        @log.prepend("a");
+    }
+    <main>
+        <button id="go" onclick=go()>go</button>
+        <p id="log">${@log.join(",")}</p>
+    </main>
+</program>

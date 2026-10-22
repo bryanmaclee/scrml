@@ -1,0 +1,7 @@
+// markup text DOES interpolate: no warning.
+<program>
+    let <s:string="ab"/>
+    <main>
+        <p id="t">typed ${@s.length} chars</p>
+    </main>
+</program>

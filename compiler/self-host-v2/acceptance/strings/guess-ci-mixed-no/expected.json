@@ -1,0 +1,25 @@
+{
+  "id": "acceptance-strings-guess-ci-mixed-no",
+  "description": "case-insensitive guess — typing `nO` shows \"nope\".",
+  "language-version": "1.0",
+  "spec": "§14.4.1 · §18 · Appendix D (string methods) · S469 (string positions are code points)",
+  "rationale": "bryan's first program made case-insensitive (S469). The `\"typed \" + <conversion>(…)` half is skipped: an int→string conversion is not ruled (owner reconsidering conversions as a whole), and string + int stays E-OPERATOR-OPERAND-TYPE (guess/a-guess-verbatim).",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "input": "input",
+        "value": "nO"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#say",
+        "text": "nope"
+      }
+    ]
+  }
+}

@@ -110,7 +110,7 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
   });
 
   test("a direct write in an interpolation (an edit call) is a write too", () => {
-    const ds = diagsOf(P(`    <xs:int[free, append]=[]/>`, `        <p>\${@xs.push(1)}</p>`));
+    const ds = diagsOf(P(`    <xs:int[free, append]=[]/>`, `        <p>\${@xs.append(1)}</p>`));
     expect(ds.map((d) => d.code)).toContain(CODE);
     expect(ds.find((d) => d.code === CODE).message).toContain("writes `@xs`");
   });

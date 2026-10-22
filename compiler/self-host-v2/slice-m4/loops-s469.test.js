@@ -228,14 +228,14 @@ describe("the grant lens — a loop never gets a write past §66.12.6", () => {
     expect(codes(prog(D, `        <button onclick={ for { @n = 1; break } }>b</button>`))).toEqual(outside);
   });
   test("an ungranted tape edited in a loop: E-WRITE-NOT-GRANTED; a granted one appends (runtime)", async () => {
-    expect(codes(prog(`    <xs:int[]=([])/>`, `        <button onclick={ for (i of 0..3) { @xs.push(i) } }>b</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
-    const src = prog(`    <xs:int[free, append]=([])/>`, `        <button onclick={ for (i of 0..3) { @xs.push(i * 2) } }>b</button>\n        <p id="n">\${@xs.length}</p>`);
+    expect(codes(prog(`    <xs:int[]=([])/>`, `        <button onclick={ for (i of 0..3) { @xs.append(i) } }>b</button>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
+    const src = prog(`    <xs:int[free, append]=([])/>`, `        <button onclick={ for (i of 0..3) { @xs.append(i * 2) } }>b</button>\n        <p id="n">\${@xs.length}</p>`);
     await load(src);
     click(btn("b"));
     expect($("#n").textContent).toBe("3");
   });
   test("a local tape is edited by no loop (the existing local-edit refusal holds in a body)", () => {
-    expect(fnCodes(`        let ys: int[free, append] = []\n        for (i of 0..3) { ys.push(i) }\n        return ys.length`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(fnCodes(`        let ys: int[free, append] = []\n        for (i of 0..3) { ys.append(i) }\n        return ys.length`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("a server wait in a loop is refused — the loop cannot wait yet (C19)", () => {
     const S = `    function g(id: string) -> string {\n        const r: string = ?{\`SELECT name FROM t WHERE id = \${id}\`}.get() !{ _ :> { return "" } }\n        return r\n    }`;

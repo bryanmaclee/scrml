@@ -1,0 +1,7 @@
+// a string method on an int receiver.
+<program>
+    let <n:int=1/>
+    <main>
+        <p>${@n.toUpperCase()}</p>
+    </main>
+</program>

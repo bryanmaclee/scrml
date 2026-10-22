@@ -752,7 +752,7 @@ function lengthHolds(len, op, n) {
 export const check = {
   req: () => ({ shortCircuit: true, test: (v) => (absent(v) || v === "" ? "Required" : null) }),
   length: (op, n) => ({
-    test: (v) => (absent(v) || lengthHolds(v.length, op, n) ? null : { tag: "LengthFailed", predicate: `(${op}${n})` }),
+    test: (v) => (absent(v) || lengthHolds(typeof v === "string" ? strLength(v) : v.length, op, n) ? null : { tag: "LengthFailed", predicate: `(${op}${n})` }),
   }),
   min: (n) => ({ test: (v) => (absent(v) || v >= n ? null : { tag: "MinFailed", threshold: n }) }),
   max: (n) => ({ test: (v) => (absent(v) || v <= n ? null : { tag: "MaxFailed", threshold: n }) }),
@@ -1033,6 +1033,182 @@ export function eq(a, b) {
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   return ka.every((k) => eq(a[k], b[k]));
+}
+
+// ---------------------------------------------------------------------------
+// s469 — the typed built-in string and tape methods (print.scrml `primJs`).
+// CODE POINTS EVERYWHERE (bryan, S469 — `.length` included): a string's
+// length, a position (`strSlice`, `strCharAt`) and a match (`strIncludes`,
+// `strStartsWith`, `strEndsWith`, `strSplit`) are all by code point, never by
+// UTF-16 unit. A match counts only where it starts AND ends on a code-point
+// boundary, so an argument holding a lone surrogate can never match, or cut,
+// half of an astral character. The tape functions never mutate: each returns
+// a NEW array and leaves its argument unchanged (§66.12.6 rule 3). Copies are
+// plain index loops.
+// ---------------------------------------------------------------------------
+
+/** The code points of `s`, one string each, in order (the string's `for…of`). */
+function codePoints(s) {
+  const out = [];
+  for (const c of s) out.push(c);
+  return out;
+}
+
+/** A string's `.length`: its number of code points. */
+export function strLength(s) {
+  // the UTF-16 length less one per surrogate PAIR (a lone surrogate is a code point of its own)
+  let n = s.length;
+  for (let j = 0; j + 1 < s.length; j++) {
+    const c = s.charCodeAt(j);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const d = s.charCodeAt(j + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { n--; j++; }
+    }
+  }
+  return n;
+}
+
+/** A position must be an int (the typer guarantees it; this keeps a defect loud, never a wrong slice). */
+function requireInt(i, what) {
+  if (!Number.isInteger(i)) throw new Error(`${what}: position ${JSON.stringify(i)} is not an int`);
+}
+
+/** A position `i` against a length `n`: a negative position counts from the end; the result is clamped to [0, n]. */
+function clampPosition(i, n) {
+  if (i < 0) return Math.max(0, n + i);
+  return Math.min(i, n);
+}
+
+/** `s.slice(from)` / `s.slice(from, to)`, positions in code points. */
+export function strSlice(s, from, to) {
+  requireInt(from, "slice");
+  if (to !== undefined) requireInt(to, "slice");
+  const cps = codePoints(s);
+  const a = clampPosition(from, cps.length);
+  const b = to === undefined ? cps.length : clampPosition(to, cps.length);
+  let out = "";
+  for (let i = a; i < b; i++) out += cps[i];
+  return out;
+}
+
+/** `s.charAt(i)`: the code point at position `i`, or `""` when there is none. */
+export function strCharAt(s, i) {
+  requireInt(i, "charAt");
+  if (i < 0) return "";
+  // walk code points without building them: `codePointAt` reads a pair as one (> 0xFFFF, two units)
+  let k = 0;
+  for (let j = 0; j < s.length; k++) {
+    const w = s.codePointAt(j) > 0xffff ? 2 : 1;
+    if (k === i) return s.slice(j, j + w);
+    j += w;
+  }
+  return "";
+}
+
+/** Is UTF-16 index `i` of `s` a code-point boundary (not between the two halves of a surrogate pair)? */
+function atBoundary(s, i) {
+  if (i <= 0 || i >= s.length) return true;
+  const hi = s.charCodeAt(i - 1);
+  const lo = s.charCodeAt(i);
+  return !(hi >= 0xd800 && hi <= 0xdbff && lo >= 0xdc00 && lo <= 0xdfff);
+}
+
+/**
+ * The needle `t` as a `u`-flag RegExp: the engine then reads both strings as CODE POINTS, so a match
+ * starts and ends on code-point boundaries by construction, and a lone surrogate in `t` matches only
+ * a lone surrogate in the string — never half of a pair. Linear like a native search (a candidate is
+ * never re-scanned after a rejected full compare). Only the u-mode syntax characters are escaped.
+ */
+function codePointNeedle(t) {
+  return new RegExp(t.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&"), "u");
+}
+
+/** `s.includes(t)`, on code-point boundaries. */
+export function strIncludes(s, t) {
+  return codePointNeedle(t).test(s);
+}
+
+/** `s.startsWith(t)`, on code-point boundaries. */
+export function strStartsWith(s, t) {
+  return s.startsWith(t) && atBoundary(s, t.length);
+}
+
+/** `s.endsWith(t)`, on code-point boundaries. */
+export function strEndsWith(s, t) {
+  return s.endsWith(t) && atBoundary(s, s.length - t.length);
+}
+
+/** `s.split(sep)`: `""` splits into code points; any other separator splits only on code-point boundaries. */
+export function strSplit(s, sep) {
+  if (sep === "") return codePoints(s);
+  return s.split(codePointNeedle(sep));
+}
+
+function copyOf(xs) {
+  const out = new Array(xs.length);
+  for (let i = 0; i < xs.length; i++) out[i] = xs[i];
+  return out;
+}
+
+/** The order of two strings by code point (not by UTF-16 unit, which puts U+10000.. before U+E000..U+FFFF). */
+function compareCodePoints(a, b) {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const x = a.codePointAt(i);
+    const y = b.codePointAt(j);
+    if (x !== y) return x < y ? -1 : 1;
+    i += x > 0xffff ? 2 : 1;
+    j += y > 0xffff ? 2 : 1;
+  }
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
+}
+
+/** The natural order of numbers: numerically; `NaN` (a defined value, dpa-037) sorts last. */
+function compareNumbers(a, b) {
+  const an = Number.isNaN(a);
+  const bn = Number.isNaN(b);
+  if (an || bn) return an === bn ? 0 : an ? 1 : -1;
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/** `xs.sort()` on a tape of numbers: a new tape. */
+export function sortNum(xs) {
+  const out = copyOf(xs);
+  out.sort(compareNumbers);
+  return out;
+}
+
+/** `xs.sort()` on a tape of strings: a new tape, by code point. */
+export function sortStr(xs) {
+  const out = copyOf(xs);
+  out.sort(compareCodePoints);
+  return out;
+}
+
+/** `xs.sort(cmp)`: a new tape ordered by the comparator (a stable sort). */
+export function sortBy(xs, cmp) {
+  const out = copyOf(xs);
+  out.sort((a, b) => cmp(a, b));
+  return out;
+}
+
+/** `xs.reverse()`: a new tape. */
+export function reversed(xs) {
+  const out = new Array(xs.length);
+  for (let i = 0; i < xs.length; i++) out[i] = xs[xs.length - 1 - i];
+  return out;
+}
+
+/** `xs.join(sep)` on a tape of strings. */
+export function joinStr(xs, sep) {
+  let out = "";
+  for (let i = 0; i < xs.length; i++) out += (i > 0 ? sep : "") + xs[i];
+  return out;
 }
 
 // ---------------------------------------------------------------------------

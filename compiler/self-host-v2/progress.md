@@ -834,6 +834,34 @@ BINDING §13 amendment (S467) — "the server half awaits by construction".
 
 ---
 
+# s469-boot-strings-1 — typed string methods, tape sort / reverse / join, grant-named edits, W-STRING-INTERP-LITERAL
+
+- **Strings (B)** — `analyze` `resolveMethod`: a built-in method is admitted only on a receiver whose BINDER type is
+  known (`string` or a tape) and is in that type's table; the ONE signature table `methodSig` / `methodResult` serves
+  the binder (result) and the typer (`methodType`, `methodArgCheck`: E-TYPE-031 / an unresolved argument refused).
+  `toUpperCase` / `toLowerCase` / `trim` / `slice` / `charAt` / `includes` / `startsWith` / `endsWith` / `split`. Core
+  `PrimOp.Str*`; positions count CODE POINTS (runtime `strSlice` / `strCharAt` / `strSplit`; S469 ruling; the
+  Appendix D conflict is `g-spec-string-position-code-unit-vs-code-point-s469`). Anything else: E-BOOTSTRAP-UNSUPPORTED
+  by name — never a generic host member call.
+- **Tapes (C)** — `sort()` natural order (Core SortNum / SortStr; other elements E-TYPE-031), `sort((a, b) => n)`
+  (SeqFn.SortBy; the comparator body is a number, S440 #10), `reverse()`, `join(sep)` (string tapes only). Each returns a
+  NEW tape (runtime copies). `@x = @x.sort()` / `.reverse()` is a position write. E-TAPE-JS-METHOD: `push` / `unshift` /
+  `splice` / `toSorted` / `toReversed` / `with` on a tape, and a discarded `sort` / `reverse` / `fill` / `copyWithin`.
+  The edit allowlist is renamed: `append` / `prepend` (slice tests migrated).
+- **Lint (D)** — `parse` `interpLiteralLint`: W-STRING-INTERP-LITERAL (PROVISIONAL, Warning via
+  `scripts/gen-bootstrap-severity.ts` PROVISIONAL) on a quoted logic string whose RAW text has an unescaped `${…}`;
+  a code-default display literal takes it back (`displayNodes`).
+- **A (int→string)** — held by the PA (owner reconsidering conversions): `g-bootstrap-int-to-string-conversion-unruled-s469`.
+- **Gates** — `slice-m4/strings-s469.test.js`; `acceptance/{strings,tapes,interp}` (25 cases) in `acceptance.test.js`.
+- **Follow-up round** (review LAND-W-F/U; bryan, S469: "code points everywhere, `.length` included") — a string's
+  `.length` is Core `StrLength` (code points; a tape's stays `Length`); `includes` / `startsWith` / `endsWith` /
+  `split(sep)` match only on code-point boundaries; a discarded `sort` / `reverse` in a ternary arm or `&&` / `||`
+  right operand is E-TAPE-JS-METHOD; new tapes (`sort` / `reverse` / `filter` / `map`) carry no grants; C9 checks a
+  PositionWrite's value (a map / sort / reverse of the field itself); the severity generator's PROVISIONAL table
+  throws on a struck / non-compile row, an `E-` downgrade, or a stale entry.
+
+---
+
 # s469 — the first loop slice: SPEC §49 "one `for`" (branch s469-boot-loops-1)
 
 - **lex** — `..` / `..=` are single tokens (DotDot / DotDotEq); `0..n` lexes the int (`...` stays three Dots).

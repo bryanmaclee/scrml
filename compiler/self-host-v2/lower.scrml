@@ -404,6 +404,7 @@ ${
             .VIndex(loc: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
             .VAt :> atExpr(c, cal, args)
             .VToEnum(enumSym: es) :> toEnumExpr(c, es, args)
+            .VMethod(op: o) :> methodExpr(c, o, cal, args)
             not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
         }
     }
@@ -412,6 +413,14 @@ ${
         const obj: AExpr | not = calleeObj(cal)
         if (obj is not || args.length != 1) return missing()
         return Expr.SeqCall(o, lowerExpr(c, obj), lowerExpr(c, args[0]))
+    }
+
+    // s469 — a typed built-in method (the binder's VMethod): Core Prim(op,
+    // [receiver, …arguments]).
+    fn methodExpr(c: LC, o: PrimOp, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not) return missing()
+        return Expr.Prim(o, [lowerExpr(c, obj)].concat(lowerExprs(c, args)))
     }
 
     fn calleeObj(cal: AExpr) -> AExpr | not {
@@ -448,6 +457,7 @@ ${
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VToEnum(enumSym: x) :> missing()
+            .VMethod(op: x) :> missing()
             .VLit(lit: l) :> missing()
             .VVariant(enumSym: x) :> missing()
             .VStructOf(ty: x) :> missing()
@@ -487,6 +497,7 @@ ${
             .VIndex(loc: x) :> missing()
             .VAt :> missing()
             .VToEnum(enumSym: x) :> missing()
+            .VMethod(op: x) :> missing()
             not :> missing()
         }
     }
@@ -503,6 +514,7 @@ ${
             .VIndex(loc: x) :> PrimOp.Not
             .VAt :> PrimOp.Not
             .VToEnum(enumSym: x) :> PrimOp.Not
+            .VMethod(op: x) :> PrimOp.Not
             not :> PrimOp.Not
         }
     }
@@ -521,6 +533,7 @@ ${
             .VIndex(loc: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VAt :> memberExpr(c, nameFact(c.t.names, e.nid), o)
             .VToEnum(enumSym: x) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
+            .VMethod(op: m) :> Expr.Prim(m, [lowerExpr(c, o)])        // s469: a string's `.length` (StrLength)
             not :> memberExpr(c, nameFact(c.t.names, e.nid), o)
         }
     }
@@ -753,6 +766,7 @@ ${
             .VSeqCall(op: x) :> ""
             .VLambda(params: x) :> ""
             .VToEnum(enumSym: x) :> ""
+            .VMethod(op: zm) :> ""
             not :> ""
         }
     }
@@ -1964,6 +1978,7 @@ ${
             .VIndex(loc: x) :> not
             .VAt :> not
             .VToEnum(enumSym: s) :> not
+            .VMethod(op: o) :> not
             not :> not
         }
     }

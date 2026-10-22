@@ -24,11 +24,11 @@ const GRANTED = []; // s444: a granted removal / filter now LOWERS (Core RemoveE
 describe("the audit log `[free, append]` is append-only", () => {
   const T = "string[free, append]";
   test("push and `[...@xs, e]` are granted", () => {
-    expect(codes(T, `@xs.push("a")`)).toEqual([]);
+    expect(codes(T, `@xs.append("a")`)).toEqual([]);
     expect(codes(T, `@xs = [...@xs, "a"]`)).toEqual([]);
   });
   test("pop, shift, filter and a front-prepend are REFUSED (E-WRITE-NOT-GRANTED)", () => {
-    for (const b of [`@xs.pop()`, `@xs.shift()`, `@xs = @xs.filter(x => true)`, `@xs.unshift("a")`, `@xs = ["a", ...@xs]`]) {
+    for (const b of [`@xs.pop()`, `@xs.shift()`, `@xs = @xs.filter(x => true)`, `@xs.prepend("a")`, `@xs = ["a", ...@xs]`]) {
       expect(codes(T, b)).toEqual(["E-WRITE-NOT-GRANTED"]);
     }
   });
@@ -37,7 +37,7 @@ describe("the audit log `[free, append]` is append-only", () => {
 describe("a stack `[free, append, pop]`", () => {
   const T = "string[free, append, pop]";
   test("push granted; pop granted and lowered (s444)", () => {
-    expect(codes(T, `@xs.push("a")`)).toEqual([]);
+    expect(codes(T, `@xs.append("a")`)).toEqual([]);
     expect(codes(T, `@xs.pop()`)).toEqual(GRANTED);
   });
   test("shift is still refused (a front removal)", () => {
@@ -48,14 +48,14 @@ describe("a stack `[free, append, pop]`", () => {
 describe("`[free, insert, remove, writable]` — anywhere covers end and front", () => {
   const T = "string[free, insert, remove, writable]";
   test("push and unshift (grow) granted and lowered; pop, shift, filter (shrink) granted", () => {
-    expect(codes(T, `@xs.push("a")`)).toEqual([]);
-    expect(codes(T, `@xs.unshift("a")`)).toEqual([]);
+    expect(codes(T, `@xs.append("a")`)).toEqual([]);
+    expect(codes(T, `@xs.prepend("a")`)).toEqual([]);
     expect(codes(T, `@xs.pop()`)).toEqual(GRANTED);
     expect(codes(T, `@xs.shift()`)).toEqual(GRANTED);
     expect(codes(T, `@xs = @xs.filter(x => true)`)).toEqual(GRANTED);
   });
   test("runs: an `insert` grant appends AND prepends", async () => {
-    const src = `<program>\n    <xs:string[free, insert]=([])/>\n    function f() { @xs.push("b")\n @xs.unshift("a")\n @xs = [...@xs, "c"] }\n    <main><button onclick=f()>go</button><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
+    const src = `<program>\n    <xs:string[free, insert]=([])/>\n    function f() { @xs.append("b")\n @xs.prepend("a")\n @xs = [...@xs, "c"] }\n    <main><button onclick=f()>go</button><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
     const r = frontEnd(mods, [{ path: "g.scrml", src }]);
     expect(r.diags).toEqual([]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
@@ -71,17 +71,17 @@ describe("`[free, insert, remove, writable]` — anywhere covers end and front",
     expect(codes("string[free, pop]", `@xs.pop()`)).toEqual(GRANTED);
   });
   test("`remove` alone grants no growing edit", () => {
-    expect(codes("string[free, remove]", `@xs.push("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes("string[free, remove]", `@xs.append("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
 
 describe("`[free, prepend, shift]` — a queue at the front", () => {
   const T = "string[free, prepend, shift]";
   test("unshift and `[e, ...@xs]` granted; shift granted; push and pop refused", () => {
-    expect(codes(T, `@xs.unshift("a")`)).toEqual([]);
+    expect(codes(T, `@xs.prepend("a")`)).toEqual([]);
     expect(codes(T, `@xs = ["a", ...@xs]`)).toEqual([]);
     expect(codes(T, `@xs.shift()`)).toEqual(GRANTED);
-    expect(codes(T, `@xs.push("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(codes(T, `@xs.append("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(T, `@xs.pop()`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });

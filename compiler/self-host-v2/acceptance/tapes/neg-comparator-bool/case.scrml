@@ -1,0 +1,7 @@
+// a comparator returns a number (S440 #10).
+<program>
+    <ns:int[]=([1, 2])/>
+    <main>
+        <p>${@ns.sort((a, b) => a > b).length}</p>
+    </main>
+</program>

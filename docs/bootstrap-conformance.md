@@ -749,7 +749,7 @@ none
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
-- `defer/array-literal-lead` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `defer/array-literal-lead` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
 - `defer/control-flow-inner-loop-ok` — twin · bootstrap-unsupported: a loop inside a deferred body is not in the bootstrap yet — move the loop into a function and call it from the `defer`
 - `defer/control-flow-neg` — twin · bootstrap-unsupported: a `defer` inside a loop body is not in the bootstrap yet — move the cleanup out of the loop, or into a function the loop calls
@@ -855,16 +855,16 @@ none
 - `error/async-not-in-scrml` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `error/construct-variant-payload-arity-let-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `error/construct-variant-payload-arity-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `error/construct-variant-payload-arity-return-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/construct-variant-payload-arity-return-neg` — twin · bootstrap-unsupported: constructing the payload variant `MyError.Timeout(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `
 - `error/construct-variant-payload-arity-trailing-comma-ok` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `error/error-008-message-pos` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
 - `error/error-008-neg` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
-- `error/fail-bare-variant-reaches-handler` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `error/fail-imported-builtin-name-enum-ok` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-bare-variant-reaches-handler` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/fail-imported-builtin-name-enum-ok` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Bad(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(
 - `error/failable-fn-value-passed-handled-neg` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
-- `error/failable-handler-lift` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `error/failable-handler-lift-success` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/failable-handler-lift` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/failable-handler-lift-success` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
 - `error/for-await-not-in-scrml` — twin · bootstrap-unsupported: an unannotated parameter `items` — bootstrap slice M2 needs `items: Type` (Core parameters are typed)
 - `error/handler-failable-reference-exempt-neg` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -875,8 +875,8 @@ none
 - `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
 - `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
 - `error/match-failable-ok-arm-rt` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
-- `error/propagate-reaches-handler` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `error/propagate-success-unwrap` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/propagate-reaches-handler` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
+- `error/propagate-success-unwrap` — twin · bootstrap-unsupported: constructing the payload variant `Phase.Missing(…)` as a value is not in the bootstrap (only `fail` builds one) — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.s
 - `error/render-no-clause-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/render-no-clause-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/render-no-of-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -939,7 +939,7 @@ none
 - `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
 - `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
-- `hostmethod/substring-match-typed` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `hostmethod/substring-match-typed` — twin · bootstrap-unsupported: `.substring(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods 
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `lifecycle/cleanup-error-call-expression` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `closeConnection`
@@ -1050,7 +1050,7 @@ none
 - `match-codes/e-type-024-struct-subject-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
 - `match-codes/e-type-025-asis-subject-pos` — twin · bootstrap-unsupported: the built-in type `asIs` (§14.1.2) is not in the bootstrap — its type system has no unresolved-value type; give the value a declared type
 - `match-leave/argument-match-arm-labelled-break-outer-neg` — twin · bootstrap-unsupported: a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as
-- `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `match-leave/argument-match-arm-return-with-lambda-neg` — twin · bootstrap-unsupported: `.forEach(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `match-leave/arm-body-ends-at-line-break-neg` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `"orphan"`
 - `match-leave/bare-break-continue-arm-no-loop-neg` — twin · bootstrap-unsupported: a `break` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/decl-arm-propagate` — twin · bootstrap-unsupported: a handled failable (`?`, `!{ … }`, `match`) is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger
@@ -1060,8 +1060,8 @@ none
 - `match-leave/dpa068-stmt-bare-break-continue` — twin · bootstrap-unsupported: a `continue` arm (§18.2 leave statement) needs a loop, and loops are not in the bootstrap
 - `match-leave/given-arm-body-lowered` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
 - `match-leave/given-arm-in-expression-position-match` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
-- `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `match-leave/given-arm-in-lambda-body-reads-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
+- `match-leave/given-arm-lambda-param-no-false-scope-error` — twin · bootstrap-unsupported: `.join(…)` on a value whose type the compiler cannot resolve — a built-in method needs a receiver of a known type (a `string` or a tape); give it one (`: string`, `: T[…]`)
 - `match-leave/given-arm-legacy-arrow-keeps-body` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
 - `match-leave/given-arm-malformed-heads-in-assignment-match-neg` — twin · parse-reject: E-PARSE-ARM: expected an arm pattern (`.Variant`, `.Variant(a, b)`, `not`, a literal, `_` or `else`), found `given`
 - `match-leave/given-arm-undeclared-name-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
@@ -1079,7 +1079,7 @@ none
 `
 - `md/interp-unclosed-quote-in-code-span` — parse-reject: E-PARSE-EXPECTED: expected `}`, found ``
 - `md/slot-hostile-values-are-text` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `md/slot-regex-literal-quote` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `md/slot-regex-literal-quote` — twin · bootstrap-unsupported: `.replace(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `t
 - `md/slot-text-reactive` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `meta/emit-single-quote-inside-attr-clean` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `meta/emit-single-quoted-attr-reject` — parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1184,7 +1184,7 @@ none
 - `parse-syntax/e-syntax-042-not-value-position-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `parse-syntax/e-syntax-042-null-value-position-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `parse-variant/happy-payload-variant` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `toUpperCase` / `toLowerCase` / `trim` / `
 - `print/tool-println-clean-stdout` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/cte-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1334,7 +1334,7 @@ none
 - `server-db/event-control-after-await-neg` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: an unannotated parameter `rows` — bootstrap slice M2 needs `rows: Type` (Core parameters are typed)
 - `server-db/inline-handler-server-call-condition-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
-- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value
 - `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
 - `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
@@ -1433,10 +1433,10 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-value-function-stored-closure-array-pos` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `type-state-codes/e-value-function-stored-host-kept-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
 - `type-state-codes/e-value-function-stored-map-pos` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-value-function-stored-neg` — twin · bootstrap-unsupported: member access `.size` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `type-state-codes/e-value-function-stored-pos` — twin · bootstrap-unsupported: `.double(…)` is not in the bootstrap — only calls of a named function, `Date.now()`, `.filter(x => …)` / `.map(x => …)` / `.sort(…)` / `.reverse()` / `.join(sep)` on a tape, and the string methods `to
 
 ### NOT-TWINNED (675)
 

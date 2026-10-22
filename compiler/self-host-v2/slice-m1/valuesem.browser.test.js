@@ -10,7 +10,7 @@ let mods, cores;
 afterEach(() => expectNoPageErrors());
 beforeAll(() => { ({ mods, cores } = loadSuite()); }, { timeout: 120000 });
 
-describe("§66.10 — `let before = @audit` then `@audit.push(\"x\")`", () => {
+describe("§66.10 — `let before = @audit` then `@audit.append(\"x\")`", () => {
   let rt;
   beforeAll(async () => { ({ rt } = await loadProgram(cores.valuesem(), "valuesem")); });
 

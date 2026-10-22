@@ -1,0 +1,16 @@
+{
+  "id": "acceptance-interp-markup-does-not-warn",
+  "description": "no W-STRING-INTERP-LITERAL in markup text.",
+  "language-version": "1.0",
+  "spec": "§4.18 · §5.5.3",
+  "rationale": "The lint is for logic strings only.",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#t",
+        "text": "typed 2 chars"
+      }
+    ]
+  }
+}

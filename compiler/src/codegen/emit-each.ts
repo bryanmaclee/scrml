@@ -36,6 +36,7 @@
  *   - `_scrml_reactive_get(name)` — read cell with auto-dep-tracking
  */
 
+import { commentText } from "./comment-text.ts";
 import type { CompileContext } from "./context.ts";
 import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 import { guardDetachedListener } from "./detached-listener.ts";
@@ -47,7 +48,7 @@ function hasFailableMatchStamp(node: unknown): boolean {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   return (require("./emit-control-flow.ts") as { hasFailableMatchStamp: (n: unknown) => boolean }).hasFailableMatchStamp(node);
 }
-import { emitStringFromTree } from "../expression-parser.ts";
+import { emitStringFromTree, sliceTemplateText } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { CGError } from "./errors.ts";
@@ -901,23 +902,22 @@ export function rewriteEachSigilInArmBody(n: any, iterVarName: string): void {
   }
 }
 
-/** Apply `lower` to the text of each top-level `${…}` interpolation in `s` (brace-balanced). */
+/**
+ * Apply `lower` to the text of each top-level `${…}` interpolation in `s`. S469 (review of
+ * d5f5d3ea1, MEDIUM-1): bounded by `sliceTemplateText` — the one boundary reader of quoted
+ * attribute text (acorn's, under both goals), shared with the emitters and the failable-call
+ * check; before, a brace counter that did not know strings, comments or regular expressions.
+ * Text after an interpolation the slicer cannot bound is left as written (the failable-call
+ * check refuses such a value).
+ */
 function rewriteSigilInsideInterpolations(s: string, lower: (x: string) => string): string {
+  const { segments, unreadable } = sliceTemplateText(s, { bare: true });
   let out = "";
-  let i = 0;
-  while (i < s.length) {
-    const open = s.indexOf("${", i);
-    if (open === -1) { out += s.slice(i); break; }
-    out += s.slice(i, open + 2);
-    let depth = 1;
-    let j = open + 2;
-    while (j < s.length && depth > 0) {
-      if (s[j] === "{") depth++;
-      else if (s[j] === "}") depth--;
-      if (depth > 0) j++;
-    }
-    out += lower(s.slice(open + 2, j));
-    i = j;
+  const last = segments[segments.length - 1];
+  for (const sg of segments) {
+    if (sg.kind === "quasi") { out += sg.text; continue; }
+    if (unreadable !== null && sg === last) { out += "${" + sg.text; continue; }
+    out += "${" + lower(sg.text) + "}";
   }
   return out;
 }
@@ -2181,30 +2181,27 @@ function lowerEachExpr(text: string, iterVarName: string): string {
  */
 function buildEachAttrTemplate(value: string, iterVarName: string): string | null {
   if (!value.includes("${")) return null;
+  // S469 (review of d5f5d3ea1, MEDIUM-1) — bounded by `sliceTemplateText`, the one boundary
+  // reader the client emitter and the failable-call check share (acorn's, under both goals).
+  // Before, a brace counter: `<li data-v="${ /* } */ 'q\'' + 'r' }">` closed at the comment's
+  // brace and the rest was emitted as code only the post-emit gate happened to reject. An
+  // interpolation the slicer cannot bound is not emitted at all (null → the caller's plain
+  // set; the failable-call check refuses the value).
+  const { segments, unreadable } = sliceTemplateText(value, { bare: true });
+  if (unreadable !== null) return null;
   let tpl = "`";
-  let i = 0;
-  const n = value.length;
-  while (i < n) {
-    if (value[i] === "$" && i + 1 < n && value[i + 1] === "{") {
-      // Find the matching `}` (brace-balanced).
-      let depth = 1;
-      let j = i + 2;
-      while (j < n && depth > 0) {
-        const c = value[j];
-        if (c === "{") depth++;
-        else if (c === "}") depth--;
-        if (depth === 0) break;
-        j++;
-      }
-      const inner = value.slice(i + 2, j);
-      tpl += "${" + lowerEachExpr(inner, iterVarName) + "}";
-      i = j + 1;
-    } else {
-      const c = value[i];
+  for (const sg of segments) {
+    if (sg.kind === "expr") { tpl += "${" + lowerEachExpr(sg.text, iterVarName) + "}"; continue; }
+    // Literal text, escaped for the backtick context. A `\` is a literal backslash here, and
+    // a `$` the slicer kept in literal text (`\${`) is escaped too, so the emitted template's
+    // interpolations are EXACTLY the slicer's.
+    const q = sg.text;
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i];
       if (c === "`") tpl += "\\`";
       else if (c === "\\") tpl += "\\\\";
+      else if (c === "$" && q[i + 1] === "{") tpl += "\\$";
       else tpl += c;
-      i++;
     }
   }
   tpl += "`";
@@ -2841,7 +2838,7 @@ function renderTemplateAttrToJs(
       // Same attribute identity VP-3 stamps, so api.js reports the attribute once.
       (refusal as { attrSinkKey?: string }).attrSinkKey = attrSinkKey(attr && attr.span, aName);
       recordRefusedLowering(refusal, attr);
-      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${aName}" attribute refused (executable sink) */`);
+      lines.push(`${indent}/* ${ATTR_INTERP_EXECUTABLE_CODE}: interpolated quoted "${commentText(aName)}" attribute refused (executable sink) */`);
       return;
     }
     if (tpl !== null) {

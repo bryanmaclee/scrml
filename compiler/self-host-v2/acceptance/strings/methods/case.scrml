@@ -1,0 +1,20 @@
+// the typed string methods: case, trim, tests, split; positions are code points (S469).
+<program>
+    let <s:string="  Hello, World  "/>
+    let <e:string="😀ab"/>
+    <main>
+        <p id="up">${@s.trim().toUpperCase()}</p>
+        <p id="lo">${@s.trim().toLowerCase()}</p>
+        <p id="inc">${@s.includes("World")}</p>
+        <p id="sw">${@s.trim().startsWith("Hello")}</p>
+        <p id="ew">${@s.endsWith("x")}</p>
+        <p id="sl">${@s.trim().slice(7)}</p>
+        <p id="sl2">${@s.trim().slice(0, 5)}</p>
+        <p id="neg">${@s.trim().slice(-5)}</p>
+        <p id="ch">${@e.charAt(0)}</p>
+        <p id="ch1">${@e.slice(1)}</p>
+        <p id="past">[${@e.charAt(9)}]</p>
+        <p id="sp">${@e.split("").join("|")}</p>
+        <p id="sp2">${"a,b,,c".split(",").join("/")}</p>
+    </main>
+</program>

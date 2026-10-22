@@ -62,7 +62,7 @@
  */
 
 import type { ExprNode, CallExpr, LambdaExpr } from "./types/ast.ts";
-import { templateInterpolationNodesAll, guardCallArmsRaw, hasLostTrailingContent } from "./expression-parser.ts";
+import { templateInterpolationNodesAll, templateTextInterpolationNodes, guardCallArmsRaw, hasLostTrailingContent } from "./expression-parser.ts";
 import { tokenizeLogic } from "./tokenizer.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 
@@ -135,13 +135,18 @@ export interface FailableCallCandidate {
    *     impl#1 lowers that guard against the LIFT's result, not the call's (the error object is
    *     lifted unchecked; executed S469), so the `!{}` does not handle it.
    */
-  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable";
+  refKind?: "call" | "fn-value" | "lift-guard" | "unreadable" | "unreadable-expr" | "unreadable-interp";
   /**
    * S469 follow-up — `refKind: "unreadable"`: a `lift` operand this walk could not read — the
    * operand text (`lift if (c) { lift if … }`, a value form nested two deep) parses neither as
    * an expression nor as statements, and names no failable function in scope. Nothing proves it
    * free of an unhandled failable call through a path the text scan cannot see, so it is
    * refused (fails closed). `calleeName` is "" and `text` is the operand text.
+   *
+   * S469 (template interpolation) — `refKind: "unreadable-expr"`: an escape hatch that carries
+   * NO source text (`raw` empty or missing) and is not a literal: the walk can read neither its
+   * structure nor its text, so nothing proves it free of an unhandled failable call. Refused
+   * (E-ERROR-002, fails closed). `calleeName` is "" and `text` is the hatch's ESTree kind.
    */
   text?: string;
   /**
@@ -646,7 +651,9 @@ class Walker {
    * template's tag IS called; any other mention may be). True when something was reported.
    */
   unreadText(text: unknown, scope: LocalScope | null, fn: FnCtx): boolean {
-    if (typeof text !== "string" || text.trim() === "") return false;
+    // S469 — text that is missing is not text that holds nothing: nothing about it is provable.
+    // (A caller holding an escape hatch with no text refuses it: see escapeHatch.)
+    if (typeof text !== "string" || text.trim() === "") { this.unreadable = true; return false; }
     // Text this walk could not read structurally: nothing in it is PROVABLE (S469 fix round 3 —
     // the exact-returns judgement reads `unreadable`; main's refuse-by-name read keeps it closed).
     this.unreadable = true;
@@ -753,6 +760,8 @@ class Walker {
             if (typeof p.key !== "string") this.expr(p.key as ExprNode, scope, fn);
             this.expr(p.value, scope, fn);
           } else if (p.kind === "spread") this.expr(p.argument, scope, fn);
+          // S469 — `{ check }` reads `check` as a VALUE (the shorthand of `{ check: check }`).
+          else if (p.kind === "shorthand") this.fnValueRead(p, scope, fn);
         }
         return;
       case "map-lit": for (const e of node.entries) { this.expr(e.key, scope, fn); this.expr(e.value, scope, fn); } return;
@@ -945,7 +954,21 @@ class Walker {
     if (nk === "Literal") return;
     // A statement's text the expression parser could not read: its reader is the statement's
     // (ownExpressions — the statement usually carries the structured form under another key).
-    if (nk === "ParseError") return;
+    // Nothing in it is PROVABLE from here (the exact-returns judgement reads `unreadable`).
+    if (nk === "ParseError") { this.unreadable = true; return; }
+    // S469 (§19.4.3) — FAIL CLOSED: a hatch with no source text can be read neither as structure
+    // nor as text. Before, `unreadText("")` returned false — nothing refused, `unreadable` not
+    // set — so `${(check(p), 1) ? "Y" : "N"}` (a sequence hatch the template-interpolation reader
+    // built with `raw: ""`) compiled and a wrong password logged in. The reader now carries the
+    // text (expression-parser.ts `readTemplateInterpolations`); a hatch that still has none is
+    // refused, never skipped.
+    if (typeof raw !== "string" || raw.trim() === "") {
+      this.unreadable = true;
+      this.cb({ call: null, calleeName: "", via: null, inFunction: fn.inFunction,
+        inFailableFn: fn.inFunction && fn.inFailableFn, fromText: true, refKind: "unreadable-expr",
+        text: typeof nk === "string" ? nk : "expression" });
+      return;
+    }
     // S469 follow-up (§19.4.3) — `check\`${p}\``: a tagged template CALLS its tag (with the
     // template's strings and interpolated values). Before, the hatch was not read and
     // `const ok = check\`${p}\`` compiled: a wrong password logged in. A tag that is a name is
@@ -961,6 +984,18 @@ class Walker {
     // ClassExpression, …) or an interpolation the parser could not read. Before, it was not
     // read at all. Its text is read to refuse (fails closed): every failable function it names
     // is an unhandled call.
+    if (nk === "TemplateInterpFallback") {
+      // S469 (review of 065fd2035, HIGH-1) — an interpolation the readers could not bound or
+      // read (`templateTextInterpolationNodes`). Its text is what JavaScript runs, whatever
+      // it names: refused even when it names no failable function (a `/* } */` once made the
+      // slice ` /* `, which named nothing, while the browser ran `check(…)` after it).
+      if (!this.unreadText(raw, scope, fn)) {
+        this.cb({ call: null, calleeName: "", via: null, inFunction: fn.inFunction,
+          inFailableFn: fn.inFunction && fn.inFailableFn, fromText: true, refKind: "unreadable-interp",
+          text: String(raw).trim() });
+      }
+      return;
+    }
     this.unreadText(raw, scope, fn);
   }
 
@@ -1134,7 +1169,7 @@ class Walker {
       if (typeof a.binding === "string" && a.binding.trim() !== "") armScope.names.set(a.binding.trim(), null);
       // S468 fix round 2 — a BRACED arm body is a statement list (§7.2.2 "Terms": "a `{ … }`
       // match or `!{}` arm block"), read by the one statement-list reader every emitter uses
-      // (`env.parseStatements` = defer-structure `parseStatementText`). Its `handlerExpr` is the
+      // (`env.parseStatements` = defer-structure `parseStatementTextDetailed`, strict since S469). Its `handlerExpr` is the
       // builder's EXPRESSION reading of the block's inner text, which stops after the FIRST
       // statement: walking it let `{ note = "d"⏎ const q = check3(p)⏎ q }` — an unhandled
       // failable call after the first statement — escape E-ERROR-002, and a wrong password
@@ -1386,6 +1421,13 @@ class Walker {
         continue;
       }
       if (value.kind === "expr" && typeof value.raw === "string") { this.unreadText(value.raw, scope, vfn); continue; }
+      // S469 (review of 834e41cba, F2) — a QUOTED value with `${ … }` (`data-v="${check(p)}"`) is a
+      // JavaScript template literal at render: each interpolation is sliced by the slicer codegen
+      // emits from and read by the one expression reader (one it cannot read is refused by name).
+      if (value.kind === "string-literal" && typeof value.value === "string" && value.value.includes("${")) {
+        for (const e of templateTextInterpolationNodes(value.value, "", 0, undefined, { bare: true })) this.expr(e, scope, textCtx(vfn));
+        continue;
+      }
       this.opaque(value, scope, vfn);
     }
     if (Array.isArray(n.children)) for (const c of n.children) this.liftedMarkup(c, scope, fn);
@@ -1407,7 +1449,8 @@ class Walker {
       if (r.kind === "call" && r.callee && typeof r.callee === "object" && (r.callee as { kind?: unknown }).kind === "ident") {
         callees.add(r.callee as object);
       }
-      if (r.kind === "ident" && typeof r.name === "string" && !callees.has(r)) {
+      // An identifier that is not a callee, or an object shorthand `{ check }` (a value read).
+      if ((r.kind === "ident" || r.kind === "shorthand") && typeof r.name === "string" && !callees.has(r)) {
         this.fnValueRead(r, scope, fn);
         return;
       }
