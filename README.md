@@ -42,7 +42,7 @@ type Task:struct = {
 
 type TaskError:enum = { Duplicate }
 
-fn isActive(t) -> boolean {
+fn isActive(t: Task) -> boolean {
     return t.completed_at is not
 }
 
@@ -57,7 +57,7 @@ function insertTask(text: string)! -> TaskError {
               RETURNING id, text, completed_at`}.get()
 }
 
-function flipTask(id) {
+function flipTask(id: number) {
     return ?{`UPDATE tasks SET completed_at =
                 CASE WHEN completed_at IS NULL THEN ${Date.now()} ELSE NULL END
               WHERE id = ${id}
@@ -78,8 +78,8 @@ There is no `null` in scrml. `not` is the one absence value, and you test for it
 <channel name="tasks">
     <tasks>: Task[] = []
 
-    function addRow(row) { @tasks = [...@tasks, row] }
-    function replaceRow(row) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
+    function addRow(row: Task) { @tasks = [...@tasks, row] }
+    function replaceRow(row: Task) { @tasks = @tasks.map(t => t.id == row.id ? row : t) }
 </>
 
 type Filter:enum = { All, Active, Done }
@@ -124,7 +124,7 @@ function submit() {
     @phase = .Saved
 }
 
-function toggle(id) {
+function toggle(id: number) {
     replaceRow(flipTask(id))
 }
 ```

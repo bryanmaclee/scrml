@@ -97,7 +97,7 @@ Fire the analytics. Focus an input. Start a timer.
 
 ```scrml
 <onTransition from=.Loading to=.Success>
-    ${ analytics.track("load.success") }
+    ${ analytics.track("load.success"); }
 </>
 ```
 
