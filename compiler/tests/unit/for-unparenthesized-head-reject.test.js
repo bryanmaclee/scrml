@@ -39,6 +39,15 @@ function allEmittedJs(r) {
   }
   return js;
 }
+// The broken loop-head shapes the recovery checks look for, each anchored with `\b` before `of`.
+// Unanchored, `of\s*\)` also matched the emitted chunk banner `// --- chunk cell scope (<token>) ---`
+// whenever the token ended in `of` (e.g. `01qsumof`). The token is an FNV-1a hash of the source path,
+// and this file compiles under a random mkdtemp directory with a random name, so ~1 run in 1300 failed
+// the OBJECT-destructure test on a correct compile (S469: reproduced by searching file names — the
+// 2247th gave `01qsumof`; earlier write-ups called it a load flake).
+const OF_OF = /\bof\s+of\b/;        // `for (const x of of)`
+const OF_EMPTY = /\bof\s*\)/;       // `for (const item of )`
+const OF_ARRAY = /\bof\s*\[/;       // `for (const item of [a, b])` (@items dropped)
 const W = body => `<program>\n\${\n  <items> = [1, 2, 3]\n}\n${body}\n</program>\n`;
 
 describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head", () => {
@@ -66,7 +75,7 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head"
     // copy that the first cut left unpatched (residual `for (const item of of)`).
     const r = compile(W(`\${\n  const names = for item of @items { lift item }\n}\n<p>ok</>`));
     expect(fuphErrors(r).length).toBe(1);
-    expect(/of\s+of\b/.test(allEmittedJs(r))).toBe(false);
+    expect(OF_OF.test(allEmittedJs(r))).toBe(false);
   });
 
   test("braceless `of` with an ARRAY-destructure head fires (destructuring follow-up)", () => {
@@ -75,7 +84,7 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head"
     // collectExpr and emitted `for (const item of [a, b])` (@items dropped).
     const r = compile(W(`<ul>\${\n  for [a, b] of @items { lift <li>\${a}</> }\n}</>`));
     expect(fuphErrors(r).length).toBe(1);
-    expect(/of\s+of\b|of\s*\[/.test(allEmittedJs(r))).toBe(false);
+    expect(OF_OF.test(allEmittedJs(r)) || OF_ARRAY.test(allEmittedJs(r))).toBe(false);
   });
 
   test("braceless `of` with an OBJECT-destructure head fires", () => {
@@ -83,7 +92,7 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head"
     // hard syntax-error bundle with no diagnostic.
     const r = compile(W(`<ul>\${\n  for {a} of @items { lift <li>\${a}</> }\n}</>`));
     expect(fuphErrors(r).length).toBe(1);
-    expect(/of\s+of\b|of\s*\)/.test(allEmittedJs(r))).toBe(false);
+    expect(OF_OF.test(allEmittedJs(r)) || OF_EMPTY.test(allEmittedJs(r))).toBe(false);
   });
 
   test("braceless `of` with a destructure head in a for-AS-EXPRESSION fires", () => {
@@ -106,7 +115,20 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head"
   test("RECOVERY: no broken `for (const x of of)` reaches any emitted output", () => {
     const r = compile(W(`\${\n  for x of @items { log(x) }\n}\n<p>ok</>`));
     expect(fuphErrors(r).length).toBe(1);
-    expect(/of\s+of\b/.test(allEmittedJs(r))).toBe(false);
+    expect(OF_OF.test(allEmittedJs(r))).toBe(false);
+  });
+});
+
+describe("the recovery checks match the defect, not a chunk token (S469 flake)", () => {
+  test("each check matches its broken loop-head shape", () => {
+    expect(OF_OF.test("for (const x of of) {")).toBe(true);
+    expect(OF_EMPTY.test("for (const item of ) {")).toBe(true);
+    expect(OF_ARRAY.test("for (const item of [a, b]) {")).toBe(true);
+  });
+
+  test("a chunk-cell-scope token ending in `of` matches none of them", () => {
+    const banner = "// --- chunk cell scope (01qsumof) ---\nconst _scrml_cs_key = (n) => { return raw ? \"01qsumof$\" + raw : raw; };";
+    expect(OF_OF.test(banner) || OF_EMPTY.test(banner) || OF_ARRAY.test(banner)).toBe(false);
   });
 });
 
