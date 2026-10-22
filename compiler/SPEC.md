@@ -44061,12 +44061,25 @@ the inhabitable values of a type:
 ```scrml
 let age: number(>=18 && <=120) = readAge()
 
-type Email = string(pattern(/^[^@]+@[^@]+$/))
+type Email = string.pattern(/^[^@]+@[^@]+$/)
 
-function rate(score: number(min(0) && max(100))) {
+function rate(score: number.min(0).max(100)) {
   // score is statically known to be in [0, 100]
 }
 ```
+
+> **Amendment (S469) — the example used a spelling the grammar does not have.** It read
+> ~~`type Email = string(pattern(/^[^@]+@[^@]+$/))`~~ and ~~`function rate(score: number(min(0) && max(100)))`~~
+> (a code block cannot carry a strike; the replaced lines are quoted here). The §53.2.1 grammar gives an inline
+> predicate's parentheses only comparisons, property comparisons, `!` / `&&` / `||` and a named shape — no call
+> such as `pattern(…)` or `min(…)`. The shared validator vocabulary reaches refinement-type position by the
+> dot-chain spelling §53.6.1 shows (`string.pattern(…)`, `number.min(0).max(10000)`), so the example now uses it.
+> Fixing the example rather than the grammar is the PA's reading (the grammar and §53.6.1's examples agree; only
+> this example disagreed); it is not an owner ruling. *(Not addressed here: a dot chain is a conjunction, so an
+> OR of two shared-core predicates has no refinement spelling; `number(>=0 && <=100)` is the inline form of this
+> example's range.)* **Provenance:** spec:§53.2.1 (grammar) · spec:§53.6.1 (shared-core vocabulary in
+> refinement-type position) · dispatch:s469-public-docs (PR #1485, which found it). **supersedes:** the two quoted
+> lines. **Direction of change:** inert — an example correction.
 
 **Stronger than state validators.** A value that doesn't satisfy the refinement predicate
 CANNOT inhabit the type — the constraint is a TYPE-LEVEL invariant. The compiler enforces
