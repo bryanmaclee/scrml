@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-empty-slot",
+  "description": "E-PARSE-TEMPLATE: an empty `${}` slot.",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "§14.13.3: each slot holds one expression.",
+  "expect": {
+    "codes": [
+      "E-PARSE-TEMPLATE"
+    ],
+    "codeCounts": {
+      "E-PARSE-TEMPLATE": 1
+    }
+  }
+}

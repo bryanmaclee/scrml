@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-tagged",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: a tagged template (`tag` then a template) is refused by name.",
+  "language-version": "1.0",
+  "spec": "§14.13.3",
+  "rationale": "A tagged template calls its tag with the template's pieces — it is not a text template, and it is not in the bootstrap.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

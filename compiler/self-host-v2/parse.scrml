@@ -1341,7 +1341,13 @@ ${
             } else {
                 const open: PTok = cur(t)
                 t = adv(t)
-                if (cur(t).cls == TC.TIEnd) {
+                // a slot the lexer could not bound one way is refused WHOLE, before
+                // its tokens are read (they are one reading of two): one report
+                const ahead: TP = skipToSlotEnd(t)
+                const unread: boolean = cur(ahead).cls == TC.TIEnd && cur(ahead).v != ""
+                if (unread) {
+                    t = ahead           // reported at the `}` below
+                } else if (cur(t).cls == TC.TIEnd) {
                     t = diagAt(t, "E-PARSE-TEMPLATE", "an empty `" + interpOpen() + "}` slot — a slot holds one expression (§14.13.3); for the characters `" + interpOpen() + "` write `\\" + interpOpen() + "`", open)
                 } else {
                     const r: RExpr = parseAssign(t)

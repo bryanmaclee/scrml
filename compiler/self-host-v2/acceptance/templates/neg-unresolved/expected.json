@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-templates-neg-unresolved",
+  "description": "E-TEXT-NON-PRIMITIVE: a slot whose type the compiler cannot resolve (fail closed).",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.2 · §34",
+  "rationale": "§14.13.2: \"a value whose type the compiler cannot resolve\" is refused — the ruled principle admits only a known primitive.",
+  "expect": {
+    "codes": [
+      "E-TEXT-NON-PRIMITIVE"
+    ],
+    "codeCounts": {
+      "E-TEXT-NON-PRIMITIVE": 1
+    }
+  }
+}

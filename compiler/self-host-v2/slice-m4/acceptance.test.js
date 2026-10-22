@@ -166,6 +166,28 @@ const STATUS = {
   "loop/neg-while": ["PASS", ["E-LOOP-WHILE-RETIRED"]],
   "loop/range": ["PASS", []],
   "loop/sum-tape": ["PASS", []],
+  // s469 — logic backtick templates (§14.13.3, blocker #5): each slot a text sink; the honest text (§20.7.2)
+  "templates/int-text": ["PASS", []],
+  "templates/number-text": ["PASS", []],
+  "templates/bool-enum-text": ["PASS", []],
+  "templates/nested": ["PASS", []],
+  "templates/escapes": ["PASS", []],
+  "templates/string-and-field": ["PASS", []],
+  "templates/narrowed": ["PASS", []],
+  "templates/neg-struct": ["PASS", ["E-TEXT-NON-PRIMITIVE"]],
+  "templates/neg-tape": ["PASS", ["E-TEXT-NON-PRIMITIVE"]],
+  "templates/neg-payload-enum": ["PASS", ["E-TEXT-NON-PRIMITIVE"]],
+  "templates/neg-not": ["PASS", ["E-TEXT-NON-PRIMITIVE"]],
+  "templates/neg-unresolved": ["PASS", ["E-TEXT-NON-PRIMITIVE"]],
+  "templates/neg-not-narrowed": ["PASS", ["E-OPERAND-NOT-NARROWED"]],
+  "templates/neg-plus-strict": ["PASS", ["E-OPERATOR-OPERAND-TYPE"]],
+  "templates/neg-number-to-string-param": ["PASS", ["E-TYPE-031"]],
+  "templates/neg-unreadable-slot": ["PASS", ["E-PARSE-TEMPLATE"]],
+  "templates/neg-html-comment": ["PASS", ["E-PARSE-TEMPLATE"]],
+  "templates/neg-bad-escape": ["PASS", ["E-PARSE-TEMPLATE"]],
+  "templates/neg-empty-slot": ["PASS", ["E-PARSE-TEMPLATE"]],
+  // a tagged template is not a text template, and not in the bootstrap — refused by name
+  "templates/neg-tagged": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
 };
 
 let verdicts;

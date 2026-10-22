@@ -1,0 +1,20 @@
+{
+  "id": "acceptance-templates-string-and-field",
+  "description": "a `string` slot is itself; a struct's field read is text; a template feeds a `string` parameter.",
+  "language-version": "1.0",
+  "spec": "§14.13.3 · §14.13.1",
+  "rationale": "§14.13.1: \"any non-`string` value → a `string` parameter … a template, `` label(`${n}`) ``\".",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      {
+        "selector": "#field",
+        "text": "hi, Ada (36)!"
+      },
+      {
+        "selector": "#num",
+        "text": "hi, 36!"
+      }
+    ]
+  }
+}

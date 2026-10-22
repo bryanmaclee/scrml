@@ -15180,7 +15180,7 @@ ${
 
     fn textUnresolved(env: TEnv, s: AExpr, ts: TypeState) -> TypeState {
         if (condBlamed(env, s, ts)) return ts
-        return notText(env, s, "a value whose type the compiler cannot resolve (annotate it — a parameter, local or return type)", ts)
+        return report(ts, env, s.span, "E-TEXT-NON-PRIMITIVE", "a template slot is text, and the compiler cannot resolve this value's type — only a known `string`, `int`, `number`, `bool` or unit enum value has one honest text (§14.13.2, fail closed). Annotate what it reads (a parameter, a local, a function's return type)")
     }
 
     fn textKnown(env: TEnv, s: AExpr, t: Type, ts: TypeState) -> TypeState {
