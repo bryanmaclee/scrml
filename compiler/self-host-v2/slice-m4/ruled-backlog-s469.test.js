@@ -281,3 +281,41 @@ describe("the client and server runtimes agree — the SAME function objects", (
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+describe("A — block arms yield with `lift` (§18.5); the value-form `if` branch rule (§17.6.10)", () => {
+  const L = `    type LoadError:enum = { NotFound(id: string), Timeout }
+    let <out:string=""/>
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        return id
+    }`;
+  const fn = (body) => prog(L + `\n    function pick(id: string) -> string {\n${body}\n    }`, `        <p>x</p>`);
+  test("a value-position arm (a failable `match`, a `!{}`) with statements and a bare last expression is E-ARM-TAIL-VALUE", () => {
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v\n                v\n            }\n            _ :> "e"\n        }`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(codes(fn(`        return match load(id) {\n            .Ok(v) :> {\n                @out = v\n                lift v\n            }\n            _ :> "e"\n        }`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            "e"\n        } }\n        return r`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            "e"\n        } }\n        return r`), "E-ARM-TAIL-VALUE")?.message).toContain("`lift <expr>`");
+  });
+  test("unchanged: `.A :> expr`, a single-expression `{ e }`, `{ lift e }`, a leaving arm, a statement-position arm without `lift`", () => {
+    expect(codes(fn(`        const r = load(id) !{ _ :> "e" }\n        return r`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> { "e" } }\n        return r`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> { lift "e" } }\n        return r`))).toEqual([]);
+    expect(codes(fn(`        const r = load(id) !{ _ :> {\n            @out = "e"\n            return "L"\n        } }\n        return r`))).toEqual([]);
+    expect(codes(fn(`        load(id) !{ _ :> {\n            @out = "e"\n            @out = "f"\n        } }\n        return "s"`))).toEqual([]);
+  });
+  test("`lift` anywhere but an arm block's last statement is refused by name; so is one in a statement-position arm", () => {
+    expect(diag(fn(`        const r = load(id) !{ _ :> {\n            lift "a"\n            @out = "b"\n        } }\n        return r`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
+    expect(diag(fn(`        load(id) !{ _ :> {\n            @out = "e"\n            lift "e"\n        } }\n        return "s"`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("yields to nothing");
+    expect(diag(fn(`        lift "x"\n        return "s"`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("`lift`");
+  });
+  test("a `lift` block arm runs its statements, then yields (runtime)", async () => {
+    const src = prog(L + `\n    function pick2(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            const t: string = "lifted:"\n            lift t + id\n        } }\n        return r\n    }`, `        <p id="r">\${pick2("x")}</p>`);
+    await load(src);
+    expect($("#r").textContent).toBe("lifted:x");
+  });
+  test("the value-form `if` is not in the bootstrap: refused by name (never read as a name `if`)", () => {
+    expect(codes(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y" } else { "n" }}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(diag(prog(`    let <b:bool=true/>`, `        <p>\${if (@b) { "y" } else { "n" }}</p>`), "E-BOOTSTRAP-UNSUPPORTED")?.message).toContain("an `if` used as a value");
+  });
+});

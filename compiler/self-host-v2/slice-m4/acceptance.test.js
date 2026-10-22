@@ -24,6 +24,16 @@ const STATUS = {
   "arms/comma-match": ["PASS", []],
   "arms/mixed-neg": ["PASS", ["E-MATCH-ARM-SEPARATOR"]],
   "arms/newline-still-read": ["PASS", []],
+  // s469-boot-ruled-backlog — §18.5 block arms yield with `lift` (S469); the value-form `if` refused by name
+  "arms/lift-guard-value": ["PASS", []],
+  "arms/single-expr-block": ["PASS", []],
+  "arms/neg-tail-guard": ["PASS", ["E-ARM-TAIL-VALUE"]],
+  "arms/neg-tail-plain": ["PASS", ["E-ARM-TAIL-VALUE"]],
+  // the ruled form, but a plain-value `match` arm with statements is beyond Core's one-expression arm
+  "arms/lift-plain-multi-unsupported": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-lift-statement-arm": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-lift-nested": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
+  "arms/neg-if-value": ["PASS", ["E-BOOTSTRAP-UNSUPPORTED"]],
   "opener/union-maybe": ["PASS", []],
   // a general union needs a union type in the bootstrap's type system
   "opener/union-multi-unsupported": ["UNSUPPORTED", ["E-BOOTSTRAP-UNSUPPORTED"]],
@@ -210,7 +220,7 @@ describe("bootstrap acceptance cases — today's verdicts", () => {
   });
   test("s469-boot-ruled-backlog: every positive parse / string / position case RAN on the bootstrap (output checked)", () => {
     for (const rel of ["parse/int-strict", "parse/number-finite", "parse/bool-exact", "parse/enum-parse", "parse/integer-type-name",
-                       "strings/admitted-methods", "strings/index-read",
+                       "strings/admitted-methods", "strings/index-read", "arms/lift-guard-value", "arms/single-expr-block",
                        "positions/from-end-explicit", "positions/at-negative-not", "positions/neg-slice-computed-traps"]) {
       expect([rel, verdicts[rel].runtimeExecuted]).toEqual([rel, true]);
     }

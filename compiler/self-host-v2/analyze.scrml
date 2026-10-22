@@ -6011,16 +6011,56 @@ ${
     fn negLiteral(x: AExpr) -> boolean {
         const k: AExprK = x.k
         return match k {
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: zs) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
             .Unary(op: o, e: inner) :> o == UnOp.Neg && positiveLit(inner)
-            else :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
     fn positiveLit(x: AExpr) -> boolean {
         const k: AExprK = x.k
         return match k {
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
             .Num(raw: r) :> Number(r) > 0
-            else :> false
+            .Str(v: zs) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -8610,7 +8650,7 @@ ${
         const body: AArmBody = a.body
         return match body {
             .ArmExpr(e: x) :> plainValueExpr(env, x, want, st)
-            .ArmBlock(b: b) :> plainValueBlock(env, b, want, st)
+            .ArmBlock(b: b) :> plainValueBlock(env, a, b, want, st)
         }
     }
 
@@ -8619,11 +8659,17 @@ ${
         return resolveExpr(env, x, want, st)
     }
 
-    fn plainValueBlock(env: Env, b: ABlock, want: Type | not, st: AS) -> RX {
+    fn plainValueBlock(env: Env, a: AArm, b: ABlock, want: Type | not, st: AS) -> RX {
         if (b.stmts.length == 1) {
             const x: AExpr | not = evalOf(b.stmts[0])
             if (x is given) return plainValueExpr(env, x, want, st)
         }
+        // s469 (§18.5): a statement-holding arm whose value is a bare last expression —
+        // after the §19.16.2 `defer` rule, in the order armBlock judges them (one report)
+        const dsp: AStmt | not = directDefer(b)
+        if (dsp is given) return plain(not, addDiag(resolveBlock(env, b, st), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (a `match` whose value is used) — the deferred block would capture the arm's result (§19.16.2). Use the `match` as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block"))
+        const bare: AExpr | not = bareTail(a, b)
+        if (bare is given) return plain(not, addDiag(resolveBlock(env, b, st), env.file, bare.span, "E-ARM-TAIL-VALUE", armTailMsg()))
         return plain(not, addDiag(resolveBlock(env, b, st), env.file, b.span, "E-BOOTSTRAP-UNSUPPORTED", "a `{ … }` arm with statements, or a leaving arm (`return`, `fail`), in a `match` whose value is used — Core's `match` arm is one expression; compute the value before the `match`, or use the `match` as a statement and write the result in each arm"))
     }
 
@@ -9320,7 +9366,12 @@ ${
     }
 
     fn armBlock(env: Env, a: AArm, b: ABlock, cx: ArmCx, st0: AS) -> AS {
-        if (cx.stmt) return resolveBlock(env, b, st0)
+        if (cx.stmt) {
+            // s469 (§18.5): "In a STATEMENT position a block arm yields nothing and
+            // needs no `lift`" — a `lift` there yields to nothing; refused, fail closed
+            if (a.lifted) return addDiag(resolveBlock(env, b, st0), env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "a `lift` in an arm whose value is not used (a statement-position `match` / `!{}`) yields to nothing (§18.5: in a statement position a block arm yields nothing and needs no `lift`) — drop the `lift`, or use the form's value")
+            return resolveBlock(env, b, st0)
+        }
         // s452 r2 (HIGH-1) — §19.16.2: "The same code covers a `defer` written
         // directly in an arm of a `match` / `if` / `for` that is used for its
         // VALUE … the defer block would capture it" — E-DEFER-UNSUPPORTED-SITE.
@@ -9335,9 +9386,15 @@ ${
         if (n == 0) return fallsThrough(env, a, cx, st0)
         const last: AExpr | not = evalOf(b.stmts[n - 1])
         if (last is not) return fallsThrough(env, a, cx, resolveBlock(env, b, st0))
-        // `{ statement* expression }`: the statements in order (their locals in
-        // scope for the value), then the last expression as the arm's value
-        let st: AS = st0
+        // s469 (§18.5, RULED S469 "block arms yield with `lift`"): a statement-holding
+        // block arm yields only by `lift`; a bare last expression is E-ARM-TAIL-VALUE
+        // (resolved as before, so it adds no cascade)
+        let st1: AS = st0
+        const bare: AExpr | not = bareTail(a, b)
+        if (bare is given) st1 = addDiag(st0, env.file, bare.span, "E-ARM-TAIL-VALUE", armTailMsg())
+        // `{ statement* lift expression }`: the statements in order (their locals in
+        // scope for the value), then the lifted expression as the arm's value
+        let st: AS = st1
         let env2: Env = env
         let i = 0
         while (i < n - 1) {
@@ -9347,6 +9404,20 @@ ${
             i = i + 1
         }
         return armValueExpr(env2, a, last, cx, st)
+    }
+
+    // s469 (§18.5) — the BARE last expression of a value-position block arm that
+    // holds a statement: two or more statements, the last an expression, not
+    // written `lift`. A single-expression `{ e }` is that expression (unchanged:
+    // the §17.6.10 single-expression reading, which S469 keeps for a branch);
+    // `not` otherwise.
+    fn bareTail(a: AArm, b: ABlock) -> AExpr | not {
+        if (a.lifted || b.stmts.length < 2) return not
+        return evalOf(b.stmts[b.stmts.length - 1])
+    }
+
+    fn armTailMsg() -> string {
+        return "a block arm whose value is used ends in a bare expression — a block arm that holds a statement yields its value with `lift` (§18.5, ruled S469: \"Block arms yield with lift\"); write `lift <expr>` as its last statement"
     }
 
     // The first `defer` written directly in `b` (not in a nested block), else not.

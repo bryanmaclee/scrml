@@ -1,0 +1,16 @@
+// §18.5: a plain-value `match` arm block with statements and a `lift` is the ruled form — but the
+// bootstrap's Core `match` arm is one expression, so it is refused by name (fail closed).
+<program>
+    type Guess:enum = { Yes, No }
+    let <g:Guess=.No/>
+    function say(x: Guess) -> string {
+        return match x {
+            .Yes :> "y"
+            .No :> {
+                const t: string = "n"
+                lift t
+            }
+        }
+    }
+    <main><p>${say(@g)}</p></main>
+</program>

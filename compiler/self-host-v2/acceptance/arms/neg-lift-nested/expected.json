@@ -1,0 +1,15 @@
+{
+  "id": "acceptance-arms-neg-lift-nested",
+  "description": "E-BOOTSTRAP-UNSUPPORTED: a `lift` inside a nested block is refused by name.",
+  "language-version": "1.0",
+  "spec": "§18.5, §10",
+  "rationale": "Fail closed: a construct the bootstrap does not read is refused by name, never compiled approximately.",
+  "expect": {
+    "codes": [
+      "E-BOOTSTRAP-UNSUPPORTED"
+    ],
+    "codeCounts": {
+      "E-BOOTSTRAP-UNSUPPORTED": 1
+    }
+  }
+}

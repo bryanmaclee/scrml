@@ -200,7 +200,10 @@ describe("the plain-value match — §18", () => {
     expect(codes(prog(COLOR, `        <p>\${Color.Pink}</p>`))).toEqual(["E-TYPE-VARIANT"]);
   });
   test("value-position limits: a block arm with statements, a leaving arm, a write — refused by name", () => {
-    expect(codes(prog(COLOR + `\n    function f() -> int {\n        return match @c {\n            .Red :> {\n                const a: int = 1\n                a\n            }\n            else :> 2\n        }\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // s469 (§18.5): a bare last expression is E-ARM-TAIL-VALUE; with `lift` (the ruled form) the arm is
+    // still beyond Core's one-expression arm — refused by name
+    expect(codes(prog(COLOR + `\n    function f() -> int {\n        return match @c {\n            .Red :> {\n                const a: int = 1\n                a\n            }\n            else :> 2\n        }\n    }`, `        <p>x</p>`))).toEqual(["E-ARM-TAIL-VALUE"]);
+    expect(codes(prog(COLOR + `\n    function f() -> int {\n        return match @c {\n            .Red :> {\n                const a: int = 1\n                lift a\n            }\n            else :> 2\n        }\n    }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(prog(COLOR + `\n    let <n:int=0/>`, `        <p>\${match @c { .Red :> @n = 1, else :> 2, }}</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });

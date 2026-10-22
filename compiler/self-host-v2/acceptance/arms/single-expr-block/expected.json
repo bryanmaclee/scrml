@@ -1,0 +1,28 @@
+{
+  "id": "acceptance-arms-single-expr-block",
+  "description": "`{ e }` and `{ lift e }` are the arm's value with no statement before them.",
+  "language-version": "1.0",
+  "spec": "§18.5, §17.6.10",
+  "rationale": "Ruled S469 \"three spec-follow-up opens\": \"A braced value-form `if` branch holding ONE expression is that expression\"; a single-expression arm is unchanged.",
+  "expect": {
+    "codes": [],
+    "input": [
+      {
+        "click": "#v"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "nf:x"
+      },
+      {
+        "selector": "#g",
+        "text": "n"
+      }
+    ]
+  }
+}
