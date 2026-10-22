@@ -1,5 +1,5 @@
 ${
-    function loadRows(q) {
+    function loadRows(q: string) {
         return ?{`/* dynamic */${q}`}.all()
     }
 }

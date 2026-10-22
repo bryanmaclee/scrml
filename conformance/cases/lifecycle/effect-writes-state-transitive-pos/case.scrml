@@ -2,10 +2,10 @@
 <program>
   <category> = "all"
   <lastFilter> = ""
-  function logFilter(c) {
+  function logFilter(c: string) {
     @lastFilter = c
   }
-  function track(c) {
+  function track(c: string) {
     logFilter(c)
   }
   <effect deps=[@category]>${ track(@category) }</>

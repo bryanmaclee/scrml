@@ -1,7 +1,7 @@
 ${
     <trace> = ""
 
-    function boom(o) {
+    function boom(o: asIs) {
         @trace = @trace + "boom;"
         return o.missing.deeper
     }

@@ -3,8 +3,8 @@ ${
   import { verifyPassword } from 'scrml:auth'
 }
 <verdict> = "unset"
-server function check(pw, hash) {
-  function matches(h) { return verifyPassword(pw, h) }
+server function check(pw: string, hash: string) {
+  function matches(h: string) { return verifyPassword(pw, h) }
   function drive(f) { return f(hash) }
   return drive(matches) ? "accepted" : "rejected"
 }

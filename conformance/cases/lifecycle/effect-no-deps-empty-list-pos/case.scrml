@@ -1,7 +1,7 @@
 // §6.7.4 — deps=[] lists no cell.
 <program>
   <n> = 0
-  function beacon(v) {
+  function beacon(v: number) {
     return v
   }
   <effect deps=[]>${ beacon(@n) }</>

@@ -2,8 +2,8 @@
 ${
   import { verifyPassword } from 'scrml:auth'
 }
-server function rankHashes(pw, hashes) {
-  function matches(h) { return verifyPassword(pw, h) }
+server function rankHashes(pw: string, hashes: string[]) {
+  function matches(h: string) { return verifyPassword(pw, h) }
   return hashes.sort((a, b) => matches(a) ? -1 : 1)
 }
 function go() {

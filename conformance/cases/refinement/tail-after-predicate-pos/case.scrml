@@ -1,6 +1,6 @@
 ${
     <raw>: number = 3
-    function keep(x) {
+    function keep(x: number) {
         let q: number(>0) foo = x
         return q
     }

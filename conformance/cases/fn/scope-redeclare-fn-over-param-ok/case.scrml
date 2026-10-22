@@ -5,14 +5,14 @@ ${
         @trace = @trace + s
     }
 
-    function f(x) {
+    function f(x: int) {
         function x() {
             return 7
         }
         return x()
     }
 
-    function g(x) {
+    function g(x: int) {
         defer D("d;")
         function x() {
             return 8

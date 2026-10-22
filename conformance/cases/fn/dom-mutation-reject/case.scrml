@@ -1,6 +1,6 @@
 <program>
 ${
-    fn build(x) {
+    fn build(x: string) {
         let el = document.createElement("div")
         return x
     }

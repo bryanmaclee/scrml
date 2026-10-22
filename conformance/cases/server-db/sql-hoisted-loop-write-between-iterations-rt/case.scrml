@@ -11,10 +11,10 @@
     // §8.10 Tier 2: the pre-fetch is taken before iteration 1, so a loop whose body can
     // WRITE the database between iterations is not hoisted — a later iteration reads
     // the row as the earlier iteration left it, as the per-iteration query does.
-    function bump(id) {
+    function bump(id: int) {
         ?{`UPDATE notes SET body = body || '!' WHERE id = ${id}`}.run()
     }
-    function bumpTwice(id) {
+    function bumpTwice(id: int) {
         bump(id)
         bump(id)
     }

@@ -1,6 +1,6 @@
 <program lang="js">
     ${
-        function f(x) {
+        function f(x: int) {
             const out = _={ in: { x }
                 const y = x +;
                 return y;

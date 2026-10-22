@@ -1,4 +1,4 @@
 <v> = ""
-${ function setV(x) { @v = x } }
+${ function setV(x: string) { @v = x } }
 
 <input oninput=setV(event.target.value)>

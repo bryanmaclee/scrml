@@ -1,7 +1,7 @@
 <program>
 ${
   @userId = 1
-  function authenticate(x) { return x }
+  function authenticate(x: string) { return x }
 }
 <timer interval=1000>
   ${

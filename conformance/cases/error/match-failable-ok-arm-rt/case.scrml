@@ -3,7 +3,7 @@ ${
         DivByZero
     }
 
-    function safeDiv(a, b)! DivErr {
+    function safeDiv(a: number, b: number)! DivErr {
         if (b == 0) fail DivErr.DivByZero
         return a / b
     }
