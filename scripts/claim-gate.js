@@ -22,37 +22,63 @@
  *           compile). Gating the spec needs its own expected-outcome grammar.
  *   NOT     `docs/changes/**`, `handOffs/**` — internal briefs + frozen
  *           continuity records, historical by design.
+ *   NOT     `docs/articles/archive/**` — superseded drafts (S469 "Archive old
+ *           drafts"). Each carries a "superseded, do not paste" banner.
  *
- * Per-block behavior (inherited from the S101 gate, unchanged):
- *   - Default: compile + ghost-pattern-lint clean. Any error fails; any
- *     `W-LINT-*` ghost-pattern lint fails.
- *   - Opt-out: a block whose first non-blank line is `// gate: skip` is skipped
- *     (illustrative fragments that aren't standalone-runnable).
- *   The marker is opt-OUT (default-gated) because accuracy is the load-bearing
- *   intent on a public surface.
+ * TWO COMPILERS, CHOSEN BY THE DOCUMENT (S469, "Ruled dialect, bootstrap-gated").
+ * Public docs are being rewritten, doc by doc, into today's RULED scrml, which
+ * impl#1 does not parse. A document opts in with `<!-- dialect: ruled -->` (or
+ * front matter `dialect: ruled`); its blocks are then compiled by the BOOTSTRAP
+ * (`scripts/scrml-boot.ts` compileSource — what `bun run boot:compile` runs), and
+ * the bootstrap's diagnostics alone decide pass/fail. Every other document keeps
+ * the impl#1 behaviour below, so nothing silently stops being gated. The marker
+ * grammar lives in `scripts/doc-gate-markers.js`; the contributor guide is
+ * `docs/DIALECT.md`.
+ *
+ * Per-block behavior:
+ *   - SNIPPET-DELEGATED: a block under a `<!-- snippet: … -->` marker is a copy of
+ *     a file that `scripts/snippet-gate.js` compiles whole (and drift-checks). It
+ *     is not compiled here; it is counted as `snippet`.
+ *   - SKIP: `<!-- gate: skip — <reason> -->` above the fence (either dialect), or
+ *     the legacy `// gate: skip` first line (impl1 documents only). The reason is
+ *     mandatory on the HTML marker; a reasonless marker FAILS.
+ *   - SPEC-AHEAD (ruled documents only): `<!-- gate: spec-ahead — <what's missing> -->`.
+ *     The block is still compiled by the bootstrap. A failure is expected and counted
+ *     as `spec-ahead` (listed with its reason). A CLEAN compile is a STALE marker:
+ *     reported as "now compiles — remove the marker" (fails only with --strict).
+ *   - impl1 default: compile with impl#1 + ghost-pattern-lint clean. Any error
+ *     fails; any `W-LINT-*` ghost-pattern lint fails.
+ *   - ruled default: compile with the bootstrap. Any Error-severity diagnostic or
+ *     printer refusal fails; warnings do not.
+ *   - A marker error (unknown kind, no reason, dangling, spec-ahead outside a ruled
+ *     document, two markers on one block, an unknown dialect) FAILS.
  *
  * MODES:
- *   `bun scripts/claim-gate.js`            GATE   — exit 1 on any failure (CI + hook).
+ *   `bun scripts/claim-gate.js`            GATE   — exit 1 on any failure.
  *   `bun scripts/claim-gate.js --report`   REPORT — never exit non-zero; print the
  *                                          tally only. Use to MEASURE a surface
  *                                          before promoting it into the gate
  *                                          (the §8 measured-migration discipline:
  *                                          assumed-zero is not measured-zero).
+ *   `bun scripts/claim-gate.js --strict`   also fail on a stale spec-ahead marker.
  *   `bun scripts/claim-gate.js [paths...]` override the surface with explicit paths.
  *
  * Exit: 0 on all-pass (or any --report run); 1 on any failure in GATE mode.
+ * (Not wired into CI or the hook as of S469 — the surface still has impl#1-era
+ * failures being migrated doc by doc. snippet-gate IS a required CI check.)
  *
  * Authored S280 (2026-07-22). `scripts/extract-readme-scrml.js` (S101) was
  * RETIRED in the same landing: its gate role passed to `scripts/snippet-gate.js`
  * (real files), and its fence-extraction capability lives on here as a survey
- * instrument.
+ * instrument. Bootstrap mode + HTML markers: S469.
  */
 
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, extname } from "path";
+import { join, extname, resolve, relative, sep } from "path";
 import { execFileSync } from "child_process";
 import { lintGhostPatterns } from "../compiler/src/lint-ghost-patterns.js";
+import { parseDocMarkers } from "./doc-gate-markers.js";
 
 /**
  * The declared PUBLIC SURFACE. A path may be a file or a directory (walked
@@ -70,20 +96,27 @@ const PUBLIC_SURFACE = [
   "marketing", // does not exist yet; tolerated-absent so the row can pre-date the dir
 ];
 
+/** Directories under a surface row that are NOT public surface (walked past, never gated). */
+const SURFACE_EXCLUDE = ["docs/articles/archive"];
+
 const args = process.argv.slice(2);
 const reportMode = args.includes("--report");
+const strictMode = args.includes("--strict");
 const explicitPaths = args.filter((a) => !a.startsWith("--"));
 const surface = explicitPaths.length > 0 ? explicitPaths : PUBLIC_SURFACE;
+
+const toRel = (p) => relative(process.cwd(), resolve(p)).split(sep).join("/");
 
 /** Expand the surface into a concrete .md file list (tolerates absent rows). */
 function collectMarkdown(paths) {
   const out = [];
   const seen = new Set();
-  const walk = (p) => {
+  const walk = (p, explicit) => {
     if (!existsSync(p)) return; // a declared-but-absent row is not an error
     const st = statSync(p);
     if (st.isDirectory()) {
-      for (const entry of readdirSync(p)) walk(join(p, entry));
+      if (!explicit && SURFACE_EXCLUDE.includes(toRel(p))) return;
+      for (const entry of readdirSync(p)) walk(join(p, entry), false);
       return;
     }
     if (extname(p) !== ".md") return;
@@ -91,33 +124,8 @@ function collectMarkdown(paths) {
     seen.add(p);
     out.push(p);
   };
-  for (const p of paths) walk(p);
+  for (const p of paths) walk(p, explicitPaths.length > 0);
   return out.sort();
-}
-
-/** Extract every ```scrml fenced block plus its 1-based start line. */
-function extractBlocks(text) {
-  const blocks = [];
-  const lines = text.split("\n");
-  let inBlock = false;
-  let blockStartLine = 0;
-  let blockBody = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!inBlock && line.trimEnd() === "```scrml") {
-      inBlock = true;
-      blockStartLine = i + 2; // first content line is i+2 (1-based)
-      blockBody = [];
-      continue;
-    }
-    if (inBlock && line.trimEnd() === "```") {
-      blocks.push({ startLine: blockStartLine, body: blockBody.join("\n") });
-      inBlock = false;
-      continue;
-    }
-    if (inBlock) blockBody.push(line);
-  }
-  return blocks;
 }
 
 const files = collectMarkdown(surface);
@@ -126,37 +134,94 @@ if (files.length === 0) {
   process.exit(0);
 }
 
+// Loaded lazily: an impl1-only run never pays for the bootstrap bundle.
+let bootCheckFn = null;
+async function bootCheck(path, text) {
+  if (bootCheckFn === null) bootCheckFn = await import("./doc-boot-check.js");
+  return bootCheckFn.bootCheck(path, text);
+}
+async function codeSummary(codes) {
+  if (bootCheckFn === null) bootCheckFn = await import("./doc-boot-check.js");
+  return bootCheckFn.codeSummary(codes);
+}
+
 const tempDir = mkdtempSync(join(tmpdir(), "claim-gate-"));
-let passed = 0;
-let skipped = 0;
-let failed = 0;
+const mode = {
+  impl1: { files: 0, passed: 0, skipped: 0, failed: 0, snippet: 0 },
+  ruled: { files: 0, passed: 0, skipped: 0, failed: 0, snippet: 0, specAhead: 0, stale: 0 },
+};
 let blockTotal = 0;
 const failures = [];
+const specAheadList = [];
+const staleList = [];
 const perFile = [];
 
 for (const file of files) {
-  const blocks = extractBlocks(readFileSync(file, "utf8"));
-  if (blocks.length === 0) continue;
+  const doc = parseDocMarkers(readFileSync(file, "utf8"));
+  const m = mode[doc.dialect];
+  const f = { file, dialect: doc.dialect, passed: 0, skipped: 0, failed: 0, snippet: 0, specAhead: 0, stale: 0 };
 
-  let filePassed = 0;
-  let fileSkipped = 0;
-  let fileFailed = 0;
+  // Marker errors fail the document even when it has no blocks.
+  for (const e of doc.errors) {
+    f.failed++;
+    m.failed++;
+    failures.push({ file, blockNum: null, startLine: e.line, why: `marker error: ${e.message}`, compileOutput: "", ghostDiags: [] });
+  }
+  if (doc.blocks.length === 0 && doc.errors.length === 0) continue;
+  m.files++;
 
-  for (let i = 0; i < blocks.length; i++) {
-    const { body, startLine } = blocks[i];
+  for (let i = 0; i < doc.blocks.length; i++) {
+    const b = doc.blocks[i];
     const blockNum = i + 1;
     blockTotal++;
 
-    const firstContentLine = body.split("\n").find((l) => l.trim().length > 0) ?? "";
-    if (/^\s*\/\/\s*gate:\s*skip\b/.test(firstContentLine)) {
-      skipped++;
-      fileSkipped++;
+    if (b.snippet) {
+      f.snippet++;
+      m.snippet++;
+      continue;
+    }
+    if (b.gate?.kind === "skip" || (doc.dialect === "impl1" && b.legacySkip && !b.gate)) {
+      f.skipped++;
+      m.skipped++;
+      continue;
+    }
+    if (b.legacySkip && doc.dialect === "ruled") continue; // already a marker error
+
+    const path = join(tempDir, `block-${blockTotal}.scrml`);
+
+    if (doc.dialect === "ruled") {
+      if (b.gate?.kind === "spec-ahead" && doc.dialect === "ruled") {
+        const r = await bootCheck(path, b.body);
+        if (r.ok) {
+          f.stale++;
+          m.stale++;
+          staleList.push({ file, line: b.gate.line, startLine: b.startLine, reason: b.gate.reason });
+          if (strictMode) {
+            f.failed++;
+            m.failed++;
+            failures.push({ file, blockNum, startLine: b.startLine, why: "stale spec-ahead marker (--strict): the block now compiles on the bootstrap", compileOutput: "", ghostDiags: [] });
+          }
+        } else {
+          f.specAhead++;
+          m.specAhead++;
+          specAheadList.push({ file, startLine: b.startLine, reason: b.gate.reason, said: await codeSummary(r.codes) });
+        }
+        continue;
+      }
+      const r = await bootCheck(path, b.body);
+      if (r.ok) {
+        f.passed++;
+        m.passed++;
+      } else {
+        f.failed++;
+        m.failed++;
+        failures.push({ file, blockNum, startLine: b.startLine, why: r.crash ? "bootstrap crash" : "bootstrap compile-fail", compileOutput: r.lines.join("\n"), ghostDiags: [] });
+      }
       continue;
     }
 
-    // Compile check.
-    const path = join(tempDir, `snippet-${blockTotal}.scrml`);
-    writeFileSync(path, body);
+    // impl1 mode (unchanged S101/S280 behaviour).
+    writeFileSync(path, b.body);
     let compileOk = true;
     let compileOutput = "";
     try {
@@ -170,43 +235,68 @@ for (const file of files) {
     }
 
     // Ghost-pattern lint (run regardless of compile result — both classes surface).
-    const ghostDiags = lintGhostPatterns(body, path);
+    const ghostDiags = lintGhostPatterns(b.body, path);
     const ghostFailing = ghostDiags.length > 0;
 
     if (compileOk && !ghostFailing) {
-      passed++;
-      filePassed++;
+      f.passed++;
+      m.passed++;
       continue;
     }
 
-    failed++;
-    fileFailed++;
+    f.failed++;
+    m.failed++;
     const why = [];
     if (!compileOk) why.push("compile-fail");
     if (ghostFailing) why.push(`${ghostDiags.length} ghost-pattern lint(s)`);
-    failures.push({ file, blockNum, startLine, why: why.join("; "), compileOutput, ghostDiags });
+    failures.push({ file, blockNum, startLine: b.startLine, why: why.join("; "), compileOutput, ghostDiags });
   }
 
-  perFile.push({ file, passed: filePassed, skipped: fileSkipped, failed: fileFailed });
+  perFile.push(f);
 }
 
 rmSync(tempDir, { recursive: true, force: true });
 
 // ---- report -------------------------------------------------------------
+const sum = (k) => mode.impl1[k] + mode.ruled[k];
+const passed = sum("passed");
+const skipped = sum("skipped");
+const failed = sum("failed");
+const snippet = sum("snippet");
+const specAhead = mode.ruled.specAhead;
+const stale = mode.ruled.stale;
+
 console.log(`claim-gate — ${files.length} file(s), ${blockTotal} scrml block(s)`);
 console.log("");
 for (const f of perFile) {
   const flag = f.failed > 0 ? "FAIL" : "ok  ";
+  const tag = f.dialect === "ruled" ? "[ruled] " : "";
+  const extra = [];
+  if (f.snippet) extra.push(`${f.snippet} snippet`);
+  if (f.specAhead) extra.push(`${f.specAhead} spec-ahead`);
+  if (f.stale) extra.push(`${f.stale} STALE spec-ahead`);
   console.log(
-    `  ${flag}  ${f.file}  (${f.passed} pass, ${f.skipped} skip, ${f.failed} fail)`,
+    `  ${flag}  ${tag}${f.file}  (${f.passed} pass, ${f.skipped} skip, ${f.failed} fail${extra.length ? ", " + extra.join(", ") : ""})`,
   );
+}
+
+if (specAheadList.length > 0) {
+  console.log("");
+  console.log(`spec-ahead blocks (${specAheadList.length}) — ruled scrml the bootstrap cannot compile yet:`);
+  for (const s of specAheadList) console.log(`  ${s.file}:${s.startLine} — ${s.reason}  [bootstrap: ${s.said}]`);
+}
+if (staleList.length > 0) {
+  console.log("");
+  console.log(`STALE spec-ahead markers (${staleList.length}) — these blocks NOW COMPILE on the bootstrap; remove the marker:`);
+  for (const s of staleList) console.log(`  ${s.file}:${s.line} — remove the marker (was: ${s.reason})`);
 }
 
 if (failed > 0 && !reportMode) {
   console.error("");
   console.error("=== claim-gate — failure detail ===");
   for (const f of failures) {
-    console.error(`\n--- ${f.file}:${f.startLine}  block #${f.blockNum} — ${f.why} ---`);
+    const where = f.blockNum === null ? "" : `  block #${f.blockNum}`;
+    console.error(`\n--- ${f.file}:${f.startLine}${where} — ${f.why} ---`);
     if (f.compileOutput) {
       console.error(
         f.compileOutput
@@ -225,14 +315,20 @@ if (failed > 0 && !reportMode) {
 
 console.log("");
 console.log(
-  `claim-gate: ${passed} passed, ${skipped} skipped, ${failed} failed (${blockTotal} total).`,
+  `per mode: impl1 — ${mode.impl1.files} file(s), ${mode.impl1.passed} pass, ${mode.impl1.skipped} skip, ` +
+    `${mode.impl1.snippet} snippet, ${mode.impl1.failed} fail · ` +
+    `bootstrap (ruled) — ${mode.ruled.files} file(s), ${mode.ruled.passed} pass, ${mode.ruled.skipped} skip, ` +
+    `${mode.ruled.snippet} snippet, ${mode.ruled.specAhead} spec-ahead, ${mode.ruled.stale} stale, ${mode.ruled.failed} fail`,
+);
+console.log(
+  `claim-gate: ${passed} passed, ${skipped} skipped, ${snippet} snippet-gated, ${specAhead + stale} spec-ahead${stale ? ` (${stale} stale)` : ""}, ${failed} failed (${blockTotal} total).`,
 );
 
 if (failed > 0) {
   console.log("");
   console.log(
-    "A genuinely non-runnable illustrative fragment may opt out with `// gate: skip` " +
-      "as its first content line. Everything else is a real stale-claim finding.",
+    "A genuinely non-runnable illustrative fragment may opt out with `<!-- gate: skip — <reason> -->` " +
+      "above its fence (docs/DIALECT.md). Everything else is a real stale-claim finding.",
   );
 }
 

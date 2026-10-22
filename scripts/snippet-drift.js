@@ -37,6 +37,9 @@
  *      that nobody compiles. Short excerpts without `<program` stay free (they
  *      must be labelled as fragments in prose — the gate cannot check prose).
  *
+ *    A `<!-- gate: … -->` marker (the claim-gate / dialect grammar, scripts/doc-gate-markers.js)
+ *    may sit between this marker and its fence without detaching them.
+ *
  * Unmarked blocks in documents with no markers are not checked at all. That is
  * deliberate and matches snippet-gate's header: fence extraction as a
  * compile-gate was measured and rejected. This check is not a compile of the
@@ -47,6 +50,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, relative, sep } from "path";
+import { isGateMarkerLine } from "./doc-gate-markers.js";
 
 /** Documents scanned for markers. `docs/changes/` is the internal change archive, not public. */
 export const DRIFT_DOC_ROOTS = ["README.md", "docs"];
@@ -124,6 +128,9 @@ export function parseDoc(text) {
       pending = null;
       continue;
     }
+    // A `<!-- gate: … -->` marker (scripts/doc-gate-markers.js) may sit between the
+    // snippet marker and its fence; it does not detach them.
+    if (isGateMarkerLine(line)) continue;
     if (pending && line.trim() !== "") {
       dangling.push({ line: pending.line, raw: pending.raw });
       pending = null;

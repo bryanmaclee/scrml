@@ -1,0 +1,289 @@
+/**
+ * scripts/doc-gate-markers.js
+ *
+ * The marker grammar shared by the two public-docs gates (`scripts/claim-gate.js`,
+ * which compiles ```scrml fences, and `scripts/snippet-gate.js`, which compiles the
+ * `.scrml` files that fences cite). One parser, so the two gates cannot disagree about
+ * what a document said. Contributor guide: `docs/DIALECT.md`.
+ *
+ * WHY (S469, owner ruling "Ruled dialect, bootstrap-gated"): public docs are being
+ * rewritten, doc by doc, into today's RULED scrml, which impl#1 does not parse. A
+ * migrated document must be checked by the BOOTSTRAP (`scripts/scrml-boot.ts`); a
+ * document not yet migrated must keep being checked by impl#1, so nothing silently
+ * stops being gated. The document says which it is.
+ *
+ * ── DOCUMENT OPT-IN ────────────────────────────────────────────────────────────
+ *   A document is RULED (compiled by the bootstrap) when it carries either
+ *     - an HTML comment on its own line, outside any fence:   <!-- dialect: ruled -->
+ *     - or a front-matter key (a `---` block at line 1):     dialect: ruled
+ *   Anything else is IMPL1 (compiled by impl#1, the pre-migration behaviour).
+ *   `dialect:` with any value other than `ruled` / `impl1` is an ERROR (a typo must not
+ *   silently fall back to impl#1). Two different dialect declarations are an ERROR.
+ *
+ * ── PER-BLOCK MARKERS ──────────────────────────────────────────────────────────
+ *   Written as HTML comments on the line(s) directly above the ```scrml fence (blank
+ *   lines and other markers may sit between; any other line ends the run). They are
+ *   invisible in rendered markdown, so a reader never sees gate plumbing.
+ *
+ *     <!-- gate: skip — <reason> -->        do not compile this block (an illustrative
+ *                                           fragment). Either dialect.
+ *     <!-- gate: spec-ahead — <reason> -->  RULED documents only. The block is in the ruled
+ *                                           dialect but the bootstrap cannot compile it yet;
+ *                                           <reason> names what is missing. It is still
+ *                                           compiled: a failure is expected and counted
+ *                                           separately; a CLEAN compile is reported as
+ *                                           "remove the marker".
+ *     <!-- snippet: path[#Lx-Ly] -->        (owned by scripts/snippet-drift.js) the block is
+ *                                           a copy of a gated file. claim-gate does not
+ *                                           compile it — snippet-gate compiles the file.
+ *
+ *   The separator after the kind may be `—`, `–`, `-`, `--` or `:`. The REASON IS
+ *   MANDATORY: `<!-- gate: skip -->` is an error, not a skip. An unknown kind
+ *   (`<!-- gate: skipp — … -->`) is an error. Two gate markers on one block is an error.
+ *   A gate marker that is not followed by a ```scrml fence is an error (it gates nothing).
+ *
+ *   LEGACY: a block whose first non-blank line is `// gate: skip` (the S101 marker) is
+ *   still honoured in IMPL1 documents, so unmigrated docs keep their state. In a RULED
+ *   document it is an error — migrate it to the HTML marker with a reason.
+ */
+
+export const DIALECTS = /** @type {const} */ (["ruled", "impl1"]);
+
+const DIALECT_COMMENT_RE = /^\s*<!--\s*dialect\s*:\s*([^\s>]*)\s*-->\s*$/;
+const FRONT_MATTER_DIALECT_RE = /^\s*dialect\s*:\s*["']?([^"'\s#]*)["']?\s*(?:#.*)?$/;
+const GATE_ANY_RE = /^\s*<!--\s*gate\s*:(.*?)-->\s*$/;
+const GATE_RE = /^\s*(skip|spec-ahead)\b\s*(?:(?:—|–|--|-|:)\s*)?([\s\S]*?)\s*$/;
+const SNIPPET_RE = /^\s*<!--\s*snippet:\s*(\S+?)(?:#L(\d+)-L(\d+))?\s*-->\s*$/;
+const FENCE_OPEN_SCRML_RE = /^\s*```scrml\s*$/;
+const FENCE_ANY_RE = /^\s*```/;
+const FENCE_CLOSE_RE = /^\s*```\s*$/;
+const LEGACY_SKIP_RE = /^\s*\/\/\s*gate:\s*skip\b\s*(?:(?:—|–|--|-|:)\s*)?(.*)$/;
+
+/**
+ * @typedef {{ kind: "skip" | "spec-ahead", reason: string, line: number }} GateMarker
+ * @typedef {{ path: string, from: number|null, to: number|null, line: number }} SnippetMarker
+ * @typedef {{
+ *   fenceLine: number,       // 1-based line of the ```scrml opener
+ *   startLine: number,       // 1-based line of the first content line
+ *   body: string,
+ *   gate: GateMarker | null,
+ *   snippet: SnippetMarker | null,
+ *   legacySkip: { reason: string } | null,
+ * }} DocBlock
+ * @typedef {{ line: number, message: string }} MarkerError
+ */
+
+/**
+ * Parse a markdown document into its dialect, its ```scrml blocks with their markers,
+ * and every marker ERROR (each one fails the gate that reads it).
+ * @param {string} text
+ * @returns {{ dialect: "ruled" | "impl1", dialectLine: number | null, blocks: DocBlock[], errors: MarkerError[] }}
+ */
+export function parseDocMarkers(text) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  /** @type {MarkerError[]} */
+  const errors = [];
+  /** @type {DocBlock[]} */
+  const blocks = [];
+  /** @type {Array<{ value: string, line: number }>} */
+  const dialects = [];
+
+  // Front matter: a `---` block starting at line 1.
+  let i = 0;
+  if (lines[0] !== undefined && lines[0].trim() === "---") {
+    let j = 1;
+    while (j < lines.length && lines[j].trim() !== "---") {
+      const m = FRONT_MATTER_DIALECT_RE.exec(lines[j]);
+      if (m) dialects.push({ value: m[1], line: j + 1 });
+      j++;
+    }
+    if (j < lines.length) i = j + 1; // an unclosed `---` is not front matter
+    else dialects.length = 0;
+  }
+
+  /** @type {GateMarker[]} */
+  let pendingGates = [];
+  /** @type {SnippetMarker | null} */
+  let pendingSnippet = null;
+  const danglingGates = () => {
+    for (const g of pendingGates) {
+      errors.push({ line: g.line, message: `\`gate: ${g.kind}\` marker is not followed by a \`\`\`scrml fence — it gates nothing` });
+    }
+    pendingGates = [];
+  };
+
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+
+    const dm = DIALECT_COMMENT_RE.exec(line);
+    if (dm) {
+      dialects.push({ value: dm[1], line: i + 1 });
+      continue;
+    }
+
+    const gm = GATE_ANY_RE.exec(line);
+    if (gm) {
+      const inner = gm[1];
+      const m = GATE_RE.exec(inner);
+      if (!m) {
+        errors.push({
+          line: i + 1,
+          message: `unknown gate marker \`${line.trim()}\` — the kinds are \`gate: skip — <reason>\` and \`gate: spec-ahead — <reason>\``,
+        });
+        continue;
+      }
+      const reason = m[2].trim();
+      if (reason === "") {
+        errors.push({
+          line: i + 1,
+          message: `\`gate: ${m[1]}\` marker has no reason — write \`<!-- gate: ${m[1]} — <why> -->\`; the reason is mandatory`,
+        });
+        continue;
+      }
+      pendingGates.push({ kind: /** @type {"skip"|"spec-ahead"} */ (m[1]), reason, line: i + 1 });
+      continue;
+    }
+
+    const sm = SNIPPET_RE.exec(line);
+    if (sm) {
+      pendingSnippet = { path: sm[1], from: sm[2] ? Number(sm[2]) : null, to: sm[3] ? Number(sm[3]) : null, line: i + 1 };
+      continue;
+    }
+
+    if (FENCE_ANY_RE.test(line)) {
+      const isScrml = FENCE_OPEN_SCRML_RE.test(line);
+      const fenceLine = i + 1;
+      const body = [];
+      i++;
+      while (i < lines.length && !FENCE_CLOSE_RE.test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      if (isScrml) {
+        if (pendingGates.length > 1) {
+          errors.push({ line: pendingGates[1].line, message: `two gate markers on one block (lines ${pendingGates.map((g) => g.line).join(", ")}) — keep one` });
+        }
+        const first = body.find((l) => l.trim().length > 0) ?? "";
+        const lm = LEGACY_SKIP_RE.exec(first);
+        blocks.push({
+          fenceLine,
+          startLine: fenceLine + 1,
+          body: body.join("\n"),
+          gate: pendingGates[0] ?? null,
+          snippet: pendingSnippet,
+          legacySkip: lm ? { reason: lm[1].trim() } : null,
+        });
+        pendingGates = [];
+      } else {
+        danglingGates();
+      }
+      pendingSnippet = null;
+      continue;
+    }
+
+    if (line.trim() !== "") {
+      danglingGates();
+      pendingSnippet = null;
+    }
+  }
+  danglingGates();
+
+  // Resolve the dialect.
+  let dialect = /** @type {"ruled"|"impl1"} */ ("impl1");
+  let dialectLine = null;
+  for (const d of dialects) {
+    if (!DIALECTS.includes(/** @type {any} */ (d.value))) {
+      errors.push({ line: d.line, message: `unknown dialect \`${d.value}\` — write \`dialect: ruled\` (or remove it for impl1)` });
+    }
+  }
+  const valid = dialects.filter((d) => DIALECTS.includes(/** @type {any} */ (d.value)));
+  if (valid.length > 0) {
+    dialect = /** @type {any} */ (valid[0].value);
+    dialectLine = valid[0].line;
+    const other = valid.find((d) => d.value !== valid[0].value);
+    if (other) errors.push({ line: other.line, message: `conflicting dialect declarations (\`${valid[0].value}\` at line ${valid[0].line}, \`${other.value}\` here)` });
+  }
+
+  // Dialect-dependent marker rules.
+  for (const b of blocks) {
+    if (b.gate?.kind === "spec-ahead" && dialect !== "ruled") {
+      errors.push({
+        line: b.gate.line,
+        message: "`gate: spec-ahead` is only meaningful in a document marked `<!-- dialect: ruled -->` (it means: ruled scrml the bootstrap cannot compile yet)",
+      });
+    }
+    if (b.legacySkip && dialect === "ruled") {
+      errors.push({
+        line: b.startLine,
+        message: "legacy `// gate: skip` line in a ruled document — use `<!-- gate: skip — <reason> -->` above the fence instead (readers should not see gate plumbing)",
+      });
+    }
+  }
+
+  return { dialect, dialectLine, blocks, errors };
+}
+
+/** True when a line is a gate marker (any kind, valid or not) — snippet-drift lets these sit between its marker and the fence. */
+export function isGateMarkerLine(line) {
+  return GATE_ANY_RE.test(line);
+}
+
+/**
+ * The DIALECT of each cited snippet file, derived from the documents that cite it
+ * (S469). A `.scrml` file a ruled document cites with `<!-- snippet: … -->` is compiled
+ * by the BOOTSTRAP in scripts/snippet-gate.js; every other file stays impl#1. The
+ * document is the single opt-in: a migrated tutorial migrates its snippet files with it,
+ * and the file itself carries no plumbing a reader would see in the copy.
+ *
+ * A `gate: spec-ahead` marker on ANY citing block marks the FILE spec-ahead (an excerpt
+ * of a spec-ahead file need not repeat it). A `gate: skip` on a snippet-marked block is
+ * an error: the file is compiled whole regardless, so the skip would be a lie.
+ * A file cited by both a ruled and an impl1 document is an error: it cannot be both.
+ *
+ * Marker errors are returned only for documents that cite a snippet or are ruled — the
+ * documents whose markers change what snippet-gate compiles.
+ *
+ * @param {(rel: string) => string} readDoc  reads a repo-relative document
+ * @param {string[]} docs                    repo-relative documents to scan
+ * @returns {{ byFile: Map<string, { dialect: "ruled"|"impl1", specAhead: { reason: string, doc: string, line: number } | null, citedBy: Array<{ doc: string, line: number, dialect: string }> }>, errors: Array<{ doc: string, line: number, message: string }> }}
+ */
+export function collectSnippetDialects(readDoc, docs) {
+  const byFile = new Map();
+  const errors = [];
+  for (const doc of docs) {
+    const text = readDoc(doc);
+    if (!text.includes("snippet:") && !text.includes("dialect")) continue;
+    const parsed = parseDocMarkers(text);
+    const cites = parsed.blocks.filter((b) => b.snippet);
+    if (cites.length === 0 && parsed.dialect !== "ruled") continue;
+    for (const e of parsed.errors) errors.push({ doc, line: e.line, message: e.message });
+    for (const b of cites) {
+      const path = b.snippet.path;
+      let entry = byFile.get(path);
+      if (!entry) {
+        entry = { dialect: parsed.dialect, specAhead: null, citedBy: [] };
+        byFile.set(path, entry);
+      }
+      entry.citedBy.push({ doc, line: b.snippet.line, dialect: parsed.dialect });
+      if (entry.dialect !== parsed.dialect) {
+        const other = entry.citedBy.find((c) => c.dialect !== parsed.dialect);
+        errors.push({
+          doc,
+          line: b.snippet.line,
+          message: `${path} is cited by a ${parsed.dialect} document here and by a ${other.dialect} document (${other.doc}:${other.line}) — one file cannot be both dialects; migrate both documents or split the file`,
+        });
+      }
+      if (b.gate?.kind === "skip") {
+        errors.push({
+          doc,
+          line: b.gate.line,
+          message: `\`gate: skip\` on a snippet-marked block — ${path} is compiled whole by snippet-gate regardless; remove the skip (in a ruled document, use \`gate: spec-ahead\` if the bootstrap cannot compile it yet)`,
+        });
+      }
+      if (b.gate?.kind === "spec-ahead" && parsed.dialect === "ruled" && entry.specAhead === null) {
+        entry.specAhead = { reason: b.gate.reason, doc, line: b.gate.line };
+      }
+    }
+  }
+  return { byFile, errors };
+}
