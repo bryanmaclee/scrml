@@ -32,9 +32,15 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 264 | 4 |
 | MED | 667 | 7 |
-| LOW | 455 | 0 |
+| LOW | 456 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-spec-s469-pre-ruling-examples-owed — SPEC examples outside the amended sections still use forms the S469 rulings retired: a tail expression as a function's value, a block arm's bare last expression, `+` with a number, ambient `Math.*` / `String(…)` / `parseInt(…)`, `E.toEnum(…)` — `NEW S469; LOW; open (SPEC editorial)`
+
+<!-- @gap id=g-spec-s469-pre-ruling-examples-owed sev=LOW status=open locus=compiler/SPEC.md(examples across §6, §13, §15, §17, §18, §19, §41, §51, §55, §59 — measured S469 r2: 14 `Math.` lines, 15 `String(` lines, 14 `toEnum(` lines, 3 `parseInt(` lines, plus tail-value and block-arm examples not counted by grep) prov=review:s469-spec-followup(fidelity review of ba1589971, item C);ruling:user-voice-scrml.md(S469 "fall-off and tail returns: ALWAYS EXPLICIT", "block arms yield with lift", conversions rulings) -->
+
+The S469 follow-up fixed the examples the fidelity review named (§18.8.1 / §53.15 `return match`, §17.6.9 Example 7 and the §13 listing's templates, §20.4 `int.parse`, the §6.5 / §6.7 / §51 `scrml:math` min/max) and added reading notes (§48 "Reading the rest of this SPEC"; §14.4.1 keeps `toEnum` until its window opens). The rest is a sweep, not a ruling: rewrite each remaining example to `return`, `lift` in a value-position block arm, a template, `scrml:math`, `int.parse` / `T.parse`, and (once the §63 window opens) `E.parse`. Some `Math.` / `String(` lines are host-code (`_{ }`) or compiler-internal and stay.
 
 ### g-bootstrap-loop-value-form-s469 — in the BOOTSTRAP, a `for` bound as a value (§49.6, `const xs = for (…) { lift e }`) and the Tier-0 `${ for … lift }` in markup are REFUSED (E-BOOTSTRAP-UNSUPPORTED) — `NEW S469; MED; open (refused, fails closed)`
 
