@@ -27,15 +27,30 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 describe("state.ts §1 — duplicate-id gap markers do not double-count", () => {
-  test("a same-id pair with AGREEING status is counted ONCE (per entry, not per marker)", () => {
+  // S469 hygiene: an agreeing pair used to collapse silently (never double-counted, never surfaced);
+  // it now throws, so a duplicated id cannot sit in the ledger unnoticed. Still never double-counted.
+  test("a same-id pair with AGREEING status throws too, naming the id (one entry, one marker)", () => {
     const toks = [
       { id: "g-a", sev: "MED", status: "open" },
       { id: "g-a", sev: "MED", status: "open" }, // duplicate marker, same entry
       { id: "g-b", sev: "MED", status: "open" },
     ];
-    const g = gapCountsFromTokens(toks);
-    expect(g.med).toBe(2); // g-a counted once + g-b — NOT 3
-    expect(g.tokens.length).toBe(2);
+    expect(() => gapCountsFromTokens(toks)).toThrow(/DUPLICATE @gap markers[\s\S]*g-a: sev=MED status=open/);
+  });
+
+  test("the live ledger has no duplicated gap id (the counter runs over it without throwing)", () => {
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+    const toks = parseGapMarkers(ledger);
+    expect(new Set(toks.map((t) => t.id)).size).toBe(toks.length);
+    expect(() => gapCountsFromTokens(toks)).not.toThrow();
+  });
+
+  test("a `key=` token inside a marker's prov/locus prose does not override the real attribute", () => {
+    // g-component-raw-body-angle-spacing-dropped-s462's prov quotes `<pre id="c">a`; last-wins read
+    // the entry's id as `"c">a`, which hid it from every per-id check.
+    const text =
+      '<!-- @gap id=g-real sev=LOW status=open locus=x prov=empirical:y(head html `<pre id="c">a &lt;b</pre>` status=resolved) -->';
+    expect(parseGapMarkers(text)).toEqual([{ id: "g-real", sev: "LOW", status: "open" }]);
   });
 
   test("a same-id pair with CONFLICTING status throws (the count cannot resolve the entry state)", () => {

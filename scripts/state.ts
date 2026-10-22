@@ -183,7 +183,11 @@ function gapMarkersFrom(text: string) {
     const attrs = new Map<string, string>();
     for (const pair of m[1].trim().split(/\s+/)) {
       const eq = pair.indexOf("=");
-      if (eq > 0) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
+      // FIRST occurrence wins (S469 hygiene). The bag is split on whitespace, so prose inside a
+      // prov=/locus= value can carry its own `key=` token: g-component-raw-body-angle-spacing-
+      // dropped-s462's prov quotes `<pre id="c">a`, and last-wins read that entry's id as `"c">a`.
+      // The real attributes always come first; the merge driver's gapIdCounts already reads the first.
+      if (eq > 0 && !attrs.has(pair.slice(0, eq))) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
     }
     const id = attrs.get("id");
     const sev = attrs.get("sev");
@@ -251,18 +255,31 @@ export function gapCountsFromTokens(tokens: { id: string; sev: string; status: s
   // which marker-granular counting DOUBLE-COUNTS. Dedup to one token per id before
   // counting. A same-id pair with DIFFERING sev/status is a genuine integrity error
   // (which is the entry's real state?) — throw loud, mirroring this file's other
-  // silent-omission guards (a same-id pair that fully agrees is collapsed silently).
+  // silent-omission guards.
+  // S469 hygiene: an AGREEING pair now throws too. It used to collapse silently, and the
+  // ledger quietly grew five duplicated ids, three of them one section copied in twice by a
+  // merge (#1256), which a silent collapse can never surface. One entry, one marker.
   const byId = new Map<string, { id: string; sev: string; status: string }>();
   const conflicts: string[] = [];
+  const dupes: string[] = [];
   for (const t of tokens) {
     const prev = byId.get(t.id);
     if (prev) {
       if (prev.status !== t.status || prev.sev !== t.sev) {
         conflicts.push(`    ${t.id}: sev=${prev.sev}/${t.sev} status=${prev.status}/${t.status}`);
+      } else {
+        dupes.push(`    ${t.id}: sev=${t.sev} status=${t.status} (the markers agree)`);
       }
-      continue; // dedup: first marker wins for counting
+      continue;
     }
     byId.set(t.id, t);
+  }
+  if (dupes.length > 0 && conflicts.length === 0) {
+    throw new Error(
+      `state.ts: ${dupes.length} gap id(s) carry DUPLICATE @gap markers —\n${dupes.join("\n")}\n` +
+      `  One entry, one marker. If it is one entry, delete the extra marker; if two entries share an\n` +
+      `  id, rename one; if a section was copied in twice (a merge leftover), delete the copy.`,
+    );
   }
   if (conflicts.length > 0) {
     throw new Error(
