@@ -21,6 +21,7 @@ import {
   headingMarkerDrift,
   classifyGapStatus,
   GAP_STATUS_CARRIED,
+  strayAnchors,
 } from "../../../scripts/state.ts";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -180,5 +181,30 @@ describe("state.ts §5 — status=carried is a recognised, separately-counted pa
     // `\r?\n`: a Windows checkout (core.autocrlf) reads this ledger with CRLF line ends (CI `windows`, #1050).
     expect(ledger).toMatch(/\| Severity \| Open[^|\r\n]*\| Carried[^|\r\n]*\|\r?\n\|---\|---\|---\|/);
     expect(ledger).toMatch(/\| HIGH \| \d+ \| \d+ \|/);
+  });
+});
+
+describe("state.ts — a second @generated START/END marker is refused (S469 hygiene)", () => {
+  const S = "<!-- @generated:gap-counts START (do not edit) -->";
+  const E = "<!-- @generated:gap-counts END -->";
+
+  test("one START and one END: no violation", () => {
+    expect(strayAnchors(["head", S, "| HIGH | 1 | 0 |", E, "tail"].join("\n"), "gap-counts")).toEqual([]);
+  });
+
+  test("a stray half table closed by its own END (the pre-22090f367 known-gaps shape) is named", () => {
+    const text = ["head", S, "| HIGH | 1 | 0 |", E, "prose", "| MED | 598 | 6 |", E].join("\n");
+    expect(strayAnchors(text, "gap-counts")).toEqual(["2 END markers (lines 4, 7)"]);
+  });
+
+  test("a duplicated START is named too; other sections' markers are not counted", () => {
+    const other = "<!-- @generated:recent-sessions END -->";
+    const text = [S, S, "x", E, other].join("\n");
+    expect(strayAnchors(text, "gap-counts")).toEqual(["2 START markers (lines 1, 2)"]);
+  });
+
+  test("the live ledger carries exactly one gap-counts START and END", () => {
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+    expect(strayAnchors(ledger, "gap-counts")).toEqual([]);
   });
 });

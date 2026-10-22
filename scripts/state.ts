@@ -443,6 +443,25 @@ function findAnchorSpan(text: string, name: string): AnchorSpan | null {
   return { betweenStart, betweenEnd, current: text.slice(betweenStart, betweenEnd) };
 }
 
+/**
+ * STRAY ANCHOR GUARD (S469 hygiene). `findAnchorSpan` reads the FIRST START and the FIRST END, so a
+ * second START or END marker anywhere else in the file is invisible to --write and --check. That is
+ * how a stray half gap-counts table (eleven interleaved HIGH/MED/LOW rows from three different
+ * regenerations, closed by its own `@generated:gap-counts END`) sat at known-gaps.md ~L663 from the
+ * S462-era merges until a PA ruling deleted it in 22090f367: every gate passed over it. A START/END
+ * marker must occur exactly once per section; this returns a description of each violation.
+ * EXPORTED for the unit test.
+ */
+export function strayAnchors(text: string, name: string): string[] {
+  const out: string[] = [];
+  for (const kind of ["START", "END"]) {
+    const re = new RegExp(`<!--\\s*@generated:${escapeRe(name)}\\s+${kind}\\b[^>]*-->`, "g");
+    const lines = [...text.matchAll(re)].map((m) => text.slice(0, m.index).split("\n").length);
+    if (lines.length > 1) out.push(`${lines.length} ${kind} markers (lines ${lines.join(", ")})`);
+  }
+  return out;
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -466,11 +485,31 @@ function regenInText(text: string, sec: GenSection): { text: string; changed: bo
   return { text: next, changed: true };
 }
 
+// Refuse to regenerate or compare while any section has a second START or END marker (see
+// strayAnchors). Exit 1, the same code as a stale section: the doc is out of shape, fix the doc.
+function refuseStrayAnchors(): void {
+  const problems: string[] = [];
+  for (const sec of GEN_SECTIONS) {
+    for (const p of strayAnchors(readFileSync(sec.file, "utf8"), sec.name)) {
+      problems.push(`@generated:${sec.name} in ${rel(sec.file)}: ${p}`);
+    }
+  }
+  if (problems.length === 0) return;
+  console.error("state: STRAY @generated anchor(s) — refusing to record or compare.\n");
+  for (const p of problems) console.error(`  ${p}`);
+  console.error(
+    `\n  Each section needs exactly one START and one END marker. A second one is almost always a\n` +
+      `  merge leftover (a stray copy of the generated block); delete the stray copy by hand.`,
+  );
+  process.exit(1);
+}
+
 // ── WRITE mode (Fork 3B) ─────────────────────────────────────────────────────
 function runWrite(): number {
   // The write path is where a hollow value becomes PERMANENT — guard it first.
   refuseDegenerateProjection();
   refuseUnparsedDeltaEntries();
+  refuseStrayAnchors();
   // Group sections by file so each file is read/written once (idempotent across multiple sections).
   const byFile = new Map<string, GenSection[]>();
   for (const s of GEN_SECTIONS) {
@@ -573,6 +612,7 @@ function refuseDegenerateProjection(): void {
 function runCheck(): number {
   refuseDegenerateProjection();
   refuseUnparsedDeltaEntries();
+  refuseStrayAnchors();
   const stale: string[] = [];
   const missing: string[] = [];
   const ok: string[] = [];
