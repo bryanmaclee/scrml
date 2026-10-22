@@ -74,11 +74,11 @@
 
 import { armStatements, objectLiteralArmValue } from "./arm-body-statements.ts";
 import { getElementShape, getAllElementNames } from "./html-elements.js";
-import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw } from "./expression-parser.ts";
+import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST, guardCallArmsRaw, templateTextInterpolationNodes } from "./expression-parser.ts";
 import { forEachCallInValuePosition, forEachCallInStatement, VALUE_POSITION_STMT_KINDS, STATEMENT_CHILD_KEYS, provableSubjectCallees, failableBindingFacts } from "./failable-value-calls.ts";
 import type { FailableEnv, FailableCallCandidate, RootHandling } from "./failable-value-calls.ts";
 import { PH_EB_CHECK, isCompilerPlaceholderName } from "./placeholder-nonce.ts";
-import { parseStatementText, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
+import { parseStatementTextDetailed, textBodiesOf, cStyleInitDeclaration } from "./validators/defer-structure.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { isRawContentElement } from "./raw-content-encode.ts";
 import { parseHandlerStatementsForCheck, parseGuardArmsFromRaw } from "./ast-builder.js";
@@ -16399,7 +16399,12 @@ function annotateNodes(
       stampFailableMatchSubject(node as unknown as ASTNodeLike, callees, fnErrorTypes, typeRegistry);
     },
     parseStatements: (text) => {
-      const r = parseStatementText(text, filePath);
+      // S469 (review of 834e41cba, F1) — the STRICT reader: a body the parser reads only by
+      // dropping trailing content is refused. The lenient `parseStatementText` read
+      // `a: { return check(p) }` (a labeled block) as the bare expression `a`, dropped the block
+      // and reported the body readable, so the call inside was never seen. A refused body falls
+      // to `unreadText` (refuse-by-name).
+      const r = parseStatementTextDetailed(text, filePath, {});
       return r.ok ? r.stmts : null;
     },
     parseExpr: (text) => {
@@ -16450,10 +16455,72 @@ function annotateNodes(
    * function that is neither declared `!` nor split is not failable on impl#1 at
    * all (`g-impl1-client-server-call-not-failable-s451`) — unchanged here.
    */
+  /**
+   * S469 (the #1444 review, MEDIUM) — an EXPORTED value. `export const g = check` (or
+   * `const g = check` + `export { g }`) hands an importer a failable function under a name the
+   * importer knows nothing about: impl#1 carries failability across modules only for a function
+   * DECLARATION (api.js `importedFnDecls`), never for a `const` alias, so the importer's `g(p)`
+   * was never checked. The `const`-alias exemption (the one value read of a failable function
+   * impl#1 accepts) does not extend to an exported binding: refused, E-IMPL1-FAILABLE-FN-VALUE.
+   * A re-export (`export { g } from …`, `export * from …`) is refused in the file that declares
+   * the binding. An exported initializer is otherwise a value position like any other.
+   */
+  const pendingFailableExports: Array<{ n: ASTNodeLike; scope: Scope }> = [];
+  function exportedFailableAliasError(local: string, target: string, span: Span): void {
+    errors.push(new TSError(
+      "E-IMPL1-FAILABLE-FN-VALUE",
+      `E-IMPL1-FAILABLE-FN-VALUE: impl#1 cannot check a failable function exported as a value: ` +
+      `'${local}' is an alias of '${target}', and impl#1 carries failability across files only for ` +
+      `a function declaration, so a call of '${local}' in an importing file would go unchecked. This is a ` +
+      `limitation of this compiler (impl#1), not a language rule. Export '${target}' itself ` +
+      `('export { ${target} }') and alias it in the importing file.`,
+      span,
+    ));
+  }
+  function checkFailableExport(n: ASTNodeLike): void {
+    if (valuePositionChecked.has(n)) return;
+    valuePositionChecked.add(n);
+    const rec = n as Record<string, unknown>;
+    if (typeof rec.reExportSource === "string" && rec.reExportSource !== "") return;
+    const span = n.span as Span;
+    const init = rec.valueInitExpr;
+    if (init && typeof init === "object") {
+      const iv = init as { kind?: unknown; name?: unknown };
+      const local = typeof rec.exportedName === "string" ? rec.exportedName : "";
+      if (iv.kind === "ident" && typeof iv.name === "string") {
+        const target = fnFactsIs(iv.name);
+        if (target !== null) { exportedFailableAliasError(local || iv.name, target, span); return; }
+      }
+      // S469 (review of 834e41cba, F4) — `export const hv = check(x) !{ … }`: the export is the
+      // guarded node of a `!{}` (`__inGuardedContext`), so its initializer's root is that
+      // handler's operand, exactly as for a `const-decl` (it was walked as "none" and a handled
+      // call was reported "not handled").
+      const handling: RootHandling = rec.__inGuardedContext === true ? "operand" : "none";
+      forEachCallInValuePosition(init as ExprNode, handling, failableEnv, (c) =>
+        reportUnhandledFailableValueCall(c, span, c.inFunction ? c.inFailableFn : false, false));
+    }
+    if (Array.isArray(rec.renames) && rec.renames.length > 0) {
+      // Resolved after the walk: `export { g }` may precede `const g = check`.
+      pendingFailableExports.push({ n, scope: scopeChain.current });
+    }
+  }
+  function checkPendingFailableExports(): void {
+    for (const { n, scope } of pendingFailableExports) {
+      for (const r of (n as { renames: unknown[] }).renames) {
+        const local = (r as { local?: unknown })?.local;
+        if (typeof local !== "string" || local === "") continue;
+        if (resolveFnBinding(local, scope, false).k !== "alias") continue;
+        const target = fnFactsIs(local, scope);
+        if (target !== null) exportedFailableAliasError(local, target, n.span as Span);
+      }
+    }
+  }
+
   function checkFailableCallsInValuePositions(n: ASTNodeLike): void {
     const kind = n.kind as string;
     const rec = n as Record<string, unknown>;
     if (kind === "markup") { checkFailableCallsInAttrValues(n); return; }
+    if (kind === "export-decl") { checkFailableExport(n); return; }
     if (!VALUE_POSITION_STMT_KINDS.has(kind)) return;
     if (kind === "match-expr" && "subject" in rec) return; // an expression, not a statement
     if (valuePositionChecked.has(n)) return;
@@ -16613,6 +16680,17 @@ function annotateNodes(
         }
       } else if (value.kind === "expr" && value.exprNode) {
         forEachCallInValuePosition(value.exprNode as ExprNode, "none", failableEnv, onCall);
+      } else if (value.kind === "string-literal" && typeof value.value === "string" && value.value.includes("${")) {
+        // S469 (review of 834e41cba, F2) — a QUOTED attribute value with `${ … }`
+        // (`data-v="${check(p) ? "a" : "b"}"`) is emitted by codegen as a JavaScript template
+        // literal (`rewriteTemplateAttrValue`) and evaluated at render. Before, it was never read
+        // here: a wrong password logged in through a direct call. Each interpolation is sliced by
+        // the slicer codegen emits from and read by the one expression reader; one it cannot read
+        // whole is refused by name (a `TemplateInterpFallback` hatch).
+        const vs = (value.span ?? attr.span ?? n.span) as { start?: number } | undefined;
+        for (const e of templateTextInterpolationNodes(value.value, filePath, vs?.start ?? 0, undefined, { bare: true })) {
+          forEachCallInValuePosition(e, "none", failableEnv, onCall);
+        }
       }
     }
   }
@@ -16702,6 +16780,33 @@ function annotateNodes(
   ): void {
     const calleeName = c.calleeName;
     const shown = c.via ? `'${calleeName}' (called through '${c.via}')` : `'${calleeName}'`;
+    if (c.refKind === "unreadable-interp") {
+      // S469 (review of 065fd2035, HIGH-1) — a template interpolation (a quoted attribute value's
+      // `${ … }`, or a template literal's) the compiler's readers could not bound or read. The
+      // browser runs it regardless, so it is refused whatever it names (fails closed).
+      const t = (c.text ?? "").replace(/\s+/g, " ");
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: impl#1 cannot read this template interpolation ('\${${t.length > 60 ? t.slice(0, 57) + "..." : t}}'), ` +
+        `so it cannot check it for an unhandled failable call (§19.4.3). Compute the value in a ` +
+        `logic block first (handling any '!' call there with '!{}' or 'match') and interpolate the name.`,
+        span,
+      ));
+      return;
+    }
+    if (c.refKind === "unreadable-expr") {
+      // S469 (§19.4.3) — an expression the failable-call check can read neither as structure nor
+      // as text (an escape hatch with no source text). Refused (fails closed): before, it was
+      // skipped, and a `!` call inside it went unchecked (a wrong password logged in).
+      errors.push(new TSError(
+        "E-ERROR-002",
+        `E-ERROR-002: impl#1 cannot read this expression (a ${c.text ?? "expression"} with no source text), ` +
+        `so it cannot check it for an unhandled failable call (§19.4.3). Bind its parts to names in ` +
+        `their own statements first (handling any '!' call there with '!{}' or 'match').`,
+        span,
+      ));
+      return;
+    }
     if (c.refKind === "unreadable") {
       // S469 follow-up (§19.4.3) — a `lift` operand neither parser reads (a value form nested
       // two deep). The failable-call check cannot prove it free of an unhandled call, so it is
@@ -17728,6 +17833,8 @@ function annotateNodes(
   for (const node of topNodes) {
     visitNode(node);
   }
+  // S469 — `export { g }` of a `const` alias of a failable function (see checkFailableExport).
+  checkPendingFailableExports();
 
   // Also annotate typeDecl nodes that may exist only in fileAST.typeDecls.
   const typeDeclNodes = (fileAST.typeDecls as ASTNodeLike[] | undefined)

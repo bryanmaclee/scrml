@@ -68,7 +68,29 @@ const PARSE_OPTIONS = { ecmaVersion: 2022 as const, sourceType: "module" as cons
  * `__scrml_error`), so they do not match. Fail-closed by SHAPE, not by a list
  * of known placeholder names: a placeholder added tomorrow is refused too.
  */
-const INTERNAL_PLACEHOLDER = /^__scrml_[A-Za-z0-9_]*[A-Za-z0-9]__$/;
+/**
+ * The byte offset of the first Annex B HTML-like comment (`<!--`, or a line-initial `-->`) in
+ * `src` read as a CLASSIC SCRIPT, or null. Read by acorn's script-goal tokenizer: a `<!--` inside
+ * a string, a template or a `//` / block comment is not a comment opener and does not count.
+ */
+export function findHtmlLikeComment(src: string): number | null {
+  let found: number | null = null;
+  try {
+    const tz = acorn.tokenizer(src, {
+      ecmaVersion: 2022, sourceType: "script", allowReturnOutsideFunction: true,
+      onComment: (block: boolean, _text: string, start: number) => {
+        if (found !== null || block) return;
+        if (src.startsWith("<!--", start) || src.startsWith("-->", start)) found = start;
+      },
+    });
+    for (const _t of tz) { if (found !== null) break; }
+  } catch {
+    // Not tokenizable as a classic script (module-only syntax): no Annex B comments to find.
+  }
+  return found;
+}
+
+const INTERNAL_PLACEHOLDER =/^__scrml_[A-Za-z0-9_]*[A-Za-z0-9]__$/;
 
 /**
  * Parse one emitted artifact. Returns a `CGError` with code
@@ -131,6 +153,24 @@ export function validateEmittedArtifact(
         placeholder = { name: tok.value, pos: tok.start, line: tok.loc?.start.line ?? 1, col: tok.loc?.start.column ?? 0 };
       },
     });
+    // S469 (review of d5f5d3ea1, HIGH-1) — the goal the browser runs. This gate parses as a
+    // MODULE, but client bundles, route chunks, workers and the runtime load as CLASSIC SCRIPTS,
+    // where Annex B makes `<!--` and a line-initial `-->` single-line comments: code the module
+    // reading sees (and every compiler check read) would be commented out — or the other way
+    // round — when it runs. Nothing the compiler emits on purpose contains one, so any artifact
+    // holding an HTML-like comment is refused (fail closed), whatever path put it there.
+    const htmlComment = findHtmlLikeComment(art.contents);
+    if (htmlComment !== null) {
+      const message =
+        `E-CODEGEN-INVALID-LOGIC: the output holds an HTML-like comment, which reads differently as a ` +
+        `classic script (how the browser loads it) than as a module.\n` +
+        `  artifact: ${art.artifact} (byte ${htmlComment})\n` +
+        `    ${extractSnippet(art.contents, htmlComment)}\n` +
+        `  \`<!--\` and a line-initial \`-->\` begin a comment in a classic script (ECMAScript Annex B) ` +
+        `and are operators in a module. Remove the sequence from the source (for example \`a < !--b\` ` +
+        `-> \`a < !(--b)\`). No codegen output artifacts were written (vendored stdlib shims may already be staged).`;
+      return new CGError("E-CODEGEN-INVALID-LOGIC", scrubPlaceholderToken(message), { file: art.sourceFile }, "error");
+    }
     if (placeholder === null) return null;
     const ph = placeholder as { name: string; pos: number; line: number; col: number };
     const authorWrote = opts.authorSourceMentions?.(ph.name) === true;

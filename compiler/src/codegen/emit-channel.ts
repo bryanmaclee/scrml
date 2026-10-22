@@ -1,3 +1,4 @@
+import { commentText } from "./comment-text.ts";
 import { genVar } from "./var-counter.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitExprField } from "./emit-expr.ts";
@@ -755,7 +756,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   const reconnVar = "_reconn";
   const connectFn = "_connect";
 
-  lines.push(`// <channel name="${name}" topic="${topic}"> — WebSocket client (§38)`);
+  lines.push(`// <channel name="${commentText(name)}" topic="${commentText(topic)}"> — WebSocket client (§38)`);
   lines.push(`const ${varName} = (() => {`);
   lines.push(`  let ${wsVar}, ${reconnVar};`);
   if (sharedVars.length > 0) {
@@ -860,7 +861,7 @@ export function emitChannelClientJs(node: any, errors: CGError[], filePath: stri
   lines.push(`})();`);
 
   if (sharedVars.length > 0) {
-    lines.push(`// §38.4 channel-cell auto-sync effects for <channel name="${name}">`);
+    lines.push(`// §38.4 channel-cell auto-sync effects for <channel name="${commentText(name)}">`);
     for (const varN of sharedVars) {
       const k = JSON.stringify(varN);
       // Read the cell FIRST (keeps the effect subscribed), THEN echo-dedup: skip the
@@ -897,7 +898,7 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   // Route export name follows the same convention as HTTP routes: _scrml_route_ws_<safeName>
   const routeExportName = `_scrml_route_ws_${safeName}`;
 
-  lines.push(`// <channel name="${name}"> — WebSocket upgrade route (§38)`);
+  lines.push(`// <channel name="${commentText(name)}"> — WebSocket upgrade route (§38)`);
   lines.push(`export const ${routeExportName} = {`);
   lines.push(`  path: ${JSON.stringify(path)},`);
   lines.push(`  method: "GET",`);
@@ -1080,7 +1081,7 @@ export function emitChannelWatchesServerBoot(
     const notifyChannel = ddl.notifyChannel;
     const qT = pgQuoteIdent(synth.table);
     const qPk = pgQuoteIdent(synth.pkColumn);
-    lines.push(`// LISTEN bridge for <channel watches=${JSON.stringify(synth.table)}> topic ${JSON.stringify(topic)}`);
+    lines.push(`// LISTEN bridge for <channel watches=${commentText(JSON.stringify(synth.table))}> topic ${commentText(JSON.stringify(topic))}`);
     lines.push(`function ${listenFn}() {`);
     lines.push(`  import("pg").then((_pgMod) => {`);
     lines.push(`    const _PgClient = (_pgMod.default && _pgMod.default.Client) || _pgMod.Client;`);
