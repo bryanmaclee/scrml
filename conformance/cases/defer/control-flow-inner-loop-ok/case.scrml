@@ -10,7 +10,7 @@ ${
                 if (i == 3) {
                     break
                 }
-                @trace = @trace + "x" + i + ";"
+                @trace = `${@trace}x${i};`
             }
             let helper = function(v) {
                 if (v > 0) {
