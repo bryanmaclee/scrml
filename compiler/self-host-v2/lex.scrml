@@ -13,7 +13,7 @@
 // REGEX bodies (`/pattern/flags` in a regex-allowed position, char-classes +
 // escapes) and TEMPLATE-INTERPOLATION nesting (`` `chunk${expr}chunk` `` — the
 // §51.0.Q.1 composite: an interp body lexes as EXPRESSIONS one level deep, with
-// an `interpDepths` frame stack disambiguating the interp-closing `}` from a
+// an `interps` frame stack disambiguating the interp-closing `}` from a
 // plain object-literal `}` by bracket depth).
 //
 // Slice-4a makes cooked-decode PRECISE: `\xHH` / `\uHHHH` / `\u{…}` and
@@ -74,8 +74,13 @@ ${
         NumberLit(raw: string),
         StringLit(cooked: string, raw: string, quote: QuoteKind),
         RegexLit(pattern: string, flags: string),
-        TemplateChunk(cooked: string, raw: string),
-        TemplateInterpStart, TemplateInterpEnd,
+        // s469 (templates) — `bad`: why the chunk's text is not a template a
+        // JavaScript reader accepts (a malformed escape, §14.13.3), "" when it
+        // is. `why` on an interp's closing `}`: why the slot's extent can be
+        // read two ways (templateSlotWhy), "" when it cannot. The parser
+        // refuses either by name (E-PARSE-TEMPLATE) — fail closed.
+        TemplateChunk(cooked: string, raw: string, bad: string),
+        TemplateInterpStart, TemplateInterpEnd(why: string),
         // A CONTEXTUAL `.foo` bare variant — a `.` in VALUE position (not member
         // access) immediately followed by an ident-start. text = ".name", name =
         // the ident without the dot. See scanBareVariant + classify's `.` arm.
@@ -187,6 +192,11 @@ ${
         if (last is .Increment)   return false
         if (last is .Decrement)   return false
         if (last is .BareVariant) return false
+        // s469 (templates): the last token of a COMPLETE template (its closing
+        // chunk) — a template is a value, so a `/` after it is a division and a
+        // `.x` a member, as in JavaScript. (Inside a template no token is
+        // classified; after a `${` the last token is TemplateInterpStart.)
+        if (last is .TemplateChunk) return false
         // Unknown stands in for chars this lexer does not tokenize yet — several
         // (`@` the reactive/each sigil, `~`, `#`) are VALUE-producing in real
         // scrml, so a following `.`/`/` is member-access / division, NOT a bare
@@ -215,7 +225,8 @@ ${
     fn kUnknown(ch: string) -> TokenKind   { return .Unknown(ch) }
     fn kBareVariant(name: string) -> TokenKind { return .BareVariant(name) }
     fn kRegex(pattern: string, flags: string) -> TokenKind { return .RegexLit(pattern, flags) }
-    fn kTemplateChunk(cooked: string, raw: string) -> TokenKind { return .TemplateChunk(cooked, raw) }
+    fn kTemplateChunk(cooked: string, raw: string, bad: string) -> TokenKind { return .TemplateChunk(cooked, raw, bad) }
+    fn kInterpEnd(why: string) -> TokenKind { return .TemplateInterpEnd(why) }
 
     fn identOrKeywordKind(text: string) -> TokenKind {
         if (isKeyword(text)) return .Keyword(text)
@@ -340,8 +351,9 @@ ${
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
-                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+                  .TemplateInterpStart | .Eof :> ""
             .Keyword(name: name) :> name
+            .TemplateInterpEnd   :> ""
             .NumberLit           :> ""
             .StringLit           :> ""
             .RegexLit            :> ""
@@ -594,11 +606,14 @@ ${
 
     // Read exactly `digitCount` hex digits (up to EOF) → the codepoint's string.
     // A malformed run (parseInt → NaN) decodes to "" (impl#1 parity).
+    // s469 (templates): only HEX DIGITS are read (at most `digitCount`), so a
+    // short `\x4"` never swallows the quote that ends its string (a JavaScript
+    // reader stops there too; escapeWhy reports the escape).
     fn scanHexEscape(cur: Cursor, digitCount: int) -> EscapeScan {
         let c = cur
         let hex: string = ""
         let i = 0
-        while (i < digitCount && !isEof(c)) {
+        while (i < digitCount && !isEof(c) && isHexDigit(peekCode(c, 0))) {
             hex = hex + charAt(c)
             c = advance(c, 1)
             i = i + 1
@@ -608,11 +623,15 @@ ${
         return { text: String.fromCodePoint(cp), cur: c }
     }
 
-    // The `\u{…}` brace form: read hex until `}` → the codepoint's string.
+    // The `\u{…}` brace form: read HEX DIGITS, then the `}` → the codepoint's
+    // string. s469 (templates): only hex digits are read — a JavaScript reader
+    // stops there too, so a malformed `\u{` never runs on past the quote or
+    // backtick that closes its string / template (`"\u{"` ends at its `"`; the
+    // escape is reported by escapeWhy).
     fn scanBraceUnicodeEscape(cur: Cursor) -> EscapeScan {
         let c = advance(cur, 1)                          // consume the opening {
         let hex: string = ""
-        while (!isEof(c) && peekCode(c, 0) != 125) {     // 125 = '}'
+        while (!isEof(c) && isHexDigit(peekCode(c, 0))) {
             hex = hex + charAt(c)
             c = advance(c, 1)
         }
@@ -822,12 +841,132 @@ ${
             } else if (code == 36 && peekCode(c, 1) == 123) {    // ${ — opens an interp (NOT consumed)
                 term = TemplateTerm.TermInterp
                 done = true
+            } else if (code == 13) {
+                // s469: a template's text reads a line break as LF — CR LF and
+                // a lone CR are each one "\n" (ECMA-262 TV / TRV), as the
+                // emitted JavaScript template would have read them
+                cooked = cooked + "\n"
+                c = advance(c, 1)
+                if (peekCode(c, 0) == 10) c = advance(c, 1)
             } else {
                 cooked = cooked + charAt(c)
                 c = advance(c, 1)
             }
         }
         return { cooked: cooked, raw: sliceText(cur, c), cur: c, term: term }
+    }
+
+    // -------------------------------------------------------------------------
+    // s469 (templates, SPEC §14.13.3) — the escape and slot-extent rules a
+    // logic backtick template is held to. The bootstrap reads a template with
+    // THIS lexer (one reader); what it reads must be what a JavaScript reader
+    // reads under BOTH goals the code runs as (a classic script and a module —
+    // impl#1's interpolation-extent.ts rule 1), or the template is refused by
+    // name (E-PARSE-TEMPLATE, parse.scrml) — fail closed.
+    // -------------------------------------------------------------------------
+
+    // The code unit at `i` of `t`, or -1 past its end.
+    fn codeAtOr(t: string, i: int) -> int {
+        if (i >= t.length) return -1
+        return t.charCodeAt(i)
+    }
+
+    // Why an escape in `text` — a template chunk's raw text, or a string's body —
+    // is not one every JavaScript goal reads the same way; "" when all are. An
+    // untagged template and a strict-mode string accept: a single-character
+    // escape, a line continuation, `\0` not followed by a digit, `\xHH`,
+    // `\uHHHH`, `\u{H…}` up to 10FFFF, and any other non-digit character escaped
+    // as itself. `\1`–`\9` and `\0` followed by a digit are legacy octal (a
+    // sloppy script's string reads them, a module and every template refuse
+    // them); `\x` / `\u` without their digits are malformed everywhere.
+    fn escapeWhy(text: string) -> string {
+        let i: int = 0
+        while (i < text.length) {
+            if (text.charCodeAt(i) != 92) {
+                i = i + 1
+            } else {
+                const n: int = codeAtOr(text, i + 1)
+                if (n >= 49 && n <= 57) return "the escape `\\" + text.substring(i + 1, i + 2) + "` (a legacy octal escape — no template or module reads it)"
+                if (n == 48 && isDigit(codeAtOr(text, i + 2))) return "the escape `\\0` followed by a digit (a legacy octal escape — no template or module reads it)"
+                if (n == 120) {
+                    if (!isHexDigit(codeAtOr(text, i + 2)) || !isHexDigit(codeAtOr(text, i + 3))) return "a `\\x` escape without two hex digits"
+                    i = i + 4
+                } else if (n == 117) {
+                    const w: int = unicodeEscapeWidth(text, i + 2)
+                    if (w < 0) return "a `\\u` escape that is not `\\uHHHH` or `\\u{H…}` (at most 10FFFF)"
+                    i = i + 2 + w
+                } else {
+                    i = i + 2
+                }
+            }
+        }
+        return ""
+    }
+
+    // The length of a well-formed `\u` escape's tail starting at `i` (after
+    // the `u`): 4 for `HHHH`, the braces' extent for `{H…}`; -1 when malformed.
+    fn unicodeEscapeWidth(text: string, i: int) -> int {
+        if (codeAtOr(text, i) == 123) {
+            let j: int = i + 1
+            while (isHexDigit(codeAtOr(text, j))) { j = j + 1 }
+            if (j == i + 1 || codeAtOr(text, j) != 125) return -1
+            if (parseInt(text.substring(i + 1, j), 16) > 1114111) return -1
+            return j + 1 - i
+        }
+        let k: int = 0
+        while (k < 4) {
+            if (!isHexDigit(codeAtOr(text, i + k))) return -1
+            k = k + 1
+        }
+        return 4
+    }
+
+    // Why a quoted string INSIDE a template slot is not one string to every
+    // JavaScript reader; "" when it is. A line break may not stand in it
+    // unescaped, it must be closed, and its escapes must be escapeWhy's.
+    fn slotStringWhy(raw: string) -> string {
+        const q: int = codeAtOr(raw, 0)
+        let i: int = 1
+        while (i < raw.length) {
+            const c: int = raw.charCodeAt(i)
+            if (c == 92) {
+                i = i + 2
+            } else if (c == 10 || c == 13) {
+                return "a line break inside a quoted string (write `\\n`)"
+            } else if (c == q) {
+                if (i != raw.length - 1) return "a string whose end cannot be read"
+                return escapeWhy(raw.substring(1, raw.length - 1))
+            } else {
+                i = i + 1
+            }
+        }
+        return "an unterminated string"
+    }
+
+    // `text` holds `<!--`, or a `-->` that only white space (or a block
+    // comment's close) precedes on its line: HTML-like comments (ECMA-262
+    // Annex B), which a classic script reads as comments and a module does not
+    // — impl#1's hasHtmlLikeComment, checked LEXICALLY (inside strings too).
+    fn htmlCommentWhy(text: string) -> string {
+        const open: string = "<" + "!--"
+        const close: string = "--" + ">"
+        if (text.indexOf(open) >= 0) return "`" + open + "` (an HTML-like comment opener — a classic script reads the rest of its line as a comment)"
+        let lineStart: int = 0
+        let i: int = 0
+        while (i <= text.length) {
+            const c: int = codeAtOr(text, i)
+            if (c == -1 || c == 10 || c == 13 || c == 8232 || c == 8233) {
+                const line: string = text.substring(lineStart, i)
+                const at: int = line.indexOf(close)
+                if (at >= 0) {
+                    const before: string = line.substring(0, at)
+                    if (before.trim() == "" || before.indexOf("*" + "/") >= 0) return "`" + close + "` at the start of a line (an HTML-like comment — a classic script reads the rest of the line as a comment)"
+                }
+                lineStart = i + 1
+            }
+            i = i + 1
+        }
+        return ""
     }
 
     // -------------------------------------------------------------------------
@@ -854,7 +993,7 @@ ${
     // State threaded through the fold. `bracketStack` is the typed stack of open
     // bracket KINDS — an opener `(`/`{`/`[` pushes its BracketKind, a closer pops
     // (DEPTH = `bracketStack.length`; ErrorRecovery + per-frame spans are slice-4).
-    // `interpDepths` is the template-interp frame stack — each entry is the
+    // `interps` is the template-interp frame stack — each frame records the
     // bracket-stack DEPTH (length) at which a `${` opened, so the matching `}`
     // (interp close) is the one seen at that same depth (§51.0.Q.1).
     type LexState:struct = {
@@ -862,7 +1001,7 @@ ${
         mode: LexMode,
         tokens: Token[],
         bracketStack: BracketKind[],
-        interpDepths: int[],
+        interps: InterpFrame[],
         // dpa-045 B(3): lexing a CODE-DEFAULT region (a `:`-shorthand body, a
         // state-child body run) — its `"…"` are display-text literals (§4.18.3),
         // in which `\"` is NOT an escape (RULED S442: deleted).
@@ -871,8 +1010,14 @@ ${
 
     // The single LexState constructor — keeps the field list in ONE place so
     // later slices (recovery) extend it here, not at every call site.
-    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interpDepths: int[], display: boolean) -> LexState {
-        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interpDepths: interpDepths, display: display }
+    // s469 (templates) — one open `${…}` slot: `depth` the bracket depth its
+    // `${` opened at, `start` the offset of its first character, and `why` —
+    // the first thing in it a JavaScript reader could read differently from
+    // this lexer (so the slot's extent is not known), "" while there is none.
+    type InterpFrame:struct = { depth: int, start: int, why: string }
+
+    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interps: InterpFrame[], display: boolean) -> LexState {
+        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interps: interps, display: display }
     }
 
     fn skipTrivia(cur: Cursor) -> Cursor {
@@ -911,20 +1056,20 @@ ${
         return stack
     }
 
-    // Pop the top interp frame (last element) off the depth stack.
-    fn popDepth(ds: int[]) -> int[] {
+    // Pop the top interp frame (last element) off the frame stack.
+    fn popDepth(ds: InterpFrame[]) -> InterpFrame[] {
         if (ds.length == 0) return ds
         return ds.slice(0, ds.length - 1)
     }
 
     // Is the current `}` the closer of the innermost open interp? True only when
-    // we are inside an interp (`interpDepths` non-empty), the char is `}`, and the
+    // we are inside an interp (`interps` non-empty), the char is `}`, and the
     // current bracket-stack DEPTH equals the depth recorded at the interp's open.
     fn isInterpCloseHere(st: LexState, cur: Cursor) -> boolean {
-        if (st.interpDepths.length == 0) return false
+        if (st.interps.length == 0) return false
         if (peekCode(cur, 0) != 125) return false           // not '}'
-        const top: int = st.interpDepths[st.interpDepths.length - 1]
-        return st.bracketStack.length == top
+        const top: InterpFrame = st.interps[st.interps.length - 1]
+        return st.bracketStack.length == top.depth
     }
 
     // Classify the lookahead into a lexical event (InCode-position classifier).
@@ -1009,7 +1154,8 @@ ${
 
     fn codeStep(st: LexState) -> LexState {
         const cur: Cursor = skipTrivia(st.cur)
-        const st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
+        let st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interps, st.display)
+        if (st2.interps.length > 0 && isSlash(cur)) st2 = markSlot(st2, slashWhy(st2))
         const ev: LexEvent = classifyCode(st2, cur)
         return dispatch(st2, ev)
     }
@@ -1018,7 +1164,121 @@ ${
         const c0: int = peekCode(st.cur, 0)
         const scan: Scan = pickScan(st.cur, c0)
         const nstack: BracketKind[] = pushBracket(st.bracketStack, c0)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, st.interpDepths, st.display)
+        const marked: LexState = markSlot(st, closerWhy(st, c0))
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, marked.interps, st.display)
+    }
+
+    // -------------------------------------------------------------------------
+    // s469 (templates) — what makes a `${…}` slot's extent unknowable. Each
+    // check runs only inside a slot; the first reason found is kept on the
+    // slot's frame and carried by its closing `}` (TemplateInterpEnd(why)).
+    // -------------------------------------------------------------------------
+
+    // Record `why` on the innermost open slot (the first reason wins).
+    fn markSlot(st: LexState, why: string) -> LexState {
+        const n: int = st.interps.length
+        if (why == "" || n == 0) return st
+        const top: InterpFrame = st.interps[n - 1]
+        if (top.why != "") return st
+        const f: InterpFrame = { depth: top.depth, start: top.start, why: why }
+        return mkState(st.cur, st.mode, st.tokens, st.bracketStack, st.interps.slice(0, n - 1).concat([f]), st.display)
+    }
+
+    // A `/` that is neither comment opener.
+    fn isSlash(c: Cursor) -> boolean {
+        if (peekCode(c, 0) != 47) return false
+        const c1: int = peekCode(c, 1)
+        return c1 != 47 && c1 != 42
+    }
+
+    // Is a `{` open inside the innermost slot (a block or an object literal)?
+    fn braceInSlot(st: LexState) -> boolean {
+        const top: InterpFrame = st.interps[st.interps.length - 1]
+        let i: int = top.depth
+        while (i < st.bracketStack.length) {
+            if (st.bracketStack[i] == BracketKind.Brace) return true
+            i = i + 1
+        }
+        return false
+    }
+
+    // A `/` inside a slot: does every JavaScript reader take it as this lexer
+    // does (a division after a value, a regular expression where a value is
+    // expected)? A JavaScript reader decides by GRAMMAR — after `}` a block's
+    // end is followed by a regular expression and an object's by a division;
+    // after `)` an `if (…)` head is followed by a regular expression; `await`
+    // is an operator to a module and a name to a script — where this lexer
+    // decides by the previous token. Where the two can differ the slot is
+    // refused: "" when they agree.
+    fn slashWhy(st: LexState) -> string {
+        const k: TokenKind | not = lastKind(st)
+        if (k is not) return ""
+        const t: string = st.tokens[st.tokens.length - 1].text
+        const two: string = " (one JavaScript reading takes it for a division, another for the start of a regular expression)"
+        if (k is .RBrace) return "a `/` after `}`" + two
+        if (k is .RParen && braceInSlot(st)) return "a `/` after `)` inside braces" + two
+        if (k is .Increment) return "a `/` after `++`" + two
+        if (k is .Decrement) return "a `/` after `--`" + two
+        if (k is .Unknown) return "a `/` after `" + t + "`" + two
+        if (k is .Ident) {
+            if (wordSlashAgrees(t, false)) return ""
+            return "a `/` after `" + t + "`" + two
+        }
+        if (k is .Keyword) {
+            if (wordSlashAgrees(t, regexAllowedAfter(k))) return ""
+            return "a `/` after `" + t + "`" + two
+        }
+        return ""
+    }
+
+    // Does JavaScript read a `/` after the word `w` as this lexer does
+    // (`bootRegex`: a regular expression)? A value word and a plain identifier
+    // are followed by a division; an operator word by a regular expression;
+    // any other reserved or contextual word (`await`, `yield`, `let`, `of`, a
+    // statement keyword, a strict-mode reserved word) reads differently by goal
+    // or position — never agreed.
+    fn wordSlashAgrees(w: string, bootRegex: boolean) -> boolean {
+        if (jsValueWord(w)) return !bootRegex
+        if (jsOperatorWord(w)) return bootRegex
+        if (jsSpecialWord(w)) return false
+        return !bootRegex
+    }
+
+    fn jsValueWord(w: string) -> boolean {
+        return w == "this" || w == "super" || w == "true" || w == "false" || w == "null"
+    }
+
+    fn jsOperatorWord(w: string) -> boolean {
+        return ["typeof", "void", "delete", "new", "in", "instanceof", "return", "throw",
+                "case", "do", "else", "extends"].indexOf(w) >= 0
+    }
+
+    fn jsSpecialWord(w: string) -> boolean {
+        return ["break", "catch", "class", "const", "continue", "debugger", "default", "enum",
+                "export", "finally", "for", "function", "if", "import", "switch", "try", "var",
+                "while", "with", "yield", "let", "static", "implements", "interface", "package",
+                "private", "protected", "public", "await", "of"].indexOf(w) >= 0
+    }
+
+    // A closer inside a slot that does not close the slot's own innermost
+    // opener (`${ a) }`, `${ (a] }`): a JavaScript reader stops there, this
+    // lexer would pop past it — the extent is not known.
+    fn closerWhy(st: LexState, c0: int) -> string {
+        const n: int = st.interps.length
+        if (n == 0) return ""
+        let want: BracketKind = BracketKind.Paren
+        if (c0 == 93) {
+            want = BracketKind.Bracket
+        } else if (c0 == 125) {
+            want = BracketKind.Brace
+        } else if (c0 != 41) {
+            return ""
+        }
+        const ch: string = String.fromCharCode(c0)
+        const top: InterpFrame = st.interps[n - 1]
+        if (st.bracketStack.length <= top.depth) return "a `" + ch + "` with no opener inside the slot"
+        if (st.bracketStack[st.bracketStack.length - 1] != want) return "a `" + ch + "` that closes a different bracket"
+        return ""
     }
 
     fn pickScan(cur: Cursor, c0: int) -> Scan {
@@ -1028,30 +1288,35 @@ ${
     }
 
     // A string emits one StringLit; a comment emits NO token (trivia).
+    // s469: inside a template slot a string is a LOGIC string (never a
+    // code-default display literal) and is held to slotStringWhy.
     fn scanStringStep(st: LexState, q: QuoteKind) -> LexState {
-        const scan: Scan = scanString(st.cur, q, st.display)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
+        const inSlot: boolean = st.interps.length > 0
+        const scan: Scan = scanString(st.cur, q, st.display && !inSlot)
+        let marked: LexState = st
+        if (inSlot) marked = markSlot(st, slotStringWhy(scan.tok.text))
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, marked.interps, st.display)
     }
 
     fn scanLineCommentStep(st: LexState) -> LexState {
-        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
+        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     fn scanBlockCommentStep(st: LexState) -> LexState {
-        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
+        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     // A regex emits one RegexLit and stays InCode.
     fn scanRegexStep(st: LexState) -> LexState {
         const scan: Scan = scanRegex(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // A bare variant `.foo` emits one BareVariant and stays InCode. The `.` is
     // not a bracket, so the bracket stack is threaded through unchanged.
     fn scanBareVariantStep(st: LexState) -> LexState {
         const scan: Scan = scanBareVariant(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interps, st.display)
     }
 
     // Enter a template: consume the opening backtick (no token) and DRIVE the
@@ -1060,7 +1325,7 @@ ${
     // which the `while (!isEof)` driver would otherwise skip at EOF).
     fn enterTemplateStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)
-        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interpDepths, st.display)
+        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interps, st.display)
         return templateBodyStep(started)
     }
 
@@ -1070,12 +1335,12 @@ ${
     // lex the interp body; EOF settles back to InCode (unterminated template).
     fn templateBodyStep(st: LexState) -> LexState {
         const scan: TmplScan = scanTemplateChunk(st.cur)
-        const chunk: Token = mkTok(kTemplateChunk(scan.cooked, scan.raw), scan.raw, st.cur, scan.cur)
+        const chunk: Token = mkTok(kTemplateChunk(scan.cooked, scan.raw, escapeWhy(scan.raw)), scan.raw, st.cur, scan.cur)
         const toks: Token[] = st.tokens.concat([chunk])
         return match scan.term {
-            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interpDepths, st.display)
-            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths, st.display)
-            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths, st.display)
+            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interps, st.display)
+            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
+            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interps, st.display)
         }
     }
 
@@ -1083,27 +1348,33 @@ ${
     // bracket-stack DEPTH (length) at which the interp opened; lex the body as
     // InCode. The stack itself is threaded through unchanged (the `${` opens no
     // bracket — only the depth snapshot the closing `}` is matched against).
-    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: int[], display: boolean) -> LexState {
+    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: InterpFrame[], display: boolean) -> LexState {
         const to: Cursor = advance(cur, 2)   // consume ${
         const tok: Token = mkTok(TokenKind.TemplateInterpStart, sliceText(cur, to), cur, to)
-        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([stack.length]), display)
+        const f: InterpFrame = { depth: stack.length, start: to.pos, why: "" }
+        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([f]), display)
     }
 
     // Close the innermost interp: emit TemplateInterpEnd (`}`), pop its frame,
     // and resume the enclosing template body. (Unlike enterTemplateStep this does
     // NOT drive the next chunk synchronously — impl#1 lets the next loop iteration
     // dispatch InTemplateBody, so a trailing `}` at EOF emits no extra chunk.)
+    // s469: the `}` carries the slot's `why` — the frame's, else an HTML-like
+    // comment anywhere in the slot's text (htmlCommentWhy).
     fn closeInterpStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)   // consume the closing }
-        const tok: Token = mkTok(TokenKind.TemplateInterpEnd, sliceText(st.cur, to), st.cur, to)
-        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interpDepths), st.display)
+        const top: InterpFrame = st.interps[st.interps.length - 1]
+        let why: string = top.why
+        if (why == "") why = htmlCommentWhy(st.cur.source.substring(top.start, st.cur.pos))
+        const tok: Token = mkTok(kInterpEnd(why), sliceText(st.cur, to), st.cur, to)
+        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interps), st.display)
     }
 
     // DEFERRED-event safety net (unreachable in practice — every InCode event has
     // an explicit arm above, and InTemplateBody is routed through step). Advances
     // one code point so the driver always makes progress. TODO(slice-4).
     fn deferAdvance(st: LexState) -> LexState {
-        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
+        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interps, st.display)
     }
 
     fn makeEof(cur: Cursor) -> Token {
@@ -1151,7 +1422,7 @@ ${
 
     fn atDepthZero(st: LexState) -> boolean {
         if (st.bracketStack.length != 0) return false
-        if (st.interpDepths.length != 0) return false
+        if (st.interps.length != 0) return false
         return st.mode == LexMode.InCode
     }
 

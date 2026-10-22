@@ -250,6 +250,7 @@ ${
         VMethod(op: PrimOp),                              // s469: a typed built-in method (`s.slice(1)`, `xs.sort()`) — a call node; Core Prim(op, [receiver, …args])
         VIndex(loc: string),                              // s469: `xs[i]` read (§49.13) — an index node; `loc` "file:line" for the trap (§19.17)
         VAt,                                              // s469: `xs.at(i)` (§49.13) — a call node: `T | not`, never a trap
+        VTemplate(text: boolean[]),                       // s469: a logic template (§14.13.3) — per slot, true when it is not a `string` and lower renders its text (Core Text)
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
@@ -1742,6 +1743,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -1778,6 +1780,7 @@ ${
             .Lambda(params: ps) :> { name: "", ok: false }
             .Sql(q: q) :> { name: "", ok: false }
             .Handled(h: x) :> { name: "", ok: false }
+            .Template(quasis: qs) :> { name: "", ok: false }
         }
     }
 
@@ -1816,6 +1819,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -1859,6 +1863,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -1888,6 +1893,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -1965,6 +1971,7 @@ ${
             .Lambda(params: ps2, body: b) :> exprReads(b)
             .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Handled(h: h) :> listReads(handledKids(h))      // s451 (Ue): the subject and the arms' values
+            .Template(quasis: qs, slots: ss) :> listReads(ss)      // s469: a template reads what its slots read
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -2030,6 +2037,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -2345,6 +2353,7 @@ ${
             .Lambda(params: lp) :> rinf(infOut("a function value"), done)
             .Sql(q: q) :> rinf(infOut("a query"), done)
             .Handled(h: x) :> rinf(infOut("a handled failable value"), done)
+            .Template(quasis: qs) :> rinf(infOk(Type.Str), done)      // s469: a template is a `string` (§14.13.3); its slots are typed where it is resolved
         }
     }
 
@@ -2914,6 +2923,7 @@ ${
             .Index(obj: ix) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -3242,6 +3252,7 @@ ${
             .Lambda(params: lp) :> -1
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
+            .Template(quasis: qs) :> -1
         }
     }
 
@@ -3278,6 +3289,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -3515,6 +3527,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -3657,6 +3670,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -4492,6 +4506,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -4788,6 +4803,7 @@ ${
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
             .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
             .Handled(h: h) :> resolveHandled(env, e, h, false, expected, st)   // s451 (Ue); s469 the plain-value match
+            .Template(quasis: qs, slots: ss) :> resolveTemplate(env, e, ss, st)   // s469 (§14.13.3)
         }
     }
 
@@ -4885,6 +4901,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -6036,6 +6053,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -6064,6 +6082,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -6226,6 +6245,7 @@ ${
             .Lambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -6284,6 +6304,7 @@ ${
             .Lambda(params: ps) :> ps
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -6312,6 +6333,7 @@ ${
             .Lambda(params: ps, body: b) :> b
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -6380,6 +6402,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -6477,6 +6500,23 @@ ${
         let t: Type | not = ry.x.ty
         if (t is not) t = rn.x.ty
         return plain(t, rn.st)
+    }
+
+    // s469 — a logic backtick template (SPEC §14.13.3): "an expression of type
+    // `string`". Each slot is resolved as a value with no expected type (a text
+    // sink takes any primitive, §14.13.2); the fact records, per slot, whether
+    // it is NOT already a `string` — lower converts exactly those to their text
+    // (Core Text, §20.7.2). Whether a slot may stand in a text sink at all is
+    // the typer's (typeTemplate: E-TEXT-NON-PRIMITIVE, E-OPERAND-NOT-NARROWED).
+    fn resolveTemplate(env: Env, e: AExpr, slots: AExpr[], st0: AS) -> RX {
+        let st: AS = st0
+        let text: boolean[] = []
+        for (const s of slots) {
+            const r: RX = resolveExpr(env, s, not, st)
+            text = text.concat([!isStrType(r.x.ty)])
+            st = r.st
+        }
+        return plain(Type.Str, addValue(st, e.nid, ValueFact.VTemplate(text)))
     }
 
     fn resolveArray(env: Env, e: AExpr, es: AExpr[], expected: Type | not, st0: AS) -> RX {
@@ -6601,6 +6641,7 @@ ${
             .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Template(quasis: qs) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -6755,6 +6796,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -7012,6 +7054,7 @@ ${
             .Lambda(params: ps2) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -7072,6 +7115,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -7143,6 +7187,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -7212,6 +7257,7 @@ ${
             .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
             .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
             .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, not, st).st   // s451 (Ue)
+            .Template(quasis: qs) :> resolveExpr(env, e, not, st).st
         }
     }
 
@@ -7268,6 +7314,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -7383,6 +7430,7 @@ ${
             .Lambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -7411,6 +7459,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -7440,6 +7489,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -7468,6 +7518,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -7581,6 +7632,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -7717,6 +7769,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -7745,6 +7798,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -8593,6 +8647,7 @@ ${
             .Lambda(params: lp) :> litOf(0, "")
             .Sql(q: q) :> litOf(0, "")
             .Handled(h: hx) :> litOf(0, "")
+            .Template(quasis: qs) :> litOf(0, "")
         }
     }
 
@@ -9138,6 +9193,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
         if (lit != "") return lit
         const pk: string = placeKey(e)
@@ -10515,6 +10571,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -10556,6 +10613,7 @@ ${
         return match f {
             .VIndex(loc: l) :> l
             .VAt :> ""
+            .VTemplate(text: tx) :> ""
             .VToEnum(enumSym: s) :> ""
             .VMethod(op: zm) :> ""
             .VLit(lit: l) :> ""
@@ -10572,6 +10630,7 @@ ${
     fn isAtFact(f: ValueFact | not) -> boolean {
         return match f {
             .VAt :> true
+            .VTemplate(text: tx) :> false
             .VIndex(loc: x) :> false
             .VToEnum(enumSym: s) :> false
             .VMethod(op: zm) :> false
@@ -12034,6 +12093,7 @@ ${
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -12937,6 +12997,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -12978,6 +13039,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -13007,6 +13069,7 @@ ${
             .Lambda(params: lp) :> noNarrowing()
             .Sql(q: q) :> noNarrowing()
             .Handled(h: x) :> noNarrowing()
+            .Template(quasis: qs) :> noNarrowing()
         }
     }
 
@@ -13124,6 +13187,7 @@ ${
             .Lambda(params: lp, body: b) :> [b]
             .Sql(q: q) :> q.params
             .Handled(h: h) :> handledKids(h)      // s451 (Ue): the subject, then each expression arm (block arms: exprBlocks)
+            .Template(quasis: qs, slots: ss) :> ss      // s469: the slots, left to right
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -13229,6 +13293,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -13835,6 +13900,7 @@ ${
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> VType.Unknown
+            .VTemplate(text: tx) :> known(Type.Str)
             .VToEnum(enumSym: s) :> VType.Unknown
             .VMethod(op: o) :> VType.Unknown
             not :> VType.Unknown
@@ -13852,6 +13918,7 @@ ${
             .VLambda(params: ps) :> not
             .VIndex(loc: x) :> not
             .VAt :> not
+            .VTemplate(text: tx) :> not
             .VToEnum(enumSym: s) :> not
             .VMethod(op: o) :> not
             not :> not
@@ -14125,6 +14192,7 @@ ${
             .Lambda(params: lp) :> -1
             .Sql(q: q) :> -1
             .Handled(h: x) :> -1
+            .Template(quasis: qs) :> -1
         }
     }
 
@@ -14238,6 +14306,7 @@ ${
             .Index(obj: o, idx: i) :> typeIndexRead(env, vf, o, i, ts)   // s469 (§49.13)
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
             .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
+            .Template(quasis: qs, slots: ss) :> typeTemplate(env, ss, ts)   // s469 (§14.13.3)
             .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
         }
     }
@@ -14260,6 +14329,7 @@ ${
             .VLambda(params: ps) :> ps
             .VIndex(loc: x) :> []
             .VAt :> []
+            .VTemplate(text: tx) :> []
             .VToEnum(enumSym: s) :> []
             .VMethod(op: o) :> []
             .VLit(lit: l) :> []
@@ -14286,6 +14356,7 @@ ${
             .VLambda(params: ps) :> VType.Unknown
             .VIndex(loc: x) :> VType.Unknown
             .VAt :> atCallType(ts, callee)
+            .VTemplate(text: tx) :> VType.Unknown
             .VToEnum(enumSym: s) :> known(Type.Maybe(Type.Named(s)))
             .VMethod(op: o) :> methodType(ts, o, callee)
             not :> VType.Unknown
@@ -14348,6 +14419,7 @@ ${
             .VToEnum(enumSym: s) :> false
             .VIndex(loc: zl) :> false
             .VAt :> false
+            .VTemplate(text: tx) :> false
             .VLit(lit: l) :> false
             .VVariant(enumSym: s) :> false
             .VStructOf(ty: s) :> false
@@ -14364,6 +14436,7 @@ ${
             .VToEnum(enumSym: s) :> not
             .VIndex(loc: zl) :> not
             .VAt :> not
+            .VTemplate(text: tx) :> not
             .VLit(lit: l) :> not
             .VVariant(enumSym: s) :> not
             .VStructOf(ty: s) :> not
@@ -14403,6 +14476,7 @@ ${
             .VLambda(params: ps) :> false
             .VIndex(loc: x) :> false
             .VAt :> false
+            .VTemplate(text: tx) :> false
             not :> false
         }
     }
@@ -14420,6 +14494,7 @@ ${
             .VLambda(params: ps) :> false
             .VIndex(loc: x) :> false
             .VAt :> false
+            .VTemplate(text: tx) :> false
             not :> false
         }
     }
@@ -14558,6 +14633,7 @@ ${
             .ParseInt :> ts
             .ParseNum :> ts
             .ParseBool :> ts
+            .Text :> ts
         }
     }
 
@@ -14745,6 +14821,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x2) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -14792,6 +14869,7 @@ ${
             .Lambda(params: lp) :> ts
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
+            .Template(quasis: qs) :> ts
         }
     }
 
@@ -14877,6 +14955,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x2) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -14928,6 +15007,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -15051,6 +15131,7 @@ ${
             .ParseInt :> VType.Unknown
             .ParseNum :> VType.Unknown
             .ParseBool :> VType.Unknown
+            .Text :> known(Type.Str)
         }
     }
 
@@ -15068,6 +15149,74 @@ ${
         const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.yes), test), yes, checkCond(env, test, rt.vt, "a ternary test", rt.ts))
         const rn: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.no), test), no, ry.ts)
         return rvt(joinVT(ry.vt, rn.vt), rn.ts)
+    }
+
+    // s469 — a logic backtick template (SPEC §14.13.3): a `string`, whose every
+    // `${…}` slot is a TEXT SINK (§14.13.1). §14.13.2: accepted — `string`,
+    // `int`, `number`, `bool`, a unit enum value; a `T | not` "SHALL be narrowed
+    // first (E-OPERAND-NOT-NARROWED, §66.20), as for `+` and comparison";
+    // refused, E-TEXT-NON-PRIMITIVE — "a struct, a tape, a tuple, a map or set,
+    // a payload enum value, a function, … and a value whose type the compiler
+    // cannot resolve" (the last limb fails closed). `not` itself is no text.
+    // A slot whose unresolved type an error already accounts for is not
+    // reported again (condBlamed — §42.4 statement 6's rule, reused).
+    fn typeTemplate(env: TEnv, slots: AExpr[], ts0: TypeState) -> RVT {
+        let ts: TypeState = ts0
+        for (const s of slots) {
+            const r: RVT = typeExpr(env, s, ts)
+            ts = textSlot(env, s, r.vt, r.ts)
+        }
+        return rvt(known(Type.Str), ts)
+    }
+
+    fn textSlot(env: TEnv, s: AExpr, v: VType, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, s.span)) return ts          // Rule C: not judged across a parse error
+        return match v {
+            .Known(t: t) :> textKnown(env, s, t, ts)
+            .Absent :> notText(env, s, "`not` (an absent value has no text)", ts)
+            .Unknown :> textUnresolved(env, s, ts)
+        }
+    }
+
+    fn textUnresolved(env: TEnv, s: AExpr, ts: TypeState) -> TypeState {
+        if (condBlamed(env, s, ts)) return ts
+        return notText(env, s, "a value whose type the compiler cannot resolve (annotate it — a parameter, local or return type)", ts)
+    }
+
+    fn textKnown(env: TEnv, s: AExpr, t: Type, ts: TypeState) -> TypeState {
+        const inner: Type | not = maybeInner(t)
+        if (inner is given) {
+            if (isTextPrimitive(env, inner)) return report(ts, env, s.span, "E-OPERAND-NOT-NARROWED", "a template slot holds a `" + typeName(t) + "` — it may be `not`, which has no text; narrow it first (`if (x is given) { … }`) (§14.13.2, S440 Gotcha Q3)")
+            return notText(env, s, "a `" + typeName(t) + "`", ts)
+        }
+        if (isTextPrimitive(env, t)) return ts
+        return notText(env, s, textWhat(env, t), ts)
+    }
+
+    // §14.13.1 item 2: "`string`, `int`, `number`, `bool`, or a unit enum value".
+    fn isTextPrimitive(env: TEnv, t: Type) -> boolean {
+        const k: int = kindOf(t)
+        if (k <= 3) return true
+        if (k != 4) return false
+        const es: Sym | not = isEnumType(env.t.types, t)
+        if (es is not) return false
+        const ti: TypeInfo | not = typeInfoOf(env.t.types, es)
+        if (ti is not) return false
+        for (const v of enumVariants(ti.def)) {
+            if (v.fields.length > 0) return false
+        }
+        return true
+    }
+
+    fn textWhat(env: TEnv, t: Type) -> string {
+        if (kindOf(t) == 5) return "a tape (`" + typeName(t) + "`)"
+        const es: Sym | not = isEnumType(env.t.types, t)
+        if (es is given) return "a value of `" + typeName(t) + "`, an enum with payload variants"
+        return "a `" + typeName(t) + "` value (a struct or an instance)"
+    }
+
+    fn notText(env: TEnv, s: AExpr, what: string, ts: TypeState) -> TypeState {
+        return report(ts, env, s.span, "E-TEXT-NON-PRIMITIVE", "a template slot is text, and this is " + what + " — only a `string`, `int`, `number`, `bool` or unit enum value has one honest text (§14.13.2). Interpolate a field (`p.name`), a `scrml:format` call, or show it with `log()`")
     }
 
     fn typeArray(env: TEnv, es: AExpr[], ts0: TypeState) -> RVT {
@@ -15269,6 +15418,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -15596,6 +15746,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -15625,6 +15776,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -15741,6 +15893,7 @@ ${
             .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
             .Sql(q: q) :> typeExpr(env, e, ts).ts
             .Handled(h: x) :> typeExpr(env, e, ts).ts
+            .Template(quasis: qs) :> typeExpr(env, e, ts).ts
         }
     }
 
@@ -15909,6 +16062,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -15962,6 +16116,7 @@ ${
             .Lambda(params: ps2) :> ts
             .Sql(q: q) :> ts
             .Handled(h: x) :> ts
+            .Template(quasis: qs) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
@@ -16832,6 +16987,7 @@ ${
             .VLambda(params: ps) :> false
             .VIndex(loc: x) :> false
             .VAt :> true
+            .VTemplate(text: tx) :> false
             .VToEnum(enumSym: s) :> true
             .VMethod(op: o) :> true
             not :> false
@@ -16873,6 +17029,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -16902,6 +17059,7 @@ ${
             .Lambda(params: ps) :> []
             .Sql(q: q) :> []
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 
@@ -16932,6 +17090,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -17056,6 +17215,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -17084,6 +17244,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -17114,6 +17275,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -17694,6 +17856,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -18302,6 +18465,7 @@ ${
         return match k {
             .Sql(q: q) :> q
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -18330,6 +18494,7 @@ ${
         return match k {
             .Sql(q: q) :> not
             .Handled(h: h) :> h
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -20266,6 +20431,7 @@ ${
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -20294,6 +20460,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -20397,6 +20564,7 @@ ${
             .Ternary(test: t, yes: y, no: n) :> planTernary(cx, t, y, n, pos, ps)
             .Lambda(params: lp, body: b) :> planExpr(cx, b, { refused: "a lambda (`xs.map(x => …)`) — an awaited combinator (§13.2) is not in the bootstrap; it arrives with the §13.2 awaited-combinator slice. Call it in a statement" }, ps)
             .Handled(h: h) :> planHandledArms(cx, h, pos, ps)
+            .Template(quasis: qs, slots: ss) :> planKids(cx, ss, pos, ps)
             .Member(obj: o) :> planKids(cx, [o], pos, ps)
             .Call(callee: c, args: a) :> planKids(cx, a, pos, ps)
             .Unary(op: o, e: x) :> planKids(cx, [x], pos, ps)
@@ -20469,6 +20637,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -20635,6 +20804,7 @@ ${
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs, slots: ss) :> keyOfList("tpl(" + JSON.stringify(qs) + "|", ss)
             .Recovered :> ""
         }
     }
@@ -20737,6 +20907,7 @@ ${
             .Lambda(params: lp) :> []
             .Sql(q: q) :> distinctSqlParams(q.params)
             .Handled(h: x) :> []
+            .Template(quasis: qs) :> []
         }
     }
 

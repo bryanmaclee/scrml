@@ -165,6 +165,13 @@ ${
         // overflow are `not`); ParseBool — exactly "true" / "false". An enum's
         // `E.parse` is a Core `match` (lower.scrml toEnumExpr), not an op.
         ParseInt, ParseNum, ParseBool,
+        // s469 (§14.13.3, logic templates) — Text(x): the one honest text of a
+        // primitive (§20.7.2) — an `int` / `number` as ECMAScript
+        // Number::toString, a `bool` as `true` / `false`, a unit enum value as
+        // its variant name. `x` is never a `string` (lower leaves those as they
+        // are) and never anything but a primitive (the typer refuses the rest,
+        // E-TEXT-NON-PRIMITIVE / E-OPERAND-NOT-NARROWED).
+        Text,
     }
 
     export type Pattern:enum = {

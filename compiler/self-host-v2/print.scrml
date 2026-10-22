@@ -484,6 +484,9 @@ ${
             .ParseInt :> rtCall(ctx, "parseIntText", a)
             .ParseNum :> rtCall(ctx, "parseNumText", a)
             .ParseBool :> rtCall(ctx, "parseBoolText", a)
+            // s469: a primitive's text (§20.7.2) — JavaScript's String() of an
+            // int / number (Number::toString), a bool, a unit variant's tag
+            .Text :> rtCall(ctx, "textOf", a)
         }
     }
 

@@ -62,7 +62,10 @@ ${
     type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
-    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int }
+    // s469 (templates): `bad` — a template chunk's malformed escape (lex.scrml
+    // escapeWhy), "" for every other token. A slot's `}` (TIEnd) carries its
+    // unreadable reason in `v`.
+    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int, bad: string }
 
     fn tokClass(k: TokenKind) -> TC {
         return match k {
@@ -74,7 +77,7 @@ ${
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq :> TC.Punct
             .TemplateInterpStart :> TC.TIStart
-            .TemplateInterpEnd :> TC.TIEnd
+            .TemplateInterpEnd(why: w) :> TC.TIEnd
             .Eof :> TC.End
             .NumberLit(raw: r) :> TC.Num
             .StringLit(cooked: c) :> TC.Str
@@ -101,7 +104,8 @@ ${
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
-                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+                  .TemplateInterpStart | .Eof :> ""
+            .TemplateInterpEnd(why: w) :> w
             .NumberLit(raw: r) :> r
             .StringLit(cooked: c) :> c
             .BareVariant(name: n) :> n
@@ -113,9 +117,31 @@ ${
         }
     }
 
+    fn tokBad(k: TokenKind) -> string {
+        return match k {
+            .TemplateChunk(cooked: c, bad: b) :> b
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr | .DotDot | .DotDotEq |
+                  .TemplateInterpStart | .Eof :> ""
+            .TemplateInterpEnd(why: w) :> ""
+            .NumberLit(raw: r) :> ""
+            .StringLit(cooked: c) :> ""
+            .BareVariant(name: n) :> ""
+            .Ident(name: n) :> ""
+            .Keyword(name: n) :> ""
+            .Unknown(ch: c) :> ""
+            .RegexLit(pattern: p) :> ""
+        }
+    }
+
     fn toPTok(t: Token) -> PTok {
         return { cls: tokClass(t.kind), v: tokPayload(t.kind), text: t.text,
-                 start: t.span.start, end: t.span.end, line: t.span.line }
+                 start: t.span.start, end: t.span.end, line: t.span.line, bad: tokBad(t.kind) }
     }
 
     fn toPToks(ts: Token[]) -> PTok[] {
@@ -369,6 +395,13 @@ ${
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else if (t.cls == TC.TChunk && t.line == prev.line) {
+                // s469 — `tag`…`` (a tagged template: the tag CALLED with the
+                // template's pieces) is not a text template; refused by name, the
+                // template read past (its own errors report)
+                const dt: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a tagged template (`tag` followed by a backtick template) is not in the bootstrap — a logic template is text (§14.13.3); pass the template to the function as an argument instead (`f(` then the template then `)`)", t)
+                const rt: RExpr = parseTemplate(dt)
+                r = mkE(rt.tp, start, AExprK.Recovered)
             } else if (isHandlerOpen(r.tp)) {
                 // s451 (Ue): `expr !{ … }` — a failable handler (§19.4.3 item 3)
                 r = parseGuard(r, start)
@@ -868,9 +901,28 @@ ${
                 if (depth == 0) return i
                 depth = depth - 1
             }
+            // s469: a backtick template is ONE operand — its text and slots may
+            // span lines and hold `,` / `|` / brackets; none of them ends the arm
+            if (x.cls == TC.TChunk) i = tmplEnd(tp.toks, i)
             i = i + 1
         }
         return tp.toks.length - 1
+    }
+
+    // s469 — the index of the chunk that closes the template whose FIRST chunk
+    // is at `i` (a nested template's tokens lie inside one of its slots).
+    fn tmplEnd(ts: PTok[], i: int) -> int {
+        let j: int = i
+        let slots: int = 0
+        while (j < ts.length) {
+            const x: PTok = ts[j]
+            if (x.cls == TC.End) return j - 1
+            if (x.cls == TC.TIStart) slots = slots + 1
+            if (x.cls == TC.TIEnd) slots = slots - 1
+            if (x.cls == TC.TChunk && slots == 0 && chunkClosed(x.text)) return j
+            j = j + 1
+        }
+        return ts.length - 1
     }
 
     // §7.2.2 rule 2 — does token `k`, the last of its line, continue the
@@ -950,13 +1002,14 @@ ${
     }
 
     fn endTokAt(x: PTok) -> PTok {
-        return { cls: TC.End, v: "", text: "", start: x.start, end: x.start, line: x.line }
+        return { cls: TC.End, v: "", text: "", start: x.start, end: x.start, line: x.line, bad: "" }
     }
 
     fn sqlOf(k: AExprK) -> ASql | not {
         return match k {
             .Sql(q: q) :> q
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -1245,8 +1298,103 @@ ${
         }
         if (isP(tp, "{")) return parseObject(tp)
         if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
+        if (t.cls == TC.TChunk) return parseTemplate(tp)  // s469: a logic backtick template (§14.13.3)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // =========================================================================
+    // s469 — a logic backtick template (SPEC §14.13.3): `` `typed ${n} chars` ``
+    // is a `string`; each `${…}` slot is a text sink holding ONE expression.
+    // The lexer bounded it (lex.scrml: a TChunk, then TIStart … TIEnd TChunk
+    // per slot; the closing backtick ends the last chunk). Refused by name,
+    // E-PARSE-TEMPLATE — fail closed: a malformed escape in its text (the
+    // chunk's `bad`), a slot whose extent a JavaScript reader could read
+    // differently (the lexer's reason, on the slot's `}`), an empty slot, a
+    // slot holding more than one expression, an unterminated template. A
+    // refused template is Recovered (its slots are not judged).
+    // =========================================================================
+    fn parseTemplate(tp: TP) -> RExpr {
+        const first: PTok = cur(tp)
+        const start: int = first.start
+        const d0: int = tp.diags.length
+        let t: TP = tmplText(tp, first)
+        let quasis: string[] = [first.v]
+        let slots: AExpr[] = []
+        let closed: boolean = chunkClosed(first.text)
+        let going: boolean = !closed
+        t = adv(t)
+        while (going) {
+            if (cur(t).cls != TC.TIStart) {
+                t = tmplUnclosed(t, first)
+                going = false
+            } else {
+                const open: PTok = cur(t)
+                t = adv(t)
+                if (cur(t).cls == TC.TIEnd) {
+                    t = diagAt(t, "E-PARSE-TEMPLATE", "an empty `" + interpOpen() + "}` slot — a slot holds one expression (§14.13.3); for the characters `" + interpOpen() + "` write `\\" + interpOpen() + "`", open)
+                } else {
+                    const r: RExpr = parseAssign(t)
+                    slots = slots.concat([r.e])
+                    t = r.tp
+                    if (cur(t).cls != TC.TIEnd && !atEnd(t)) {
+                        t = diagAt(t, "E-PARSE-TEMPLATE", "a template slot holds ONE expression — found `" + cur(t).text + "` after it (§14.13.3); compute the value first and put the result in the slot", cur(t))
+                        t = skipToSlotEnd(t)
+                    }
+                }
+                if (cur(t).cls != TC.TIEnd) {
+                    t = tmplUnclosed(t, first)
+                    going = false
+                } else {
+                    const close: PTok = cur(t)
+                    if (close.v != "") {
+                        const d: Diag = newDiag("E-PARSE-TEMPLATE", "this template slot cannot be read one way — " + close.v + " — so where it ends is not known, and it is refused (§14.13.3). Compute the value into a local first and put the local in the slot", t.file, mkSpan(open.start, close.end))
+                        t = { toks: t.toks, i: t.i, nid: t.nid, diags: t.diags.concat([d]), file: t.file }
+                    }
+                    t = adv(t)
+                    if (cur(t).cls != TC.TChunk) {
+                        t = tmplUnclosed(t, first)
+                        going = false
+                    } else {
+                        const chunk: PTok = cur(t)
+                        t = tmplText(t, chunk)
+                        quasis = quasis.concat([chunk.v])
+                        if (chunkClosed(chunk.text)) going = false
+                        t = adv(t)
+                    }
+                }
+            }
+        }
+        if (t.diags.length > d0) return mkE(t, start, AExprK.Recovered)
+        return mkE(t, start, AExprK.Template(quasis, slots))
+    }
+
+    // A template chunk's text: a malformed escape (lex.scrml escapeWhy) is refused.
+    fn tmplText(tp: TP, chunk: PTok) -> TP {
+        if (chunk.bad == "") return tp
+        return diagAt(tp, "E-PARSE-TEMPLATE", "this template's text holds " + chunk.bad + " (§14.13.3) — a template's escapes are a JavaScript template's: `\\n`, `\\t`, `\\``, `\\" + interpOpen() + "`, `\\xHH`, `\\uHHHH`, `\\u{H…}`", chunk)
+    }
+
+    fn tmplUnclosed(tp: TP, first: PTok) -> TP {
+        return diagAt(tp, "E-PARSE-TEMPLATE", "this template is not closed — end it with a backtick (§14.13.3)", first)
+    }
+
+    // Past a slot's extra tokens, to its `}` (a nested template's slots skipped whole).
+    fn skipToSlotEnd(tp: TP) -> TP {
+        let t: TP = tp
+        let depth: int = 0
+        let going: boolean = true
+        while (going && !atEnd(t)) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.TIEnd && depth == 0) {
+                going = false
+            } else {
+                if (x.cls == TC.TIStart) depth = depth + 1
+                if (x.cls == TC.TIEnd) depth = depth - 1
+                t = adv(t)
+            }
+        }
+        return t
     }
 
     // s442: array elements up to (and consuming) `]`; `...e` is a Spread element.
@@ -1633,6 +1781,7 @@ ${
             .Lambda(params: p) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -3520,6 +3669,7 @@ ${
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
             .Handled(h: x) :> ""
+            .Template(quasis: qs) :> ""
         }
     }
 
@@ -4796,6 +4946,7 @@ ${
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
             .Handled(h: x) :> not
+            .Template(quasis: qs) :> not
         }
     }
 
@@ -4942,6 +5093,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 
@@ -4971,6 +5123,7 @@ ${
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
             .Handled(h: x) :> false
+            .Template(quasis: qs) :> false
         }
     }
 

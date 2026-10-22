@@ -36,7 +36,7 @@
 import { encode, decode, failure, failed, runDefers, eq, indexRead, atRead, CodecDefect, CSRF_COOKIE, CSRF_HEADER,
   strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, strEndsWith,
   strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat,
-  parseIntText, parseNumText, parseBoolText,
+  parseIntText, parseNumText, parseBoolText, textOf,
   sortNum, sortStr, sortBy, reversed, joinStr } from "./runtime.js";
 
 // What printed server bodies call through `rt.` (print.scrml prints them for
@@ -49,6 +49,8 @@ export { strSlice, strCharAt, strSplit, strLength, strIncludes, strStartsWith, s
 // function objects the client runtime exports (one definition, never a server copy)
 export { strIndexOf, strLastIndexOf, strReplace, strReplaceAll, strPadStart, strPadEnd, strRepeat };
 export { parseIntText, parseNumText, parseBoolText };
+// s469 — a logic template slot's text (§14.13.3, §20.7.2)
+export { textOf };
 
 // ---------------------------------------------------------------------------
 // SQL text. A query site's literal runs, frozen once at module load, in the
