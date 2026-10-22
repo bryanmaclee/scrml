@@ -2,19 +2,20 @@
 
 <program auth="required">
 
-  <report> = ""
+  let <report:string=""/>
 
   // Reading `session` makes this a server function. The role check runs on
   // the server, so a non-admin's response never contains the admin text.
-  function loadAdminReport() {
+  function loadAdminReport() -> string {
     if (session.role is given && session.role == "Admin") {
-      return "3 signups are waiting for review."
+      return "3 signups are waiting for review.";
     }
-    return ""
+    return "";
   }
 
   function refresh() {
-    @report = loadAdminReport()
+    // A server call can fail on the wire; the handler says what to show then.
+    @report = loadAdminReport() !{ .Transport(t) :> "Could not load the report." };
   }
 
   <div>

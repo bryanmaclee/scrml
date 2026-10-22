@@ -1,12 +1,12 @@
-// 02a-derived.scrml — derived state recomputes whenever inputs change.
+// 02a-derived.scrml — derived state recomputes whenever its inputs change.
 
 <program>
 
-  <count> = 0
-  const <doubled> = @count * 2
-  const <parity> = @count % 2 == 0 ? "even" : "odd"
+  let <count:int=0/>
+  <doubled:int=(@count * 2)/>
+  <parity:string=(@count % 2 == 0 ? "even" : "odd")/>
 
-  function inc() { @count = @count + 1 }
+  function inc() { @count = @count + 1; }
 
   <div>
     <p>Count: ${@count}</p>
