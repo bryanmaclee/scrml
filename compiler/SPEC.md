@@ -2193,9 +2193,11 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
   in the generated `onchange` handler. The coercions are:
     - ~~`number` (or any numeric refinement type): `Number(event.target.value)`~~ *(struck S469)*
       `int` / `number` (or a numeric refinement type): `int.parse` / `number.parse` of
-      `event.target.value` (§14.13.4); text that does not parse writes `not`.
+      `event.target.value` (§14.13.4); ~~text that does not parse writes `not`~~ *(withdrawn S469 r2)* text that
+      does not parse is NOT written (the cell keeps its last good value).
     - ~~`boolean`: `event.target.value === "true"`~~ *(struck S469)* `bool`: `bool.parse(event.target.value)`;
-      any text but `"true"` / `"false"` writes `not`. A static `<option value="…">` of such a `<select>` that is
+      ~~any text but `"true"` / `"false"` writes `not`~~ *(withdrawn S469 r2)* any text but `"true"` /
+      `"false"` is not written. A static `<option value="…">` of such a `<select>` that is
       not `"true"` or `"false"` SHALL be compile error E-TYPE-031 *(derived: the option can never parse; PA
       reading of the deep-dive Fork 9, not separately ruled)*.
     - `enum`: `EnumTypeName_toEnum[event.target.value]` ~~`?? event.target.value`~~ *(raw-string
@@ -2215,14 +2217,22 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
       > raw-string fallback sentence above.
     - `string` (or unknown/unannotated): no coercion; `event.target.value` is used as-is.
   **(S469) The same number coercion applies to `bind:value` on an `<input>` or `<textarea>`** whose cell is
-  `int`, `number` or a numeric refinement type (`Number(…)` is never the coercion). Because unparseable text
+  `int`, `number` or a numeric refinement type (`Number(…)` is never the coercion). ~~Because unparseable text
   writes `not`, the bound cell of a number or `bool` coercion SHALL admit `not` (`int | not`, `number | not`,
   `bool | not`); a non-optional such cell is compile error **E-TYPE-041** at the `bind:value` attribute (§14.13.5;
-  the cell-type requirement is the PA's default, stated there).
-  > **Amendment S469 — bindings parse, and fail to `not`.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* (*"Bindings
+  the cell-type requirement is the PA's default, stated there).~~ *(withdrawn S469 r2 — the PA default is
+  superseded by the owner's ruling below.)* **Text that does not strictly parse is not written:** the cell keeps
+  its last good value and its type is unchanged (a plain `int` stays `int`; no `| not` is required), while the
+  field keeps showing what was typed. A cell that does admit `not` is treated the same way (bad text never writes
+  `not`). An emptied field is text that does not parse.
+  > **Amendment S469 r2 — bad text keeps the old value.** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — bad text in a bound number/bool input keeps the old value" — *"Keep old value, refuse write (Recommended)"* (*"`bind:value` on a number/int cell (and a bool `<select>`): input that doesn't strictly parse is not written. The cell keeps its last good value and stays a plain `int`; the field still shows what was typed. Follows the S440 enum-`<select>` ruling and conversions dive Fork 9. Supersedes the PA default in the SPEC follow-up draft (cell must be `T | not`, else E-TYPE-041), which is withdrawn."*) **supersedes:** the struck
+  > `not`-writing sentences above and in §14.13.5, and the withdrawn E-TYPE-041 limb (§34). **Direction of change:**
+  > relative to the pre-S469 text, semantics-changed (`""` / `"abc"` were written as `0` / `NaN`, `"yes"` as
+  > `false`); relative to the withdrawn draft, newly-accepting (a plain `int` cell under `bind:value` is fine).
+  > **Amendment S469 — bindings parse~~, and fail to `not`~~ (the failure half withdrawn S469 r2, above).** **Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"* (*"Bindings
   > stay implicit but fail safe: `bind:value` on a number cell and a bool `<select>` turn bad input into `not`, never
-  > a fake 0/false."*). **supersedes:** the two struck coercions. **Direction of change:** newly-rejecting (a
-  > non-optional number / `bool` cell under `bind:value`); semantics-changed (`""` / `"abc"` were `0` / `NaN`,
+  > a fake 0/false."*). **supersedes:** the two struck coercions. **Direction of change:** ~~newly-rejecting (a
+  > non-optional number / `bool` cell under `bind:value`);~~ *(withdrawn S469 r2)* semantics-changed (`""` / `"abc"` were `0` / `NaN`,
   > `"yes"` was `false`). **Nominal / spec-ahead** — impl#1 carries it; the bootstrap refuses a number
   > `bind:value` today (deep-dive §13 slice C3).
   The coercion is applied only at the write-back site (the generated `onchange` handler).
@@ -14739,9 +14749,9 @@ The interaction with `broadcast()` calls (§38.9 — `E-CHANNEL-004`) is unchang
 > parse"*, *"Leading-float parse"*) and `toNumber` (*"`""` → `0`, non-numeric → `NaN`"*) rows; Appendix D's
 > `String`, `Number`, `parseInt`, `parseFloat` and `Math` entries. Each is marked where it stands.
 > **Direction of change:** newly-rejecting — a non-primitive in a text sink other than `print` (which already
-> refused one), a comparator-free `round(x)`, a number passed to a `string` parameter (already a type error under
-> §7.5.1; now ruled, not open), a `bind:value` number / bool cell whose type does not admit `not`, and leading-prefix
-> parses; newly-accepting — `T.parse(s)`, `trunc`, `int` and unit-enum arguments to `print`; semantics-defined —
+> refused one), a mode-free `round(x)`, a number passed to a `string` parameter (already a type error under
+> §7.5.1; now ruled, not open), ~~a `bind:value` number / bool cell whose type does not admit `not`,~~ *(withdrawn
+> S469 r2, §14.13.5)* and leading-prefix parses; newly-accepting — `T.parse(s)`, `trunc`, `int` and unit-enum arguments to `print`; semantics-defined —
 > a number's text (§20.7.2), a logic template's typing. **Nominal / spec-ahead** throughout: impl#1 carries every
 > part (§34.0); the bootstrap builds it (slices C1–C5 of the deep-dive §13).
 
@@ -14828,16 +14838,22 @@ whatever `${n}` prints, `number.parse` reads back (for `-0`, whose text is `"0"`
 
 `E.parse` replaces `E.toEnum` (§14.4.1), through a §63 deprecation window.
 
-#### 14.13.5 Bindings convert, and fail to `not`
+#### 14.13.5 Bindings convert; bad text keeps the old value
 
-A `bind:value` on an input whose cell is a number type (`int`, `number`, or a refinement of one), and a
+~~A `bind:value` on an input whose cell is a number type (`int`, `number`, or a refinement of one), and a
 `bind:value` on a `<select>` whose cell is `bool`, convert the element's text with `T.parse` (§14.13.4) on every
 write-back. Text that does not parse writes **`not`** — never a stand-in `0`, `NaN` or `false`. So the cell's type
 SHALL admit `not` (`int | not`, `number | not`, `bool | not`); a non-optional cell under such a binding is compile
-error E-TYPE-041 (§5.4). *(The cell-type requirement is the PA's default: the ruling says bad input becomes `not`,
-and a non-optional cell cannot hold `not`. The alternative — refuse the write and keep the old value, as §5.4 does
-for a non-optional enum cell — was not taken for numbers, because a number field the user has emptied would then
-silently keep showing a value the user deleted.)* An enum `<select>` keeps §5.4's rule (S440).
+error E-TYPE-041 (§5.4). *(The cell-type requirement is the PA's default: …)*~~ *(withdrawn S469 r2 — the PA default
+is superseded by the owner's ruling.)*
+
+A `bind:value` on an input whose cell is a number type (`int`, `number`, or a refinement of one), and a
+`bind:value` on a `<select>` whose cell is `bool`, convert the element's text with `T.parse` (§14.13.4) on every
+write-back. Text that does not strictly parse is **not written**: the cell keeps its last good value — never a
+stand-in `0`, `NaN`, `false` or `not` — and the field keeps showing what was typed. The cell's type is unchanged
+(a plain `int` stays `int`). This is the S440 enum-`<select>` rule (§5.4) applied to numbers and `bool`. An enum
+`<select>` keeps §5.4's rule (S440).
+**Provenance:** ruling:user-voice-scrml.md S469 "⭐ RULED — bad text in a bound number/bool input keeps the old value" — *"Keep old value, refuse write (Recommended)"* (*"`bind:value` on a number/int cell (and a bool `<select>`): input that doesn't strictly parse is not written. The cell keeps its last good value and stays a plain `int`; the field still shows what was typed. Follows the S440 enum-`<select>` ruling and conversions dive Fork 9. Supersedes the PA default in the SPEC follow-up draft (cell must be `T | not`, else E-TYPE-041), which is withdrawn."*)
 
 #### 14.13.6 One spelling per primitive type: `int`, `bool`
 
@@ -27792,7 +27808,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-REPLAY-001 | §51.14 | A replay-mode block references a non-replay-safe primitive (e.g., uncontrolled side-effect, non-deterministic source). The error message names the specific primitive. Replay mode requires every effect to be deterministic + idempotent. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-REPLAY-002 | §51.14 | A replay-mode block calls a function whose body is not provably replay-safe. Resolution: mark the callee replay-safe explicitly, or refactor the call out of the replay-mode block. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-REPLAY-003 | §51.14 | A replay-mode block performs an action whose ordering across replays is not stable (e.g., async-source iteration with non-deterministic interleaving). (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
-| E-TYPE-041 | §14, §17.6 | `not` (the absence sentinel) assigned to a variable of non-optional type `T`. `not` is only assignable to `T \| not` optional types. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) **(S469)** Also: a `bind:value` whose number or `bool` coercion can write `not` (§5.4, §14.13.5) bound to a cell whose type does not admit `not` — reported at the attribute; this limb is **Nominal / spec-ahead — not yet emitted** (PA default: the ruling makes bad input `not`, ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*). | Error |
+| E-TYPE-041 | §14, §17.6 | `not` (the absence sentinel) assigned to a variable of non-optional type `T`. `not` is only assignable to `T \| not` optional types. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) ~~**(S469)** Also: a `bind:value` whose number or `bool` coercion can write `not` (§5.4, §14.13.5) bound to a cell whose type does not admit `not` — reported at the attribute; this limb is **Nominal / spec-ahead — not yet emitted** (PA default: the ruling makes bad input `not`, ruling:user-voice-scrml.md S469 "⭐ RULED — conversions: what MUST be spelled out" — *"yeah, I like that better"*).~~ *(limb withdrawn S469 r2: bad text keeps the old value, so a bound cell need not admit `not` — ruling:user-voice-scrml.md S469 "⭐ RULED — bad text in a bound number/bool input keeps the old value" — "Keep old value, refuse write (Recommended)". Nominal.)* | Error |
 | ~~E-TYPE-042~~ | §17.6, §45 | **Retired 2026-07-31 (S305).** Every shape this row claimed is owned by a live sibling, measured by execution: `== not` / `!= not` fire **E-EQ-002** (`gauntlet-phase3-eq-checks.js` — TS-stage, fatal, `return`s), and `=== not` / `!== not` fire **E-EQ-004** (the `===` form is itself rejected, §45). The codegen-stage emitter at `rewrite.ts` therefore has no surviving unique trigger and is unreachable from source. Same disposition as the S263 E-MARKUP retirement: two catalogue rows for one surface is a freeze-gate defect, not a second guarantee. The SHAPE remains rejected — by the siblings, with a correct message. | Error |
 | E-TYPE-045 | §17.6, §42.10 | `not` used in prefix position as a boolean negation operator — bare `not @x` OR parenthesized `not (expr)`, in ANY expression position (if/while condition, attr `if=`, `${...}` interpolation, ternary, `&&`/`\|\|`, return, call-arg, derived-RHS). `not` is the absence value, not a negation operator — use `!expr` / `!(expr)` for boolean negation, or `expr is not` for absence. (Catalog addition S78 audit; enforcement broadened to all positions + bare form S188 — detected at the lowering choke-point `compiler/src/expression-parser.ts` `preprocessForAcorn`, emitted by `harvestNotPrefixNegation` at `compiler/src/type-system.ts`.) | Error |
 | E-TYPE-071 | §16.8, §15.14 | `render` invocation appears outside a markup-producing context (component body or markup-typed position). `render` is only valid where its output is consumed as markup. (Catalog addition S78 audit; emitted at `compiler/src/codegen/rewrite.ts`.) | Error |
